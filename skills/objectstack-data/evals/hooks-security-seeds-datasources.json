@@ -158,7 +158,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "+86 138", "@example.com"],
-        "must_not_contain": ["****", "'N/A'", "type: 'text', label: 'Phone'"]
+        "must_not_contain": ["'138****", "'N/A'", "type: 'text', label: 'Phone'"]
       }
     },
     {
@@ -194,11 +194,61 @@
     {
       "id": 20,
       "prompt": "Each `project` shows a `task_count` — the number of its `task` records (each task has a `project` lookup). Add a `client_viewer` permission set: clients read projects, but must never be able to read tasks.",
-      "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry — and because a roll-up covers every child row and answers only to the parent field's own access, the set also masks the summary: `fields: { 'project.task_count': { readable: false } }`, with no View All / Modify All on `project` (either overrides the mask). The build then finishes without `security-rollup-source-unreadable`; the warning is resolved, not left standing or explained away, and not silenced by granting the `task` read the request forbids.",
+      "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry — and because a roll-up covers every child row and answers only to the parent field's own access, the set also masks the summary: `fields: { 'project.task_count': { readable: false } }`, with no Modify All on `project` (it overrides the mask). The build then finishes without `security-rollup-source-unreadable`; the warning is resolved, not left standing or explained away, and not silenced by granting the `task` read the request forbids.",
       "files": [],
       "assertions": {
         "must_contain": ["function: 'count'", "'project.task_count': { readable: false }"],
         "must_not_contain": ["task: { allowRead: true }"]
+      }
+    },
+    {
+      "id": 27,
+      "prompt": "Each `project` shows a `task_count` — the number of its `task` records (each task has a `project` lookup). Add a `client_viewer` permission set: clients read projects and should see how many tasks each one has, but must never be able to read the tasks themselves.",
+      "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry. The request says the set sees the total but not the rows, so the column stays readable and the set's entry for it says why: `fields: { 'project.task_count': { readable: true, rollupSourceUnreadableReason: 'Clients see progress counts, not tasks' } }`. `security-rollup-source-unreadable` is then reported as a note quoting the reason instead of a warning, so the build finishes with no warning standing. The count is not masked (that would withhold a total the request grants, and the reason is refused beside `readable: false`), and the warning is not silenced by granting the `task` read the request forbids.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["summary", "project.task_count", "rollupSourceUnreadableReason"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 21,
+      "prompt": "In our project tracker a contractor may create a `task` only when they are its `assignee` (a person field). A contractor asks the assistant \"Add a 'Launch checklist' task to the Website relaunch\" and the create answers 403, because the request names no assignee. Author the field and the contractor permission set's policy so the plain request succeeds, without widening whom a contractor may assign.",
+      "expected_output": "`assignee: { type: 'user', defaultValue: 'current_user' }` on `task`, and on the contractor permission set a `rowLevelSecurity` policy with `object: 'task'`, `operation: 'insert'` and `check: 'assignee == current_user.id'`. The default fills an omitted `assignee` with the acting user before `check` is judged, so a create that names no assignee is admitted and one naming someone else is still refused. The `check` is kept as it is, not loosened or dropped.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'user'", "defaultValue: 'current_user'", "check: 'assignee == current_user.id'"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 22,
+      "prompt": "Our package `com.acme.crm` ships a position `sales_rep`, live at customers, and a sharing rule in the same package whose `sharedWith` is `{ type: 'position', value: 'sales_rep' }`. The next version must call the position `crm_sales_rep`. What changes in the package?",
+      "expected_output": "The position becomes `{ name: 'crm_sales_rep', label: 'Sales Rep', renamedFrom: ['sales_rep'], permissionSets: [...] }`: renamed in place with `renamedFrom`, never deleted and re-added, so at boot its holders (`sys_user_position`) move to the new name in every organization. Only holders move: no other reference to the old name is rewritten, so the package's own sharing rule is re-pointed in source to `sharedWith: { type: 'position', value: 'crm_sales_rep' }`, as is any approver, queue member, policy `positions` entry or `current_user.positions` predicate in the package that names `sales_rep`. Stored references in an installed environment (recipients, pending approvers, invitations) are listed by table in the boot log for an administrator to re-point in Setup.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["renamedFrom: ['sales_rep']", "value: 'crm_sales_rep'"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 23,
+      "prompt": "When an `order` is created, add a `fulfilment_job` row for the warehouse without slowing the save. Orders also arrive in atomic batches that can roll back, and a job must never exist for an order that did not survive. Our `afterFind` read-log hook carries the same flag: does it wait for the commit too?",
+      "expected_output": "An `afterInsert` hook on `order` with `async: true` and a sandboxed `body: { language: 'js', source, capabilities: ['api.write'] }` that inserts the `fulfilment_job` through `ctx.api`; nothing awaits it, so the save is not slowed. Inside a transaction (the atomic batch) it starts once the outermost transaction commits and never runs if that rolls back, a failed commit included, so no job is written for an order that did not survive; outside a transaction it starts at once. The `afterFind` hook does not wait: a rollback does not undo a read, so with the flag it starts as the read is dispatched, whatever the transaction does next.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["afterInsert", "async: true", "api.write", "commit", "afterFind"],
+        "must_not_contain": ["handler:", "HookContext"]
+      }
+    },
+    {
+      "id": 24,
+      "prompt": "Write a background hook that adds a `payment_failure` row whenever an insert on `payment` is refused or rolled back. It must not slow the save.",
+      "expected_output": "Redirects: a background (`async: true`) hook on `afterInsert` cannot do this. Inside a transaction it starts only once the outermost transaction commits and never runs when that rolls back (a failed commit included), so it never sees a refused or rolled-back insert. Record the failure in the caller, where the write is made: the caller receives the error and inserts the `payment_failure` row outside the rolled-back transaction. A sync hook is no home for this row either: its own `ctx.api` writes roll back with the write. The `async` flag stays for work that follows a committed insert.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["caller", "roll"],
+        "must_not_contain": []
       }
     }
   ]

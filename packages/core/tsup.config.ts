@@ -5,14 +5,17 @@ import { defineConfig, type Options } from 'tsup';
 import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
 
 /**
- * `@objectstack/core` ships two entry points:
+ * `@objectstack/core` ships three entry points:
  * - `index.ts` — full microkernel (Node-only; pulls in plugin sandbox,
  *   filesystem helpers, etc).
  * - `logger.ts` — tiny browser-safe logger reused by `@objectstack/client`
  *   so importing the client SDK in a browser bundle does NOT drag in
  *   Node-only kernel internals (e.g. `process.cpuUsage()`).
+ * - `egress.ts` — the outbound-request guard (Node-only; loads `undici`), kept
+ *   off the main entry so a kernel that makes no tenant-aimed requests never
+ *   loads the HTTP client.
  */
-const ENTRY_NAMES = ['index', 'logger'] as const;
+const ENTRY_NAMES = ['index', 'logger', 'egress'] as const;
 const emitDts = !process.env.OS_SKIP_DTS;
 
 const shared: Options = {

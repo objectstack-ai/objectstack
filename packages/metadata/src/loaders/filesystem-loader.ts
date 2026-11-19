@@ -96,6 +96,17 @@ export class FilesystemLoader implements MetadataLoader {
    * entry was retired cannot write its older answer back over the retirement.
    */
   private resolutionEpoch = 0;
+  /**
+   * [#34206, ADR-0156 D5] Every type directory {@link probeFile} has looked
+   * in, for {@link changeMark}. A directory once asked about stays observed,
+   * up to {@link PROBED_TYPE_DIR_CAP} directories; the type comes from the
+   * read, so past the cap the set starts over. Starting over moves the mark
+   * (fewer paths are read), so a cache confirming on it recompiles, never
+   * renews: the failure direction is a recompile, not a missed change.
+   */
+  private readonly probedTypeDirs = new Set<string>();
+
+  private static readonly PROBED_TYPE_DIR_CAP = 1_000;
 
   private static readonly RESOLUTION_MEMO_CAP = 10_000;
 
@@ -764,6 +775,10 @@ export class FilesystemLoader implements MetadataLoader {
   /** The disk read behind {@link findFile}: one `fs.access` per resolvable extension, in precedence order. */
   private async probeFile(type: string, name: string): Promise<string | null> {
     const typeDir = path.join(this.rootDir, type);
+    if (!this.probedTypeDirs.has(typeDir) && this.probedTypeDirs.size >= FilesystemLoader.PROBED_TYPE_DIR_CAP) {
+      this.probedTypeDirs.clear();
+    }
+    this.probedTypeDirs.add(typeDir);
     const extensions = this.resolvableExtensions();
 
     for (const ext of extensions) {
@@ -778,6 +793,39 @@ export class FilesystemLoader implements MetadataLoader {
     }
 
     return null;
+  }
+
+  /**
+   * [#34206, ADR-0156 D5] What another process can change under an item
+   * {@link load} answered: the modification time and size of every type
+   * directory a read has probed (a file created, removed or renamed in it
+   * moves the directory's), and of every file a read resolved (an edit in
+   * place moves the file's). An absent path reads `absent`, so creating it
+   * moves the mark too. One `stat` per directory and per resolved file.
+   *
+   * It covers item reads only. It is what lets a cache of an answer this
+   * loader contributed to, including a miss it remembered, be renewed on a
+   * confirmation instead of recompiled (`MetadataManager.loaderChangeMark`).
+   *
+   * The path set grows as reads probe new directories and resolve new files,
+   * so the mark also moves when nothing on disk did: the first confirmation
+   * after a warm-up usually recompiles. That is conservative, never stale.
+   */
+  async changeMark(): Promise<string> {
+    const files = new Set<string>();
+    for (const names of this.resolvedFiles.values()) {
+      for (const filePath of names.values()) if (filePath) files.add(filePath);
+    }
+    const paths = [...[...this.probedTypeDirs].sort(), ...[...files].sort()];
+    const marks = await Promise.all(paths.map(async (p) => {
+      try {
+        const stats = await fs.stat(p);
+        return `${p}:${stats.mtimeMs}:${stats.size}`;
+      } catch {
+        return `${p}:absent`;
+      }
+    }));
+    return createHash('sha1').update(marks.join('\n')).digest('hex');
   }
 
   private rememberResolution(type: string, name: string, filePath: string | null): void {

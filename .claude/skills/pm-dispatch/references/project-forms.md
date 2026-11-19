@@ -10,8 +10,8 @@
 
 - 项目指令只有一行:`pm-dispatch <席位> [<席位>…]`,如 `pm-dispatch 总监`、`pm-dispatch ui skills`。
 - 首词恒为技能目录名 `pm-dispatch`;⛔ 不用 `fleet`,它已是 bot 与中继的名字。
-- 席位词 = 中文名或车道文件名:总监 = `lanes/director.md`,分诊 = `triage.md`,复核 = `review.md`。
-- 其余席位词同 `lanes/` 下文件名(去 `.md`,全集即该目录),如 ui、server、cloud、objectstack。
+- 席位词 = 中文名或车道文件名:总监 = `director.md`,分诊 = `triage.md`,L2 或复核 = `l2-review.md`。
+- 其余席位词同 `lanes/` 下文件名(去 `.md`,全集即该目录),如 ui、cloud;验证 = `qa`+`eval` 一席。
 - 一车道多席:协调者取 🟢 行写本账号的那一席;无则取空席;再无则问维护者一次。
 - 其余一切住本文:⛔ 不往项目里贴模板;⛔ 不在账号层复制技能。
 
@@ -34,14 +34,15 @@
 - 正文首行 `Mailbox-of: <席位> · <login>`;坐席即开(`mailbox-open.mjs`)并订阅,存根记 `Mailbox:`。
 - 永不合并,不欠 CI,落地与台账查询排除它;移交或换账号关旧开新;评论首行 `To: <席位>`。
 - 次行恒为一键,下列事件必敲;一事一行 ≤200 字节,只写键与编号;表外即半态。
-- 车道→复核席或兄弟席同交接行 `Request: contract-review`;反向随记录 `Notify: contract-review`。
+- 跨账号或跨项目:车道→L2 或兄弟席 `Request: contract-review`;反向随记录 `Notify: contract-review`。
 - 任一席→分诊:p0 嫌疑、main 红、确定性队列红 `Request: urgent-triage`。
 - 立锚卡者→分诊(缺则总监)`Request: main-red`,→破坏 PR 的席与锚卡车道 `Notify: main-red`。
 - 锚卡关闭:分诊(缺则总监)→正文带 `Waits-on: main-red #n` 的每张 open PR 之席 `Notify: main-green`。
+  队列 flake 锚卡同理:敲其签名踢出(名单照 `lanes/queue.md`)、仍开且未回队的每张 PR 之席。
 - 车道→分诊问卡去留路由定级 `Request: triage`;发版板生产者→车道 `Notify: release-blocker`。
 - 车道→cloud 席:缺 cloud 事实读数 `Request: cloud-confirm`;反向随记录 `Notify: cloud-confirm`。
 - 移卡入队者→车道:p0/p1 `Blocked-by` 关闭 `Notify: unblocked`;记裁决席→被改席 `Notify: ruling`。
-- 席→兄弟席或他车道:认领文件面相交或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
+- 席→兄弟席或他车道:重叠检查令排后或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
 - p0/p1 卡阻于他车道未认领或闲置 ≥3h 的卡:认领席(未认领则分诊)→其车道 `Request: assist`。
 - 收方随记录(认领/ETA/不接理由)回 `Notify: assist`;ETA 或 2h 无记录交分诊,彼道无席呈决策卡。
 - 上下线→兄弟席与分诊 `Notify: seat-online`、`Notify: seat-offline`;清单变→兄弟席 `Notify: split`。
@@ -55,5 +56,4 @@
 
 ## 总表
 
-- objectstack 置顶 issue「车队总表」,一席一行;正文由坐席/接管/移交重生成。
-- 行 = 仓 · 车道 · 席 · 账号 · 在飞 · 待裁 · 待落地 · 撞墙注记 · 最近动静 · 信箱 PR。
+- objectstack 置顶 issue「车队总表」,一席一行;坐席/接管/移交重生成,列照 `fleet-roster.mjs`。

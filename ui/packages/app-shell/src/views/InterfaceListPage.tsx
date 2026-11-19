@@ -38,6 +38,7 @@ import { usePermissions } from '@object-ui/permissions';
 import type { ActionBarSchema, ListViewSchema } from '@object-ui/types';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
+import { usePreviewListDataSource } from '../preview/unpublishedObjectReads.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -318,6 +319,10 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       : metadata.objects || [];
   // Not memoised: the scope's list is read afresh each render, as `objects` was.
   const objectDef = sourceObjects.find((o: any) => o?.name === cfg.source);
+  // objectstack#34807 — in the draft preview the list reads its object
+  // definition with the draft-only fields marked, so a column on one is drawn
+  // empty instead of refusing the whole list query; outside it, the adapter.
+  const listDataSource = usePreviewListDataSource(dataSource, objectDef);
   const resolvedView = React.useMemo(
     () => resolveSourceView(objectDef, cfg.sourceView),
     [objectDef, cfg.sourceView],
@@ -558,6 +563,12 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       // is relayed: the spec retired it (#25923) and `ListView` reads none.
       ...(view.tree !== undefined ? { tree: view.tree } : {}),
       ...(view.chart !== undefined ? { chart: view.chart } : {}),
+      // #34382 — a `type: 'timesheet'` view's `timesheet` block
+      // (`{ rowFields, dateField, valueField }`), carried whole like the two
+      // above for the same reason: `ListView`'s timesheet branch draws nothing
+      // but its configuration notice without it, and no page-derived default
+      // can guess which fields make the rows, the day and the value.
+      ...(view.timesheet !== undefined ? { timesheet: view.timesheet } : {}),
 
       // Presentation policy — the page layer (ADR-0047).
       userFilters: cfg.userFilters ?? view.userFilters,
@@ -684,7 +695,7 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       <div className="flex-1 min-h-0 overflow-auto">
         <ListView
           schema={schema}
-          dataSource={dataSource}
+          dataSource={listDataSource}
           userFilterSelections={initialUfSelections}
           onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
           onSortChange={onConfigChange ? (sort: any) => onConfigChange({ sort }) : undefined}

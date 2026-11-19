@@ -568,7 +568,7 @@ export const ptBR: PlatformTranslationData = {
           label: 'Chave de API do DashScope',
           help: 'sk-... — emitida em dashscope.console.aliyun.com.',
         },
-        dashscope_model: { label: 'Modelo' },
+        dashscope_model: { label: 'Modelo', help: 'Exemplos: qwen-plus, qwen-max, qwen3-max, qwen-turbo.' },
         cloudflare_account_id: {
           label: 'ID da conta Cloudflare',
           help: 'O ID hexadecimal de 32 caracteres da URL do seu painel da Cloudflare.',
@@ -581,7 +581,10 @@ export const ptBR: PlatformTranslationData = {
           label: 'Token do Cloudflare AI Gateway',
           help: 'Emitido em AI Gateway → aba "API tokens" (cfut_… ou sk_…).',
         },
-        cloudflare_model: { label: 'Modelo' },
+        cloudflare_model: {
+          label: 'Modelo',
+          help: 'Formato: provider/model. Provedores permitidos (segundo o Cloudflare /compat): anthropic, openai, groq, mistral, cohere, perplexity, workers-ai, google-ai-studio, vertex, grok, deepseek, cerebras, baseten, parallel.',
+        },
         siliconflow_api_key: { label: 'Chave de API do SiliconFlow' },
         siliconflow_model: {
           label: 'Modelo',
@@ -592,7 +595,10 @@ export const ptBR: PlatformTranslationData = {
           label: 'Modelo',
           help: 'Formato: provider/model (por exemplo anthropic/claude-3.5-sonnet, deepseek/deepseek-chat).',
         },
-        title_generation_enabled: { label: 'Resumir automaticamente os títulos das conversas' },
+        title_generation_enabled: {
+          label: 'Resumir automaticamente os títulos das conversas',
+          help: 'Ativado, o LLM é solicitado a gerar um título curto após a primeira resposta do assistente. Desative para economizar tokens ou deixe o título em branco para que os usuários nomeiem as conversas manualmente.',
+        },
         title_max_length: {
           label: 'Tamanho máximo do título (caracteres)',
           help: 'Limite rígido do título gerado. O que passar disso é truncado no servidor.',

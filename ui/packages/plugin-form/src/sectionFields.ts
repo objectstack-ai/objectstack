@@ -336,7 +336,12 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // (#4069) — the control is deliberately left empty for exactly that
     // resolution, so refusing the submit would leave nothing to type.
     required: isRequiredInForm(field, isCreateFormMode(ctx)),
-    disabled: ctx.readOnly || ctx.mode === 'view' || field.readonly,
+    // `_draftOnly` is the console's draft-preview marker on a field only the
+    // draft declares (app-shell `previewFormDataSource`, which also keeps it
+    // out of every write): an underscore-private convention between two of
+    // this repository's packages, never an authoring key. It is drawn disabled
+    // rather than `readonly`, which `filterSystemFields` drops before render.
+    disabled: ctx.readOnly || ctx.mode === 'view' || field.readonly || field._draftOnly === true,
     placeholder: field.placeholder,
     // The help line under the control: the spec's `inlineHelpText`, else
     // `description`, through the one read `ObjectForm`'s field builder shares
@@ -350,6 +355,9 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // ... and a `permission-ref` field carries the object this form edits
     // (objectstack#32795), so the widget recognises the grant's name column by
     // its object and its column.
+    // (A lookup whose `lookupFilters` read `{ $record }` is stamped as a field
+    // of the record being edited by `gateFormFields`, the one step every
+    // layout draws its fields through.)
     field: withFormObject(
       withFollowedParentObject(withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName), ctx.objectSchema?.fields),
       ctx.objectName,
@@ -460,7 +468,13 @@ function resolveSectionEntry(
   // `defaultValue` on the object field, not which layer asserted `required` —
   // a form view saying `required: true` over `defaultValue: 'NOW()'` makes the
   // same claim the object schema does, and hits the same wall.
-  if (fd.required != null) {
+  //
+  // Except over a `_draftOnly` field (the console's draft-preview marker, see
+  // `fromObjectSchema`): it is drawn disabled, so a requirement restated by a
+  // view would refuse every save over a control the viewer cannot fill. The
+  // marked copy already carries no `required` of its own.
+  const draftOnly = ctx.objectSchema?.fields?.[fieldName]?._draftOnly === true;
+  if (fd.required != null && !draftOnly) {
     base.required = isRequiredInForm(
       { required: fd.required, defaultValue: ctx.objectSchema?.fields?.[fieldName]?.defaultValue },
       isCreateFormMode(ctx),

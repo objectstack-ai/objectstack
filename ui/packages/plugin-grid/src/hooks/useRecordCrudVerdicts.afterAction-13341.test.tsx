@@ -41,10 +41,12 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { notifyDataChanged } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import {
-  useRecordCrudVerdicts,
   __clearRecordCrudVerdictCache,
   type RecordCrudOperation,
 } from './useRecordCrudVerdicts';
+// objectstack#34208 — the hook asks only once a row's actions are reached for;
+// these pins are about what it does once it asks.
+import { useAskedRecordCrudVerdicts } from '../__tests__/askedRecordCrudVerdicts';
 
 const OBJECT = 'sys_business_unit';
 
@@ -54,6 +56,7 @@ function me(userId: string): MePermissionsAuthenticatedResponse {
     userId,
     tenantId: 't1',
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: [],
     permissionSets: [],
     objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
@@ -124,7 +127,7 @@ const once = (ids: string[]) =>
   Object.fromEntries(ids.flatMap((id) => [[`update:${id}`, 1], [`delete:${id}`, 1]]));
 
 function usePage(recordIds: string[]) {
-  const lookup = useRecordCrudVerdicts({ objectName: OBJECT, recordIds, update: true, delete: true });
+  const lookup = useAskedRecordCrudVerdicts({ objectName: OBJECT, recordIds, update: true, delete: true });
   return Object.fromEntries(recordIds.map((id) => [id, { update: lookup(id, 'update'), delete: lookup(id, 'delete') }]));
 }
 

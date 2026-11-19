@@ -687,25 +687,72 @@ const opportunities = await engine.find('opportunity', {
 
 A condition on a related record's fields beneath a relation field (`lookup`,
 `master_detail`, `user`, `tree`) is served in `where`: the engine reads the
-related object with it **as the caller**, then matches the field against the
-ids it returns (`$in`; any member when `multiple: true`).
+related object with it **as the caller**. On a read verb (`find`, `findOne`,
+`count`, `aggregate`) a single-valued relation is matched in the database
+where that is provably the same read: the related read is planned, not run,
+and the driver receives one statement with a subquery,
+`account IN (SELECT id FROM account WHERE <its read scope> AND <condition>)` —
+no id list, no cap. The related object's read restrictions the planned read
+observes are carried into the subquery, or the hop falls back to reading the
+related ids as the caller and matching them with `$in`, under the cap below.
+Otherwise (a multi-valued
+relation, or `update` / `delete`) the field is matched against the ids the
+related read returns (`$in`; any member when `multiple: true`).
 
-Limits — one level: every key a field the related object declares, no relation
-or dotted key inside; forward only: never a parent by its children; `where`
+Limits — up to three relationships (ADR-0071's hop limit): every key a field the
+related object declares, and a relation key may hold a condition of its own on
+its related object (`{ account: { owner: { region: 'NA' } } }`), each hop read as
+the caller and nested as a subquery; no dotted key; forward only: never a parent by its children; `where`
 only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
-at most 1000 related ids, refused past that, `INVALID_FILTER` / 400, never
-truncated; as the caller: the related object's row scope and field permissions
+where ids are read, at most 1000 of them, refused past that,
+`INVALID_FILTER` / 400, never truncated; the subquery form is taken only on
+the related object's own datasource; on a read verb it needs a driver that
+compiles it — the SQL drivers (every `driver-sql` dialect, Turso) compile it and
+the in-memory driver evaluates it in process, each declaring the
+`DriverCapabilities.readableIdsLeaf` bit, and on a driver without it (MongoDB,
+OData) a single-valued relation condition on a read verb is refused before
+anything is read, `INVALID_FILTER` / 400, naming the driver and the two-step
+route (a multi-valued relation and `update` / `delete` keep the capped id read
+there); as the caller: the related object's row scope and field permissions
 apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
 never an empty result.
+
+A single-valued relation on a read verb keeps the id read, and its 1000-id cap, in each
+of these cases:
+
+- a related object on another datasource;
+- a federated related object;
+- a related object whose reads an object-scoped middleware or an `afterFind` hook shapes;
+- a related object read under different driver options than the outer object (its tenant
+  scope, most commonly) — decided before the related read is planned where the registry
+  answers it (the two objects' tenancy class under a walled posture), at the executor
+  boundary otherwise;
+- a related read that a middleware answers itself (or adds rows to after the driver call).
+
+A hop that falls back after planning (a middleware answering the related read, or driver
+options only the request decides) dispatches the related read twice: its middleware chain
+and `beforeFind` hooks run for the planned read and again for the id read.
+
+A read rule that narrows a related object's rows after its driver call bounds a relation
+condition on that object only when it is registered for that object — as an object-keyed
+middleware or an `afterFind` hook; registered that way, the hop keeps the id read.
 
 - **Every verb that takes a `where`** serves it — `find`, `findOne`, `count`,
   `aggregate`, `update` and `delete` — and so do the REST `GET /data/:object` and
   `POST /data/:object/query` doors, which read through the same engine calls. A
-  single-valued relation matches with `$in` on the related ids; a multi-valued one
+  single-valued relation matches with a subquery on a read verb (or with `$in` on the
+  related ids in the cases listed above) and with `$in` on the related ids on
+  `update` / `delete`; a multi-valued one
   (`multiple: true`) matches a record when **any** member qualifies, written as one
   `$contains` per id under an `$or`.
-- **A second level is refused.** `{ account: { owner: { region: 'NA' } } }` and
-  `{ account: { 'owner.region': 'NA' } }` answer `INVALID_FILTER` / 400.
+- **A related record the caller cannot read never matches**, whatever the operator:
+  `{ account: { status: { $ne: 'cancelled' } } }` leaves out a row whose account is
+  absent or hidden from the caller, as well as one whose account is cancelled.
+- **Up to three relationships.** `{ account: { owner: { region: 'NA' } } }` reads
+  `user` as the caller, then `account` as the caller with the owner subquery inside,
+  and every hop carries its own object's row scope and field check; a related record
+  the caller cannot read at any hop excludes the row. A fourth relationship, and the
+  dotted `{ account: { 'owner.region': 'NA' } }`, answer `INVALID_FILTER` / 400.
 - **The reverse direction is not served.** A parent filtered by its children is not
   written as `{ opportunities: { stage: 'won' } }`: the parent has no such field, so the
   REST doors answer `INVALID_FIELD` / 400.
@@ -1101,7 +1148,7 @@ const rows = await engine.aggregate('opportunity', {
 
 A `groupBy` entry may be an object carrying `dateGranularity`, which buckets a
 `date`/`datetime` column into uniform periods. The bucketed value is projected under
-the field name (or `alias`, on the in-memory path):
+the field name, or under `alias` when the node sets one (pushed down or in memory alike):
 
 ```typescript
 const revenueByMonth = await engine.aggregate('order', {

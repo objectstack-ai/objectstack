@@ -64,7 +64,7 @@ import {
   type NavigationOverlayMode,
   type RecordTopBarStepper,
 } from '@object-ui/components';
-import { overlayWidthFor } from '@object-ui/plugin-view';
+import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
@@ -724,6 +724,31 @@ function siblingRecordPath(pathname: string, from: string, to: string): string |
   return null;
 }
 
+/**
+ * Where a page opened from a list's rows (its `from` siblings) goes to show
+ * the sibling `toId` in place of `fromId`: the same route with the record
+ * segment renamed, the same `?tab=`, an open related tab left behind, and the
+ * history state carried along. `null` when the pathname names no `fromId`
+ * record. The counter's ↓ ↑ navigate here with `replace`; so does the
+ * approvals queue's 「open the next one」 after a decision
+ * (`approval-decision/approvalQueueAdvance.tsx`), with its own `from`.
+ */
+export function siblingRecordStep(
+  location: { pathname: string; search: string; state: unknown },
+  fromId: string,
+  toId: string,
+): { to: { pathname: string; search: string }; state: Record<string, unknown> } | null {
+  const pathname = siblingRecordPath(location.pathname, fromId, toId);
+  if (pathname === null) return null;
+  const pageSearch = new URLSearchParams(location.search);
+  pageSearch.delete(RECORD_RELATED_ENLARGE_PARAM);
+  const qs = pageSearch.toString();
+  return {
+    to: { pathname, search: qs ? `?${qs}` : '' },
+    state: withoutKeys(location.state, [RECORD_RELATED_ENLARGE_PUSHED_STATE]),
+  };
+}
+
 /** What a page opened from a list knows about that list. */
 export interface RecordPageReturn {
   /**
@@ -741,7 +766,7 @@ export interface RecordPageReturn {
  * The rows a list showed, handed in the page's `from` state by a list whose
  * rows open as pages (objectstack#27524): its row click and its record links.
  */
-function readFromSiblings(state: unknown): readonly string[] | undefined {
+export function readFromSiblings(state: unknown): readonly string[] | undefined {
   const from = (state as { from?: { siblings?: unknown } } | null | undefined)?.from;
   const siblings = from?.siblings;
   return Array.isArray(siblings) && siblings.every((id) => typeof id === 'string')
@@ -779,15 +804,13 @@ export function useRecordPageReturn(recordId: string | undefined): RecordPageRet
       if (!recordId || !siblings || index < 0) return {};
       // The `from` state goes along unchanged: the next page has the same list.
       const go = (nextId: string) => () => {
-        const to = siblingRecordPath(location.pathname, recordId, nextId);
-        if (to === null) return;
-        const pageSearch = new URLSearchParams(location.search);
-        pageSearch.delete(RECORD_RELATED_ENLARGE_PARAM);
-        const qs = pageSearch.toString();
-        navigate(
-          { pathname: to, search: qs ? `?${qs}` : '' },
-          { replace: true, state: withoutKeys(location.state, [RECORD_RELATED_ENLARGE_PUSHED_STATE]) },
+        const step = siblingRecordStep(
+          { pathname: location.pathname, search: location.search, state: location.state },
+          recordId,
+          nextId,
         );
+        if (step === null) return;
+        navigate(step.to, { replace: true, state: step.state });
       };
       return {
         stepper: {

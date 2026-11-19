@@ -41,11 +41,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "プラットフォーム管理者権限の変更",
           action_invocation: "アクション実行",
           package_uninstall: "パッケージのアンインストール",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "非管理パッケージのインポート",
+          credential_use: "資格情報の使用",
+          scim_refused: "SCIM 要求の拒否",
+          audit_signing_key_change: "監査署名キーの変更",
+          dataset_query: "データセットクエリ",
+          scim_manager_unresolved: "SCIM マネージャーの未解決"
         }
       },
       user_id: {

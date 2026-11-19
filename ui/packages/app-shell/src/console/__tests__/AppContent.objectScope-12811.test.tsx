@@ -91,6 +91,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { useActionModal } from '../../hooks/useActionModal';
@@ -133,7 +137,14 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34188 — the `?names=` read answers the asked names it
+          // holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? OBJECTS.filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'app' ? server.apps : [];
           const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
@@ -226,8 +237,13 @@ describe('one console open asks for the app\'s objects, not the whole registry (
 
     expect(objectCalls()).not.toContain('object');
     expect(objectCalls()[0]).toBe(`object?package=${CRM}`);
-    // The route's lookup target outside the package, and the object the app's `requiresObject` entry names.
-    expect([...objectCalls()].sort()).toEqual([`object?package=${CRM}`, 'object/cloud_only', 'object/sys_user'].sort());
+    // The route's lookup target outside the package, and the object the app's
+    // `requiresObject` entry names, each in a `?names=` presence read
+    // (objectstack#34244): the unregistered `cloud_only` is never asked by
+    // name, and the gate still hides its entry; the served `sys_user` is.
+    expect([...objectCalls()].sort()).toEqual(
+      [`object?package=${CRM}`, 'object?names=cloud_only', 'object?names=sys_user', 'object/sys_user'].sort(),
+    );
     // The route element and the chrome are handed the scope.
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact,sys_user');
     expect(screen.getByTestId('console-layout').getAttribute('data-chrome-objects')).toBe('crm_account,crm_contact,sys_user');
@@ -239,7 +255,10 @@ describe('one console open asks for the app\'s objects, not the whole registry (
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('sys_user'));
 
     expect(objectCalls()).not.toContain('object');
-    expect(objectCalls().some((c) => c.startsWith('object?'))).toBe(false);
+    // objectstack#34188 — the list-shaped reads are presence reads: the lookup
+    // target's, and (objectstack#34244) the `requiresObject` entry's.
+    expect([...objectCalls().filter((c) => c.startsWith('object?'))].sort()).toEqual(['object?names=cloud_only', 'object?names=sys_user']);
+    expect(objectCalls()).not.toContain('object/cloud_only');
     expect(objectCalls()).toEqual(expect.arrayContaining(['object/crm_account', 'object/sys_user']));
     expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account');
   });
@@ -281,7 +300,13 @@ describe('an object outside the package is read by name, behind the skeleton (ob
     server.holdByName = true;
     boot('/apps/crm/crm_account');
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact'));
-    expect(server.calls).toContain('object/sys_user');
+    // The lookup target's by-name read goes out once its `?names=` presence
+    // read has answered it served (objectstack#34188), a render after the
+    // package list let the route draw: wait for that read, never assume it
+    // went out in the same render as the list's first paint. It is held, so
+    // the list drawn without it is still the route not waiting for it.
+    await waitFor(() => expect(server.calls).toContain('object/sys_user'));
+    expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact');
     expect(screen.getByTestId('object-view')).not.toHaveTextContent('sys_user');
 
     act(() => server.release());

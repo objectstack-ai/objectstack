@@ -264,11 +264,12 @@ describe('feature-gate completeness guard (#2874)', () => {
     }
 
     it('finds the gated surface (guards the walker itself)', () => {
-      // 37 booked inputs exist today (38 before #9968 retired
-      // sys_user.actions.set_user_role); if the walker ever goes blind and
-      // finds none, the it.each below would vacuously pass — pin a floor
-      // instead.
-      expect(referencedInputs.length).toBeGreaterThanOrEqual(37);
+      // 44 booked inputs exist today (37 before the seven membership actions
+      // were hidden while cloud-managed; 38 before #9968
+      // retired sys_user.actions.set_user_role); if the walker ever goes
+      // blind and finds none, the it.each below would vacuously pass — pin a
+      // floor instead.
+      expect(referencedInputs.length).toBeGreaterThanOrEqual(44);
     });
 
     it.each(referencedInputs)('%s references registered flag %s and is booked', (path, flag) => {

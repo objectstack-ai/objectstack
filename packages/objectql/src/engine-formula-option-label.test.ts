@@ -188,3 +188,108 @@ describe('#26608 — label() reads the option label in the reader\'s locale', ()
     expect(b.display_name).toBe('v2 · Clean');
   });
 });
+
+describe('#33634 — the declared sourceLocale, not defaultLocale, is the authored option label\'s language', () => {
+  // An app authored in English that defaults its users to zh-CN: `defaultLocale:
+  // 'zh-CN'`, `sourceLocale: 'en'`, no `fallbackLocale` (collapsed to zh-CN by
+  // both boot paths), English inline option labels, a zh-CN pack.
+  const enSource = (overrides: Record<string, unknown> = {}) => makeI18n({
+    getDefaultLocale: () => 'zh-CN',
+    getFallbackLocale: () => 'zh-CN',
+    getSourceLocale: () => 'en',
+    ...overrides,
+  });
+  const en = { locale: 'en' } as never;
+
+  it('an en reader gets the inline English label; a zh-CN reader gets the pack', async () => {
+    const { engine } = await makeEngine(enSource());
+    const a = await engine.insert('ol_version', { version_no: 2, kind: 'clean' }, { context: en }) as Rec;
+    expect(a.display_name).toBe('v2 · Clean');
+    const b = await engine.insert('ol_version', { version_no: 3, kind: 'redline' }, { context: zhCN }) as Rec;
+    expect(b.display_name).toBe('v3 · 修订稿');
+  });
+
+  it('CONTROL — no sourceLocale declared: an en reader walks the chain to zh-CN, as before', async () => {
+    const { engine } = await makeEngine(enSource({ getSourceLocale: () => undefined }));
+    const a = await engine.insert('ol_version', { version_no: 2, kind: 'clean' }, { context: en }) as Rec;
+    expect(a.display_name).toBe('v2 · 清稿');
+  });
+});
+
+describe('label() over a multi-select reads each selected label, joined, in the reader\'s locale', () => {
+  // The card's quote-line shape: a multi-select of gap kinds named by a
+  // formula, beside a CONTROL single select named the same way.
+  const LINE = {
+    name: 'ol_quote_line',
+    label: 'Quote Line',
+    fields: {
+      id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+      gaps: {
+        name: 'gaps', label: 'Gaps', type: 'select' as const, multiple: true,
+        options: [
+          { label: 'No sales price', value: 'no_sales_price' },
+          { label: 'No customer', value: 'no_customer' },
+          { label: 'No freight region', value: 'no_freight_region' },
+        ],
+      },
+      gaps_note: {
+        name: 'gaps_note', label: 'Gaps Note', type: 'formula' as const,
+        expression: { dialect: 'cel', source: 'label(record.gaps)' },
+      },
+      one: {
+        name: 'one', label: 'One Gap', type: 'select' as const,
+        options: [{ label: 'No sales price', value: 'no_sales_price' }, { label: 'No customer', value: 'no_customer' }],
+      },
+      one_note: {
+        name: 'one_note', label: 'One Note', type: 'formula' as const,
+        expression: { dialect: 'cel', source: 'label(record.one)' },
+      },
+    },
+  };
+  const GAP_LABELS = { no_sales_price: '无销售价', no_customer: '无客户', no_freight_region: '无运费区域' };
+
+  async function makeLineEngine() {
+    const engine = new ObjectQL();
+    const rig = makeStubDriver();
+    engine.registerDriver(rig.driver as never, true);
+    await engine.init();
+    engine.registry.registerObject(LINE as never, 'test');
+    engine.setI18nService(makeI18n({
+      getTranslations: (locale: string) => (locale === 'zh-CN'
+        ? { objects: { ol_quote_line: { fields: { gaps: { options: GAP_LABELS }, one: { options: GAP_LABELS } } } } }
+        : {}),
+    }));
+    return { engine, ...rig };
+  }
+
+  const readIn = (engine: ObjectQL, id: unknown, context: unknown) =>
+    engine.findOne('ol_quote_line', { where: { id }, context } as never) as Promise<Rec>;
+
+  it('a record read answers the joined labels in zh-CN and en-US, beside the single-select control', async () => {
+    const { engine } = await makeLineEngine();
+    const created = await engine.insert(
+      'ol_quote_line', { gaps: ['no_sales_price', 'no_customer'], one: 'no_customer' }, { context: enUS },
+    ) as Rec;
+    const zh = await readIn(engine, created.id, zhCN);
+    expect(zh.gaps_note).toBe('无销售价, 无客户');
+    expect(zh.one_note).toBe('无客户');
+    const en = await readIn(engine, created.id, enUS);
+    expect(en.gaps_note).toBe('No sales price, No customer');
+    expect(en.one_note).toBe('No customer');
+  });
+
+  it('a one-element selection reads that one label; the write response reads the writer\'s locale', async () => {
+    const { engine } = await makeLineEngine();
+    const created = await engine.insert('ol_quote_line', { gaps: ['no_freight_region'] }, { context: zhCN }) as Rec;
+    expect(created.gaps_note).toBe('无运费区域');
+    expect((await readIn(engine, created.id, enUS)).gaps_note).toBe('No freight region');
+  });
+
+  it('an empty selection and an empty field read \'\'', async () => {
+    const { engine } = await makeLineEngine();
+    const empty = await engine.insert('ol_quote_line', { gaps: [] }, { context: zhCN }) as Rec;
+    expect((await readIn(engine, empty.id, zhCN)).gaps_note).toBe('');
+    const none = await engine.insert('ol_quote_line', { gaps: null }, { context: enUS }) as Rec;
+    expect((await readIn(engine, none.id, enUS)).gaps_note).toBe('');
+  });
+});

@@ -6,7 +6,7 @@ import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 // two merge boundaries that stamp it.
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
-import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
+import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext, RelationGroupAggregateRelation } from './types.js';
 import { assertDatasetGroupColumnsDistinct } from '../dataset-group-column-door.js';
 import { assertDatasetDateBucketsTemporal, assertDatasetGroupTargetsStored } from '../dataset-date-bucket-door.js';
 import {
@@ -38,8 +38,10 @@ import { invalidMemberError } from '../dataset-refusal.js';
 // A cross-object `where` leaf, served as the engine's nested-relation condition.
 import {
   CROSS_OBJECT_JOIN_ROUTE,
+  CROSS_OBJECT_WHERE_MAX_HOPS,
   lowerCrossObjectWhere,
   type CrossObjectWhereLowering,
+  type CrossObjectWhereReader,
   type ServedCrossObjectLeaf,
   type UnservedCrossObjectLeaf,
 } from './cross-object-where.js';
@@ -68,6 +70,7 @@ import {
 // of an offset-only window per dialect, shared with the native face.
 // [#25907] `orderClauseSql` likewise for the order and its NULL placement.
 import { aggregateOfMeasure, orderClauseSql, windowClauseSql, windowTopSql } from './native-sql-strategy.js';
+import { answerWholeGrid, groupCountRequestOf } from '../dataset-group-count.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -192,10 +195,15 @@ type BucketEchoRefusalCause = { zone: string } | { dialect: AnalyticsSqlDialect 
  * at a UTC or unset `timezone`. Everything else refuses here, and the
  * refusal names its cause:
  *
- * - [#21630] **A non-UTC `timezone`, on every driver.** The engine then
- *   buckets in memory on that zone's calendar (ADR-0053 Phase 2, D2;
- *   `tzRequiresInMemory` in objectql's `engine.ts`): the driver only fetches
- *   the rows, and no statement the database runs groups by those keys. The
+ * - [#21630] **A non-UTC `timezone` the engine buckets in memory.** The
+ *   engine buckets it on that zone's calendar in JS (ADR-0053 Phase 2 D2;
+ *   `tzRequiresInMemory` in objectql's `engine-delete-and-aggregate.ts`): the
+ *   driver only fetches the rows, and no statement the database runs groups by
+ *   those keys. [#33697] Since D2's amendment that is every driver but one
+ *   declaring `supports.zonedDateBucketing` (PostgreSQL), and on that one a
+ *   zone the runtime resolves to no IANA area/location name (`+08:00`,
+ *   `EST5EDT`); for a resolved area/location zone there, the hook answers the
+ *   zoned expression the database groups by and the echo prints it. The
  *   `date_trunc('<granularity>', col)` this used to print groups on the
  *   database SESSION's calendar where it runs at all. Measured on PostgreSQL
  *   16.14 with the server at `Asia/Shanghai`, it answered timestamp keys such
@@ -230,10 +238,12 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
     `[analytics] cannot render display SQL for the "${granularity}" bucket of "${dimension}"` +
       ('zone' in cause
         ? ` with timezone "${cause.zone}". The query itself is SERVED: the engine buckets it in memory on that ` +
-          `zone's calendar, so no statement the database runs groups by those bucket keys. Refusing rather than ` +
-          `printing one that groups on another calendar. Run the query itself (/analytics/query) to get its rows; ` +
-          `with timezone "UTC" or none, this dry run renders the expression the driver groups the bucket by, ` +
-          `where the driver has one.`
+          `zone's calendar, because this datasource's driver does not bucket that zone in the database, so no ` +
+          `statement the database runs groups by those bucket keys. (A driver that declares zone-aware ` +
+          `bucketing, such as PostgreSQL, does, for a zone the runtime resolves to an IANA area/location name, ` +
+          `and this dry run then prints its expression.) Refusing rather than printing one that groups on ` +
+          `another calendar. Run the query itself (/analytics/query) to get its rows; with timezone "UTC" or ` +
+          `none, this dry run renders the expression the driver groups the bucket by, where the driver has one.`
         : (cause.dialect === 'unknown'
             ? `: the driver behind this datasource names no SQL dialect and renders no expression for it. A ` +
               `driver that runs no SQL, such as the in-memory or MongoDB driver, buckets it without one: the ` +
@@ -250,6 +260,34 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
   err.status = 501;
   err.refusal = true;
   return err;
+}
+
+/**
+ * [#33697] How the echo reads a query's `timezone` for its date buckets: the
+ * way `engine.aggregate` reads it (objectql `judgeBucketZone`,
+ * `engine-delete-and-aggregate.ts`; ADR-0053 Phase 2 D2 as amended), through
+ * the runtime's own resolution. Restated here because the engine's predicate
+ * is not reachable from this package; `objectql-echo-bucket-enumeration.test.ts`
+ * holds the two together.
+ *
+ * - `utc` — unset, empty, or a name that resolves to `UTC`.
+ * - `area` — resolves to an IANA area/location name (contains `/`), `zone`
+ *   being that resolved name: pushed down to a driver declaring
+ *   `supports.zonedDateBucketing`, in memory on every other.
+ * - `memory` — the runtime cannot resolve it, or it resolves to an offset or
+ *   an abbreviation with no `/`: in memory on every driver.
+ */
+function echoBucketZone(timezone: string | undefined):
+  { kind: 'utc' } | { kind: 'area'; zone: string } | { kind: 'memory' } {
+  if (timezone === undefined || timezone === '' || timezone === 'UTC') return { kind: 'utc' };
+  let resolved: string;
+  try {
+    resolved = new Intl.DateTimeFormat('en-US', { timeZone: timezone }).resolvedOptions().timeZone;
+  } catch {
+    return { kind: 'memory' };
+  }
+  if (resolved === 'UTC') return { kind: 'utc' };
+  return resolved.includes('/') ? { kind: 'area', zone: resolved } : { kind: 'memory' };
 }
 
 /** One `engine.aggregate` group key: a column, or a column bucketed by a granularity. */
@@ -271,8 +309,9 @@ function unservedCrossObjectFilterRefused(field: string, leaf: UnservedCrossObje
   switch (leaf.reason) {
     case 'multi-hop':
       why =
-        `: it traverses ${field.split('.').length - 1} relationships, and ${served}, one relationship ` +
-        `deep. Filter on a field of the first related object instead, or remove the filter.`;
+        `: it traverses ${field.split('.').length - 1} relationships, and ${served}, up to ` +
+        `${CROSS_OBJECT_WHERE_MAX_HOPS} relationships deep (ADR-0071's hop limit). Filter on a field ` +
+        `at most ${CROSS_OBJECT_WHERE_MAX_HOPS} relationships away instead, or remove the filter.`;
       break;
     case 'negated':
       why =
@@ -304,13 +343,15 @@ function unservedCrossObjectFilterRefused(field: string, leaf: UnservedCrossObje
  * caller wrote.
  */
 function crossObjectEchoRefused(leaf: ServedCrossObjectLeaf): Error {
-  const attr = leaf.field.split('.').slice(1).join('.');
+  const segments = leaf.field.split('.');
+  const nested = segments.reduceRight(
+    (inner, key, i) => (i === segments.length - 1 ? `{ "${key}": … }` : `{ "${key}": ${inner} }`), '',
+  );
   return invalidFilterError(
     `[analytics] cannot render display SQL for the cross-object filter "${leaf.member}". The query ` +
-    `itself is answered by the engine, as the nested-relation condition { "${leaf.relation}": ` +
-    `{ "${attr}": … } }: it reads "${leaf.object}" as the caller, with that object's row scope and ` +
-    `field permissions, and matches "${leaf.relation}" against the ids it returns, refusing a match ` +
-    `past its cap. No statement printed here reproduces that read. Run the query itself ` +
+    `itself is answered by the engine, as the nested-relation condition ${nested}: it reads "${leaf.object}" as the caller, with that object's row scope and ` +
+    `field permissions, and keeps the rows whose "${leaf.relation}" is a record that read admits. ` +
+    `No statement printed here reproduces that read. Run the query itself ` +
     `(/analytics/query) for its rows.`,
   );
 }
@@ -589,6 +630,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // nested-relation condition it serves (`cross-object-where.ts`); a leaf this
     // path cannot serve exactly stays dotted, for `planCrossObject` to refuse.
     const served = this.servedWhere(cube, query, ctx);
+    // [#33626] …and the dataset's own `filter` alike.
+    const servedScope = this.servedScope(cube, query, ctx);
     this.applyFilterNode(normalizeAnalyticsFilterTree(served.query, lowering), cube, filter, conjuncts);
     // #3650 — and the time-dimension WINDOWS, through the SAME merge, so a
     // `dateRange` and a caller `where` bound on one field compose instead of
@@ -625,11 +668,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // folding a measure filter into THIS whole-call filter instead would
     // narrow EVERY measure, trading a wrong `won_count` for a wrong
     // `opp_count` as well.
-    if (datasetScope?.filter) {
+    if (servedScope.filter) {
       // `null` = constrains nothing, which is the AND identity — nothing to add,
       // and nothing invented for a filter that says nothing.
       const scopeCondition = this.filterNodeToCondition(
-        normalizeAnalyticsFilterTree({ where: datasetScope.filter }, lowering),
+        normalizeAnalyticsFilterTree({ where: servedScope.filter }, lowering),
         cube,
       );
       if (scopeCondition) conjuncts.push(scopeCondition);
@@ -640,7 +683,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     // #3654 — classify cross-object references. A cross-object DIMENSION within
     // the supported envelope is served by an FK-expand (`executeCrossObject`);
-    // a one-hop cross-object `where` leaf already reached `filter` as the
+    // a cross-object `where` leaf of up to three hops (and the dataset's own
+    // `filter`'s, #33626) already reached `filter` as the
     // engine's nested-relation condition (`servedWhere`, above); everything the
     // engine cannot serve (cross-object measures, a `where` leaf `servedWhere`
     // left dotted, multi-hop, non-recombinable measures) is REJECTED by `planCrossObject` —
@@ -660,7 +704,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // with a predicate the engine cannot join and silently mis-bucketed it,
     // which is the exact outcome #3654's loud refusal exists to prevent.
     const plan = this.planCrossObject(
-      cube, query, this.filterMemberView(cube, served.query, ctx), relationshipReferenceOf(ctx), served.lowering.unserved,
+      cube, query, this.filterMemberView(cube, served.query, ctx, servedScope.filter), relationshipReferenceOf(ctx), served.lowering.unserved,
     );
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
@@ -769,6 +813,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * orders chronologically here.)
    */
   private orderAndWindow(query: AnalyticsQuery, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+    // [query_dataset totalGroups] The rows in hand are every group: no read
+    // above hands `engine.aggregate` an order or a window, so it answers the
+    // whole grid, and the cut is this line's. A caller that asked for the
+    // group count (`dataset-group-count.ts`) gets the grid's length before the
+    // cut — no read is added for it. A read that ever hands the engine a
+    // window must take the count from the engine instead, never from here.
+    const groupCount = groupCountRequestOf(query);
+    if (groupCount) answerWholeGrid(rows, groupCount);
     return applyWindow(applyOrdering(rows, query.order), query.limit, query.offset);
   }
 
@@ -787,8 +839,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * and answers the face's bucket keys. [#21647] That expression is the only
    * thing a bucket is ever printed as. Where there is none, the echo refuses
    * ({@link bucketEchoRefused}), on every driver and every dialect: a non-UTC
-   * `timezone`, which the engine buckets in memory on that zone's calendar
-   * (#21630), and a hook that answers nothing at UTC, which is a driver that
+   * `timezone` the engine buckets in memory on that zone's calendar (#21630;
+   * since #33697 a driver declaring zone-aware bucketing answers the zoned
+   * expression for a resolved area/location zone, and it is printed), and a hook that answers nothing at UTC, which is a driver that
    * runs no SQL, a granularity the driver leaves to the engine, or a host that
    * wires no hook (#21595 was SQLite's case of it). No bucket expression is
    * written here.
@@ -875,8 +928,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // The same respelling of a cross-object `where` leaf `execute()` makes, so
     // both faces judge one member view.
     const served = this.servedWhere(cube, query, ctx);
+    const servedScope = this.servedScope(cube, query, ctx);
     const plan = this.planCrossObject(
-      cube, query, this.filterMemberView(cube, served.query, ctx), relationshipReferenceOf(ctx), served.lowering.unserved,
+      cube, query, this.filterMemberView(cube, served.query, ctx, servedScope.filter), relationshipReferenceOf(ctx), served.lowering.unserved,
     );
     // Read once, reused below for both the per-measure conditional aggregate
     // (#10413 phase 2) and the dataset-scope WHERE conjunct (#10413 phase 1) —
@@ -938,12 +992,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // (`no such function`), and PostgreSQL answers a timestamp where the face
     // answers `2026-01`.
     //
-    // Asked only for a UTC or unset `timezone`. The driver's expression is a
-    // UTC bucket. [#21630] A non-UTC zone makes the engine bucket in memory on
-    // that zone's calendar instead, on every driver (ADR-0053 Phase 2, D2;
-    // `tzRequiresInMemory` in objectql's `engine.ts`, the same test on the same
-    // `timezone`), so no statement the database runs groups by those keys, and
-    // the echo refuses on every dialect before the hook is asked
+    // [#33697] The zone is read as the engine reads it (`echoBucketZone`,
+    // ADR-0053 Phase 2 D2 as amended): a UTC or unset `timezone`, or a name
+    // the runtime resolves to `UTC` (`Etc/UTC`, `GMT`), asks the hook for the
+    // UTC bucket. [#21630] A zone that resolves to an IANA area/location name
+    // asks the hook WITH the resolved name: a driver declaring
+    // `supports.zonedDateBucketing` answers the zoned expression the database
+    // groups by, and every other driver answers nothing, because the engine
+    // buckets that zone in memory there — so the echo refuses, naming the
+    // zone. A zone that resolves to no area/location name is bucketed in
+    // memory on every driver, and the echo refuses it before the hook is asked
     // ({@link bucketEchoRefused}).
     //
     // [#21647] Where the hook answers nothing at UTC, the echo refuses too, on
@@ -963,9 +1021,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // `driver-turso`'s remote face (it advertises no granularity, and inherits
     // the SQLite expression, which libSQL runs).
     const zone = query.timezone;
-    const inMemoryZone = zone && zone !== 'UTC' ? zone : undefined;
+    const bucketZone = echoBucketZone(zone);
+    const hook = (ctx as DatasetScopedStrategyContext).dateBucketSql;
     const driverBucketSql = (col: string, granularity: string): string | undefined => {
-      const answered = (ctx as DatasetScopedStrategyContext).dateBucketSql?.(tableName, col, granularity);
+      const answered = bucketZone.kind === 'area'
+        ? hook?.(tableName, col, granularity, bucketZone.zone)
+        : hook?.(tableName, col, granularity);
       return typeof answered === 'string' && answered !== '' ? answered : undefined;
     };
     const dimExpr = (dim: string): string => {
@@ -979,9 +1040,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       const col = this.resolveFieldName(cube, dim, 'dimension');
       const gran = gransByDim.get(dim)?.[0];
       if (!gran) return col;
-      if (inMemoryZone !== undefined) throw bucketEchoRefused(dim, gran, { zone: inMemoryZone });
+      if (bucketZone.kind === 'memory') throw bucketEchoRefused(dim, gran, { zone: zone! });
       const bucket = driverBucketSql(col, gran);
-      if (bucket === undefined) throw bucketEchoRefused(dim, gran, { dialect: sqlDialectFor(ctx, tableName) });
+      if (bucket === undefined) {
+        throw bucketZone.kind === 'area' && typeof hook === 'function'
+          ? bucketEchoRefused(dim, gran, { zone: zone! })
+          : bucketEchoRefused(dim, gran, { dialect: sqlDialectFor(ctx, tableName) });
+      }
       return bucket;
     };
 
@@ -1048,6 +1113,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // has no statement here that reproduces it: refused, as the authored
     // nested-relation form is below, in words that name the dotted member.
     if (served.lowering.served.length > 0) throw crossObjectEchoRefused(served.lowering.served[0]);
+    if (servedScope.served.length > 0) throw crossObjectEchoRefused(servedScope.served[0]);
     // Recursive, so the echoed statement carries the same disjunctions the
     // engine filter does — the echo exists to REPRODUCE execution, and an
     // `$or` rendered as a conjunction (or dropped) is exactly the lie this
@@ -1275,17 +1341,43 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     query: AnalyticsQuery,
     ctx: StrategyContext,
   ): { query: AnalyticsQuery; lowering: CrossObjectWhereLowering } {
+    const lowering = lowerCrossObjectWhere(lowerAnalyticsWhere(query), this.crossObjectWhereReader(cube, ctx));
+    if (lowering.served.length === 0) return { query, lowering };
+    return { query: { ...query, where: lowering.where } as AnalyticsQuery, lowering };
+  }
+
+  /**
+   * [#33626] The compiled dataset's OWN definition-level `filter`, with its
+   * servable cross-object leaves respelled exactly as {@link servedWhere}
+   * respells the caller's: the engine then serves each as its nested-relation
+   * condition (a read-scoped subquery on a SQL driver). `filter` is the scope
+   * as declared when nothing was respelled (or `undefined` when the cube is not
+   * a compiled dataset or declares none); a leaf left dotted keeps the
+   * dataset-filter refusal in {@link planCrossObject}.
+   */
+  private servedScope(
+    cube: Cube,
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+  ): { filter: unknown; served: readonly ServedCrossObjectLeaf[] } {
+    const declared = (ctx as DatasetScopedStrategyContext).getDatasetScope?.(query.cube!)?.filter;
+    if (!declared) return { filter: declared, served: [] };
+    const lowering = lowerCrossObjectWhere(lowerAnalyticsWhere({ where: declared }), this.crossObjectWhereReader(cube, ctx));
+    if (lowering.served.length === 0) return { filter: declared, served: [] };
+    return { filter: lowering.where, served: lowering.served };
+  }
+
+  /** What {@link lowerCrossObjectWhere} reads a member through, on this cube. */
+  private crossObjectWhereReader(cube: Cube, ctx: StrategyContext): CrossObjectWhereReader {
     const baseObject = this.extractObjectName(cube);
     const referenceOf = relationshipReferenceOf(ctx);
-    const lowering = lowerCrossObjectWhere(lowerAnalyticsWhere(query), {
+    return {
       cube,
       baseObject,
       referenceOf,
       resolveField: (member) => this.resolveFieldName(cube, member, 'any'),
       isCrossObject: (field) => this.isCrossObjectField(cube, field, baseObject, referenceOf),
-    });
-    if (lowering.served.length === 0) return { query, lowering };
-    return { query: { ...query, where: lowering.where } as AnalyticsQuery, lowering };
+    };
   }
 
   /**
@@ -1395,6 +1487,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     cube: Cube,
     query: AnalyticsQuery,
     ctx: StrategyContext,
+    // [#33626] The dataset `filter` as the engine receives it ({@link servedScope}).
+    scopeFilter: unknown,
   ): Record<string, FilterMemberOrigin> {
     // Read from the SAME channel both doors lower the scope from, so the view
     // and the predicate cannot disagree about what the engine will receive.
@@ -1419,8 +1513,8 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     });
     return Object.fromEntries([
       ...measureLeaves,
-      ...(datasetScope?.filter
-        ? leaves(normalizeAnalyticsFilterTree({ where: datasetScope.filter }, NO_DATETIME_COLUMNS), { kind: 'dataset-filter' })
+      ...(scopeFilter
+        ? leaves(normalizeAnalyticsFilterTree({ where: scopeFilter }, NO_DATETIME_COLUMNS), { kind: 'dataset-filter' })
         : []),
       ...leaves(normalizeAnalyticsFilterTree(query, NO_DATETIME_COLUMNS), { kind: 'where' }),
     ]);
@@ -1690,37 +1784,19 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // [#28798] The dataset refusal for a column asked twice, as on the direct path.
     assertDatasetGroupColumnsDistinct(baseObject, groupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
 
-    // Base aggregate, grouped by the FK, scoped to the base object. Threads the
-    // ExecutionContext for the engine-side second belt too (#3602).
-    const baseRows = await ctx.executeAggregate!(baseObject, {
-      groupBy: groupBy.length > 0 ? (groupBy as unknown as string[]) : undefined,
-      aggregations: aggregations.length > 0 ? aggregations : undefined,
-      filter: this.withReadScope(baseObject, filter, ctx),
-      timezone: query.timezone,
-      context: ctx.context,
-    });
-
-    // [#29304] A cross-object dimension over a virtual attribute, whether or
-    // not a base row carries a key to resolve. See {@link assertCrossObjectAttrsStored}.
-    assertCrossObjectAttrsStored(plan, ctx);
-
-    // Resolve each cross-object dim's FK → attribute, SCOPED to the referenced
-    // object: a related record the caller cannot read never yields its
-    // attribute, so it buckets as RESTRICTED (no leak; ADR-0021 D-C / #3602).
-    const resolvedDims: CrossObjectDim[] = [];
-    for (const cd of plan.crossDims) {
-      const fkValues = [...new Set(baseRows.map((r) => r[cd.fkField]).filter((v) => v != null))];
-      const fkToAttr = await this.resolveFkAttr(cd.refObject, cd.attr, fkValues, ctx);
-      resolvedDims.push({ outputName: cd.outputName, fkField: cd.fkField, fkToAttr });
-    }
-
     const measures: MeasureRecombine[] = (query.measures ?? []).map((m) => ({
       alias: m,
       // planCrossObject already asserted every measure is recombinable.
       method: this.resolveMeasureAggregation(cube, m).method as RecombinableMethod,
     }));
 
-    const merged = rebucketCrossObject(baseRows, baseDimFields, resolvedDims, measures);
+    // [relation group join] On a driver that compiles it, one statement: the
+    // base aggregate LEFT JOINs each related object's readable rows and
+    // groups by the attribute itself — no id list, no bind-parameter ceiling.
+    // `null` when the host cannot run it or the engine declined: the
+    // FK-expand below serves the dimension as it always has.
+    const joined = await this.executeCrossObjectJoined(baseObject, plan, groupBy, baseDimFields, aggregations, filter, query, measures, ctx);
+    const merged = joined ?? await this.executeCrossObjectExpanded(baseObject, plan, groupBy, baseDimFields, aggregations, filter, query, measures, ctx);
 
     // Map resolved group keys back to the caller's dimension names.
     const mappedRows = merged.map((row) => {
@@ -1749,6 +1825,177 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   /**
+   * [relation group join] Serve the cross-object dimensions as ONE aggregate
+   * the engine compiles to `LEFT JOIN … GROUP BY` (objectql
+   * `relation-group-join.ts`), through
+   * {@link DatasetScopedStrategyContext.executeRelationGroupAggregate}.
+   *
+   * The related read is the FK-expand's own, minus its id list: the related
+   * object's read scope ({@link relatedReadScope}, judged and marked exactly
+   * as {@link resolveFkAttr} judges it) is the condition the engine's planned
+   * read of that object applies beside its own pipeline. Each row comes back
+   * with the attribute and a resolved column; a row no readable related
+   * record joined buckets as RESTRICTED, exactly as an id the FK-expand's read
+   * did not return — the rows go through the same {@link rebucketCrossObject},
+   * keyed per row, so the buckets and their measures are the FK-expand's.
+   *
+   * Throws the engine's refusal (`INVALID_QUERY` / 400) when the read's
+   * driver compiles no semi-join (MongoDB, OData, [#33876]): the dimension is
+   * served on no path there.
+   *
+   * `null` — serve by the FK-expand — when the host wired no such hook or the
+   * engine declined (a driver that compiles no join: memory, Turso;
+   * a read it cannot prove is one statement), and when anything on the way
+   * refused with a 4xx: the FK-expand re-derives that refusal, so its order
+   * and its envelope stay today's.
+   */
+  private async executeCrossObjectJoined(
+    baseObject: string,
+    plan: CrossObjectPlan,
+    groupBy: AggregateGroupKey[],
+    baseDimFields: string[],
+    aggregations: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }>,
+    filter: Record<string, unknown>,
+    query: AnalyticsQuery,
+    measures: MeasureRecombine[],
+    ctx: StrategyContext,
+  ): Promise<Record<string, unknown>[] | null> {
+    const run = (ctx as DatasetScopedStrategyContext).executeRelationGroupAggregate;
+    if (typeof run !== 'function') return null;
+
+    // [#29304] A virtual attribute is the FK-expand's to refuse, in the
+    // dataset door's words and after its base read's own doors: this path
+    // only declines, before the engine is asked.
+    try {
+      assertCrossObjectAttrsStored(plan, ctx);
+    } catch (error) {
+      if (isClientRefusal(error)) return null;
+      throw error;
+    }
+
+    // One relation per FK column, each attribute under its own column.
+    const relations: Array<{ field: string; object: string; where?: Record<string, unknown>; attrs: Array<{ attr: string; alias: string }>; resolvedAlias: string }> = [];
+    const columnOf = new Map<string, { relation: number; alias: string }>();
+    for (const cd of plan.crossDims) {
+      let index = relations.findIndex((r) => r.field === cd.fkField);
+      if (index === -1) {
+        index = relations.length;
+        const where = this.relatedReadScope(cd.refObject, ctx);
+        relations.push({
+          field: cd.fkField,
+          object: cd.refObject,
+          ...(where !== undefined ? { where } : {}),
+          attrs: [],
+          resolvedAlias: `__rg${index}_resolved`,
+        });
+      }
+      const relation = relations[index]!;
+      let attr = relation.attrs.find((a) => a.attr === cd.attr);
+      if (!attr) {
+        attr = { attr: cd.attr, alias: `__rg${index}_a${relation.attrs.length}` };
+        relation.attrs.push(attr);
+      }
+      columnOf.set(cd.outputName, { relation: index, alias: attr.alias });
+    }
+
+    // The base group keys without the FK columns the joins replace — a FK
+    // column a base dimension names itself (`account` beside `account.name`)
+    // stays.
+    const replaced = new Set(relations.map((r) => r.field).filter((f) => !baseDimFields.includes(f)));
+    const joinGroupBy = groupBy.filter((g) => typeof g !== 'string' || !replaced.has(g));
+
+    // A 4xx refusal is not this path's to word: the base query here is not
+    // the FK-expand's (its FK columns are gone, so a refusal citing a group
+    // key's position names another one), and the related read is judged even
+    // over an empty base set, which the FK-expand never reads. The FK-expand
+    // re-derives it, so the envelope a client sees, and the dry run it
+    // matches, stays today's field for field. A 5xx is the join's own
+    // fault and surfaces.
+    let answer: Awaited<ReturnType<typeof run>>;
+    try {
+      answer = await run.call(ctx, baseObject, {
+        groupBy: joinGroupBy.length > 0 ? (joinGroupBy as unknown as string[]) : undefined,
+        aggregations: aggregations.length > 0 ? aggregations : undefined,
+        filter: this.withReadScope(baseObject, filter, ctx),
+        timezone: query.timezone,
+        context: ctx.context,
+      }, relations as readonly RelationGroupAggregateRelation[]);
+    } catch (error) {
+      if (isClientRefusal(error)) return null;
+      throw error;
+    }
+    // [#33876] The read's driver compiles no semi-join (MongoDB, OData): the
+    // engine refused the dimension before reading anything, and no path
+    // serves it — thrown here, never answered by the FK-expand.
+    if (!answer.joined && answer.refusal !== undefined) throw answer.refusal;
+    if (!answer.joined) return null;
+
+    // Each row is one group of the joined statement. Its key for a relation
+    // is the row itself when a readable related record joined, and absent
+    // (RESTRICTED) when none did — the FK-expand's map, one entry per row.
+    const keyOf = (relation: number): string => `__rg${relation}_key`;
+    const rows = answer.rows.map((row, i) => {
+      const keyed: Record<string, unknown> = { ...row };
+      relations.forEach((r, index) => {
+        keyed[keyOf(index)] = Number(row[r.resolvedAlias]) === 1 ? i : null;
+      });
+      return keyed;
+    });
+    const resolvedDims: CrossObjectDim[] = plan.crossDims.map((cd) => {
+      const { relation, alias } = columnOf.get(cd.outputName)!;
+      const fkToAttr = new Map<unknown, unknown>();
+      rows.forEach((row, i) => {
+        if (row[keyOf(relation)] === i) fkToAttr.set(i, row[alias]);
+      });
+      return { outputName: cd.outputName, fkField: keyOf(relation), fkToAttr };
+    });
+    return rebucketCrossObject(rows, baseDimFields, resolvedDims, measures);
+  }
+
+  /**
+   * Serve the cross-object dimensions by FK-expand (#3654): the base aggregate
+   * grouped by each FK column, each FK resolved to its attribute by a scoped
+   * read of the referenced object ({@link resolveFkAttr}), re-bucketed here.
+   */
+  private async executeCrossObjectExpanded(
+    baseObject: string,
+    plan: CrossObjectPlan,
+    groupBy: AggregateGroupKey[],
+    baseDimFields: string[],
+    aggregations: Array<{ field: string; method: AggregationFunction; alias: string; filter?: Record<string, unknown> }>,
+    filter: Record<string, unknown>,
+    query: AnalyticsQuery,
+    measures: MeasureRecombine[],
+    ctx: StrategyContext,
+  ): Promise<Record<string, unknown>[]> {
+    // Base aggregate, grouped by the FK, scoped to the base object. Threads the
+    // ExecutionContext for the engine-side second belt too (#3602).
+    const baseRows = await ctx.executeAggregate!(baseObject, {
+      groupBy: groupBy.length > 0 ? (groupBy as unknown as string[]) : undefined,
+      aggregations: aggregations.length > 0 ? aggregations : undefined,
+      filter: this.withReadScope(baseObject, filter, ctx),
+      timezone: query.timezone,
+      context: ctx.context,
+    });
+
+    // [#29304] A cross-object dimension over a virtual attribute, whether or
+    // not a base row carries a key to resolve. See {@link assertCrossObjectAttrsStored}.
+    assertCrossObjectAttrsStored(plan, ctx);
+
+    // Resolve each cross-object dim's FK → attribute, SCOPED to the referenced
+    // object: a related record the caller cannot read never yields its
+    // attribute, so it buckets as RESTRICTED (no leak; ADR-0021 D-C / #3602).
+    const resolvedDims: CrossObjectDim[] = [];
+    for (const cd of plan.crossDims) {
+      const fkValues = [...new Set(baseRows.map((r) => r[cd.fkField]).filter((v) => v != null))];
+      const fkToAttr = await this.resolveFkAttr(cd.refObject, cd.attr, fkValues, ctx);
+      resolvedDims.push({ outputName: cd.outputName, fkField: cd.fkField, fkToAttr });
+    }
+
+    return rebucketCrossObject(baseRows, baseDimFields, resolvedDims, measures);
+  }
+
+  /**
    * Resolve `fkValues` (ids of `refObject`) to their `attr` values, applying the
    * referenced object's OWN read scope (#3654 / #3602). Reuses the aggregate
    * bridge — `group by (id, attr)` is one row per record. Ids the scope hides
@@ -1763,10 +2010,34 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const map = new Map<unknown, unknown>();
     if (fkValues.length === 0 || typeof ctx.executeAggregate !== 'function') return map;
     const idFilter: Record<string, unknown> = { id: { $in: fkValues } };
+    const scope = this.relatedReadScope(refObject, ctx);
+    const filter = scope !== undefined ? { $and: [idFilter, scope] } : idFilter;
+    const rows = await ctx.executeAggregate(refObject, {
+      // [#28692] `<relation>.id` resolves the FK to the related record's own
+      // id: `id` is already the key, and naming it twice is a groupBy the
+      // engine refuses (`INVALID_QUERY`).
+      groupBy: attr === 'id' ? ['id'] : ['id', attr],
+      aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
+      filter,
+      context: ctx.context,
+    });
+    for (const r of rows) {
+      if (r.id != null) map.set(r.id, r[attr]);
+    }
+    return map;
+  }
+
+  /**
+   * The referenced object's OWN read scope, as the related read of a
+   * cross-object dimension applies it — by FK-expand ({@link resolveFkAttr}) or
+   * as the engine's planned read of a join ({@link executeCrossObjectJoined}) —
+   * judged and marked as policy, or `undefined` when there is none.
+   */
+  private relatedReadScope(refObject: string, ctx: StrategyContext): Record<string, unknown> | undefined {
     const scope = typeof ctx.getReadScope === 'function' ? ctx.getReadScope(refObject) : null;
     // [#8220] Same boundary family as `withReadScope`: the scope arm is policy.
-    // `idFilter` is this method's own plumbing, not the caller's text — it
-    // stays unmarked, which withholds, and that is correct for a filter no
+    // `resolveFkAttr`'s id filter is its own plumbing, not the caller's text —
+    // it stays unmarked, which withholds, and that is correct for a filter no
     // author typed.
     // [#13640] The SECOND engine-bound merge on this strategy, and the same
     // door: the referenced object's own scope is `$and`-ed into a filter handed
@@ -1791,20 +2062,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       assertReadScopeAdmittedByEngine(scope, refObject, ctx.context, ctx as DatasetScopedStrategyContext);
     }
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
-    const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
-    const rows = await ctx.executeAggregate(refObject, {
-      // [#28692] `<relation>.id` resolves the FK to the related record's own
-      // id: `id` is already the key, and naming it twice is a groupBy the
-      // engine refuses (`INVALID_QUERY`).
-      groupBy: attr === 'id' ? ['id'] : ['id', attr],
-      aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
-      filter,
-      context: ctx.context,
-    });
-    for (const r of rows) {
-      if (r.id != null) map.set(r.id, r[attr]);
-    }
-    return map;
+    return scope != null ? (scope as Record<string, unknown>) : undefined;
   }
 
   /**
@@ -2260,16 +2518,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#20887] The echo DECLINES the nested-relation form, the way it
       // declines a cross-field comparison (#7598's echo ruling: one consistent,
       // loud answer, never a half-rendering). What runs is a read of the
-      // related object as the caller, then a match against the ids it
-      // returned; no statement this renderer can print reproduces that — a
-      // JOIN would name rows the caller's field permissions and the engine's
-      // cap never let through. `execute()` swallows the echo's refusal, so the
+      // related object as the caller, then a match against what that read
+      // admits; no statement this renderer can print reproduces that — a
+      // JOIN would name rows the caller's read restrictions on the related
+      // object never let through. `execute()` swallows the echo's refusal, so the
       // query face still answers; only the dry-run face refuses.
       throw invalidFilterError(
         `[analytics] cannot render display SQL for the nested-relation condition on "${node.member}" ` +
         `({ "${node.member}": { … } }). The query itself is answered by the engine: it reads the ` +
         `related object as the caller, with that object's row scope and field permissions, and ` +
-        `matches "${node.member}" against the ids it returns, refusing a match past its cap. No ` +
+        `keeps the rows whose "${node.member}" is a record that read admits. No ` +
         `statement printed here reproduces that read. Run the query itself (/analytics/query) for ` +
         `its rows.`,
       );
@@ -2652,4 +2910,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     }
     return fields;
   }
+}
+
+/** [relation group join] A declared 4xx: a verdict the FK-expand re-derives in its own order and words. */
+function isClientRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null | undefined)?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
 }

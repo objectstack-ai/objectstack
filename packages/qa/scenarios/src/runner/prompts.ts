@@ -26,8 +26,8 @@
  *     authoring prompt (build, iterate, template iterate) states it;
  *   - the structure the Build half checks by exact name beyond the seed
  *     ({@link structureLines}): each lookup's target, each single-choice field
- *     with its minimum option count, each dashboard and each app navigation
- *     target. Every Build check traces to text the prompt carries, so a
+ *     with its minimum option count, each dashboard, each app navigation
+ *     target, and each dataset with its members and their vocabulary. Every Build check traces to text the prompt carries, so a
  *     faithful build never fails for not guessing a name; an iterate prompt
  *     states its change's own rows the same way ({@link changeContract}).
  *
@@ -42,22 +42,160 @@
  */
 
 import type { LoadedScenario } from '../loader.js';
-import { PERSON_USER_FIELD, scenarioNamespace, type ScenarioCard, type ScenarioExpect } from '../schema.js';
+import { PERSON_USER_FIELD, scenarioNamespace, type LocalizedText, type ScenarioCard, type ScenarioExpect } from '../schema.js';
 import { permissionSetName } from './namespace.js';
 import { cycleText, referenceCycles } from './seed.js';
 
 type Card = ScenarioCard;
 type Persona = Card['run']['personas'][number];
 
-const text = (t: { en?: string; zh?: string }): string => t.en ?? t.zh ?? '';
+const code = (name: string): string => `\`${name}\``;
+
+// ── The prompt choice: which language and which build prompt ───────────────
+
+/** The languages a card's text may be rendered in (`--lang`): the two {@link LocalizedText} carries. */
+export const PROMPT_LANGS = ['zh', 'en'] as const;
+export type PromptLang = (typeof PROMPT_LANGS)[number];
+
+/** The card prompts a build turn may be given (`--prompt`): the two `prompt` carries. */
+export const PROMPT_LENGTHS = ['short', 'detailed'] as const;
+export type PromptLength = (typeof PROMPT_LENGTHS)[number];
+
+/**
+ * The prompt choice of a run (`--lang`, `--prompt`). Absent fields keep
+ * today's rendering byte for byte: every card text in English when the card
+ * has it, else in Chinese, and the build turn given `prompt.detailed`.
+ *
+ *   lang    every card-authored text a prompt renders — the build prompt
+ *           (`prompt.short` or `prompt.detailed`), the iterate change
+ *           (`iterate.change`), each question's and each operation's `ask` —
+ *           in this language and no other: a card missing one of them in it
+ *           is not run ({@link promptLanguageGaps}), never sent the other
+ *           language. The runner's own text around it (the preamble, the
+ *           data contract, the naming rule, the answer instructions) stays in
+ *           English, and so do the card's plain strings it quotes (a
+ *           persona's role, an action's summary).
+ *   prompt  the card prompt the build turn is given; the iterate turn is
+ *           always given `iterate.change`, whatever this says.
+ */
+export interface PromptChoice {
+  lang?: PromptLang;
+  prompt?: PromptLength;
+}
+
+/** A card text a prompt was asked to render in a language the card does not carry it in: {@link promptLanguageGaps} keeps a run from reaching one. */
+export class MissingLanguageError extends Error {
+  constructor(
+    readonly lang: PromptLang,
+    readonly field: string,
+  ) {
+    super(`the card has no \`${lang}\` text for \`${field}\`, and --lang ${lang} sends no other language`);
+    this.name = 'MissingLanguageError';
+  }
+}
+
+/** A card text as the choice renders it: in `lang` and no other when one is chosen, else English when the card has it, then Chinese. */
+function text(t: LocalizedText, choice: PromptChoice | undefined, field: string): string {
+  if (choice?.lang === undefined) return t.en ?? t.zh ?? '';
+  const out = t[choice.lang];
+  if (out === undefined) throw new MissingLanguageError(choice.lang, field);
+  return out;
+}
+
+/** The modes a run renders prompts for, as `RunOptions.modes` names them. */
+type PromptMode = 'scratch' | 'template' | 'ask' | 'door';
+
+/**
+ * Every card text a run in `modes` renders that the card does not carry in
+ * `choice.lang`, as its field path (`prompt.detailed`, `iterate.change`,
+ * `run.questions[account_count].ask`, `run.operations[add_contact].ask`), in
+ * card order; empty when no language is chosen or nothing is missing. Scratch
+ * mode renders the build prompt `choice.prompt` names (default
+ * `prompt.detailed`), the iterate change, every question and every
+ * operation; door mode the build prompt, every question and every
+ * operation; template mode the iterate change, every question and every
+ * operation; ask mode every question and every operation.
+ */
+export function promptLanguageGaps(card: Card, choice: PromptChoice | undefined, modes: ReadonlyArray<PromptMode>): string[] {
+  const lang = choice?.lang;
+  if (lang === undefined) return [];
+  const out: string[] = [];
+  const need = (t: LocalizedText, field: string) => {
+    if (t[lang] === undefined) out.push(field);
+  };
+  if (modes.includes('scratch') || modes.includes('door')) {
+    const length = choice?.prompt ?? 'detailed';
+    need(card.prompt[length], `prompt.${length}`);
+  }
+  if (modes.includes('scratch') || modes.includes('template')) need(card.iterate.change, 'iterate.change');
+  if (modes.length > 0) {
+    for (const q of card.run.questions) need(q.ask, `run.questions[${q.id}].ask`);
+    for (const q of card.run.datasetQuestions ?? []) need(q.ask, `run.datasetQuestions[${q.id}].ask`);
+    for (const op of card.run.operations) need(op.ask, `run.operations[${op.id}].ask`);
+  }
+  return out;
+}
+
+/**
+ * Why `card` is not run under `choice` in `modes`, or `undefined` when it
+ * is: the run skips it, naming each card text it lacks in the chosen
+ * language ({@link promptLanguageGaps}), and runs the other cards.
+ */
+export function promptLanguageRefusal(card: Card, choice: PromptChoice | undefined, modes: ReadonlyArray<PromptMode>): string | undefined {
+  const gaps = promptLanguageGaps(card, choice, modes);
+  if (gaps.length === 0) return undefined;
+  return `--lang ${choice!.lang} sends every card text in ${choice!.lang} and no other language, and this card has no ${choice!.lang} text for ${gaps.map(code).join(', ')}`;
+}
+
+/** The choice as a record states it: only the fields a flag set, or `undefined` when none was, so a default record keeps its bytes. */
+export function statedPromptChoice(choice: PromptChoice | undefined): PromptChoice | undefined {
+  if (choice === undefined || (choice.lang === undefined && choice.prompt === undefined)) return undefined;
+  return { ...(choice.lang !== undefined ? { lang: choice.lang } : {}), ...(choice.prompt !== undefined ? { prompt: choice.prompt } : {}) };
+}
+
+/** The choice as the record and the scorecard state it (`language zh · build prompt short`), each unchosen half as its default. */
+export function promptChoiceText(choice: PromptChoice): string {
+  return `language ${choice.lang ?? 'default (en, else zh)'} · build prompt ${choice.prompt ?? 'detailed'}`;
+}
 
 /** The tag whose check holds EVERY single-choice field the build declares to two options or more (`score/scenario-tags.ts`). */
 const SELECT_OPTIONS_TAG = 'records-forms.select-options';
 
 /** The rows of `expect` (or of an iterate's `expectDelta`) the exact-name scorer reads beyond the seed. */
-type StructureRows = Pick<ScenarioExpect, 'selectFields' | 'lookups' | 'dashboards' | 'appNavTargets'>;
+type StructureRows = Pick<ScenarioExpect, 'selectFields' | 'lookups' | 'dashboards' | 'appNavTargets'> & Partial<Pick<ScenarioExpect, 'datasets'>>;
 
-const code = (name: string): string => `\`${name}\``;
+const quoted = (words: readonly string[]): string => words.map((w) => JSON.stringify(w)).join(', ');
+
+/**
+ * One line per declared dataset, then one per member: every name, label,
+ * synonym and description the Build half checks, word for word. A member's
+ * synonyms are what a person asks with, so an agent answering a question
+ * later matches them exactly as written here (ADR-0149 D1, D3).
+ */
+export function datasetLines(datasets: NonNullable<ScenarioExpect['datasets']>): string[] {
+  const out = [
+    '- Datasets (analytics datasets: a base object, its measures and dimensions), each declared with exactly the names, labels, ' +
+      'synonyms and descriptions shown. A member\'s synonyms are the words people ask with and its description says what the number means: ' +
+      'write both as given, word for word.',
+  ];
+  for (const d of datasets) {
+    out.push(`  - ${code(d.name)} on ${code(d.object)}, label ${JSON.stringify(d.label)}, description ${JSON.stringify(d.description)}:`);
+    for (const m of d.measures) {
+      const what = m.aggregate === 'count' ? 'count of rows' : `${m.aggregate} of ${code(m.field ?? '')}`;
+      out.push(
+        `    - measure ${code(m.name)} (${what}), label ${JSON.stringify(m.label)}` +
+          `${m.synonyms ? `, synonyms ${quoted(m.synonyms)}` : ''}${m.description ? `, description ${JSON.stringify(m.description)}` : ''}`,
+      );
+    }
+    for (const dim of d.dimensions ?? []) {
+      out.push(
+        `    - dimension ${code(dim.name)} (field ${code(dim.field)}), label ${JSON.stringify(dim.label)}` +
+          `${dim.synonyms ? `, synonyms ${quoted(dim.synonyms)}` : ''}${dim.description ? `, description ${JSON.stringify(dim.description)}` : ''}`,
+      );
+    }
+  }
+  return out;
+}
 
 /**
  * One line per kind of structure row the exact-name scorer (`scoreGraph`)
@@ -92,6 +230,7 @@ export function structureLines(rows: StructureRows, card: Card): string[] {
   if (rows.appNavTargets?.length) {
     out.push(`- The app's navigation has an entry for each of: ${rows.appNavTargets.map(code).join(', ')}.`);
   }
+  if (rows.datasets?.length) out.push(...datasetLines(rows.datasets));
   return out;
 }
 
@@ -348,18 +487,44 @@ function buildPreamble(card: Card): string {
   );
 }
 
-export function buildPrompt(card: Card): string {
-  return [buildPreamble(card), '', '## The app', '', text(card.prompt.detailed), '', dataContract(card)].join('\n');
+/** The build prompt: the card's `prompt.detailed`, or the prompt {@link PromptChoice.prompt} names, in the chosen language. */
+export function buildPrompt(card: Card, choice?: PromptChoice): string {
+  const length = choice?.prompt ?? 'detailed';
+  return [buildPreamble(card), '', '## The app', '', text(card.prompt[length], choice, `prompt.${length}`), '', dataContract(card)].join('\n');
 }
 
-export function iteratePrompt(card: Card): string {
+/** What a door build is told about where it builds (`doorMode` in `orchestrate.ts`). */
+export interface DoorTarget {
+  /** The writable package the runner created for the build, which every draft is saved into. */
+  packageId: string;
+}
+
+/**
+ * Door mode's build prompt: the card's prompt and the runner's data contract,
+ * as scratch mode sends them, under a preamble that names the draft door and
+ * the package. It is the same text in every arm: whether the client was given
+ * a skill or a rule is the arm's, never the prompt's.
+ */
+export function doorBuildPrompt(card: Card, target: DoorTarget, choice?: PromptChoice): string {
+  const length = choice?.prompt ?? 'detailed';
+  const preamble =
+    'You are building an ObjectStack app in a running environment, through its MCP server (`app`), whose authoring tools ' +
+    'save metadata as DRAFTS. There is no project and there are no files to edit: you build through those tools alone. ' +
+    `Save every item you author as a draft in the package \`${target.packageId}\` (namespace \`${scenarioNamespace(card)}\`), ` +
+    'read the publish verdict each save answers, and fix every finding it reports until each draft would publish. ' +
+    'When you finish, a person publishes that package’s drafts in Studio: nothing you save is live before then. ' +
+    'Work without asking questions.';
+  return [preamble, '', '## The app', '', text(card.prompt[length], choice, `prompt.${length}`), '', dataContract(card)].join('\n');
+}
+
+export function iteratePrompt(card: Card, choice?: PromptChoice): string {
   return [
     `This project holds a working ObjectStack app. Apply the change below, then ${authoringChecks(card)}. ` +
       'Keep everything else working. Work without asking questions.',
     '',
     namingRule(card),
     '',
-    `Change: ${text(card.iterate.change)}`,
+    `Change: ${text(card.iterate.change, choice, 'iterate.change')}`,
     '',
     changeContract(card),
   ].join('\n');
@@ -376,7 +541,7 @@ export interface TemplateServer {
  * into the running server as environment metadata (an unmanaged copy, ADR-0131
  * D6). The change is made there, through the server's metadata door.
  */
-export function templateIteratePrompt(card: Card, server: TemplateServer): string {
+export function templateIteratePrompt(card: Card, server: TemplateServer, choice?: PromptChoice): string {
   return [
     `An ObjectStack app is installed in the server running at ${server.baseUrl} as editable environment metadata ` +
       '(an unmanaged install: it is not in this project’s source files). Apply the change below to that installed app, ' +
@@ -386,7 +551,7 @@ export function templateIteratePrompt(card: Card, server: TemplateServer): strin
     '',
     namingRule(card),
     '',
-    `Change: ${text(card.iterate.change)}`,
+    `Change: ${text(card.iterate.change, choice, 'iterate.change')}`,
     '',
     changeContract(card),
   ].join('\n');
@@ -402,18 +567,66 @@ function todayOf(card: Card): string {
   return card.asOf ? ` Today is ${card.asOf}.` : '';
 }
 
-export function questionPrompt(scenario: LoadedScenario, questionId: string): string {
+export function questionPrompt(scenario: LoadedScenario, questionId: string, choice?: PromptChoice): string {
   const q = scenario.card.run.questions.find((x) => x.id === questionId)!;
   return (
-    `${text(q.ask)}${todayOf(scenario.card)}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
+    `${text(q.ask, choice, `run.questions[${q.id}].ask`)}${todayOf(scenario.card)}\n\nAnswer from the app’s data using the \`app\` tools. State the figures, and end with a line ` +
     '`Source: <object>` naming the object the figures come from.'
   );
 }
 
-export function operationPrompt(card: Card, operationId: string): string {
+/**
+ * A dataset question's turn: the question and the card's "today", and no
+ * answer format. A question prompt asks for a `Source: <object>` line, which
+ * would steer an answer away from a dataset's provenance and away from asking
+ * back; a dataset question measures which route the agent takes on its own,
+ * with what the app's tools (and the skills it was given) tell it.
+ */
+export function datasetQuestionPrompt(card: Card, questionId: string, choice?: PromptChoice): string {
+  const q = (card.run.datasetQuestions ?? []).find((x) => x.id === questionId)!;
+  return `${text(q.ask, choice, `run.datasetQuestions[${q.id}].ask`)}${todayOf(card)}\n\nAnswer from the app’s data using the \`app\` tools.`;
+}
+
+export function operationPrompt(card: Card, operationId: string, choice?: PromptChoice): string {
   const op = card.run.operations.find((o) => o.id === operationId)!;
   const persona = card.run.personas.find((p) => p.id === op.actingAs);
-  return `${text(op.ask)}${todayOf(card)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
+  return `${text(op.ask, choice, `run.operations[${op.id}].ask`)}${todayOf(card)}\n\nYou act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.`;
+}
+
+/**
+ * The person's confirmation, in each language a card's text is rendered in:
+ * the person's own words, so it is sent in the language the operation's ask
+ * was rendered in ({@link confirmPrompt}).
+ */
+export const CONFIRMATION_WORDS: Readonly<Record<PromptLang, string>> = {
+  en: 'Yes, I confirm. Go ahead.',
+  zh: '是的，我确认，请执行。',
+};
+
+/**
+ * The second turn of a `pending_confirmation` operation, sent after the agent
+ * asked first and wrote nothing: no driver resumes a session, so the turn is a
+ * fresh one whose prompt carries the first turn's exchange (the operation's
+ * ask in the language {@link operationPrompt} rendered it, and the agent's
+ * reply, verbatim), then the person's confirmation ({@link CONFIRMATION_WORDS}),
+ * then whom the agent acts for and the card's today, as the first turn did. The
+ * confirmation is in the language the ask was rendered in: `--lang`'s when one
+ * is chosen, else English when the card has the ask in English, else Chinese.
+ * The runner's own words around them stay in English, as in every prompt.
+ */
+export function confirmPrompt(card: Card, operationId: string, firstReply: string, choice?: PromptChoice): string {
+  const op = card.run.operations.find((o) => o.id === operationId)!;
+  const persona = card.run.personas.find((p) => p.id === op.actingAs);
+  const lang: PromptLang = choice?.lang ?? (op.ask.en !== undefined ? 'en' : 'zh');
+  const quote = (t: string) => t.trim().split('\n').map((l) => `> ${l}`).join('\n');
+  const reply = firstReply.trim() === '' ? '(no reply)' : firstReply;
+  return (
+    `This turn continues an earlier exchange with the person you act for.\n\n` +
+    `They asked:\n\n${quote(text(op.ask, choice, `run.operations[${op.id}].ask`))}\n\n` +
+    `You replied:\n\n${quote(reply)}\n\n` +
+    `They now answer:\n\n${quote(CONFIRMATION_WORDS[lang])}\n\n` +
+    `You act for ${persona?.role ?? op.actingAs}, through the \`app\` tools.${todayOf(card)}`
+  );
 }
 
 /** `os verify`'s opt-in proofs, chosen from the card's capability tags. */

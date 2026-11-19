@@ -108,7 +108,7 @@ an intent decision no codemod may make for you:
 
 | You wrote | Decide |
 | :--- | :--- |
-| `{ where: { id, …other } }` without `multi` | declare `multi: true` so the full `where` is honoured (the result becomes the matched count), or drop the extra `where` keys to keep an unconditional single-row write |
+| `{ where: { id, …other } }` without `multi` | declare `multi: true` so the full `where` is honoured (the result becomes the matched count), or drop the extra `where` keys to keep an unconditional single-row write. Under record sharing the `multi: true` form is a predicate write, bounded by the caller's write scope: a row the caller holds only through a read share, admitted by an app `update` widener, is left unwritten with no error. To write that row, address it by id alone (`where: { id }`) ([details](/docs/permissions/rls)) |
 | `data.id` ≠ `where.id` | make the two ids equal (or drop `where.id`) to address the row by the payload id, or remove `id` from the payload to address it by `where.id` |
 
 ⚠️ **Flow authors reach this through `update_record` / `delete_record` nodes**

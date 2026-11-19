@@ -821,7 +821,13 @@ export interface ResultDialogFieldSpec {
    * and React refuses an object as a child.
    */
   label?: SpecResultDialogField['label'];
-  format?: 'qrcode' | 'code-list' | 'secret' | 'text' | 'json';
+  /** Derived, like `label`: the contract's field format set (`table` included). */
+  format?: SpecResultDialogField['format'];
+  /**
+   * Derived, like `format`: the cells of a `format: 'table'` field,
+   * `[{ path, label?, format? }]`, `path` read in one element of the array.
+   */
+  columns?: SpecResultDialogField['columns'];
 }
 export interface ResultDialogSpec {
   /** Derived `I18nLabel` — see `ResultDialogFieldSpec.label` on resolving it. */
@@ -830,7 +836,8 @@ export interface ResultDialogSpec {
   description?: SpecResultDialog['description'];
   /** Derived `I18nLabel` — see `ResultDialogFieldSpec.label` on resolving it. */
   acknowledge?: SpecResultDialog['acknowledge'];
-  format?: 'qrcode' | 'code-list' | 'secret' | 'text' | 'json';
+  /** Derived: the dialog-level default set (every field format but `table`). */
+  format?: SpecResultDialog['format'];
   fields?: ResultDialogFieldSpec[];
 }
 
@@ -2241,8 +2248,18 @@ export class ActionRunner {
         // An authored `errorMessage` is shown as written — a string, or the
         // `template` envelope's `source` (objectui#13367); no scope is declared
         // for its holes yet. An envelope with no text falls to the error.
+        // Between the two sits the refusal's producer-marked `userMessage`
+        // (objectstack#34215): the handler's words for the user, shown in
+        // place of the platform's `error` text. An authored `errorMessage`
+        // still wins — the spec declares it the override of the raw error,
+        // and an action that sets it keeps the text its author wrote.
+        // Presence is the marking: a blank value is no marking (the predicate
+        // `declaredUserMessage` and `@objectstack/client` apply).
         const authored = actionCopySource(action.errorMessage);
-        const raw: unknown = authored || result.error;
+        const declared = typeof result.userMessage === 'string' && result.userMessage.trim()
+          ? result.userMessage
+          : undefined;
+        const raw: unknown = authored || declared || result.error;
         const message = typeof raw === 'string'
           ? raw
           : (raw && typeof (raw as { message?: unknown }).message === 'string')

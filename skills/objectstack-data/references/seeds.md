@@ -155,7 +155,7 @@ produce byte-identical `dist/objectstack.json`.
 
 | Practice | Why |
 |:---------|:----|
-| Always use `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checking otherwise |
+| TypeScript: `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checks otherwise |
 | Prefer natural keys (`code` / `email` / `slug`) | Portable across environments |
 | Leave `mode` unset; `upsert` only for reference data | Replays keep customer edits |
 | Scope demo data with `env: ['dev','test']` | Keep noise out of prod |

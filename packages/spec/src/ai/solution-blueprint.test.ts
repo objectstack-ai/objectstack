@@ -10,7 +10,8 @@ import {
 } from './solution-blueprint.zod';
 import { ViewFilterRuleSchema } from '../ui/view.zod';
 import { SortItemSchema } from '../shared/enums.zod';
-import { FieldSchema, FieldType, SelectOptionSchema } from '../data/field.zod';
+import { FieldSchema, FieldType, SelectOptionSchema, multiDeclarableFieldTypes } from '../data/field.zod';
+import { FILE_REFERENCE_TYPES } from '../data/field-value.zod';
 import { ObjectSchema } from '../data/object.zod';
 import { VIRTUAL_FIELD_AGGREGATE_REMEDY } from '../data/aggregate-field-type-compatibility';
 
@@ -598,7 +599,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         nameField: null,
         stageField: null,
         fields: [
-          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null },
+          { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null },
         ],
       },
     ],
@@ -637,7 +638,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }] },
+        { name: 'x', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -664,11 +665,11 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           stageField: null,
           fields: [
             {
-              name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null, defaultValue: null,
+              name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null,
               summaryOperations: { object: 'task', function: 'count', field: 'id', relationshipField: null, conditions: null },
             },
             {
-              name: 'completed_task_count', label: '已完成任务数', type: 'summary', required: null, reference: null, options: null, expression: null, defaultValue: null,
+              name: 'completed_task_count', label: '已完成任务数', type: 'summary', required: null, reference: null, options: null, expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null,
               summaryOperations: {
                 object: 'task', function: 'count', field: 'id', relationshipField: null,
                 conditions: [{ field: 'status', op: 'eq', value: 'completed' }],
@@ -740,7 +741,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
 
   describe('stageField + option kind (the model names the stage field and states each option\'s kind, or says null)', () => {
     const statusField = (options: Array<Record<string, unknown>>) => ({
-      name: 'status', label: null, type: 'select', required: null, reference: null, options, summaryOperations: null, expression: null, defaultValue: null,
+      name: 'status', label: null, type: 'select', required: null, reference: null, options, summaryOperations: null, expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null,
     });
     const STAGES = [
       { label: 'New', value: 'new', kind: 'open' },
@@ -1299,6 +1300,9 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
           summaryOperations: null,
           expression: null,
           defaultValue: null,
+          multiple: null,
+          accept: null,
+          maxSize: null,
         }],
       }],
       views: null,
@@ -1326,7 +1330,7 @@ describe('blueprint widget `aggregate` and calendar view `startDateField`', () =
       name: 'interview', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
       fields: [{
         name: 'score', label: null, type: 'number', required: null, reference: null, options: null,
-        summaryOperations: null, expression: null, defaultValue: null,
+        summaryOperations: null, expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null,
       }],
     }],
     views: null,
@@ -1506,7 +1510,7 @@ describe('blueprint field `defaultValue`', () => {
       name: 'task', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
       fields: [{
         name: 'flag', label: null, required: null, reference: null, options: null, summaryOperations: null,
-        expression: null, defaultValue: null, ...field,
+        expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null, ...field,
       }],
     }],
     views: null,
@@ -1614,7 +1618,7 @@ describe('blueprint field `defaultValue`', () => {
         name: 'task', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
         fields: [{
           name: 'flag', label: null, type: 'boolean', required: null, reference: null, options: null,
-          summaryOperations: null, expression: null,
+          summaryOperations: null, expression: null, multiple: null, accept: null, maxSize: null,
         }],
       }],
     });
@@ -1712,7 +1716,7 @@ describe('blueprint field `expression` — the stored computed value', () => {
       objects: [{
         name: 'order_line', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
         fields: [{
-          ...STORED, label: null, required: null, reference: null, options: null, summaryOperations: null, defaultValue: null,
+          ...STORED, label: null, required: null, reference: null, options: null, summaryOperations: null, defaultValue: null, multiple: null, accept: null, maxSize: null,
         }],
       }],
       views: null,
@@ -1800,7 +1804,7 @@ describe('blueprint object `icon`', () => {
   it('is required-but-nullable on the strict mirror (OpenAI strict: every key in `required`)', () => {
     const object = {
       name: 'invoice', label: null, description: null, icon: 'receipt', sharingModel: null, nameField: null, stageField: null,
-      fields: [{ name: 'title', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }],
+      fields: [{ name: 'title', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null }],
     };
     const bp = (o: Record<string, unknown>) => ({ summary: 's', assumptions: [], questions: null, objects: [o], views: null, dashboards: null, app: null });
     expect(SolutionBlueprintStrictSchema.parse(bp(object)).objects[0].icon).toBe('receipt');
@@ -1860,5 +1864,213 @@ describe('blueprint view `name` — bare, or qualified with its own object', () 
     const foreign = BlueprintViewSchema.safeParse({ object: 'ticket', name: 'case.open_list' });
     expect(foreign.error?.issues.map((i) => ({ path: i.path, code: i.code })))
       .toEqual([{ path: ['name'], code: 'custom' }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The field contract's `multiple`, `accept` and `maxSize`, on the blueprint
+// field and its strict mirror (the `defaultValue` precedent, ruling B on
+// cloud#3619). An AI build of "an expense claim with its e-invoices" names one
+// file field holding several invoices; without these keys the blueprint could
+// not say "several", which file types, or how large.
+// ---------------------------------------------------------------------------
+describe('blueprint field `multiple`, `accept` and `maxSize`', () => {
+  const KEYS = ['multiple', 'accept', 'maxSize'] as const;
+  const OPTIONS = [{ label: 'Open', value: 'open' }, { label: 'Done', value: 'done' }];
+  const lenientField = (field: Record<string, unknown>) => SolutionBlueprintSchema.safeParse({
+    summary: 's',
+    objects: [{ name: 'claim', fields: [{ name: 'invoices', ...field }] }],
+  });
+  const strictField = (field: Record<string, unknown>) => SolutionBlueprintStrictSchema.safeParse({
+    summary: 's', assumptions: [], questions: null, views: null, dashboards: null, app: null,
+    objects: [{
+      name: 'claim', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
+      fields: [{
+        name: 'invoices', label: null, required: null, reference: null, options: null, summaryOperations: null,
+        expression: null, defaultValue: null, multiple: null, accept: null, maxSize: null, ...field,
+      }],
+    }],
+  });
+  /** What the field needs besides `type` for the BUILT field's schema to judge only the key under test. */
+  const builtExtras = (type: string): Record<string, unknown> => {
+    if (type === 'select' || type === 'radio') return { options: OPTIONS };
+    if (type === 'lookup' || type === 'master_detail') return { reference: 'contact' };
+    return {};
+  };
+  const lenientShape = () => (SolutionBlueprintSchema as any).shape.objects.element.shape.fields.element.shape;
+  const strictShape = () => (SolutionBlueprintStrictSchema as any).shape.objects.element.shape.fields.element.shape;
+  const MULTIPLE_PATH = ['objects', 0, 'fields', 0, 'multiple'];
+  const issuesAt = (result: { error?: { issues: Array<{ path: PropertyKey[]; code: string; message: string }> } }, path: PropertyKey[]) =>
+    (result.error?.issues ?? []).filter((i) => JSON.stringify(i.path) === JSON.stringify(path));
+
+  it('both sides carry the three keys (key parity)', () => {
+    for (const key of KEYS) {
+      expect({ key, lenient: key in lenientShape(), strict: key in strictShape() })
+        .toEqual({ key, lenient: true, strict: true });
+    }
+  });
+
+  it('each key takes exactly the values the built field\'s own key takes (VALUE parity with FieldSchema)', () => {
+    const fieldShape = (FieldSchema as any).shape;
+    const BATTERY: Record<(typeof KEYS)[number], unknown[]> = {
+      multiple: [true, false, 'true', 1, 0, [], {}],
+      accept: [[], ['application/pdf', 'image/*', '.ofd'], [''], 'image/*', [1], [null], {}],
+      maxSize: [1, 10485760, 0, -1, 1.5, '1024', Number.NaN, Number.POSITIVE_INFINITY, true],
+    };
+    for (const key of KEYS) {
+      for (const value of BATTERY[key]) {
+        const built = fieldShape[key].safeParse(value).success;
+        expect({ key, value, lenient: lenientShape()[key].safeParse(value).success, strict: strictShape()[key].safeParse(value).success })
+          .toEqual({ key, value, lenient: built, strict: built });
+      }
+      // Absence: optional on the lenient side, null on the strict mirror.
+      expect({ key, absent: lenientShape()[key].safeParse(undefined).success }).toEqual({ key, absent: true });
+      expect({ key, nulled: strictShape()[key].safeParse(null).success, absent: strictShape()[key].safeParse(undefined).success })
+        .toEqual({ key, nulled: true, absent: false });
+    }
+  });
+
+  it('CONTROL: a field that declares none of them parses as before, and gains no key', () => {
+    const parsed = lenientField({ type: 'file' });
+    expect(parsed.success).toBe(true);
+    for (const key of KEYS) expect({ key, present: key in parsed.data!.objects[0].fields[0] }).toEqual({ key, present: false });
+    const strict = strictField({ type: 'file' });
+    expect(strict.success).toBe(true);
+    for (const key of KEYS) expect(strict.data!.objects[0].fields[0][key]).toBeNull();
+  });
+
+  it('carries a multi-file field with its accept and maxSize through both sides, into a field the built schema accepts', () => {
+    const invoices = { type: 'file', multiple: true, accept: ['application/pdf', 'image/*', '.ofd'], maxSize: 10485760 };
+    const lenient = lenientField(invoices);
+    expect(lenient.success).toBe(true);
+    expect(lenient.data!.objects[0].fields[0]).toMatchObject(invoices);
+    const strict = strictField(invoices);
+    expect(strict.success).toBe(true);
+    expect(strict.data!.objects[0].fields[0]).toMatchObject(invoices);
+    const built = FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', ...invoices });
+    expect(built.success).toBe(true);
+    expect(built.data).toMatchObject(invoices);
+  });
+
+  it('accepts `accept` and `maxSize` on file, lookup and select alike, as the built field does (read only on media)', () => {
+    for (const type of ['file', 'lookup', 'select']) {
+      const field = { type, ...builtExtras(type), accept: ['.pdf'], maxSize: 1024 };
+      const lenient = lenientField(field);
+      expect({ type, lenient: lenient.success }).toEqual({ type, lenient: true });
+      expect(lenient.data!.objects[0].fields[0]).toMatchObject({ accept: ['.pdf'], maxSize: 1024 });
+      const strictOptions = type === 'select' ? { options: OPTIONS.map((o) => ({ ...o, kind: null })) } : {};
+      expect({ type, strict: strictField({ ...field, ...strictOptions }).success }).toEqual({ type, strict: true });
+      expect({ type, built: FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', ...field }).success })
+        .toEqual({ type, built: true });
+    }
+  });
+
+  it('refuses `multiple: true` on a "text" field by name at the key, naming the declarable types', () => {
+    const result = lenientField({ type: 'text', multiple: true });
+    expect(result.success).toBe(false);
+    const named = issuesAt(result, MULTIPLE_PATH);
+    expect(result.error!.issues).toHaveLength(1);
+    expect(named.map((i) => i.code)).toEqual(['custom']);
+    expect(named[0].message).toContain('"invoices" (text)');
+    for (const type of multiDeclarableFieldTypes()) {
+      if (type !== 'radio') expect(named[0].message).toContain(`"${type}"`);
+    }
+  });
+
+  it('refuses `multiple: true` on a "radio" field by name at the key, as the built field does', () => {
+    const result = lenientField({ type: 'radio', options: OPTIONS, multiple: true });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues).toHaveLength(1);
+    const named = issuesAt(result, MULTIPLE_PATH);
+    expect(named.map((i) => i.code)).toEqual(['custom']);
+    expect(named[0].message).toContain('"invoices" (radio)');
+    expect(named[0].message).toContain('"checkboxes"');
+    const built = FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', type: 'radio', options: OPTIONS, multiple: true });
+    expect(built.error?.issues.map((i) => i.path)).toEqual([['multiple']]);
+  });
+
+  it('refuses `multiple: true` on exactly the types the built field refuses it on (FieldSchema\'s own set)', () => {
+    for (const type of FieldType.options) {
+      const blueprint = issuesAt(lenientField({ type, ...builtExtras(type), multiple: true }), MULTIPLE_PATH).length;
+      const built = FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', type, ...builtExtras(type), multiple: true });
+      const builtRefused = (built.error?.issues ?? []).filter((i) => JSON.stringify(i.path) === '["multiple"]').length;
+      expect({ type, blueprint, built: builtRefused }).toEqual({ type, blueprint: builtRefused, built: builtRefused });
+      expect({ type, refused: blueprint === 1 })
+        .toEqual({ type, refused: type === 'radio' || !multiDeclarableFieldTypes().has(type) });
+      // `false` is never refused, on any type.
+      expect({ type, falseRefused: issuesAt(lenientField({ type, ...builtExtras(type), multiple: false }), MULTIPLE_PATH).length })
+        .toEqual({ type, falseRefused: 0 });
+    }
+  });
+
+  it('refuses a defaultValue on a multi-value "select", as the built field does, and keeps it on a single-value one', () => {
+    const multi = lenientField({ type: 'select', options: OPTIONS, multiple: true, defaultValue: 'open' });
+    expect(multi.success).toBe(false);
+    expect(multi.error!.issues).toHaveLength(1);
+    const named = issuesAt(multi, ['objects', 0, 'fields', 0, 'defaultValue']);
+    expect(named).toHaveLength(1);
+    expect(named[0].message).toContain('"invoices" (select)');
+    expect(named[0].message).toContain('`multiple: true`');
+    // The built field judges the default against the list contract and refuses the scalar.
+    const built = FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', type: 'select', options: OPTIONS, multiple: true, defaultValue: 'open' });
+    expect(built.success).toBe(false);
+    expect(lenientField({ type: 'select', options: OPTIONS, multiple: true }).success).toBe(true);
+    expect(lenientField({ type: 'select', options: OPTIONS, multiple: false, defaultValue: 'open' }).success).toBe(true);
+  });
+
+  it('refuses an option `kind` on a multi-value "select", one issue per option at its `kind`, as the built field does', () => {
+    const KINDED = [{ label: 'Open', value: 'open', kind: 'open' }, { label: 'Plain', value: 'plain' }, { label: 'Won', value: 'won', kind: 'won' }];
+    const result = lenientField({ type: 'select', options: KINDED, multiple: true });
+    expect(result.success).toBe(false);
+    const refused = result.error!.issues.map((i) => ({ path: i.path, code: i.code }));
+    expect(refused).toEqual([
+      { path: ['objects', 0, 'fields', 0, 'options', 0, 'kind'], code: 'custom' },
+      { path: ['objects', 0, 'fields', 0, 'options', 2, 'kind'], code: 'custom' },
+    ]);
+    expect(result.error!.issues[0].message).toContain('"invoices" (select)');
+    expect(result.error!.issues[0].message).toContain('with `multiple: true`');
+    // The built field refuses the same options at the same paths.
+    const built = FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', type: 'select', options: KINDED, multiple: true });
+    expect((built.error?.issues ?? []).map((i) => i.path)).toEqual([['options', 0, 'kind'], ['options', 2, 'kind']]);
+    // CONTROL: the same kinds on a single-value select parse on both, and so does a multi-value select without kinds.
+    expect(lenientField({ type: 'select', options: KINDED }).success).toBe(true);
+    expect(lenientField({ type: 'select', options: KINDED, multiple: false }).success).toBe(true);
+    expect(FieldSchema.safeParse({ name: 'invoices', label: 'Invoices', type: 'select', options: KINDED }).success).toBe(true);
+    expect(lenientField({ type: 'select', options: OPTIONS, multiple: true }).success).toBe(true);
+    // The strict mirror's null kind is absence: no refusal.
+    const nulled = strictField({ type: 'select', multiple: true, options: OPTIONS.map((o) => ({ ...o, kind: null })) });
+    expect(nulled.success).toBe(true);
+  });
+
+  it('refuses an object whose stageField names a multi-value "select", at `stageField`', () => {
+    const object = (multiple: boolean) => SolutionBlueprintSchema.safeParse({
+      summary: 's',
+      objects: [{
+        name: 'claim',
+        stageField: 'status',
+        fields: [{ name: 'status', type: 'select', multiple, options: [{ label: 'Open', value: 'open' }, { label: 'Paid', value: 'paid' }] }],
+      }],
+    });
+    const refused = object(true);
+    expect(refused.success).toBe(false);
+    expect(refused.error!.issues.map((i) => i.path)).toEqual([['objects', 0, 'stageField']]);
+    // CONTROL: the single-value select is a stage field (its options still owe a kind, refused at the options).
+    expect(object(false).error!.issues.map((i) => i.path).some((p) => p.at(-1) === 'stageField')).toBe(false);
+  });
+
+  it('the describes name where each key applies, pinned against the built field\'s own sets, and promise no build', () => {
+    for (const shape of [lenientShape(), strictShape()]) {
+      const multiple: string = shape.multiple.description;
+      for (const type of multiDeclarableFieldTypes()) expect({ type, named: multiple.includes(`"${type}"`) }).toEqual({ type, named: true });
+      for (const key of ['accept', 'maxSize'] as const) {
+        const text: string = shape[key].description;
+        for (const type of FILE_REFERENCE_TYPES) expect({ key, type, named: text.includes(`"${type}"`) }).toEqual({ key, type, named: true });
+        expect(text).toContain('Read only on the media family');
+      }
+      for (const key of KEYS) {
+        expect(shape[key].description).toContain('Carried into the built field by the applier');
+        expect(shape[key].description).not.toMatch(/is built with/);
+      }
+    }
   });
 });

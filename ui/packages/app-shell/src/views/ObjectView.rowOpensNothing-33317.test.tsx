@@ -23,7 +23,9 @@
  * CONTROL: a row that opens (the default drawer, an authored `page`) keeps
  * its link and its Open item. objectstack#33548: an authored `none` row opens
  * nothing on a ⌘, Ctrl or middle click either; a row that opens still does. The bare data page (`ObjectDataPage`) routes
- * its own row clicks, so its list-only face is pinned too.
+ * its own row clicks, so its list-only face is pinned too. objectstack#33549:
+ * a view authored `navigation.preventNavigation: true` resolves the same way
+ * whatever its mode, with the same `drawer` view minus the flag as CONTROL.
  *
  * The record body is not what this file reads, so `RecordDetailView` is a
  * null sink.
@@ -32,7 +34,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
@@ -86,8 +88,11 @@ const ROWS = [
   { id: 'c2', connection: 'azure-prod', token_prefix: 'scim_cd34' },
 ];
 
+/** A list view's authored `navigation` block, as these cases write it. */
+type AuthoredNavigation = { mode?: string; preventNavigation?: boolean };
+
 /** The object, its one list view carrying `navigation` when given. */
-function objectsWith(navigation?: { mode: string }) {
+function objectsWith(navigation?: AuthoredNavigation) {
   return [
     {
       name: OBJECT_NAME,
@@ -129,6 +134,7 @@ function answer(apiOperations?: string[]): MePermissionsAuthenticatedResponse {
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['admin'],
     systemPermissions: [],
     objects: {
@@ -191,7 +197,18 @@ function withProviders(apiOperations: string[] | undefined, children: React.Reac
   );
 }
 
-async function mountList(opts: { apiOperations?: string[]; navigation?: { mode: string } }) {
+/** The list route's query string, drawn where a case can read it: the drawer's `?recordId=` lands here. */
+function LocationProbe() {
+  const { search } = useLocation();
+  return <output data-testid="list-search">{search}</output>;
+}
+
+/** The record the drawer's `?recordId=` names on the list route, or `null`. */
+function drawerRecordId(): string | null {
+  return new URLSearchParams(screen.getByTestId('list-search').textContent ?? '').get('recordId');
+}
+
+async function mountList(opts: { apiOperations?: string[]; navigation?: AuthoredNavigation }) {
   const objects = objectsWith(opts.navigation);
   window.history.replaceState(null, '', LIST_PATH);
   render(
@@ -201,7 +218,12 @@ async function mountList(opts: { apiOperations?: string[]; navigation?: { mode: 
         <Routes>
           <Route
             path="/apps/:appName/:objectName/view/:viewId"
-            element={<ObjectView dataSource={dataSourceFor(objects)} objects={objects} onEdit={() => {}} />}
+            element={(
+              <>
+                <ObjectView dataSource={dataSourceFor(objects)} objects={objects} onEdit={() => {}} />
+                <LocationProbe />
+              </>
+            )}
           />
           <Route path="*" element={<div data-testid="left-the-list" />} />
         </Routes>
@@ -337,5 +359,56 @@ describe('objectstack#33317 — the bare data page: a list-only object\'s rows d
   it('CONTROL — the same object served with no restriction: the name cell is the record link', async () => {
     await mountDataPage(undefined);
     expect(looksLikeALink('okta-staging')).toBe(true);
+  });
+});
+
+describe('objectstack#33549 — the console object list: `navigation.preventNavigation: true` opens no record, whatever the mode', () => {
+  const PREVENTED_DRAWER = { mode: 'drawer', preventNavigation: true };
+
+  it('a `drawer` view with `preventNavigation: true`: a row click writes no `?recordId=` and stays on the list', async () => {
+    await mountList({ navigation: PREVENTED_DRAWER });
+    fireEvent.click(screen.getByText('scim_ab12'));
+    fireEvent.click(screen.getByText('okta-staging'));
+    expect(drawerRecordId()).toBeNull();
+    expect(screen.queryByTestId('left-the-list')).toBeNull();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('…nor does a ⌘, Ctrl or middle click open a new tab', async () => {
+    await mountList({ navigation: PREVENTED_DRAWER });
+    fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
+    fireEvent.click(screen.getByText('scim_ab12'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('scim_ab12'), { button: 1 });
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(drawerRecordId()).toBeNull();
+  });
+
+  it('…and the row draws no link face: the name cell is plain text, and the right-click menu has no Open but keeps Revoke', async () => {
+    await mountList({ navigation: PREVENTED_DRAWER });
+    expect(looksLikeALink('okta-staging')).toBe(false);
+    expect(screen.queryAllByTestId('primary-field-link')).toHaveLength(0);
+    const menu = await contextMenuOf('scim_ab12');
+    expect(menu.ids.filter((id) => OPEN_ITEMS.includes(id ?? ''))).toEqual([]);
+    expect(menu.labels).toContain('Revoke');
+  });
+
+  it('a `page` view with `preventNavigation: true` draws no link face either', async () => {
+    await mountList({ navigation: { mode: 'page', preventNavigation: true } });
+    expect(looksLikeALink('okta-staging')).toBe(false);
+    fireEvent.click(screen.getByText('scim_ab12'));
+    expect(screen.queryByTestId('left-the-list')).toBeNull();
+  });
+
+  it('CONTROL — the same `drawer` view with `preventNavigation: false`: a row click writes `?recordId=`, and the name cell is the record link', async () => {
+    await mountList({ navigation: { mode: 'drawer', preventNavigation: false } });
+    expect(looksLikeALink('okta-staging')).toBe(true);
+    fireEvent.click(screen.getByText('scim_ab12'));
+    await waitFor(() => expect(drawerRecordId()).toBe('c1'));
+  });
+
+  it('CONTROL — the same `drawer` view with the flag absent: a row click writes `?recordId=`', async () => {
+    await mountList({ navigation: { mode: 'drawer' } });
+    fireEvent.click(screen.getByText('scim_ab12'));
+    await waitFor(() => expect(drawerRecordId()).toBe('c1'));
   });
 });

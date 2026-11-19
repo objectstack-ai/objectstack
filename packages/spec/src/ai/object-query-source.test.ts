@@ -5,7 +5,8 @@
  *
  * What is pinned: the two shapes the producer answers (a `get_record` read and
  * an aggregate) round-trip; an optional key sent as `null` is refused; `scope`
- * and the aggregation function are closed; a key a newer producer adds is
+ * is required and closed to its two values, `all_records` included; the
+ * aggregation function is closed; a key a newer producer adds is
  * stripped, not refused; a `line` past the producer's 280-character budget
  * still parses; the tool roster is the five tools.
  */
@@ -68,10 +69,27 @@ describe('ObjectQuerySourceSchema', () => {
     }
   });
 
-  it('refuses a scope other than visible_to_you', () => {
-    const r = ObjectQuerySourceSchema.safeParse({ ...getRecordBlock, scope: 'all' });
+  it('round-trips a block whose scope is all_records (no row restriction applied)', () => {
+    const block: ObjectQuerySource = { ...aggregateBlock, scope: 'all_records' };
+    const r = ObjectQuerySourceSchema.safeParse(block);
+    expect(r.success).toBe(true);
+    expect(r.data).toEqual(block);
+  });
+
+  it('refuses a scope outside its two values', () => {
+    for (const scope of ['all', 'visible', 'ALL_RECORDS', '']) {
+      const r = ObjectQuerySourceSchema.safeParse({ ...getRecordBlock, scope });
+      expect(r.success, scope).toBe(false);
+      expect(r.error?.issues.map((i) => [i.path.join('.'), i.code]), scope).toEqual([['scope', 'invalid_value']]);
+    }
+  });
+
+  it('refuses a block that states no scope', () => {
+    const withoutScope: Record<string, unknown> = { ...getRecordBlock };
+    delete withoutScope.scope;
+    const r = ObjectQuerySourceSchema.safeParse(withoutScope);
     expect(r.success).toBe(false);
-    expect(paths(r)).toEqual(['scope']);
+    expect(r.error?.issues.map((i) => [i.path.join('.'), i.code])).toEqual([['scope', 'invalid_value']]);
   });
 
   it('refuses an unknown aggregation function', () => {

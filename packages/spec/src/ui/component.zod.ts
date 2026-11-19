@@ -51,6 +51,7 @@ import {
   // `ListViewPageProps`.
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
   VIEW_METADATA_MEMBERS,
 } from './view.zod';
 // [#22444] The one prescription both tiers refuse a list view's retired
@@ -1411,12 +1412,15 @@ export const RecordDetailsProps = strictObject({
      * fold a partly-filled section uses — instead of a column of empty rows;
      * edit mode is unchanged and renders every row, editable. No key, shape or
      * default changed, and the describe() states the ruled rendering, which
-     * objectui's `DetailSection` follows. The key governs only the ALL-empty
+     * objectui's `DetailSection` follows. Read-only, the details body first
+     * names every such section in the one line that closes it, and expanding
+     * that line draws them so — one line for all the empty groups instead of a
+     * card for each (objectstack#35019). The key governs only the ALL-empty
      * case: a partly-filled section's empty rows follow the renderer's own
      * fold (objectui#7129 Q2-C) in either polarity, so the old lead "hide this
      * section's empty fields" no longer told the two values apart.
      */
-    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode it renders its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
+    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode the details body names it in the one line that closes the body, beside every other all-empty section kept this way, and expanding that line renders each in its place as its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
     /** Collapsible card. Initial state is expanded; the toggle is the heading. */
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
@@ -1969,6 +1973,52 @@ export const RecordHighlightsProps = strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
+/**
+ * #34383 — a feed whose authored `types` allow-list leaves out `'comment'`
+ * while its comment composer is on is refused where it is written.
+ *
+ * `types` names the feed item kinds the feed SHOWS, and `comment` is one of
+ * them; both renderers of this shape (`record:activity`, and the `feed` of
+ * `record:chatter` / `record:discussion`) filter their rows by that allow-list.
+ * So with `'comment'` left out, a comment posted through the composer is
+ * stored and then filtered out of the very feed it was posted to — the
+ * HotCRM `lead_detail` `lead_activity` block (`types: ['task']`) lost every
+ * post that way. The `record:activity` renderer withholds the composer on such
+ * a feed since #34388; this is the authoring half, so the contradiction is
+ * refused where it is written instead of being quietly corrected on screen.
+ *
+ * Judged on the PARSED value, so an omitted `showCommentInput` reads as its
+ * default `true` (the composer is on); the console mirror strips spec
+ * defaults, so `undefined` reads as on there too — `!== false` is the one
+ * reading both doors share. An absent `types` means every kind and is never
+ * refused.
+ *
+ * Located at `showCommentInput`, not at `types`: `types` on its own is valid
+ * (any list of kinds, the open-vocabulary ruling), and what this feed cannot
+ * honour is the composer beside it — the key whose value (written, or the
+ * default) asks for something the list rules out. An issue AT `types` would
+ * also read, to a per-key judge such as the console's member probe, as the
+ * container itself being refused. Matching is exact, as the renderers match: `'Comment'` is not
+ * `'comment'`. A `types` that already failed its own element check (a
+ * non-string entry) is left to that issue.
+ */
+function refuseFeedTypesWithoutCommentBesideComposer(
+  feed: { types?: unknown; showCommentInput?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (!Array.isArray(feed.types) || feed.showCommentInput === false) return;
+  if (!feed.types.every((entry) => typeof entry === 'string')) return;
+  if (feed.types.includes('comment')) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['showCommentInput'],
+    message: `\`types\` (${JSON.stringify(feed.types)}) leaves out 'comment', so this feed never shows a comment, `
+      + 'yet `showCommentInput` (default true) asks for a comment composer on it: a comment posted there would be '
+      + 'stored and never shown on this feed. To take comments on this feed, add \'comment\' to `types`; '
+      + 'to keep it comment-free, set `showCommentInput: false`.',
+  });
+}
+
 export const RecordActivityProps = strictObject({
   surface: 'this `record:activity`',
   history: PROPS_HISTORY,
@@ -2021,7 +2071,7 @@ export const RecordActivityProps = strictObject({
    * name; the ruling accepted that cost rather than re-close the vocabulary.
    */
   types: z.array(z.union([FeedItemType, z.string().min(1)])).optional().describe(
-    'Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set.',
+    'Feed item kinds to show (default: all). Open vocabulary: the FeedItemType members are the platform built-in kinds, and author-contributed activity kinds (open sys_activity.type vocabulary, ADR-0052 §5b.2) are equally legal — entries are never validated against the built-in set. A list that leaves out \'comment\' while `showCommentInput` is not false is refused: such a feed never shows a comment, so the composer would take posts it then hides — add \'comment\' or set `showCommentInput: false`.',
   ),
   /** Default filter mode (Airtable-style dropdown) */
   filterMode: FeedFilterMode.default('all').describe('Default activity filter'),
@@ -2034,7 +2084,7 @@ export const RecordActivityProps = strictObject({
   /** Merge field_change + comment in a unified timeline */
   unifiedTimeline: z.boolean().default(true).describe('Mix field changes and comments in one timeline (Airtable style)'),
   /** Show the comment input box at the bottom */
-  showCommentInput: z.boolean().default(true).describe('Show "Leave a comment" input at the bottom'),
+  showCommentInput: z.boolean().default(true).describe('Show "Leave a comment" input at the bottom. Needs a `types` that admits \'comment\' (or no `types`): beside a `types` that leaves it out, set this false.'),
   /** Enable @mentions in comments */
   enableMentions: z.boolean().default(true).describe('Enable @mentions in comments'),
   /** Enable emoji reactions */
@@ -2045,7 +2095,7 @@ export const RecordActivityProps = strictObject({
   showSubscriptionToggle: z.boolean().default(true).describe('Show bell icon for record-level notification subscription'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-});
+}).superRefine(refuseFeedTypesWithoutCommentBesideComposer);
 
 // `position` old-spelling prescriptions (#8762). Each names `--from 17`: the
 // conversion is registered `toMajor: 18`, and a bare `os migrate meta` is
@@ -8506,8 +8556,9 @@ const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', 
  * ## Built from the list view, by reference
  *
  * Every member is {@link ListViewSchema}'s own schema object (its `shape`
- * spread), and both of its object-level checks are attached
- * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding}),
+ * spread), and each of its object-level checks is attached
+ * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding},
+ * {@link checkListViewTimesheetBinding}),
  * so a key or value the authoring door refuses on a list view is refused here
  * with the same issue. So `kanban.groupField` is an unknown key of the kanban
  * block, and the list kind is the bag's own `type` (the node's `type` is the
@@ -8559,7 +8610,7 @@ const ListViewPageProps = lazySchema(() => strictObject({
   ...ListViewSchema.shape,
   columns: ListViewSchema.shape.columns.optional(),
   options: VIEW_METADATA_MEMBERS.listOverlay.shape.options,
-}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding));
+}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding).superRefine(checkListViewTimesheetBinding));
 
 /**
  * ----------------------------------------------------------------------

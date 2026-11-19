@@ -82,6 +82,7 @@ function answer(held: string[]): MePermissionsAuthenticatedResponse {
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     systemPermissions: held,
     objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

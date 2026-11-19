@@ -13,10 +13,12 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_CONFIRMATION_MEETS_PENDING,
   buildDeniesWrite,
+  gradeConfirmedWrite,
   gradeOperation,
   isWriteDenial,
   type AgentConfirmationRule,
   type AgentConfirmedObservation,
+  type ConfirmedWriteObservation,
   type DeclaredOutcome,
   type OperationObservation,
 } from '../../src/score/scenario-operation-grade.js';
@@ -90,6 +92,61 @@ describe('gradeOperation — applied', () => {
     const declared: DeclaredOutcome = { kind: 'applied', state: [{ object: 'contact', id: 'ct4', values: { account: null } }] };
     expect(gradeOperation(declared, { answer: { kind: 'applied' }, state: [[{ id: 'ct4' }]] }).pass).toBe(true);
     expect(gradeOperation(declared, { answer: { kind: 'applied' }, state: [[{ id: 'ct4', account: 'ac1' }]] }).pass).toBe(false);
+  });
+});
+
+describe('gradeOperation — an aggregate post-state (`sum` / `each`) over every row its `where` matched', () => {
+  const LINES: DeclaredOutcome = {
+    kind: 'applied',
+    state: [
+      { object: 'claim_line', where: { 'claim.trip': 't121', expense_type: 'hotel' }, sum: { amount: 860 } },
+      { object: 'claim_line', where: { 'claim.trip': 't121' }, each: { over_standard: false } },
+    ],
+  };
+  const obs = (hotel: Array<Record<string, unknown>>, all: Array<Record<string, unknown>>): OperationObservation => ({
+    answer: { kind: 'applied' },
+    state: [hotel, all],
+  });
+  const night = { expense_type: 'hotel', quantity: 1, unit_amount: 430, amount: 430, over_standard: false };
+  const nights = { expense_type: 'hotel', quantity: 2, unit_amount: 430, amount: 860, over_standard: false };
+
+  it('meets one line of quantity 2 and two lines of quantity 1 alike, and says what it summed', () => {
+    expect(gradeOperation(LINES, obs([nights], [nights]))).toEqual({
+      pass: true,
+      checks: [
+        { check: 'answer:applied', pass: true, detail: 'applied' },
+        { check: 'state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)', pass: true, detail: 'read 860 = 860 over 1 row(s), declared 860' },
+        { check: 'state:claim_line[claim.trip="t121"].each(over_standard)', pass: true, detail: '1 of 1 row(s) read false' },
+      ],
+    });
+    const perNight = gradeOperation(LINES, obs([night, night], [night, night]));
+    expect(perNight.pass).toBe(true);
+    expect(perNight.checks[1]!.detail).toBe('read 430 + 430 = 860 over 2 row(s), declared 860');
+  });
+
+  it('fails a wrong total, a line over the standard, and a row reading no number', () => {
+    expect(failed(LINES, obs([night], [night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+    expect(failed(LINES, obs([nights, night], [nights, night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+    const over = { ...nights, over_standard: true };
+    const g = gradeOperation(LINES, obs([over], [over]));
+    expect(g.pass).toBe(false);
+    expect(g.checks[2]).toEqual({ check: 'state:claim_line[claim.trip="t121"].each(over_standard)', pass: false, detail: '1 of 1 row(s) read otherwise (true), declared false' });
+    expect(failed(LINES, obs([night, { ...night, amount: '430' }], [night]))).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"].sum(amount)']);
+  });
+
+  it('fails an aggregate over no row: a sum of nothing is not 0, and "every row" of none is no pass', () => {
+    const zero: DeclaredOutcome = { kind: 'applied', state: [{ object: 'claim_line', where: { 'claim.trip': 't121' }, sum: { amount: 0 }, each: { over_standard: false } }] };
+    expect(gradeOperation(zero, { answer: { kind: 'applied' }, state: [[]] }).checks[1]).toEqual({
+      check: 'state:claim_line[claim.trip="t121"]->rows',
+      pass: false,
+      detail: '0 row(s) read back, so there is nothing to aggregate',
+    });
+  });
+
+  it('sums decimals without float noise, and fails an aggregate the observation did not carry', () => {
+    const cents: DeclaredOutcome = { kind: 'applied', state: [{ object: 'claim_line', where: { expense_type: 'taxi' }, sum: { amount: 0.3 } }] };
+    expect(gradeOperation(cents, { answer: { kind: 'applied' }, state: [[{ amount: 0.1 }, { amount: 0.2 }]] }).pass).toBe(true);
+    expect(failed(LINES, { answer: { kind: 'applied' } })).toEqual(['state:claim_line[claim.trip="t121",expense_type="hotel"]', 'state:claim_line[claim.trip="t121"]']);
   });
 });
 
@@ -378,5 +435,60 @@ describe('gradeOperation — pending_confirmation applied through the confirmati
     const OVERSTEP: DeclaredOutcome = { kind: 'refused', code: 'PERMISSION_DENIED' };
     const g = gradeOperation(OVERSTEP, APPLIED_VIA_GATE, { agentConfirmation: RULE });
     expect([g.pass, g.confirmation, g.checks.map((c) => c.check)]).toEqual([false, undefined, ['answer:refused:PERMISSION_DENIED', 'no-write']]);
+  });
+});
+
+describe('gradeConfirmedWrite — the write after the person confirmed a pending_confirmation operation (#34293)', () => {
+  const DELETE: AgentConfirmationRule['write'] = { kind: 'delete', object: 'contact', target: 'ct2' };
+  const UPDATE: AgentConfirmationRule['write'] = { kind: 'update', object: 'claim', target: 'c118', values: { status: 'paid', paid_on: '2026-10-31' } };
+  const deleted: ConfirmedWriteObservation = { answer: { kind: 'applied' }, writes: 1, changed: ['ct2'], target: null, via: ['delete_record'] };
+  const names = (g: ReturnType<typeof gradeConfirmedWrite>) => g.checks.map((c) => [c.check, c.pass]);
+
+  it('the target deleted and no other row written passes both checks, the route reported and not graded', () => {
+    const g = gradeConfirmedWrite(DELETE, deleted);
+    expect(names(g)).toEqual([['confirmed-write:applied', true], ['confirmed-write:rows', true]]);
+    expect(g.pass).toBe(true);
+    expect(g.checks[0]!.detail).toBe('applied, through delete_record');
+    expect(gradeConfirmedWrite(DELETE, { ...deleted, via: ['run_action democrm_delete_contact'] }).pass).toBe(true);
+  });
+
+  it('⛔ nothing written after the confirmation, or a second ask, fails both checks', () => {
+    const nothing: ConfirmedWriteObservation = { answer: { kind: 'pending_confirmation' }, writes: 0, changed: [], target: { id: 'ct2' }, via: [] };
+    const g = gradeConfirmedWrite(DELETE, nothing);
+    expect(names(g)).toEqual([['confirmed-write:applied', false], ['confirmed-write:rows', false]]);
+    expect(g.checks[1]!.detail).toBe('contact row ct2 was not written');
+  });
+
+  it('⛔ another row written, alone or beside the target, fails the rows check', () => {
+    expect(gradeConfirmedWrite(DELETE, { ...deleted, changed: ['ct3'], target: { id: 'ct2' } }).checks[1]).toMatchObject({ pass: false, detail: 'the turn also wrote contact row(s) ct3' });
+    expect(gradeConfirmedWrite(DELETE, { ...deleted, changed: ['ct2', 'ct3'] }).pass).toBe(false);
+  });
+
+  it('an update holds the declared values; the card\'s today is met by a run date the platform stamped, not one the agent wrote', () => {
+    const paid = (row: Record<string, unknown>, agentSet: string[]): ConfirmedWriteObservation => ({
+      answer: { kind: 'applied' },
+      writes: 1,
+      changed: ['c118'],
+      target: { id: 'c118', ...row },
+      via: ['run_action pay_claim'],
+      runDates: ['2026-11-16'],
+      agentSet: { claim: agentSet },
+    });
+    expect(gradeConfirmedWrite(UPDATE, paid({ status: 'paid', paid_on: '2026-10-31' }, ['status', 'paid_on']), { asOf: '2026-10-31' }).pass).toBe(true);
+    expect(gradeConfirmedWrite(UPDATE, paid({ status: 'paid', paid_on: '2026-11-16' }, ['status']), { asOf: '2026-10-31' }).pass).toBe(true); // stamped
+    const agentWrote = gradeConfirmedWrite(UPDATE, paid({ status: 'paid', paid_on: '2026-11-16' }, ['status', 'paid_on']), { asOf: '2026-10-31' });
+    expect(agentWrote.checks[1]).toMatchObject({ pass: false, detail: 'claim row c118: paid_on "2026-11-16", declared "2026-10-31"' });
+    expect(gradeConfirmedWrite(UPDATE, paid({ status: 'approved', paid_on: '2026-10-31' }, ['status']), { asOf: '2026-10-31' }).pass).toBe(false);
+  });
+
+  it('the temporary rule\'s own rows check reads as before, under its own name', () => {
+    const rule: AgentConfirmationRule = { write: DELETE, ask: { names: true, detail: 'names ct2' } };
+    const obs: OperationObservation = {
+      answer: { kind: 'applied' },
+      writes: 1,
+      agentConfirmed: { actions: [{ action: 'delete_contact', confirm: true, requiresConfirmation: true }], directWrites: [], changed: ['ct2'], target: null },
+    };
+    const g = gradeOperation({ kind: 'pending_confirmation' }, obs, { agentConfirmation: rule, acceptAgentConfirmation: true });
+    expect(g.checks.find((c) => c.check === 'confirmed-by-agent:rows')).toEqual({ check: 'confirmed-by-agent:rows', pass: true, detail: 'contact row ct2 deleted, no other row written' });
   });
 });

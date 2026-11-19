@@ -24,9 +24,11 @@
  * `packages/runtime/src/domains/packages-publish-drafts-response-conformance.test.ts`;
  * THIS file owns the helper's half of the wire face.
  *
- * `probes` is deliberately opaque in the declaration (#9406 ruling: staged,
- * upgrade only when a consumer needs a field) — so the cases here assert it is
- * carried through unstripped, never its inner shape.
+ * `probes` is MODELED in the declaration (`BuildProbeReportSchema`, ruling
+ * record 6929121584: the #9406 staging ended when the console's publish-health
+ * line began reading fields of it). So the cases here assert its inner shape
+ * too: every key the probe emits is declared, and a finding is carried through
+ * with nothing stripped, its `userMessage` included.
  */
 // Pays the lint root's first load at collection, never inside a clocked case.
 import './__fixtures__/lint-root-preload.testkit.js';
@@ -256,21 +258,21 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         }
     });
 
-    it('probes rides the response opaque: carried through parse unstripped, shape unconstrained (#9406 staging)', async () => {
+    it('probes rides the response modeled: the report the probe pass returns parses with nothing stripped', async () => {
         const p = await makeProtocol();
         await stageDrafts(p, [{ type: 'view', name: 'cases', item: viewBody('cases', 'Cases') }]);
         const raw: any = await p.publishPackageDrafts({ packageId: PKG });
 
-        // ADR-0038 L3: something was publishable, so the probe pass really ran.
-        // This is the assertion that keeps "opaque" from decaying into
-        // "absent": the KEY is part of the declared face even though its inner
-        // shape deliberately is not.
+        // ADR-0038 L3: something was publishable, so the probe pass really ran,
+        // and its view plane counted the one view it read.
         expect(Object.keys(raw)).toContain('probes');
+        expect(raw.probes.checked).toEqual({ seeds: 0, views: 1, widgets: 0, objects: 0 });
         expect(strippedKeys(raw)).toEqual([]);
         const parsed = PublishPackageDraftsResponseSchema.parse(raw);
-        // Reference equality through parse — z.unknown() passes the value
-        // through; a modeled schema that strips would break this first.
-        expect(parsed.probes).toBe(raw.probes);
+        // Deep equality through parse: the schema is modeled now, so parse
+        // builds a new object, and a key the model does not declare would be
+        // missing from it. (`toBe` held only while `probes` was `z.unknown()`.)
+        expect(parsed.probes).toEqual(raw.probes);
     });
 
     it('publishing a seed: the aggregate seedApplied is carried through with its counters', async () => {

@@ -35,6 +35,24 @@ export const PENDING_SSO_MESSAGES = {
     "This environment is not cloud-managed, so there is no hosting organisation's sign-in for a pending person to "
     + 'arrive through. Create the user with a password or an invitation instead (admin/create-user, '
     + 'admin/import-users). No user was added.',
+  notManagedRemove:
+    'This environment is not cloud-managed, so it holds no pending people whose invitation could be cancelled. '
+    + 'Deactivate the user instead (admin/ban-user). No one was removed.',
+  removeNotPending:
+    'This person is not pending: they have signed in, or were not added to sign in through the hosting '
+    + "organisation's identity provider, so they cannot be removed here. Deactivate them instead. No one was removed.",
+  removeRefused: 'This person could not be removed, and no one was removed.',
+  removeRefusedReinvited:
+    'Their invitation had already been cancelled at the hosting organisation, so it was sent again and they stay '
+    + 'pending as before.',
+  removeRefusedNotReinvited:
+    'Their invitation had already been cancelled at the hosting organisation, and sending it again did not '
+    + 'succeed, so they stay pending with no invitation: add them again to send one.',
+  removeHostCancelled:
+    'The hosting organisation had already been told to cancel their invitation, and it is not sent again.',
+  removeHostUnreachable:
+    "The hosting organisation could not be reached to cancel this person's invitation, so they were not removed. "
+    + 'Nothing was changed; try again.',
   alreadyExists:
     'A user with this email address already exists in this environment, so no one was added. Change the existing '
     + "user's positions, permission sets or manager on their record instead.",

@@ -46,7 +46,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SysMetadataActivation } from '@objectstack/platform-objects';
 import { defineStack } from '@objectstack/spec';
 import type { AutomationContext } from '@objectstack/spec/contracts';
-import { AutomationServicePlugin } from './plugin.js';
+import { AutomationServicePlugin, packagedFlowDefaultReader } from './plugin.js';
 import type { AutomationEngine, FlowTrigger, FlowTriggerBinding } from './engine.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -83,13 +83,13 @@ const pluginManifest = (id: string) => ({
     name: 'crm',
 });
 
-/** The shipping package: one object and the base flow over it. */
-const shippingStack = () =>
+/** The shipping package: one object and the base flow over it (`base`: more keys on that flow). */
+const shippingStack = (base: Record<string, unknown> = {}) =>
     defineStack(
         {
             manifest: pluginManifest(BASE),
             objects: [{ name: TICKET, label: 'Ticket', fields: { title: { name: 'title', label: 'Title', type: 'text' } } }],
-            flows: [ticketFlow('BASE')],
+            flows: [ticketFlow('BASE', base)],
         } as never,
         { strict: false },
     ) as Record<string, unknown>;
@@ -183,6 +183,7 @@ async function boot(
     start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>,
     second: Second = 'none',
     ledger = false,
+    base: Record<string, unknown> = {},
 ) {
     const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
     kernels.push(kernel);
@@ -210,7 +211,7 @@ async function boot(
             const manifests = ctx.getService<{ register(m: unknown): Promise<void> }>('manifest');
             const registerStack = (stack: Record<string, unknown>) => manifests.register({ ...(stack.manifest as object), ...stack });
             if (second === 'before') await registerStack(otherStack());
-            if (!second.startsWith('installed-both')) await registerStack(shippingStack());
+            if (!second.startsWith('installed-both')) await registerStack(shippingStack(base));
             if (second === 'after') await registerStack(otherStack());
             if (second.startsWith('installed-')) {
                 ctx.hook('kernel:ready', async () => {
@@ -238,17 +239,18 @@ async function measuredBoot(
     rows: readonly Row[],
     start: (ql: ObjectQL, automation: AutomationEngine) => Promise<void>,
     second: Second = 'none',
+    base: Record<string, unknown> = {},
 ) {
     const dir = mkdtempSync(join(tmpdir(), 'qa-28717-'));
     dirs.push(dir);
     const file = join(dir, 'store.db');
     const first = await boot(file, async (ql) => {
         for (const row of rows) await ql.insert('sys_metadata', storedRow(row), { context: SYS } as never);
-    });
+    }, 'none', false, base);
     await first.kernel.shutdown();
     kernels.splice(kernels.indexOf(first.kernel), 1);
     const warn = vi.spyOn(ObjectLogger.prototype, 'warn');
-    const measured = await boot(file, start, second);
+    const measured = await boot(file, start, second, false, base);
     const collisionCalls = warn.mock.calls
         .filter(([message]) => String(message).includes('Flow name collision') && String(message).includes(`'${FLOW}'`));
     const collisions = collisionCalls.map(([message]) => String(message));
@@ -310,6 +312,22 @@ describe('[#28717] a declared .custom flow override is armed from the first boot
         ]);
         expect(collisions).toHaveLength(1);
         expect(((await automation.getFlow(FLOW)) as { label?: string } | null)?.label).toBe('BASE');
+    });
+
+    it('[#34655, L2 N8] the base ships `defaultActive: false`: the armed override, which omits the key, stays off — read through the real protocol', async () => {
+        let armedAtPull: string | undefined;
+        const { fired, automation, kernel } = await measuredBoot(['override'], async (ql, engine) => {
+            armedAtPull = ((await engine.getFlow(FLOW)) as { label?: string } | null)?.label;
+            await insertTicket(ql, 'shipped off');
+        }, 'none', { defaultActive: false });
+        expect(armedAtPull).toBe('OVERRIDE');
+        // The package's own body, as the protocol's every-shipper read serves it (no mock: the duck-typed
+        // `shippedArtifactsOf` that `packagedFlowDefaultReader` asks).
+        const read = packagedFlowDefaultReader({ getService: (name: string) => kernel.getService(name) } as never);
+        expect(read(FLOW, BASE)).toBe(false);
+        expect(read(FLOW, PAIR), 'control: the pair ships no body of its own').toBeUndefined();
+        expect(automation.getFlowRuntimeStates().find((s) => s.name === FLOW)).toMatchObject({ enabled: false });
+        expect(fired).toEqual([]);
     });
 
     it('control: with only the override, it is armed from the boot pull with no receipt and no warning (#28412)', async () => {

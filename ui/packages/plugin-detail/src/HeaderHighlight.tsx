@@ -145,9 +145,13 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // leaves `--spacing * 1.5` of the padding visible, the bleed of an
             // editable value's hover background (`-mx-1.5`), and does not clip
             // the other three sides. Below `sm` there is no border to hide
-            // (each chip is its own line, see the chip classes).
+            // (each chip is a separator-less grid cell, see the chip classes).
             'sm:-ml-[calc(var(--spacing)*5+1px)]',
             'sm:[clip-path:inset(-100vmax_-100vmax_-100vmax_calc(var(--spacing)*3.5+1px))]',
+            // Below `sm` the strip is the default page's phone grid
+            // (objectstack#34595): two equal columns, so six highlights read
+            // as three rows, not six.
+            'max-sm:grid max-sm:grid-cols-2 max-sm:gap-x-4 max-sm:gap-y-3',
           )}
         >
           {visibleFields.map((field) => {
@@ -348,12 +352,11 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // like the first one.
             //
             // Below `sm` the strip is ONE layout (objectui#12523): every chip
-            // is a full-width line with no separator and no padding. At a
-            // 358px row two columns leave a value about 150px, which cuts the
-            // HotCRM lead's phone number and email, while a full line shows
-            // both whole; and a touch screen cannot hover a `title`. The
-            // classes are the same for every chip, wide or not, so no chip
-            // can fall back to the wrapping layout.
+            // is one cell of the row's two-column grid (objectstack#34595, the
+            // default page's phone grid), with no separator and no padding.
+            // The classes are the same for every chip, wide or not, so no chip
+            // can fall back to the wrapping layout; a value too long for its
+            // cell is cut by the value span with an ellipsis, as on any row.
             return (
               <div
                 key={field.name}
@@ -363,7 +366,7 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                   useWide
                     ? 'basis-[16rem] min-w-[min(16rem,100%)]'
                     : 'basis-[9rem] min-w-[min(9rem,100%)]',
-                  'max-sm:basis-full max-sm:max-w-full max-sm:border-l-0 max-sm:px-0',
+                  'max-sm:min-w-0 max-sm:max-w-full max-sm:border-l-0 max-sm:px-0',
                 )}
               >
                 <span className="text-xs font-medium text-muted-foreground">

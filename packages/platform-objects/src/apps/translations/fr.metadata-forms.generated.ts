@@ -967,7 +967,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "Refus",
-        helpText: "Catalogue des refus, indexé par le code SCREAMING_SNAKE que lève le corps (par ex. CLEAN_VERSION_REQUIRED). L’appelant lit le message déclaré, traduit dans sa langue, avec le statut déclaré. Corps JavaScript (L2) uniquement"
+        helpText: "Catalogue des refus, indexé par le code SCREAMING_SNAKE que lève le hook (par ex. CLEAN_VERSION_REQUIRED). L’appelant lit le message déclaré, traduit dans sa langue, avec le statut déclaré. Pour un corps JavaScript (L2) ou un gestionnaire ; refusé sur un corps expression"
       },
       "refusals.message": {
         label: "Message",

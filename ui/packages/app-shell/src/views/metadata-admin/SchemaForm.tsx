@@ -56,7 +56,7 @@ import {
   CollapsibleContent,
 } from '@object-ui/components';
 import { usePredicateScope } from '@object-ui/react';
-import { resolveSectionGroupReferences } from '@object-ui/plugin-form';
+import { resolveSectionGroupReferences } from '@object-ui/plugin-form/core';
 import { evaluatePredicate, buildPredicateCtx, visibleOptions } from './predicate.js';
 import type { FormFieldSpec, FormSectionSpec, FormViewSpec, VisibilityPredicate } from './form-spec.js';
 import {

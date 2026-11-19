@@ -887,7 +887,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (68)...
+  → Running author-time rules (70)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -1173,6 +1173,7 @@ performed. So `plan` really is a dry run, and everything `apply` is about to do
 
   In place (existing rows converged when you apply)
     ~ crm_contact [normalize_datetime_storage: signed_at — 1,240 row update(s)]
+    ~ crm_deal [normalize_boolean_storage: won — 312 row update(s)]
 
   Needs confirmation
     ~ crm_contact.email [relax_not_null]
@@ -1189,10 +1190,16 @@ column needs when the database predates the canonical UTC storage (ADR-0053
 addendum D-B1..D-B4). It carries a row count because that is the number
 deciding whether to run it now; on MySQL it reads `widen_datetime_columns` and
 is an `ALTER … MODIFY` table rebuild that holds a metadata lock for its
-duration.
+duration. On SQLite it also lists `normalize_boolean_storage`: rows of a
+`Field.boolean` or `Field.toggle` column that an older build stored as the text
+`'true'` / `'false'` become `1` / `0`, so boolean filters, sorts and groups find
+them. Any other text in such a column is left as stored and reported in the
+log.
 
-Both are safe to apply — the convergence preserves every stored instant and is
-idempotent — but only the second takes time proportional to your data.
+All three are safe to apply — the datetime convergence preserves every stored
+instant, the boolean step rewrites only the two canonical spellings, and each is
+idempotent — but only the MySQL widen is a table rebuild whose duration grows with
+your data.
 
 #### Runtime-owned indexes apply builds
 
@@ -1290,7 +1297,7 @@ field declares `storage: { notNull: false }`, since that declaration is the deli
 changes stay with `os migrate apply`. A column change the database could not apply leaves the publish
 a success with an `object-column-changes-not-applied` warning on its answer naming each column.
 
-On a Turso remote primary (`libsql://`), a tightened or relaxed `NOT NULL` and a dropped DEFAULT stay drift, because that transport runs no SQLite table rebuild. `os migrate plan` and `os migrate apply` list each such entry with `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.`, offer `--allow-destructive` only for the destructive changes that database can apply, and count the rest as drift a re-run cannot apply.
+On a Turso remote primary (`libsql://`), a relaxed `NOT NULL` is applied in place, with libSQL's own `ALTER TABLE … ALTER COLUMN … TO …`: only the `NOT NULL` clause leaves the column's stored definition, no row is copied, and the entry counts as applied only once the column reads back nullable with the type and DEFAULT it had. A database that refuses that statement leaves the column as it was, and the entry is listed as not applied. libSQL refuses it for a column whose stored definition holds a comma: a DEFAULT or a CHECK with a comma in it, a type width such as `NUMERIC(10, 2)`, or a comment. Such a column keeps its `NOT NULL` and the table is left as it was; `os migrate apply` lists the entry as not applied, its log says the definition holds a comma, and no table rebuild is attempted. Columns the platform creates on a remote primary are `TEXT`, `INTEGER` or `REAL` with no DEFAULT and no width, so they never hold a comma. A tightened `NOT NULL` and a dropped DEFAULT stay drift there, because that transport runs no SQLite table rebuild. `os migrate plan` and `os migrate apply` list each such entry with `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.`, offer `--allow-destructive` only for the destructive changes that database can apply, and count the rest as drift a re-run cannot apply.
 
 `--allow-destructive` refuses some drops until the data they would lose is
 safe. No flag skips these refusals:
@@ -1678,6 +1685,29 @@ name that is not a roll-up this run walks — a typo, a plain field, or an objec
 `--object` left out — is refused before any row is read. Naming a `count` /
 `sum` is accepted and changes nothing, so a caller can pass every column it
 just declared.
+
+**A package install or upgrade does this for you.** When a running deployment
+installs or upgrades a package through an install door (the marketplace
+install, for example), the door's schema sync computes every roll-up the
+package added, on each stored row still holding `NULL`. It uses the aggregate
+the child-write recompute uses and a system-context write that covers every
+organization's rows, and it writes no child row. Like the door's own seed
+writes, it runs with automations off: no metadata-bound hook or record-change
+flow fires on a backfilled parent. A roll-up over that parent is still
+recomputed. This command, run by hand, keeps running them. `min` / `max` / `avg` are
+included, because the door knows those columns are new. Roll-ups the deployment
+already served when it booted are not walked again, so an upgrade that adds no
+roll-up costs nothing here. Two cases still need this command:
+
+- **The walk did not complete.** A row failed, an object could not be read, or
+  the per-object bound was reached. The server logs it at `error`, naming each
+  roll-up, and gives the exact
+  `os migrate summary-nulls --apply --recompute-undefined-on-empty …` line.
+  The next install in the same process also walks those roll-ups again.
+- **The roll-up arrived with a restart, not through an install door.** This
+  covers a code-defined app's new version and a marketplace install whose hot
+  register failed and loaded at the next restart. A boot records what it serves
+  and computes nothing.
 
 Idempotent — every write turns a `NULL` into a number, so a second run finds
 nothing and writes nothing. Re-running until the report says zero *is* the
@@ -2186,6 +2216,13 @@ when:
   cannot be shown, so it is never amended, and `os audit verify` reads it
   `modified`;
 - the rewrite would change a column the object seals in clear.
+
+The amendments are signed by the host's checkpoint signer (`audit.checkpointSigner`) when the
+host registers one, and by the deployment's local key when it registers none; a host checkpoint
+sink (`audit.checkpointSink`) is handed each amendment. A signer or sink that is registered but
+cannot be resolved stops the run before any row is amended or rewritten: it prints
+`Audit redaction seal: the '<slot>' service is registered but could not be resolved (<cause>)`
+and exits `1`. It never falls back to the local key in place of the host's signer.
 
 The dry run decides each row the same way and writes nothing. Re-run where the
 crypto provider `os serve` seals with is available.
@@ -2906,6 +2943,7 @@ os verify --delete-behaviors                   # Also prove each declared delete
 os verify --unique-scopes --multi-tenant       # Also prove each declared unique collides where its scope says
 os verify --parent-write-reach                 # Also prove each controlled_by_parent detail write follows its master
 os verify --dashboard-windows                  # Also prove each dashboard date picker counts the rows its window selects
+os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   # Also run one flow and report its node trace
 ```
 
 1. **Author-time rules.** The rule registry `os validate` runs, over the stack
@@ -2918,9 +2956,17 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    them, and `os validate` prints them. This stage is the rule registry, not all
    of `os validate`: the `defineStack` provenance refusal (a config whose
    default export `defineStack` did not build, `STACK_PROVENANCE_MISSING`), the
-   package-docs lint, the capability-provider check, the picklist-reference and
-   view-container-name checks and `--strict` stay `os validate`'s, so run it
-   too.
+   package-docs lint, the picklist-reference and view-container-name checks and
+   `--strict` stay `os validate`'s, so run it too.
+
+   The stage then runs `os validate`'s capability-provider check over every
+   declared `requires` token and reports each finding as an **advisory**, in
+   the sentence `os validate` prints: a cloud-only token, an `enterprise` token
+   whose package is not installed, and an `enterprise` token whose package
+   resolves but which no plugin in `plugins[]` provides (for
+   `hierarchy-security`, the hierarchy scopes then behave as owner-only). These
+   never change `os verify`'s exit status, including the cloud-only tokens
+   `os validate` refuses.
 2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
    stack. The boot reads the project's `.env*` files first, the ones `os dev`
    reads, from the directory holding the config (a variable already exported
@@ -3047,6 +3093,50 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    ground truth cannot model (`$or`, a range, a
    relationship path, a condition on the window's own field), are reported
    `excluded`.
+   With `--flow <name>`, another fresh boot runs that one flow once and reports
+   what the engine did: each node's status as the run's log records it, the
+   first failure with its code and the node named, and every write the run
+   made. The run starts the way production starts it. A record-change flow is
+   started by its own trigger: the run writes the record `--flow-record`
+   names (its fields as a JSON object) as the dev admin, inserting it for a
+   create or write leg, seeding it and saving it unchanged for an update leg
+   (so a condition comparing old and new values sees no change), and seeding
+   it and deleting it for a delete leg. A flow its own trigger starts is
+   started with no caller, with the context that trigger builds: an
+   API-triggered flow is handed `--flow-input` (a JSON object) as its record
+   and its params, as the inbound hook hands it the request body; a
+   time-relative flow is handed the `--flow-record` row as its record, seeded
+   first so it is in the table, as a swept row is (the acting organization a
+   sweep can set, `tenantId`, is not reproduced); a schedule, or another
+   flow declared `runAs: 'system'`, is handed `--flow-input` as its params
+   (a real tick's own `jobId`, `flowName` and `schedule` params and a
+   binding's acting organization are not reproduced). Any other flow goes
+   through the trigger route as the dev admin, with `--flow-input` as its
+   params. Before the run starts, every node whose type no installed plugin
+   runs is named, reached or not, and a flow whose trigger never binds is
+   reported with the trigger and the engine's reason, and is not run. A
+   schedule or time-relative trigger the deployment's scheduled-work switch
+   keeps unarmed (the default) is not a defect: it is reported as not armed
+   and the flow is still run. A run that fails, a node with no executor, a
+   trigger that never binds, a record-change or time-relative flow given no
+   record, and a write refused because its object lives outside the
+   ephemeral stack each fail `os verify`; a run the start condition skipped,
+   one that paused at a screen, wait or approval, and one stopped at an
+   outbound node are reported and do not. The run writes to the in-memory
+   database this boot creates and nowhere else: a write to an object bound to
+   any other datasource is refused before that datasource's driver is called,
+   and the node that made it fails naming the object and the datasource.
+   Four outbound node types are not executed: `http`, `connector_action`
+   (which also runs every connector a plugin contributes), `notify` and
+   `script`. A plugin's own node type that calls out under another name is
+   not stood in, and runs for real. A run that ends at one of the four stops
+   there, and the report names it (`outbound_not_run`); every node before it
+   ran for real. A stop inside a child flow is named at the child's node, and
+   a `fault` edge on the calling `subflow` or `map` node is still followed.
+   Inside a `try_catch` region the catch region handles the stop as it would
+   a failed call, and the run goes on: the stop is listed
+   (`outboundStops`), and a later node that fails is still the first failure
+   and still fails `os verify`.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
@@ -3074,15 +3164,20 @@ document carries depends on where the run ended:
   `path`, `message`, `hint`, plus `package` for a finding raised inside one
   package of the artifact), or the schema issues when the stack does not parse.
 - **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
-  `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
+  `capabilities` (the capability-provider advisories: `token`, `message`, and
+  `validate`, which is `error` when `os validate` refuses the stack over it and
+  `warning` when it reports it; `[]` when there are none), `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
   `hardFailures` it adds), `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
   `deleteBehaviors` (with `--delete-behaviors`), `uniqueScopes` (with
   `--unique-scopes`; its `boot` names the legs the run could prove),
   `parentWriteReach` (with `--parent-write-reach`; its `personas` name who
   wrote and who could not be provisioned), `dashboardWindows` (with
   `--dashboard-windows`; its `presets` name what each preset handed the door
-  and how it resolved) and `hardFailures`, the count the exit status is read
-  from.
+  and how it resolved), `flowRun` (with `--flow`: the `verdict`, how the run
+  started, the `trigger` and whether it is bound, the `steps`, the
+  `missingExecutors`, the `firstFailure`, the `outboundStops`, the `writes`
+  and the `confinement`)
+  and `hardFailures`, the count the exit status is read from.
 - **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
   when the failure carries them.
 
@@ -3641,6 +3736,89 @@ the grant, use the environment's console: **Account → Connect an AI Assistant*
 | `--print` | — | Print the endpoint and the command that registers it; run nothing |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token, used only to find the environment; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+
+### Skills
+
+The published skills catalog (`@objectstack/skills`, see [AI Skills](/docs/ai/skills))
+installed into, updated in and checked against your coding agent's skills
+directory. All three work in an empty directory as well as in a project: no
+`package.json` is read or written.
+
+| Command | Description |
+|---------|-------------|
+| `os skills install` | Copy the catalog at one version into the skills directory, and record what was written |
+| `os skills update` | Move the recorded catalog to another version; skills it did not install are never touched |
+| `os skills status` | Report the installed catalog against the expected version: missing, modified and extra skills |
+
+**Which version.** `--version <v>` (an exact version), else `--target <t>` —
+the version the target environment runs, read from its restriction profile
+exactly as [`os validate --target`](#os-validate) reads it (an environment's
+`http(s)` URL, or a profile JSON file) — else this CLI's own version, which is
+the catalog's: the two are released together. The output names which one was
+used. A range or a tag is refused, and so is a version the registry does not
+publish, naming it.
+
+**Where from.** The `@objectstack/skills` tarball at exactly that version, read
+with `npm pack` from the npm registry your environment configures (your
+`.npmrc` files and `npm_config_*` variables apply). Only its
+`dist/skills/<name>/` directories are copied.
+
+**What is recorded.** `install` writes `.objectstack-skills.json` beside the
+skills: the version and every file of every catalog skill with its hash. That
+record is how `update` and `status` tell the catalog's skills from your own.
+
+#### `os skills install`
+
+```bash
+os skills install                                  # this CLI's version, into .claude/skills/
+os skills install --version 18.5.0                 # the version an MCP server names
+os skills install --target https://acme.example.com # the version a target environment runs
+os skills install --dir .agents/skills             # another agent's skills directory
+```
+
+A directory that already holds a recorded catalog is refused, naming
+`os skills update`. A skill directory the record does not name but which shares
+a catalog skill's name (for example one an earlier `skills experimental_sync`
+copied) is refused, naming it; `--force` replaces it with the catalog's.
+
+#### `os skills update`
+
+```bash
+os skills update                                  # this CLI's version
+os skills update --target https://acme.example.com # the version a target environment runs
+os skills update --version 18.6.0
+```
+
+Replaces each recorded skill at the new version and removes each one the new
+version no longer ships. A skill directory the record does not name is never
+written, replaced or removed: a new catalog skill whose name one of yours
+already uses is refused, naming it. A recorded skill you changed is refused,
+naming the files; `--force` discards the change. With no recorded catalog the
+command refuses, naming `os skills install`.
+
+#### `os skills status`
+
+```bash
+os skills status
+os skills status --target https://acme.example.com --check # exit 1 when the catalog is not the target's
+os skills status --json
+```
+
+Reports the installed and the expected version (resolved in the order above),
+`missing` (recorded skills whose directory is gone), `modified` (recorded skills
+with a file changed, removed or added) and `extra` (skill directories the record
+does not name — yours, listed and never judged). The registry is not read. A
+mismatch is no recorded catalog, another version, or any missing or modified
+skill: the command exits `0` regardless, and `1` on a mismatch with `--check`.
+
+| Flag | Commands | Purpose |
+|---|---|---|
+| `--version <v>` | all three | Exact catalog version (not with `--target`) |
+| `--target <t>` | all three | Target environment URL or restriction profile file whose skills version to use |
+| `--dir <path>` | all three | The skills directory (default `.claude/skills/` under the current directory) |
+| `--json` | all three | One JSON document on stdout |
+| `--force` | `install`, `update` | `install`: replace same-named directories it did not install. `update`: discard local changes to catalog skills |
+| `--check` | `status` | Exit `1` on a mismatch |
 
 ### Packages
 

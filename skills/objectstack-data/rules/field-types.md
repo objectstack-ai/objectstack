@@ -39,7 +39,7 @@ const fields = {
 | `url` | Web URLs — built-in format validation | `required` |
 | `phone` | Phone numbers | `format` |
 | `password` | ⚠️ Masked-on-read input. On a generic object the value is stored **PLAINTEXT at rest** (never hashed — one-way hashing applies only inside the auth subsystem's own identity tables). Prefer `secret` for credentials; a generic `password` field triggers a build warning | `minLength`, `maxLength` |
-| `secret` | Reversible **encrypted-at-rest** credential (DB password, API key, token) — encrypted on write via `ICryptoProvider`, masked on read, fail-closed (ADR-0100). **The recommended type for credentials** | — |
+| `secret` | Reversible **encrypted-at-rest** credential (DB password, API key, token) — encrypted on write via `ICryptoProvider`, masked on read, fail-closed (ADR-0100) | — |
 | `markdown` | Markdown-formatted content | `maxLength` |
 | `html` | Raw HTML content | `maxLength` |
 | `richtext` | WYSIWYG rich text editor | `maxLength` |
@@ -49,7 +49,7 @@ const fields = {
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
-| `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency, currencyField, homeAmount) |
+| `currency` | Monetary amounts | `currencyConfig` (→ Currency) |
 | `percent` | Percentage; stored as a fraction (0-1) unless the field declares `max` above 1 (`max: 100`), then whole points; seeds, defaults, API values use that scale | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
 
 ## Date & Time
@@ -129,7 +129,7 @@ Stored as JSON on the parent row — no separate table / FK:
 |:-----|:------------|:-------|
 | `formula` | Computed on read: neither aggregatable nor a dataset or cube dimension (group key); both need a stored field of its return type with the same `expression` (objectstack-ui → Dashboards → Dataset-Bound Widgets) that reads only its own row (relationships.md → Computed column) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
 | `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
-| `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"` |
+| `autonumber` | Auto-incrementing display format (→ Autonumber) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"` |
 
 ## Enhanced Types
 
@@ -176,6 +176,19 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 (`date`/`datetime`) rate, and that rate in `rateField` (`number`), both
 `readonly: true`. Cross-currency totals sum `field`.
 
+**A roll-up of the home field.** A `sum` / `min` / `max` / `avg` `summary` over a
+child's `homeAmount.field` declares `currencyMode: 'dynamic'`, no `defaultCurrency`
+(ADR-0144: metadata never names the home currency, so never `'fixed'` with it).
+It shows in `localization.currency`; undeclared, a bare number. `defineStack`
+(`os validate`, the build) refuses `'dynamic'` on any other roll-up, and any
+`currencyConfig` on a `count`.
+
+```typescript
+// on project; expense.amount_home is the expense amount's homeAmount.field
+actual_cost: Field.summary({ summaryOperations: { object: 'expense', field: 'amount_home', function: 'sum' },
+  currencyConfig: { currencyMode: 'dynamic' } }),
+```
+
 **A line in its parent's currency.** On a `master_detail` child, `currencyField`
 may be `'<master_detail field>.<parent code field>'`: one hop (a `lookup` path
 is refused) to the parent's `iso_4217_currency` field. The line stores no code:
@@ -198,14 +211,27 @@ delete the lines and purge the recycle bin, or move them to another invoice.
 
 ```typescript
 {
-  type: 'lookup',
-  reference: 'account',
+  type: 'lookup',  // price_book, on quote
+  reference: 'price_book',
   required: true,
   lookupFilters: [
-    { field: 'status', operator: 'eq', value: 'active' },
+    { field: 'is_active', operator: 'eq', value: true },
+    // the record being edited: a field, or one lookup hop (at most one dot)
+    { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true },
+    { field: 'market', operator: 'eq', value: { $record: 'account.market' }, orEmpty: true },
   ],
 }
 ```
+
+**`{ $record: 'path' }`** is the whole `value` (never an `in` / `notIn` member) and,
+like `orEmpty`, pairs only with `eq`, `ne`, `gt`, `lt`, `gte`, `lte`. Only a record
+form resolves it; every other picker host (inline edit, an action dialog, a bulk
+action) leaves the entry out. **Empty value:** while the referenced value is empty
+or unreadable, the entry is dropped. **`orEmpty: true`** also matches a candidate
+whose column is null. **Not `dependsOn`:** the picker re-queries when a `$record`
+field changes; listing it in `dependsOn` adds an equality filter (`quote_date = …`)
+on the referenced object. The picker only narrows the choice: a rule the save must
+enforce belongs on the server too.
 
 ### Formula
 
@@ -221,18 +247,11 @@ const total = {
 
 ### Autonumber
 
-```typescript
-{
-  type: 'autonumber',
-  format: 'CASE-{0000}',
-}
-```
-
 The `format` is literal text interleaved with `{...}` tokens:
 
 | Token | Renders | Example |
 |:------|:--------|:--------|
-| `{0000}` | The counter, zero-padded to that many digits (**minimum** width). At most ONE slot. | `CASE-{0000}` → `CASE-0042` |
+| `{0000}` | The counter, zero-padded to that many digits. At most ONE slot. | `CASE-{0000}` → `CASE-0042` |
 | `{YYYY}` `{YY}` `{MM}` `{DD}` `{YYYYMMDD}` | Generation date in the request's business timezone | `AD{YYYYMMDD}{0000}` → `AD202606170001` |
 | `{field_name}` | The value of another field **on the same record** | `{plan_no}{000}` → `PLAN-001001` |
 
@@ -242,5 +261,5 @@ The `format` is literal text interleaved with `{...}` tokens:
 
 1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty interpolated field makes the record number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
 2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique).
-3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps). Size it for readability, not as a ceiling.
+3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps).
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.

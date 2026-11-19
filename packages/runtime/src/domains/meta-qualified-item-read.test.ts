@@ -55,14 +55,28 @@ const read = async (path: string, query?: Record<string, unknown>, context: any 
 };
 const labelOf = (answer: { body?: any }) => answer.body?.data?.item?.label ?? answer.body?.item?.label;
 
+/** [#33385] The stored `sys_metadata` rows the engine double answers; empty unless a pin stores one. */
+let storedRows: Array<Record<string, unknown>> = [];
+const storedRowsMatching = (where: Record<string, unknown> | undefined) => storedRows.filter((row) =>
+    Object.entries(where ?? {}).every(([key, value]) => {
+        if (value !== null && typeof value === 'object') {
+            const inList = (value as { $in?: unknown }).$in;
+            if (!Array.isArray(inList)) throw new Error(`engine double: operator ${Object.keys(value).join(', ')} is not implemented`);
+            return inList.includes(row[key]);
+        }
+        return (row[key] ?? null) === value;
+    }));
+
 beforeEach(() => {
+    storedRows = [];
     registry = new SchemaRegistry({ multiTenant: false });
     for (const id of [A, B, C]) {
         registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! } as never, 'code');
     }
     const engine = {
         registry,
-        find: vi.fn().mockResolvedValue([]),
+        // [#33385] Stored `sys_metadata` rows for `find`: equality on each `where` key, nothing else.
+        find: vi.fn(async (_object: string, opts?: { where?: Record<string, unknown> }) => storedRowsMatching(opts?.where)),
         findOne: vi.fn().mockResolvedValue(null),
         insert: vi.fn(),
         update: vi.fn(),
@@ -353,6 +367,8 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
         for (const id of unnamed) expect(JSON.stringify(answer.body)).not.toContain(id);
     };
 
+    /** [#33385] The types whose by-name read serves the minimal stored row of the row-holder CONTROL below. */
+    const ROW_SERVED_TYPES: readonly string[] = ['dashboard', 'email_template', 'permission', 'report'];
     for (const type of PACKAGE_SCOPED_READ_TYPES) {
         // [contract review M1, S2] Both registration orders: a reader that takes
         // the first registered holder serves the disabled one's body when it
@@ -403,21 +419,103 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             expect(labelOf(await read(`/${type}/shared`, { package: `${A}.custom` }))).toBe(`alpha ${type}`);
         });
 
-        // [epic ruling R4-B2] `_env` is held at `main`'s answer: with no served
-        // holder it judges every holder, so it refuses naming the disabled one.
-        it(`${type}: only a disabled holder — no holder: 404 on every package address, never a 409 naming it; \`_env\` refuses naming it, as on main`, async () => {
+        // [#33385, #32183 row 17 (ruling R4-B2 on PR #32497)] FROM `_env`
+        // 409 naming the disabled holder (R4-B2 held it there) TO 404: a
+        // disabled package holds no name, so `_env` answers as for a name no
+        // package holds, as every package address does, naming no package.
+        it(`${type}: only a disabled holder — no holder: 404 on every address, \`_env\` included, never a 409 naming it; re-enabled, \`_env\` refuses naming it`, async () => {
             ship(type, 'solo', B);
             registry.disablePackage(B);
             for (const [path, query] of [
                 [`/${type}/solo`, undefined],
                 [`/${type}/solo`, { package: C }],
                 [`/${type}/gamma/solo`, undefined],
+                [`/${type}/_env/solo`, undefined],
             ] as const) {
                 const answer = await read(path, query);
-                expect([answer.status, path, query], JSON.stringify(answer.body)).toEqual([404, path, query]);
+                expect([answer.status, answer.body?.error?.code, path, query], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND', path, query]);
                 expect(JSON.stringify(answer.body)).not.toContain(B);
             }
+            // CONTROL — the holder enabled: `_env` refuses naming it, unchanged.
+            registry.enablePackage(B);
             refusedNaming(await read(`/${type}/_env/solo`), [B], [A]);
+        });
+
+        // [#33401, #33385] A package-less row of the disabled holder's key is
+        // its customization (seat ruling 6882483833 on #32814): `_env` and the
+        // bare read answer as if no row were stored, never the row.
+        it(`${type}: only a disabled holder, and a package-less row of its name — \`_env\`, the bare read and its layers answer 404, never the row; re-enabled, \`_env\` refuses naming it`, async () => {
+            ship(type, 'solo', B);
+            registry.registerItem(type, { name: 'solo', label: `custom ${type}`, _provenance: 'org' }, 'name' as never);
+            registry.disablePackage(B);
+            for (const path of [`/${type}/solo`, `/${type}/solo/layers`, `/${type}/_env/solo`]) {
+                const answer = await read(path);
+                expect([answer.status, answer.body?.error?.code, path], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND', path]);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(`custom ${type}`);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(B);
+            }
+            registry.enablePackage(B);
+            refusedNaming(await read(`/${type}/_env/solo`), [B], [A]);
+        });
+
+        // [#33385] CONTROL — an enabled package holding the name only through a
+        // stored row the registry has not read: `_env` keeps `main`'s 409, as
+        // its refusal stands whenever the read naming no package serves an item.
+        it(`${type}: only a disabled holder in the registry, and an enabled package's unhydrated stored row — \`_env\` refuses 409, as on main, never that row`, async () => {
+            ship(type, 'solo', B);
+            storedRows.push({ id: 'row_gamma', type, name: 'solo', state: 'active', package_id: C,
+                metadata: JSON.stringify({ name: 'solo', label: `gamma row ${type}` }) });
+            registry.disablePackage(B);
+            const bare = await read(`/${type}/solo`);
+            const env = await read(`/${type}/_env/solo`);
+            expect(JSON.stringify(env.body ?? null)).not.toContain(`gamma row ${type}`);
+            // Measured on this fixture: these four types' by-name read serves
+            // the minimal stored row; the others serve no row of this shape, and
+            // `_env` answers as that read does (404). Named, so the 409 leg can
+            // never pass vacuously.
+            expect(labelOf(bare) === `gamma row ${type}`, JSON.stringify(bare.body)).toBe(ROW_SERVED_TYPES.includes(type));
+            if (ROW_SERVED_TYPES.includes(type)) {
+                expect([env.status, env.body?.error?.code], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+                expect(env.body?.error?.details?.candidates, JSON.stringify(env.body)).toEqual([{ kind: 'package', packageId: B }]);
+            } else {
+                expect([bare.status, env.status], JSON.stringify([bare.body, env.body])).toEqual([404, 404]);
+            }
+        });
+
+        // [#33385, review S1] CONTROL — the door judges the read it admits. A
+        // draft read (`?state=draft`, `?preview=draft`) and the deprecated
+        // layered view (`?layers=`) are not the read naming no package that
+        // judged the name, so a marked refusal stands for them: `main`'s 409,
+        // never an enabled package's draft or stored row at `_env`.
+        it(`${type}: only a disabled holder in the registry — \`_env\` with an admitted draft switch or the layered view refuses 409, as on main, a caller not admitted to drafts is answered the plain read's 404, never an enabled package's draft or row`, async () => {
+            const refusedAtEnv = async (query: Record<string, string>) => {
+                const env = await read(`/${type}/_env/solo`, query);
+                expect([env.status, env.body?.error?.code, query], JSON.stringify(env.body)).toEqual([409, 'RESOURCE_CONFLICT', query]);
+                // [review#2 S4] Its candidate is the disabled registry holder, as on main;
+                // the enabled package holding the name through its row is not named.
+                expect(env.body?.error?.details?.candidates, JSON.stringify(env.body)).toEqual([{ kind: 'package', packageId: B }]);
+                for (const label of [`gamma draft ${type}`, `gamma row ${type}`]) expect(JSON.stringify(env.body ?? null)).not.toContain(label);
+            };
+            ship(type, 'solo', B);
+            registry.disablePackage(B);
+            // An enabled package's draft row, and no active row of the name.
+            storedRows.push({ id: 'draft_gamma', type, name: 'solo', state: 'draft', package_id: C,
+                metadata: JSON.stringify({ name: 'solo', label: `gamma draft ${type}` }) });
+            const draftReads: Record<string, string>[] = [{ state: 'draft' }, { state: 'DRAFT' }, { preview: 'draft' }];
+            for (const query of draftReads) await refusedAtEnv(query);
+            // A caller `mayReadPendingDrafts` does not admit is answered the plain
+            // read whatever it sends, so `_env` answers it as the plain read does:
+            // 404, never the draft, and never a 409 naming the disabled holder.
+            const member = { ...ctx(), executionContext: { userId: 'u_member', systemPermissions: [] } };
+            for (const query of draftReads) {
+                const env = await read(`/${type}/_env/solo`, query, member);
+                expect([env.status, env.body?.error?.code, query], JSON.stringify(env.body)).toEqual([404, 'RESOURCE_NOT_FOUND', query]);
+                for (const text of [`gamma draft ${type}`, B]) expect(JSON.stringify(env.body ?? null)).not.toContain(text);
+            }
+            // An enabled package's unhydrated active row: the layered view.
+            storedRows = [{ id: 'row_gamma', type, name: 'solo', state: 'active', package_id: C,
+                metadata: JSON.stringify({ name: 'solo', label: `gamma row ${type}` }) }];
+            await refusedAtEnv({ layers: 'true' });
         });
 
         it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
@@ -872,8 +970,10 @@ describe('#32183 × #32310 — the caller arm judges the served holders', () => 
  * two packages register answers the read's `409 RESOURCE_CONFLICT` naming both
  * holders as `details.candidates`, as the item read does. The refusal leaves
  * through `errorFromThrown`, which composes `details` from
- * `resolveThrownHttpError`. Only this cell of #32622 is covered here: a stored
- * row's layered refusal, and the REST `/layers` door, are not.
+ * `resolveThrownHttpError`. This is the dispatcher's registry-holder cell; the
+ * stored-row cells and the REST `/layers` door are pinned beside the #28337
+ * and #32354 pins (`meta-layers-ambiguous-package.test.ts`,
+ * `meta-disabled-holder-served-stack.test.ts` and their REST twins).
  */
 describe('#32250 — the dispatcher /layers 409 names the holders', () => {
     it('a name two packages register: 409 RESOURCE_CONFLICT with both as details.candidates', async () => {

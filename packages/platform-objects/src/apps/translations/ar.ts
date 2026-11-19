@@ -18,7 +18,9 @@ export const ar: TranslationData = {
         grp_account_developer: { label: 'المطوّر' },
         grp_account_ai_assistant: { label: 'مساعد الذكاء الاصطناعي' },
         nav_account_profile: { label: 'الملف الشخصي' },
+        nav_account_mobile_app: { label: 'تطبيق الجوال' },
         nav_account_notifications: { label: 'الإشعارات' },
+        nav_account_notification_settings: { label: 'إعدادات الإشعارات' },
         nav_account_approvals: { label: 'بانتظار موافقتي' },
         nav_account_memberships: { label: 'مؤسساتي' },
         nav_account_linked: { label: 'الحسابات المرتبطة' },
@@ -37,7 +39,6 @@ export const ar: TranslationData = {
       navigation: {
         group_overview: { label: 'نظرة عامة' },
         group_apps: { label: 'التطبيقات' },
-        nav_packaged_actions: { label: 'الإجراءات المضمَّنة في الحزم' },
         nav_marketplace_browse: { label: 'تصفح السوق' },
         nav_marketplace_installed: { label: 'التطبيقات المثبّتة' },
         nav_cloud_connection: { label: 'الاتصال السحابي' },
@@ -187,13 +188,55 @@ export const ar: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'المستخدمون' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'المؤسسات' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'الجلسات' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'عمليات التثبيت' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'المستخدمون',
+          description: 'عدد حسابات المستخدمين المسجلة، النشطة وغير النشطة.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'المؤسسات',
+          description: 'عدد المؤسسات المسجلة؛ لكل مؤسسة أعضاؤها وبياناتها وإعداداتها الخاصة.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'الجلسات',
+          description: 'عدد جلسات تسجيل الدخول المسجلة، جلسة واحدة لكل تسجيل دخول من متصفح أو جهاز.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'عمليات التثبيت',
+          description: 'عدد عمليات تثبيت الحزم المسجلة، عملية واحدة لكل حزمة مثبتة.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'الإجراء' }, user_id: { label: 'المستخدم' } },
-      measures: { event_count: { label: 'الأحداث' } },
+      dimensions: {
+        action: {
+          label: 'الإجراء',
+          description: 'نوع الإجراء الذي يسجله إدخال سجل التدقيق، مثل الإنشاء أو التحديث أو الحذف أو تسجيل الدخول أو تغيير الإعدادات.',
+        },
+        user_id: {
+          label: 'المستخدم',
+          description: 'المستخدم الذي نفّذ الإجراء الخاضع للتدقيق؛ تُجمع الإدخالات التي تكتبها المنصة بنفسها تحت «النظام».',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'الأحداث',
+          description: 'عدد إدخالات سجل التدقيق؛ يسجل كل إدخال إجراءً واحدًا نُفّذ في النظام من قِبل مستخدم أو من قِبل المنصة نفسها.',
+        },
+      },
     },
   },
 

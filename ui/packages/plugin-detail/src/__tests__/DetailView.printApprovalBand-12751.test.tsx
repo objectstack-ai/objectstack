@@ -55,7 +55,9 @@ function makeDataSource() {
 function renderRecord(locked: boolean, onPrintPage: boolean) {
   const view = (
     <InlineEditProvider
-      canEdit={false}
+      // The record page's `canEdit` carries `!approvalLocked` (objectstack#34701:
+      // the editable badge now reads it), so an unlocked node is editable here.
+      canEdit={!locked}
       locked={locked}
       approvalPending
       approvalIsSubmitter

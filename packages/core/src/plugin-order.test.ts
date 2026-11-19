@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     resolvePluginOrder,
+    PluginOrderCycleError,
     validateInitServiceContract,
     assertInitServiceRequirements,
     type OrderablePlugin,
@@ -67,6 +68,39 @@ describe('resolvePluginOrder', () => {
                 { name: 'b', dependencies: ['a'] },
             ])),
         ).toThrow('Circular dependency detected');
+    });
+
+    it('throws a cycle as a PluginOrderCycleError naming the path, the message and the envelope unchanged', () => {
+        let caught: unknown;
+        try {
+            resolvePluginOrder(toMap([
+                { name: 'x' },
+                { name: 'a', dependencies: ['b'] },
+                { name: 'b', optionalDependencies: ['c'] },
+                { name: 'c', dependencies: ['a'] },
+            ]));
+        } catch (err) {
+            caught = err;
+        }
+        expect(caught).toBeInstanceOf(PluginOrderCycleError);
+        expect(caught).toBeInstanceOf(Error);
+        const cycleError = caught as PluginOrderCycleError & { code?: unknown; status?: unknown };
+        // Each name depends on the next; the first is repeated last.
+        expect(cycleError.cycle).toEqual(['a', 'b', 'c', 'a']);
+        // What a kernel boot reads is what it read before the class existed.
+        expect(cycleError.message).toBe('[Kernel] Circular dependency detected: a');
+        expect(cycleError.code).toBeUndefined();
+        expect(cycleError.status).toBeUndefined();
+    });
+
+    it('names a plugin that depends on itself as a one-name cycle', () => {
+        let caught: unknown;
+        try {
+            resolvePluginOrder(toMap([{ name: 'a', optionalDependencies: ['a'] }]));
+        } catch (err) {
+            caught = err;
+        }
+        expect((caught as PluginOrderCycleError).cycle).toEqual(['a', 'a']);
     });
 });
 

@@ -246,7 +246,13 @@ describe('flow conditions under the null-guard gate (#29026)', () => {
 // hook (no record), and the other injected columns, which can hold null on a
 // stored row. The type verdicts on an injected column are untouched: the door
 // keeps the served types.
-describe('the publish door judges a flow or hook condition over an injected system column by what a stored row holds (#33246)', () => {
+// #33435 — `os build` reads the objects as authored, with no injected column
+// declared, and used to leave every one of them out of the null-guard gate, so
+// it accepted what the door refused. The flow and hook condition sites now
+// judge the injected columns the authored object does not declare as the door
+// judges them over the served object: the six a stored row can hold null in
+// at every site, and `created_at` / `updated_at` at a `beforeInsert` hook only.
+describe('a flow or hook condition over an injected system column is judged by what a stored row holds, at the publish door and at os build alike (#33246, #33435)', () => {
   /** The trigger object as authored; `sharingModel` keeps `security-owd-unset` quiet. */
   const account = {
     name: 'crm_account',
@@ -419,6 +425,107 @@ describe('the publish door judges a flow or hook condition over an injected syst
     for (const write of writes(condition, 'crm_remote')) {
       expect(atDoor(write, [applyInjectedSystemColumns(remote)]).filter(nullGuardOn('created_at')), label(write, condition)).toHaveLength(1);
     }
+  });
+
+  /** The six injected columns a stored row can hold null in. */
+  const NULLABLE_INJECTED = ['owner_id', 'created_by', 'updated_by', 'owning_business_unit_id', 'queue', 'organization_id'];
+
+  it('⭐ LIT — os build refuses an unguarded ordering over each injected column a stored row can hold null in, with the door\'s finding, at every flow slot and at a hook', () => {
+    for (const column of NULLABLE_INJECTED) {
+      const condition = `record.${column} > 'a'`;
+      for (const write of writes(condition)) {
+        const build = atBuild(write);
+        expect(build, label(write, condition)).toHaveLength(1);
+        expect(build.filter(nullGuardOn(column)), label(write, condition)).toHaveLength(1);
+        expect(build, label(write, condition)).toEqual(atDoor(write));
+      }
+    }
+  });
+
+  it('⭐ LIT — os build judges a flow\'s bare spelling of an injected column as it judges a declared nullable field\'s', () => {
+    // The door's per-write snapshot judges no bare name, a declared field's
+    // included (the CONTROL leg), so the build is the one reader here.
+    for (const [condition, column] of [["owner_id > 'a'", 'owner_id'], ['amount > 0', 'amount']] as const) {
+      const write: Write = { type: 'flow', item: flowAt('start', condition), collection: 'flows' };
+      const build = atBuild(write);
+      expect(build, condition).toHaveLength(1);
+      expect(build[0]!.message, condition).toContain(`applies \`>\` to \`${column}\``);
+      expect(atDoor(write), condition).toEqual([]);
+    }
+  });
+
+  // One case per ownership tier, not one case looping the three: each tier is
+  // 30 build runs and 30 door runs (six columns × five sites), the cost of the
+  // un-tiered build case above. Folded into one case, the three tiers ran
+  // about 0.65 s on an idle box and 5.26 s under a full CI run, over the 5 s
+  // per-case cap. Every tier, column, site and assertion is still checked.
+  for (const ownership of ['business_unit', 'org', 'none'] as const) {
+    it(`⭐ LIT — on the \`${ownership}\` ownership tier os build judges exactly the injected columns the tier carries, as the door does`, () => {
+      const tiered = { ...account, ownership };
+      const servedTier = applyInjectedSystemColumns(tiered);
+      for (const column of NULLABLE_INJECTED) {
+        const condition = `record.${column} > 'a'`;
+        for (const write of writes(condition)) {
+          const build = atBuild(write, [tiered]);
+          expect(build.filter(nullGuardOn(column)).length, `${ownership} · ${label(write, condition)}`)
+            .toBe(column in servedTier.fields ? 1 : 0);
+          expect(build, `${ownership} · ${label(write, condition)}`).toEqual(atDoor(write, [servedTier]));
+        }
+      }
+    });
+  }
+
+  it('⭐ LIT — os build refuses an ordering over `created_at` / `updated_at` at a `beforeInsert` hook, and only there, as the door does', () => {
+    for (const condition of [
+      "record.created_at > timestamp('2025-01-01T00:00:00Z')",
+      'record.updated_at > record.created_at',
+    ]) {
+      for (const events of [['beforeInsert'], ['beforeInsert', 'beforeUpdate']]) {
+        for (const object of ['crm_account', ['crm_account']]) {
+          const write: Write = { type: 'hook', item: { ...hookOn(object, condition), events }, collection: 'hooks' };
+          expect(atBuild(write).filter((f) => f.message.includes('declares as nullable')).length, `${events.join(',')}: ${condition}`)
+            .toBeGreaterThan(0);
+          expect(atBuild(write), `${events.join(',')}: ${condition}`).toEqual(atDoor(write));
+        }
+      }
+      // A hook on a stamped stored row, and every flow slot: the build accepts, as the door does.
+      for (const write of [
+        ...writes(condition),
+        { type: 'hook', item: { ...hookOn('crm_account', condition), events: ['afterInsert'] }, collection: 'hooks' } as Write,
+      ]) {
+        expect(atBuild(write), label(write, condition)).toEqual([]);
+        expect(atDoor(write), label(write, condition)).toEqual([]);
+      }
+    }
+  });
+
+  it('⭐ CONTROL — the guarded spelling publishes and builds over every injected column', () => {
+    for (const column of NULLABLE_INJECTED) {
+      const condition = `record.${column} != null && record.${column} > 'a'`;
+      for (const write of writes(condition)) {
+        expect(atBuild(write), label(write, condition)).toEqual([]);
+        expect(atDoor(write), label(write, condition)).toEqual([]);
+      }
+    }
+  });
+
+  it('⭐ CONTROL — an injected column the author declares keeps the author\'s verdict at the build, as at the door', () => {
+    // `required: true` is the author's own claim that the column is valued.
+    const declared = { ...account, fields: { ...account.fields, owner_id: { type: 'lookup', reference: 'sys_user', label: 'Owner', required: true } } };
+    const condition = "record.owner_id > 'a'";
+    for (const write of writes(condition)) {
+      expect(atBuild(write, [declared]), label(write, condition)).toEqual([]);
+      expect(atDoor(write, [applyInjectedSystemColumns(declared)]), label(write, condition)).toEqual([]);
+    }
+  });
+
+  it('⭐ CONTROL — a validation rule over an injected column keeps its verdict: the build judges declared fields only there, as the object door does', () => {
+    const ruled = { ...account, validations: [{ name: 'owner_named', type: 'script', condition: "record.owner_id > 'a'", message: 'Owner' }] };
+    const stack = { objects: [ruled] };
+    const build = runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.rule === EXPRESSION_INVALID).map(shape);
+    expect(build).toEqual([]);
+    const { errors, advisories } = runRuntimeAuthoringRules({ type: 'object', item: ruled, context: { objects: [served] } });
+    expect([...errors, ...advisories].filter((f) => f.rule === EXPRESSION_INVALID)).toEqual([]);
   });
 
   it('⭐ CONTROL — an unguarded ordering over a declared nullable field is refused at the door and at the build alike', () => {

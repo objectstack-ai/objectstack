@@ -288,7 +288,15 @@ export interface ScriptContext {
    * middleware reads it, and neither does anything a body writes back.
    * Absent on the action face.
    */
-  provenance?: { flowRunId?: string; attributedUserId?: string; performedByClientId?: string; impersonatedBy?: string };
+  provenance?: {
+    flowRunId?: string;
+    attributedUserId?: string;
+    performedByClientId?: string;
+    performedByAgentId?: string;
+    performedByConversationId?: string;
+    performedByConfirmationId?: string;
+    impersonatedBy?: string;
+  };
   /**
    * The caller's options bag, PROJECTED to the two members ADR-0058's D2
    * declares visible to the `before*` phase — `multi` and `where` — for the
@@ -412,6 +420,21 @@ export interface ScriptContext {
    * `=== undefined` does not, so the VM-facing contract is stated as `null`.
    */
   title?: (field: string | undefined, api: unknown) => Promise<string | undefined>;
+  /**
+   * [#34374, ruling 6913660232 parameter 7] `ctx.text(key, params?)` for the
+   * HOOK face and (#34374 PR2) the ACTION face — a sentence the hook declared
+   * under `HookSchema.texts` (or the action under `ActionSchema.texts`, read at
+   * `objects.<object>._actions.<action>.texts.<key>.message` /
+   * `globalActions.<action>.texts.<key>.message`), answered
+   * in the ORGANIZATION's language (translated `hooks.<hook>.texts.<key>.message`
+   * first, the declared message on a miss, its `{{ }}` holes filled from
+   * `params` after). Built per invocation by `buildHookTextSurface`
+   * (`hook-text.ts`); `installCtx` wires it onto the VM's `ctx.text` through the
+   * same deferred-promise pump as `title`. A key the hook does not declare
+   * rejects as a fault naming the hook and the key; an unreadable Localization
+   * setting rejects too. No capability token: it reads no record.
+   */
+  text?: (key: string, params?: Record<string, unknown>) => Promise<string>;
   /**
    * The engine's save-notice member, marshalled for the HOOK face (#28251) —
    * `HookContextSchema.notice` (`@objectstack/spec/data`), which objectql's

@@ -335,6 +335,15 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // enforced its row is stale: delete it and decide the offer then — that
   // decision belongs to the enforcement, not to this gate.
 
+  // A boolean whose UNSET state is the meaning, and no default to show it.
+  {
+    kind: 'omit',
+    type: 'skill',
+    path: ROOT_PATH,
+    key: 'mcpPrompt',
+    why: "unset means offered as an MCP prompt and only `false` withholds the skill, so the key's meaning lives in its absence, and it deliberately has no schema default (an undeclared skill parses byte-identical). The form's boolean control is a switch that draws unset as off, so every offered skill would read as withheld; a select writes its option value as a string, which this boolean key refuses. Authored in source or through the metadata API, where the describe text says what `false` does",
+  },
+
   // Platform-written, never authored.
   {
     kind: 'omit',
@@ -454,6 +463,40 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: 'currencyConfig',
     key: 'homeAmount',
     why: "planned, not yet written — the `{ field, rateDate, rateField }` pointers are validated at parse (all three required, each judged against the object's field map), but no engine converts the amount or stores the home amount and the rate until the write-time home-currency projection lands, which ADR-0144 D9 releases with this key. A form control offered today would let an author declare a home amount nothing writes",
+  },
+  // #34374 — a hook's declared texts land in the hook's source first. The
+  // Studio row (a key-only record beside `refusals`, with its help text in
+  // the eleven metadata-forms bundles) is a follow-up, so this row records
+  // why the key is not offered yet.
+  {
+    kind: 'omit',
+    type: 'hook',
+    path: ROOT_PATH,
+    key: 'texts',
+    why: "live, not yet offered in the Studio — the sentences a hook writes into records (`ctx.text`, answered in the organization's language) are validated at parse (snake_case keys, closed-scope holes over declared `params`, a literal `ctx.text` key the hook does not declare refused at save) and read at run time, and they are declared in the hook's package source beside the code that asks for them. The Studio row, a key-only record beside `refusals`, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then a hook authored in the Studio declares `texts` through the metadata API or its package source",
+  },
+  // #34273 — an action's refusal catalogue lands in the action's source
+  // first, as a hook's declared texts did (#34374). The Studio row (a
+  // key-only record, with its help text in the eleven metadata-forms
+  // bundles) is a follow-up, so this row records why the key is not offered.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'refusals',
+    why: "live, not yet offered in the Studio — the refusals a `script` action's `js` body throws by code (answered with the declared sentence in the caller's locale) are validated at parse (SCREAMING_SNAKE codes, the hook entry's closed-scope holes over declared `params`, a literal code or reason the catalogue does not declare refused at save) and read at run time, and they are declared in the action's package source beside the body that throws them. The Studio row, a key-only record, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then an action authored in the Studio declares `refusals` through the metadata API or its package source",
+  },
+  // #34374 (action half) — an action's declared texts land in the action's
+  // source first, as its refusal catalogue (#34273) and a hook's declared
+  // texts did. The Studio row (a key-only record, with its help text in the
+  // eleven metadata-forms bundles) is a follow-up, so this row records why the
+  // key is not offered.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'texts',
+    why: "live, not yet offered in the Studio — the sentences a `script` action's `js` body writes into records (`ctx.text`, answered in the organization's language) are validated at parse (snake_case keys, closed-scope holes over declared `params`, a literal `ctx.text` key the action does not declare refused at save) and read at run time, and they are declared in the action's package source beside the body that asks for them. The Studio row, a key-only record beside `refusals`, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then an action authored in the Studio declares `texts` through the metadata API or its package source",
   },
   // #27946 — an action's pressed-state predicate lands spec-first the same
   // way: `planned` in the liveness ledger, drawn by no action surface until
@@ -795,6 +838,14 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'overrides',
     why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  // #34655 — the default of the packaged-flow switch (ADR-0126 §4 amendment).
+  {
+    kind: 'omit',
+    type: 'flow',
+    path: ROOT_PATH,
+    key: 'defaultActive',
+    why: "a package's declaration, refused on every flow this form saves — the schema says a flow authored in the environment is switched by `status` and may not declare this key. The automation engine refuses it at registration on a flow no installed package ships, which is every flow the form writes, so a control would offer a value the save door always rejects. Like `skill.mcpPrompt`, its meaning also lives in its absence (unset ships the flow on, with no schema default), which a switch would draw as off. Authored in package source; an administrator's on/off for a packaged flow is the activation toggle, not this key",
   },
   {
     kind: 'omit',

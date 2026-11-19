@@ -26,12 +26,20 @@
  *    A person who opens the page already signed in accepts nothing here.
  *  - The server decides as it always does. The page reads the invitation
  *    (`get-invitation`) and accepts it (`accept-invitation`) as the new
- *    account; an address that is not the invited one is refused by the server,
- *    the hook answers `refused`, and the page goes on to the accept page as
- *    before, which shows that refusal.
+ *    account. An address that is not the invited one is refused by the
+ *    server, the hook answers `refused`, and the page goes on to the accept
+ *    page as before, which shows that refusal.
+ *  - Accepting needs a verified address. An account whose address is not
+ *    verified is refused for that, and the hook hands over straight to the
+ *    verification-mail screen (`/verify-email-prompt`) for the account's
+ *    address, whose link returns to the accept page; it answers `joining`
+ *    meanwhile, so the page holds instead of moving on.
  *  - A sign-up that waits for email verification creates no session here, so
  *    nothing is accepted on this page; the verification mail returns to the
  *    accept page.
+ *  - An account a sign-up admitted by the invitation it presents is not a
+ *    member of any organization until it accepts, so a sign-up whose address
+ *    is not verified lands on the accept page with no organization.
  *
  * After the acceptance the session is switched to the organization, and the
  * page then enters it by a full-page navigation to the console root, the way
@@ -40,8 +48,10 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
 import { invitationIdOf } from './invitationArrival.js';
+import { isAcceptNeedsVerifiedEmail } from '../organizations/orgErrorMessage.js';
 
 /**
  * Where a register page's invitation join stands:
@@ -53,7 +63,9 @@ import { invitationIdOf } from './invitationArrival.js';
  *  - `joined`: the server accepted the invitation and the session is on its
  *    organization — the page enters the console root;
  *  - `refused`: the server refused the read or the acceptance — the page goes
- *    on to the accept page, as it did before.
+ *    on to the accept page, as it did before. A refusal for an unverified
+ *    address is not this outcome: the hook hands over to the verification-mail
+ *    screen and stays `joining`.
  */
 export type InvitationSignUpJoin = 'none' | 'joining' | 'joined' | 'refused';
 
@@ -63,6 +75,7 @@ export type InvitationSignUpJoin = 'none' | 'joining' | 'joined' | 'refused';
  */
 export function useInvitationSignUpJoin(redirect: string | null | undefined): InvitationSignUpJoin {
   const { user, isLoading, getInvitation, acceptInvitation, switchOrganization } = useAuth();
+  const navigate = useNavigate();
   const invitationId = invitationIdOf(redirect);
 
   // Latched the first time the session check answers with nobody signed in.
@@ -88,7 +101,16 @@ export function useInvitationSignUpJoin(redirect: string | null | undefined): In
         const invitation = await getInvitation(id);
         await acceptInvitation(id);
         organizationId = invitation.organizationId;
-      } catch {
+      } catch (err) {
+        // Accepting needs a verified address: hand over to the verification
+        // mail, whose link returns to the accept page, and hold meanwhile.
+        if (isAcceptNeedsVerifiedEmail(err) && redirect) {
+          const sp = new URLSearchParams();
+          if (user?.email) sp.set('email', user.email);
+          sp.set('redirect', redirect);
+          navigate(`/verify-email-prompt?${sp.toString()}`, { replace: true });
+          return;
+        }
         setOutcome({ id, result: 'refused' });
         return;
       }
@@ -97,7 +119,7 @@ export function useInvitationSignUpJoin(redirect: string | null | undefined): In
       await switchOrganization(organizationId).catch(() => undefined);
       setOutcome({ id, result: 'joined' });
     })();
-  }, [applies, invitationId, getInvitation, acceptInvitation, switchOrganization]);
+  }, [applies, invitationId, getInvitation, acceptInvitation, switchOrganization, navigate, redirect, user]);
 
   if (!applies) return 'none';
   return outcome && outcome.id === invitationId ? outcome.result : 'joining';

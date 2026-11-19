@@ -114,6 +114,7 @@ const metadata = await client.meta.getItem('object', 'task');
 | `$orderby` | `sort` | Sort order |
 | `$skip` | `skip` | Pagination offset |
 | `$top` | `top` | Limit records |
+| `$count: false` | `count=false` | Decline the total: the server skips its `count(*)` and the result carries no `total` |
 
 ### Filter Conversion
 

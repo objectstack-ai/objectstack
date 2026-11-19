@@ -1,5 +1,22 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * Action protocol schemas — `ActionSchema`, the `action` metadata type, and the parts it is built from.
+ *
+ * An action is a command a user or an AI agent runs: a button on a record
+ * header, a list row or a list toolbar, or on a page. Its `type` names the
+ * dispatch route — a `script` body or handler, a `url`, a `flow`, an `api`
+ * endpoint, a `modal` or a `form` — and `locations` names the surfaces that
+ * draw it. Declare one with `defineAction`.
+ *
+ * Beside {@link ActionSchema}: {@link ActionParamSchema} (one input of the
+ * param dialog), {@link ActionLocationSchema} (the surfaces),
+ * {@link ActionAiSchema} (how an agent is offered the action),
+ * {@link ActionRefusalSchema} (one entry of the `refusals` catalogue a
+ * `script` body refuses through) and {@link InlineActionSchema} (an action
+ * declared inline on a page element instead of registered by name).
+ */
+
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { FieldType } from '../data/field.zod';
@@ -36,6 +53,23 @@ import {
 } from './action-copy-template';
 import { templateExpressionInput } from '../shared/typed-expression-input';
 import { HookBodySchema } from '../data/hook-body.zod';
+// [#34273] An action's refusal catalogue: the hook catalogue's entry shape,
+// code spelling, literal-throw reading and sentences — import-free leaves.
+// [#34374 PR2] …and its declared texts: the hook texts' entry shape, key
+// spelling, literal `ctx.text` reading and sentences, from the same leaves.
+import { declaredRefusalEntrySchema, declaredTextEntrySchema } from '../data/declared-entry.zod';
+import {
+  HOOK_REFUSAL_CODE_PATTERN,
+  HOOK_TEXT_KEY_PATTERN,
+  actionRefusalsWithoutSandboxedBody,
+  actionTextsWithoutRunnableCode,
+  hookRefusalCodesThrownIn,
+  hookRefusalReasonsThrownIn,
+  hookTextKeysAskedIn,
+  undeclaredActionRefusalCodeAtSave,
+  undeclaredActionRefusalReasonAtSave,
+  undeclaredActionTextKeyAtSave,
+} from '../data/hook-refusal-codes';
 // [#25653] Import-free leaf, shared with `HookSchema`: the identity-assignment
 // set, the body-source reading and the refusal text.
 import {
@@ -835,12 +869,94 @@ const ACTION_HISTORY =
  * and `preflight.fields` share, so the param dialog's preflight panel and the
  * one-shot result dialog draw from one vocabulary. The renderer contract of
  * each member is on `resultDialog`.
+ *
+ * `table` is a FIELD format only: it needs the field's own `columns`, so the
+ * dialog-level default and a column's cell take {@link actionAnswerScalarFormat},
+ * the set derived from this one with `table` excluded (#34391).
  */
-const ACTION_ANSWER_FIELD_FORMATS = ['qrcode', 'code-list', 'secret', 'text', 'json'] as const;
+const ACTION_ANSWER_FIELD_FORMATS = ['qrcode', 'code-list', 'secret', 'text', 'json', 'table'] as const;
+
+const ActionAnswerFieldFormatSchema = z.enum(ACTION_ANSWER_FIELD_FORMATS);
+
+/**
+ * The field set minus `table`: the formats of `resultDialog.format` (a default
+ * carries no `columns`) and of a table column's cell (a table does not nest).
+ * Derived with `.exclude`, never a second hand-written list, so a format added
+ * to the field set reaches both. `tableRefusal` is the message the slot answers
+ * for `table`; every other value keeps the generic enum refusal.
+ */
+function actionAnswerScalarFormat(tableRefusal: string) {
+  return ActionAnswerFieldFormatSchema.exclude(['table'], {
+    error: (issue) => (issue.input === 'table' ? tableRefusal : undefined),
+  });
+}
+
+/**
+ * One column of a `table` field: a dot `path` into ONE element of the array,
+ * an optional header `label`, an optional cell `format`. It reuses the field
+ * row's alias map where it applies.
+ */
+const ActionAnswerTableColumnSchema = strictObject({
+  surface: 'this table column',
+  history: ACTION_HISTORY,
+  aliases: { key: 'path', field: 'path', name: 'path', title: 'label', display: 'format', render: 'format' },
+}, {
+  path: z.string().describe('Dot path into one element of the array (e.g. "email", "result.reason").'),
+  label: I18nLabelSchema.optional().describe('Column header. Omitted, the header is the column `path`.'),
+  format: actionAnswerScalarFormat(
+    '`table` is a field format, not a cell format: a cell draws one value of one row, and a table does not '
+    + 'nest. Drop `format` (a cell value that does not fit its format, an object or an array included, draws as compact JSON text), or '
+    + "write `format: 'json'`.",
+  ).optional().describe('Cell format: the field formats minus `table`; omitted, `text`. A value that does not fit the cell\'s format, whatever it is (an object or an array under `text`, a number under `secret`), draws as compact JSON text; a missing or `null` value draws an empty cell. Inside a cell, `text` and `code-list` draw the value alone with no copy control, while `secret` keeps its mask, reveal and copy and `qrcode` keeps its code and copy.'),
+});
+
+/**
+ * [#34391] The cross-key refusals of one answer row — `columns` belongs to
+ * `format: 'table'` and to nothing else, both ways round:
+ *
+ *  1. `columns` beside any other `format` (or none — the dialog-level default
+ *     is never `table`) would parse clean and never be read.
+ *  2. `format: 'table'` without `columns` is refused, NOT defaulted to the
+ *     element's keys: the column list is the contract the console draws
+ *     exactly, and guessing keys out of a JSON array is the consumer dialect
+ *     Prime Directive 12 forbids. An empty list draws no column, so it is
+ *     refused too.
+ */
+function refuseTableColumnContradictions(
+  row: { format?: string; columns?: unknown[] },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (row.format === 'table') {
+    if (row.columns === undefined || row.columns.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['columns'],
+        message:
+          "`format: 'table'` draws each element of the array at `path` as one row, and needs `columns` to "
+          + 'say which values of an element are its cells, in order: the console draws exactly the listed '
+          + "columns and never guesses them from the element's keys. Add `columns: [{ path, label }]`, one "
+          + 'entry per cell.',
+      });
+    }
+    return;
+  }
+  if (row.columns !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['columns'],
+      message:
+        "`columns` lists the cells of a `format: 'table'` field, and this field's format is "
+        + (row.format === undefined ? 'not `table` (the dialog-level default is never `table`)' : `\`${row.format}\``)
+        + ', so the list would parse clean and never be read. Write '
+        + "`format: 'table'` on this field to draw the array as rows, or drop `columns`.",
+    });
+  }
+}
 
 /**
  * One row of the fields an action shows from a server answer: a dot `path`
- * into the answer, an optional `label`, an optional `format` override.
+ * into the answer, an optional `label`, an optional `format` override, and —
+ * for `format: 'table'` only — its `columns`.
  * `resultDialog.fields` and `preflight.fields` are built from this one row
  * (#31840), so the row's keys, aliases and format set cannot drift between
  * them; each caller names its own surface and what `path` is read against.
@@ -853,8 +969,9 @@ function actionAnswerFieldRow(surface: string, pathDescription: string) {
   }, {
     path: z.string().describe(pathDescription),
     label: I18nLabelSchema.optional(),
-    format: z.enum(ACTION_ANSWER_FIELD_FORMATS).optional().describe('Per-field format override.'),
-  });
+    format: ActionAnswerFieldFormatSchema.optional().describe('Per-field format override. `table` draws an array as rows and requires `columns`.'),
+    columns: z.array(ActionAnswerTableColumnSchema).optional().describe("The cells of a `format: 'table'` field, in order: `[{ path, label?, format? }]`, `path` read in ONE element of the array. Required by `table` (never guessed from the element's keys) and refused beside any other format."),
+  }).superRefine(refuseTableColumnContradictions);
 }
 
 export const ActionAiSchema = strictObject({
@@ -1377,6 +1494,109 @@ const actionObject = () => strictObject({
   ),
 
   /**
+   * The action's refusal catalogue (#34273) — the twin of
+   * `HookSchema.refusals` (#26170, ruling 6431311681 letter A; #33214,
+   * ruling 6879477573), entry for entry: every refusal the action's body may
+   * throw, keyed by the code it throws.
+   *
+   *   refusals: {
+   *     SIGN_IN_REQUIRED: { message: 'Sign in to rate this article.', status: 401 },
+   *     STAGE_LOCKED: {
+   *       message: 'This stage change is not allowed.',
+   *       params: ['stage'],
+   *       reasons: { closed: { message: 'A {{ stage }} opportunity can no longer change stage.' } },
+   *     },
+   *   }
+   *
+   * The body refuses by code only — it throws an error carrying a declared
+   * `code`, optionally a declared `reason` and the `params` its sentence
+   * names — and the runtime answers with that entry: its `message` (or the
+   * reason's), translated in the caller's locale with the declared sentence
+   * as the fallback, its holes filled from `params`, marked as the end user's
+   * sentence (`userMessage`), and its `status`. The translation sits beside
+   * the action's other copy: `objects.<object>._actions.<action>.refusals.<CODE>.message`
+   * (`….reasons.<REASON>.message`), or `globalActions.<action>.refusals.…` for
+   * an object-less action — the address every action translation is read at.
+   *
+   * A code the catalogue does not declare, a reason a code with `reasons`
+   * does not declare, or a throw with no code, is refused loudly: at save
+   * where the body's source names it literally, otherwise when it runs, as a
+   * fault naming the action and the code. An error a host call raised and
+   * the body let through unchanged (a `ctx.api` write refused by the engine,
+   * a hook's refusal under it) passes through as before, and so does a crash.
+   *
+   * Answered where an action runs code of its own: a `type: 'script'`
+   * action's sandboxed `js` body — which is also what `os build` lowers an
+   * inline `target` function to. Refused on every other action: another
+   * `type` (its `target` is a URL, page, flow or endpoint), an `expression`
+   * body, or no body. Absent: the action's throws are answered as they
+   * always were.
+   */
+  refusals: z.record(
+    z.string().regex(HOOK_REFUSAL_CODE_PATTERN, {
+      message: 'A refusal code is SCREAMING_SNAKE (e.g. SIGN_IN_REQUIRED) — the error code the body throws',
+    }),
+    ActionRefusalSchema,
+  ).optional().describe(
+    'Refusal catalogue keyed by the SCREAMING_SNAKE code the action\'s js body throws: { message, status?, reasons?, '
+    + 'params? }. The body refuses by code only, optionally with a declared reason and params; the runtime answers with '
+    + 'the declared message (translated through objects.<object>._actions.<action>.refusals.<CODE>.message, or '
+    + 'globalActions.<action>.refusals.<CODE>.message for an object-less action, ….reasons.<REASON>.message for a '
+    + 'reason, in the caller\'s locale, holes filled from params) and status. A code not declared here, or a reason a '
+    + 'code with reasons does not declare, is refused loudly — at save when the body throws it literally, otherwise at '
+    + 'run time. Only a type: \'script\' action with a js body declares one',
+  ),
+
+  /**
+   * The action's declared texts (#34374 PR2, ruling 6913660232 parameter 7) —
+   * the twin of `HookSchema.texts`: every sentence the action's body writes
+   * into a record for people to read, keyed by a snake_case key the body asks
+   * for.
+   *
+   *   texts: {
+   *     email_subject: { message: 'Email: {{ subject }}', params: ['subject'] },
+   *   }
+   *
+   *   await ctx.api.object('crm_activity').insert({ subject: await ctx.text('email_subject', { subject }) });
+   *
+   * `ctx.text(key, params?)` answers the sentence in the ORGANIZATION's
+   * language, never the caller's (parameter 2): the Localization setting when
+   * somebody set it, else the app's `i18n.defaultLocale` (parameter 3, the
+   * one shared reader a hook text and the flow record write read). It picks
+   * the translation beside the action's other copy first —
+   * `objects.<object>._actions.<action>.texts.<key>.message`, or
+   * `globalActions.<action>.texts.<key>.message` for an object-less action —
+   * and fills the `{{ }}` holes from `params` after (parameter 1). With no
+   * translation, or no language, the declared sentence is answered and the
+   * action goes on (parameter 5). A Localization setting that cannot be READ
+   * rejects the call. A string the body builds itself is written as it is
+   * (parameter 4).
+   *
+   * A key the body asks for literally that `texts` does not declare is
+   * refused at save; any other undeclared key is refused when the action
+   * runs, as a fault naming the action and the key. Served where an action
+   * runs code of its own: a `type: 'script'` action's sandboxed `js` body —
+   * which is also what `os build` lowers an inline `target` function to.
+   * Refused on every other action: another `type` (its `target` is a URL,
+   * page, flow or endpoint), an `expression` body, or no body. Absent:
+   * `ctx.text` has nothing to answer.
+   */
+  texts: z.record(
+    z.string().regex(HOOK_TEXT_KEY_PATTERN, {
+      message: 'A text key is snake_case (e.g. email_subject) — the key the action\'s body asks for with ctx.text',
+    }),
+    ActionTextSchema,
+  ).optional().describe(
+    'Texts the action\'s js body writes into records, keyed by the snake_case key it asks for with ctx.text(KEY, '
+    + 'params): { message, params? }. ctx.text answers the sentence in the organization\'s language (the Localization '
+    + 'setting when somebody set it, else the app\'s i18n.defaultLocale), translated through '
+    + 'objects.<object>._actions.<action>.texts.<key>.message (globalActions.<action>.texts.<key>.message for an '
+    + 'object-less action) with the declared message as the fallback, its holes filled from params. A key not declared '
+    + 'here is refused — at save when the body asks for it literally, otherwise at run time. Only a type: \'script\' '
+    + 'action with a js body declares one',
+  ),
+
+  /**
    * The declarative single-record field write — the row-level counterpart of
    * a list view's `bulkActionDefs` `{ operation: 'update', patch }` (#14092,
    * maintainer ruling 2026-09-01), spelled with the same words on purpose:
@@ -1722,6 +1942,29 @@ const actionObject = () => strictObject({
    *   toggle and copy button.
    * - `text` — plain text with copy.
    * - `json` — pretty-printed JSON in a monospace block.
+   * - `table` (#34391) — value must be an array; each element is one row and
+   *   each entry of the field's `columns` one cell, in `columns` order. The
+   *   header of a column is its `label`, falling back to its `path`. A cell
+   *   reads the column's dot `path` in the element; a missing value (the
+   *   path resolves to `undefined`) and a `null` draw an empty cell. A
+   *   present value draws in the column's `format` (omitted: `text`) when it
+   *   fits that format the way a field's value must: `qrcode`, `secret` and
+   *   `text` take a string, `code-list` an array of strings. Any value that
+   *   does not fit, whatever the column's format (an object or an array under
+   *   the omitted `text`, a number under `secret`), draws as compact JSON
+   *   text, which is also how `json` draws in a cell. Inside a cell, `text`
+   *   and `code-list` draw the value alone with no copy control, while
+   *   `secret` keeps its mask, reveal and copy and `qrcode` keeps its code
+   *   and copy. An element that is not
+   *   a plain object (an array, `null` or a scalar) has no paths to read: its
+   *   row draws the element itself as compact JSON text in the first cell and
+   *   leaves the other cells empty. `[]` draws the header
+   *   row over an empty-state line. A field value that is missing is skipped
+   *   like any other field's, and one that is not an array draws as `json`,
+   *   as `code-list` does.
+   *   `table` is a field format only: it requires `columns` (never guessed
+   *   from the element's keys), `columns` is refused beside any other format,
+   *   and neither the dialog-level `format` nor a cell takes `table`.
    *
    * The dialog SHOULD set `refreshAfter` to true on close (separate from
    * the existing `refreshAfter` flag, which fires immediately on success).
@@ -1734,11 +1977,15 @@ const actionObject = () => strictObject({
     title: I18nLabelSchema.optional(),
     description: I18nLabelSchema.optional(),
     acknowledge: I18nLabelSchema.optional().describe('Acknowledge button label, e.g. "I have saved this"'),
-    format: z.enum(ACTION_ANSWER_FIELD_FORMATS).optional().describe('Default format for fields without their own format. Defaults to json when omitted.'),
+    format: actionAnswerScalarFormat(
+      "`table` is a per-field format only: the dialog-level `format` is the default for fields without "
+      + 'their own, and a default carries no `columns`. Write `format: \'table\'` with its `columns` on the '
+      + 'field that holds the array.',
+    ).optional().describe('Default format for fields without their own format: any field format but `table`, which needs the field\'s own `columns`. Defaults to json when omitted.'),
     fields: z.array(actionAnswerFieldRow(
       'this result dialog field',
       'Dot path into result.data (e.g. "totpURI", "client.client_secret").',
-    )).optional().describe('Which fields from result.data to render. Omit to dump full JSON.'),
+    )).optional().describe('Which fields from result.data to render. Omit to dump full JSON. A field with `format: \'table\'` draws an array of objects as rows, one cell per entry of its `columns`, in order; the columns are never guessed from the elements\' keys.'),
   }).optional().describe('Render API response in a one-shot reveal dialog (suppresses successMessage when set).'),
   /**
    * [#31840] Preflight read — one same-origin `GET` the param dialog sends
@@ -1852,7 +2099,7 @@ const actionObject = () => strictObject({
     fields: z.array(actionAnswerFieldRow(
       'this preflight field',
       'Dot path into the selected answer (e.g. "findings", "verdict.summary").',
-    )).optional().describe('Which values of the selected answer the panel shows, in `resultDialog.fields`\' row and format set. Omit to show the selected answer as JSON.'),
+    )).optional().describe('Which values of the selected answer the panel shows, in `resultDialog.fields`\' row and format set — `table` and its `columns` included, drawn by the same renderer contract. Omit to show the selected answer as JSON.'),
     seed: z.array(strictObject({
       surface: 'this preflight seed',
       history: ACTION_HISTORY,
@@ -2381,6 +2628,110 @@ function refuseUnopenableOnSuccessNavigate(
 }
 
 /**
+ * [#34273] One entry of an action's refusal catalogue (`ActionSchema.refusals`):
+ * the sentence the user reads when the action's body throws the entry's code,
+ * and the status the refusal is answered with. The same entry a hook's
+ * catalogue holds (`HookRefusalSchema`), built by the one factory so the two
+ * cannot drift; only its words name the action and its translation address.
+ */
+export const ActionRefusalSchema = declaredRefusalEntrySchema('action');
+
+export type ActionRefusal = z.input<typeof ActionRefusalSchema>;
+
+/**
+ * [#34374 PR2] One declared text of an action (`ActionSchema.texts`): a
+ * sentence the action's body writes into a record for people to read, picked
+ * in the ORGANIZATION's language when the body asks for it
+ * (`ctx.text(key, params)`). The same entry a hook's texts hold
+ * (`HookTextSchema`), built by the one factory so the two cannot drift; only
+ * its words name the action and its translation address. With `params`, a
+ * hole over an undeclared name is refused at parse; a hole holding logic, an
+ * unknown formatter, an empty hole and a `currency` formatter with no code
+ * are refused where the text is compiled (`@objectstack/lint`
+ * `validate-hook-refusal-templates.ts`).
+ */
+export const ActionTextSchema = declaredTextEntrySchema('action');
+
+export type ActionText = z.input<typeof ActionTextSchema>;
+
+/**
+ * [#34374 PR2] The object-level check on an action's `texts`, the twin of
+ * `HookSchema`'s: `texts` nothing the action runs could ask for is refused at
+ * `texts`, and a key the body's source asks for literally
+ * (`ctx.text('key')`) that `texts` does not declare is refused at
+ * `body.source`, one issue each. A key that arrives any other way is the
+ * run-time refusal's.
+ */
+function refuseUndeclaredLiteralActionTextKey(
+  data: {
+    type?: string;
+    body?: { language?: string; source?: unknown };
+    texts?: Record<string, unknown>;
+  },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (!data.texts) return;
+  const type = data.type ?? 'script';
+  if (type !== 'script' || data.body?.language !== 'js') {
+    ctx.addIssue({ code: 'custom', path: ['texts'], message: actionTextsWithoutRunnableCode(type, data.body?.language) });
+    return;
+  }
+  const source = data.body.source;
+  if (typeof source !== 'string') return;
+  const declared = Object.keys(data.texts);
+  for (const key of hookTextKeysAskedIn(source)) {
+    if (Object.prototype.hasOwnProperty.call(data.texts, key)) continue;
+    ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: undeclaredActionTextKeyAtSave(key, declared) });
+  }
+}
+
+/**
+ * [#34273] The object-level check on an action's `refusals`, the twin of
+ * `HookSchema`'s: a catalogue nothing the action runs could answer is
+ * refused at `refusals`, and a code (or a reason under a code that declares
+ * `reasons`) the body's source throws literally that the catalogue does not
+ * declare is refused at `body.source`, one issue each. A code that arrives any
+ * other way is the run-time refusal's.
+ */
+function refuseUndeclaredLiteralActionRefusalCode(
+  data: {
+    type?: string;
+    body?: { language?: string; source?: unknown };
+    refusals?: Record<string, { reasons?: Record<string, unknown> } | undefined>;
+  },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (!data.refusals) return;
+  const type = data.type ?? 'script';
+  if (type !== 'script' || data.body?.language !== 'js') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['refusals'],
+      message: actionRefusalsWithoutSandboxedBody(type, data.body?.language),
+    });
+    return;
+  }
+  const source = data.body.source;
+  if (typeof source !== 'string') return;
+  const declared = Object.keys(data.refusals);
+  for (const code of hookRefusalCodesThrownIn(source)) {
+    if (Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
+    ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: undeclaredActionRefusalCodeAtSave(code, declared) });
+  }
+  for (const { code, reason } of hookRefusalReasonsThrownIn(source)) {
+    if (!Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
+    // Read only under a code that declares `reasons`, as on a hook.
+    const reasons = data.refusals[code]?.reasons;
+    if (!reasons || Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['body', 'source'],
+      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons)),
+    });
+  }
+}
+
+/**
  * [#25653, ruling record 6384657105 letter A] App-authored automation does not
  * use elevation to write the four identity-assignment objects, and an action
  * body always runs as system (`buildActionExecutionContext`, runtime). The data
@@ -2892,6 +3243,8 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }).superRefine(refuseDeclarativeUpdateContradictions(ACTION_DECLARATIVE_UPDATE))
   .superRefine(refuseInertOutcomeMessages)
   .superRefine(refuseIdentityAssignmentBodyWrite)
+  .superRefine(refuseUndeclaredLiteralActionRefusalCode)
+  .superRefine(refuseUndeclaredLiteralActionTextKey)
   .superRefine(refusePreflightContradictions)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final

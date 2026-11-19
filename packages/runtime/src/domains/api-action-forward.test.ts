@@ -51,6 +51,7 @@ import { FORWARD_CREDENTIAL_HEADER, redeemForwardCredential } from '@objectstack
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { ActionActivationProjection } from '@objectstack/objectql';
 import { apiKeyManagementCredentialRefusal, API_KEY_MANAGEMENT_SESSION_REQUIRED_MESSAGE } from '@objectstack/core';
+import { SysUser } from '@objectstack/platform-objects/identity';
 
 const OBJECT = 'crm_lead';
 const BAN_LEAD = {
@@ -1051,6 +1052,15 @@ describe('[#28943] an API-key caller is never offered a `sys_api_key` write as r
     };
     const CASE_OBJECT = { name: 'crm_case', actions: [CLOSE_CASE] };
     const bootWithKeys = (opts: Parameters<typeof boot>[0] = {}) => boot({ ...opts, extraObjects: [API_KEY_OBJECT, CASE_OBJECT] });
+    /**
+     * [#33690] The same forward with no confirmation declared: the MCP door
+     * hands a declared-gated action to the person before anything is forwarded,
+     * so the forward's own guard is reached at MCP only on this twin.
+     */
+    const UNGATED_API_KEY_OBJECT = {
+        name: 'sys_api_key', actions: [{ ...REVOKE_API_KEY, ai: { ...REVOKE_API_KEY.ai, requiresConfirmation: false } }],
+    };
+    const bootUngatedKeys = (opts: Parameters<typeof boot>[0] = {}) => boot({ ...opts, extraObjects: [UNGATED_API_KEY_OBJECT, CASE_OBJECT] });
 
     const KEY_CTX = (): HttpProtocolContext => {
         const ctx: any = CTX({ 'x-api-key': 'osk_member_key' });
@@ -1097,11 +1107,17 @@ describe('[#28943] an API-key caller is never offered a `sys_api_key` write as r
         const h = bootWithKeys();
         const listed = await listFor(h, KEY_CTX());
 
-        const thrown = await runViaMcp(h, KEY_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
+        // [#33690] Declared-gated: held for the person before the forward, so no guard is reached.
+        const held = await runViaMcp(h, KEY_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
+        expect(held).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details: { reason: 'no_confirmation_service' } });
+
+        const ungated = bootUngatedKeys();
+        const thrown = await runViaMcp(ungated, KEY_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
         expect(thrown).toBeInstanceOf(Error);
         expect((thrown as any).status).toBe(403);
         expect((thrown as any).code).toBe(listed[REVOKE_API_KEY.name].unavailable.code);
         expect(String(thrown.message)).toBe(listed[REVOKE_API_KEY.name].unavailable.reason);
+        expect(ungated.request).not.toHaveBeenCalled();
 
         const res = await h.dispatcher.handleActions(`/sys_api_key/${REVOKE_API_KEY.name}`, 'POST', { recordId: 'key_1' }, KEY_CTX());
         expect(statusOf(res)).toBe(403);
@@ -1118,12 +1134,18 @@ describe('[#28943] an API-key caller is never offered a `sys_api_key` write as r
         expect(listed[REVOKE_API_KEY.name]).toBeDefined();
         expect(listed[REVOKE_API_KEY.name].unavailable).toBeUndefined();
 
-        const result: any = await runViaMcp(h, SESSION_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1');
+        // [#33690] Declared-gated: the caller's `confirm: true` does not run it at MCP.
+        const held = await runViaMcp(h, SESSION_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1').catch((e) => e);
+        expect(held).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details: { reason: 'no_confirmation_service' } });
+        expect(h.injected).toHaveLength(0);
+
+        const u = bootUngatedKeys({ answer: { body: { success: true, data: { id: 'key_1', revoked: true } } } });
+        const result: any = await runViaMcp(u, SESSION_CTX(), 'sys_api_key', REVOKE_API_KEY.name, 'key_1');
         expect(result.ok).toBe(true);
-        expect(h.injected).toHaveLength(1);
-        expect(h.injected[0].url).toBe('http://app.example.test/api/v1/data/sys_api_key/key_1');
-        expect(h.injected[0].init.method).toBe('PATCH');
-        expect(JSON.parse(String(h.injected[0].init.body))).toMatchObject({ revoked: true });
+        expect(u.injected).toHaveLength(1);
+        expect(u.injected[0].url).toBe('http://app.example.test/api/v1/data/sys_api_key/key_1');
+        expect(u.injected[0].init.method).toBe('PATCH');
+        expect(JSON.parse(String(u.injected[0].init.body))).toMatchObject({ revoked: true });
     });
 
     it('control: the same data-door write on an object no rule guards stays runnable under an API key', async () => {
@@ -1807,5 +1829,38 @@ describe('[#29881] a per-record api action is refused at the door with no record
             expect(refused).not.toHaveProperty('path');
         }
         expect(buildApiActionRequest(RECALC_ONE, { recordId: 'r1', params: {}, ec })).toEqual({ method: 'POST', path: '/api/v1/apps/showcase/recalc', body: { recordId: 'r1' } });
+    });
+});
+
+// [#34912] The stamp stays generic. The SSO-user doors (plugin-auth
+// `pending-sso-users.ts`) admit the `organizationId` this builder stamps on
+// every `/api/v1/auth/` target, when it equals the caller's session
+// organization; the builder is not taught which doors take it. CONTROL: the
+// declared SSO-user actions are stamped with the caller's organization, and
+// so is another identity route (Ban User), exactly as before.
+describe('[#34912] buildApiActionRequest stamps the caller organization on every identity route, the SSO-user doors included', () => {
+    const declared = (name: string) => {
+        const action = (SysUser.actions ?? []).find((a) => a.name === name);
+        if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+        return action;
+    };
+    const ec = { userId: 'u_admin', tenantId: 'org_session' };
+
+    it('Import Users and Add User forward the caller organization as organizationId', () => {
+        const imported = buildApiActionRequest(declared('import_sso_users'), { params: { csv: 'email\na@example.com\n' }, ec });
+        expect(imported).toEqual({
+            method: 'POST', path: '/api/v1/auth/admin/import-sso-users',
+            body: { csv: 'email\na@example.com\n', organizationId: 'org_session' },
+        });
+        const added = buildApiActionRequest(declared('add_sso_user'), { params: { email: 'b@example.com' }, ec });
+        expect((added as any).body).toEqual({ email: 'b@example.com', organizationId: 'org_session' });
+    });
+
+    it('CONTROL: another identity route keeps the stamp, and no organization means no stamp', () => {
+        const ban = buildApiActionRequest(declared('ban_user'), { recordId: 'u_target', record: { id: 'u_target' }, params: {}, ec });
+        expect((ban as any).path).toBe('/api/v1/auth/admin/ban-user');
+        expect((ban as any).body).toMatchObject({ userId: 'u_target', organizationId: 'org_session' });
+        const none = buildApiActionRequest(declared('import_sso_users'), { params: { csv: 'x' }, ec: { userId: 'u_admin' } });
+        expect((none as any).body).toEqual({ csv: 'x' });
     });
 });

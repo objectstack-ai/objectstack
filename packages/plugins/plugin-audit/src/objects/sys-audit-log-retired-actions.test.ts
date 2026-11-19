@@ -143,6 +143,13 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + '`audit` slot, called by rest/src/analytics-routes.ts (POST /analytics/dataset/query and each query of '
       + 'its batch door) once per saved-dataset query that reached the read, for the opted-in datasets (#31797)',
   ],
+  [
+    'scim_manager_unresolved',
+    'plugin-audit/src/scim-refusal-audit.ts — recordScimManagerUnresolved on the `audit` slot; called by '
+      + 'plugin-auth/src/auth-manager-request-routing.ts (handleRequest, the SCIM arm) through '
+      + 'plugin-auth/src/scim-manager-projection.ts for a served user write whose manager reference named no '
+      + 'User, at the operator warn\'s rate (#33918)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */

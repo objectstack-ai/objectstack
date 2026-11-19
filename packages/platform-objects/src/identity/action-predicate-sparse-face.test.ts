@@ -106,6 +106,9 @@ function sourceOf(raw: unknown): string | undefined {
 const FEATURES = {
   organization: true, multiOrgEnabled: true, twoFactor: true,
   oidcProvider: true, admin: true, phoneNumber: true, apiKey: true, sso: true,
+  // The one hide-when-on flag the swept actions read: off is its "on" here,
+  // the setting that leaves the record half reachable.
+  cloudManaged: false,
 };
 
 /** Evaluate through the canonical engine; a fault is reported, never thrown. */

@@ -273,6 +273,10 @@ export interface StudioSavedDraft {
  * saved meanwhile gets its own. Called only once the save has landed: a
  * refused save keeps its refusal strip and says nothing about saving, and a
  * conflict the author settled by reloading saved nothing.
+ *
+ * objectstack#34818 — the flow pillar no longer calls it: a flow's landed
+ * autosave says 已保存 in the flow's own title row, read aloud with the flow's
+ * name, and only a failed save raises a toast there (seat ruling 6954475081).
  */
 export function announceDraftSaved(saved: StudioSavedDraft, label: string, locale: string): void {
   toast.success(tFormat('engine.studio.draftSaved', locale, { item: label || saved.name }), {

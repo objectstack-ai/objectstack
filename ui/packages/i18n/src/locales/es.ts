@@ -196,6 +196,8 @@ const es = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Complete los campos del formulario y luego envíe o cancele.",
+    sectionNav: "Secciones del formulario",
+    sectionNavErrors: "Campos por corregir: {{number}}",
     deniedDescription: "No tienes permiso para editar este campo.",
     serverDefaultHint: "Se establece automáticamente al guardar.",
     requiredForAction: "Obligatorio para ejecutar «{{action}}».",
@@ -558,6 +560,7 @@ const es = {
       succeeded: "Correctos {{count}} / {{total}}",
       resultFailed: " · Fallidos {{count}}",
       succeededRecords: "Registros correctos",
+      aggregateNotCompleted: "La acción no se completó para los registros seleccionados. Es posible que algunos registros ya se hayan modificado; al cerrar, la lista muestra sus valores actuales.",
       retry: "Reintentar",
       downloadErrorCsv: "Descargar CSV de errores",
       cancel: "Cancelar",
@@ -595,6 +598,7 @@ const es = {
         "Esta vista está agrupada, pero su origen de datos no implementa queryGroupHeaders, por lo que no se pueden contar los grupos. Quite la agrupación para mostrar los registros.",
       needsWholeRows:
         "La agrupación necesita todos los registros, pero esta cuadrícula recibió solo una página de ellos, por lo que no se pueden contar los grupos. Entregue todos los registros o deje que la cuadrícula los obtenga de un origen de datos que implemente queryGroupHeaders.",
+      draftOnly: "No agrupado por {{fields}}: solo existe en el borrador hasta que publique.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -961,6 +965,8 @@ const es = {
     removeGroup: "Eliminar",
     groupingUnstoredNotice: "Esta lista no se puede agrupar por {{fields}}: su valor se calcula al mostrarse y no se almacena. La lista se muestra sin esa agrupación.",
     groupingUnstoredRemove: "Quitar de la agrupación",
+    draftOnlyQueryDropped: "Sin filtrar ni ordenar por {{fields}}: solo existe en el borrador hasta que publiques.",
+    withheldFieldsLeftOut: "Sin mostrar, filtrar, ordenar ni agrupar por {{fields}}: el paquete que lo añade está desactivado. Vuelve cuando se activa el paquete.",
     inlineEditShort: "Edición en línea",
     inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
   },
@@ -1418,6 +1424,8 @@ const es = {
     writeStrippedUnknownReason: "No aplicado por el servidor: {{fields}}",
     approvalPendingEditable: "En aprobación · editable",
     approvalPendingTooltip: "Este registro tiene una solicitud de aprobación pendiente; este paso todavía permite la edición",
+    approvalPending: "En aprobación",
+    approvalPendingNotEditableTooltip: "Este registro tiene una solicitud de aprobación pendiente",
     approvalProgress: "Aprobaciones — {{got}} de {{need}}",
     approvalProgressGroups: "Firmas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progreso de la aprobación",
@@ -1609,7 +1617,6 @@ const es = {
     widgetForbiddenMessage: "No tienes permiso para ver los datos de este widget.",
     allWidgetsForbiddenMessage: "No tienes permiso para ver los datos de este panel.",
     details: "Detalles",
-    exportCsv: "Exportar CSV",
     openInList: "Abrir en la lista",
     filters: {
       label: "Filtros del panel",
@@ -1639,6 +1646,9 @@ const es = {
     },
     total: "Total",
     noDataSourceFor: "Sin fuente de datos para",
+    drillTooMany: 'Hay demasiados registros relacionados con este valor para mostrarlos aquí. Acota los filtros del panel e inténtalo de nuevo.',
+    drillUnavailable: 'Los registros de este valor no se pueden mostrar desde aquí.',
+    drillFailed: 'No se pudieron cargar los registros de este valor. Inténtalo de nuevo más tarde.',
     config: {
       breadcrumb: {
         dashboard: "Panel de control",
@@ -1972,10 +1982,24 @@ const es = {
       },
       passwordsNote: "Contraseñas temporales — se muestran una sola vez y nunca se almacenan. Guárdelas ahora; cada usuario debe cambiar la suya en el primer inicio de sesión.",
       passwordsMore: "Se han omitido más entradas — use la descarga.",
+      positionsHint: "Puestos: asigne una columna con nombres de máquina de puestos, varios separados por «;». Cada uno se asigna como en Setup; un nombre que no existe o que usted no puede asignar se informa en su fila, y el usuario se crea igualmente.",
+      managerHint: "Responsable: asigne una columna con el responsable de cada usuario, por dirección de correo (o número de teléfono si el inicio de sesión por teléfono está activo). Los responsables se vinculan cuando todas las filas están dentro, así que cuenta también uno que aparece más abajo en el archivo; un responsable que no se encuentra o no se puede vincular se informa en su fila, y el usuario se crea igualmente.",
       passwordsDownload: "Descargar CSV",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        publishFromBar_one: '{{count}} cambio sin publicar. Publícalo desde la barra del borrador de arriba.',
+        publishFromBar_many: '{{count}} de cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        publishFromBar_other: '{{count}} cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        showDraftToPublish: '{{count}} cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraftToPublish_one: '{{count}} cambio sin publicar. Muestra el borrador para revisarlo y publicarlo.',
+        showDraftToPublish_many: '{{count}} de cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraftToPublish_other: '{{count}} cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraft: 'Mostrar borrador',
+        receipt: 'Publicado. Tus cambios ya están activos.',
+        dismissReceipt: 'Cerrar',
         count: "{{count}} cambio(s) aún no se han publicado — los usuarios no pueden verlos.",
         publish: "Publicar",
         published: "Todos los cambios pendientes están activos.",
@@ -2073,6 +2097,9 @@ const es = {
           title: "Editando «{{app}}»",
           titleGeneric: "Editar esta aplicación",
           description: "¿Qué desea cambiar? Modifico esta aplicación sobre la marcha — añadir un campo, un objeto, una vista o un panel, o ajustar lo que ya existe.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Pregunta por los datos de esta app —recuentos, listas y resúmenes— o dime qué cambiar y modificaré la app al momento: un campo, un objeto, una vista o un panel.",
         },
       },
       clearConversation: "Borrar",
@@ -2218,7 +2245,7 @@ const es = {
       changesApplied: "Aplicado",
       changesDrafted: "Guardado como borrador",
       changesFailed: "No aplicado",
-      discussing: "Tratando: {{target}}",
+      discussing: "Viendo: {{target}}",
       changeVerb: {
         createObject: "Crear objeto",
         addField: "Añadir campo",
@@ -2266,11 +2293,16 @@ const es = {
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
-        title: "Asistente",
+        title: "Asistente de IA",
         description: "Chat con el asistente de IA",
         resize: "Redimensionar el chat",
         collapse: "Contraer el chat",
         maximize: "Abrir como página completa",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Historial",
+        backToChat: "Volver al chat",
+        expand: "Expandir",
+        restore: "Restaurar panel lateral",
         open: "Abrir el asistente",
         planAwaitingApproval: "Un plan propuesto espera su aprobación",
       },
@@ -2319,6 +2351,9 @@ const es = {
       fieldErrorsToast_many: "{{count}} de ajustes requieren atención: {{settings}}",
       fieldErrorsToast_other: "{{count}} ajustes requieren atención: {{settings}}",
       cryptoRefusalTitle: "Esta instalación no puede cifrar secretos",
+      platformManagedTitle: "Gestionado por la plataforma",
+      platformManagedBody: "La plataforma de alojamiento proporciona y configura esto para este entorno, por lo que no se ajusta aquí.",
+      aiProviderManaged: "El proveedor de IA, su modelo y sus credenciales los gestiona la plataforma.",
       cryptoRefusalSubjectSuffix: "está declarado como cifrado, por lo que no se escribió nada.",
       cryptoRefusalNoSubject: "El valor declarado como cifrado fue rechazado, por lo que no se escribió nada.",
       cryptoRefusalToast: "No se pueden cifrar los secretos: {{subject}}",
@@ -2371,6 +2406,7 @@ const es = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que confirme.",
       organizationName: {
         title: "Asigne un nombre a su organización",
@@ -2417,6 +2453,8 @@ const es = {
         done: 'Tienes conectado un asistente de IA o una clave de API.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Añade tu primera aplicación', todo: 'Aún no tienes una aplicación propia. Instala una desde el marketplace o crea una, y aparecerá en Inicio.', done: 'Ya tienes una aplicación propia en Inicio.' },
+      firstRecord: { title: 'Añade tu primer registro', todo: 'Nadie ha creado todavía un registro en tus aplicaciones.', done: 'Se ha creado un registro en tus aplicaciones.', action: 'Abrir aplicación' },
     },
     error: {
       connectionFailed: "No se puede conectar al servidor",
@@ -2555,8 +2593,16 @@ const es = {
       },
       viewTypeTree: "Árbol",
       viewTypeTreeDesc: "Anida los registros autorreferenciados en una jerarquía mediante un campo principal.",
+      viewTypeTimesheet: "Hoja de horas",
+      viewTypeTimesheetDesc: "Introduce un número por fila y día de la semana; cada celda rellena es un registro.",
       parentField: "Campo principal",
       parentFieldHelp: "El campo que apunta al registro principal (mismo objeto) y define la jerarquía. Solo son válidos los campos autorreferenciados.",
+      timesheetRowField: "Campo de fila",
+      timesheetRowFieldHelp: "Cada fila de la cuadrícula es un valor de este campo, como un proyecto.",
+      timesheetDateField: "Campo de fecha",
+      timesheetDateFieldHelp: "Los registros se colocan en el día de la semana de esta fecha.",
+      timesheetValueField: "Campo de valor",
+      timesheetValueFieldHelp: "El número que cada celda muestra y edita, como las horas.",
       viewName: "Nombre",
       viewNameHelp: "Clave técnica (snake_case). Se rellena automáticamente a partir del título — edítela si lo desea.",
       viewNameRequired: "Introduzca una clave (minúsculas, números, guion bajo). No se rellena automáticamente con títulos no latinos.",
@@ -2585,7 +2631,7 @@ const es = {
       expandToPage: "Abrir como página completa",
       openAsPage: "Abrir como página completa",
       objectNotFound: "Objeto no encontrado",
-      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe en la configuración actual.",
+      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe o no tiene acceso a él.",
       objectNotFoundHint: "Verifique la configuración de navegación de su aplicación o seleccione un objeto diferente en la barra lateral.",
       objectPackageDisabled: "El objeto \"{{objectName}}\" pertenece a un paquete deshabilitado, por lo que no se está sirviendo.",
       filterOrGroupNotEditable: "Este filtro tiene un grupo O junto a otras condiciones, que el editor de filtros no puede mostrar, así que aquí es de solo lectura. La vista lo sigue aplicando.",
@@ -2744,6 +2790,10 @@ const es = {
       launcherLabel: "Lanzador de aplicaciones",
       menuLabel: "Navegación de la aplicación",
       menuEmpty: "Esta aplicación no tiene entradas de navegación que puedas abrir.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "Barra de menú de la aplicación",
+      searchMenu: "Buscar en el menú",
+      phoneBarHint: "Marca una entrada con la estrella para ponerla en la barra inferior. La barra muestra las cuatro primeras.",
       itemMenu: "Más acciones para {{name}}",
       openInNewTab: "Abrir en nueva pestaña",
       copyLink: "Copiar enlace",
@@ -2774,6 +2824,7 @@ const es = {
         retry: "Continuar con el inicio de sesión único",
       },
       ssoHandoff: "Continuar a {{target}}",
+      ssoHandoffClient: "Inicia sesión para continuar en {{clientName}}",
       devAdminHint: {
         title: "Instancia de desarrollo local",
         signIn: "Iniciar sesión como administrador de desarrollo",
@@ -2803,6 +2854,8 @@ const es = {
         directSignInRateLimited: "Se iniciaron demasiados inicios de sesión desde esta red hace un momento. Espera unos segundos y vuelve a intentarlo.",
         networkNotAllowed: "Este sistema no permite iniciar sesión desde tu red. Conéctate desde una red permitida (por ejemplo, la red de la oficina o la VPN de tu organización) o pide ayuda a tu administrador.",
         ssoAccessDenied: "La cuenta con la que iniciaste sesión no tiene acceso a este entorno. Inicia sesión con una cuenta que tenga acceso o pide a un administrador de la organización de este entorno que te añada como miembro.",
+        ssoAccessDeniedNotMember: "La cuenta con la que iniciaste sesión no es miembro de la organización de este entorno. Inicia sesión con una cuenta que lo sea o pide a un administrador de la organización que te invite.",
+        ssoAccessDeniedInvitationPending: "Te han invitado a la organización de este entorno, pero aún no has aceptado la invitación. Acepta la invitación desde tu correo electrónico y vuelve a iniciar sesión.",
         ssoSwitchAccount: "Cambiar de cuenta",
         ssoBackToConsole: "Volver a la consola",
         ssoSwitchAccountHint: "Cambiar de cuenta abre tu servicio de inicio de sesión en una pestaña nueva y cierra allí tu sesión. Después, vuelve a iniciar sesión aquí con una cuenta que tenga acceso.",
@@ -2981,6 +3034,10 @@ const es = {
       missingToken: "Falta un token en el enlace de verificación.",
       emailMissing: "Falta la dirección de correo",
       resendButton: "Reenviar correo de verificación",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Su correo aún no está verificado. Envíe un enlace de verificación a {{email}} y luego haga clic en el enlace para verificar su cuenta.",
+      sendButton: "Enviar correo de verificación",
       resending: "Enviando…",
       resent: "¡Correo enviado! Revise su bandeja de entrada",
       resentSuccess: "¡Correo de verificación enviado!",
@@ -3115,6 +3172,10 @@ const es = {
       granted: "Acceso concedido",
       denied: "Acceso denegado",
       noRedirect: "El servidor no devolvió ninguna URL de redirección.",
+      returnToApp: "Vuelva a {{appName}} para continuar. Puede cerrar esta pestaña.",
+      returnToUnnamedApp: "Vuelva a la aplicación para continuar. Puede cerrar esta pestaña.",
+      openApp: "Abrir {{appName}}",
+      openUnnamedApp: "Abrir la aplicación",
       failed: "Error en el consentimiento",
       footer: "Puede revocar el acceso en cualquier momento desde la configuración de su cuenta.",
     },
@@ -3251,7 +3312,7 @@ const es = {
     aiAssistant: "Asistente de IA",
     designInStudio: "Diseñar en Studio",
     editApp: "Editar aplicación",
-    openAppInStudio: "Ver la aplicación en Studio",
+    openAppInStudio: "Ver {{app}} en Studio",
   },
   home: {
     build: {
@@ -3446,7 +3507,6 @@ const es = {
   },
   empty: {
     objectNotFound: "Objeto no encontrado",
-    objectNotFoundDescription: "Falta la definición del objeto \"{{name}}\". Verifique su configuración o navegue hacia atrás.",
     interfacePageSourceMissing: "Esta página de interfaz hace referencia a \"{{name}}\", que no está disponible.",
     pageNotFound: "Página no encontrada",
     pageNotFoundDescription: "La página \"{{name}}\" no fue encontrada. Puede haber sido eliminada o renombrada.",
@@ -3786,6 +3846,17 @@ const es = {
       accept: "Aceptar invitación",
       accepted: "Invitación aceptada",
       joinedDescription: "Te damos la bienvenida a {{orgName}}. Te uniste como {{role}}.",
+      joinedWelcome: "Te damos la bienvenida a {{orgName}}.",
+      verifyEmailTitle: "Verifica tu dirección de correo",
+      verifyEmailDescription: "La dirección de correo de esta cuenta debe ser la invitada y estar verificada. Verifícala y vuelve a abrir el enlace de invitación desde tu buzón.",
+      proofInvalid: "Este enlace de invitación ya no se puede usar. Pide una nueva invitación o inicia sesión en una cuenta existente.",
+      signInInstead: "Iniciar sesión en una cuenta existente",
+      proofTitle: "Únete a {{orgName}}",
+      proofDescription: "Configura tu cuenta para {{email}} y acepta la invitación.",
+      proofDivider: "o establece una contraseña",
+      proofNameLabel: "Nombre",
+      proofPasswordLabel: "Contraseña",
+      proofSubmit: "Crear cuenta y unirme",
       continue: "Continuar",
       acceptFailed: "No se pudo aceptar la invitación",
       decline: "Rechazar",
@@ -3821,6 +3892,8 @@ const es = {
     viewApprovals: "Ver aprobaciones",
     noPendingApprovals: "Sin aprobaciones pendientes",
     openApprovalsInbox: "Abrir bandeja de aprobaciones",
+    needsYou: "Requiere su acción",
+    viewApprovalDetails: "Ver detalles",
     badgeTotal: "{{total}} en total",
     badgeNotifications: "{{count}} temas sin leer",
     badgeNotifications_one: "{{count}} tema sin leer",
@@ -4056,13 +4129,11 @@ const es = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Te queda un {{left}} de tu cuota de IA. Un modelo marcado con ×N la consume N veces más rápido que el modelo predeterminado.',
@@ -4127,6 +4198,7 @@ const es = {
       get_metadata_schema: "Consultar el formato de los metadatos",
       get_package: "Revisar el paquete",
       get_record_history: "Leer el historial del registro",
+      list_flow_runs: "Revisar las ejecuciones del flujo",
       list_metadata: "Listar los metadatos existentes",
       list_objects: "Listar los objetos existentes",
       list_packages: "Listar los paquetes existentes",
@@ -4228,6 +4300,26 @@ const es = {
       needsAttention_one: "{{count}} requiere atención",
       needsAttention_many: "{{count}} de elementos requieren atención",
       needsAttention_other: "{{count}} requieren atención",
+      health: {
+        sampleRowsLive: "{{count}} filas de ejemplo publicadas",
+        sampleRowsLive_one: "{{count}} fila de ejemplo publicada",
+        sampleRowsLive_many: "{{count}} de filas de ejemplo publicadas",
+        sampleRowsLive_other: "{{count}} filas de ejemplo publicadas",
+        views: "{{count}} vistas",
+        views_one: "{{count}} vista",
+        views_many: "{{count}} de vistas",
+        views_other: "{{count}} vistas",
+        widgets: "{{count}} widgets",
+        widgets_one: "{{count}} widget",
+        widgets_many: "{{count}} de widgets",
+        widgets_other: "{{count}} widgets",
+        seeds: "{{count}} conjuntos de datos de ejemplo",
+        seeds_one: "{{count}} conjunto de datos de ejemplo",
+        seeds_many: "{{count}} de conjuntos de datos de ejemplo",
+        seeds_other: "{{count}} conjuntos de datos de ejemplo",
+        verified: "Verificado: {{checks}}",
+        seedFailed: "No se pudieron cargar los datos de ejemplo.",
+      },
       unknownPhase: "Fase de creación desconocida",
       nextStepsLead: "A continuación puede decir: {{steps}}",
       nextStepQuote: "«{{step}}»",
@@ -4418,13 +4510,26 @@ const es = {
     progressBar: 'Progreso de la decisión',
     declaredActions: 'Acciones',
     decisionPanelOffRequestPage: 'El panel de decisión de aprobación solo funciona en las páginas de solicitudes de aprobación.',
+    openNextAfterDecision: 'Abrir la siguiente tras decidir',
+    queueDone: 'No quedan solicitudes pendientes en esta lista.',
     snapshotAsSubmitted: 'Tal como se envió',
+    snapshotChanged: 'Modificado',
+    snapshotCurrentValue: 'Valor actual',
+    snapshotOpenRecord: 'Abrir registro',
+    snapshotCurrentUnreadable: 'No se puede leer el registro actual, así que los cambios posteriores al envío no se marcan.',
+    snapshotChildCurrent: 'Filas actuales: el envío no guarda las filas secundarias.',
+    progressTitle: 'Progreso de la aprobación',
+    attachmentsTitle: 'Adjuntos',
     attachmentChip: 'Adjunto',
     attachmentOpenFailed: 'No se pudo abrir el archivo adjunto: inténtalo de nuevo',
     approveOneTitle: '¿Aprobar «{{title}}»?',
     approveOneBody: 'Esto aprueba la solicitud con tu identidad. Para añadir un comentario o un adjunto, abre la solicitud.',
     flowOrigin: 'Iniciada por flujo',
     submittedByYou: 'Enviado por ti',
+    awaitingYourDecision: 'Pendiente de tu aprobación',
+    stepNumber: 'Paso {{n}}',
+    submittedByName: 'Enviado por {{name}}',
+    moreDecisionActions: 'Más acciones de aprobación',
     sortBy: 'Ordenar',
     sortRecent: 'Más recientes primero',
     sortOldest: 'Más antiguas primero',
@@ -4610,6 +4715,11 @@ const es = {
       pendingHere_one: 'Vista previa del borrador · {{count}} cambio sin publicar en esta página',
       pendingHere_many: 'Vista previa del borrador · {{count}} de cambios sin publicar en esta página',
       pendingHere_other: 'Vista previa del borrador · {{count}} cambios sin publicar en esta página',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Vista previa del borrador · {{count}} cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_one: 'Vista previa del borrador · {{count}} cambio sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_many: 'Vista previa del borrador · {{count}} de cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_other: 'Vista previa del borrador · {{count}} cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
     },
     changes: {
       title: 'Cambios pendientes',
@@ -4626,7 +4736,7 @@ const es = {
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
       fieldOrderChanged: 'Orden de los campos cambiado',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Incluye cambios redactados por el copiloto de IA',
+      draftedByCopilot: 'Incluye cambios redactados por el asistente de IA',
       draftedByMcpClient: 'Incluye cambios redactados por el cliente MCP «{{client}}»',
       draftedByMcp: 'Incluye cambios redactados por un cliente MCP',
       detailChangedKeys: 'También cambió:',
@@ -4763,7 +4873,8 @@ const es = {
       securityBlockTitle_one: 'La publicación será rechazada: {{count}} elemento necesita una decisión primero',
       securityBlockTitle_many: 'La publicación será rechazada: {{count}} de elementos necesitan una decisión primero',
       securityBlockTitle_other: 'La publicación será rechazada: {{count}} elementos necesitan una decisión primero',
-      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Uso compartido de registros y vuelva a publicar.',
+      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Quién puede ver qué registros y vuelva a publicar.',
+      flowChecksTitle: 'Antes de publicar: la comprobación de publicación señalará lo siguiente',
       securityRule: {
         owdUnset: 'No se ha declarado la base de uso compartido de registros (sharingModel). El entorno de ejecución usa private, pero la base debe ser una decisión explícita.',
         owdAlias: 'La base de uso compartido de registros (sharingModel) no es un valor canónico, así que el entorno de ejecución trata el objeto como private.',
@@ -4774,6 +4885,8 @@ const es = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Esta app aún no está publicada. Funciona, pero solo los creadores pueden verla. Publícala para que tus usuarios la vean.',
       message: 'Aplicación sin publicar — totalmente funcional, pero solo la ven los creadores. Publíquela para que sus usuarios la vean.',
       publish: 'Publicar',
       publishing: 'Publicando…',
@@ -5232,6 +5345,52 @@ const es = {
     sourceRequired: "Una página {{kind}} requiere un {{source}} no vacío.",
     loading: "Cargando el entorno de ejecución de React…",
     error: "Error en la página React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Aplicación móvil",
+    subtitle: "Conecta la aplicación móvil de ObjectOS a este servidor",
+    scanHint: "Abre la aplicación móvil de ObjectOS y escanea este código para conectarla a este servidor.",
+    qrAlt: "Código QR que conecta la aplicación móvil de ObjectOS a este servidor",
+    linkLabel: "Enlace de conexión",
+    copy: "Copiar enlace",
+    copied: "Enlace copiado",
+    privacy: "El código solo contiene la dirección de este servidor, nunca tu cuenta.",
+    loadFailed: "No se pudo leer la dirección pública de este servidor. Recarga la página para volver a intentarlo.",
+    unreachableTitle: "Un teléfono no puede acceder a la dirección de este servidor",
+    unreachableBody: "La dirección de este servidor es {{address}}, una dirección local o privada que un teléfono no puede abrir, así que no se muestra ningún código. Establece {{setting}} en el servidor con su dirección pública, por ejemplo {{example}}, y reinícialo.",
+    insecureTitle: "La dirección de este servidor no usa HTTPS",
+    insecureBody: "La dirección de este servidor es {{address}}. La aplicación móvil inicia sesión a través de ella, por lo que debe usar HTTPS, y no se muestra ningún código. Sirve este servidor por HTTPS, establece {{setting}} con su dirección https://, por ejemplo {{example}}, y reinícialo.",
+    unpublishedTitle: "Este servidor no publica su dirección pública",
+    unpublishedBody: "No se muestra ningún código: este servidor todavía no ofrece su dirección pública a la aplicación móvil. Actualiza el servidor a una versión que lo admita.",
+  },
+  notificationSettings: {
+    title: "Configuración de notificaciones",
+    subtitle: "Elige qué notificaciones recibes y por qué canales",
+    loading: "Cargando tu configuración de notificaciones…",
+    loadFailed: "No se pudo leer tu configuración de notificaciones. Recarga la página para intentarlo de nuevo.",
+    saveFailed: "El cambio no se guardó: {{reason}}",
+    general: "General",
+    generalWarning: "Al cambiar el resumen o las horas de silencio se guarda tu propia configuración general. A partir de entonces se aplica a cada tema y canal que no hayas configurado tú, en lugar de los valores predeterminados de tu organización.",
+    digest: "Resumen",
+    digestNone: "Sin resumen",
+    digestDaily: "Diario",
+    digestWeekly: "Semanal",
+    digestNoOff: "No se ofrece «Sin resumen»: guardarlo no desactiva un resumen que fija tu organización, así que podría no tener efecto.",
+    quietHours: "Horas de silencio",
+    quietHoursNoClear: "No se puede guardar un intervalo vacío: no desactiva las horas de silencio que fija tu organización, así que podría no tener efecto. Indica una hora de inicio y una de fin.",
+    save: "Guardar",
+    matrix: "Temas y canales",
+    topic: "Tema",
+    allTopics: "Todos los temas",
+    alwaysDelivered: "Siempre se entrega",
+    notConfigured: "No configurado",
+    toggleLabel: "{{topic}} por {{channel}}",
+    sourceOwn: "Tu configuración",
+    sourceDefault: "Predeterminado de la organización",
+    sourceBuiltin: "Predeterminado",
+    sourceMandatory: "Obligatorio",
   },
 };
 

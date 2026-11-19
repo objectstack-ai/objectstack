@@ -265,12 +265,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // Draft state for view config edits — cached locally, saved on demand
     const [viewDraft, setViewDraft] = useState<Record<string, any> | null>(null);
     
-    // Record count tracking for footer
-    const [recordCount, setRecordCount] = useState<number | undefined>(undefined);
-    // objectstack#27594 — the records the open view matched, as its list
-    // reported them, for the title's 「VIEW ▾ · COUNT」.
-    const [viewTotal, setViewTotal] = useState<{ viewId: string; total: number } | null>(null);
-    
     // Admin users automatically get design tools (no toggle needed)
     const { user, activeOrganization } = useAuth();
     const { isAdmin } = useWorkspaceAdminStatus();
@@ -963,9 +957,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onToast: toastHandler as (message: string, options?: { type?: string }) => void,
     });
 
-    // objectstack#25992 slice 4: the realtime refresh, conflict resolution and
-    // footer record count moved to `./objectViewLiveData.ts`; the count state stays here.
-    useObjectViewLiveData({ dataSource, objectDef, refreshData, refreshKey, setRecordCount });
+    // objectstack#25992 slice 4: the realtime refresh and conflict resolution
+    // moved to `./objectViewLiveData.ts`. Its `$top: 0` count probe is gone
+    // (objectstack#34207): the counts this page draws come from the list's answer.
+    useObjectViewLiveData({ objectDef, refreshData });
 
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
     // URL, row click, open as page, record links) moved to `./objectViewRecordNavigation.ts`.
@@ -1056,7 +1051,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         pinnedViewId,
         setPinnedViewId: setPinnedViewChoice,
         appSegment: appName,
-        viewTotal,
         personalViewIds,
         onSavePersonalView: personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal
             ? () => setPersonalViewDialog({ mode: 'save' })
@@ -1066,10 +1060,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             : undefined,
         onDeletePersonalView: personalViewsReady ? (id: string) => { void handleDeletePersonalView(id); } : undefined,
     });
-    const handleListTotalChange = useCallback((total: number) => {
-        if (!activeViewId) return;
-        setViewTotal((prev) => (prev?.viewId === activeViewId && prev.total === total ? prev : { viewId: activeViewId, total }));
-    }, [activeViewId]);
 
     // objectstack#25992 slice 11a: the column-declaration flags, the held list refs and
     // `renderListView` moved to `./objectViewListRenderer.tsx`.
@@ -1115,7 +1105,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         urlFilters,
         initialUfSelections,
         handleUserFilterSelectionsChange,
-        handleListTotalChange,
         viewPanelFilters,
     });
 
@@ -1216,7 +1205,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  chrome that real-app conventions (Gmail / Notion / Linear)
                  reclaim for content. The create / import / overflow
                  actions move to a floating action button (see below), and
-                 the title's view switcher 「<view> ▾ · N」 leads the list's
+                 the title's view switcher 「VIEW ▾」 leads the list's
                  toolbar row, beside its filter / sort / display tools
                  (objectstack#27058). */}
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
@@ -1391,7 +1380,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                             mode={viewConfigPanelMode}
                             activeView={activeView}
                             objectDef={objectDef}
-                            recordCount={recordCount}
                             onSave={handleViewConfigSave}
                             onViewUpdate={handleViewUpdate}
                             onCreate={handleViewCreate}

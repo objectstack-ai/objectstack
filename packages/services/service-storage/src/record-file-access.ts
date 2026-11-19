@@ -511,7 +511,7 @@ export interface RecordFileAccessDeps {
 
 /** [#32712] The i18n surface the page's labels are translated through (`II18nService`'s reads). */
 export type UploadLinkLabelI18n = Pick<II18nService, 'getLocales' | 'getTranslations'> &
-  Partial<Pick<II18nService, 'getFallbackLocale' | 'getDefaultLocale'>>;
+  Partial<Pick<II18nService, 'getFallbackLocale' | 'getDefaultLocale' | 'getSourceLocale'>>;
 
 /** [#32747] One upload of a submit, its media type settled. */
 type TypedUpload = UploadLinkUpload & { mimeType: string };
@@ -1344,7 +1344,10 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const bundle = i18n ? translationBundleOf(i18n) : undefined;
     if (!i18n || !bundle) return { objectLabel, fieldLabel };
     const fallback = typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
-    const defaultLocale = typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+    // [#33634] The authored language: the declared `sourceLocale`, else the
+    // users' `defaultLocale` — the metadata route's rule.
+    const source = typeof i18n.getSourceLocale === 'function' ? i18n.getSourceLocale() : undefined;
+    const defaultLocale = source || (typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined);
     const translated = translateObject(doc, bundle, {
       locale: lang,
       ...(fallback ? { fallbackChain: [fallback] } : {}),

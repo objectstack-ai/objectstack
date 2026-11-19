@@ -1496,17 +1496,44 @@ describe('PublishPackageDraftsResponseSchema (declares the batch publish respons
     ).toBe(false);
   });
 
-  it('probes is opaque BY DECLARATION (ruled: modeled only once a consumer needs a field): any shape passes through unmodified, unstripped', () => {
-    // The real `BuildProbeReport` shape of today…
-    const report = { issues: [], checked: { seeds: 1, views: 2, widgets: 0, objects: 3 } };
+  // [ruling record 6929121584] `probes` was opaque BY DECLARATION until a
+  // consumer needed a field of it. The console's publish-health line reads
+  // `checked` and `issues[]`, so the report is modeled, and this pin is the
+  // upgrade the pin it replaces asked for instead of being relaxed.
+  it('probes is MODELED (ruled: a consumer reads its fields): the real report round-trips unstripped', () => {
+    const report = {
+      issues: [{
+        layer: 'runtime',
+        severity: 'error',
+        artifact: { type: 'dashboard', name: 'sales_overview' },
+        ref: { type: 'dataset', name: 'deal_metrics', member: 'revenue_by_month' },
+        code: 'empty_query', // adr0112-ok: D6c build-probe diagnostics code
+        message: 'Dashboard "sales_overview" widget "revenue_by_month" returns NO data from dataset "deal_metrics" although object "crm_deal" has rows — the widget will render empty for every user.',
+        fix: 'Run the dataset query directly to see the compiled strategy/SQL; check the dataset\'s measure/dimension field bindings against object "crm_deal".',
+        userMessage: 'The widget "Revenue by month" on dashboard "Sales overview" shows no data, although "Deals" has records.',
+      }],
+      checked: { seeds: 1, views: 2, widgets: 1, objects: 3 },
+    };
     const parsed = PublishPackageDraftsResponseSchema.parse({ ...realResponse, probes: report });
     expect(parsed.probes).toEqual(report);
-    // …and a future shape this contract deliberately does NOT constrain. If a
-    // consumer ever needs a field of `probes`, upgrade the declaration on its
-    // own card instead of relaxing this pin.
-    expect(
-      PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, probes: { anything: 'else' } }).success,
-    ).toBe(true);
+    // The clean receipt: no findings, four counters.
+    const clean = { issues: [], checked: { seeds: 0, views: 0, widgets: 0, objects: 0 } };
+    expect(PublishPackageDraftsResponseSchema.parse({ ...realResponse, probes: clean }).probes).toEqual(clean);
+  });
+
+  it('probes is the report or it is absent: a body that is not the report no longer parses', () => {
+    // What the opaque declaration let through, and the model refuses: the
+    // member is `BuildProbeReportSchema` by reference.
+    for (const probes of [{ anything: 'else' }, 'ok', 42, { issues: [] }, { checked: { seeds: 0, views: 0, widgets: 0, objects: 0 } }]) {
+      expect(
+        PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, probes }).success,
+        `probes ${JSON.stringify(probes)} must fail parse`,
+      ).toBe(false);
+    }
+    // The finding is `RuntimeBuildIssueSchema` by reference, so a lossy one
+    // fails the whole parse instead of surviving with members dropped.
+    const lossy = { issues: [{ code: 'empty_query', severity: 'error' }], checked: { seeds: 0, views: 0, widgets: 1, objects: 0 } }; // adr0112-ok: D6c build-probe diagnostics code
+    expect(PublishPackageDraftsResponseSchema.safeParse({ ...realResponse, probes: lossy }).success).toBe(false);
   });
 
   it('declares the route-attached ADR-0045 receipts: unhiddenApps / unhideError / rebindError', () => {
@@ -1582,6 +1609,122 @@ describe('PublishPackageDraftsResponseSchema (declares the batch publish respons
     // conformance suites: nothing on the serving path parses this schema.
     const parsed = PublishPackageDraftsResponseSchema.parse(realResponse) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual(Object.keys(realResponse).sort());
+  });
+});
+
+
+import { BuildProbeReportSchema, RuntimeBuildIssueSchema } from './protocol.zod';
+import type { BuildProbeReport, RuntimeBuildIssue } from './protocol.zod';
+
+/**
+ * [ruling record 6929121584] The ADR-0038 L3 probe report and its finding, the
+ * shape `PublishPackageDraftsResponseSchema.probes` carries. Declared member
+ * for member against the one producer (`runBuildProbes`,
+ * `@objectstack/metadata-protocol`); the producer-side half is
+ * `packages/metadata-protocol/src/build-probes-user-message.test.ts`, which
+ * parses every finding the probes really emit, and
+ * `packages/objectql/src/publish-package-drafts-response-conformance.test.ts`,
+ * which parses the report a real publish answers. Here, what the declaration
+ * itself accepts and refuses.
+ */
+describe('RuntimeBuildIssueSchema / BuildProbeReportSchema (the ADR-0038 L3 probe report)', () => {
+  const issue = {
+    layer: 'runtime',
+    severity: 'error',
+    artifact: { type: 'seed', name: 'crm_deal_sample' },
+    ref: { type: 'object', name: 'crm_deal' },
+    code: 'seed_not_applied', // adr0112-ok: D6c build-probe diagnostics code
+    message: 'Seed "crm_deal_sample" was published but object "crm_deal" has no rows — the sample data never materialized.',
+    fix: 'Check the publish response\'s seedApplied for the load error, fix the seed rows (field names/types), and republish the seed.',
+  };
+
+  it('accepts a finding as the probes emit it, with nothing stripped', () => {
+    expect(RuntimeBuildIssueSchema.parse(issue)).toEqual(issue);
+  });
+
+  it('requires the five members every finding carries; `ref`, `fix` and `userMessage` are optional', () => {
+    for (const missing of ['layer', 'severity', 'artifact', 'code', 'message'] as const) {
+      const body: Record<string, unknown> = { ...issue };
+      delete body[missing];
+      expect(RuntimeBuildIssueSchema.safeParse(body).success, `omitting '${missing}' must fail parse`).toBe(false);
+    }
+    // `probes_unavailable` is the finding with neither a `ref` nor a `fix`.
+    const bare = {
+      layer: 'runtime',
+      severity: 'warning',
+      artifact: { type: 'dashboard', name: 'sales_overview, ops_overview' },
+      code: 'probes_unavailable', // adr0112-ok: D6c build-probe diagnostics code
+      message: '3 dashboard widget(s) could not be probed: no analytics service is mounted on this kernel.',
+    };
+    expect(RuntimeBuildIssueSchema.parse(bare)).toEqual(bare);
+  });
+
+  it('closes `layer` to `runtime` and `severity` to the two the probes emit', () => {
+    for (const layer of ['graph', 'render', 'intent', 'Runtime']) {
+      expect(RuntimeBuildIssueSchema.safeParse({ ...issue, layer }).success, layer).toBe(false);
+    }
+    for (const severity of ['error', 'warning']) {
+      expect(RuntimeBuildIssueSchema.safeParse({ ...issue, severity }).success, severity).toBe(true);
+    }
+    expect(RuntimeBuildIssueSchema.safeParse({ ...issue, severity: 'info' }).success).toBe(false);
+  });
+
+  it('leaves `code` open: the producer\'s list may grow, and a new id is still a finding', () => {
+    expect(RuntimeBuildIssueSchema.safeParse({ ...issue, code: 'a_code_a_later_probe_adds' }).success).toBe(true);
+    expect(RuntimeBuildIssueSchema.safeParse({ ...issue, code: 7 }).success).toBe(false);
+  });
+
+  it('carries the widget a finding is about in `ref.member`', () => {
+    const widget = {
+      ...issue,
+      artifact: { type: 'dashboard', name: 'sales_overview' },
+      ref: { type: 'dataset', name: 'deal_metrics', member: 'revenue_by_month' },
+      code: 'widget_query_failed',
+    };
+    expect(RuntimeBuildIssueSchema.parse(widget).ref).toEqual({ type: 'dataset', name: 'deal_metrics', member: 'revenue_by_month' });
+    expect(RuntimeBuildIssueSchema.safeParse({ ...widget, ref: { type: 'dataset' } }).success).toBe(false);
+  });
+
+  // The producer-composed sentence for the person who published, in the
+  // request's locale: optional, so a finding without one stays a finding, and
+  // declared, so a client that parses the response keeps it.
+  it('carries an optional `userMessage` beside the stable code and the agent-facing text', () => {
+    const userMessage = '“商机”的示例数据未能载入，因此“商机”中还没有记录。请检查示例数据后重新发布。';
+    const parsed = RuntimeBuildIssueSchema.parse({ ...issue, userMessage });
+    expect(parsed).toEqual({ ...issue, userMessage });
+    expect(parsed.code).toBe(issue.code);
+    expect(parsed.message).toBe(issue.message);
+    expect(parsed.fix).toBe(issue.fix);
+    expect(RuntimeBuildIssueSchema.parse(issue)).not.toHaveProperty('userMessage');
+  });
+
+  it('refuses a `userMessage` that is not text', () => {
+    for (const userMessage of [42, null, { en: 'x' }, ['x']]) {
+      expect(
+        RuntimeBuildIssueSchema.safeParse({ ...issue, userMessage }).success,
+        `userMessage ${JSON.stringify(userMessage)} must fail parse`,
+      ).toBe(false);
+    }
+  });
+
+  it('the report requires both halves: the findings and the four per-plane counters', () => {
+    const report = { issues: [issue], checked: { seeds: 1, views: 0, widgets: 0, objects: 0 } };
+    expect(BuildProbeReportSchema.parse(report)).toEqual(report);
+    expect(BuildProbeReportSchema.safeParse({ issues: [issue] }).success).toBe(false);
+    expect(BuildProbeReportSchema.safeParse({ checked: report.checked }).success).toBe(false);
+    for (const plane of ['seeds', 'views', 'widgets', 'objects'] as const) {
+      const checked: Record<string, unknown> = { ...report.checked };
+      delete checked[plane];
+      expect(BuildProbeReportSchema.safeParse({ issues: [], checked }).success, `omitting checked.${plane} must fail parse`).toBe(false);
+      expect(BuildProbeReportSchema.safeParse({ issues: [], checked: { ...report.checked, [plane]: 1.5 } }).success, `a fractional checked.${plane} must fail parse`).toBe(false);
+    }
+  });
+
+  it('types the report and its finding for a consumer', () => {
+    expectTypeOf<BuildProbeReport['issues'][number]>().toEqualTypeOf<RuntimeBuildIssue>();
+    expectTypeOf<RuntimeBuildIssue['userMessage']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<RuntimeBuildIssue['layer']>().toEqualTypeOf<'runtime'>();
+    expectTypeOf<BuildProbeReport['checked']>().toEqualTypeOf<{ seeds: number; views: number; widgets: number; objects: number }>();
   });
 });
 
@@ -3181,5 +3324,28 @@ describe('RollbackMetaItemRequestSchema declares what the rollback door enforces
 
   it('requires toVersion', () => {
     expect(RollbackMetaItemRequestSchema.safeParse(base).success).toBe(false);
+  });
+});
+
+import { DiffMetaItemRequestSchema } from './protocol.zod';
+
+describe('DiffMetaItemRequestSchema declares what the diff door reads (#33308)', () => {
+  // The REST door reads both bounds through this declaration: a whole number,
+  // as it read them before the request was declared, and `packageId` names
+  // the holder whose versions a by-package name's diff compares.
+  const base = { type: 'flow', name: 'shared_flow' } as const;
+
+  it.each([['fromVersion'], ['toVersion']])('refuses a %s that is not a whole number', (key) => {
+    for (const value of [1.5, '2', true]) {
+      expect(DiffMetaItemRequestSchema.safeParse({ ...base, [key]: value }).success, JSON.stringify(value)).toBe(false);
+    }
+  });
+
+  it('CONTROL: both bounds are optional, and every member is preserved through parse', () => {
+    expect(DiffMetaItemRequestSchema.safeParse(base).success).toBe(true);
+    const full = { ...base, fromVersion: 1, toVersion: 3, packageId: 'com.acme.alpha.custom' };
+    const result = DiffMetaItemRequestSchema.safeParse(full);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(full);
   });
 });

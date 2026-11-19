@@ -56,6 +56,10 @@ import { strandedDecisionFailure } from '@objectstack/types';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 // `.js` on purpose — NodeNext resolution requires the extension (#7248).
 import { RestServer } from './rest-server.js';
+// The rest server's routes load `@objectstack/objectql` lazily, inside a
+// handler; paying that load here, at collection, keeps it out of the first
+// case's `testTimeout` window (check:test-source-alias).
+import '@objectstack/objectql';
 
 const REQ = '/api/v1/approvals/requests/:id';
 
@@ -407,6 +411,37 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
         // exact defect the card reported.
         expect(Object.keys(answer.body ?? {}).sort())
             .toEqual(['code', 'decision', 'error', 'finalized', 'repairable', 'runId']);
+    });
+
+    it('a decision stranded by a record hook\'s refusal carries that refusal on the same 500 (#34579)', async () => {
+        // The step after the decision was refused by a record hook. The status
+        // code still does not move (#13807 B), and the four facts are as
+        // above; what is added is WHICH refusal stranded the run: the engine's
+        // `innerRefusal` (ruling B′ on #24914) and the hook's marked
+        // `userMessage`, at the top level where a record save's refusal and
+        // every flow door's `FLOW_FAILED` already put it.
+        const userMessage = '产能已被其他订单占用，该方案无法按当前产能通过。';
+        const innerRefusal = {
+            code: 'VALIDATION_FAILED' as const,
+            message: "hook 'alloc_plan_capacity_recheck' threw: Error: over_capacity",
+        };
+        const rest = boot({
+            decide: vi.fn().mockRejectedValue(strandedDecisionFailure(
+                "RESUME_FAILED: the approve decision was recorded on request req_1, but its flow run "
+                + "'run_1' could not be resumed and is now stranded: Node 'adopt_plan' failed",
+                { finalized: true, decision: 'approve', runId: 'run_1', repairable: true, innerRefusal, userMessage },
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/approve`);
+
+        expect(answer.status).toBe(500);
+        expect(answer.body?.code).toBe('RESUME_FAILED');
+        expect(answer.body?.finalized).toBe(true);
+        expect(answer.body?.innerRefusal).toEqual(innerRefusal);
+        expect(answer.body?.userMessage).toBe(userMessage);
+        expect(Object.keys(answer.body ?? {}).sort()).toEqual(
+            ['code', 'decision', 'error', 'finalized', 'innerRefusal', 'repairable', 'runId', 'userMessage'],
+        );
     });
 
     it('REVERSE CONTROL — a RESUME_FAILED with no carrier answers exactly the body it always did', async () => {

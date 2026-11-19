@@ -74,6 +74,8 @@ export const APP_ROUTE_METADATA_READS: ReadonlyArray<{ path: string; reads: read
   { path: 'component/:ns/:name/*', reads: ALL_LAZY_METADATA_TYPES },
   // A redirect into Studio (objectstack#28578): the retired Packaged automation page.
   { path: 'component/automation/packaged', reads: NONE },
+  // A redirect into Studio (objectstack#34724): the retired Packaged Actions page.
+  { path: 'component/automation/packaged-actions', reads: NONE },
   { path: 'component/metadata/directory', reads: NONE },
   { path: 'component/metadata/resource/*', reads: NONE },
   { path: 'design/dashboard/:dashboardName', reads: ['dashboard'] },

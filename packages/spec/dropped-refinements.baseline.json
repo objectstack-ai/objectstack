@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 265,
-    "droppedRefinementSites": 1069,
+    "publishedSchemasWithDroppedRefinements": 274,
+    "droppedRefinementSites": 1151,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -82,6 +82,11 @@
         "schema"
       ]
     },
+    "api/AiSavedQuestion": {
+      "sites": [
+        "source.filter.lazy"
+      ]
+    },
     "api/AnalyticsQueryRequest": {
       "sites": [
         "where.lazy"
@@ -105,6 +110,10 @@
         "manifest.actions.element.in.ai.outputSchema",
         "manifest.actions.element.in.onSuccess",
         "manifest.actions.element.in.params.element.in",
+        "manifest.actions.element.in.preflight.fields.element",
+        "manifest.actions.element.in.refusals.valueType",
+        "manifest.actions.element.in.resultDialog.fields.element",
+        "manifest.actions.element.in.texts.valueType",
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
@@ -134,6 +143,7 @@
         "manifest.hooks.element",
         "manifest.hooks.element.object",
         "manifest.hooks.element.refusals.valueType",
+        "manifest.hooks.element.texts.valueType",
         "manifest.jobs.element",
         "manifest.jobs.element.schedule.options[0].timezone",
         "manifest.mappings.element",
@@ -147,6 +157,7 @@
         "manifest.objects.element.fields.out.valueType",
         "manifest.objects.element.fields.out.valueType.currencyConfig",
         "manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "manifest.objects.element.fields.out.valueType.summaryOperations",
         "manifest.objects.element.lifecycle",
         "manifest.objects.element.membershipKeys",
@@ -169,6 +180,7 @@
         "manifest.translations.element",
         "manifest.translations.element.valueType.flows.valueType.errorMessage",
         "manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
+        "manifest.translations.element.valueType.flows.valueType.records.valueType.fields.valueType",
         "manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
@@ -198,6 +210,11 @@
         "data.flow.errorHandling",
         "data.flow.nodes.element.in.waitEventConfig",
         "data.flow.variables.element"
+      ]
+    },
+    "api/CreateAiSavedQuestionResponse": {
+      "sites": [
+        "question.source.filter.lazy"
       ]
     },
     "api/CreateFlowRequest": {
@@ -285,6 +302,10 @@
         "data.options[1].manifest.actions.element.in.ai.outputSchema",
         "data.options[1].manifest.actions.element.in.onSuccess",
         "data.options[1].manifest.actions.element.in.params.element.in",
+        "data.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.options[1].manifest.actions.element.in.refusals.valueType",
+        "data.options[1].manifest.actions.element.in.resultDialog.fields.element",
+        "data.options[1].manifest.actions.element.in.texts.valueType",
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -313,6 +334,7 @@
         "data.options[1].manifest.hooks.element",
         "data.options[1].manifest.hooks.element.object",
         "data.options[1].manifest.hooks.element.refusals.valueType",
+        "data.options[1].manifest.hooks.element.texts.valueType",
         "data.options[1].manifest.jobs.element",
         "data.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.options[1].manifest.mappings.element",
@@ -324,6 +346,7 @@
         "data.options[1].manifest.objects.element.fields.out.valueType",
         "data.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "data.options[1].manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "data.options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.objects.element.membershipKeys",
@@ -380,7 +403,8 @@
         "translations.flows.valueType.screens.valueType.description",
         "translations.flows.valueType.screens.valueType.title",
         "translations.flows.valueType.successMessage",
-        "translations.flows.valueType.notices.valueType.message"
+        "translations.flows.valueType.notices.valueType.message",
+        "translations.flows.valueType.records.valueType.fields.valueType"
       ]
     },
     "api/GetUiViewResponse": {
@@ -433,6 +457,10 @@
         "options[1].manifest.actions.element.in.ai.outputSchema",
         "options[1].manifest.actions.element.in.onSuccess",
         "options[1].manifest.actions.element.in.params.element.in",
+        "options[1].manifest.actions.element.in.preflight.fields.element",
+        "options[1].manifest.actions.element.in.refusals.valueType",
+        "options[1].manifest.actions.element.in.resultDialog.fields.element",
+        "options[1].manifest.actions.element.in.texts.valueType",
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -461,6 +489,7 @@
         "options[1].manifest.hooks.element",
         "options[1].manifest.hooks.element.object",
         "options[1].manifest.hooks.element.refusals.valueType",
+        "options[1].manifest.hooks.element.texts.valueType",
         "options[1].manifest.jobs.element",
         "options[1].manifest.jobs.element.schedule.options[0].timezone",
         "options[1].manifest.mappings.element",
@@ -472,6 +501,7 @@
         "options[1].manifest.objects.element.fields.out.valueType",
         "options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "options[1].manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.objects.element.membershipKeys",
@@ -512,6 +542,11 @@
         "options[1].manifest.views.element.list.timeline.groupByField"
       ]
     },
+    "api/ListAiSavedQuestionsResponse": {
+      "sites": [
+        "questions.element.source.filter.lazy"
+      ]
+    },
     "api/ListInstalledPackagesResponse": {
       "sites": [
         "data.packages.element.options[0].manifest.data.element.records.element.valueType",
@@ -521,6 +556,10 @@
         "data.packages.element.options[1].manifest.actions.element.in.ai.outputSchema",
         "data.packages.element.options[1].manifest.actions.element.in.onSuccess",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
+        "data.packages.element.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.packages.element.options[1].manifest.actions.element.in.refusals.valueType",
+        "data.packages.element.options[1].manifest.actions.element.in.resultDialog.fields.element",
+        "data.packages.element.options[1].manifest.actions.element.in.texts.valueType",
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -549,6 +588,7 @@
         "data.packages.element.options[1].manifest.hooks.element",
         "data.packages.element.options[1].manifest.hooks.element.object",
         "data.packages.element.options[1].manifest.hooks.element.refusals.valueType",
+        "data.packages.element.options[1].manifest.hooks.element.texts.valueType",
         "data.packages.element.options[1].manifest.jobs.element",
         "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.packages.element.options[1].manifest.mappings.element",
@@ -560,6 +600,7 @@
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.currencyConfig",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
+        "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.lookupFilters.element",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.summaryOperations",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys",
@@ -606,7 +647,11 @@
         "data.actions.element.in",
         "data.actions.element.in.ai.outputSchema",
         "data.actions.element.in.onSuccess",
-        "data.actions.element.in.params.element.in"
+        "data.actions.element.in.params.element.in",
+        "data.actions.element.in.preflight.fields.element",
+        "data.actions.element.in.refusals.valueType",
+        "data.actions.element.in.resultDialog.fields.element",
+        "data.actions.element.in.texts.valueType"
       ]
     },
     "api/ObjectDefinitionResponse": {
@@ -616,11 +661,16 @@
         "data.actions.element.in.ai.outputSchema",
         "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
+        "data.actions.element.in.preflight.fields.element",
+        "data.actions.element.in.refusals.valueType",
+        "data.actions.element.in.resultDialog.fields.element",
+        "data.actions.element.in.texts.valueType",
         "data.defaultRowScope",
         "data.fieldGroups",
         "data.fields.out.valueType",
         "data.fields.out.valueType.currencyConfig",
         "data.fields.out.valueType.inlineColumns.element",
+        "data.fields.out.valueType.lookupFilters.element",
         "data.fields.out.valueType.relatedListFilter.lazy",
         "data.fields.out.valueType.summaryOperations",
         "data.lifecycle",
@@ -767,6 +817,11 @@
     "automation/FlowNode": {
       "sites": [
         "in.waitEventConfig"
+      ]
+    },
+    "automation/FlowRecordFieldValue": {
+      "sites": [
+        ""
       ]
     },
     "automation/FlowRegion": {
@@ -993,6 +1048,7 @@
         "",
         "currencyConfig",
         "inlineColumns.element",
+        "lookupFilters.element",
         "relatedListFilter.lazy",
         "summaryOperations"
       ]
@@ -1028,10 +1084,16 @@
       "sites": [
         "",
         "object",
-        "refusals.valueType"
+        "refusals.valueType",
+        "texts.valueType"
       ]
     },
     "data/HookRefusal": {
+      "sites": [
+        ""
+      ]
+    },
+    "data/HookText": {
       "sites": [
         ""
       ]
@@ -1112,11 +1174,16 @@
         "actions.element.in.ai.outputSchema",
         "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
+        "actions.element.in.preflight.fields.element",
+        "actions.element.in.refusals.valueType",
+        "actions.element.in.resultDialog.fields.element",
+        "actions.element.in.texts.valueType",
         "defaultRowScope",
         "fieldGroups",
         "fields.out.valueType",
         "fields.out.valueType.currencyConfig",
         "fields.out.valueType.inlineColumns.element",
+        "fields.out.valueType.lookupFilters.element",
         "fields.out.valueType.relatedListFilter.lazy",
         "fields.out.valueType.summaryOperations",
         "lifecycle",
@@ -1139,6 +1206,7 @@
         "fields.out.valueType",
         "fields.out.valueType.currencyConfig",
         "fields.out.valueType.inlineColumns.element",
+        "fields.out.valueType.lookupFilters.element",
         "fields.out.valueType.relatedListFilter.lazy",
         "fields.out.valueType.summaryOperations"
       ]
@@ -1349,7 +1417,11 @@
         "actions.element.in",
         "actions.element.in.ai.outputSchema",
         "actions.element.in.onSuccess",
-        "actions.element.in.params.element.in"
+        "actions.element.in.params.element.in",
+        "actions.element.in.preflight.fields.element",
+        "actions.element.in.refusals.valueType",
+        "actions.element.in.resultDialog.fields.element",
+        "actions.element.in.texts.valueType"
       ]
     },
     "kernel/OpsDomainModule": {
@@ -1440,6 +1512,7 @@
         "field",
         "field.currencyConfig",
         "field.inlineColumns.element",
+        "field.lookupFilters.element",
         "field.relatedListFilter.lazy",
         "field.summaryOperations"
       ]
@@ -1464,6 +1537,7 @@
         "operations.element.options[0].field",
         "operations.element.options[0].field.currencyConfig",
         "operations.element.options[0].field.inlineColumns.element",
+        "operations.element.options[0].field.lookupFilters.element",
         "operations.element.options[0].field.relatedListFilter.lazy",
         "operations.element.options[0].field.summaryOperations",
         "operations.element.options[3].object",
@@ -1471,6 +1545,10 @@
         "operations.element.options[3].object.actions.element.in.ai.outputSchema",
         "operations.element.options[3].object.actions.element.in.onSuccess",
         "operations.element.options[3].object.actions.element.in.params.element.in",
+        "operations.element.options[3].object.actions.element.in.preflight.fields.element",
+        "operations.element.options[3].object.actions.element.in.refusals.valueType",
+        "operations.element.options[3].object.actions.element.in.resultDialog.fields.element",
+        "operations.element.options[3].object.actions.element.in.texts.valueType",
         "operations.element.options[3].object.defaultRowScope",
         "operations.element.options[3].object.fieldGroups",
         "operations.element.options[3].object.fields.out.valueType",
@@ -1495,11 +1573,16 @@
         "object.actions.element.in.ai.outputSchema",
         "object.actions.element.in.onSuccess",
         "object.actions.element.in.params.element.in",
+        "object.actions.element.in.preflight.fields.element",
+        "object.actions.element.in.refusals.valueType",
+        "object.actions.element.in.resultDialog.fields.element",
+        "object.actions.element.in.texts.valueType",
         "object.defaultRowScope",
         "object.fieldGroups",
         "object.fields.out.valueType",
         "object.fields.out.valueType.currencyConfig",
         "object.fields.out.valueType.inlineColumns.element",
+        "object.fields.out.valueType.lookupFilters.element",
         "object.fields.out.valueType.relatedListFilter.lazy",
         "object.fields.out.valueType.summaryOperations",
         "object.lifecycle",
@@ -1542,6 +1625,7 @@
         "options[0].field",
         "options[0].field.currencyConfig",
         "options[0].field.inlineColumns.element",
+        "options[0].field.lookupFilters.element",
         "options[0].field.relatedListFilter.lazy",
         "options[0].field.summaryOperations",
         "options[3].object",
@@ -1549,6 +1633,10 @@
         "options[3].object.actions.element.in.ai.outputSchema",
         "options[3].object.actions.element.in.onSuccess",
         "options[3].object.actions.element.in.params.element.in",
+        "options[3].object.actions.element.in.preflight.fields.element",
+        "options[3].object.actions.element.in.refusals.valueType",
+        "options[3].object.actions.element.in.resultDialog.fields.element",
+        "options[3].object.actions.element.in.texts.valueType",
         "options[3].object.defaultRowScope",
         "options[3].object.fieldGroups",
         "options[3].object.fields.out.valueType",
@@ -1576,6 +1664,7 @@
         "",
         "valueType.flows.valueType.errorMessage",
         "valueType.flows.valueType.notices.valueType.message",
+        "valueType.flows.valueType.records.valueType.fields.valueType",
         "valueType.flows.valueType.refusals.valueType.message",
         "valueType.flows.valueType.screens.valueType.description",
         "valueType.flows.valueType.screens.valueType.title",
@@ -1589,7 +1678,8 @@
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title",
         "flows.valueType.successMessage",
-        "flows.valueType.notices.valueType.message"
+        "flows.valueType.notices.valueType.message",
+        "flows.valueType.records.valueType.fields.valueType"
       ]
     },
     "system/Schedule": {
@@ -1604,7 +1694,8 @@
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title",
         "flows.valueType.successMessage",
-        "flows.valueType.notices.valueType.message"
+        "flows.valueType.notices.valueType.message",
+        "flows.valueType.records.valueType.fields.valueType"
       ]
     },
     "system/ServerRateLimitConfig": {
@@ -1647,6 +1738,7 @@
         "",
         "valueType.flows.valueType.errorMessage",
         "valueType.flows.valueType.notices.valueType.message",
+        "valueType.flows.valueType.records.valueType.fields.valueType",
         "valueType.flows.valueType.refusals.valueType.message",
         "valueType.flows.valueType.screens.valueType.description",
         "valueType.flows.valueType.screens.valueType.title",
@@ -1660,7 +1752,8 @@
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title",
         "flows.valueType.successMessage",
-        "flows.valueType.notices.valueType.message"
+        "flows.valueType.notices.valueType.message",
+        "flows.valueType.records.valueType.fields.valueType"
       ]
     },
     "system/TranslationItem": {
@@ -1670,7 +1763,8 @@
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title",
         "flows.valueType.successMessage",
-        "flows.valueType.notices.valueType.message"
+        "flows.valueType.notices.valueType.message",
+        "flows.valueType.records.valueType.fields.valueType"
       ]
     },
     "ui/Action": {
@@ -1678,7 +1772,11 @@
         "in",
         "in.ai.outputSchema",
         "in.onSuccess",
-        "in.params.element.in"
+        "in.params.element.in",
+        "in.preflight.fields.element",
+        "in.refusals.valueType",
+        "in.resultDialog.fields.element",
+        "in.texts.valueType"
       ]
     },
     "ui/ActionAi": {
@@ -2015,6 +2113,16 @@
         "components.element.lazy.type"
       ]
     },
+    "ui/RecordActivityProps": {
+      "sites": [
+        ""
+      ]
+    },
+    "ui/RecordChatterProps": {
+      "sites": [
+        "feed"
+      ]
+    },
     "ui/RecordDetailsProps": {
       "sites": [
         "emptyState.link.url",
@@ -2135,6 +2243,16 @@
       "sites": [
         "filter.element",
         "filter.element.options[0]"
+      ]
+    },
+    "ui/ActionRefusal": {
+      "sites": [
+        ""
+      ]
+    },
+    "ui/ActionText": {
+      "sites": [
+        ""
       ]
     }
   }

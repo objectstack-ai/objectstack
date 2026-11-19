@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { HTTP_SIGNATURE_HEADER, signHttpBody } from '@objectstack/core';
+import { findEgressRefusal } from '@objectstack/core/egress';
 import type { HttpAckResult, HttpDelivery } from './http-outbox.js';
 
 /**
@@ -33,7 +34,50 @@ export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 export { HTTP_SIGNATURE_HEADER as SIGNATURE_HEADER, signHttpBody as signBody };
 
 /**
- * The exact request body for a delivery — the bytes that get POSTed, and
+ * Whether a request of this method goes out with no body at all. `fetch`
+ * refuses a GET or HEAD request that carries one (any one, `''` included), so
+ * a delivery of either verb is sent bodyless and signed as such. The inline
+ * `http` node arm sends the same: no body for a GET.
+ */
+export function isBodylessMethod(method: string | undefined): boolean {
+    return method !== undefined && /^(GET|HEAD)$/i.test(method);
+}
+
+/**
+ * Whether a payload stands for "no body": absent, `null`, or an empty plain
+ * object — what a durable `http` node with no `body` enqueues (`body ?? {}`).
+ * Anything else is bytes a receiver would be sent.
+ */
+function isNoBodyPayload(payload: unknown): boolean {
+    if (payload === undefined || payload === null) return true;
+    if (typeof payload !== 'object' || Array.isArray(payload)) return false;
+    const proto = Object.getPrototypeOf(payload);
+    return (proto === Object.prototype || proto === null) && Object.keys(payload).length === 0;
+}
+
+/**
+ * Why a delivery of this method cannot carry this payload, or `undefined` when
+ * it can. A GET or HEAD sends no body, so a payload that is a real body would
+ * be dropped while the row records success. The outbox refuses it instead.
+ */
+export function bodylessPayloadRefusal(method: string | undefined, payload: unknown): string | undefined {
+    if (!isBodylessMethod(method) || isNoBodyPayload(payload)) return undefined;
+    const verb = method!.toUpperCase();
+    return `a ${verb} delivery is sent with no body, and this one carries a payload, which would be `
+        + `dropped. Use POST or PUT to send the payload, or drop the body to send a bodyless ${verb}.`;
+}
+
+/**
+ * Refuse, at enqueue, a GET or HEAD delivery whose payload is a real body
+ * (see {@link bodylessPayloadRefusal}). Both outboxes call it before they sign.
+ */
+export function assertBodylessPayloadAdmitted(input: { method?: string; payload: unknown }): void {
+    const refusal = bodylessPayloadRefusal(input.method, input.payload);
+    if (refusal !== undefined) throw new Error(`IHttpOutbox.enqueue: ${refusal}`);
+}
+
+/**
+ * The exact request body for a delivery — the bytes that get sent, and
  * therefore the bytes the signature covers.
  *
  * A string payload is sent verbatim (a pre-rendered body); anything else is
@@ -42,8 +86,15 @@ export { HTTP_SIGNATURE_HEADER as SIGNATURE_HEADER, signHttpBody as signBody };
  * `JSON.stringify(JSON.parse(s)) === s` for any `s` that `JSON.stringify`
  * produced — so signing at enqueue and sending after a reload agree byte for
  * byte. `http-signature-at-rest.integration.test.ts` pins that.
+ *
+ * A GET or HEAD sends no body, so its bytes are the empty string — what the
+ * published scheme signs for a request with no body. The outbox admits such a
+ * delivery only with no payload, so nothing is dropped. Pass the delivery's
+ * `method` wherever the body is signed, or the signature covers bytes that
+ * are never sent.
  */
-export function deliveryBody(payload: unknown): string {
+export function deliveryBody(payload: unknown, method?: string): string {
+    if (isBodylessMethod(method)) return '';
     return typeof payload === 'string' ? payload : JSON.stringify(payload ?? null);
 }
 
@@ -55,7 +106,8 @@ export type FetchImpl = (
     init: {
         method: string;
         headers: Record<string, string>;
-        body: string;
+        /** Absent for a GET or HEAD delivery, which is sent with no body. */
+        body?: string;
         signal: AbortSignal;
     },
 ) => Promise<{
@@ -83,15 +135,28 @@ export type HttpAttemptOutcome =
  *   - 2xx                       → success
  *   - 4xx (except 408/429)      → permanent failure (retriable = false → dead)
  *   - 408, 429, 5xx, transport  → retriable
+ *   - a connect the egress guard refused → permanent failure, named
+ *     `EGRESS_REFUSED`: retrying cannot change the verdict, so it dead-letters
+ *     at once instead of walking the retry schedule; a host name that did
+ *     not resolve reads the same refusal text and stays retriable
  */
 export async function sendOnce(
     delivery: HttpDelivery,
     fetchImpl: FetchImpl,
 ): Promise<HttpAttemptOutcome> {
-    const body = deliveryBody(delivery.payload);
+    const method = delivery.method ?? 'POST';
+    // A row enqueued before the enqueue refusal (or redelivered from then) can
+    // still hold a GET or HEAD with a real payload: fail it, never drop it.
+    const refusal = bodylessPayloadRefusal(method, delivery.payload);
+    if (refusal !== undefined) {
+        return { success: false, retriable: false, error: refusal, durationMs: 0 };
+    }
+    // The bytes the enqueue-time signature covers. A GET or HEAD sends none.
+    const body = deliveryBody(delivery.payload, method);
+    const bodyless = isBodylessMethod(method);
 
     const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
+        ...(bodyless ? {} : { 'Content-Type': 'application/json' }),
         'User-Agent': 'ObjectStack-Http/1.0',
         'X-Objectstack-Delivery': delivery.id,
         'X-Objectstack-Attempt': String(delivery.attempts + 1),
@@ -111,9 +176,9 @@ export async function sendOnce(
     const start = Date.now();
     try {
         const res = await fetchImpl(delivery.url, {
-            method: delivery.method ?? 'POST',
+            method,
             headers,
-            body,
+            ...(bodyless ? {} : { body }),
             signal: controller.signal,
         });
         clearTimeout(timer);
@@ -134,6 +199,9 @@ export async function sendOnce(
     } catch (err: unknown) {
         clearTimeout(timer);
         const durationMs = Date.now() - start;
+        const refused = findEgressRefusal(err);
+        // Final unless the host name did not resolve; the text is the same either way.
+        if (refused) return { success: false, retriable: refused.unresolved === true, error: refused.message, durationMs };
         const e = err as { name?: string; message?: string };
         const error = e?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : e?.message ?? String(err);
         return { success: false, retriable: true, error, durationMs };

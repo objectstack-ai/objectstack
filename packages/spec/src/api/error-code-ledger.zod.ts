@@ -831,15 +831,28 @@ export const ERROR_CODE_LEDGER = {
     // declared `engines.protocol` range excludes this runtime's major
     // (`ProtocolIncompatibleError`, `protocol-handshake.ts`). Answered 422:
     // the manifest is well-formed, but it declares a range this runtime can
-    // never satisfy, and the remedy is a body change
-    // (`objectstack migrate meta --from N`). It matches this package's own
-    // METADATA_SCHEMA_INVALID. It is not 409, which this ledger keeps for
-    // refusals from environment state (CONCURRENT_UPDATE). The two HTTP
-    // doors that reach the throw, `POST /api/v1/packages` and (since #21805)
+    // never satisfy, so the same body never succeeds on this runtime. The
+    // remedy is a different body (migrated metadata, or a build for this
+    // runtime's protocol), or, for a package ahead of the runtime, a runtime
+    // upgrade, which is a deployment change, not environment state. It
+    // matches this package's own METADATA_SCHEMA_INVALID. It is not 409,
+    // which this ledger keeps for refusals from environment state
+    // (CONCURRENT_UPDATE). The two HTTP doors that reach the throw,
+    // `POST /api/v1/packages` and (since #21805)
     // `POST /api/v1/marketplace/install-local`, answer the same bytes through
     // the shared `protocolIncompatibleAnswer`, carrying `requiredRange`,
-    // `rangeSource`, `protocolVersion`, `targetMajor` and `migrateCommand` in
-    // `error.details`.
+    // `rangeSource`, `protocolVersion` and `targetMajor` in `error.details`
+    // on every refusal. `migrateCommand` is present only when the chain can
+    // replay the package's metadata: `objectstack migrate meta --from N` for
+    // a `targetMajor` from the migrate-meta support floor
+    // (`MIGRATION_SUPPORT_FLOOR`, 16, ADR-0087 D3) up to the runtime's major,
+    // and the bare `objectstack migrate meta` when `targetMajor` is null. It
+    // is absent when `targetMajor` is AHEAD of the runtime (#26480), where
+    // the message names upgrading the runtime or installing a build for this
+    // runtime's protocol, and absent BELOW the floor (#33466), where
+    // `--from N` refuses and the message names installing a build for this
+    // runtime's protocol, or bringing the metadata to the floor by another
+    // path and then running `--from 16`.
     'OS_PROTOCOL_INCOMPATIBLE',
   ],
   '@objectstack/objectql': [
@@ -1183,6 +1196,16 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_ARTIFACT_PACKAGES',
     'INVALID_ARTIFACT_PACKAGE_ENTRY',
     'DUPLICATE_ARTIFACT_PACKAGE',
+    // ADR-0130 D5 — `resolveArtifactPackageEntries` refuses an artifact two or
+    // more of whose packages depend on each other through
+    // `manifest.dependencies`, a cycle `resolvePluginOrder` cannot order (the
+    // sorter's typed `PluginOrderCycleError`, answered in this envelope).
+    // `refuse()` stamps `code` + `status: 422` like its siblings, and
+    // `details.cycle` lists the package ids along the cycle, each depending on
+    // the next, the first repeated last. Door reading as the siblings:
+    // `POST /api/v1/marketplace/install-local` answers it through
+    // `declaredRefusalAnswer`, `details` included.
+    'CYCLIC_ARTIFACT_PACKAGES',
     // ADR-0119 D2 — the migration-journal runner's four refusals
     // (`MigrationJournalRefusal`, `utils/migration-journal.ts`: a
     // `(code, message)` constructor, `code` only, no `status`). Raised by
@@ -1236,6 +1259,15 @@ export const ERROR_CODE_LEDGER = {
     // the hosted `/automation` domain (`runtime/domains/automation-hooks.ts`)
     // for a qualified address its qualifier does not admit. Provenance only.
     'INVALID_SIGNATURE',          // hook secret did not verify the request body
+    // The outbound-request guard (`@objectstack/core/egress`). Neither reaches
+    // a wire envelope: `EGRESS_REFUSED` is the named reason a webhook
+    // delivery dead-letters with and a flow `http` node fails with, when its
+    // target is not public and not allowlisted (`EgressRefusedError`,
+    // `egress/guarded-fetch.ts`); `EGRESS_ALLOWLIST_INVALID` is the boot's
+    // refusal of a malformed or over-broad `OS_EGRESS_ALLOWED_TARGETS`
+    // (`EgressAllowlistError`, `egress/policy.ts`).
+    'EGRESS_REFUSED',
+    'EGRESS_ALLOWLIST_INVALID',
   ],
   '@objectstack/types': [
     // [#20919] The REST door's error CLASSIFICATION half

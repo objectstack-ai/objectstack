@@ -25,8 +25,8 @@ action's own label, params and `visible`.
 ## TypeScript Usage
 
 ```typescript
-import { BulkActionDefSchema, BulkActionExecutionSchema, BulkActionOperationSchema, BulkActionParamSchema } from '@objectstack/spec/ui';
-import type { BulkActionDef, BulkActionExecution, BulkActionOperation, BulkActionParam } from '@objectstack/spec/ui';
+import { BulkActionDefSchema, BulkActionExecutionSchema, BulkActionOperationSchema, BulkActionParamSchema, BulkActionResultSchema } from '@objectstack/spec/ui';
+import type { BulkActionDef, BulkActionExecution, BulkActionOperation, BulkActionParam, BulkActionResult } from '@objectstack/spec/ui';
 
 // Validate data
 const result = BulkActionDefSchema.parse(data);
@@ -173,6 +173,27 @@ const result = BulkActionDefSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Option label (plain string — not i18n-resolved on this path). |
 | **value** | `string \| number \| boolean` | ✅ | Stored value. |
+
+
+---
+
+## BulkActionResult
+
+[PLANNED — not enforced] The per-row outcome an `execution: 'aggregate'` bulk action handler MAY resolve with: `{ succeeded: [ids], failed: [{ id, message }] }` as its whole resolve value, never attached to a rejection (a rejection stays one outcome for the selection). The console does not read it yet, so until its reader lands a handler that cannot cover the whole selection must still reject: a resolved aggregate call is counted as covering every selected row. Not the data plane's batch answer: here `succeeded` and `failed` are row lists, not counts. Once read: a value with neither member keeps the one-outcome report; a value with either member that does not parse is reported as unreadable, never as full success; members beyond the two lists carry no meaning. Ids must be dispatched `params._selectedIds`: an id outside the selection is dropped, a duplicate counts once, an id in both lists counts as failed, and a selected id in neither list is reported as not confirmed, never as succeeded.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **succeeded** | `string[]` | ✅ | Ids of the selected rows the handler wrote. Each must be one of the dispatched `params._selectedIds`. The planned reader will drop an id outside the selection, count a duplicate once, and count an id that is also in `failed` as failed. |
+| **failed** | `({ id: string; message: string } & Record<string, any>)[]` | ✅ | One entry per selected row the handler did not write, each with its own reason (`message`, not `error`). The planned reader will drop an id outside `params._selectedIds` and count a duplicate once. |
+
+### Nested Shape: `BulkActionResult.failed[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Id of a selected row the handler did not write: one of the dispatched `params._selectedIds`. |
+| **message** | `string` | ✅ | Why this row was not written, as the person running the action should read it. |
 
 
 ---

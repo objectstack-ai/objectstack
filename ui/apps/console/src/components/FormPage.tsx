@@ -126,9 +126,11 @@ import {
   isMissingForRequired,
   isRuntimeDefault,
   isServerOwnedValue,
+  planObjectFormulas,
   resolveAffordance,
   resolveFieldRuleState,
   type FieldRuleFaults,
+  type ObjectFormulaPlan,
   type FieldRulePredicate,
 } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -136,7 +138,7 @@ import {
   omitServerResolvedDefaults,
   optionListDefault,
   resolveSectionGroupReferences,
-} from '@object-ui/plugin-form';
+} from '@object-ui/plugin-form/core';
 // ADR-0059's published door for a host that renders field widgets OUTSIDE the
 // form renderer: `resolveFormWidgetType` + `getLazyFieldWidget` hand back the
 // very component `@object-ui/fields` registers for the form, so a host built on
@@ -496,6 +498,20 @@ type EffectiveSubmitBehavior = SubmitBehavior | { kind: 'created-record' };
 interface RenderableField {
   name: string;
   label: string;
+  /**
+   * Where {@link RenderableField.label} came from, decided where the row is
+   * built and never re-guessed from the string: `'entry'` when the form
+   * view's field entry declared its own `label`, `'object'` when the row fell
+   * back to the object field's label (or its name).
+   *
+   * The two are different texts. An entry label is the visitor-facing copy
+   * the author wrote for THIS form, served already localized by the form
+   * endpoint (`_sections.{section}.fields.{field}.label`); the app bundle's
+   * `fields.{object}.{field}` translates the OBJECT field, the agent-side
+   * label. So only an `'object'` row takes the bundle overlay — see
+   * `rowLabel` in {@link FormPage}.
+   */
+  labelSource: 'entry' | 'object';
   type: string;
   required: boolean;
   readonly: boolean;
@@ -853,6 +869,10 @@ export function buildSections(
         // objectui#13380 — the three `I18nLabel` keys, collapsed to the
         // visitor's language before they reach a `string` slot.
         label: localized(override.label ?? def.label) ?? override.field,
+        // The same `??` as the line above, read once more for its branch: an
+        // entry that declared a label is the visitor's copy, never overlaid
+        // by the object field's bundle translation at render.
+        labelSource: override.label != null ? 'entry' : 'object',
         type: def.type ?? 'text',
         required: override.required ?? def.required ?? false,
         readonly: override.readonly ?? false,
@@ -2406,6 +2426,50 @@ function findSubmitRefusals(
   return { faultedVisibleWhen, missing };
 }
 
+const warnedUnservableRules = new Set<string>();
+
+/**
+ * `sections` with the OBJECT-level `visibleWhen` (`rules.visibleWhen`) of every
+ * row that reads a formula this page cannot compute dropped, each drop warned
+ * once (objectstack#35033). The field is then shown and keeps its `required`,
+ * and its rule is no fault, so the submit is not refused for it (no ADR-0137
+ * D2 refusal) and the server, which judges the write, decides. The view-level
+ * predicate is a layout gate and is left alone. Returns `sections` itself when
+ * nothing drops.
+ */
+export function withoutUnservableRuleVisibleWhen(
+  sections: RenderableSection[],
+  plan: ObjectFormulaPlan | undefined,
+): RenderableSection[] {
+  if (!plan || plan.unservable.size === 0) return sections;
+  let changed = false;
+  const out = sections.map((sec) => {
+    let fields: RenderableField[] | undefined;
+    sec.fields.forEach((f, i) => {
+      const pred = f.rules?.visibleWhen;
+      if (pred == null) return;
+      const reads = plan.unservableReadsOf(pred);
+      if (reads.length === 0) return;
+      fields ??= sec.fields.slice();
+      const { visibleWhen: _dropped, ...rules } = f.rules!;
+      fields[i] = { ...f, rules };
+      const why = reads.map(([name, reason]) => `'${name}' ${reason}`).join('; ');
+      const key = JSON.stringify([f.name, why]);
+      if (!warnedUnservableRules.has(key)) {
+        warnedUnservableRules.add(key);
+        console.warn(
+          `[object-ui] The visibleWhen of field '${f.name}' reads a formula the form cannot compute ` +
+            `(${why}), so the field is shown and keeps its required flag; the server decides on save.`,
+        );
+      }
+    });
+    if (!fields) return sec;
+    changed = true;
+    return { ...sec, fields };
+  });
+  return changed ? out : sections;
+}
+
 // ─── Main component ─────────────────────────────────────────────────
 
 export interface FormPageProps {
@@ -2529,6 +2593,19 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
    * and NO in the same position with the wrapper removed.
    */
   const { sectionLabel, fieldLabel, objectLabel } = useSafeFieldLabel();
+  /**
+   * The label a row is NAMED by, on screen and in every refusal that names
+   * it — one rule for all of them, so a message never calls a field something
+   * the visitor cannot see.
+   *
+   * An entry-declared label (`labelSource: 'entry'`) is printed as served: it
+   * is this form's own copy, already localized by the form endpoint, and the
+   * bundle's `fields.{object}.{field}` translates a different text — the
+   * object field's. Only a row whose label came from the object field takes
+   * that overlay, falling back to the served label on a miss.
+   */
+  const rowLabel = (object: string, f: Pick<RenderableField, 'name' | 'label' | 'labelSource'>): string =>
+    f.labelSource === 'entry' ? f.label : fieldLabel(object, f.name, f.label);
   // The page's own chrome — the loading line, the success toast, the
   // thank-you panel's defaults, and (objectui#11071) the submit button, the
   // pending-redirect line and the required refusal's frame — through the same
@@ -2718,9 +2795,30 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, identifier, search, channel]);
 
+  /**
+   * The object's `formula` fields, recomputed from the live values for the
+   * field rules (objectstack#35033): a rule reading one is judged on the value
+   * the written record would serve, as the server judges it. A row whose
+   * object-level `visibleWhen` reads a formula this page cannot compute loses
+   * that rule — shown and still required, never a submit refusal — in
+   * {@link withoutUnservableRuleVisibleWhen}. The payload stays `values`.
+   * The formulas are computed for the acting user of `predicateScope`
+   * (`current_user`), bound as the server binds it.
+   */
+  const formulaPlan = useMemo(
+    () => planObjectFormulas(loaded?.objectSchema?.fields, predicateScope),
+    [loaded, predicateScope],
+  );
+  const ruleValues = useMemo(
+    () => (formulaPlan ? formulaPlan.compute(values) : values),
+    [formulaPlan, values],
+  );
   const sections = useMemo<RenderableSection[]>(
-    () => (loaded ? buildSections(loaded.form, loaded.objectSchema, language) : []),
-    [loaded, language],
+    () =>
+      loaded
+        ? withoutUnservableRuleVisibleWhen(buildSections(loaded.form, loaded.objectSchema, language), formulaPlan)
+        : [],
+    [loaded, language, formulaPlan],
   );
 
   /**
@@ -2817,7 +2915,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     if (faultedVisibleWhen.length > 0) {
       const msg = t('form.visibleWhenFaulted', {
         fields: faultedVisibleWhen
-          .map((f) => fieldLabel(object, f.name, f.label))
+          .map((f) => rowLabel(object, f))
           .join(t('validation.formInvalidJoiner')),
       });
       setError(msg);
@@ -2835,7 +2933,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       // the words are the locale's, not a concatenation of English.
       const msg = t('publicForm.requiredFields', {
         fields: missing
-          .map((f) => fieldLabel(object, f.name, f.label))
+          .map((f) => rowLabel(object, f))
           .join(t('validation.formInvalidJoiner')),
       });
       setError(msg);
@@ -2843,7 +2941,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       // The record form's message for an empty required field, per row.
       setFieldErrors(Object.fromEntries(missing.map((f) => [
         f.name,
-        t('validation.required', { field: fieldLabel(object, f.name, f.label) }),
+        t('validation.required', { field: rowLabel(object, f) }),
       ])));
       return true;
     }
@@ -2885,7 +2983,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const handleWizardNext = (object: string) => {
     const refusals = findSubmitRefusals(
       [sections[currentStep]],
-      values,
+      ruleValues,
       loaded?.record,
       isCreateForm,
       predicateScope,
@@ -2916,7 +3014,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     if (!loaded) return;
     const refusals = findSubmitRefusals(
       wizardView && !onLastStep ? [sections[currentStep]] : sections,
-      values,
+      ruleValues,
       loaded.record,
       isCreateForm,
       predicateScope,
@@ -2940,7 +3038,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     }
     const refusals = findSubmitRefusals(
       sections,
-      values,
+      ruleValues,
       loaded.record,
       isCreateForm,
       predicateScope,
@@ -3257,7 +3355,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // things that depend on it below — the row's presence, the
           // required marker, and the control's own attributes. Computing
           // it three times would be three chances to disagree.
-          const state = resolveRowState(f, values, loaded.record, isCreateForm, predicateScope);
+          const state = resolveRowState(f, ruleValues, loaded.record, isCreateForm, predicateScope);
           if (!state.visible) return null;
           // The row's refusal mark, if the last submit left one: its own text
           // under the control, or the banner that names it.
@@ -3297,9 +3395,11 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
                 * payload, which is why the symptom looked like "field
                 * labels translate, section headings do not"; the client
                 * lookup is the overlay an app bundle can put on top,
-                * not a replacement for that server value.
+                * not a replacement for that server value — and only for
+                * a row whose label IS the object field's (`rowLabel`):
+                * an entry-declared label is printed as served.
                 */}
-              {fieldLabel(loaded.object, f.name, f.label)}
+              {rowLabel(loaded.object, f)}
               {/* Visual-only (objectui#3299): the control's `required` /
                   `aria-required` is the announced channel; hiding the `*`
                   keeps it out of the control's accessible name. */}
@@ -3353,7 +3453,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const renderTabbedSections = () => {
     const drawn = sections
       .map((sec, at) => ({ sec, at, key: sectionTabKey(sec, at) }))
-      .filter(({ sec }) => isSectionVisible(sec, values, loaded.record, predicateScope));
+      .filter(({ sec }) => isSectionVisible(sec, ruleValues, loaded.record, predicateScope));
     if (drawn.length === 0) return null;
     const active = resolveActiveTab(drawn.map((d) => d.key), pickedTab, loaded.form?.defaultTab);
     const stripAt = loaded.form?.tabPosition ?? 'top';
@@ -3544,7 +3644,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           // would renumber every later section the moment one hid, remounting
           // their inputs and taking the caret with them. `null` keeps each
           // surviving section on the key it already had.
-          if (!isSectionVisible(sec, values, loaded.record, predicateScope)) return null;
+          if (!isSectionVisible(sec, ruleValues, loaded.record, predicateScope)) return null;
           return (
           <section key={i} className="rounded-md border bg-card p-4 sm:p-5">
             {sec.label && (

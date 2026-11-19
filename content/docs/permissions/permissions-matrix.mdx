@@ -143,7 +143,7 @@ Field-level security controls visibility and editability of individual fields pe
 | `opportunity.amount` | Visible, Editable | Visible, Editable | Visible, Editable | Visible | Visible |
 | `opportunity.margin` | Visible, Editable | Visible, Editable | Hidden | Hidden | Hidden |
 
-**View All / Modify All reach every field.** The Sales Manager column follows from section 2: `sales_manager_access` holds `viewAllRecords` on `contact` and `modifyAllRecords` on `opportunity`, and a set holding View All on an object reads every field of it, while Modify All also edits every field (ADR-0066 D2 ⑧ as amended). Field rules in other sets cannot hide `contact.ssn` from that manager. To keep a field from someone, grant them the object without View All / Modify All and withhold the field there.
+**View All / Modify All reach every field.** The Sales Manager column follows from section 2: `sales_manager_access` holds `viewAllRecords` on `contact` and `modifyAllRecords` on `opportunity`, and a set holding View All on an object reads every field of it that its own field rules do not hide, while Modify All reads and edits every field (ADR-0066 D2 ⑧ as amended). Field rules in other sets cannot hide `contact.ssn` from that manager. To keep a field from someone, withhold it in a set that grants the object without Modify All, and give them no other set that reads the field.
 
 ### FLS States
 
@@ -307,7 +307,8 @@ graph TD
 - **Scope depth** — grant a permission set `readScope: 'unit'` /
   `'unit_and_below'`; the owner-match widens to the caller's unit (or its
   subtree). A position assignment's `business_unit_id` anchor decides *which*
-  unit that means for multi-unit users (ADR-0090 Addendum).
+  unit that means for multi-unit users (ADR-0090 Addendum). Enterprise edition
+  only: on the open edition these scopes behave as owner-only.
 - **Sharing-rule recipients** — share with
   `{ type: 'unit_and_subordinates', value: 'east' }` to reach everyone in the
   East subtree, or `{ type: 'position', value: 'sales_manager' }` to reach a
@@ -370,7 +371,7 @@ flowchart TD
 | 7 | **Field-Level Security** | Which fields is the user allowed to see/edit? |
 
 <Callout type="tip">
-**Performance:** For reads, steps 2–6 are compiled into a query filter (owner-match ∪ materialized shares, AND-ed with RLS) at query time, not evaluated record-by-record. By-id writes are verified with a pre-image check: the target row is re-read through the write-scope filter before the mutation, and a row the caller cannot read answers exactly what a missing id answers (`404 RECORD_NOT_FOUND`). A predicate (`multi: true`) update or delete matches only the rows the caller can read: a row the read door would not return is not written, not counted and not refused, and above 10 000 such rows the write is refused (`400 INVALID_FILTER`) rather than narrowed by a cut-off list. A caller whose read of the object is refused writes none of its records: its by-id and predicate updates and deletes are refused, whatever rows they address. This keeps security checks efficient even on tables with millions of rows.
+**Performance:** For reads, steps 2–6 are compiled into a query filter (owner-match ∪ materialized shares, AND-ed with RLS) at query time, not evaluated record-by-record. By-id writes are verified with a pre-image check: the target row is re-read through the write-scope filter before the mutation, and a row the caller cannot read answers exactly what a missing id answers (`404 RECORD_NOT_FOUND`). A predicate (`multi: true`) update or delete matches only the rows the caller can read: a row the read door would not return is not written, not counted and not refused, and above 10 000 such rows the write is refused (`400 INVALID_FILTER`) rather than narrowed by a cut-off list. Under record sharing it is bounded further, by the rows the caller may write (owner depth and queue, plus edit shares for an update; a share never grants delete, ADR-0111 D3): a row the caller can only read through a read share is not written by a predicate write, even when an app `update` widener admits it, and the write answers no error; address that row by id alone to write it. A caller whose read of the object is refused writes none of its records: its by-id and predicate updates and deletes are refused, whatever rows they address. This keeps security checks efficient even on tables with millions of rows.
 </Callout>
 
 ## See also

@@ -81,13 +81,17 @@ function classesOf(el: Element): string[] {
 }
 
 describe('objectui#13088 — the pending-drafts bar shows its whole sentence', () => {
-  it('the sentence wraps instead of being clamped to one line, and the publish button stays on the bar', async () => {
-    render(<PendingDraftsBar packageId={PKG} idle />);
+  // objectstack#34610 — the bar's action is now Show draft (the screen's one
+  // Publish is the shell's bar), and it keeps its place the same way.
+  it('the sentence wraps instead of being clamped to one line, and the action button stays on the bar', async () => {
+    render(<PendingDraftsBar packageId={PKG} idle onShowDraft={() => {}} />);
     const bar = await screen.findByTestId('pending-drafts-bar', undefined, { timeout: 4000 });
     const sentence = within(bar).getByTestId('pending-drafts-bar-sentence');
 
-    // The whole sentence is in the element, including its second half.
-    expect(sentence).toHaveTextContent('1 change(s) are not published yet — users cannot see them.');
+    // The whole sentence is in the element, including its second half. (No
+    // i18n instance is mounted here, so the inline default is drawn and the
+    // plural form is not chosen; the packs' `_one` form is not what this pins.)
+    expect(sentence).toHaveTextContent(/^1 unpublished changes?\. Show the draft to review and publish (it|them)\.$/);
 
     // No one-line clamp on the sentence itself.
     const clamps = classesOf(sentence).filter((c) => CLAMPS_ITSELF.has(c) || /^line-clamp-/.test(c));
@@ -101,7 +105,7 @@ describe('objectui#13088 — the pending-drafts bar shows its whole sentence', (
     }
     expect(inherited).toEqual([]);
 
-    // The publish action stays on the bar.
-    expect(within(bar).getByRole('button', { name: 'Publish' })).toBeInTheDocument();
+    // The action stays on the bar.
+    expect(within(bar).getByRole('button', { name: 'Show draft' })).toBeInTheDocument();
   });
 });

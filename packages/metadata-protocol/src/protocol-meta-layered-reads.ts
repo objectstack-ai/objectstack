@@ -43,7 +43,7 @@ import {
     storedRowDocument,
     withItemLockFamily,
 } from './item-lock.js';
-import { type MetadataDiagnostics, computeMetadataDiagnostics, withViewLintWarnings } from './metadata-diagnostics.js';
+import { type MetadataDiagnostics, computeMetadataDiagnostics, viewLintObjectLookup, withViewLintWarnings } from './metadata-diagnostics.js';
 import { redactMetadataItem } from './metadata-redaction.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
@@ -66,19 +66,23 @@ import {
 } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
+    bareDocServiceCopyDisplacesEntry,
     judgeBareActionRead,
     judgeDroppedServiceRefusal,
     packageScopedRefusalOf,
+    refuseAmbiguousBareDocRead,
     rethrowPackageScopedRefusal,
+    registryAnswerAtAddress,
     servedFromDisabledHolder,
     serviceAnswerFitsBareAction,
+    serviceCopyOfAnotherPackage,
 } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { isAnotherHoldersCopy, servedAddressJudgment } from './protocol-meta-item-face.js';
+import { declaredMemberOverrideAddressOf, isAnotherHoldersCopy, rowHeldBaseAddressOf, servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
@@ -102,9 +106,52 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'de
     if (judged?.kind === 'refused') return judged.error;
     if (judged !== undefined) return undefined;
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
+    // [#34441 cell 2] …and a base whose dependents' rows at the member are
+    // bundle additions to it is the one holder, read at its address by
+    // {@link getMetaItemLayered} ({@link rowHeldBaseAddressOf}), as the plain
+    // read serves it: no ambiguity to refuse. Beside a package-less row the
+    // refusal stands (#33210).
+    if (address.candidates.length > 1 && !address.unbound) {
+        const base = await rowHeldBaseAddressOf(host, type, name, member);
+        if (base !== undefined && address.candidates.includes(base)) return undefined;
+    }
     return address.candidates.length > 1
-        ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
+        ? withPackageCandidates(
+            packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates),
+            PLURAL_TO_SINGULAR[type] ?? type, name, address.candidates,
+        )
         : undefined;
+}
+
+/**
+ * [#32622, ADR-0150 D5] The package-less writes' refusal, as the layered door
+ * answers it (#28337: its sentence, code, status and `?package=` remedy,
+ * unchanged), with the holders it names carried as a package-scoped refusal's
+ * `refusal.candidates` (`[{ kind: 'package', packageId }, …]`, the `/actions`
+ * shape), so each transport answers them as `details.candidates`, as for every
+ * other `/layers` refusal. Carried by SHAPE (`refusal.status: 'refused'`),
+ * which the one recogniser reads (`packageScopedRefusalCandidates` in
+ * `@objectstack/types`), because the type this refusal judges need not be one
+ * the package-scoped resolver covers. The save and delete doors' answer of
+ * the same rows does not move.
+ */
+function withPackageCandidates(
+    error: Error & { code: 'RESOURCE_CONFLICT'; status: 409 },
+    type: string,
+    name: string,
+    packageIds: readonly string[],
+): Error & { code: 'RESOURCE_CONFLICT'; status: 409 } {
+    return Object.assign(error, {
+        refusal: {
+            status: 'refused' as const,
+            reason: 'ambiguous-in-environment' as const,
+            type,
+            name,
+            callerPackageId: null,
+            candidates: packageIds.map((packageId) => ({ kind: 'package' as const, packageId })),
+            message: error.message,
+        },
+    });
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemLayered`; the method's docblock there is its contract. */
@@ -182,6 +229,21 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         : await servedAddressJudgment(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
     const servedAddress = judged?.kind === 'served' ? judged.packageId : undefined;
     if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
+    // [#32849, ADR-0150 D4, ADR-0146 D8 item 2] …and, judged neither way, a
+    // member whose one shipper's declared override is stored is read at that
+    // shipper, as the plain read takes it ({@link declaredMemberOverrideAddressOf}):
+    // `effective` is then the override `?package=<shipper>` serves, never the
+    // shipper's own member beside it. The draft layer stays at the address the
+    // strict draft read takes, which this arm does not move (the plain read
+    // leaves its strict draft read where it was).
+    // [#33210 (c)] …and a member only a dependent's addition holds, over a
+    // row-held base, at that base, as the plain read takes it ({@link rowHeldBaseAddressOf}).
+    const declaredOverrideAt = request.packageId || judged !== undefined
+        ? undefined
+        : await declaredMemberOverrideAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member))
+            ?? await rowHeldBaseAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
+    const draftPackageId = request.packageId;
+    if (declaredOverrideAt !== undefined) request = { ...request, packageId: declaredOverrideAt };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the
     // selector's or else the canonical one, read exactly as
@@ -216,6 +278,34 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         ? await judgeBareActionRead(host, request.name)
         : undefined;
     const exactAddress = await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
+    // [#34248, ruling 6893582352] …and a bare doc read of a name two enabled
+    // packages hold, beside the environment's own entry, reads that entry as
+    // {@link getMetaItem} serves it ({@link refuseAmbiguousBareDocRead}): as
+    // its code layer, never the package copy the service kept. Its refusal
+    // without such an entry stays the door's, as before.
+    let bareDocEnvironmentEntry: unknown;
+    if (!request.packageId && request.type === 'doc') {
+        try {
+            bareDocEnvironmentEntry = refuseAmbiguousBareDocRead(host, request.name, member);
+        } catch (error) {
+            if (packageScopedRefusalOf(error) === undefined) throw error;
+        }
+    }
+    // [ADR-0150 D3, #32914] …and, naming no package, a type addressed by
+    // package is judged by the registry's package-scoped resolver, as the
+    // plain read judges it ({@link getMetaItem}, its `packagelessScopedRead`):
+    // a name two or more served packages hold is refused naming each
+    // (`PackageScopedNameRefusedError`, `409 RESOURCE_CONFLICT` with its
+    // candidates), before any layer is read and whatever the metadata service
+    // holds. The code layer below otherwise fell back to the artifact lookup's
+    // first composite, so the read answered the holder that registered first.
+    // Asked for the judgment only: a name one holder holds keeps the layers
+    // below as they were. [contract review S1] Stored-row holders are not
+    // this judgment's: the door refuses them through
+    // {@link packagelessLayeredReadRefusal}, its step 1c.
+    if (!request.packageId && host.engine?.registry?.readsByPackage?.(request.type) === true) {
+        host.engine.registry.resolveItem(request.type, request.name, null, member);
+    }
 
     // [ADR-0131 D6] Environment → code: the overlay layer is the
     // environment's stored row; no organization's row is read.
@@ -235,9 +325,15 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
         // or a disabled package's customization ({@link servedFromDisabledHolder}),
         // as in {@link getMetaItem}.
+        // [ADR-0150 D3, red line 2] …or, at an address naming a package the
+        // exact qualifier does not judge, another package's item, as in
+        // {@link getMetaItem} ({@link serviceCopyOfAnotherPackage}): the
+        // lookups below read the package's own.
         if (fromService.data !== undefined && fromService.data !== null
             && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
-                || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
+                || await servedFromDisabledHolder(host, request.name, fromService.data)))
+            && !(exactAddress === undefined && serviceCopyOfAnotherPackage(host, request, fromService.data))
+            && !bareDocServiceCopyDisplacesEntry(bareDocEnvironmentEntry, fromService.data)) {
             // [#26699] …when it is the member this read addresses, as in
             // {@link getMetaItem}: the service keys a type's items by name
             // alone, so for a bundle it holds whichever member it
@@ -328,18 +424,45 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         const judgedPackageId = typeof (bareActionAnswer?.item as { _packageId?: unknown } | undefined)?._packageId === 'string'
             ? (bareActionAnswer!.item as { _packageId: string })._packageId
             : undefined;
-        const artifact = bareActionAnswer !== undefined && judgedPackageId === undefined
+        // [#34248] …and so is a bare doc read's environment entry: no
+        // package's artifact is its code layer; the entry is, as the plain
+        // read's code step serves it.
+        const artifact = (bareActionAnswer !== undefined && judgedPackageId === undefined) || bareDocEnvironmentEntry !== undefined
             ? undefined
             : host.lookupArtifactItem(request.type, request.name, request.packageId || judgedPackageId, wantedMember);
         let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
             ?? namedMemberOnly(runtimeOnly(bareActionAnswer !== undefined
                 ? bareActionAnswer.item
-                : host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
-        if (regItem === undefined) {
+                : bareDocEnvironmentEntry !== undefined
+                    ? bareDocEnvironmentEntry
+                    : host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
+        if (regItem === undefined && bareDocEnvironmentEntry === undefined) {
             const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
             if (alt) regItem = namedMemberOnly(runtimeOnly(host.engine.registry.getItem(alt, request.name, request.packageId, member)));
         }
+        // [ADR-0150 D3/D5, red line 2] …and at such an address, the package's
+        // own item, as {@link getMetaItem}'s code step answers there
+        // ({@link registryAnswerAtAddress}): a package that holds no item of
+        // the name read another package's artifact or first composite, and is
+        // now refused naming the holders (ruling 6917064203 on #34398).
+        if (exactAddress === undefined) regItem = namedMemberOnly(runtimeOnly(registryAnswerAtAddress(host, request, regItem, member, isWantedMember, { refuse: true })));
         if (regItem !== undefined) code = regItem;
+
+        // [#34441 cell 1, #21059] Naming no member, the bare-name read answers
+        // a bundle that ships no canonical member with the member it ships,
+        // until a stored row is hydrated into that bare slot: the hydrated
+        // row is no artifact read (dropped above), and the shipped member it
+        // displaced is the artifact the bare name reads. Without this the same
+        // read answered `code` = the base's `fr-FR` before a restart and
+        // `null` after it (404 on `/layers`), with a dependent's `en-US` row
+        // stored. A named member is never answered here (its own lookups ran).
+        // [#34248] Nor is a bare doc read's environment entry: beside two
+        // enabled holders that entry is the read's answer, and the artifact
+        // lookup's first composite is the holder registered first, which the
+        // read never serves (as for the bare action read's judged answer).
+        if (code === null && member === undefined && bareActionAnswer === undefined && bareDocEnvironmentEntry === undefined) {
+            code = host.lookupArtifactItem(request.type, request.name, request.packageId) ?? null;
+        }
     }
 
     // [#5840] The code half of the rule #5707 wrote for the overlay half,
@@ -537,7 +660,16 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // With several such rows, the pair's is reported, else the first
     // package's in id order.
     let orphaned = false;
-    if (overlay === null && code !== null && typeof contentPackageId === 'string' && contentPackageId !== '') {
+    // [#34441 cell 1] …and only over a code layer of the member this read
+    // addresses. Naming no member, a bundle whose base ships no canonical
+    // member takes the base's other member as its code layer (the registry's
+    // bare-name read, above); a dependent's row of the canonical member is
+    // then no row the base's document shadows but the dependent's addition
+    // (#28802 R2), and reported as an orphan it became `/published`'s
+    // document, before a restart only. FROM (`main` 31096af83d): A ships
+    // `fr-FR` only, D stores `en-US`: `/published` served D's row (200), where
+    // with no D row it answers 404.
+    if (overlay === null && code !== null && isWantedMember(code) && typeof contentPackageId === 'string' && contentPackageId !== '') {
         const base = contentPackageId;
         let rows: readonly StoredOverlayRow[] = [];
         try {
@@ -598,7 +730,7 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     let draft: unknown | null | undefined;
     if (opts.withDraft === true) {
         draft = null;
-        const draftAddress = request.packageId
+        const draftAddress = draftPackageId
             ? undefined
             : await host.strictDraftReadAddress(request.type, request.name, member);
         try {
@@ -606,8 +738,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 type: request.type,
                 name: request.name,
                 state: 'draft',
-                ...(request.packageId
-                    ? { packageId: request.packageId }
+                ...(draftPackageId
+                    ? { packageId: draftPackageId }
                     : draftAddress ? { packageId: draftAddress.packageId } : {}),
                 ...memberOption(member),
             }))?.row;
@@ -631,7 +763,9 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 // package-less draft of a name two or more packages hold is
                 // refused naming every holder, and another holder's draft is
                 // no draft here. The layer itself stays the draft as stored.
-                if (exactAddress) {
+                // [#32849] A draft read at the address the strict draft read
+                // takes is no exact address's.
+                if (exactAddress && draftPackageId) {
                     const stamped = withRowBinding(draft, (draftRow as { package_id?: unknown }).package_id);
                     if ((isPackageLessRow(draftRow) && declinesPackageLessRowAt(host, request.type, request.name, draftRow as ServedOverrideRow))
                         || exactQualifierItem(host, request, exactAddress, stamped, member) !== stamped) {
@@ -704,9 +838,22 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // layer it derives from, not the value the by-name read serves.
     // [#28409] …and an orphaned row (above) is a shadowed layer of the
     // same kind: `effective` is the code layer the by-name read serves.
+    // [#34248, ruling 6893582352] …but not the package-less row behind a bare
+    // doc read's environment entry, beside two enabled holders: the entry the
+    // hydrator lays for it is tenant-authored, so it is no code layer (#21059,
+    // above), and the row it came from is the environment's own item, which
+    // answers first. Declined, `effective` was the empty code layer while the
+    // plain read served the row. Only that entry: a stamp-less runtime
+    // registration is a code layer (`code` holds it), and beside a different
+    // package-less stored row it stays the effective layer, as the plain read
+    // serves it.
+    const environmentRowAnswers = bareDocEnvironmentEntry !== undefined
+        && code === null
+        && isTenantAuthored(bareDocEnvironmentEntry)
+        && isPackageLessRow({ package_id: overlayBinding });
     const effectiveBase: unknown | null = expandedFrom !== undefined
         ? expandedFrom.item
-        : overlay !== null && !orphaned && !host.declinesStoredRow(request.type, request.name, overlayRow)
+        : overlay !== null && !orphaned && (environmentRowAnswers || !host.declinesStoredRow(request.type, request.name, overlayRow))
             ? host.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
             : code;
     // [#21738] The lock is the one item-lock resolution's — the
@@ -748,12 +895,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // `?layers=true` authoring read, the one Studio's item editor takes when
     // no draft is pending, so the pass runs unconditionally here. [#31866]
     // The list-view field warnings ({@link withListViewFieldWarnings}) ride
-    // the same pass, as `getMetaItem` serves them.
+    // the same pass, as `getMetaItem` serves them, [#34901] over the same
+    // disabled-package fold ({@link viewLintObjectLookup}).
     const _diagnostics = effective !== null && typeof effective === 'object' && !Array.isArray(effective)
         ? (await withViewLintWarnings(
             request.type,
             { ...(effective as Record<string, unknown>), _diagnostics: schemaDiagnostics },
-            (name) => host.engine?.registry?.getObject?.(name),
+            viewLintObjectLookup(host.engine?.registry),
         ))._diagnostics as MetadataDiagnostics | undefined
         : schemaDiagnostics;
 

@@ -434,7 +434,8 @@ describe('POST /data/:object/import — the round trip a customer actually runs'
 
     const { res, text } = makeStreamRes();
     await exportRoute.handler({ params: { object: 'shift' }, query: { format: 'csv' } } as any, res);
-    const lines = text().split('\r\n').filter((l) => l.length > 0);
+    // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+    const lines = text().replace(/^\uFEFF/, '').split('\r\n').filter((l) => l.length > 0);
     const header = lines[0].split(',');
     const cells = lines[1].split(',');
     // What the customer opens in Excel: business-timezone wall clock, no offset.

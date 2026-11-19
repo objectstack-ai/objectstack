@@ -21,6 +21,9 @@
 // test reads the store back afterwards.
 
 import { describe, it, expect, vi } from 'vitest';
+// The protocol module reaches `@objectstack/lint` by a dynamic import; its first
+// load is paid here, at collection, not inside a case's clocked window.
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -369,5 +372,149 @@ describe('many-data non-atomic — unchanged (#4620 regression net)', () => {
 
         expect(res.succeeded).toBe(1);
         expect(t.rows.get('a')).toEqual({ id: 'a', title: 'a-new' });
+    });
+});
+
+/**
+ * [#33795] The engine's optional roll-up batch scope (`deferSummaryRecompute`,
+ * ruling 6922040858), as the bulk update doors use it. The fake scope below is
+ * the contract's shape: run the callback, then "recompute" once — or throw the
+ * engine's stale-roll-up refusal (`ERR_SUMMARY_RECOMPUTE`) whose `written` is
+ * the callback's result.
+ */
+function armBatchScope(t: ReturnType<typeof makeStoreEngine>, opts: { failRecompute?: boolean } = {}) {
+    const recompute = vi.fn((_commitsSoFar: number) => {});
+    t.engine.deferSummaryRecompute = vi.fn(async (callback: () => Promise<unknown>) => {
+        const result = await callback();
+        recompute(t.commits.length);
+        if (opts.failRecompute) {
+            throw Object.assign(new Error('Roll-up summary recompute failed after retries for 1 parent record(s)'), {
+                code: 'ERR_SUMMARY_RECOMPUTE',
+                written: result,
+                failures: [{ childObject: 'invoice', parentObject: 'account', parentId: 'acc-1', field: 'invoice_total' }],
+            });
+        }
+        return result;
+    });
+    /** Every `engine.update` ran inside the scope: after it was entered, before its one recompute. */
+    const everyUpdateInScope = () => {
+        const entered = (t.engine.deferSummaryRecompute as any).mock.invocationCallOrder[0];
+        const recomputed = recompute.mock.invocationCallOrder[0];
+        return t.update.mock.invocationCallOrder.every((at: number) => at > entered && at < recomputed);
+    };
+    return { recompute, everyUpdateInScope };
+}
+
+describe('[#33795] the bulk update doors run as one roll-up batch', () => {
+    it('updateManyData runs every row inside the scope, and the scope recomputes once', async () => {
+        const t = makeStoreEngine();
+        const s = armBatchScope(t);
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const res: any = await p.updateManyData({
+            object: 'invoice',
+            records: [{ id: 'a', data: { title: 'a-new' } }, { id: 'b', data: { title: 'b-new' } }, { id: 'c', data: { title: 'c-new' } }],
+        } as any);
+        expect(res).toMatchObject({ success: true, succeeded: 3, failed: 0 });
+        expect(t.engine.deferSummaryRecompute).toHaveBeenCalledTimes(1);
+        expect(s.recompute).toHaveBeenCalledTimes(1);
+        expect(t.update).toHaveBeenCalledTimes(3);
+        expect(s.everyUpdateInScope()).toBe(true);
+    });
+
+    it('a non-atomic batch stopped by a failed row still ends the scope over the rows that landed', async () => {
+        const t = makeStoreEngine();
+        const s = armBatchScope(t);
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const res: any = await p.updateManyData({
+            object: 'invoice',
+            records: [{ id: 'a', data: { title: 'a-new' } }, { id: 'b', data: { title: POISON } }, { id: 'c', data: { title: 'c-new' } }],
+        } as any);
+        expect(t.rows.get('a')).toEqual({ id: 'a', title: 'a-new' });
+        expect(res).toMatchObject({ success: false, succeeded: 1, failed: 2 });
+        expect(res.results[2].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
+        expect(s.recompute).toHaveBeenCalledTimes(1);
+        expect(s.everyUpdateInScope()).toBe(true);
+    });
+
+    it('non-atomic: a failed end-of-batch recompute keeps the rows written and is logged once at error', async () => {
+        const t = makeStoreEngine();
+        armBatchScope(t, { failRecompute: true });
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            const res: any = await p.updateManyData({
+                object: 'invoice',
+                records: [{ id: 'a', data: { title: 'a-new' } }, { id: 'b', data: { title: 'b-new' } }],
+            } as any);
+            expect(res).toMatchObject({ success: true, succeeded: 2, failed: 0 });
+            expect(t.rows.get('b')).toEqual({ id: 'b', title: 'b-new' });
+            const lines = errors.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('account.invoice_total'));
+            expect(lines).toHaveLength(1);
+        } finally {
+            errors.mockRestore();
+        }
+    });
+
+    it('atomic: the recompute runs inside the transaction, before the commit', async () => {
+        const t = makeStoreEngine();
+        const s = armBatchScope(t);
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const res: any = await p.updateManyData({
+            object: 'invoice',
+            records: [{ id: 'a', data: { title: 'a-new' } }, { id: 'b', data: { title: 'b-new' } }],
+            options: { atomic: true },
+        } as any);
+        expect(res).toMatchObject({ success: true, succeeded: 2 });
+        expect(s.recompute).toHaveBeenCalledWith(0); // no commit yet when it ran
+        expect(t.commits).toHaveLength(1);
+    });
+
+    it('atomic: a failed end-of-batch recompute rolls the batch back with the rolled-back envelope a failed row answers', async () => {
+        const t = makeStoreEngine();
+        armBatchScope(t, { failRecompute: true });
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const res: any = await p.updateManyData({
+            object: 'invoice',
+            records: [{ id: 'a', data: { title: 'a-new' } }, { id: 'b', data: { title: 'b-new' } }, { id: 'c', data: { title: 'c-new' } }],
+            options: { atomic: true },
+        } as any);
+        // Nothing landed.
+        expect(t.rows.get('a')).toEqual({ id: 'a', title: 'a-old' });
+        expect(t.rows.get('c')).toEqual({ id: 'c', title: 'c-old' });
+        expect(t.rollbacks).toHaveLength(1);
+        expect(t.commits).toHaveLength(0);
+        // The envelope a per-row recompute failure answered: the last row
+        // carries the refusal's row error, the earlier rows ROLLED_BACK.
+        expect(res).toMatchObject({ success: false, succeeded: 0, failed: 3, total: 3 });
+        expect(res.results.map((r: any) => r.errors?.[0]?.code)).toEqual(['ROLLED_BACK', 'ROLLED_BACK', 'ERR_SUMMARY_RECOMPUTE']);
+        expect(res.results[2].errors?.[0]?.message).toBe('The update of this record failed. The reason is in the server log.');
+        expect(res.results[0].errors?.[0]?.message).toContain('record 2 failed');
+    });
+
+    it('an engine without the member keeps the per-row loop unchanged', async () => {
+        const t = makeStoreEngine();
+        expect(t.engine.deferSummaryRecompute).toBeUndefined();
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const res: any = await p.updateManyData({
+            object: 'invoice',
+            records: [{ id: 'a', data: { title: 'a-new' } }, { id: 'b', data: { title: 'b-new' } }],
+        } as any);
+        expect(res).toMatchObject({ success: true, succeeded: 2, failed: 0 });
+    });
+
+    it('batchData: the update arm runs inside the scope; the delete arm does not enter it', async () => {
+        const t = makeStoreEngine();
+        const s = armBatchScope(t);
+        const p = new ObjectStackProtocolImplementation(t.engine);
+        const updated: any = await p.batchData({
+            object: 'invoice',
+            request: { operation: 'update', records: [{ id: 'a', data: { title: 'a-new' } }, { id: 'b', data: { title: 'b-new' } }] },
+        } as any);
+        expect(updated).toMatchObject({ success: true, succeeded: 2 });
+        expect(t.engine.deferSummaryRecompute).toHaveBeenCalledTimes(1);
+        expect(s.everyUpdateInScope()).toBe(true);
+        await p.batchData({ object: 'invoice', request: { operation: 'delete', records: [{ id: 'c' }] } } as any);
+        expect(t.engine.deferSummaryRecompute).toHaveBeenCalledTimes(1);
+        expect(t.rows.has('c')).toBe(false);
     });
 });

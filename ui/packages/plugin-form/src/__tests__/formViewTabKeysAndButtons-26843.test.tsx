@@ -24,7 +24,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
+
+// Section names are read inside the <form>: the section navigation above it
+// repeats each name once two or more sections are drawn (objectstack#34605).
+const inForm = () => within(document.querySelector('form') as HTMLElement);
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import { ObjectForm } from '../ObjectForm';
@@ -154,7 +158,7 @@ describe('the modal tabbed layout honours the tab keys, with and without subform
 
   it('CONTROL: subforms with no contentLayout stay stacked — no tab strip', async () => {
     renderModalForm({ contentLayout: undefined, subforms: SUBFORMS });
-    await waitFor(() => expect(screen.getByText('Sec Two')).toBeInTheDocument());
+    await waitFor(() => expect(inForm().getByText('Sec Two')).toBeInTheDocument());
 
     expect(trigger('s1')).toBeNull();
   });

@@ -238,10 +238,12 @@ beforeAll(async () => {
  * staging gave, so no case sees another's writes. The tests switch the mode
  * on afterwards: every door under test reads the accessor per request.
  */
-async function stage(opts: { adminPlugin?: boolean; host?: EnvironmentUserHost | 'none'; tables?: Map<string, any[]> } = {}) {
+async function stage(
+  opts: { adminPlugin?: boolean; host?: EnvironmentUserHost | 'none'; tables?: Map<string, any[]>; config?: Record<string, unknown> } = {},
+) {
   const engine = createMemoryEngine();
   for (const [name, rows] of structuredClone(opts.tables ?? staged.tables)) engine.tables.set(name, rows);
-  const manager = makeManager(engine, opts.adminPlugin ?? false);
+  const manager = makeManager(engine, opts.adminPlugin ?? false, opts.config);
   const told: Array<{ kind: string; event: EnvironmentUserEvent }> = [];
   const recordingHost: EnvironmentUserHost = {
     userAdded: (event) => void told.push({ kind: 'added', event }),
@@ -1080,6 +1082,47 @@ describe('[#33186] the Setup → Users add actions reach the pending-person door
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: the console's offer of a DECLARED action, and what it posts
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Shared by the two describes below; the first one's header says how they judge.
+
+/** The session payload's principal for the staged admin: the platform-admin rung the doors' gate judges. */
+const ADMIN_PRINCIPAL = { id: 'staged-admin', email: EMAILS.admin, positions: [] as string[], isPlatformAdmin: true };
+
+function declaredAction(name: string) {
+  const action = (SysUser.actions ?? []).find((a) => a.name === name);
+  if (!action) throw new Error(`sys_user declares no action named "${name}"`);
+  return action;
+}
+
+/** The console's verdict on the declared action for this row, under the features this kernel serves. */
+function offeredOn(s: Awaited<ReturnType<typeof stage>>, name: string, row: Record<string, unknown>): boolean | string {
+  const raw = declaredAction(name).visible as unknown;
+  const source = typeof raw === 'string' ? raw : (raw as { source?: unknown } | undefined)?.source;
+  if (typeof source !== 'string') return `NO CEL SOURCE on ${name}`;
+  const features = (s.manager.getPublicConfig() as any).features;
+  const user = { ...ADMIN_PRINCIPAL, id: s.ids.admin };
+  const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, extra: { current_user: user, user, ctx: { user }, features } });
+  if (!r.ok) return `FAULT ${r.error.message.split('\n')[0]!.trim()}`;
+  return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
+}
+
+/**
+ * What the action posts for this row: its constant `bodyExtra`, the record id
+ * under `recordIdParam`, then the collected params.
+ */
+function actionCall(name: string, userId: string, collected: Record<string, unknown> = {}) {
+  const action = declaredAction(name);
+  const target = String(action.target);
+  expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
+  const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
+  for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
+  const extra = ((action as { bodyExtra?: Record<string, unknown> }).bodyExtra ?? {});
+  return { path: target.slice(BASE.length), body: { ...extra, [String(action.recordIdParam)]: userId, ...collected } };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Setup → Users: Deactivate / Reactivate are offered without the admin plugin
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -1093,37 +1136,6 @@ describe('[#33186] the Setup → Users add actions reach the pending-person door
 // `target`. CONTROL: an action whose door needs the plugin stays hidden there.
 
 describe('[#33759] Ban / Unban are offered and work without the admin plugin', () => {
-  /** The session payload's principal for the staged admin: the platform-admin rung the doors' gate judges. */
-  const ADMIN_PRINCIPAL = { id: 'staged-admin', email: EMAILS.admin, positions: [] as string[], isPlatformAdmin: true };
-
-  function declaredAction(name: string) {
-    const action = (SysUser.actions ?? []).find((a) => a.name === name);
-    if (!action) throw new Error(`sys_user declares no action named "${name}"`);
-    return action;
-  }
-
-  /** The console's verdict on the declared action for this row, under the features this kernel serves. */
-  function offeredOn(s: Awaited<ReturnType<typeof stage>>, name: string, row: Record<string, unknown>): boolean | string {
-    const raw = declaredAction(name).visible as unknown;
-    const source = typeof raw === 'string' ? raw : (raw as { source?: unknown } | undefined)?.source;
-    if (typeof source !== 'string') return `NO CEL SOURCE on ${name}`;
-    const features = (s.manager.getPublicConfig() as any).features;
-    const user = { ...ADMIN_PRINCIPAL, id: s.ids.admin };
-    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, extra: { current_user: user, user, ctx: { user }, features } });
-    if (!r.ok) return `FAULT ${r.error.message.split('\n')[0]!.trim()}`;
-    return typeof r.value === 'boolean' ? r.value : `NON-BOOLEAN ${JSON.stringify(r.value)}`;
-  }
-
-  /** What the action posts for this row: the record id under `recordIdParam`, then the collected params. */
-  function actionCall(name: string, userId: string, collected: Record<string, unknown> = {}) {
-    const action = declaredAction(name);
-    const target = String(action.target);
-    expect(target.startsWith(BASE), `${name} targets the auth mount`).toBe(true);
-    const declaredNames = (action.params ?? []).map((p) => p.name ?? p.field);
-    for (const key of Object.keys(collected)) expect(declaredNames, `${name} declares the ${key} param`).toContain(key);
-    return { path: target.slice(BASE.length), body: { [String(action.recordIdParam)]: userId, ...collected } };
-  }
-
   it.each([
     ['unmanaged', false],
     ['managed', true],
@@ -1158,5 +1170,775 @@ describe('[#33759] Ban / Unban are offered and work without the admin plugin', (
     const on = await stage({ adminPlugin: true });
     expect((on.manager.getPublicConfig() as any).features.admin).toBe(true);
     expect(offeredOn(on, 'impersonate_user', on.row(EMAILS.member)!)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Removing a pending person, which cancels their invitation at the host
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A recording host with a `userRemoved` member, unless `withRemoved` is false. */
+function removingHost(opts: { withRemoved?: boolean; removed?: () => void; added?: () => void } = {}) {
+  const told: Array<{ kind: string; event: EnvironmentUserEvent }> = [];
+  const host: EnvironmentUserHost = {
+    userAdded: (event) => {
+      told.push({ kind: 'added', event });
+      opts.added?.();
+    },
+    userDeactivated: (event) => void told.push({ kind: 'deactivated', event }),
+    userReactivated: (event) => void told.push({ kind: 'reactivated', event }),
+    ...(opts.withRemoved === false
+      ? {}
+      : {
+          userRemoved: (event: EnvironmentUserEvent) => {
+            told.push({ kind: 'removed', event });
+            opts.removed?.();
+          },
+        }),
+  };
+  return { host, told };
+}
+
+/** Add one pending person with a position, a permission set and a membership; answers their id. */
+async function addPending(s: Awaited<ReturnType<typeof stage>>, email: string): Promise<string> {
+  const res = await s.fire(
+    '/admin/add-sso-user',
+    { email, name: 'Typo', positions: ['sales_rep'], permissionSets: ['crm_user'] },
+    s.bearers.admin,
+  );
+  expect(res.status, await res.clone().text()).toBe(201);
+  return String(s.row(email)!.id);
+}
+
+/** Make the delete of `sys_user` answer a `restrict` refusal, as the engine's delete walk does (`DELETE_RESTRICTED`, 409). */
+const RESTRICTED = 'This User cannot be deleted because an Approval Rule still refers to it.';
+function restrictDelete(s: Awaited<ReturnType<typeof stage>>): void {
+  const realDelete = s.engine.delete.bind(s.engine);
+  s.engine.delete = async (name: string, q: any = {}) => {
+    if (name === 'sys_user') throw Object.assign(new Error(RESTRICTED), { code: 'DELETE_RESTRICTED', status: 409 });
+    return realDelete(name, q);
+  };
+}
+
+describe('[#33228] admin/remove-sso-user removes a pending person and cancels their invitation', () => {
+  it('removes the row, its grants and membership, and tells the host userRemoved first', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'typo@exmaple.com');
+
+    const res = await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toEqual({ userId: id, email: 'typo@exmaple.com', removed: true, host: { notified: true } });
+    expect(s.row('typo@exmaple.com')).toBeUndefined();
+    for (const table of ['sys_user_position', 'sys_user_permission_set', 'sys_member']) {
+      expect(s.rowsOf(table, id), table).toHaveLength(0);
+    }
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+    expect(told[1]!.event).toMatchObject({ userId: id, email: 'typo@exmaple.com', source: PENDING_SSO_SOURCE, actorId: s.ids.admin });
+  });
+
+  it('a host without userRemoved is told userDeactivated for the pending person instead', async () => {
+    const { host, told } = removingHost({ withRemoved: false });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'fallback@example.com');
+
+    expect((await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated']);
+    expect(told[1]!.event).toMatchObject({ userId: id, source: PENDING_SSO_SOURCE });
+    expect(s.row('fallback@example.com')).toBeUndefined();
+  });
+
+  it('refuses a person who is not pending with 409, calls no host and removes no one', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    for (const userId of [s.ids.member, s.ids.idp]) {
+      const v = await verdict(await s.fire('/admin/remove-sso-user', { userId }, s.bearers.admin));
+      expect(v.status, v.text).toBe(409);
+      expect(v.code).toBe('RESOURCE_CONFLICT');
+      expect(v.message?.split('. ')[0]).toBe(PENDING_SSO_MESSAGES.removeNotPending.split('. ')[0]);
+    }
+    expect(s.row(EMAILS.member)).toBeDefined();
+    expect(s.row(EMAILS.idp)).toBeDefined();
+    expect(told).toEqual([]);
+  });
+
+  it('a host\'s typed refusal leaves the person as they are: nothing removed', async () => {
+    const { host } = removingHost({
+      removed: () => {
+        throw new EnvironmentUserHostRefusal(409, OWNER_CONFLICT.code, OWNER_CONFLICT.message);
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'refused.remove@example.com');
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe(OWNER_CONFLICT.code);
+    expect(v.message).toBe(OWNER_CONFLICT.message);
+    expect(s.row('refused.remove@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+  });
+
+  it('a host that cannot be reached refuses the removal: 503, the person is kept and nothing is re-sent', async () => {
+    const { host, told } = removingHost({
+      removed: () => {
+        throw new Error('host down');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'unreached.remove@example.com');
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect([v.status, v.code, v.message]).toEqual([503, 'SERVICE_UNAVAILABLE', PENDING_SSO_MESSAGES.removeHostUnreachable]);
+    expect(s.row('unreached.remove@example.com')).toMatchObject({ id, source: PENDING_SSO_SOURCE });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+    // Asked once, and no invitation is sent again.
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+  });
+
+  it('with no host wired the person is removed and the answer says no_host', async () => {
+    const s = await managedStage({ host: 'none' });
+    const id = await addPending(s, 'nohost.remove@example.com');
+    const body: any = await (await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin)).json();
+    expect(body.data).toEqual({ userId: id, email: 'nohost.remove@example.com', removed: true, host: { notified: false, reason: 'no_host' } });
+    expect(s.row('nohost.remove@example.com')).toBeUndefined();
+  });
+
+  it('a record that restricts the delete refuses it with the engine\'s answer; the person stays and is re-invited inline', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held@example.com');
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('DELETE_RESTRICTED');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeRefusedReinvited}`);
+    expect(s.row('held@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'removed', 'added']);
+    expect(told[2]!.event).toMatchObject({ userId: id, email: 'held@example.com', source: PENDING_SSO_SOURCE });
+  });
+
+  it('a re-invite the host does not take is said truthfully: the person stays pending with no invitation', async () => {
+    let calls = 0;
+    const { host } = removingHost({
+      added: () => {
+        calls += 1;
+        if (calls > 1) throw new Error('host down');
+      },
+    });
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held.unsent@example.com');
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeRefusedNotReinvited}`);
+    expect(s.row('held.unsent@example.com')).toMatchObject({ source: PENDING_SSO_SOURCE });
+    expect(calls).toBe(2);
+  });
+
+  it('refuses an unknown id 404, a missing id or an unknown key 400, and a non-admin 403', async () => {
+    const s = await managedStage();
+    const unknown = await verdict(await s.fire('/admin/remove-sso-user', { userId: 'usr_nobody' }, s.bearers.admin));
+    expect([unknown.status, unknown.code]).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    const missing = await verdict(await s.fire('/admin/remove-sso-user', {}, s.bearers.admin));
+    expect([missing.status, missing.code]).toEqual([400, 'INVALID_REQUEST']);
+    const extra = await verdict(await s.fire('/admin/remove-sso-user', { userId: s.ids.member, email: 'x@example.com' }, s.bearers.admin));
+    expect([extra.status, extra.code]).toEqual([400, 'INVALID_REQUEST']);
+    const id = await addPending(s, 'guarded@example.com');
+    const member = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.member));
+    expect([member.status, member.code]).toEqual([403, 'PERMISSION_DENIED']);
+    expect(s.row('guarded@example.com')).toBeDefined();
+  });
+
+  it('CONTROL: off a managed environment it answers 409 and removes no one', async () => {
+    const s = await stage();
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: s.ids.member }, s.bearers.admin));
+    expect([v.status, v.code, v.message]).toEqual([409, 'RESOURCE_CONFLICT', PENDING_SSO_MESSAGES.notManagedRemove]);
+    expect(s.row(EMAILS.member)).toBeDefined();
+  });
+});
+
+describe('[#33228] a deactivated person is never sent an invitation, and a removal is held to pending people', () => {
+  it('re-adding a deactivated pending person does not invite them: host reads deactivated', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.banned@example.com';
+    const id = await addPending(s, email);
+    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+
+    const res = await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ userId: id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated']);
+  });
+
+  it('CONTROL: re-adding a pending person who is not deactivated invites them again', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.active@example.com';
+    const id = await addPending(s, email);
+
+    const body: any = await (await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin)).json();
+
+    expect(body.data).toMatchObject({ userId: id, alreadyPending: true, host: { notified: true } });
+    expect(told.map((t) => t.kind)).toEqual(['added', 'added']);
+  });
+
+  it('a refused removal of a deactivated pending person sends no new invitation, and says the old one is cancelled', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, 'held.banned@example.com');
+    expect((await s.fire('/admin/ban-user', { userId: id }, s.bearers.admin)).status).toBe(200);
+    restrictDelete(s);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeRefused} ${RESTRICTED} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(told.map((t) => t.kind)).toEqual(['added', 'deactivated', 'removed']);
+  });
+
+  it('a deactivated pending person whose banned column reads back as a string is not invited on a re-add', async () => {
+    const { host, told } = removingHost();
+    const s = await managedStage({ host });
+    const email = 'readd.banned.string@example.com';
+    const id = await addPending(s, email);
+    for (const stored of ['1', 'true']) {
+      s.row(email)!.banned = stored;
+      const body: any = await (await s.fire('/admin/add-sso-user', { email, name: 'Typo' }, s.bearers.admin)).json();
+      expect(body.data, stored).toMatchObject({ userId: id, alreadyPending: true, host: { notified: false, reason: 'deactivated' } });
+    }
+    expect(told.map((t) => t.kind)).toEqual(['added']);
+  });
+
+  it('a person who signs in while the host is asked is not removed: 409, and the answer says the host was told', async () => {
+    const email = 'signs.in@example.com';
+    let s!: Awaited<ReturnType<typeof stage>>;
+    const { host } = removingHost({
+      removed: () => {
+        s.row(email)!.source = 'idp_provisioned';
+      },
+    });
+    s = await managedStage({ host });
+    const id = await addPending(s, email);
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('RESOURCE_CONFLICT');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
+    expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+  });
+
+  it('a person whose first sign-in commits inside the unit of work, after the pending read, is not removed: 409, and the child deletes roll back', async () => {
+    const email = 'signs.in.late@example.com';
+    const { host } = removingHost();
+    const s = await managedStage({ host });
+    const id = await addPending(s, email);
+    const CHILDREN = ['sys_user_position', 'sys_user_permission_set', 'sys_member'] as const;
+    for (const table of CHILDREN) expect(s.rowsOf(table, id).length, table).toBeGreaterThan(0);
+    // The memory engine has no transaction, so the plugin's `runAtomically`
+    // would run the removal unatomically. Give it one: the seam calls
+    // `engine.transaction`, and a throw out of it restores every table this
+    // unit of work wrote. `sys_user` is left as it is, because its change is
+    // the concurrent sign-in's commit, not this unit of work's write.
+    let units = 0;
+    (s.engine as any).transaction = async (work: (trx: unknown, info: unknown) => Promise<unknown>) => {
+      units += 1;
+      const before = new Map([...s.engine.tables].filter(([name]) => name !== 'sys_user').map(([name, rows]) => [name, structuredClone(rows)]));
+      try {
+        return await work({}, {});
+      } catch (error) {
+        for (const [name, rows] of before) s.engine.tables.set(name, rows);
+        throw error;
+      }
+    };
+    // The first sign-in lands between the in-unit pending read and the row's
+    // delete: the first child delete is the moment after that read.
+    const realDelete = s.engine.delete.bind(s.engine);
+    s.engine.delete = async (name: string, q: any = {}) => {
+      if (name === 'sys_user_position') s.row(email)!.source = 'idp_provisioned';
+      return realDelete(name, q);
+    };
+
+    const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id }, s.bearers.admin));
+
+    expect(v.status, v.text).toBe(409);
+    expect(v.code).toBe('RESOURCE_CONFLICT');
+    expect(v.message).toBe(`${PENDING_SSO_MESSAGES.removeNotPending} ${PENDING_SSO_MESSAGES.removeHostCancelled}`);
+    expect(s.row(email)).toMatchObject({ id, source: 'idp_provisioned' });
+    expect(units, 'the removal ran inside the transactional seam').toBe(1);
+    for (const table of CHILDREN) expect(s.rowsOf(table, id).length, `${table} rolled back`).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Unlock is offered and works without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.unlock_user` posts to `admin/unlock-user`, an ObjectStack mount
+// (ADR-0069 D2) whose handler clears the lockout through the data engine; the
+// lockout itself (`sys_user.locked_until` / `failed_login_count`) is stamped by
+// this plugin's own sign-in path, with no better-auth admin plugin involved.
+// Each case locks the member the way the lockout locks anyone, by
+// `lockoutThreshold` wrong passwords through the real sign-in, shows the right
+// password refused while the lock holds, then judges and drives the DECLARED
+// action against the door and signs in again.
+
+describe('[#34010] Unlock is offered and works without the admin plugin', () => {
+  const LOCKOUT = { lockoutThreshold: 3, lockoutDurationMinutes: 15 };
+  const WRONG_PASSWORD = 'Wr0ng!Guess-34010';
+
+  /** Lock the member through the sign-in lockout itself, and show the lock holding against the right password. */
+  async function lockMember(s: Awaited<ReturnType<typeof stage>>): Promise<void> {
+    for (let i = 0; i < LOCKOUT.lockoutThreshold; i++) {
+      expect((await s.signIn(EMAILS.member, WRONG_PASSWORD)).status, `wrong password ${i + 1}`).toBe(401);
+    }
+    const lockedUntil = new Date(s.row(EMAILS.member)!.locked_until).getTime();
+    expect(lockedUntil, 'the lockout stamped a lock in the future').toBeGreaterThan(Date.now());
+    const sessions = s.rowsOf('sys_session', s.ids.member).length;
+    const held = await verdict(await s.signIn(EMAILS.member));
+    expect(held.status, held.text).toBe(401);
+    expect(s.rowsOf('sys_session', s.ids.member), 'the locked account got no session').toHaveLength(sessions);
+  }
+
+  it.each([
+    ['unmanaged', false],
+    ['managed', true],
+  ] as const)('%s kernel: a locked account is offered Unlock, the door releases it, and the next sign-in succeeds', async (_kind, managed) => {
+    const s = managed ? await managedStage({ config: LOCKOUT }) : await stage({ config: LOCKOUT });
+    expect((s.manager.getPublicConfig() as any).features.admin, 'this kernel serves features.admin off').toBe(false);
+    await lockMember(s);
+
+    expect(offeredOn(s, 'unlock_user', s.row(EMAILS.member)!)).toBe(true);
+    const unlock = actionCall('unlock_user', s.ids.member);
+    // The door's platform-admin gate holds without the plugin: a caller without
+    // the standing is refused and the lock stays.
+    const denied = await verdict(await s.fire(unlock.path, unlock.body, s.bearers.idp));
+    expect(denied.status, denied.text).toBe(403);
+    expect(denied.code).toBe('PERMISSION_DENIED');
+    expect(s.row(EMAILS.member)!.locked_until).toBeTruthy();
+
+    const res = await s.fire(unlock.path, unlock.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.locked_until ?? null).toBeNull();
+    expect(Number(s.row(EMAILS.member)!.failed_login_count)).toBe(0);
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+
+  it('CONTROL: with the plugin on, Unlock is offered and releases the account as before', async () => {
+    const s = await stage({ adminPlugin: true, config: LOCKOUT });
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(true);
+    await lockMember(s);
+
+    expect(offeredOn(s, 'unlock_user', s.row(EMAILS.member)!)).toBe(true);
+    const unlock = actionCall('unlock_user', s.ids.member);
+    const res = await s.fire(unlock.path, unlock.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(s.row(EMAILS.member)!.locked_until ?? null).toBeNull();
+    expect((await s.signIn(EMAILS.member)).status).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: Set Password is offered and works without the admin plugin
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `sys_user.set_user_password` posts to `admin/set-user-password`, plugin-auth's
+// wrapper registered ahead of the catch-all: it runs the platform-admin gate,
+// then hashes through better-auth's core `internalAdapter`, which every kernel
+// carries, with or without the vendor admin plugin. Each case judges the
+// DECLARED action under the features the kernel serves, drives what it posts
+// (its `bodyExtra`, `recordIdParam` and collected params), and signs in with
+// the new password. The action's other rule is kept: it is hidden on a
+// cloud-managed environment, whose door refuses every target.
+
+describe('[#34130] Set Password is offered and works without the admin plugin', () => {
+  const COLLECTED = { newPassword: NEW_PASSWORD, mustChangePassword: false, revokeSessionsAndKeys: false };
+
+  it('unmanaged kernel: Set Password is offered, the door sets the password, and the member signs in with it', async () => {
+    const s = await stage();
+    const features = (s.manager.getPublicConfig() as any).features;
+    expect(features.admin, 'this kernel serves features.admin off').toBe(false);
+    expect(features.cloudManaged ?? false).toBe(false);
+
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(true);
+    const call = actionCall('set_user_password', s.ids.member, COLLECTED);
+    // The door's platform-admin gate holds without the plugin: a caller without
+    // the standing is refused and the old password still signs in.
+    const denied = await verdict(await s.fire(call.path, call.body, s.bearers.idp));
+    expect(denied.status, denied.text).toBe(403);
+    expect(denied.code).toBe('PERMISSION_DENIED');
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(401);
+
+    const res = await s.fire(call.path, call.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
+    expect((await s.signIn(EMAILS.member)).status).toBe(401);
+  });
+
+  it('unmanaged kernel: with the dialog defaults the door also flags the member and revokes their sessions', async () => {
+    const s = await stage();
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(false);
+    // The values the dialog submits when the admin types only the password:
+    // every other declared param at its declared default.
+    const defaults = Object.fromEntries(
+      (declaredAction('set_user_password').params ?? [])
+        .filter((p) => p.defaultValue !== undefined)
+        .map((p) => [String(p.name ?? p.field), p.defaultValue]),
+    );
+    expect(defaults).toEqual({ mustChangePassword: true, revokeSessionsAndKeys: true });
+    expect(s.rowsOf('sys_session', s.ids.member).length, 'the member holds a session before').toBeGreaterThan(0);
+
+    const call = actionCall('set_user_password', s.ids.member, { newPassword: NEW_PASSWORD, ...defaults });
+    const v = await verdict(await s.fire(call.path, call.body, s.bearers.admin));
+    expect(v.status, v.text).toBe(200);
+    const data = JSON.parse(v.text).data;
+    expect(data.mustChangePassword).toBe(true);
+    expect(data.revokeSessionsAndKeys).toBe(true);
+    expect(data.revoked?.complete).toBe(true);
+    expect(s.row(EMAILS.member)!.must_change_password).toBe(true);
+    // Revocation stamps each session row rather than deleting it.
+    const sessions = s.rowsOf('sys_session', s.ids.member);
+    expect(data.revoked.sessions).toBe(sessions.length);
+    for (const row of sessions) {
+      expect(row.revoke_reason).toBe('admin_password_reset');
+      expect(new Date(row.expires_at).getTime()).toBeLessThanOrEqual(Date.now());
+    }
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
+  });
+
+  it('managed kernel: Set Password stays hidden, the rule kept beside the dropped gate', async () => {
+    const s = await managedStage();
+    const features = (s.manager.getPublicConfig() as any).features;
+    expect(features.admin).toBe(false);
+    expect(features.cloudManaged).toBe(true);
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(false);
+  });
+
+  it('CONTROL: with the plugin on, Set Password is offered and sets the password as before', async () => {
+    const s = await stage({ adminPlugin: true });
+    expect((s.manager.getPublicConfig() as any).features.admin).toBe(true);
+    expect(offeredOn(s, 'set_user_password', s.row(EMAILS.member)!)).toBe(true);
+    const call = actionCall('set_user_password', s.ids.member, COLLECTED);
+    const res = await s.fire(call.path, call.body, s.bearers.admin);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await s.signIn(EMAILS.member, NEW_PASSWORD)).status).toBe(200);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The organization an identity-route action forward stamps
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A `type: 'api'` action forwarded to the auth mount carries the caller's
+// active organization as `body.organizationId` (`buildApiActionRequest` in
+// `@objectstack/runtime`; its control pin lives beside it in
+// `api-action-forward.test.ts`). Each of the three doors admits that one key,
+// and only when it equals the organization the caller's own session is
+// working in; any other value is refused before anything is read or written,
+// and the value never feeds scope. The staged admin's session holds
+// DEFAULT_ORG as its active organization (the session-create hook selects the
+// sole membership), and `clearActiveOrganization` takes it away.
+
+describe('[#34912] the SSO-user doors admit the stamped organizationId only when it is the session\'s', () => {
+  const OTHER_ORG = 'org_elsewhere';
+
+  /** The admin's sessions with no active organization, as a caller working in none holds them. */
+  const clearActiveOrganization = (s: Awaited<ReturnType<typeof stage>>): number => {
+    const sessions = ((s.engine.tables.get('sys_session') ?? []) as any[]).filter((r) => String(r.user_id) === s.ids.admin);
+    for (const session of sessions) {
+      session.active_organization_id = null;
+      delete session.activeOrganizationId;
+    }
+    return sessions.length;
+  };
+
+  /** Whether the staged admin's session holds DEFAULT_ORG, the fixture invariant every equal-key leg rests on. */
+  const assertSessionHoldsDefaultOrg = (s: Awaited<ReturnType<typeof stage>>): void => {
+    const sessions = ((s.engine.tables.get('sys_session') ?? []) as any[]).filter((r) => String(r.user_id) === s.ids.admin);
+    expect(
+      sessions.some((r) => (r.active_organization_id ?? r.activeOrganizationId) === DEFAULT_ORG),
+      'fixture invariant: the admin session works in DEFAULT_ORG',
+    ).toBe(true);
+  };
+
+  describe('admin/add-sso-user', () => {
+    it.each([
+      ['absent', {}],
+      ['equal to the session organization', { organizationId: DEFAULT_ORG }],
+    ])('organizationId %s: the person is added, joined to the session organization', async (_label, extra) => {
+      const s = await managedStage();
+      assertSessionHoldsDefaultOrg(s);
+      const email = `add.${Object.keys(extra).length}@example.com`;
+
+      const res = await s.fire('/admin/add-sso-user', { email, name: 'Stamped', ...extra }, s.bearers.admin);
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(201);
+      const row = s.row(email)!;
+      expect(row.source).toBe(PENDING_SSO_SOURCE);
+      expect(s.rowsOf('sys_member', String(row.id)).map((m) => m.organization_id)).toEqual([DEFAULT_ORG]);
+      expect(body.data).toMatchObject({ email, alreadyPending: false, organizationId: DEFAULT_ORG });
+      expect(s.told.map((t) => t.kind)).toEqual(['added']);
+    });
+
+    it('a different organization is refused 400 naming both, and no one is added or told', async () => {
+      const s = await managedStage();
+      const v = await verdict(
+        await s.fire('/admin/add-sso-user', { email: 'foreign.add@example.com', name: 'F', organizationId: OTHER_ORG }, s.bearers.admin),
+      );
+      expect([v.status, v.code], v.text).toEqual([400, 'INVALID_REQUEST']);
+      expect(v.message).toContain(OTHER_ORG);
+      expect(v.message).toContain(DEFAULT_ORG);
+      expect(s.row('foreign.add@example.com')).toBeUndefined();
+      expect(s.told).toEqual([]);
+    });
+
+    it('no active organization in the session plus a body organization is refused 400 NO_ACTIVE_ORGANIZATION; CONTROL: without the key the add stands', async () => {
+      const s = await managedStage();
+      expect(clearActiveOrganization(s)).toBeGreaterThan(0);
+
+      const v = await verdict(
+        await s.fire('/admin/add-sso-user', { email: 'noorg.add@example.com', name: 'N', organizationId: DEFAULT_ORG }, s.bearers.admin),
+      );
+      expect([v.status, v.code], v.text).toEqual([400, 'NO_ACTIVE_ORGANIZATION']);
+      expect(s.row('noorg.add@example.com')).toBeUndefined();
+      expect(s.told).toEqual([]);
+
+      const control = await s.fire('/admin/add-sso-user', { email: 'noorg.add@example.com', name: 'N' }, s.bearers.admin);
+      expect(control.status, await control.clone().text()).toBe(201);
+    });
+
+    it('an organizationId that is not a non-empty string is refused 400 and no one is added', async () => {
+      const s = await managedStage();
+      for (const organizationId of [null, '', 42]) {
+        const v = await verdict(
+          await s.fire('/admin/add-sso-user', { email: 'typed.add@example.com', name: 'T', organizationId }, s.bearers.admin),
+        );
+        expect([v.status, v.code], `${JSON.stringify(organizationId)}: ${v.text}`).toEqual([400, 'INVALID_REQUEST']);
+      }
+      expect(s.row('typed.add@example.com')).toBeUndefined();
+    });
+  });
+
+  describe('admin/import-sso-users', () => {
+    const CSV = 'email,name\nstamp.one@example.com,One\nstamp.two@example.com,Two\n';
+
+    it.each([
+      ['absent', {}],
+      ['equal to the session organization', { organizationId: DEFAULT_ORG }],
+    ])('organizationId %s: every row is added, joined to the session organization', async (_label, extra) => {
+      const s = await managedStage();
+      assertSessionHoldsDefaultOrg(s);
+
+      const res = await s.fire('/admin/import-sso-users', { csv: CSV, ...extra }, s.bearers.admin);
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data.summary).toEqual({ total: 2, added: 2, alreadyPending: 0, failed: 0 });
+      for (const email of ['stamp.one@example.com', 'stamp.two@example.com']) {
+        const row = s.row(email)!;
+        expect(row.source).toBe(PENDING_SSO_SOURCE);
+        expect(s.rowsOf('sys_member', String(row.id)).map((m) => m.organization_id)).toEqual([DEFAULT_ORG]);
+      }
+    });
+
+    it('a different organization is refused 400 naming both, and no row is imported or told', async () => {
+      const s = await managedStage();
+      const before = s.users().length;
+      const v = await verdict(await s.fire('/admin/import-sso-users', { csv: CSV, organizationId: OTHER_ORG }, s.bearers.admin));
+      expect([v.status, v.code], v.text).toEqual([400, 'INVALID_REQUEST']);
+      expect(v.message).toContain(OTHER_ORG);
+      expect(v.message).toContain(DEFAULT_ORG);
+      expect(s.users()).toHaveLength(before);
+      expect(s.told).toEqual([]);
+    });
+
+    it('no active organization in the session plus a body organization is refused 400 NO_ACTIVE_ORGANIZATION', async () => {
+      const s = await managedStage();
+      expect(clearActiveOrganization(s)).toBeGreaterThan(0);
+      const before = s.users().length;
+      const v = await verdict(await s.fire('/admin/import-sso-users', { csv: CSV, organizationId: DEFAULT_ORG }, s.bearers.admin));
+      expect([v.status, v.code], v.text).toEqual([400, 'NO_ACTIVE_ORGANIZATION']);
+      expect(s.users()).toHaveLength(before);
+      expect(s.told).toEqual([]);
+    });
+  });
+
+  describe('admin/remove-sso-user', () => {
+    it.each([
+      ['absent', {}],
+      ['equal to the session organization', { organizationId: DEFAULT_ORG }],
+    ])('organizationId %s: the pending person is removed', async (_label, extra) => {
+      const { host, told } = removingHost();
+      const s = await managedStage({ host });
+      assertSessionHoldsDefaultOrg(s);
+      const id = await addPending(s, 'stamp.remove@example.com');
+
+      const res = await s.fire('/admin/remove-sso-user', { userId: id, ...extra }, s.bearers.admin);
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(200);
+      expect(body.data).toMatchObject({ userId: id, removed: true });
+      expect(s.row('stamp.remove@example.com')).toBeUndefined();
+      expect(told.map((t) => t.kind)).toEqual(['added', 'removed']);
+    });
+
+    it('a different organization is refused 400 naming both; the person is kept and the host is not asked', async () => {
+      const { host, told } = removingHost();
+      const s = await managedStage({ host });
+      const id = await addPending(s, 'foreign.remove@example.com');
+
+      const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id, organizationId: OTHER_ORG }, s.bearers.admin));
+
+      expect([v.status, v.code], v.text).toEqual([400, 'INVALID_REQUEST']);
+      expect(v.message).toContain(OTHER_ORG);
+      expect(v.message).toContain(DEFAULT_ORG);
+      expect(s.row('foreign.remove@example.com')).toMatchObject({ id, source: PENDING_SSO_SOURCE });
+      expect(s.rowsOf('sys_member', id).length).toBeGreaterThan(0);
+      expect(told.map((t) => t.kind)).toEqual(['added']);
+    });
+
+    it('no active organization in the session plus a body organization is refused 400 NO_ACTIVE_ORGANIZATION; the person is kept', async () => {
+      const { host, told } = removingHost();
+      const s = await managedStage({ host });
+      const id = await addPending(s, 'noorg.remove@example.com');
+      expect(clearActiveOrganization(s)).toBeGreaterThan(0);
+
+      const v = await verdict(await s.fire('/admin/remove-sso-user', { userId: id, organizationId: DEFAULT_ORG }, s.bearers.admin));
+
+      expect([v.status, v.code], v.text).toEqual([400, 'NO_ACTIVE_ORGANIZATION']);
+      expect(s.row('noorg.remove@example.com')).toMatchObject({ id, source: PENDING_SSO_SOURCE });
+      expect(told.map((t) => t.kind)).toEqual(['added']);
+    });
+  });
+
+  it('the body organization never feeds scope: on a multi-organization deployment the person joins the session organization', async () => {
+    // Driven over fakes so the join's target is observable: the door reads the
+    // organization from the session seam, and an equal body value is admitted
+    // without being the value the join is handed.
+    const engine = createMemoryEngine();
+    const joined: unknown[] = [];
+    const sessionReads: string[] = [];
+    const deps = {
+      isCloudManaged: () => true,
+      getDataEngine: () => engine as any,
+      getTenancy: () => ({ isolationActive: true }) as any,
+      getCallerActiveOrganizationId: async () => {
+        sessionReads.push('read');
+        return 'org_session';
+      },
+      getAddMember: async () => async (input: { body: { organizationId: string } }) => {
+        joined.push(input.body.organizationId);
+        return {};
+      },
+      createGrant: {
+        resolveActorContext: async () => ({}),
+        runAtomically: async <T,>(work: () => Promise<T>) => work(),
+      },
+    } as any;
+    const request = (organizationId: unknown) =>
+      new Request(`${ORIGIN}${BASE}/admin/add-sso-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'multi.org@example.com', name: 'Multi', organizationId }),
+      });
+
+    const refused = await runAddSsoUser(deps, { id: 'admin-1' } as any, request('org_attacker'));
+    expect([refused.status, refused.body.error?.code]).toEqual([400, 'INVALID_REQUEST']);
+    expect(joined).toEqual([]);
+    expect(((engine.tables.get('sys_user') ?? []) as any[]).length).toBe(0);
+
+    const admitted = await runAddSsoUser(deps, { id: 'admin-1' } as any, request('org_session'));
+    expect(admitted.status, JSON.stringify(admitted.body)).toBe(201);
+    expect(joined).toEqual(['org_session']);
+    // The check and the join each read the session; neither read the body's value as the scope.
+    expect(sessionReads.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: what the result dialogs read is what the doors answer
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('[#34651] add-sso-user says a re-added address was already pending, and only then', () => {
+  it('an email-only re-add of a still-pending person answers pendingAgain: true', async () => {
+    const s = await managedStage();
+    const email = 'pending.again@example.com';
+    expect((await s.fire('/admin/add-sso-user', { email }, s.bearers.admin)).status).toBe(201);
+
+    const res = await s.fire('/admin/add-sso-user', { email }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data.pendingAgain).toBe(true);
+    // Widening only: the key every answer carries is unchanged.
+    expect(body.data.alreadyPending).toBe(true);
+  });
+
+  it('CONTROL: a fresh add carries no pendingAgain at all, so the dialog draws no row for it', async () => {
+    const s = await managedStage();
+    const res = await s.fire('/admin/add-sso-user', { email: 'pending.fresh@example.com' }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    expect(body.data).not.toHaveProperty('pendingAgain');
+    expect(body.data.alreadyPending).toBe(false);
+  });
+});
+
+describe('[#34651] the import result table reads members of a real row answer', () => {
+  /** The declared `table` field of `sys_user.import_sso_users`'s result dialog. */
+  function importTableColumns(): string[] {
+    const fields = (declaredAction('import_sso_users').resultDialog?.fields ?? []) as Array<{
+      path: string;
+      format?: string;
+      columns?: Array<{ path: string }>;
+    }>;
+    const table = fields.filter((field) => field.format === 'table');
+    expect(table, 'import_sso_users declares one table field').toHaveLength(1);
+    const columns = (table[0]!.columns ?? []).map((column) => column.path);
+    expect(columns.length, 'the table declares its columns').toBeGreaterThan(0);
+    return columns;
+  }
+
+  it('every column path\'s first segment is a member of a row the import door really answered', async () => {
+    const s = await managedStage();
+    // A person already pending, so one row of the file is a re-add.
+    expect((await s.fire('/admin/add-sso-user', { email: 'align.readd@example.com' }, s.bearers.admin)).status).toBe(201);
+    // Rows chosen so each member the door answers on some row is answered:
+    // a fresh add whose manager is unknown (`alreadyPending`, `host`,
+    // `managerError`), a malformed address (`error`), and a re-add that sends
+    // a column (`notApplied`).
+    const csv = [
+      'email,name,permission_sets,manager_id',
+      'align.fresh@example.com,Align Fresh,,nobody.align@example.com',
+      'not-an-address,Align Bad,,',
+      'align.readd@example.com,Align Readd,crm_user,',
+    ].join('\n');
+
+    const res = await s.fire('/admin/import-sso-users', { csv }, s.bearers.admin);
+    const body: any = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    const rows = body.data.rows as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.ok)).toEqual([true, false, true]);
+
+    const unanswered = importTableColumns()
+      .map((path) => path.split('.')[0]!)
+      .filter((member) => !rows.some((row) => Object.hasOwn(row, member)));
+    expect(unanswered, `row answers: ${JSON.stringify(rows)}`).toEqual([]);
   });
 });

@@ -140,11 +140,11 @@ actions:
 1. Edit YAML file (2 minutes)
 2. Commit to Git (30 seconds)
 3. CI/CD auto-deploys (1 minute)
-4. **All platforms update instantly** (web, iOS, Android refresh layout from server)
+4. **Every screen updates on its next load** (the Console fetches the layout from the server, in a desktop or phone browser and inside the ObjectStack mobile app alike)
 
 **Total Time:** 5 minutes. **No app store approvals needed.**
 
-### 2. Write Once, Run Anywhere (For Real This Time)
+### 2. One Definition, Every Screen
 
 ```yaml
 # customer_form.view.yml (ONE definition)
@@ -157,28 +157,11 @@ fields:
     required: false
 ```
 
-**Renderers Translate to Native Widgets:**
-
-```tsx
-// Web Renderer (React)
-<TextField type="email" required label="Email" />
-
-// iOS Renderer (SwiftUI)
-TextField("Email", text: $email)
-  .textContentType(.emailAddress)
-  .keyboardType(.emailAddress)
-
-// Android Renderer (Jetpack Compose)
-OutlinedTextField(
-  value = email,
-  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
-)
-```
+**One Renderer Paints It Everywhere:** the Console reads this definition and paints it in a desktop browser, in a phone browser, and inside the ObjectStack mobile app, which is a native shell hosting the same Console. There is no per-platform implementation of the form to write or keep in sync.
 
 **Result:** 
-- **1 definition** → 3 native implementations
-- **Zero drift:** All platforms render the same fields in the same order
-- **Platform-native UX:** iOS users get iOS keyboard, Android users get Material Design
+- **1 definition** → 1 renderer (the Console) on every screen
+- **Zero drift:** desktop and phone render the same fields in the same order
 
 ### 3. Same Metadata Powers Studio Editors and Agent Tools
 
@@ -247,7 +230,7 @@ fields:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                   Mobile App Bundle                   │
+│                   Client App Bundle                   │
 │                                                        │
 │  ┌─────────────────────────────────────────────┐     │
 │  │  CustomerForm.tsx (hardcoded)               │     │
@@ -269,12 +252,12 @@ fields:
 
 ```
 ┌─────────────────┐                      ┌──────────────────┐
-│   Mobile App    │                      │      Server      │
-│                 │                      │                  │
+│ Browser or the  │                      │      Server      │
+│   mobile app    │                      │                  │
 │  ┌───────────┐  │  1. Request Layout  │  ┌────────────┐  │
-│  │  Generic  │  │ ─────────────────→  │  │   Layout   │  │
-│  │ Renderer  │  │                      │  │  Resolver  │  │
-│  │  (Tiny)   │  │  2. Return JSON     │  │            │  │
+│  │  Console  │  │ ─────────────────→  │  │   Layout   │  │
+│  │ (generic  │  │                      │  │  Resolver  │  │
+│  │ renderer) │  │  2. Return JSON     │  │            │  │
 │  │           │  │ ←─────────────────  │  │            │  │
 │  └───────────┘  │                      │  └────────────┘  │
 │        ↓        │                      │        ↑         │
@@ -284,10 +267,10 @@ fields:
 ```
 
 **Benefits:**
-- App binary is tiny (just renderer logic, no UI definitions)
+- The Console carries renderer logic only, no UI definitions
 - Change UI → Update YAML → Server serves new layout instantly
-- No app store approval needed
-- 100% of users see new UI immediately (no fragmentation)
+- No app store approval needed: the ObjectStack mobile app hosts the Console, so a new layout needs no new app build
+- Every user sees the new UI on their next load (no fragmentation)
 
 ### Layout Request/Response Flow
 
@@ -700,7 +683,7 @@ A conformant ObjectUI renderer must:
 
 1. **Fetch Layout:** `GET /api/v1/ui/view/{object}/{viewType}`
 2. **Parse JSON:** Validate against ObjectUI schema
-3. **Instantiate Components:** Map JSON types to native widgets
+3. **Instantiate Components:** Map JSON types to the renderer's components
 4. **Handle Events:** User clicks → API calls → UI updates
 5. **Manage State:** Form values, validation errors, loading states
 6. **Accessibility:** Keyboard navigation, screen readers, ARIA labels
@@ -729,16 +712,13 @@ function renderField(field: FieldDefinition) {
 }
 ```
 
-### Platform-Specific Renderers
+### The Renderer That Ships
 
-| Renderer | Technology | Status |
-|----------|-----------|--------|
-| `@objectstack/react-renderer` | React + Material-UI | 🚧 In Progress |
-| `@objectstack/vue-renderer` | Vue 3 + Vuetify | 📋 Planned |
-| `@objectstack/flutter-renderer` | Flutter (iOS/Android) | 📋 Planned |
-| `@objectstack/swift-renderer` | SwiftUI (iOS native) | 📋 Planned |
-| `@objectstack/compose-renderer` | Jetpack Compose (Android) | 📋 Planned |
-| `@objectstack/tauri-renderer` | Tauri + React (Desktop) | 📋 Planned |
+| Renderer | Technology | Where it runs |
+|----------|-----------|---------------|
+| The Console | React (`@object-ui/*` packages) | Desktop and phone browsers; the ObjectStack mobile app hosts it |
+
+The ObjectStack mobile app is a native shell around the Console, not a native renderer: phones get the same Console renderer as browsers. The protocol itself does not depend on React, so another renderer that meets the responsibilities above could paint the same definitions; none other ships today.
 
 ## What's Next?
 

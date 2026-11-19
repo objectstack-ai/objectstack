@@ -61,6 +61,7 @@ const PRINCIPAL: MePermissionsAuthenticatedResponse = {
   tenantId: null,
   positions: ['finance'],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: ['rfa_fixture_member'],
   objects: { [OBJECT]: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false } },
   // As `/auth/me/permissions` serves them: the conditioned entry as its lock.

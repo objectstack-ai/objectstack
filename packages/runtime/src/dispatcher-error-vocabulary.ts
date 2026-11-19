@@ -547,6 +547,24 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'wire, and a vendor rename turns the pin red rather than silently minting a local code.',
     },
     {
+        code: 'INVALID_EMAIL_OR_PASSWORD',
+        file: 'packages/plugins/plugin-auth/src/sign-in-lockout-refusal.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.12's BASE_ERROR_CODES member, the answer its own `/sign-in/email` gives a " +
+            "wrong password (`dist/api/routes/sign-in.mjs`, `APIError.from('UNAUTHORIZED', " +
+            "BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD)`). ADR-0069 D2's `lockoutRefusal: 'uniform'` " +
+            'answers a locked account at every other door that ends in a session with exactly that ' +
+            "answer: the sentence is read off the vendor's constant, the code is the vendor's spelling, " +
+            'and `locked-account-every-sign-in-door.test.ts` holds the whole answer equal to the one ' +
+            "`/sign-in/email` gives, so a vendor rename turns that pin red rather than minting a local " +
+            "code. Raised inside a better-auth endpoint, it leaves as the vendor's own `Response`. " +
+            'Registering it would promote a vendor spelling into the platform vocabulary, for the ' +
+            'reason the section note above gives.',
+    },
+    {
         code: 'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION',
         file: 'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts',
         shape: 'objlit',
@@ -563,6 +581,24 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             '`/organization/list-user-invitations` better-auth endpoint, so it leaves as the ' +
             "vendor's own `Response` on the vendor's wire — the identical refusal the vendor handler " +
             'raised unconditionally before the rebuild — and never as a throw this repo classifies.',
+    },
+    {
+        code: 'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+        file: 'packages/plugins/plugin-auth/src/invitation-accept-verified-email.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.12's own organization-plugin vocabulary — spelled exactly so in the " +
+            'installed vendor at `dist/plugins/organization/error-codes.mjs`, the code its own ' +
+            '`/organization/accept-invitation` answers when `requireEmailVerificationOnInvitation` is on ' +
+            "(`crud-invites.mjs`) — and read at runtime off `plugin.$ERROR_CODES`; the local " +
+            'restatement is only the fallback for a plugin object carrying no `$ERROR_CODES`, and ' +
+            "`invitation-accept-verified-email.test.ts` pins it equal to the vendor's own entry so a " +
+            "vendor rename turns the pin red rather than minting a local code. Raised " +
+            "`APIError.from('FORBIDDEN', …)` from the vendor's `beforeAcceptInvitation` hook inside the " +
+            "accept endpoint, so it leaves as the vendor's own `Response` on the vendor's wire " +
+            'and never as a throw this repo classifies.',
     },
 
     {

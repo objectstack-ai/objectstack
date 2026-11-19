@@ -64,6 +64,7 @@ import { resolveUserAuthzGrants } from '@objectstack/core';
 import { applyPlatformAdminImpersonation } from './admin-impersonate-endpoint.js';
 import { requireSecondFactorAtCodeAndLinkDoors } from './second-factor-code-and-link-doors.js';
 import { buildOrganizationPlugin, type OrganizationPluginHost } from './auth-manager-organization-plugin.js';
+import { ACCEPT_INVITATION_ONE_STEP_PATH, buildInvitationProofDoorPlugin } from './invitation-mailbox-proof.js';
 import {
   OAUTH_ORGANIZATION_CLAIM,
   assertScimAdminCoherence,
@@ -117,11 +118,14 @@ export interface PluginListHost {
   enforceSessionControls: AuthManager['enforceSessionControls'];
   getAppName: AuthManager['getAppName'];
   getAudience: AuthManager['getAudience'];
+  getAuthContext: AuthManager['getAuthContext'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
   getMcpResourceUrl: AuthManager['getMcpResourceUrl'];
+  getApi: AuthManager['getApi'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
+  isSsoOnlyMode: AuthManager['isSsoOnlyMode'];
   jwtSigningFailureReported: AuthManager['jwtSigningFailureReported'];
   multiOrgPostureEffective: AuthManager['multiOrgPostureEffective'];
   orgRolesMap: AuthManager['orgRolesMap'];
@@ -129,8 +133,30 @@ export interface PluginListHost {
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
   resolveTwoFactorAccountLockout: AuthManager['resolveTwoFactorAccountLockout'];
+  assertPasswordNotReused: AuthManager['assertPasswordNotReused'];
+  recordPasswordHistory: AuthManager['recordPasswordHistory'];
+  stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
   storedRecipientLocale: AuthManager['storedRecipientLocale'];
+  validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
 }
+
+/**
+ * better-auth's `haveIBeenPwned` default door list, as the installed vendor
+ * declares it. Handing the plugin an explicit list replaces that default, so
+ * the list the platform hands it is this one plus the one-step invitation
+ * acceptance; the card's test reads the installed vendor default and pins the
+ * two equal, so a vendor that grows its list reds that test instead of
+ * silently losing the addition.
+ */
+export const BREACH_CHECK_VENDOR_DEFAULT_PATHS: readonly string[] = [
+  '/sign-up/email',
+  '/change-password',
+  '/reset-password',
+  '/email-otp/reset-password',
+  '/phone-number/reset-password',
+  '/admin/create-user',
+  '/admin/set-user-password',
+];
 
 /**
  * The body of `AuthManager.buildPluginList()`; the method's docblock and the
@@ -265,6 +291,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         emailLocaleArg: (...a) => this.emailLocaleArg(...a),
         getAppName: (...a) => this.getAppName(...a),
         getAudience: (...a) => this.getAudience(...a),
+        getAuthContext: (...a) => this.getAuthContext(...a),
         getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
         getDataEngine: (...a) => this.getDataEngine(...a),
         getEmailService: (...a) => this.getEmailService(...a),
@@ -276,6 +303,18 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       };
       return buildOrganizationPlugin.call(host);
     });
+    // [#34257] The one-step acceptance door for the invitation mail's mailbox
+    // proof (`invitation-mailbox-proof.ts`), beside the plugin it accepts through.
+    plugins.push(await buildInvitationProofDoorPlugin({
+      getApi: () => this.getApi(),
+      validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...(a as Parameters<AuthManager['validateAudienceAdmission']>)),
+      isSsoOnlyMode: () => this.isSsoOnlyMode(),
+      getDataEngine: () => this.getDataEngine(),
+      counterStore: () => this.config.sharedCounterStore?.() ?? Promise.reject(new Error('no shared counter store')),
+      stampPasswordChangedAt: (userId) => this.stampPasswordChangedAt(userId),
+      assertPasswordNotReused: (userId, candidate, verify) => this.assertPasswordNotReused(userId, candidate, verify),
+      recordPasswordHistory: (userId, oldHash) => this.recordPasswordHistory(userId, oldHash),
+    }));
   }
 
   if (enabled.twoFactor) {
@@ -301,6 +340,9 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.passwordRejectBreached) {
     const { haveIBeenPwned } = await import('better-auth/plugins/haveibeenpwned');
     plugins.push(haveIBeenPwned({
+      // The plugin's own default doors, plus the one-step invitation
+      // acceptance, which sets a password too.
+      paths: [...BREACH_CHECK_VENDOR_DEFAULT_PATHS, ACCEPT_INVITATION_ONE_STEP_PATH],
       customPasswordCompromisedMessage:
         'This password has appeared in a known data breach. Please choose a different one.',
     }));
@@ -309,7 +351,10 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.admin) {
     await this.addOptionalPlugin(plugins, 'admin', async () => {
       const { admin } = await import('better-auth/plugins/admin');
-      // Platform admin: ban/unban, set-password, impersonate, set-role.
+      // The vendor admin plugin: what create-user and import-users drive,
+      // impersonation, and better-auth's own /admin/* routes (set-role,
+      // list-users, …). Ban/unban, unlock and set-password are ObjectStack
+      // mounts served with or without it (`plugins.admin` in auth-config.zod.ts).
       // Schema mapping ensures the plugin's added user/session columns
       // match ObjectStack's snake_case conventions (ban_reason,
       // ban_expires, impersonated_by). `role` and `banned` are already
@@ -844,6 +889,11 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         await import('./scim-connection-service.js');
       const { createScimGroupProjection } = await import('./scim-group-projection.js');
       const { createScimSsoAdoptionResolver } = await import('./scim-sso-adoption.js');
+      const { createScimManagerProjection } = await import('./scim-manager-projection.js');
+      const projectScimManager = createScimManagerProjection({
+        getDataEngine: () => this.getDataEngine() as never,
+        logger: this.config.logger as never,
+      });
       const secret = this.resolveAuthSecret();
       // [#32120] One stamper for this manager's SCIM plugin, so its
       // per-credential minute claims are shared by every request it verifies.
@@ -909,7 +959,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
             getEngine: () => this.getDataEngine() as never,
             readConnection: () => scimRequestScope.getStore(),
           }),
-          reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
+          // The Enterprise `manager` attribute onto `sys_user.manager_id`,
+          // after the lifecycle reconcile and in the same transaction, through
+          // the admin endpoint's own refusals. See `scim-manager-projection.ts`.
+          reconcileUser: async (state, context) => {
+            await this.reconcileScimUserLifecycle(state, context);
+            await projectScimManager(state, context);
+          },
         },
         // [ADR-0134 D4, filled for permission sets] A pushed group grants the
         // permission sets its `sys_idp_group_mapping` rows name, inside the

@@ -201,6 +201,7 @@ describe('the related table asks the list page\'s export question (objectstack#3
       userId: 'u-1',
       tenantId: null,
       hasAnyQueue: false,
+      objectsUsingQueues: [],
       positions: [],
       permissionSets: ['rep'],
       objects: {

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+import { isServiceNotRegisteredError, type Plugin, type PluginContext } from '@objectstack/core';
 import {
   effectiveTenancyPosture,
   resolveLocalizationContext,
@@ -42,6 +42,7 @@ import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditActorSnapshot, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { MENTION_EMAIL_TEMPLATES } from './mention-email.js';
 import { createAppActivityWriter } from './app-activity-door.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
@@ -626,11 +627,39 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
+      // The mention e-mail's link to the record (`mention-email.ts`): a
+      // Console page, composed by the auth service's `getConsoleUrl` — the
+      // one composer of Console page links in mail. Resolved at send time;
+      // without an auth service the link stays relative.
+      const getConsoleUrl = (path: string): string | undefined => {
+        let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+        try {
+          auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+        } catch {
+          return undefined;
+        }
+        return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+      };
+      // The mention e-mail's text: one template per catalog locale, in the
+      // messaging service's code-declared tier (`mention-email.ts`). A
+      // messaging service without the seam renders the e-mail from the
+      // notification's title and body alone.
+      const messagingAtReady = getMessaging();
+      if (messagingAtReady && typeof messagingAtReady.registerBuiltinTemplates === 'function') {
+        try {
+          messagingAtReady.registerBuiltinTemplates(MENTION_EMAIL_TEMPLATES);
+        } catch (err: any) {
+          ctx.logger.warn('AuditPlugin: the @mention e-mail templates were NOT registered — mention e-mails carry the notification title and comment preview with no link to the record', {
+            error: err?.message ?? String(err),
+          });
+        }
+      }
       const auditWriters = installAuditWriters(engine as any, this.name, {
         getMessaging,
         getI18n,
         getLocale,
         getDefaultOrganizationId,
+        getConsoleUrl,
         admitMentionRecipients: (input) =>
           admitMentionRecipients({ engine: engine as any, getTenancyPosture, logger: ctx.logger as any }, input),
       });
@@ -835,8 +864,9 @@ export class AuditPlugin implements Plugin {
    * Start the audit sealer (ADR-0154 D3) over the engine's storage. The
    * signer and the sink are resolved per pass from the `audit.checkpointSigner`
    * and `audit.checkpointSink` slots (D11), the signer falling back to the
-   * default local key of D6; the `cluster` service, when registered, holds the
-   * `audit.sealer` lock. An engine without the storage surface the sealer
+   * default local key of D6 only when no host signer is registered; the
+   * `cluster` service, when registered, holds the `audit.sealer` lock. A seam
+   * that is registered but fails to resolve stops the pass (#34280). An engine without the storage surface the sealer
    * reads (a test double) starts no sealer, and neither does a one-shot
    * command's boot (`armSealer: false`).
    */
@@ -848,19 +878,13 @@ export class AuditPlugin implements Plugin {
     const option = this.options.cryptoProvider ?? this.hostCryptoProvider;
     const crypto = typeof option === 'function' ? option() : option;
     const localSigner = crypto ? new LocalCheckpointSigner({ engine: sealEngine, crypto }) : undefined;
-    const optional = <T>(name: string): T | undefined => {
-      try {
-        return ctx.getService<T>(name) ?? undefined;
-      } catch {
-        return undefined;
-      }
-    };
+    const seam = hostSeamResolver(ctx);
     this.sealer = new AuditSealer({
       engine: sealEngine,
       ...(crypto ? { crypto } : {}),
-      signer: () => optional<IAuditCheckpointSigner>(AUDIT_CHECKPOINT_SIGNER_SERVICE) ?? localSigner,
-      sink: () => optional<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
-      cluster: () => optional<IClusterService>('cluster'),
+      signer: async () => (await seam<IAuditCheckpointSigner>(AUDIT_CHECKPOINT_SIGNER_SERVICE)) ?? localSigner,
+      sink: () => seam<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
+      cluster: () => seam<IClusterService>('cluster'),
       logger: ctx.logger,
     });
     this.sealer.start();
@@ -1102,4 +1126,40 @@ function tenancyServiceResolver(ctx: PluginContext): TenancyServiceResolver | un
     | undefined;
   if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
   return () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy');
+}
+
+/**
+ * #34280: how the sealer reaches a host seam (`audit.checkpointSigner`,
+ * `audit.checkpointSink`, `cluster`), as three states, not two. Never
+ * registered ⇒ `undefined`, and the sealer uses its stand-in (the local
+ * signer, no export, the in-process lock). Registered and resolved ⇒ the
+ * service. Registered and NOT resolvable — a factory that throws, a KMS client
+ * that cannot start — ⇒ the rejection, which stops the pass instead of
+ * silently signing with the local key.
+ *
+ * The kernel's async accessor draws that line with the branded "never
+ * registered" rejection (`isServiceNotRegisteredError`), ⛔ not message text,
+ * and it also builds a factory-registered seam, which the sync accessor
+ * refuses ("is async"). A host with no async accessor (`LiteKernel`) has no
+ * factories, so "not registered" is the only fault its sync accessor reports.
+ */
+function hostSeamResolver(ctx: PluginContext): <T>(name: string) => Promise<T | undefined> {
+  return async <T>(name: string): Promise<T | undefined> => {
+    const kernel = ctx.getKernel?.() as
+      | { getServiceAsync?: <S>(name: string, scopeId?: string) => Promise<S> }
+      | undefined;
+    if (kernel && typeof kernel.getServiceAsync === 'function') {
+      try {
+        return (await kernel.getServiceAsync<T>(name)) ?? undefined;
+      } catch (err) {
+        if (isServiceNotRegisteredError(err)) return undefined;
+        throw err;
+      }
+    }
+    try {
+      return ctx.getService<T>(name) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
 }

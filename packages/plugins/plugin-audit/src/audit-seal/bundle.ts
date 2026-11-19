@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { createHash } from 'node:crypto';
+import { auditTrustedKeyOf } from './signature.js';
 import type { CheckpointSignedBody } from './signed-body.js';
 import {
   AUDIT_PROOF_BUNDLE_FORMAT,
@@ -25,8 +25,10 @@ import {
  *
  * Trust comes only from the fingerprints the caller gives (`--trusted-key`),
  * learnt out of band. A key the bundle carries is used only when its
- * fingerprint is one of them AND the key hashes to it; the bundle can name a
- * key, never vouch for one.
+ * fingerprint is one of them AND the key hashes to it, in one of the two
+ * admitted encodings (`signature.ts`: Ed25519 raw, ES256 SPKI); the bundle can
+ * name a key, never vouch for one. The format stays v1: a reader that admits
+ * Ed25519 only reads an ES256 key as untrusted, the fail-closed direction.
  *
  * What the bundle cannot prove is what no checkpoint it carries lists: the
  * rows of a sealed window the live run found unheld are carried as its
@@ -45,7 +47,8 @@ export class AuditProofBundleError extends Error {
 export interface AuditProofBundleVerifyOptions {
   /**
    * Fingerprints of the signing keys to trust (lowercase hex SHA-256 of the
-   * raw public key, as the live check prints them), at least one.
+   * public key's bytes — an Ed25519 key's raw 32, an ES256 key's SPKI DER — as
+   * the live check prints them), at least one.
    */
   trustedKeys: readonly string[];
   now?: () => number;
@@ -128,9 +131,7 @@ class BundleCheck extends VerdictLedger {
   protected async publicKeyOf(keyId: string): Promise<string | null> {
     if (!this.trusted.has(keyId)) return null;
     for (const { fingerprint, public_key } of this.bundle.keys) {
-      if (fingerprint !== keyId) continue;
-      const raw = Buffer.from(public_key, 'base64');
-      if (raw.length === 32 && raw.toString('base64') === public_key && createHash('sha256').update(raw).digest('hex') === keyId) return public_key;
+      if (fingerprint === keyId && auditTrustedKeyOf(keyId, public_key)) return public_key;
     }
     return null;
   }

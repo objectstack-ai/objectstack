@@ -538,3 +538,140 @@ describe('CONTROLs — what keeps its order (objectui#12243)', () => {
     );
   });
 });
+
+// ── Cases Opened by Day and Priority (objectstack#34364) ────────────────────
+// HotCRM's `cases_opened_by_day_priority`: rows `priority` (a select), columns
+// `created_at` (a date dimension, `dateGranularity: 'day'`, so its answer
+// column types `time`), values `case_count`. The rows below are what a server
+// answers when the empty-bucket fill does not run: grouped by the STORED
+// priority, so the day columns arrive in first-seen order. The null day is the
+// empty bucket, named by its declared `nullLabel`.
+//
+// DIRECTIONS, written before the ablations were run:
+//  - no date comparator: RED (a), (b) and the CONTROL (their day headers);
+//    GREEN (c), (d), whose server order already reads correctly;
+//  - an order on ANY key re-lays nothing (the old all-or-nothing rule): RED
+//    (b), (c), (d) (their rows) and the CONTROL (its day headers); GREEN (a);
+//  - a named dimension re-laid anyway: RED (d) and the CONTROL; GREEN the rest.
+const DAY_FIELDS = [
+  { name: 'priority', type: 'string', label: 'Priority' },
+  { name: 'created_at', type: 'time', label: 'Created', nullLabel: 'No date' },
+  { name: 'case_count', type: 'number', label: 'Cases' },
+];
+const DAY_ROWS_BY_PRIORITY = [
+  { priority: 'Critical', created_at: '2026-11-12', case_count: 1 },
+  { priority: 'Critical', created_at: '2026-11-16', case_count: 2 },
+  { priority: 'High', created_at: '2026-11-14', case_count: 3 },
+  { priority: 'High', created_at: '2026-11-03', case_count: 4 },
+  { priority: 'Low', created_at: '2026-11-03', case_count: 5 },
+  { priority: 'Low', created_at: '2026-11-12', case_count: 6 },
+  { priority: 'Medium', created_at: null, case_count: 7 },
+  { priority: 'Medium', created_at: '2026-11-14', case_count: 8 },
+];
+const STORED_PRIORITY: Record<string, string> = { Critical: 'critical', High: 'high', Low: 'low', Medium: 'medium' };
+/** One dataset answer carrying `rows` in the order given, with its drill rows aligned to them. */
+const dayAnswer = (rows: typeof DAY_ROWS_BY_PRIORITY) => ({
+  rows,
+  fields: DAY_FIELDS,
+  object: 'crm_case',
+  dimensionFields: { priority: 'priority', created_at: 'created_at' },
+  drillScopes: { case_count: {} },
+  drillRawRows: rows.map((r) => ({ priority: STORED_PRIORITY[r.priority], created_at: r.created_at })),
+});
+const byCount = (dir: 1 | -1) => [...DAY_ROWS_BY_PRIORITY].sort((a, b) => dir * (a.case_count - b.case_count));
+// The server's `created_at` order, the stored priority breaking ties; the
+// empty day sorts last ascending and first descending, as Postgres does.
+const byDay = (dir: 1 | -1) =>
+  [...DAY_ROWS_BY_PRIORITY].sort((a, b) => {
+    const ka = a.created_at;
+    const kb = b.created_at;
+    if (ka !== kb) {
+      if (ka === null) return dir;
+      if (kb === null) return -dir;
+      return dir * (ka < kb ? -1 : 1);
+    }
+    return STORED_PRIORITY[a.priority] < STORED_PRIORITY[b.priority] ? -1 : 1;
+  });
+
+const DAY_MATRIX = {
+  name: 'cases_opened_by_day_priority',
+  type: 'matrix',
+  dataset: 'case_metrics',
+  rows: ['priority'],
+  columns: ['created_at'],
+  values: ['case_count'],
+};
+const ASCENDING_DAYS = ['2026-11-03', '2026-11-12', '2026-11-14', '2026-11-16', 'No date'];
+// Each row in option order, its cells under the ascending day headers.
+const OPTION_ORDER_CELLS = [
+  ['Low', '5', '6', '—', '—', '—'],
+  ['Medium', '—', '—', '8', '—', '7'],
+  ['High', '4', '—', '3', '—', '—'],
+  ['Critical', '—', '1', '—', '2', '—'],
+];
+const headerTexts = (matrix: HTMLElement) => Array.from(matrix.querySelectorAll('thead th')).map((th) => th.textContent);
+
+async function renderDayMatrix(rows: typeof DAY_ROWS_BY_PRIORITY, order?: Array<{ by: string; direction?: string }>) {
+  const src = sourceByDimensions({ 'priority,created_at': dayAnswer(rows) });
+  const drills: DatasetDrillArgs[] = [];
+  render(
+    <DatasetReportRenderer
+      report={order ? { ...DAY_MATRIX, order } : DAY_MATRIX}
+      dataSource={src}
+      onDrill={(a) => drills.push(a)}
+    />,
+  );
+  const matrix = await screen.findByTestId('dataset-matrix');
+  return { src, drills, matrix };
+}
+
+describe('a matrix lays out each header dimension on its own: a date by bucket key, a select by its options (objectstack#34364)', () => {
+  it('(a) no order: the day columns ascend by bucket key, the empty day last, and the priority rows read in option order', async () => {
+    const { src, drills, matrix } = await renderDayMatrix(DAY_ROWS_BY_PRIORITY);
+    await waitFor(() => expect(headerTexts(matrix)).toEqual(['Priority', ...ASCENDING_DAYS]));
+    await waitFor(() => expect(rowCells(matrix)).toEqual(OPTION_ORDER_CELLS));
+    expect('order' in src.calls[0]).toBe(false);
+    // Only the headers moved: a cell under a moved header drills into its own bucket.
+    fireEvent.click(within(matrix).getAllByTestId('dataset-drill-cell')[0]);
+    await waitFor(() => expect(drills.length).toBe(1));
+    expect(drills[0].groupKey).toEqual({ priority: 'Low', created_at: '2026-11-03' });
+  });
+
+  it('(b) an order on the measure names neither axis: the same layout', async () => {
+    const { src, matrix } = await renderDayMatrix(byCount(-1), [{ by: 'case_count', direction: 'desc' }]);
+    await waitFor(() => expect(headerTexts(matrix)).toEqual(['Priority', ...ASCENDING_DAYS]));
+    await waitFor(() => expect(rowCells(matrix)).toEqual(OPTION_ORDER_CELLS));
+    expect(src.calls[0].order).toEqual({ case_count: 'desc' });
+  });
+
+  it('(c) an order on the date names only the columns: they ascend as the server ordered them, the rows STILL read in option order', async () => {
+    const { src, matrix } = await renderDayMatrix(byDay(1), [{ by: 'created_at', direction: 'asc' }]);
+    await waitFor(() => expect(headerTexts(matrix)).toEqual(['Priority', ...ASCENDING_DAYS]));
+    await waitFor(() => expect(rowCells(matrix)).toEqual(OPTION_ORDER_CELLS));
+    expect(src.calls[0].order).toEqual({ created_at: 'asc' });
+  });
+
+  it('(d) a descending order on the date is the author’s: the columns descend, the rows read in option order', async () => {
+    const { src, matrix } = await renderDayMatrix(byDay(-1), [{ by: 'created_at', direction: 'desc' }]);
+    await waitFor(() => expect(rowCells(matrix)[0]?.[0]).toBe('Low'));
+    expect(headerTexts(matrix)).toEqual(['Priority', 'No date', '2026-11-16', '2026-11-14', '2026-11-12', '2026-11-03']);
+    expect(rowCells(matrix)).toEqual([
+      ['Low', '—', '—', '—', '6', '5'],
+      ['Medium', '7', '—', '8', '—', '—'],
+      ['High', '—', '—', '3', '—', '4'],
+      ['Critical', '—', '2', '—', '1', '—'],
+    ]);
+    expect(src.calls[0].order).toEqual({ created_at: 'desc' });
+  });
+
+  it('CONTROL: an order on the select names only the rows: they keep the server’s order, the day columns still ascend', async () => {
+    const { matrix } = await renderDayMatrix(DAY_ROWS_BY_PRIORITY, [{ by: 'priority', direction: 'asc' }]);
+    await waitFor(() => expect(headerTexts(matrix)).toEqual(['Priority', ...ASCENDING_DAYS]));
+    // Wait out the metadata read, so an option layout would have landed by now.
+    await waitFor(() => expect(metaCalls).toContain('/api/v1/meta/object/crm_case'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(rowCells(matrix).map((r) => r[0])).toEqual(['Critical', 'High', 'Low', 'Medium']);
+  });
+});

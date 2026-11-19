@@ -182,7 +182,8 @@ describe('the record page draws the final tab order at first paint (objectstack#
     await settle();
     const find = vi.fn(async () => ({ data: [], total: 0 }));
     renderPage(find);
-    const final = ['overview', RECORD_PAGE_TIMELINE_PANEL, 'note.parent_id', 'event.lead_id'];
+    // objectstack#34590 — 动态 is the row's last tab (supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」).
+    const final = ['overview', 'note.parent_id', 'event.lead_id', RECORD_PAGE_TIMELINE_PANEL];
     expect(shownIds()).toEqual(final);
     const watch = watchTabList();
     await settle();
@@ -205,13 +206,14 @@ describe('the record page draws the final tab order at first paint (objectstack#
       return { data: [], total: TOTALS[objectName] };
     });
     renderPage(find);
-    // The set is out: the row is Overview and Activity alone, and nothing on it will have to move.
-    expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL]);
+    // The set is out: the row is Overview alone — 动态, the last tab, waits
+    // with the panels (objectstack#34590 — 动态 is the row's last tab (supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」)) — and nothing on it will have to move.
+    expect(shownIds()).toEqual(['overview']);
     const states: string[][] = [shownIds() as string[]];
     const observer = new MutationObserver(() => states.push(shownIds() as string[]));
     observer.observe(document.querySelector('[data-record-tab-row]')!, { childList: true, subtree: true });
     release();
-    const final = ['overview', RECORD_PAGE_TIMELINE_PANEL, 'note.parent_id', 'event.lead_id'];
+    const final = ['overview', 'note.parent_id', 'event.lead_id', RECORD_PAGE_TIMELINE_PANEL];
     await waitFor(() => expect(shownIds()).toEqual(final));
     await settle();
     observer.disconnect();
@@ -228,7 +230,8 @@ describe('the record page draws the final tab order at first paint (objectstack#
     renderPage(find);
     // Tasks (first in the arrangement) is never counted: it stays first; Calls (0) folds.
     await waitFor(() =>
-      expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'task.lead_id', 'note.parent_id', 'event.lead_id']),
+      // objectstack#34590 — 动态 is the row's last tab (supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」).
+      expect(shownIds()).toEqual(['overview', 'task.lead_id', 'note.parent_id', 'event.lead_id', RECORD_PAGE_TIMELINE_PANEL]),
     );
     expect(document.querySelector('[data-record-tab="task.lead_id"] [data-record-tab-count]')).toBeNull();
     expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('+1');
@@ -256,12 +259,13 @@ describe('the record page draws the final tab order at first paint (objectstack#
         />
       </RecordContextProvider>,
     );
-    expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'call.lead_id']);
+    // 动态 waits with the panels; the active tab is drawn (objectstack#34590 — 动态 is the row's last tab (supersedes objectstack#27524 Target 8's 动态-second: 「「动态」在最后」)).
+    expect(shownIds()).toEqual(['overview', 'call.lead_id']);
     expect(document.querySelector('[aria-selected="true"]')?.getAttribute('data-record-tab')).toBe('call.lead_id');
     release();
     // Calls turns out empty: as the active tab it stays on the row, in the last slot.
     await waitFor(() =>
-      expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'note.parent_id', 'event.lead_id', 'call.lead_id']),
+      expect(shownIds()).toEqual(['overview', 'note.parent_id', 'event.lead_id', RECORD_PAGE_TIMELINE_PANEL, 'call.lead_id']),
     );
   });
 });

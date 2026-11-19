@@ -20,6 +20,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not in a case's clocked window: `HttpDispatcher` reaches a
+// dynamic `import('@objectstack/metadata')` (`standalone-stack.ts`).
+import '@objectstack/metadata';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
@@ -83,7 +86,9 @@ describe('[#30797] the dispatcher /meta 403 applies the errors.permission_denied
             expect(a.status).toBe(403);
             expect(a.body?.error?.code).toBe('PERMISSION_DENIED');
             expect(a.body?.error?.message).toBe(OVERRIDE_ZH);
-            expect(t).toHaveBeenCalledWith('errors.permission_denied', 'zh-CN', expect.anything());
+            // The override TEMPLATE is asked by key and locale, no params: the
+            // renderer interpolates it once (`renderOperationMessage`, #34454).
+            expect(t).toHaveBeenCalledWith('errors.permission_denied', 'zh-CN', undefined);
         });
 
         it(`${type}/${name}: CONTROL — no i18n service gives the built-in catalog sentence`, async () => {

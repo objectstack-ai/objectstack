@@ -6,26 +6,27 @@ import path from 'node:path';
 import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
- * GEOMETRY pin for `record:path`'s phone row (objectstack#26897).
+ * GEOMETRY pin for `record:path` below `sm`: the compact path (objectstack#34595).
  *
- * At 390×844 on the HotCRM seed the path's row below `sm` cut the stage at its
- * right edge mid-word ("Resolu"): the stages were content-width and
- * `whitespace-nowrap` inside a sideways scroller whose scrollbar is hidden, so
- * nothing said the row scrolled. The fix gives every stage an equal share with
- * a 2.5rem floor, truncates an ordinary label with an ellipsis and wraps a
- * terminal one, as the desktop rail does.
+ * The phone row used to name every stage in an equal share (objectstack#26897),
+ * which at 375px cut seven opportunity stages to their first letters. Below
+ * `sm` the path now draws one rail segment per stage and no names, then a
+ * summary line with the step and the current stage's FULL name, which opens a
+ * list of every stage. This spec measures, in Chromium, that the rail fits
+ * its row at phone widths with every segment one width, and that the summary
+ * shows the current stage's name whole — wrapping a long one — inside the
+ * viewport, on a 44px touch target.
  *
- * ⚠️ A Playwright spec and not a vitest test for the reason
+ * A Playwright spec and not a vitest test for the reason
  * `record-header-title-width.spec.ts` gives: jsdom has no layout engine, so a
  * width read there is 0 and an assertion on it is vacuous. The class-shape
- * half (and the `title` that keeps a cut label readable) is pinned beside the
- * renderer in `record-path.phoneRow-26897.test.tsx`.
+ * half is pinned beside the renderer in `record-path.compact-34595.test.tsx`.
  *
- * REAL, read out of `record-path.tsx` at run time: the phone row's class
- * string, the stage, rail and label base strings `renderStage` composes, and
- * the three named label/stage constants — plus real Tailwind compiled from the
- * installed `tailwindcss` for exactly those candidates. FIXTURE: the stage
- * labels, and the element tree, transcribed from `renderStage`.
+ * REAL, read out of `record-path.tsx` at run time: the compact block's class,
+ * the rail's base string `railClass` composes and the named PHONE_* constants
+ * — plus real Tailwind compiled from the installed `tailwindcss` for exactly
+ * those candidates. FIXTURE: the stage labels, and the element tree,
+ * transcribed from the compact block.
  */
 
 const REPO_ROOT = uiRoot();
@@ -49,41 +50,32 @@ function grab(re: RegExp, mustContain: string[]): string {
 }
 
 const CLS = {
-  row: grab(/\{\/\* Mobile:[^\n]*\*\/\}\s*<div\s+className="([^"]+)"/, ['sm:hidden', 'overflow-x-auto']),
-  stage: grab(/className=\{cn\('([^']+)', o\.className\)\}/, ['flex-col']),
+  compact: grab(/\{\/\* Mobile:[^\n]*\*\/\}\s*<div\s+className="([^"]+)"/, ['sm:@sm:hidden']),
   rail: grab(/const railClass = [\s\S]*?cn\(\s*'([^']+)'/, ['w-full']),
-  label: grab(/const labelClass = [\s\S]*?cn\(\s*'([^']+)'/, ['min-w-0']),
-  phoneStage: grab(/const PHONE_STAGE_CLASS = '([^']+)'/, ['min-w-10']),
-  phoneLabel: grab(/const PHONE_LABEL_CLASS = '([^']+)'/, ['truncate']),
-  terminalLabel: grab(/const TERMINAL_LABEL_CLASS = '([^']+)'/, ['[overflow-wrap:anywhere]']),
+  railRow: grab(/const PHONE_RAIL_ROW_CLASS = '([^']+)'/, ['flex', 'w-full']),
+  railSegment: grab(/const PHONE_RAIL_SEGMENT_CLASS = '([^']+)'/, ['flex-1', 'min-w-0']),
+  summary: grab(/const PHONE_SUMMARY_CLASS =\s*'([^']+)'/, ['min-h-11', 'w-full']),
+  summaryStage: grab(/const PHONE_SUMMARY_STAGE_CLASS = '([^']+)'/, ['[overflow-wrap:anywhere]']),
 };
 
-type Stage = { label: string; terminal?: boolean };
+/** The opportunity path the card measured: seven stages, the last one lost. */
+const OPPORTUNITY = ['Prospecting', 'Qualification', 'Needs Analysis', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
 
-/** The card's case path, as the HotCRM seed draws it. */
-const CASE_STAGES: Stage[] = [
-  { label: 'New' },
-  { label: 'In Progress' },
-  { label: 'Waiting on Customer' },
-  { label: 'Resolution Proposed' },
-  { label: 'Resolved' },
-  { label: 'Closed', terminal: true },
-];
+/** A long path: twenty stages, far more than seven names could share. */
+const LONG_PATH = Array.from({ length: 20 }, (_, i) => `Stage number ${i + 1}`);
 
-/** A long path: ten stages, so 2.5rem floors cannot all fit a 320px row. */
-const LONG_STAGES: Stage[] = Array.from({ length: 10 }, (_, i) => ({ label: `Stage number ${i + 1}` }));
-
-const fixture = (stages: Stage[]) =>
-  `<div id="row" role="list" class="${CLS.row}">` +
+const fixture = (stages: string[], current: string) =>
+  `<div class="${CLS.compact}">` +
+  `<div id="rails" aria-hidden="true" class="${CLS.railRow}">` +
   stages
-    .map(
-      (s) =>
-        `<div role="listitem" class="${CLS.stage} ${CLS.phoneStage}">` +
-        `<span class="${CLS.rail} bg-muted"></span>` +
-        `<span class="${CLS.label} ${s.terminal ? CLS.terminalLabel : CLS.phoneLabel}">${s.label}</span>` +
-        '</div>',
-    )
+    .map((_, i) => `<span class="${CLS.rail} bg-muted ${CLS.railSegment}${i === stages.length - 1 ? ' ml-1' : ''}"></span>`)
     .join('') +
+  '</div>' +
+  `<button id="summary" type="button" class="${CLS.summary}">` +
+  `<span class="shrink-0">Step 5 of ${stages.length - 1}</span><span aria-hidden="true">·</span>` +
+  `<span id="current" class="${CLS.summaryStage}">${current}</span>` +
+  '<svg class="ml-auto h-4 w-4 shrink-0" width="16" height="16"></svg>' +
+  '</button>' +
   '</div>';
 
 let css = '';
@@ -96,25 +88,32 @@ test.beforeAll(async () => {
       return { path: file, base: path.dirname(file), content: readFileSync(file, 'utf8') };
     },
   });
-  css = compiler.build([...Object.values(CLS), 'bg-muted'].join(' ').split(/\s+/).filter(Boolean));
+  css = compiler.build(
+    [...Object.values(CLS), 'bg-muted ml-1 shrink-0 ml-auto h-4 w-4'].join(' ').split(/\s+/).filter(Boolean),
+  );
   if (!css.includes('@media')) {
-    throw new Error('Tailwind produced no media queries — `sm:hidden` would be inert.');
+    throw new Error('Tailwind produced no media queries — `sm:@sm:hidden` would be inert.');
   }
 });
 
 type Reading = {
   rowClientWidth: number;
   rowScrollWidth: number;
-  stages: { label: string; left: number; right: number; width: number; clipped: boolean; ellipsis: boolean }[];
+  segments: { left: number; right: number; width: number }[];
+  summary: { right: number; height: number };
+  current: { right: number; clipped: boolean; lines: number };
 };
 
-async function readRow(page: Page, stages: Stage[], width: number): Promise<Reading> {
+async function readPath(page: Page, stages: string[], current: string, width: number): Promise<Reading> {
   await page.setViewportSize({ width, height: 844 });
-  await page.setContent(`<style>html,body{margin:0}${css}</style>${fixture(stages)}`, { waitUntil: 'load' });
+  await page.setContent(
+    `<style>html,body{margin:0}body{padding:0 16px;font:14px sans-serif}${css}</style>${fixture(stages, current)}`,
+    { waitUntil: 'load' },
+  );
   // Wait for the row's layout to settle across two frames, then for fonts.
   await page.waitForFunction(
     () => {
-      const row = document.getElementById('row');
+      const row = document.getElementById('rails');
       if (!row || row.getBoundingClientRect().width <= 0) return false;
       const w = row.scrollWidth;
       const prev = (window as unknown as { __w?: number }).__w;
@@ -127,58 +126,64 @@ async function readRow(page: Page, stages: Stage[], width: number): Promise<Read
   await page.evaluate(() => document.fonts?.ready);
   return page.evaluate(() => {
     const round = (n: number) => Math.round(n * 100) / 100;
-    const row = document.getElementById('row')!;
+    const row = document.getElementById('rails')!;
+    const summary = document.getElementById('summary')!.getBoundingClientRect();
+    const cur = document.getElementById('current')!;
+    const curRect = cur.getBoundingClientRect();
+    const lineHeight = parseFloat(getComputedStyle(cur).lineHeight) || 16;
     return {
       rowClientWidth: row.clientWidth,
       rowScrollWidth: row.scrollWidth,
-      stages: Array.from(row.children).map((item) => {
-        const label = item.querySelector('span:not(.bg-muted)') as HTMLElement;
-        const r = item.getBoundingClientRect();
-        return {
-          label: label.textContent ?? '',
-          left: round(r.left),
-          right: round(r.right),
-          width: round(r.width),
-          clipped: label.scrollWidth > label.clientWidth,
-          ellipsis: getComputedStyle(label).textOverflow === 'ellipsis',
-        };
+      segments: Array.from(row.children).map((seg) => {
+        const r = seg.getBoundingClientRect();
+        return { left: round(r.left), right: round(r.right), width: round(r.width) };
       }),
+      summary: { right: round(summary.right), height: round(summary.height) },
+      current: {
+        right: round(curRect.right),
+        clipped: cur.scrollWidth > cur.clientWidth,
+        lines: Math.round(curRect.height / lineHeight),
+      },
     };
   });
 }
 
-test.describe('record:path phone row (objectstack#26897)', () => {
+test.describe('record:path compact phone path (objectstack#34595)', () => {
   for (const width of [320, 375, 390]) {
-    test(`the case path fits its row at ${width}px and every cut label ellipsises`, async ({ page }) => {
-      const r = await readRow(page, CASE_STAGES, width);
-      // THE assertion: nothing hides past the row's edge, where the hidden
-      // scrollbar gave no sign that it was there.
+    test(`the opportunity's rail fits its row at ${width}px, one width per stage, and names the current stage whole`, async ({ page }) => {
+      const r = await readPath(page, OPPORTUNITY, 'Negotiation', width);
       expect(
         r.rowScrollWidth,
-        `row holds ${r.rowScrollWidth}px of stages in ${r.rowClientWidth}px — the last stage is cut at the edge`,
+        `rail holds ${r.rowScrollWidth}px of segments in ${r.rowClientWidth}px — a stage is cut at the edge`,
       ).toBeLessThanOrEqual(r.rowClientWidth);
-      for (const s of r.stages) {
-        expect(s.right, `stage "${s.label}" ends past the row`).toBeLessThanOrEqual(width + 0.5);
-        // A label that does not fit is cut WITH an ellipsis, never bare.
-        if (s.clipped) expect(s.ellipsis, `stage "${s.label}" is cut with no ellipsis`).toBe(true);
+      expect(r.segments).toHaveLength(OPPORTUNITY.length);
+      for (const s of r.segments) {
+        expect(s.right, 'a rail segment ends past the viewport').toBeLessThanOrEqual(width + 0.5);
+        expect(s.width, 'a rail segment collapsed').toBeGreaterThan(8);
       }
-      // Not vacuous: at these widths the long labels really are cut.
-      expect(r.stages.some((s) => s.clipped), 'no label was cut, so the ellipsis went unmeasured').toBe(true);
-      // Equal shares: every stage is one width.
-      const widths = new Set(r.stages.map((s) => Math.round(s.width)));
-      expect(widths.size, `stage widths ${[...widths].join(', ')}`).toBe(1);
+      // Equal shares: every segment is one width.
+      const widths = new Set(r.segments.map((s) => Math.round(s.width)));
+      expect(widths.size, `segment widths ${[...widths].join(', ')}`).toBe(1);
+      // The current stage's name is whole, inside the viewport, on a 44px target.
+      expect(r.current.clipped, 'the current stage name is cut').toBe(false);
+      expect(r.current.right).toBeLessThanOrEqual(width + 0.5);
+      expect(r.summary.right).toBeLessThanOrEqual(width + 0.5);
+      expect(r.summary.height).toBeGreaterThanOrEqual(44);
     });
   }
 
-  test('a terminal label wraps instead of being cut, as on the desktop rail', async ({ page }) => {
-    const r = await readRow(page, [...CASE_STAGES.slice(0, 5), { label: 'Closed — Duplicate', terminal: true }], 320);
-    const terminal = r.stages[r.stages.length - 1];
-    expect(terminal.clipped, 'the terminal stage label is cut').toBe(false);
+  test('a long current stage name wraps instead of being cut', async ({ page }) => {
+    const long = 'Waiting on Customer Signature and Legal Review of the Master Agreement';
+    const r = await readPath(page, OPPORTUNITY, long, 320);
+    expect(r.current.clipped, 'the long stage name is cut').toBe(false);
+    expect(r.current.right).toBeLessThanOrEqual(320 + 0.5);
+    // Not vacuous: at 320px the name really does need more than one line.
+    expect(r.current.lines, 'the long name fit one line, so wrapping went unmeasured').toBeGreaterThan(1);
   });
 
-  test('past the floor the stages keep 2.5rem and the row scrolls instead', async ({ page }) => {
-    const r = await readRow(page, LONG_STAGES, 320);
-    for (const s of r.stages) expect(s.width).toBeGreaterThanOrEqual(40);
-    expect(r.rowScrollWidth).toBeGreaterThan(r.rowClientWidth);
+  test('a twenty-stage path still fits its rail at 320px', async ({ page }) => {
+    const r = await readPath(page, LONG_PATH, 'Stage number 5', 320);
+    expect(r.rowScrollWidth).toBeLessThanOrEqual(r.rowClientWidth);
+    for (const s of r.segments) expect(s.width).toBeGreaterThan(0);
   });
 });

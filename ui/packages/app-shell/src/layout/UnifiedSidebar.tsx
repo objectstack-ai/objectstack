@@ -28,6 +28,7 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarMenuAction,
+  SidebarInput,
   cn,
   useSidebar,
 } from '@object-ui/components';
@@ -74,12 +75,13 @@ import {
 } from './ContextSelectors.js';
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
-import { useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
+import { SIDEBAR_EDGE_ZONE, useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
 import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
+import { PhoneAppNavBar, PhoneMenuStar } from './PhoneAppNavBar.js';
 
 /**
  * The class the Recent group's label carries so that, once the sidebar
@@ -147,12 +149,22 @@ interface UnifiedSidebarProps {
   /** Callback when user switches apps */
   onAppChange?: (name: string) => void;
   /**
-   * Below the fold width, draw the sidebar as the icon rail that expands over
-   * the content (objectstack#27593). The console layout sets it, and folds
-   * the sidebar with `useResponsiveSidebar`; off, the sidebar is drawn as the
-   * provider says at every width.
+   * The console's sidebar (objectstack#27593, objectstack#35062): from 768 px
+   * up a collapsed sidebar is hidden, takes no width, and floats its full menu
+   * over the content from the window's left edge and from the app bar's
+   * trigger; below the fold width it collapses on its own. The console layout
+   * sets it, and folds the sidebar with
+   * `useResponsiveSidebar`; off, the sidebar is drawn as the provider says at
+   * every width, collapsed to the primitive's icon rail.
    */
   railOverlay?: boolean;
+  /**
+   * On a phone, draw the app's bottom menu bar (objectstack#34594) and give the
+   * drawer, which its 「More」 cell opens, a search box and a star per entry.
+   * The console layout decides it: a phone, inside an app, not on a record
+   * page or a record form. Ignored outside an app and from 768 px up.
+   */
+  phoneNavBar?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -170,8 +182,8 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSidebarProps) {
-  const { isMobile, setOpenMobile } = useSidebar();
+export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar = false }: UnifiedSidebarProps) {
+  const { isMobile, openMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
   const { appLabel } = useServedAppLabel();
@@ -183,10 +195,12 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // hook, so the two surfaces cannot name one entry two ways.
   const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
   const resolveNavTargetIcon = useNavTargetIcon();
-  // Below the fold width the sidebar is the icon rail and expands over the
-  // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
+  // Collapsed, the console's sidebar is hidden and its menu floats over the
+  // content (objectstack#35062); below the fold width it collapses on its own
+  // (objectstack#27593), and `useResponsiveSidebar` folds and unfolds it.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
-  const railPanel = useConsoleSidebarRailPanel(rail);
+  const sidebarRef = React.useRef<HTMLDivElement | null>(null);
+  const railPanel = useConsoleSidebarRailPanel(rail, sidebarRef);
   const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
 
   // Swipe-from-left-edge gesture to open sidebar on mobile
@@ -500,6 +514,35 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // Recent section collapsed by default
   const [recentExpanded, setRecentExpanded] = React.useState(false);
 
+  // objectstack#34594 — the phone's bottom menu bar and the full menu its
+  // 「More」 cell opens. The bar reads every visible area of the app (the drawer
+  // shows one area at a time; a pin from another area keeps its cell), and the
+  // same pruned trees the drawer draws. Studio's menu is the rewritten one the
+  // drawer shows.
+  const phoneMenu = isMobile && phoneNavBar && context === 'app' && !!activeApp;
+  const phoneBarItems: NavigationItem[] = isStudioApp
+    ? studioNavigationItems
+    : visibleAreas.length > 0
+      ? visibleAreas.flatMap((area) => area.navigation ?? [])
+      : readableAppNavigation ?? [];
+  // The full menu's search: ephemeral, cleared whenever the drawer closes.
+  const [menuQuery, setMenuQuery] = React.useState('');
+  const [menuQueryOpen, setMenuQueryOpen] = React.useState(openMobile);
+  if (menuQueryOpen !== openMobile) {
+    // Adjusted while rendering, on the drawer's open state changing (React's
+    // "adjusting state when a prop changes"), not in an effect.
+    setMenuQueryOpen(openMobile);
+    if (!openMobile) setMenuQuery('');
+  }
+  const renderPhoneMenuStar = (item: NavigationItem, row: NavItemActionContext) => (
+    <PhoneMenuStar
+      label={row.label}
+      pinned={!!item.pinned}
+      onToggle={() => togglePin(item.id, !item.pinned, item, row.basePath)}
+      t={t}
+    />
+  );
+
   // One ⋯ menu on every entry, in place of the pin action (objectui#12427):
   // its first entry adds the entry to Favorites or removes it, through the
   // same pin store the pin action wrote. Not on a phone, where the sidebar
@@ -578,7 +621,8 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   return (
     <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
     <Sidebar
-      collapsible="icon"
+      ref={sidebarRef}
+      collapsible={railPanel.collapsible}
       className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
       {...railPanel.panelProps}
     >
@@ -601,6 +645,26 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
               <LayoutGrid className="h-5 w-5" />
             </Link>
           </div>
+          {/* objectstack#34594 — the full menu the bottom bar's 「More」
+              opens: searchable, and each entry's star offers it to the bar. */}
+          {phoneMenu && (
+            <div className="space-y-1.5 px-2 pb-1.5 pt-1">
+              <SidebarInput
+                type="search"
+                value={menuQuery}
+                onChange={(event) => setMenuQuery(event.target.value)}
+                placeholder={t('console.nav.searchMenu', { defaultValue: 'Search menu' })}
+                aria-label={t('console.nav.searchMenu', { defaultValue: 'Search menu' })}
+                data-testid="phone-menu-search"
+                className="h-10 text-[15px]"
+              />
+              <p data-testid="phone-menu-pin-hint" className="text-xs text-muted-foreground">
+                {t('console.nav.phoneBarHint', {
+                  defaultValue: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
+                })}
+              </p>
+            </div>
+          )}
         </SidebarHeader>
       )}
       <SidebarContent className={`pt-2 ${ICON_RAIL_SCROLLS_VERTICALLY}`}>
@@ -673,7 +737,11 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              checkCapability={checkCap}
              checkDocTarget={checkDocTarget}
              enablePinning={!isMobile}
-             renderItemAction={isMobile ? undefined : renderNavItemAction}
+             // On a phone the drawer draws no ⋯ menu (objectui#1055); where it
+             // is the bottom bar's full menu, each entry carries a star
+             // instead (objectstack#34594).
+             renderItemAction={isMobile ? (phoneMenu ? renderPhoneMenuStar : undefined) : renderNavItemAction}
+             searchQuery={phoneMenu ? menuQuery : undefined}
              extraFavorites={contentFavoriteRows}
              pinnedOrder={pinnedIds}
              onPinnedReorder={reorderPins}
@@ -815,18 +883,20 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
          )}
         </nav>
       </SidebarContent>
-      {/* "Keep sidebar open" turns the fold off for this browser; offered
-          where the fold applies, while the rail is expanded or kept open. */}
-      {rail.narrow && (rail.overlayOpen || rail.keepOpen) && (
+      {/* "Keep sidebar open": in the floated menu it puts the sidebar back
+          beside the content and keeps it there (on the fold, for this
+          browser); in a sidebar kept open on a narrow window it is pressed,
+          and turns the fold back on (objectstack#35062). */}
+      {railPanel.keepOpenControl && (
         <SidebarFooter className="border-t border-sidebar-border">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
                 data-testid="sidebar-keep-open"
-                aria-pressed={rail.keepOpen}
-                isActive={rail.keepOpen}
+                aria-pressed={railPanel.keepOpenControl.pressed}
+                isActive={railPanel.keepOpenControl.pressed}
                 tooltip={keepOpenLabel}
-                onClick={() => rail.setKeepOpen(!rail.keepOpen)}
+                onClick={railPanel.keepOpenControl.onPress}
               >
                 <Pin className="h-4 w-4" />
                 <span>{keepOpenLabel}</span>
@@ -838,10 +908,40 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       {/* No footer trigger: the app bar's left slot holds the shell's one
           sidebar trigger at every width (objectui#12429). */}
     </Sidebar>
-    {/* Mobile bottom-tab navigation removed — the drawer (☰) already
-        surfaces the full navigation tree, so a bottom strip of the
-        first 5 leaves was pure duplication and ate ~52px of vertical
-        space. Pattern follows Notion / Linear (drawer-only). */}
+    {/* objectstack#35062 — the window's left edge while the sidebar is
+        hidden: resting the pointer on it, or a press, floats the menu. For
+        the pointer only; the keyboard has the app bar's trigger and ⌘B. */}
+    {railPanel.edgeZoneProps && (
+      <div
+        data-testid="console-sidebar-edge"
+        aria-hidden="true"
+        className={cn(SIDEBAR_EDGE_ZONE, CONSOLE_BELOW_TOP_BAR)}
+        {...railPanel.edgeZoneProps}
+      />
+    )}
+    {/* objectstack#34594 — the phone's bottom menu bar. After the sidebar,
+        so it takes the sidebar's place before the page in reading order. */}
+    {phoneMenu && (
+      <PhoneAppNavBar
+        items={phoneBarItems}
+        pinnedIds={pinnedIds}
+        basePath={basePath}
+        guards={{
+          evaluateVisibility: evalVis,
+          checkPermission: checkPerm,
+          checkCapability: checkCap,
+          checkDocTarget,
+          hasActionHandler: !!dispatchNavAction,
+        }}
+        templateContext={navTemplateContext}
+        resolveTargetLabel={resolveNavTargetLabel}
+        resolveTargetIcon={resolveNavTargetIcon}
+        locale={language}
+        t={t}
+        menuOpen={openMobile}
+        onOpenMenu={() => setOpenMobile(true)}
+      />
+    )}
     </div>
   );
 }

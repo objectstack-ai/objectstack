@@ -12,7 +12,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: ai
   tags: agent, tool, skill, knowledge, llm, embedding, mcp
 ---
@@ -161,9 +161,16 @@ nests user params under `data` while keeping `recordIdParam` flat.
 
 **Human-in-the-loop.** `AIServicePlugin({ enableActionApproval: true })` (default
 `false`) persists an `ai_pending_actions` row instead of running a dangerous
-action and returns `{ status: 'pending_approval', pendingActionId }`; an operator
-approves or rejects in Studio's **AI Pending Actions** inbox (or via
-`GET/POST /api/v1/ai/pending-actions/...`). Whether *your* action is held is
+action and returns `{ status: 'pending_approval', pendingActionId }`. The queue
+is listed in Studio's **AI Pending Actions** inbox (or via
+`GET /api/v1/ai/pending-actions`), but deciding is the person's own act: only the
+person the call ran as approves or rejects the item, in the app on their
+signed-in session. Another user's `ai:approve` does not decide it; an API key
+or token (even the person's own) is refused, and so is an AI identity and any
+call that arrives through an AI door. The model's own confirmation does not
+decide the item, and neither does a `confirm` on the call: the item waits for
+the person. So an operator script lists items and never decides them; a second approver goes through the approvals engine (the `held`
+outcome). Whether *your* action is queued is
 decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.
@@ -175,7 +182,8 @@ questions, and Studio's "AI exposure" diagnostics use the same predicates.
 `@objectstack/mcp` publishes your app over the Model Context Protocol, so an
 external agent (Claude, Cursor, Codex, …) can read it and act on it with **no
 cloud licence**. (Consuming *external* MCP servers is the inbound sibling,
-`@objectstack/connector-mcp`.)
+`@objectstack/connector-mcp`.) Answering a question through those tools, as
+the connected agent, is **objectstack-ask**.
 
 ```ts
 import { MCPServerPlugin } from '@objectstack/mcp';
@@ -199,9 +207,17 @@ permissions and row-level security:
 | `query_records`, `get_record` | reads — filter, field selection, sorting, pagination |
 | `aggregate_records` | GROUP BY totals; registered only when the data bridge implements `aggregate` |
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
-| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true` — ask the human first, then retry |
+| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true`. A request in which the human names the record to delete, with exactly one record matching, is their approval: send `confirm: true` on that call without asking again. When the name matches more than one record, or the request does not identify one, list the candidates, ask which one, and send `confirm: true` only after the answer |
 | `delete_records` | up to 200 records of one object per call (fewer under a smaller `OS_DATA_MAX_PAGE_SIZE` or `OS_DATA_QUERY_ROW_BUDGET`), by `where` or `recordIds`, not both; a call without `confirm: true` is the preview (match count, sample ids) and deletes nothing — show it to the human, and send `confirm: true` only once they approve; over OAuth it needs `data:read` and `data:write` |
-| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; registered only when the bridge implements `listActions` and `runAction` (the stdio bridge does not, so it serves none), `resume_run` only when it also implements `resumeRun`. An action flagged `ai.requiresConfirmation` (`list_actions` reports it) is refused with the same 428 unless the call sends `confirm: true`, and nothing runs — ask the human first, then retry. Under an AI service account's own key (an agent acting for itself, for no person) the call is refused whatever it sends and nothing runs: hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. `resume_run` submits a paused screen flow's form under the same gates |
+| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; registered only when the bridge implements `listActions` and `runAction` (the stdio bridge does not, so it serves none), `resume_run` only when it also implements `resumeRun`. An action declaring `ai.requiresConfirmation: true` (`list_actions` reports it) never runs on the call: the host's pending-confirmation service hands it to the person the call runs as, who approves or rejects it in the app, and the answer is `status: 'pending_confirmation'` with a `pendingId` — a success, so relay its message and do not retry. Under an AI service account's own key (an agent acting for itself, for no person) the call is refused with the same 428, `details.reason: 'service_account'`, at every action door, and nothing runs: hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. `resume_run` submits a paused screen flow's form under the same gates; a handed-off run stays paused |
+
+**Never send `confirm` to `run_action` or `resume_run`:** a call carrying it is
+refused, on every action. A host with no such service (the open build ships
+none) refuses a gated call 428, `details.reason: 'no_confirmation_service'`: the
+person performs it in the app. On a long-lived (stdio) server whose bridge serves
+these tools, a client advertising form-mode `elicitation` is asked instead:
+`accept` runs it once; decline, dismissal or five minutes unanswered refuse it
+(`declined` / `cancelled` / `timed_out`). Over Streamable HTTP nobody is asked.
 
 ---
 

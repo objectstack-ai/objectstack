@@ -331,6 +331,16 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
     why: 'RUNTIME-ONLY (objectstack#28245) — object-field metadata (the spec\'s `FieldSchema.lookupAutofill`) read off the '
       + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form.',
   },
+  recordBeingEdited: {
+    readers: ['entry@fields/src/widgets/lookupRecordReference.ts'],
+    why: 'RUNTIME-ONLY (objectstack#34197, objectstack#34344) — the record form\'s statement that one record is being '
+      + 'edited, with the object each hop points at, stamped (`withRecordBeingEdited`) on a lookup whose `lookupFilters` '
+      + 'read `{ $record }`. A host that edits no single record must not be able to claim it. Two things hold that: '
+      + 'the widget honours only a stamp `withRecordBeingEdited` issued, so the key written as data, on this face\'s '
+      + 'loose `FormFieldSchema` or anywhere else, is no stamp; and a record form stamps every field it draws, '
+      + 'generated or inline, in the one step every layout draws through (`gateFormFields`), dropping an authored '
+      + 'key first. Not declared here, deliberately: no document authors it.',
+  },
   homeAmountSource: {
     readers: [CURRENCY],
     why: 'RUNTIME-ONLY (objectstack#27196) — the producers stamp the home-amount source onto the resolved field '

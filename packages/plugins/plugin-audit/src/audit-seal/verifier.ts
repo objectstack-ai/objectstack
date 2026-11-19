@@ -1,10 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { createPublicKey, verify, type KeyObject } from 'node:crypto';
 import { parseLifecycleDuration } from '@objectstack/objectql';
 import type { IAuditCheckpointSigner, ICryptoProvider } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/types';
-import { canonicalDatetime, leafHash, leafInput, rowIdOf, type SealedFieldTypes } from './canonical.js';
+import { canonicalDatetime, chainValueOf, leafHash, leafInput, rowIdOf, sealChainFieldOf, type SealedFieldTypes } from './canonical.js';
 import { AUDIT_AMENDMENT_OBJECT, AUDIT_CHECKPOINT_OBJECT, AUDIT_SIGNING_KEY_OBJECT, checkpointSeedContext, columnSaltsOf, decodeCheckpointSeed } from './seed.js';
 import { AUDIT_SEAL_WINDOW_MS } from './sealer.js';
 import {
@@ -18,6 +17,7 @@ import {
   type ExpiryAmendmentBody,
   type RedactionAmendmentBody,
 } from './signed-body.js';
+import { auditTrustedKeyOf, verifyAuditSignature, type AuditTrustedKey } from './signature.js';
 import { readAuditSealSecret, trustedSigningKey, type SealStorageDriver, type SealStorageReader } from './signer.js';
 
 /** Where a seed's and a signing key's wrapped handles are stored (`readAuditSealSecret`). */
@@ -31,7 +31,9 @@ const SECRET_OBJECT = 'sys_secret';
  * Trust. A signing key is trusted only when the trust anchor vouches for it
  * (D6: the local anchor derives the public half from the wrapped private half,
  * never reads it off a row). A checkpoint signed under any other key, or whose
- * signature does not verify, holds nothing.
+ * signature does not verify, holds nothing. The algorithm a signature is
+ * checked by — Ed25519 or ES256 — is the trusted key's type, never anything a
+ * record says (`signature.ts`).
  *
  * Per chain (object × organization, or × the deployment):
  *
@@ -201,7 +203,10 @@ export interface AuditProofBundle {
   readonly checked_at: string;
   /** The live run's scope; the offline check judges the same. */
   readonly scope: AuditVerifyReport['scope'];
-  /** The public halves (raw 32 bytes, base64) of the keys the live run's anchor vouched for. */
+  /**
+   * The public halves of the keys the live run's anchor vouched for, base64: an Ed25519 key's raw
+   * 32 bytes, an ES256 key's SPKI DER. Each `fingerprint` is the SHA-256 of those bytes.
+   */
   readonly keys: ReadonlyArray<{ readonly fingerprint: string; readonly public_key: string }>;
   readonly objects: readonly AuditProofBundleObject[];
 }
@@ -250,7 +255,6 @@ interface BundleDraft {
 const PAGE_SIZE = 500;
 const iso = (ms: number): string => new Date(ms).toISOString();
 const windowOf = (ms: number): number => Math.floor(ms / AUDIT_SEAL_WINDOW_MS) * AUDIT_SEAL_WINDOW_MS;
-const tenantOf = (row: Row): string | null => (typeof row.tenant_id === 'string' && row.tenant_id !== '' ? row.tenant_id : null);
 const zero = (): AuditVerdictCounts => ({ unmodified: 0, modified: 0, missing: 0, late: 0, redacted: 0, expired: 0, unsealed: 0 });
 const messageOf = (err: unknown): string => String((err as Error)?.message ?? err);
 
@@ -301,11 +305,11 @@ export abstract class VerdictLedger {
     this.rangeHi = scope.to ? windowOf(scope.to.getTime() - 1) + AUDIT_SEAL_WINDOW_MS : Number.POSITIVE_INFINITY;
   }
 
-  /** The public half (raw 32 bytes, base64) of signing key `keyId` when this check trusts it, else `null`. */
+  /** The public half (base64, `signature.ts`) of signing key `keyId` when this check trusts it, else `null`. */
   protected abstract publicKeyOf(keyId: string): Promise<string | null>;
 
   /** Each key a record named: its public half when trusted, `null` when not. */
-  protected get keys(): ReadonlyMap<string, { key: KeyObject; publicKey: string } | null> {
+  protected get keys(): ReadonlyMap<string, AuditTrustedKey | null> {
     return this.trust.keys;
   }
 
@@ -392,12 +396,14 @@ export abstract class VerdictLedger {
  * reader of one: the live and offline checks, and the redaction amendment
  * writer before it proves a row against a checkpoint or names an amendment
  * already written. A signature is `ok` only under a key the trust anchor
- * vouches for (`publicKeyOf`), and only when it verifies over the body's bytes.
- * Each key is asked about once.
+ * vouches for (`publicKeyOf`), and only when it verifies over the body's bytes
+ * by the algorithm of that key's type (`signature.ts`): a key the anchor
+ * answers in no admitted encoding, or under an id its bytes do not hash to,
+ * is no trusted key. Each key is asked about once.
  */
 export class SigningKeyTrust {
   /** Each key a record named: its public half when trusted, `null` when not. */
-  readonly keys = new Map<string, { key: KeyObject; publicKey: string } | null>();
+  readonly keys = new Map<string, AuditTrustedKey | null>();
 
   constructor(private readonly publicKeyOf: (keyId: string) => Promise<string | null>) {}
 
@@ -406,25 +412,13 @@ export class SigningKeyTrust {
     const trusted = await this.trustedKey(keyId);
     if (!trusted) return 'untrusted_key';
     if (typeof signature !== 'string' || signature === '') return 'signature';
-    try {
-      return verify(null, bytes, trusted.key, Buffer.from(signature, 'base64')) ? 'ok' : 'signature';
-    } catch {
-      return 'signature';
-    }
+    return verifyAuditSignature(trusted, bytes, signature) ? 'ok' : 'signature';
   }
 
-  private async trustedKey(keyId: string): Promise<{ key: KeyObject; publicKey: string } | null> {
+  private async trustedKey(keyId: string): Promise<AuditTrustedKey | null> {
     if (this.keys.has(keyId)) return this.keys.get(keyId)!;
     const publicKey = await this.publicKeyOf(keyId);
-    let trusted: { key: KeyObject; publicKey: string } | null = null;
-    if (publicKey !== null) {
-      try {
-        const x = Buffer.from(publicKey, 'base64').toString('base64url');
-        trusted = { key: createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x }, format: 'jwk' }), publicKey };
-      } catch {
-        trusted = null;
-      }
-    }
+    const trusted = typeof publicKey === 'string' ? auditTrustedKeyOf(keyId, publicKey) : null;
     this.keys.set(keyId, trusted);
     return trusted;
   }
@@ -433,7 +427,9 @@ export class SigningKeyTrust {
 /**
  * @internal The live trust anchor (D6): a host's `audit.checkpointSigner` when
  * one is given, else the local key, trusted only through its wrapped private
- * half ({@link trustedSigningKey}). The two objects a key is trusted through
+ * half ({@link trustedSigningKey}). Never both: with a host signer the local
+ * derivation is not asked, so a local key stays trusted after the switch only
+ * when the host signer pins it (its `trustedPublicKey` answers for it). The two objects a key is trusted through
  * are its row and the `sys_secret` row of its wrapped private half: either
  * table absent is no key, and any other read fault is thrown rather than read
  * as tampering.
@@ -480,7 +476,7 @@ class LedgerCheck extends VerdictLedger {
       checked_at: report.checked_at,
       scope: report.scope,
       keys: [...this.keys]
-        .filter((entry): entry is [string, { key: KeyObject; publicKey: string }] => entry[1] !== null)
+        .filter((entry): entry is [string, AuditTrustedKey] => entry[1] !== null)
         .map(([fingerprint, { publicKey }]) => ({ fingerprint, public_key: publicKey }))
         .sort((a, b) => cmp(a.fingerprint, b.fingerprint)),
       objects: bundled,
@@ -861,6 +857,8 @@ function jsonColumn(value: unknown): unknown {
 /** One sealed object's chains and rows, read live. */
 class ObjectCheck extends ChainCheck<LedgerCheck> {
   private readonly types: SealedFieldTypes;
+  /** The column a row's chain is read from, as the sealer reads it ({@link chainValueOf}). */
+  private readonly chainField: string;
   private readonly hot: SealStorageDriver;
   private readonly archive: SealStorageDriver | undefined;
   /** The object's highest trusted `sealed_through`, and the windows a trusted `window` checkpoint names. */
@@ -881,6 +879,7 @@ class ObjectCheck extends ChainCheck<LedgerCheck> {
   ) {
     super(check, object.name);
     this.types = (object.fields ?? {}) as SealedFieldTypes;
+    this.chainField = sealChainFieldOf(object.lifecycle);
     const { engine } = check;
     const hot = engine.getDriverForObject(object.name);
     if (!hot) throw new Error(`no driver resolves for '${object.name}'`);
@@ -1077,7 +1076,7 @@ class ObjectCheck extends ChainCheck<LedgerCheck> {
     for (const { row, head } of ordered) await this.judgeCheckpoint(row, head, (body) => this.readLeaves(body, head, rows));
     const sealedWindow = start + AUDIT_SEAL_WINDOW_MS <= this.watermark || this.sealedWindows.has(start);
     for (const [id, row] of rows) {
-      const chain = chainKeyOf(tenantOf(row));
+      const chain = chainKeyOf(chainValueOf(row, this.chainField));
       if (!this.check.inScope(chain) || this.held.has(id)) continue;
       if (sealedWindow || this.listedByFaulted.has(id)) this.unheld.set(id, { chain, windowStart: start });
     }

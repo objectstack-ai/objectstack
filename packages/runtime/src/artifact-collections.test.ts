@@ -192,10 +192,10 @@ describe('resolveArtifactCollections', () => {
         // resolves its collections after that. A nameless item is claimed by
         // value, so the stamps alone used to turn one definition into two.
         const additive = JSON.parse(JSON.stringify({
-            data: [{ object: 'account', mode: 'insert', records: [{ name: 'once' }] }],
+            data: [{ object: 'account', mode: 'ignore', records: [{ name: 'once' }] }],
             datasourceMapping: [{ datasource: 'primary', default: true }],
             packages: packagesOf({
-                data: [{ object: 'account', mode: 'insert', records: [{ name: 'once' }] }],
+                data: [{ object: 'account', mode: 'ignore', records: [{ name: 'once' }] }],
                 datasourceMapping: [{ datasource: 'primary', default: true }],
             }),
         }));
@@ -223,8 +223,8 @@ describe('resolveArtifactCollections', () => {
         // out of identity. A dataset whose records differ is a second
         // definition, and it still arrives.
         const additive = JSON.parse(JSON.stringify({
-            data: [{ object: 'account', mode: 'insert', records: [{ name: 'top' }] }],
-            packages: packagesOf({ data: [{ object: 'account', mode: 'insert', records: [{ name: 'body' }] }] }),
+            data: [{ object: 'account', mode: 'ignore', records: [{ name: 'top' }] }],
+            packages: packagesOf({ data: [{ object: 'account', mode: 'ignore', records: [{ name: 'body' }] }] }),
         }));
         applyProtection(additive.packages[1].manifest.data[0], { packageId: 'com.example.core' });
 

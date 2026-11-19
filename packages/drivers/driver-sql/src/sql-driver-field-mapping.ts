@@ -4,7 +4,7 @@
  * [#29520 codemod] The "Field mapping" section of `SqlDriver`: the bodies of
  * `mapSortField`, `paginationTieBreaker`, `orderKeysFor`, `remoteColumn`,
  * `applyWriteColumnMap`, `mapAggregateFunc` moved out of `sql-driver.ts` whole
- * by `scripts/codemod-split-sql-driver.mjs`.
+ * (split by #29598 and #30139).
  *
  * A MOVE, not a redesign. {@link FieldMappingFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`

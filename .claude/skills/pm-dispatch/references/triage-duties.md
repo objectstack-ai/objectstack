@@ -6,14 +6,13 @@
 - 两级盘点:小时轮以 `since` 窗口读增量,锚 = 座位贴上一份收班简报的时间戳。
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
 - 每日一 fire 跑两仓全量对账(`objectstack-ai/objectstack`、`objectstack-ai/cloud`)并归集日频职责;
-- 选层按 fire 时刻 ⛔ 不用计数器,简报写明层;cloud 卡首触归 `repo:cloud` 席自巡,见多仓协调。
-- 两仓对账兜底:cloud 卡无状态逾 4 h ⇒ 写信 `repo:cloud` 各席,⛔ 不代打标签(`lanes/cloud.md`)。
+- 选层按 fire 时刻 ⛔ 不用计数器,简报写明层;cloud 卡首触与逾 4 h 兜底照 `lanes/cloud.md`。
 - 每日看板的车道一节展示 devx 六项度量;清单住 `lanes/devx.md` 范围节度量行,⛔ 不另抄。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
-- 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
+- 轮次记录按车道计欠 L2 逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
 - 每日看板与轮次记录列「待维护者」:当前里程碑已清的专题,注小结贴否;读数非门禁。
 - 「待维护者」另逐张列 open `needs-user-decision` 与 `pm:awaiting-maintainer` 卡,注入态以来卡龄。
-- UTC 3 倍数时的轮次记录报 24h 流量:卡新建/关闭/净增,合并 PR 数,open p1,引契约复核新卡数。
+- UTC 3 倍数时的轮次记录报 24h 流量:卡新建/关闭/净增,合并 PR 数,open p1,引 L2 审核新卡数。
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
 - ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
@@ -28,19 +27,20 @@
 - main-red 锚卡由席位先立先派,首触事后补作记录级:可改域,⛔ 不改动作,在飞照补。
 - 锚卡关闭同轮照 project-forms.md 敲门,一 PR 一敲;敲门数进轮次记录。
 - 主干全量红与确定性队列红首触定 p0(锚卡、根因卡、full-run 卡);flake 锚卡判确定性才升。
+- 例外:一签名 2h 内踢 ≥2 独立 head 组的队列 flake 即 p0;修复合入关卡,2h 无新踢按上行定。
+  须失败用例 `main` 已有;一 PR 后叠组算一 head,其新红测试即出队;计数插队见 `lanes/queue.md`。
 - 车道席自分诊:本车道卡挡自有在飞(认领卡/PR/落地/拆分链)且证据清楚,方可首触定 p1/p2。
 - 证据 = 卡上引具名失败 check/run、复现读数或 pin 测试;记录照分诊格式贴卡,请分诊复审。
 - 行首 `Ruling-ref:` 引本例外裁决原话;⛔ 不改 `domain:*`、不定 p0(归 main-red)、不碰人工地板。
 - 分诊每轮读上轮以来新贴的自分诊记录,逐条回复确认或改判;复审前席位定级有效。
 - 分诊定级轮读车道 `Suggested-grade:` 行:是输入不是定级,确认或改判,不采纳给理由。
 - 分类动作每张三选一,外加一个修复通道;裁定写方向、给六态之一。
-- 停 `pm:blocked` 同笔在卡正文写行首 `Blocked-by: #N`(issue/PR 号;full-run 卡写评论),散文不算。
 - 日对账 fire 读 `check-half-states` H14,在飞卡亦然:NOT carrying ⇒ `label-write.mjs --add pm:blocking`;
 - stale/UNJUDGED 行手核跨仓依赖后 `--remove pm:blocking`,留则写明理由;增删卡号进轮次记录。
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,无可问之事;⛔ 工具/门禁修复不由此进。
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
-- 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
+- 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢 L1/L2 轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决 ⇒ 分诊自补半状态。
 - 自补 = 同笔 `pm:on-hold`+原文 `Restart-when:`+降 p3;写不出可执行判据才挂 `pm:retriage` 问车道。
@@ -56,6 +56,11 @@
 - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储的视图配置是。
 - 三类同欠 `reach:`,分诊只把关不测;观察、休眠、零拉动 ⛔ 不立卡、不进收口卡、无配额。
 - 缺 `reach:` 且非例外 ⇒ 定 `priority:p3`,并入收口卡或清扫卡,⛔ 不单独派发、不因此关卡。
+- p3 首触标准:仅对已定 p3;`filing-gate.md` 定级第 2、3 条胜之,⛔ 不及其〈读数判据〉半径外。
+  关条中且留条不中 ⇒ 关 not_planned、写理由,胜本文与该文诸不关条;余皆留。关条:无客户/
+  用户影响(仅 pin、ADR/jsdoc 措辞、内部重构、测试标题改写);读数过时、已取代或已交付;
+  按 `reach:` 两形无一可测的边角(如双持有者边缘、路径段内换行)。留条:用户可见缺陷、
+  已发布文档/技能、安全项、维护者直派、open PR 承载或席位已接、不可逆或有硬时限。
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
 - `type`(Bug/Feature/Task)立单者可预填、分诊校正;新卡即时打,存量卡 ⛔ 不回填、下次碰到补。
@@ -82,10 +87,9 @@
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。
 - 三类外首触关闭只清门前存量,关 not planned(不等批准可否决重开);三类内无证据拒收。
 - 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;判级只在此轮,不在立单时。
-- ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:关卡行、下三行、锚卡首触。
-- 总监席活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲一次,首行键 `Owned-24h re-check:`。
-- 敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ `label-write.mjs --release` 一笔中继释放,贴不动。
-- 释放:`Release:` 评论(出处三件)+ `Resume-from:` 行 + `pm:dispatched`→`pm:queue` + 清 assignee。
+- ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:关卡行、下两行、锚卡首触。
+- 分诊活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲一次,首行键 `Owned-24h re-check:`。
+- 敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ 兄弟席一笔中继释放;无则轮次记录交总监。
 - 人工地板(恒呈维护者):功能新增;ADR;协议/公开契约变化;破坏性或难回滚动作。
 - 人工地板同含:安全/权限边界;门禁削弱(降阈/删必查/抬上限/跳测);新增运行时第三方依赖;
 - 花费/配额/舰队形态/默认模型档位;新增必需门禁/hook/棘轮(卡具名所守契约与预期捕获)。

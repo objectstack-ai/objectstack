@@ -54,6 +54,7 @@ import type {
 } from 'ai';
 import type { z } from 'zod';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
+import type { EvalUser } from '../identity/eval-user.zod.js';
 
 /**
  * @deprecated Use `ModelMessage` from `ai` instead.
@@ -204,7 +205,9 @@ export interface AIToolDefinition {
  * ONE exported constant, because the member's SPELLING is the whole contract:
  * the door that refuses and the client that retries have to agree on it, and a
  * door hand-spelling its own `'confirm'` is precisely how two doors drift into
- * two dialects (Prime Directive #12). Every AI-facing action door reads this.
+ * two dialects (Prime Directive #12). Every door that gates on the member reads
+ * this, and the MCP `run_action` and `resume_run` tools key their REFUSAL of it
+ * off this constant (below).
  *
  * It rides as a TOP-LEVEL member of the action request. The two request
  * shapes it is destined for are the MCP `run_action` tool input (`actionName`
@@ -212,8 +215,13 @@ export interface AIToolDefinition {
  * and the runtime action door's own request object — the `input` argument of
  * `invokeBusinessAction` (`objectName` / `recordId` / `params`,
  * `packages/runtime/src/action-execution.ts`), which the MCP bridge builds
- * that object from. Each grows the member in the change that enforces it, so
- * neither ever accepts-and-ignores it. A third door carries the same member
+ * that object from. Each grew the member in the change that enforced it. The
+ * MCP tool input has since retired it (below). The runtime request keeps it
+ * for the host door, which reads it; on the MCP bridge path the same request
+ * type still accepts it but nothing reads it there (the amended contract asks
+ * the person instead), and no MCP call can supply it, because the tool refuses
+ * the member before the bridge is called. A third door
+ * carries the same member
  * at the top level of its input: the MCP `delete_record` tool (see
  * {@link AIActionConfirmation}, "The second gate"). Two placements were
  * rejected, and the reasons are the contract:
@@ -244,10 +252,15 @@ export interface AIToolDefinition {
  * The amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}) has a
  * person confirm an action declaring `ai.requiresConfirmation: true`, through
  * an elicitation or a hand-off to the app, and the member never counts on such
- * a call. That is what the doors enforce from the change that implements the
- * amendment; until it ships they still gate on the member as described above
- * and in {@link AIActionConfirmation}. The MCP `delete_record` and
- * `delete_records` gates are outside the amendment and keep reading it.
+ * a call. The MCP `run_action` and `resume_run` tools implement it, and with
+ * it the member is RETIRED from both tools' input: a call that carries it is
+ * refused by the tool's closed input, before the call is resolved, on every
+ * action, declared-gated or not. The refusal says that confirmation happens in
+ * the app, by the person, and the caller resends without the member. A door
+ * that has not implemented the amendment (a host door under the `ai` posture)
+ * still gates on the member as described above and in
+ * {@link AIActionConfirmation}. The MCP `delete_record` and `delete_records`
+ * gates are outside the amendment and keep reading it.
  */
 export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
 
@@ -262,8 +275,12 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * now a person's confirmation ({@link AI_ACTION_CONFIRMATION_CAPABILITY}):
  * the server elicits it through the client, or hands the call to the host's
  * pending-confirmation service for the person to decide in the app, and the
- * caller's own `confirm` never counts. What follows describes the member contract the
- * doors enforce until the change that implements the amendment; the
+ * caller's own `confirm` never counts. The MCP `run_action` and `resume_run`
+ * tools implement the amendment and no longer accept the member at all: a call
+ * that carries it is refused at the tool's input, on every action, and the
+ * caller resends without it. What follows describes the member contract a
+ * door enforces until it implements the amendment (a host door under the `ai`
+ * posture), and the FROM half of the MCP tools' breaking note; the
  * predicate section (the DECLARED flag, never the listing heuristic) and the
  * AI service account rule carry over unchanged. The MCP `delete_record` and
  * `delete_records` gates are outside the amendment and keep reading the
@@ -391,17 +408,23 @@ export interface ActionConfirmationRequiredDetails {
     /** The object the action operates on; omitted for object-less actions. */
     objectName?: string;
     /**
-     * The request member a caller acting for a person sets to `true` and
-     * retries with, once its human approves — always the value of
-     * {@link AI_ACTION_CONFIRMATION_MEMBER}, echoed so the caller reads it off
-     * the refusal instead of restating it. An AI service account's refusal
-     * carries it too, but no retry of that account's succeeds: a person runs
-     * the action (ADR-0151 D3 rule 3).
+     * Always the value of {@link AI_ACTION_CONFIRMATION_MEMBER}, echoed so the
+     * caller reads the member's spelling off the refusal instead of restating
+     * it. What the caller does with it depends on the gate that refused:
      *
-     * Under the amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}),
-     * once the doors implement it, no retry with the member runs a
-     * declared-gated action: the member confers nothing there, and `reason`
-     * says what the caller can do.
+     * - A member gate (no `reason`: the MCP `delete_record` / `delete_records`
+     *   gate, or a door before the amendment): a caller acting for a person
+     *   sets it to `true` and retries, once its human approves.
+     * - A refusal under the amended contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY},
+     *   `reason` set): the member confers nothing, and no retry with it runs
+     *   the action; `reason` says what the caller can do. At the MCP
+     *   `run_action` and `resume_run` tools the echo names the member those
+     *   tools REFUSE at their input: the caller never sends it there, since
+     *   the person confirms, in the client when it can be asked there and in
+     *   the app otherwise.
+     *
+     * An AI service account's refusal carries it too, but no retry of that
+     * account's succeeds: a person runs the action (ADR-0151 D3 rule 3).
      */
     confirmationMember: typeof AI_ACTION_CONFIRMATION_MEMBER;
     /**
@@ -446,11 +469,15 @@ export interface ActionConfirmationRequiredDetails {
  *
  * 1. **Which calls.** A call on an action whose author declared
  *    `ai.requiresConfirmation: true` (the DECLARED flag, never the listing
- *    heuristic; {@link AIActionConfirmation} keeps that predicate), through an
- *    AI door: the MCP `run_action` tool, and the MCP `resume_run` tool for the
- *    candidate action it would run. Every caller acting for a person is
- *    covered, OAuth token or API key, a person or an agent acting for one
- *    (`onBehalfOf`).
+ *    heuristic; {@link AIActionConfirmation} keeps that predicate), through
+ *    EVERY AI door that starts one: the MCP `run_action` tool, the MCP
+ *    `resume_run` tool for the candidate action it would run, and the in-app
+ *    assistant's action tools (the actions-as-tools runtime of ADR-0011). Every
+ *    caller acting for a person is covered, OAuth token, API key or a session
+ *    to the app, a person or an agent acting for one (`onBehalfOf`). Rules 2
+ *    to 4 below are the MCP doors' channel. The in-app door asks through its
+ *    own channel, under "The in-app assistant door" below; rules 5 and 6 bind
+ *    it as written.
  * 2. **When the person is asked.** After EVERY admission gate has passed,
  *    the subject load and the caller-scope subject verdict included, so
  *    nobody is asked to confirm a call that is refused anyway, and before
@@ -491,6 +518,10 @@ export interface ActionConfirmationRequiredDetails {
  *    - Elicited `accept`: the call dispatches as any admitted call does,
  *      exactly once, under the caller's permissions. The confirmation covers
  *      that one call: nothing is stored, and the next call is asked again.
+ *      For a `resume_run` call the accept is bound to the screen the run was
+ *      parked on when the person was asked: when the run has moved on to
+ *      another screen meanwhile, the resume is refused `409
+ *      RESOURCE_CONFLICT`, nothing resumes, and the run stays where it is.
  *    - Elicited `decline`: the person said no. Refused, reason `declined`;
  *      nothing runs. The caller does not retry unless the person asks again.
  *    - Elicited `cancel`: the person dismissed the question without choosing.
@@ -507,7 +538,10 @@ export interface ActionConfirmationRequiredDetails {
  *      carries its run ({@link ActionConfirmationHandOff.run}): approving it
  *      resumes THAT parked run with the values the call carried, as the
  *      approver, who must be the run's owner as today; it never starts a new
- *      run of the flow.
+ *      run of the flow. The approval is bound to the screen the run was
+ *      parked on when the call was handed off (the run's `screenNodeId`):
+ *      when the host passes that screen back and the run has moved on to
+ *      another one, the resume is refused and the run stays where it is.
  *    - Handed off, then rejected in the app: nothing runs.
  *    The approve and reject doors of the pending-confirmation service take a
  *    person's signed-in session to the app and nothing else. They refuse an
@@ -520,7 +554,11 @@ export interface ActionConfirmationRequiredDetails {
  * 5. **The caller's `confirm` never counts.** On a declared-gated call the
  *    member ({@link AI_ACTION_CONFIRMATION_MEMBER}) confers nothing: not with
  *    an elicitation, not in place of one, not in place of a hand-off, and not
- *    when the host has no service.
+ *    when the host has no service. The MCP `run_action` and `resume_run`
+ *    tools do not accept it at all: a call carrying it is refused at the
+ *    tool's input, on every action, gated or not, because the person
+ *    confirms (elicited in the client where it can be asked, in the app
+ *    otherwise); the caller resends without it.
  * 6. **An AI service account: unchanged** (ADR-0151 D3 rule 3). An agent
  *    principal acting for itself, with no `onBehalfOf`, is refused whatever it
  *    sends, reason `service_account`. It is neither elicited (no person stands
@@ -534,6 +572,51 @@ export interface ActionConfirmationRequiredDetails {
  * {@link ActionConfirmationRequiredDetails}, whose `reason` says which case
  * above it is. A hand-off is not a refusal: it is the successful answer
  * {@link ActionConfirmationPending}.
+ *
+ * ## The in-app assistant door: the same rule, its own channel
+ *
+ * Ruled on #33689 (record 6893484458, 「B 同一规则，两套流程暂留」): the rule
+ * binds every AI door, the in-app assistant included, and the in-app door
+ * keeps its own channel. Merging the two channels was not ruled.
+ *
+ * The in-app assistant asks through the pending-action queue of
+ * {@link IAIService}: the call is recorded as a pending action
+ * ({@link IAIService.proposePendingAction}), the tool answers the model
+ * `pending_approval`, and the person is shown the item as an inline
+ * pending-approval card in the conversation and in the inbox. Nothing runs
+ * until the item is decided. When that channel is not wired (no AI service
+ * that records pending actions, or the host has not turned the queue on),
+ * the door does not offer a declared-gated action as a tool at all: it is
+ * neither run unconfirmed nor offered and then refused. Three points bind the
+ * in-app door, the same three that bind a hand-off:
+ *
+ * 1. **Who decides.** Only the person the call ran as (the conversation's
+ *    user, the person an agent acts for) approves or rejects the item. Holding
+ *    `ai:approve`, or any other permission, does not let another user decide
+ *    it. A host that wants a second person to approve the write uses the
+ *    existing `held` outcome of {@link IAIService.approvePendingAction}: the
+ *    person approves, and the write waits on the approvals engine.
+ * 2. **Which credential.** The approve and reject doors take a person's
+ *    signed-in session to the app and nothing else, exactly as the
+ *    pending-confirmation service's doors do (rule 4): an API key, a delegated
+ *    or OAuth token and any other service credential are refused, whoever it
+ *    resolves to, and so is an AI identity (an agent principal, with or
+ *    without `onBehalfOf`, and any call that arrives through an AI door).
+ * 3. **As whom it runs.** An approved item runs as that person, never as a
+ *    synthetic AI principal, through the same admitted sequence as any action
+ *    call, every gate and permission re-checked at the moment of approval. A
+ *    refusal there runs nothing and is recorded on the item as `failed`.
+ *
+ * The three points bind EVERY item in the in-app queue, whichever trigger
+ * queued it: an action declaring `ai.requiresConfirmation: true`, or one the
+ * destructive heuristic gates (ADR-0011's confirmation table). A pending row
+ * does not record why it was queued, and the queue has one decider rule; an
+ * administrator who is to approve as well does so through `held`, never by
+ * deciding the person's item.
+ *
+ * Neither the model's own confirmation nor the caller's `confirm` counts
+ * (rule 5): the item waits for the person. An approval proves what an approved
+ * hand-off proves, that a signed-in session to the app answered.
  *
  * ## What an answer proves
  *
@@ -557,16 +640,26 @@ export interface ActionConfirmationRequiredDetails {
  *   actions: they read the member, as {@link AIActionConfirmation} describes,
  *   until a decision moves them.
  * - REST `/actions` stays outside the gate for a person, as before.
+ * - The in-app door's pending-action queue and the pending-confirmation
+ *   service ({@link IActionConfirmationService}) stay two seams; the rule
+ *   that binds them is one.
  *
  * ## When it binds
  *
  * This text is the contract from the release that carries it. The doors
  * implement it in the change that enforces it, which also moves the shipped
- * prescriptions that describe the member. Until that change ships, every door
- * still gates on the member as {@link AIActionConfirmation} describes: the
- * MCP `run_action` and `resume_run` tools run a declared-gated action on
- * `confirm: true`, over stdio and over Streamable HTTP alike, and that reading
- * is the FROM half of the breaking note.
+ * prescriptions that describe the member. Until a door's change ships, it
+ * still gates on the member as {@link AIActionConfirmation} describes. The
+ * MCP `run_action` and `resume_run` tools ran a declared-gated action on
+ * `confirm: true` until theirs, over stdio and over Streamable HTTP alike, and
+ * that reading is the FROM half of their breaking note; the release that
+ * ships their hand-off also retires the member from their input, so a call
+ * that carries it is refused there. The in-app door likewise runs
+ * ADR-0011's queue as documented until its implementing change ships: any
+ * holder of `ai:approve` may decide an item, the approve and reject doors take
+ * whatever credential they authenticate, and an approved item is re-dispatched
+ * through the pre-registered dispatcher of ADR-0011's invocation flow. That
+ * reading is the FROM half for the in-app door's three points.
  *
  * Measured at the amendment: the long-lived stdio server keeps the client's
  * `initialize` capabilities and can send a request to the client while a call
@@ -636,6 +729,17 @@ export interface ActionConfirmationHandOff {
         runId: string;
         /** The screen's field values the call carried. */
         values: Record<string, unknown>;
+        /**
+         * The screen the run was parked on when the call was handed off: its
+         * `nodeId` (`ScreenSpec.nodeId`, `./automation-service`), the screen
+         * `values` were given for. Absent when the engine named no node for
+         * it. A host that stores it and passes it back on approval
+         * (`ActionResumeRequest.screenNodeId`, `@objectstack/runtime`) binds
+         * the approval to that screen: a run that has moved on to another
+         * screen (a wizard the person advanced in the app, or a second
+         * approval of the same call) is refused, and nothing resumes.
+         */
+        screenNodeId?: string;
     };
 }
 
@@ -682,8 +786,25 @@ export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
  * through the same admitted sequence, every gate and permission re-checked; a
  * hand-off that carries a run ({@link ActionConfirmationHandOff.run}) resumes
  * that run instead of starting one. On rejection nothing runs. When an item
- * lapses, and how the caller learns its outcome, are the host's to define. A
- * host may build it over its own pending-action store; the
+ * lapses, and how the caller learns its outcome, are the host's to define.
+ *
+ * The approval leg runs through the framework's host doors, so a host keeps
+ * no copy of the admission rules (`@objectstack/runtime`):
+ * `dispatchAction(kernel, { …, posture: 'ai', confirm: true })` runs a
+ * handed-off `run_action` as the approving person, and
+ * `dispatchActionResume(kernel, { executionContext, runId, values, confirm:
+ * true })` resumes the run a handed-off `resume_run` carries
+ * ({@link ActionConfirmationHandOff.run}) as that person, asking every
+ * `resume_run` gate again: a run no longer paused, or one another person
+ * started, is refused. A wizard the first approval moved on to its next
+ * screen is still paused under the same run id, so the host passes back the
+ * screen the call was handed off on (`run.screenNodeId`, as `screenNodeId`):
+ * a run no longer on that screen is refused, `409 RESOURCE_CONFLICT`, and
+ * stays where it is. Without it, a second call with the same hand-off
+ * resumes whatever screen the run is on with the values given. Deciding a
+ * pending item once is the host's.
+ *
+ * A host may build it over its own pending-action store; the
  * `held` outcome of {@link IAIService.approvePendingAction} is the existing
  * precedent for a write that waits on a person outside the conversation.
  */
@@ -697,6 +818,81 @@ export interface IActionConfirmationService {
      *                whose call the item is recorded
      */
     submit(handOff: ActionConfirmationHandOff, context: ExecutionContext): Promise<{ pendingId: string }>;
+}
+
+// ---------------------------------------------------------------------------
+// The AI-route caller — `req.user` on an AI route handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Which credential admitted the caller of an AI route, as
+ * {@link AIRouteUser.credential} carries it. One vocabulary: the runtime's
+ * environment-membership gate and its api-action forward read the same three
+ * values.
+ *
+ * - `session`: a person's signed-in session to the app, whichever carrier
+ *   brought its token: the session cookie, or an `Authorization: Bearer`
+ *   header (the same session, read by the same session read; a client on a
+ *   split-origin deployment, where the cookie does not flow, sends it that
+ *   way). Ruled on #34184 (record 6942875153), Q1 A.
+ * - `api_key`: an API key, in any spelling the key header accepts.
+ * - `oauth`: an OAuth access token (honoured on the MCP endpoint alone), or
+ *   the credential the server mints to forward an OAuth-connected agent's call
+ *   in process; both resolve to an agent principal carrying the token's
+ *   scopes.
+ */
+export type AIRouteCredentialKind = 'session' | 'api_key' | 'oauth';
+
+/**
+ * The caller an AI route handler receives as `req.user`: the route table the
+ * AI service registers (`buildAIRoutes`) is dispatched with
+ * `{ body, params, query, headers, user }`, and `user` is this shape, or
+ * absent for an anonymous caller (reachable only on a route that declares
+ * `auth: false`).
+ *
+ * The identity core is an `EvalUser` (ADR-0068 D1), extended with the keys
+ * every dispatch path that hands a user to customer code publishes: the
+ * id and display-name aliases and the two authority channels, which are never
+ * merged. Two facts are the AI route's own, so that a door reserved to the
+ * person (an approval only the person the call ran as may give) can tell who
+ * is acting and how they came in, without reading request headers:
+ * {@link AIRouteUser.impersonatedBy} and {@link AIRouteUser.credential}.
+ */
+export interface AIRouteUser extends EvalUser {
+    /** The acting user's id (`sys_user.id`). */
+    id: string;
+    /** Alias of {@link AIRouteUser.id}. */
+    userId: string;
+    /** The display name (`sys_user.name`); the id when none resolves. */
+    name: string;
+    /** Alias of {@link AIRouteUser.name}. */
+    displayName: string;
+    /** ADR-0090 position names held by the caller. */
+    positions: string[];
+    /** Permission-SET names (`admin_full_access`, `ai_seat`, …). */
+    permissions: string[];
+    /** CAPABILITIES (`manage_metadata`, `studio.access`, …): a separate channel. */
+    systemPermissions: string[];
+    /**
+     * The administrator (a `sys_user` id) who started the impersonation session
+     * this request runs in: `ExecutionContext.impersonatedBy`, carried as is.
+     * Absent on every other request; absence means the user in
+     * {@link AIRouteUser.id} is acting themselves. {@link AIRouteUser.id} stays
+     * the impersonated user.
+     *
+     * A fact a door may use to refuse an act reserved to the person (ruled on
+     * #34184, record 6942875153, Q2 A). It is never the authorization subject, and no platform
+     * middleware reads it; what it decides is the consuming door's.
+     */
+    impersonatedBy?: string;
+    /**
+     * Which credential admitted this caller; see {@link AIRouteCredentialKind}.
+     * Absent when the request recorded none (a host that hands the dispatcher
+     * an execution context without running its identity step). A door reserved
+     * to a person's signed-in session reads anything but `'session'`, absence
+     * included, as not that session.
+     */
+    credential?: AIRouteCredentialKind;
 }
 
 // ---------------------------------------------------------------------------
@@ -788,11 +984,25 @@ export interface IAIService {
      * Persist a proposed AI-initiated action that requires human approval
      * before execution. Used by the actions-as-tools runtime when the
      * picked action is dangerous (delete / danger variant / has
-     * `confirmText`) and `enableActionApproval` is on.
+     * `confirmText`) or declares `ai.requiresConfirmation: true`, and
+     * `enableActionApproval` is on.
      *
      * Implementations write a row to `ai_pending_actions` and return
      * its id. The caller (the tool handler) immediately returns a
      * `{ status: 'pending_approval' }` envelope to the LLM.
+     *
+     * This is the in-app assistant door's channel of the confirmation rule
+     * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}, "The in-app assistant
+     * door"), and its three points bind the item from the moment it is
+     * recorded:
+     *
+     * 1. **Who decides:** only the person the call ran as, recorded as
+     *    `proposedBy`; no other user decides it, whatever permission they
+     *    hold, `ai:approve` included.
+     * 2. **Which credential:** the item is decided on that person's signed-in
+     *    session to the app, never on an API key, token or AI identity.
+     * 3. **As whom it runs:** once approved, as that person, every gate and
+     *    permission re-checked.
      */
     proposePendingAction?(input: ProposePendingActionInput): Promise<{ id: string }>;
 
@@ -801,6 +1011,24 @@ export interface IAIService {
      * via the same handler that would have run had approval not been
      * required. Updates the row to `executed` (or `failed`) and returns
      * the outcome.
+     *
+     * The three points of the in-app assistant door
+     * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}) bind it:
+     *
+     * 1. **Who decides:** `actorId` must be the person the call ran as (the
+     *    row's `proposed_by`). Another user is refused whatever permission
+     *    they hold, `ai:approve` included, and the row stays `pending`.
+     * 2. **Which credential:** the door that calls this member admits only a
+     *    person's signed-in session to the app; an API key, a delegated or
+     *    OAuth token, any other service credential and an AI identity are
+     *    refused before it is called, whoever they resolve to.
+     * 3. **As whom it runs:** the re-dispatch runs as that person, through
+     *    the same admitted sequence as any action call, every gate and
+     *    permission re-checked at this moment. A refusal there runs nothing
+     *    and the row is `failed`.
+     *
+     * A host that wants a second person to approve the write does not let
+     * that person decide the item: it uses `held`, below.
      *
      * `held` is the third outcome: the confirmation was accepted, and the
      * write waits on an approval outside the conversation, because a host
@@ -818,6 +1046,15 @@ export interface IAIService {
     /**
      * Reject a pending action. The row transitions to `rejected` and the
      * optional `reason` is stored so the next LLM turn can surface it.
+     * Nothing runs.
+     *
+     * The deciding points of the in-app assistant door
+     * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}) bind it as they bind
+     * {@link IAIService.approvePendingAction}: `actorId` must be the person
+     * the call ran as (the row's `proposed_by`), whatever permission another
+     * user holds, `ai:approve` included; and the door that calls this member
+     * admits only that person's signed-in session to the app, never an API
+     * key, token or AI identity.
      */
     rejectPendingAction?(id: string, actorId: string, reason?: string): Promise<void>;
 
@@ -1104,6 +1341,17 @@ export interface AIObjectResult<T> {
 // ---------------------------------------------------------------------------
 
 /**
+ * One message of a persisted conversation: a Vercel `ModelMessage` plus the
+ * turn it belongs to, the `turnId` it was written under
+ * ({@link IAIConversationService.addMessage}). Absent or null on a message
+ * stored with no turn. The wire shape is `AiConversationMessageSchema` (`api/protocol.zod.ts`).
+ */
+export type AIConversationMessage = ModelMessage & {
+    /** The turn the message was written under; absent or null when it had none. */
+    turnId?: string | null;
+};
+
+/**
  * A persistent AI conversation with message history
  */
 export interface AIConversation {
@@ -1115,8 +1363,8 @@ export interface AIConversation {
     agentId?: string;
     /** User who owns the conversation */
     userId?: string;
-    /** Messages in the conversation */
-    messages: ModelMessage[];
+    /** Messages in the conversation, each with the turn it was written under */
+    messages: AIConversationMessage[];
     /** Creation timestamp (ISO 8601) */
     createdAt: string;
     /** Last update timestamp (ISO 8601) */

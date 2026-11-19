@@ -165,7 +165,9 @@ describe('action-confirmation contract — an unconfirmed gated action is refuse
  * carries its run), that the amendment adds
  * no second refusal code, and that the contract's own text names every reason,
  * every answer and the three steps, so the types and the prose cannot drift
- * apart. NOT pinned: any door behaviour, which the implementing change lands
+ * apart. Also pinned: that the rule binds every AI door, the in-app assistant
+ * included, which keeps its own channel under the same three points (who
+ * decides, which credential, as whom it runs; #33689 Q1 ruled B). NOT pinned: any door behaviour, which the implementing change lands
  * and pins.
  */
 describe('action-confirmation contract, as amended: a person confirms, elicited or handed off', () => {
@@ -324,6 +326,56 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     );
     expect(prose, 'the refusal for a host without the pending-confirmation service no longer names the remedy').toMatch(
       /use a client that supports confirmation, or to perform the action in the app/,
+    );
+  });
+
+  it('the rule binds EVERY AI door, the in-app assistant included, through its own channel', () => {
+    // #33689 Q1, ruled B (record 6893484458, 「B 同一规则，两套流程暂留」): one
+    // rule for every AI door; the in-app queue stays its own channel.
+    const prose = capabilityProse();
+    expect(prose, 'rule 1 no longer covers every AI door').toMatch(
+      /through EVERY AI door that starts one: the MCP `run_action` tool, the MCP `resume_run` tool for the candidate action it would run, and the in-app assistant's action tools/,
+    );
+    // Control: the MCP-only reading of rule 1 is gone, not merely joined.
+    expect(prose, 'rule 1 reads as MCP-only again').not.toMatch(
+      /through an AI door: the MCP `run_action` tool, and the MCP `resume_run` tool for the candidate action it would run\. Every caller/,
+    );
+    expect(prose, 'the in-app door lost its section').toContain('## The in-app assistant door: the same rule, its own channel');
+    expect(prose, 'the in-app door no longer withholds a declared-gated action when its channel is not wired').toMatch(
+      /When that channel is not wired .* the door does not offer a declared-gated action as a tool at all/,
+    );
+    expect(prose, 'the in-app door no longer limits the decision to the person the call ran as').toMatch(
+      /\*\*Who decides\.\*\* Only the person the call ran as .* approves or rejects the item\. Holding `ai:approve`, or any other permission, does not let another user decide it\./,
+    );
+    expect(prose, 'the second-person path is no longer the existing held outcome').toMatch(
+      /A host that wants a second person to approve the write uses the existing `held` outcome/,
+    );
+    expect(prose, 'the in-app deciding doors no longer take only a signed-in session').toMatch(
+      /\*\*Which credential\.\*\* The approve and reject doors take a person's signed-in session to the app and nothing else/,
+    );
+    expect(prose, 'the in-app deciding doors no longer refuse a credential or an AI identity').toMatch(
+      /an API key, a delegated or OAuth token and any other service credential are refused, whoever it resolves to, and so is an AI identity/,
+    );
+    expect(prose, 'an approved in-app item no longer runs as the person with every gate re-checked').toMatch(
+      /\*\*As whom it runs\.\*\* An approved item runs as that person, never as a synthetic AI principal, through the same admitted sequence as any action call, every gate and permission re-checked/,
+    );
+    expect(prose, 'the in-app door no longer says the model\'s own confirmation does not count').toMatch(
+      /Neither the model's own confirmation nor the caller's `confirm` counts/,
+    );
+    expect(prose, 'the three points no longer bind every in-app queued item, whichever trigger queued it').toMatch(
+      /The three points bind EVERY item in the in-app queue, whichever trigger queued it: an action declaring `ai\.requiresConfirmation: true`, or one the destructive heuristic gates/,
+    );
+    expect(prose, 'the contract no longer says why the in-app queue has one decider rule').toMatch(
+      /A pending row does not record why it was queued, and the queue has one decider rule/,
+    );
+    // Control: the MCP doors' reach is still the DECLARED flag alone; the
+    // in-app queue's wider reach must not leak into rule 1.
+    expect(prose, 'rule 1 lost its DECLARED-flag predicate').toMatch(
+      /`ai\.requiresConfirmation: true` \(the DECLARED flag, never the listing heuristic;/,
+    );
+    expect(prose, 'the contract claims the two seams were merged').toMatch(/stay two seams; the rule that binds them is one/);
+    expect(prose, 'the FROM half of the in-app door is no longer stated').toMatch(
+      /The in-app door likewise runs ADR-0011's queue as documented until its implementing change ships: any holder of `ai:approve` may decide an item/,
     );
   });
 });

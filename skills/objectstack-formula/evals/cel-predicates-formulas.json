@@ -100,6 +100,26 @@
         "must_contain": ["isoDate(date(record.start_at))", "F`"],
         "must_not_contain": ["isoDate(record.start_at)", "{record."]
       }
+    },
+    {
+      "id": 11,
+      "prompt": "On `quote_line`, `no_margin_reasons` is a select field with `multiple: true`. Add a `margin_note` formula that shows the selected reasons as text, in the reader's language.",
+      "expected_output": "`F`label(record.no_margin_reasons)``. On a multi-select, `label()` reads each selected value's option label in the reader's locale, in the order the record stores them, joined with `, ` (`No sales price, No customer` to an `en-US` reader); an empty selection reads `''`. No per-option ternary or extra field is needed.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["label(record.no_margin_reasons)", "F`"],
+        "must_not_contain": ["joinNonEmpty", "{record."]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "On `loan`, add a `due_on` formula: 7 days after the `borrow_date` date field, as `YYYY-MM-DD` text.",
+      "expected_output": "`F`isoDate(addDays(record.borrow_date, 7))``. A `date` field reads as its `YYYY-MM-DD` text, and `timestamp()` parses only a full ISO instant, so the build refuses `timestamp()` over the field, alone or plus a duration (`date-text-call`). `addDays` shifts the date by whole days and `isoDate` keeps the result a date.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["isoDate(addDays(record.borrow_date, 7))", "F`"],
+        "must_not_contain": ["timestamp(record.borrow_date)", "{record."]
+      }
     }
   ]
 }

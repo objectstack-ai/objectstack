@@ -3,7 +3,8 @@
 // @objectstack/verify — public API.
 //
 // Boot any ObjectStack app in-process and verify it through the real HTTP
-// stack. Seven proof families, all app-agnostic (derived from your metadata):
+// stack. Seven proof families, all app-agnostic (derived from your metadata),
+// and one run of a flow the caller names:
 //   - data fidelity   : runCrudVerification     — author → write → read → assert
 //   - authorization   : runRlsProofs            — "you can't write what you can't read"
 //   - value shape     : runReferenceShapeProofs — "a reference refuses a value that is not a record id"
@@ -11,6 +12,7 @@
 //   - unique scope    : runUniqueScopeProofs    — "a declared unique collides where its scope says"
 //   - parent write    : runParentWriteReachProofs — "a detail write needs edit on its master, and its own verb"
 //   - dashboard window: runDashboardWindowProofs — "a dashboard's date picker counts the rows its window selects"
+//   - flow run        : runFlowProof            — "this flow, run once, did what each node says"
 
 export { bootStack, bootStackOnce } from './harness.js';
 export type { VerifyStack, BootOptions } from './harness.js';
@@ -184,6 +186,22 @@ export type {
   DashboardWindowWidgetResult,
   DashboardWindowReport,
 } from './dashboard-window.js';
+
+// The local flow run: one flow, run once against the booted ephemeral stack
+// the way production starts it, reported node by node with the first failure
+// and what it wrote; every write outside the ephemeral stack is refused.
+export { runFlowProof, formatFlowRunReport } from './flow-run.js';
+export type {
+  FlowRunRequest,
+  FlowRunVerdict,
+  FlowRunStart,
+  FlowRunStep,
+  FlowRunWrite,
+  FlowRunFailureKind,
+  FlowRunFailure,
+  FlowRunTrigger,
+  FlowRunReport,
+} from './flow-run.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.

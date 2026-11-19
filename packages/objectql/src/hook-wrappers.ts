@@ -24,7 +24,7 @@ import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
 import { hookRunAs, deriveHookApi, deriveAppAuthoredHookApi, seedHookUserGrants, seedHookUnreadMembership, type HookRunAs } from './hook-run-as.js';
-import { runDetachedHook } from './unit-detach.js';
+import { runDetachedHook, UNIT_ROLLED_BACK, waitsForUnitCommit } from './unit-detach.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -267,7 +267,8 @@ export function declaredHookCondition(meta: Pick<Hook, 'condition'>): (Expressio
  *
  *   1. condition  → skip when the formula evaluates FALSE; abort the operation
  *                   when it cannot be evaluated at all (#4775)
- *   2. async      → fire-and-forget (after* events only)
+ *   2. async      → fire-and-forget (after* events only), on the commit of
+ *                   the unit it fires in, never on its rollback (#33760)
  *   3. retry      → repeat on throw with backoff
  *   4. timeout    → abort if handler runs too long
  *   5. onError    → swallow when set to 'log'
@@ -474,6 +475,13 @@ export function wrapDeclarativeHook(
     }
 
     const restore = installFlatInput(ctx);
+    // [#33760] The engine-built api, held before a `runAs` install replaces it:
+    // the unit an `async` run waits for is the one the TRIGGERING write is in,
+    // and only this api knows it. A derived api need not — the unscoped one a
+    // `'user'` pin gets on a user-less trigger (`UnscopedHookApi`) carries no
+    // engine and no detach at all, so asking it would start the run at once,
+    // inside the unit, and after a rollback too.
+    const engineApi = ctx.api;
     // [#14010] `runAs` is applied to `ctx.api` ONLY, and only for the handler
     // call — the same install/restore shape as the flat input above, so the
     // engine's own context object is never touched (the condition gate above
@@ -515,12 +523,29 @@ export function wrapDeclarativeHook(
         // as before this key existed — unless the hook is app-authored, whose
         // derived api (#25653) the same restore would take away.
         const detached = restoreApi === noRestore ? ctx : { ...ctx };
+        // [#33760] A run that waits for its unit's commit starts after both
+        // restores below, so it gets a copy taken now, which keeps the flat
+        // input and the api the handler is owed. One that starts now (outside
+        // any unit) still gets `detached`, by reference as before.
+        const atDispatch = detached === ctx ? { ...ctx } : detached;
+        let dispatching = true;
         // [#33651] And it runs outside every unit of work open at dispatch —
         // the door's own unit for a blocking `after*` beside it (#22782), or a
         // caller's: nothing awaits it, so a unit it joined would commit under
-        // its writes ("Transaction query already complete"). `unit-detach.ts`.
-        void runDetachedHook(detached.api, () => runWithErrorPolicy(detached))
-          .then(() => recordOutcome())
+        // its writes ("Transaction query already complete"). [#33760] Once
+        // that unit commits, and not at all when it rolls back — the unit read
+        // off `engineApi`, whatever api the handler itself runs on. Only for a
+        // write event: a rollback does not undo a read, so an `afterFind` run
+        // starts now. `unit-detach.ts`.
+        void runDetachedHook(engineApi, () => runWithErrorPolicy(dispatching ? detached : atDispatch), waitsForUnitCommit(ctx.event))
+          .then((ran) => {
+            if (ran !== UNIT_ROLLED_BACK) { recordOutcome(); return; }
+            logger.debug('[hook] async handler not run: the unit of work it was fired in rolled back', {
+              hook: meta.name,
+              object: ctx.object,
+              event: ctx.event,
+            });
+          })
           .catch((err) => {
             recordOutcome(err);
             // Contract arg order (#5637) — see the `onError=log` site above.
@@ -529,6 +554,7 @@ export function wrapDeclarativeHook(
               error: (err as any)?.message,
             });
           });
+        dispatching = false;
         return;
       }
 

@@ -12,7 +12,7 @@
  *
  * #27356 row 12 (maintainer-ruled B): the read-only package's app is not left
  * with no entry. The same gate answers it with the `view` posture, and the bar
- * draws an eye (「Open app in Studio」) in the pencil's place, the switcher row
+ * draws an eye (「Open {app} in Studio」, ADR-0146 D5) in the pencil's place, the switcher row
  * taking the same target in the same posture. Kernel packages, an unlisted
  * package and an unread list still draw neither.
  *
@@ -41,7 +41,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
     language: 'en',
-    t: (key: string, options?: Record<string, unknown>) => String(options?.defaultValue ?? key),
+    // i18next's `{{token}}` interpolation, so an app-named entry reads as drawn.
+    t: (key: string, options?: Record<string, unknown>) =>
+      String(options?.defaultValue ?? key).replace(/\{\{(\w+)\}\}/g, (_m, k: string) => String(options?.[k] ?? '')),
   }),
   useObjectLabel: () => {
     const label = (x: { name?: string; label?: string } | string) =>
@@ -178,6 +180,7 @@ const AUTHOR: MePermissionsAuthenticatedResponse = {
   tenantId: 'org_1',
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},
@@ -287,7 +290,8 @@ describe('the app bar\'s Edit app follows the owning package\'s posture (objectu
     });
     mountAt(HOTCRM_ROUTE);
     await settle();
-    expect(screen.getByLabelText('Open app in Studio')).toBeInTheDocument();
+    // ADR-0146 D5 — the eye is named for the app: 「Open {app} in Studio」.
+    expect(screen.getByRole('link', { name: 'Open CRM in Studio' })).toHaveAttribute('href', HOTCRM_VIEW);
   });
 
   it('CONTROL — the pencil for a writable package, deep-linked, and the switcher row to the same target', async () => {
@@ -373,5 +377,26 @@ describe('what the posture read costs (objectui#12615)', () => {
     await settle();
     expect(await screen.findByTestId('app-design-in-studio-button')).toBeInTheDocument();
     expect(packageReads(fetchMock)).toBe(1);
+  });
+});
+
+describe('the read-only entry draws WITH its text, named for the app (objectstack#34593, ADR-0146 D5)', () => {
+  it('the eye carries the visible words 「Open {app} in Studio」, not an icon alone', async () => {
+    mountAt(HOTCRM_ROUTE);
+    await settle();
+    const entry = screen.getByTestId('app-view-in-studio-button');
+    const words = entry.querySelector('[data-slot="view-in-studio-text"]');
+    expect(words).not.toBeNull();
+    expect(words).toHaveTextContent(/^Open CRM in Studio$/);
+    expect(words).not.toHaveClass('sr-only');
+    expect(entry.querySelector('svg')).not.toBeNull();
+  });
+
+  it('CONTROL — the writable package keeps the pencil, icon-only, with no browse words', async () => {
+    mountAt(BASE_ROUTE);
+    await settle();
+    const pencil = screen.getByTestId('app-design-in-studio-button');
+    expect(pencil.querySelector('[data-slot="view-in-studio-text"]')).toBeNull();
+    expect(screen.queryByText(/in Studio$/)).toBeNull();
   });
 });

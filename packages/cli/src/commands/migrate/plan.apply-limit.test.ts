@@ -207,7 +207,8 @@ const footer = (lines: string[]) => lines.filter((l) => /Apply with:|cannot be a
 
 describe('a driver that declares what its apply door cannot perform', () => {
   it('each such entry names that limit instead of --allow-destructive; the drop keeps its remedy; the footer offers --allow-destructive for the drop alone', async () => {
-    const { stack, driftApplyLimit } = stackWith([DROP, TIGHTEN, RELAX], new Set(['tighten_not_null', 'relax_not_null']));
+    // [#33724] The REMOTE face relaxes in place (ruling 6915086281): it declares a limit for the tightening alone.
+    const { stack, driftApplyLimit } = stackWith([DROP, TIGHTEN, RELAX], new Set(['tighten_not_null']));
     boot.mockResolvedValueOnce(stack);
     const { lines, exitCode } = await run([]);
     expect(exitCode, lines.join('\n')).toBe(0);
@@ -218,14 +219,15 @@ describe('a driver that declares what its apply door cannot perform', () => {
       `${T}.code: metadata declares \`storage.notNull\` but the column is nullable — existing nulls must be backfilled. `
       + `"os migrate apply" cannot apply it on this database: ${LIMIT}.`,
     );
-    expect(entryLine(lines, 'relax_not_null')).toContain(`"os migrate apply" cannot apply it on this database: ${LIMIT}.`);
+    expect(entryLine(lines, 'relax_not_null')).toContain(RELAX.message);
+    expect(entryLine(lines, 'relax_not_null')).not.toContain('cannot apply it on this database');
     expect(entryLine(lines, 'drop_column')).toContain(DROP.message);
     expect(entryLine(lines, 'drop_column')).not.toContain('cannot apply it on this database');
 
     const tail = footer(lines);
     expect(tail.join('\n')).not.toContain('(add --allow-destructive for drops / tightenings)');
     expect(tail.join('\n')).toContain('Apply with: os migrate apply (add --allow-destructive for the 1 destructive change(s) it can apply on this database)');
-    expect(tail.join('\n')).toMatch(/2 change\(s\) above cannot be applied on this database by "os migrate apply"/);
+    expect(tail.join('\n')).toMatch(/1 change\(s\) above cannot be applied on this database by "os migrate apply"/);
     // Asked once per entry, of the stack that knows which driver reported it.
     expect(driftApplyLimit).toHaveBeenCalledTimes(3);
   }, CASE_TIMEOUT_MS);
@@ -243,7 +245,7 @@ describe('a driver that declares what its apply door cannot perform', () => {
   }, CASE_TIMEOUT_MS);
 
   it('--json: the document is the report, unchanged — the same keys, each message as the differ wrote it', async () => {
-    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], new Set(['tighten_not_null', 'relax_not_null'])).stack);
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], new Set(['tighten_not_null'])).stack);
     const { payload, exitCode } = await run(['--json']);
     expect(exitCode).toBe(0);
     expect(Object.keys(payload).sort()).toEqual(

@@ -257,7 +257,9 @@ describe('[#20010] the neighbouring shapes compile exactly as before', () => {
     ['the empty $in — the FALSE constant', { stage: { $in: [] } }, { kind: 'const', value: false }],
     // [ADR-0053 D-D1, amended — #5930 step 3] The TRUE constant, inside the
     // shared lowering's NULL escape (`$nin` is negative-polarity): TRUE still.
-    ['the empty $nin — the TRUE constant', { stage: { $nin: [] } }, { kind: 'or', children: [leaf('stage', 'notSet', []), { kind: 'const', value: true }] }],
+    // [#34384] It names the member it was written on, so the native compile can
+    // evaluate it on an existing parent when that member is a related field.
+    ['the empty $nin — the TRUE constant', { stage: { $nin: [] } }, { kind: 'or', children: [leaf('stage', 'notSet', []), { kind: 'const', value: true, member: 'stage' }] }],
     ['a scalar ordering comparand', { amt: { $gt: 5 } }, leaf('amt', 'gt', [5])],
     ['a { $field } in an ordering slot (served on the engine path)', { amt: { $gt: { $field: 'id' } } }, leaf('amt', 'gt', [{ $field: 'id' }])],
     ['the implicit null — the has-no-value predicate', { stage: null }, leaf('stage', 'notSet', [])],

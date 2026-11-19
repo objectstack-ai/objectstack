@@ -161,6 +161,9 @@ export const SysDeviceCode = ObjectSchema.create({
     { fields: ['device_code'], unique: 'global' },
     { fields: ['user_code'], unique: 'global' },
     { fields: ['status'], unique: false },
+    // The one-step invitation door reads a user's device authorizations by
+    // this column (`plugin-auth` `invitation-mailbox-proof.ts`).
+    { fields: ['user_id'], unique: false },
   ],
 
   enable: {

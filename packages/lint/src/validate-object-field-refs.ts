@@ -103,6 +103,28 @@
  *  - **`lookupColumns[]`** (both arms: a name, or `{ field }`) — the columns
  *    of this field's record picker.
  *  - **`lookupFilters[].field`** — the picker's base filter.
+ *  - **`lookupFilters[].value.$record`** (#34200) — a comparand read from the
+ *    RECORD BEING EDITED (`LookupFilterRecordReferenceSchema`, #34009): a
+ *    field of the object that owns the picker field, or one relationship hop from
+ *    it (`account.cb_market`). The parse judges its SHAPE (snake_case names,
+ *    at most one dot, the whole value, a scalar operator); only the object
+ *    graph can say whether `account` is a relationship of the edited object
+ *    and `cb_market` a field of what it references. Judged on the picker
+ *    types alone, the picker being its only reader. A path of two hops is
+ *    refused at the second hop on the raw `os lint` path the parse has not
+ *    seen; a hop's leaf on an object outside this stack stays unjudged, as
+ *    every cross-package name in this family does. A path through or to a
+ *    MULTI-VALUED field (#34378) — a hop through a `multiple: true` lookup
+ *    (`accounts.cb_market`), a plain path to one (`tags`), or a leaf that is
+ *    one behind a single-valued hop — is refused too: the comparand is ONE
+ *    value under a scalar operator, and a list has no such value. The
+ *    predicate is `isMultiValueField` (`@objectstack/spec/data`), the one
+ *    `FieldSchema` reads. A registry-injected column, and a leaf on an object
+ *    outside this stack, stay unjudged. A `{ $record }` nested
+ *    deeper inside a literal (`value: { any: { $record: 'x' } }`) is an
+ *    opaque literal to the parse, and this rule does not name it either: no
+ *    reader resolves that shape, nothing first-party writes it, and the
+ *    unresolved-`$record` refusal belongs to the server door that meets it.
  *  - **`dependsOn[]`** (both arms: a name, or `{ field, param }`) — the fields
  *    whose values gate this field and, on a picker, scope its candidates.
  *  - **`summaryOperations.filter`** — every field key of a roll-up's child-row
@@ -168,6 +190,10 @@
  *                                       → the query on `referenceTo`
  *                                       (`validate-preset-comparands.ts` binds
  *                                       the same key the same way, #19791)
+ * lookupFilters[i].value     OWNER      field.zod.ts `LookupFilterRecordReference`
+ *   .$record                            — the picker swaps in the edited
+ *                                       record's value (its reader is #34197,
+ *                                       not yet landed: judged as declared)
  * dependsOn[i] / .field      OWNER      LookupField.tsx — the gate reads the
  *                                       host's record by this key
  * dependsOn[i] / .param      REFERENCE  LookupField.tsx `dependentFilter` — the
@@ -184,8 +210,9 @@
  * `lookupColumns`, `dependsOn` and `indexes[].fields` are read VERBATIM by
  * their readers — a picker column key, a record key, a physical column — so
  * a dotted name there addresses nothing and is judged as one name, never
- * walked as a relationship path. `relatedListColumns` and
- * `lookupFilters[].field` keep the family's path resolution.
+ * walked as a relationship path. `relatedListColumns`,
+ * `lookupFilters[].field` and `lookupFilters[].value.$record` keep the
+ * family's path resolution — the last bounded to one hop.
  *
  * On `dependsOn`, a bare name that misses on the owner is reported once,
  * there; the same name is not reported a second time against the referenced
@@ -266,9 +293,10 @@ import {
   recordsOf,
   resolveFieldPath,
   type FieldPathVerdict,
+  type GraphField,
   type ObjectGraph,
 } from './object-graph.js';
-import { classifyDottedFilterHead, isVirtualSearchField } from '@objectstack/spec/data';
+import { classifyDottedFilterHead, isMultiValueField, isVirtualSearchField } from '@objectstack/spec/data';
 
 /**
  * A field-name list entry — object-level, or on one of the object's fields —
@@ -435,6 +463,41 @@ interface FieldNameSlot {
   read: (entry: unknown) => SlotRead | undefined;
   /** The hint: this position's remedy, one line (the verdict carries the "Did you mean"). */
   prescription: string;
+  /**
+   * [#34200] `true` when the slot's only reader is the record picker, so it is
+   * judged only on {@link PICKER_FIELD_TYPES} even though its names address
+   * the OWNER. (A REFERENCE slot needs the picker's target anyway, so it is
+   * judged on those types alone without saying so.)
+   */
+  pickerOnly?: boolean;
+  /**
+   * [#34200] The most relationship hops a path may take before its leaf, at a
+   * path-resolved (`verbatim: false`) position whose reader walks a bounded
+   * number. A path longer than that is refused at the first segment past the
+   * bound, before anything is resolved. Unset = the family's path resolution,
+   * unbounded.
+   */
+  maxHops?: number;
+  /**
+   * [#34200] `true` when a miss here is its own finding, never folded into
+   * another slot's at the same entry: the `dependsOn` pair reports a shared
+   * name once because one fix answers both, which is not true of a `$record`
+   * path beside the same entry's `.field` — the two name fields of two
+   * different objects.
+   */
+  ownFinding?: boolean;
+  /**
+   * [#34378] `true` when the path must read ONE value: its first segment and,
+   * behind a hop, its leaf may not be multi-valued (`isMultiValueField`). A
+   * path whose head is multi-valued is refused whether it ends there or hops
+   * through it, at the head; a multi-valued leaf behind a single-valued hop is
+   * refused at the leaf. Judged only on a path the family's resolution did
+   * not already refuse, and only on AUTHORED fields: a registry-injected
+   * column, or a leaf on an object outside the stack, stays unjudged.
+   */
+  singleValued?: boolean;
+  /** [#34378] The hint when {@link singleValued} refuses a path. */
+  singleValuedPrescription?: string;
 }
 
 function nameOf(v: unknown): string | undefined {
@@ -451,6 +514,21 @@ function readString(entry: unknown): SlotRead | undefined {
 function readMember(entry: unknown, member: string): SlotRead | undefined {
   const name = isRec(entry) ? nameOf(entry[member]) : undefined;
   return name ? { name, suffix: `.${member}` } : undefined;
+}
+
+/**
+ * [#34200] The path of a `{ $record: 'path' }` comparand that is the WHOLE
+ * `value` of a `lookupFilters` entry — the one place `refuseMalformedLookupFilterEntry`
+ * (`field.zod.ts`) admits it. A `$record` object as a member of a list value
+ * is refused by that parse with its own sentence, so it is not read here; one
+ * nested deeper inside a literal is an opaque literal to the parse and to this
+ * rule alike (see the module note).
+ */
+function readRecordReference(entry: unknown): SlotRead | undefined {
+  if (!isRec(entry) || !isRec(entry.value)) return undefined;
+  if (!Object.prototype.hasOwnProperty.call(entry.value, '$record')) return undefined;
+  const name = nameOf(entry.value.$record);
+  return name ? { name, suffix: '.value.$record' } : undefined;
 }
 
 const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
@@ -481,6 +559,26 @@ const FIELD_NAME_SLOTS: readonly FieldNameSlot[] = [
     prescription:
       'Fix `field` — a picker filter runs on the referenced object, so it names a field of that '
       + 'object, not of the object that owns this field.',
+  },
+  {
+    // [#34200] `{ $record: 'path' }` reads the RECORD BEING EDITED — the record
+    // of the object that owns this field — and at most one relationship hop from it
+    // (`account.cb_market`). Its reader is the picker, which swaps the value in
+    // before the query leaves the browser.
+    key: 'lookupFilters',
+    address: 'owner',
+    verbatim: false,
+    pickerOnly: true,
+    maxHops: 1,
+    ownFinding: true,
+    singleValued: true,
+    read: readRecordReference,
+    prescription:
+      'Fix the path — `$record` reads the record being edited: a field of this object, or one '
+      + 'relationship field of it and then a field of the object it references (`account.cb_market`).',
+    singleValuedPrescription:
+      'Point `$record` at a single-valued field: a multi-valued field holds a list, and no scalar comparison '
+      + 'takes one. Copy the value you mean onto a single-valued field and reference that.',
   },
   {
     key: 'dependsOn',
@@ -599,6 +697,29 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
   /** A finding this position words itself (not the unknown-name verdict). */
   const refuseKey = (at: { where: string; path: string }, message: string, hint: string): void => {
     findings.push({ severity: 'error', rule: OBJECT_FIELD_REF_UNKNOWN, where: at.where, path: at.path, message, hint });
+  };
+
+  /**
+   * [#34378] Where a path that resolved stops reading ONE value: its AUTHORED
+   * first segment on `objectName` when that is multi-valued (a plain path to
+   * it, or a hop through it), else — behind a single-valued hop — its
+   * authored leaf when that is. `undefined` = single-valued, or not
+   * judgeable here (a registry-injected column, an object outside the stack).
+   */
+  const multiValuedSegment = (
+    objectName: string,
+    segments: readonly string[],
+  ): { how: string; field: string; object: string } | undefined => {
+    const isMulti = (m: GraphField | undefined): boolean =>
+      typeof m?.type === 'string' && isMultiValueField({ type: m.type, multiple: m.multiple === true });
+    const head = graph.get(objectName)?.fields.get(segments[0]!);
+    if (isMulti(head)) {
+      return { how: segments.length > 1 ? 'goes through' : 'names', field: segments[0]!, object: objectName };
+    }
+    if (segments.length < 2) return undefined;
+    const verdict = resolveFieldPath(graph, objectName, segments.join('.'));
+    if (verdict?.kind !== 'ok' || verdict.injected || !isMulti(verdict.meta)) return undefined;
+    return { how: 'ends at', field: verdict.field, object: verdict.object };
   };
 
   /** The declared slice of `name` on `objectName` — authored, else registry-injected. */
@@ -863,6 +984,7 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
       for (const slot of FIELD_NAME_SLOTS) {
         const list = field[slot.key];
         if (!Array.isArray(list)) continue;
+        if (slot.pickerOnly && !(meta?.type && PICKER_FIELD_TYPES.has(meta.type))) continue;
         const against = slot.address === 'owner' ? objName : target;
         if (!against) continue;
 
@@ -870,17 +992,51 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
           const read = slot.read(entry);
           if (!read) return;
           const at = `${slot.key}[${i}]`;
-          if (reported.has(`${at}=${read.name}`)) return;
+          if (!slot.ownFinding && reported.has(`${at}=${read.name}`)) return;
+          const subject = `fields.${fieldName}.${at}${read.suffix}`;
+          const where = `${label} › fields.${fieldName}.${slot.key}`;
+          const path = `${objPath}.fields.${fieldName}.${at}${read.suffix}`;
+
+          // A path past the slot's hop bound is refused at the first segment
+          // beyond it, whatever the earlier segments resolve to: no reader
+          // walks it, so the rest is not worth resolving.
+          const segments = read.name.split('.');
+          if (slot.maxHops !== undefined && segments.length - 1 > slot.maxHops) {
+            const past = segments[slot.maxHops];
+            refuseKey(
+              { where, path },
+              `${subject} "${read.name}" takes a second hop at "${past}"; it reads at most one relationship hop `
+                + `from the record being edited.`,
+              slot.prescription,
+            );
+            return;
+          }
+
           const hit = judge({
             against,
             name: read.name,
             verbatim: slot.verbatim,
-            subject: `fields.${fieldName}.${at}${read.suffix}`,
-            where: `${label} › fields.${fieldName}.${slot.key}`,
-            path: `${objPath}.fields.${fieldName}.${at}${read.suffix}`,
+            subject,
+            where,
+            path,
             prescription: slot.prescription,
           });
-          if (hit) reported.add(`${at}=${read.name}`);
+          if (hit && !slot.ownFinding) reported.add(`${at}=${read.name}`);
+
+          // [#34378] A path that names real fields can still read a LIST: a
+          // multi-valued head, or a multi-valued leaf behind one hop. The
+          // comparand is one value under a scalar operator, so it is refused.
+          if (!hit && slot.singleValued) {
+            const multi = multiValuedSegment(against, segments);
+            if (multi) {
+              refuseKey(
+                { where, path },
+                `${subject} "${read.name}" ${multi.how} "${multi.field}", a multi-valued field on object `
+                  + `"${multi.object}"; a $record comparand is one value under a scalar operator.`,
+                slot.singleValuedPrescription ?? slot.prescription,
+              );
+            }
+          }
         });
       }
 

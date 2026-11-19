@@ -361,8 +361,9 @@ export interface PendingSchemaWork {
    * How much data the step touches, when that is knowable up front and worth
    * knowing — absent for the additive kinds, which touch none.
    *
-   * For `normalize_datetime_storage` it is the number of row-writes (summed
-   * across `columns`, since each is its own `UPDATE`). For
+   * For `normalize_datetime_storage` and `normalize_boolean_storage` it is the
+   * number of row-writes (summed across `columns`, since each is its own
+   * `UPDATE`). For
    * `widen_datetime_columns` it is the table's row count, because MySQL's
    * `ALTER … MODIFY` is a full rebuild holding a metadata lock — which is the
    * number that decides "now" versus "in a maintenance window".
@@ -398,6 +399,11 @@ export interface PendingSchemaWork {
  * section tells the operator the work is never data-losing, and that claim must
  * not silently come to cover a row rewrite.
  *
+ * [#34973] `normalize_boolean_storage` rewrites rows in place too: the SQLite
+ * boolean backfill, which turns legacy text `'true'` / `'false'` cells into
+ * `1` / `0`. It is in place by the rule below, and `os migrate plan` renders
+ * it as a row-update count beside the temporal ones.
+ *
  * [#30636] Two more describe the one existing-table shape the additive path
  * cannot adopt — keyed by `_id`, with no `id` column (`existing-table-refusal.ts`):
  * `rebuild_table` drops and recreates it while it is EMPTY (in place: it is
@@ -418,6 +424,7 @@ export type PendingSchemaWorkKind =
   | 'add_columns'
   | 'normalize_datetime_storage'
   | 'normalize_time_storage'
+  | 'normalize_boolean_storage'
   | 'widen_datetime_columns'
   | 'widen_time_columns'
   | 'rebuild_table'
@@ -2297,10 +2304,52 @@ const IMPLICIT_INDEX_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_det
  * The platform's own system column names. The injection pass puts
  * `created_by` / `updated_by` / `owner_id` / `owning_business_unit_id` on
  * nearly every object, and the tenant column has the registry-provisioned
- * tenant index already, so none of them is implicitly indexed (#31882 seat
- * ruling, scope B: their write cost is not paid for by a measured read).
+ * tenant index already, so none of them is implicitly indexed AS A REFERENCE
+ * (#31882 seat ruling, scope B: their write cost is not paid for by a measured
+ * read). Two system keys have that measured read now and are indexed by
+ * {@link IMPLICIT_SYSTEM_COLUMN_KEYS} instead.
  */
 const SYSTEM_COLUMN_NAMES: ReadonlySet<string> = new Set<string>(Object.values(SystemFieldName));
+
+/**
+ * The system-column keys schema sync indexes without a declaration (#33695).
+ * The maintainer's ruling 「两个都加」 supersedes scope B of the #31882 ruling
+ * for exactly these two keys, on a measured read each:
+ *
+ *   - `(created_at, id)`: the default list order, `created_at desc, id desc`.
+ *     Without it every default-ordered page sorts its whole filtered set. Both
+ *     are builtin columns, so every table the driver creates carries them.
+ *   - `(owner_id)`: the column a private-OWD read filters on. Only an object
+ *     whose fields carry it gets one: the injection pass withholds `owner_id`
+ *     from `sys_*`, `managedBy` objects and every ownership tier but `user`.
+ *
+ * Non-unique, no organization key part, named by {@link buildIndexName} like
+ * the reference indexes, so an author's own `{ fields: [...] }` over the same
+ * key converges on the same index.
+ */
+const IMPLICIT_SYSTEM_COLUMN_KEYS: ReadonlyArray<readonly string[]> = [
+  [SystemFieldName.CREATED_AT, SystemFieldName.ID],
+  [SystemFieldName.OWNER_ID],
+];
+
+/**
+ * Does this object carry every column of an {@link IMPLICIT_SYSTEM_COLUMN_KEYS}
+ * key? A builtin column always; any other only as a declared, single-valued
+ * field that stores a column. Never the tenant column.
+ */
+function carriesImplicitSystemKey(
+  key: readonly string[],
+  fields: Record<string, any>,
+  tenantField: string | null,
+): boolean {
+  return key.every((column) => {
+    if (column === tenantField) return false;
+    if (BUILTIN_COLUMNS.has(column)) return true;
+    const field = fields?.[column];
+    if (field == null || !fieldHasColumn(field)) return false;
+    return !isMultiValueField({ type: String(field.type ?? ''), multiple: field.multiple === true });
+  });
+}
 
 /**
  * Is this field a column the driver indexes without a declaration (#31882)?
@@ -2334,12 +2383,20 @@ export function isImplicitlyIndexedReference(name: string, field: any, tenantFie
  * It joins the declared set in {@link declaredIndexSet}, so the boot sync
  * creates it, `os migrate plan` reports it as `create_index` on a database
  * that lacks it, and the orphan pass never proposes dropping it.
+ *
+ * [#33695] After the reference indexes come the system-column keys
+ * ({@link IMPLICIT_SYSTEM_COLUMN_KEYS}) the object carries, each unless a
+ * declared index's key already STARTS WITH that whole key. With
+ * `physicalColumns`, a key whose columns the table does not all have is left
+ * out: an existing table the sync adopted without a `created_at` column is
+ * never given an index it cannot build.
  */
 function implicitReferenceIndexesOver(
   table: string,
   fields: Record<string, any>,
   tenantField: string | null,
   declared: ReadonlyArray<ExpectedIndex>,
+  physicalColumns?: ReadonlySet<string>,
 ): ExpectedIndex[] {
   const leading = new Set(declared.map((i) => i.columns[0]));
   const names = new Set(declared.map((i) => i.name));
@@ -2351,27 +2408,39 @@ function implicitReferenceIndexesOver(
     names.add(name);
     out.push({ name, columns: [column], unique: false });
   }
+  for (const key of IMPLICIT_SYSTEM_COLUMN_KEYS) {
+    if (!carriesImplicitSystemKey(key, fields, tenantField)) continue;
+    if (physicalColumns && !key.every((c) => physicalColumns.has(c))) continue;
+    if (declared.some((i) => key.every((c, k) => i.columns[k] === c))) continue;
+    const name = buildIndexName(table, [...key], false);
+    if (names.has(name)) continue;
+    names.add(name);
+    out.push({ name, columns: [...key], unique: false });
+  }
   return out;
 }
 
 /**
- * The implicit reference indexes for one object, against its declared set
- * (see {@link implicitReferenceIndexesOver}). The boot sync
- * (`syncTableIndexes`) adds these to what it materializes.
+ * The implicit indexes for one object, against its declared set (see
+ * {@link implicitReferenceIndexesOver}): the reference indexes (#31882) and
+ * the system-column keys (#33695). The boot sync (`syncTableIndexes`) adds
+ * these to what it materializes, passing the table's `physicalColumns` so a
+ * key over a column the table lacks is never attempted.
  */
 export function implicitReferenceIndexes(args: {
   table: string;
   fields: Record<string, any>;
   tenantField: string | null;
   declaredIndexes?: DeclaredIndexInput[];
+  physicalColumns?: ReadonlySet<string>;
 }): ExpectedIndex[] {
-  const { table, fields, tenantField, declaredIndexes } = args;
+  const { table, fields, tenantField, declaredIndexes, physicalColumns } = args;
   const declared = uniqueIndexesFromFields(table, fields, tenantField);
   for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
     const norm = normalizeDeclaredIndex(table, idx, tenantField);
     if (norm) declared.push(norm);
   }
-  return implicitReferenceIndexesOver(table, fields, tenantField, declared);
+  return implicitReferenceIndexesOver(table, fields, tenantField, declared, physicalColumns);
 }
 
 /**

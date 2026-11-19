@@ -328,6 +328,15 @@ export interface AuthPublicConfig {
      */
     localSignIn?: 'hidden' | 'off';
     /**
+     * Where an explicit sign-out returns when the identity provider ends its
+     * own session, served on the same terms as `localSignIn`: `hold` returns
+     * to the sign-in page, which holds with a button to sign in again;
+     * `identity-provider` returns through the direct sign-in start door, so
+     * the identity provider's own sign-in page is shown. Read only while
+     * `directSignIn` is `true` (the door exists); absent means `hold`.
+     */
+    afterSignOut?: 'hold' | 'identity-provider';
+    /**
      * The managed (cloud-hosted) mode: `true` when the cloud's control plane
      * runs this environment (`isCloudManaged()` server-side; declared as
      * `AuthFeaturesConfigSchema.cloudManaged` in `@objectstack/spec`). People
@@ -445,6 +454,16 @@ export interface AuthPublicConfig {
      * form is what it was before the key existed.
      */
     turnstileSiteKey?: string;
+    /**
+     * This deployment's public base URL, as the auth layer composes every link
+     * it hands out: the configured base URL (`OS_AUTH_URL`, then
+     * `BETTER_AUTH_URL`, then `OS_BASE_URL`) with any sub-path it carries, or
+     * the loopback fallback when none is set, served as an address only
+     * (scheme, host, path). The account app's Mobile App page encodes it in
+     * the connect code, never the browser's own address. Absent from a server
+     * that does not publish it.
+     */
+    publicBaseUrl?: string;
   };
 }
 
@@ -610,6 +629,18 @@ export interface AuthClient {
   getInvitationPreview: (invitationId: string) => Promise<AuthInvitationPreview | null>;
   /** Accept an invitation as the current user */
   acceptInvitation: (invitationId: string) => Promise<void>;
+  /**
+   * The one-step invitation acceptance (objectstack
+   * `POST /organization/accept-invitation-one-step`). With the mailbox
+   * proof the invitation mail's link carries, it needs no session: it creates
+   * the account (or sets the password of an unverified one), verifies the
+   * address, accepts and signs in, answering `accepted`, or `sign_in` when the
+   * address has an account the person signs in to as today. Without a proof it
+   * accepts for the signed-in session when its address is the invited one and
+   * verified, else answers `verify_email`. Rejects with the server's `code` and
+   * `status` otherwise (`INVALID_TOKEN` for any proof that does not admit).
+   */
+  acceptInvitationOneStep: (input: AuthInvitationOneStepInput) => Promise<AuthInvitationOneStepOutcome>;
   /** Reject an invitation as the current user */
   rejectInvitation: (invitationId: string) => Promise<void>;
   /** List invitations addressed to the current user */
@@ -708,6 +739,21 @@ export interface AuthInvitationPreview {
    */
   email: string;
 }
+
+/** The body of the one-step invitation acceptance. */
+export interface AuthInvitationOneStepInput {
+  invitationId: string;
+  /** The mailbox proof from the invitation mail's link; absent for a signed-in session. */
+  proof?: string;
+  name?: string;
+  password?: string;
+}
+
+/** What the one-step invitation acceptance answers. */
+export type AuthInvitationOneStepOutcome =
+  | { outcome: 'accepted'; organizationId: string }
+  | { outcome: 'sign_in' }
+  | { outcome: 'verify_email' };
 
 /** Organization member */
 export interface AuthOrganizationMember {

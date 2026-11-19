@@ -191,6 +191,8 @@ const pt = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Preencha os campos do formulário e depois envie ou cancele.",
+    sectionNav: "Seções do formulário",
+    sectionNavErrors: "Campos a corrigir: {{number}}",
     deniedDescription: "Você não tem permissão para editar este campo.",
     serverDefaultHint: "Definido automaticamente ao salvar.",
     requiredForAction: "Obrigatório para executar «{{action}}».",
@@ -553,6 +555,7 @@ const pt = {
       succeeded: "Concluídos {{count}} / {{total}}",
       resultFailed: " · Falhas {{count}}",
       succeededRecords: "Registros concluídos",
+      aggregateNotCompleted: "A ação não foi concluída para os registros selecionados. Alguns registros podem já ter sido alterados; ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
       cancel: "Cancelar",
@@ -590,6 +593,7 @@ const pt = {
         "Esta visão está agrupada, mas sua fonte de dados não implementa queryGroupHeaders, portanto os grupos não podem ser contados. Remova o agrupamento para mostrar os registros.",
       needsWholeRows:
         "O agrupamento precisa de todos os registros, mas esta grade recebeu apenas uma página deles, portanto os grupos não podem ser contados. Entregue todos os registros ou deixe a grade buscá-los em uma fonte de dados que implemente queryGroupHeaders.",
+      draftOnly: "Não agrupado por {{fields}}: existe apenas no rascunho até você publicar.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -956,6 +960,8 @@ const pt = {
     removeGroup: "Remover",
     groupingUnstoredNotice: "Esta lista não pode ser agrupada por {{fields}}: o valor é calculado ao ser exibido e não é armazenado. A lista é exibida sem esse agrupamento.",
     groupingUnstoredRemove: "Remover do agrupamento",
+    draftOnlyQueryDropped: "Sem filtrar nem ordenar por {{fields}}: existe apenas no rascunho até você publicar.",
+    withheldFieldsLeftOut: "Sem exibir, filtrar, ordenar nem agrupar por {{fields}}: o pacote que o adiciona está desativado. Ele volta quando o pacote for ativado.",
     inlineEditShort: "Edição em linha",
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
   },
@@ -1415,6 +1421,8 @@ const pt = {
     writeStrippedUnknownReason: "Não aplicado pelo servidor: {{fields}}",
     approvalPendingEditable: "Em aprovação · editável",
     approvalPendingTooltip: "Este registro tem uma solicitação de aprovação pendente; esta etapa ainda permite a edição",
+    approvalPending: "Em aprovação",
+    approvalPendingNotEditableTooltip: "Este registro tem uma solicitação de aprovação pendente",
     approvalProgress: "Aprovações — {{got}} de {{need}}",
     approvalProgressGroups: "Assinaturas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progresso da aprovação",
@@ -1604,7 +1612,6 @@ const pt = {
     widgetForbiddenMessage: "Você não tem permissão para ver os dados deste widget.",
     allWidgetsForbiddenMessage: "Você não tem permissão para ver os dados deste painel.",
     details: "Detalhes",
-    exportCsv: "Exportar CSV",
     openInList: "Abrir na lista",
     filters: {
       label: "Filtros do painel",
@@ -1634,6 +1641,9 @@ const pt = {
     },
     total: "Total",
     noDataSourceFor: "Sem fonte de dados para",
+    drillTooMany: 'Há registros demais relacionados a este valor para listá-los aqui. Restrinja os filtros do painel e tente novamente.',
+    drillUnavailable: 'Os registros deste valor não podem ser listados aqui.',
+    drillFailed: 'Não foi possível carregar os registros deste valor. Tente novamente mais tarde.',
     config: {
       breadcrumb: {
         dashboard: "Painel",
@@ -1967,10 +1977,24 @@ const pt = {
       },
       passwordsNote: "Senhas temporárias — exibidas uma única vez, nunca armazenadas. Salve-as agora; cada usuário deve trocar a sua no primeiro acesso.",
       passwordsMore: "Demais entradas omitidas — use o download.",
+      positionsHint: "Cargos: mapeie uma coluna com nomes de máquina de cargos, vários separados por \";\". Cada um é atribuído como no Setup; um nome que não existe, ou que você não pode atribuir, é informado na linha, e o usuário é criado mesmo assim.",
+      managerHint: "Gestor: mapeie uma coluna com o gestor de cada usuário, pelo endereço de e-mail (ou número de telefone quando o login por telefone está ativo). Os gestores são vinculados depois que todas as linhas entram, então um gestor mais abaixo no arquivo também conta; um gestor que não é encontrado, ou não pode ser vinculado, é informado na linha, e o usuário é criado mesmo assim.",
       passwordsDownload: "Baixar CSV",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_one: '{{count}} alteração não publicada. Publique-a na barra do rascunho no topo.',
+        publishFromBar_many: '{{count}} de alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_other: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        showDraftToPublish: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_one: '{{count}} alteração não publicada. Mostre o rascunho para revisá-la e publicá-la.',
+        showDraftToPublish_many: '{{count}} de alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_other: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraft: 'Mostrar rascunho',
+        receipt: 'Publicado. Suas alterações estão no ar.',
+        dismissReceipt: 'Fechar',
         count: "{{count}} alteração(ões) ainda não publicada(s) — os usuários não conseguem vê-las.",
         publish: "Publicar",
         published: "Todas as alterações pendentes estão ativas.",
@@ -2068,6 +2092,9 @@ const pt = {
           title: "Editando “{{app}}”",
           titleGeneric: "Editar este aplicativo",
           description: "O que você quer mudar? Eu altero este aplicativo no lugar — adicionar um campo, objeto, visão ou painel, ou ajustar o que já existe.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Pergunte sobre os dados deste app — contagens, listas e resumos — ou diga o que mudar, e eu modifico o app na hora: um campo, um objeto, uma visualização ou um painel.",
         },
       },
       clearConversation: "Limpar",
@@ -2213,7 +2240,7 @@ const pt = {
       changesApplied: "Aplicado",
       changesDrafted: "Salvo como rascunho",
       changesFailed: "Não aplicado",
-      discussing: "Discutindo: {{target}}",
+      discussing: "Vendo: {{target}}",
       changeVerb: {
         createObject: "Criar objeto",
         addField: "Adicionar campo",
@@ -2261,11 +2288,16 @@ const pt = {
       unavailableRetry: "Tentar novamente",
       unavailableHome: "Voltar ao início",
       dock: {
-        title: "Assistente",
+        title: "Assistente de IA",
         description: "Conversa com o assistente de IA",
         resize: "Redimensionar a conversa",
         collapse: "Recolher a conversa",
         maximize: "Abrir como página inteira",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Histórico",
+        backToChat: "Voltar ao chat",
+        expand: "Expandir",
+        restore: "Restaurar painel lateral",
         open: "Abrir o assistente",
         planAwaitingApproval: "Um plano proposto aguarda sua aprovação",
       },
@@ -2314,6 +2346,9 @@ const pt = {
       fieldErrorsToast_many: "{{count}} de configurações precisam de atenção: {{settings}}",
       fieldErrorsToast_other: "{{count}} configurações precisam de atenção: {{settings}}",
       cryptoRefusalTitle: "Esta implantação não consegue criptografar segredos",
+      platformManagedTitle: "Gerenciado pela plataforma",
+      platformManagedBody: "A plataforma de hospedagem fornece e configura isso para este ambiente, por isso não é definido aqui.",
+      aiProviderManaged: "O provedor de IA, seu modelo e suas credenciais são gerenciados pela plataforma.",
       cryptoRefusalSubjectSuffix: "está declarado como criptografado, portanto nada foi gravado.",
       cryptoRefusalNoSubject: "O valor declarado como criptografado foi recusado, portanto nada foi gravado.",
       cryptoRefusalToast: "Não é possível criptografar segredos: {{subject}}",
@@ -2366,6 +2401,7 @@ const pt = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Os valores ainda não definidos foram sugeridos com base no seu navegador. Nada é salvo até você confirmar.",
       organizationName: {
         title: "Dê um nome à sua organização",
@@ -2412,6 +2448,8 @@ const pt = {
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
+      firstApp: { title: 'Adicione seu primeiro aplicativo', todo: 'Ainda não há um aplicativo seu. Instale um pelo marketplace ou crie um, e ele aparecerá no Início.', done: 'Um aplicativo seu está no Início.' },
+      firstRecord: { title: 'Adicione seu primeiro registro', todo: 'Ninguém criou um registro nos seus aplicativos ainda.', done: 'Um registro foi criado nos seus aplicativos.', action: 'Abrir aplicativo' },
     },
     error: {
       connectionFailed: "Não é possível conectar ao servidor",
@@ -2550,8 +2588,16 @@ const pt = {
       },
       viewTypeTree: "Árvore",
       viewTypeTreeDesc: "Aninha registros autorreferenciados em uma hierarquia por um campo pai.",
+      viewTypeTimesheet: "Folha de horas",
+      viewTypeTimesheetDesc: "Informe um número por linha e dia da semana; cada célula preenchida é um registro.",
       parentField: "Campo pai",
       parentFieldHelp: "O campo que aponta para o registro pai (mesmo objeto) e define a hierarquia. Apenas campos autorreferenciados são válidos.",
+      timesheetRowField: "Campo de linha",
+      timesheetRowFieldHelp: "Cada linha da grade é um valor deste campo, como um projeto.",
+      timesheetDateField: "Campo de data",
+      timesheetDateFieldHelp: "Os registros são colocados no dia da semana desta data.",
+      timesheetValueField: "Campo de valor",
+      timesheetValueFieldHelp: "O número que cada célula mostra e edita, como horas.",
       viewName: "Nome",
       viewNameHelp: "Chave técnica (snake_case). Preenchida automaticamente a partir do título — edite se quiser.",
       viewNameRequired: "Informe uma chave (letras minúsculas, números, sublinhado). Não é preenchida automaticamente para títulos não latinos.",
@@ -2580,7 +2626,7 @@ const pt = {
       expandToPage: "Abrir como página inteira",
       openAsPage: "Abrir como página inteira",
       objectNotFound: "Objeto não encontrado",
-      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe na configuração atual.",
+      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe ou você não tem acesso a ele.",
       objectNotFoundHint: "Verifique as configurações de navegação do seu aplicativo ou selecione um objeto diferente na barra lateral.",
       objectPackageDisabled: "O objeto \"{{objectName}}\" pertence a um pacote desativado e, por isso, não está sendo servido.",
       filterOrGroupNotEditable: "Este filtro tem um grupo OU ao lado de outras condições, que o editor de filtros não consegue exibir, por isso aqui é somente leitura. A visão continua aplicando o filtro.",
@@ -2739,6 +2785,10 @@ const pt = {
       launcherLabel: "Iniciador de aplicativos",
       menuLabel: "Navegação do aplicativo",
       menuEmpty: "Este aplicativo não tem entradas de navegação que você possa abrir.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "Barra de menu do aplicativo",
+      searchMenu: "Pesquisar no menu",
+      phoneBarHint: "Marque uma entrada com a estrela para colocá-la na barra inferior. A barra mostra as quatro primeiras.",
       itemMenu: "Mais ações para {{name}}",
       openInNewTab: "Abrir em nova aba",
       copyLink: "Copiar link",
@@ -2769,6 +2819,7 @@ const pt = {
         retry: "Continuar com login único",
       },
       ssoHandoff: "Continuar para {{target}}",
+      ssoHandoffClient: "Entre para continuar em {{clientName}}",
       devAdminHint: {
         title: "Instância de desenvolvimento local",
         signIn: "Entrar como administrador de desenvolvimento",
@@ -2798,6 +2849,8 @@ const pt = {
         directSignInRateLimited: "Muitos logins foram iniciados a partir desta rede agora há pouco. Aguarde alguns segundos e tente novamente.",
         networkNotAllowed: "Este sistema não permite entrar a partir da sua rede. Conecte-se de uma rede permitida (por exemplo, a rede do escritório ou a VPN da sua organização) ou fale com o administrador.",
         ssoAccessDenied: "A conta com a qual você entrou não tem acesso a este ambiente. Entre com uma conta que tenha acesso ou peça a um administrador da organização deste ambiente para adicionar você como membro.",
+        ssoAccessDeniedNotMember: "A conta com a qual você entrou não é membro da organização deste ambiente. Entre com uma conta que seja ou peça a um administrador da organização para convidar você.",
+        ssoAccessDeniedInvitationPending: "Você foi convidado para a organização deste ambiente, mas o convite ainda não foi aceito. Aceite o convite pelo seu e-mail e entre novamente.",
         ssoSwitchAccount: "Trocar de conta",
         ssoBackToConsole: "Voltar ao console",
         ssoSwitchAccountHint: "Trocar de conta abre seu serviço de login em uma nova aba e encerra sua sessão lá. Depois, entre aqui novamente com uma conta que tenha acesso.",
@@ -2976,6 +3029,10 @@ const pt = {
       missingToken: "Falta um token no link de verificação.",
       emailMissing: "Endereço de e-mail ausente",
       resendButton: "Reenviar e-mail de verificação",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Seu endereço de e-mail ainda não foi verificado. Envie um link de verificação para {{email}} e depois clique no link para verificar sua conta.",
+      sendButton: "Enviar e-mail de verificação",
       resending: "Enviando…",
       resent: "E-mail enviado! Verifique sua caixa de entrada",
       resentSuccess: "E-mail de verificação enviado!",
@@ -3110,6 +3167,10 @@ const pt = {
       granted: "Acesso concedido",
       denied: "Acesso negado",
       noRedirect: "O servidor não retornou nenhuma URL de redirecionamento.",
+      returnToApp: "Volte para {{appName}} para continuar. Você pode fechar esta aba.",
+      returnToUnnamedApp: "Volte para o aplicativo para continuar. Você pode fechar esta aba.",
+      openApp: "Abrir {{appName}}",
+      openUnnamedApp: "Abrir o aplicativo",
       failed: "Falha no consentimento",
       footer: "Você pode revogar o acesso a qualquer momento nas configurações da sua conta.",
     },
@@ -3246,7 +3307,7 @@ const pt = {
     aiAssistant: "Assistente de IA",
     designInStudio: "Projetar no Studio",
     editApp: "Editar aplicativo",
-    openAppInStudio: "Ver aplicativo no Studio",
+    openAppInStudio: "Ver {{app}} no Studio",
   },
   home: {
     build: {
@@ -3441,7 +3502,6 @@ const pt = {
   },
   empty: {
     objectNotFound: "Objeto não encontrado",
-    objectNotFoundDescription: "A definição do objeto \"{{name}}\" está ausente. Verifique sua configuração ou navegue de volta.",
     interfacePageSourceMissing: "Esta página de interface faz referência a \"{{name}}\", que não está disponível.",
     pageNotFound: "Página não encontrada",
     pageNotFoundDescription: "A página \"{{name}}\" não foi encontrada. Ela pode ter sido removida ou renomeada.",
@@ -3781,6 +3841,17 @@ const pt = {
       accept: "Aceitar convite",
       accepted: "Convite aceito",
       joinedDescription: "Boas-vindas a {{orgName}}. Você entrou como {{role}}.",
+      joinedWelcome: "Boas-vindas a {{orgName}}.",
+      verifyEmailTitle: "Verifique seu endereço de e-mail",
+      verifyEmailDescription: "O endereço de e-mail desta conta precisa ser o convidado e estar verificado. Verifique-o e abra novamente o link do convite a partir da sua caixa de entrada.",
+      proofInvalid: "Este link de convite não pode mais ser usado. Peça um novo convite ou entre em uma conta existente.",
+      signInInstead: "Entrar em uma conta existente",
+      proofTitle: "Entrar em {{orgName}}",
+      proofDescription: "Configure sua conta para {{email}} para aceitar o convite.",
+      proofDivider: "ou defina uma senha",
+      proofNameLabel: "Nome",
+      proofPasswordLabel: "Senha",
+      proofSubmit: "Criar conta e entrar",
       continue: "Continuar",
       acceptFailed: "Falha ao aceitar o convite",
       decline: "Recusar",
@@ -3816,6 +3887,8 @@ const pt = {
     viewApprovals: "Ver aprovações",
     noPendingApprovals: "Sem aprovações pendentes",
     openApprovalsInbox: "Abrir caixa de aprovações",
+    needsYou: "Requer sua ação",
+    viewApprovalDetails: "Ver detalhes",
     badgeTotal: "{{total}} no total",
     badgeNotifications: "{{count}} tópicos não lidos",
     badgeNotifications_one: "{{count}} tópico não lido",
@@ -4051,13 +4124,11 @@ const pt = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'Resta {{left}} da sua cota de IA. Um modelo marcado com ×N a consome N vezes mais rápido que o modelo padrão.',
@@ -4122,6 +4193,7 @@ const pt = {
       get_metadata_schema: "Consultar o formato dos metadados",
       get_package: "Revisar o pacote",
       get_record_history: "Ler o histórico do registro",
+      list_flow_runs: "Verificar as execuções do fluxo",
       list_metadata: "Listar os metadados existentes",
       list_objects: "Listar os objetos existentes",
       list_packages: "Listar os pacotes existentes",
@@ -4223,6 +4295,26 @@ const pt = {
       needsAttention_one: "{{count}} precisa de atenção",
       needsAttention_many: "{{count}} de itens precisam de atenção",
       needsAttention_other: "{{count}} precisam de atenção",
+      health: {
+        sampleRowsLive: "{{count}} linhas de exemplo publicadas",
+        sampleRowsLive_one: "{{count}} linha de exemplo publicada",
+        sampleRowsLive_many: "{{count}} de linhas de exemplo publicadas",
+        sampleRowsLive_other: "{{count}} linhas de exemplo publicadas",
+        views: "{{count}} visões",
+        views_one: "{{count}} visão",
+        views_many: "{{count}} de visões",
+        views_other: "{{count}} visões",
+        widgets: "{{count}} widgets",
+        widgets_one: "{{count}} widget",
+        widgets_many: "{{count}} de widgets",
+        widgets_other: "{{count}} widgets",
+        seeds: "{{count}} conjuntos de dados de exemplo",
+        seeds_one: "{{count}} conjunto de dados de exemplo",
+        seeds_many: "{{count}} de conjuntos de dados de exemplo",
+        seeds_other: "{{count}} conjuntos de dados de exemplo",
+        verified: "Verificado: {{checks}}",
+        seedFailed: "Não foi possível carregar os dados de exemplo.",
+      },
       unknownPhase: "Fase de criação desconhecida",
       nextStepsLead: "Em seguida, você pode dizer: {{steps}}",
       nextStepQuote: "“{{step}}”",
@@ -4413,13 +4505,26 @@ const pt = {
     progressBar: 'Progresso da decisão',
     declaredActions: 'Ações',
     decisionPanelOffRequestPage: 'O painel de decisão de aprovação só funciona nas páginas de solicitações de aprovação.',
+    openNextAfterDecision: 'Abrir a próxima após decidir',
+    queueDone: 'Não há mais solicitações pendentes nesta lista.',
     snapshotAsSubmitted: 'Conforme enviado',
+    snapshotChanged: 'Alterado',
+    snapshotCurrentValue: 'Valor atual',
+    snapshotOpenRecord: 'Abrir registro',
+    snapshotCurrentUnreadable: 'Não é possível ler o registro atual, então as alterações após o envio não são marcadas.',
+    snapshotChildCurrent: 'Linhas atuais: o envio não guarda as linhas filhas.',
+    progressTitle: 'Progresso da aprovação',
+    attachmentsTitle: 'Anexos',
     attachmentChip: 'Anexo',
     attachmentOpenFailed: 'Não foi possível abrir o anexo — tente novamente',
     approveOneTitle: 'Aprovar "{{title}}"?',
     approveOneBody: 'Isso aprova a solicitação com a sua identidade. Para adicionar um comentário ou anexo, abra a solicitação.',
     flowOrigin: 'Iniciada por fluxo',
     submittedByYou: 'Enviado por você',
+    awaitingYourDecision: 'Aguardando sua aprovação',
+    stepNumber: 'Etapa {{n}}',
+    submittedByName: 'Enviado por {{name}}',
+    moreDecisionActions: 'Mais ações de aprovação',
     sortBy: 'Ordenar',
     sortRecent: 'Mais recentes primeiro',
     sortOldest: 'Mais antigas primeiro',
@@ -4605,6 +4710,11 @@ const pt = {
       pendingHere_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada nesta página',
       pendingHere_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas nesta página',
       pendingHere_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas nesta página',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
     },
     changes: {
       title: 'Alterações pendentes',
@@ -4621,7 +4731,7 @@ const pt = {
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
       fieldOrderChanged: 'Ordem dos campos alterada',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclui alterações rascunhadas pelo copiloto de IA',
+      draftedByCopilot: 'Inclui alterações rascunhadas pelo assistente de IA',
       draftedByMcpClient: 'Inclui alterações rascunhadas pelo cliente MCP “{{client}}”',
       draftedByMcp: 'Inclui alterações rascunhadas por um cliente MCP',
       detailChangedKeys: 'Também alterado:',
@@ -4758,7 +4868,8 @@ const pt = {
       securityBlockTitle_one: 'A publicação será recusada — {{count}} item precisa de uma decisão primeiro',
       securityBlockTitle_many: 'A publicação será recusada — {{count}} de itens precisam de uma decisão primeiro',
       securityBlockTitle_other: 'A publicação será recusada — {{count}} itens precisam de uma decisão primeiro',
-      securityBlockWhere: 'Corrija no objeto em Configurações → Compartilhamento de registros e publique novamente.',
+      securityBlockWhere: 'Corrija no objeto em Configurações → Quem pode ver quais registros e publique novamente.',
+      flowChecksTitle: 'Antes de publicar: a verificação de publicação vai apontar o seguinte',
       securityRule: {
         owdUnset: 'Nenhuma base de compartilhamento de registros (sharingModel) foi declarada. O runtime usa private, mas a base precisa ser uma decisão explícita.',
         owdAlias: 'A base de compartilhamento de registros (sharingModel) não é um valor canônico, então o runtime trata o objeto como private.',
@@ -4769,6 +4880,8 @@ const pt = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Este app ainda não foi publicado. Ele funciona, mas só os criadores podem vê-lo. Publique para que seus usuários o vejam.',
       message: 'App não publicado — totalmente funcional, mas somente os criadores o veem. Publique-o para que seus usuários o vejam.',
       publish: 'Publicar',
       publishing: 'Publicando…',
@@ -5227,6 +5340,52 @@ const pt = {
     sourceRequired: "Uma página {{kind}} requer um {{source}} não vazio.",
     loading: "Carregando o runtime do React…",
     error: "Erro na página React",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Aplicativo móvel",
+    subtitle: "Conecte o aplicativo móvel ObjectOS a este servidor",
+    scanHint: "Abra o aplicativo móvel ObjectOS e escaneie este código para conectá-lo a este servidor.",
+    qrAlt: "Código QR que conecta o aplicativo móvel ObjectOS a este servidor",
+    linkLabel: "Link de conexão",
+    copy: "Copiar link",
+    copied: "Link copiado",
+    privacy: "O código contém apenas o endereço deste servidor, nunca a sua conta.",
+    loadFailed: "Não foi possível ler o endereço público deste servidor. Recarregue a página para tentar novamente.",
+    unreachableTitle: "Um celular não consegue acessar o endereço deste servidor",
+    unreachableBody: "O endereço deste servidor é {{address}}, um endereço local ou privado que um celular não consegue abrir, então nenhum código é exibido. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+    insecureTitle: "O endereço deste servidor não usa HTTPS",
+    insecureBody: "O endereço deste servidor é {{address}}. O aplicativo móvel faz login por ele, então ele precisa usar HTTPS, e nenhum código é exibido. Sirva este servidor por HTTPS, defina {{setting}} com o endereço https:// dele, por exemplo {{example}}, e reinicie-o.",
+    unpublishedTitle: "Este servidor não publica seu endereço público",
+    unpublishedBody: "Nenhum código é exibido: este servidor ainda não oferece seu endereço público ao aplicativo móvel. Atualize o servidor para uma versão compatível.",
+  },
+  notificationSettings: {
+    title: "Configurações de notificação",
+    subtitle: "Escolha quais notificações você recebe e por quais canais",
+    loading: "Carregando suas configurações de notificação…",
+    loadFailed: "Não foi possível ler suas configurações de notificação. Recarregue a página para tentar novamente.",
+    saveFailed: "A alteração não foi salva: {{reason}}",
+    general: "Geral",
+    generalWarning: "Alterar o resumo ou o horário silencioso salva sua própria configuração geral. A partir daí ela vale para todo tópico e canal que você não configurou, no lugar dos padrões da sua organização.",
+    digest: "Resumo",
+    digestNone: "Sem resumo",
+    digestDaily: "Diário",
+    digestWeekly: "Semanal",
+    digestNoOff: "\"Sem resumo\" não é oferecido: salvá-lo não desativa um resumo definido pela sua organização, então pode não ter efeito.",
+    quietHours: "Horário silencioso",
+    quietHoursNoClear: "Não é possível salvar um intervalo vazio: ele não desativa o horário silencioso definido pela sua organização, então pode não ter efeito. Defina um horário de início e um de término.",
+    save: "Salvar",
+    matrix: "Tópicos e canais",
+    topic: "Tópico",
+    allTopics: "Todos os tópicos",
+    alwaysDelivered: "Sempre entregue",
+    notConfigured: "Não configurado",
+    toggleLabel: "{{topic}} por {{channel}}",
+    sourceOwn: "Sua configuração",
+    sourceDefault: "Padrão da organização",
+    sourceBuiltin: "Padrão",
+    sourceMandatory: "Obrigatório",
   },
 };
 

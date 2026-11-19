@@ -22,11 +22,19 @@ import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+// The layout's reach includes `import('@objectstack/lint')` (the draft
+// preview bar's capability lint): pay that load during collection, not inside
+// a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 vi.mock('../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false }),
 }));
-vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => <nav aria-label="App menu" /> }));
+vi.mock('../UnifiedSidebar', () => ({
+  UnifiedSidebar: ({ phoneNavBar }: { phoneNavBar?: boolean }) => (
+    <nav aria-label="App menu" data-testid="sidebar-stub" data-phone-nav-bar={phoneNavBar ? 'on' : 'off'} />
+  ),
+}));
 vi.mock('../AppHeader', () => ({
   AppHeader: () => (
     <div data-testid="app-bar">
@@ -39,7 +47,7 @@ vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: ()
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
-import { ConsoleLayout, isRecordPagePath } from '../ConsoleLayout';
+import { ConsoleLayout, hidesPhoneNavBar, isRecordPagePath } from '../ConsoleLayout';
 import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
@@ -149,6 +157,55 @@ describe('isRecordPagePath (objectstack#28483)', () => {
       '/organizations/acme',
     ]) {
       expect(isRecordPagePath(path), path).toBe(false);
+    }
+  });
+});
+
+/**
+ * objectstack#34594 — the phone's bottom menu bar: the layout asks the sidebar
+ * for it on every app route below 768 px except a record page and a record
+ * form (create or edit), whose bottom edge is the record's actions or the
+ * form's submit buttons; and while it is drawn the inset keeps its height
+ * free at the bottom. The bar itself is `UnifiedSidebar.phoneNavBar-34594`'s.
+ */
+describe('the phone bottom menu bar is drawn off the record and form routes (objectstack#34594)', () => {
+  const barState = () => screen.getByTestId('sidebar-stub').getAttribute('data-phone-nav-bar');
+  const insetKeepsBarFree = () =>
+    screen.getByTestId('console-route').parentElement!.className.includes('!pb-[calc(3rem+env(safe-area-inset-bottom))]');
+
+  it('at 375 px a list, a view, a dashboard, a page and the app root ask for the bar, and the inset keeps it free', () => {
+    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/crm_lead/view/all', '/apps/crm/dashboard/sales', '/apps/crm/page/home']) {
+      mountAt(path, 375);
+      expect(barState(), path).toBe('on');
+      expect(insetKeepsBarFree(), path).toBe(true);
+      cleanup();
+    }
+  });
+
+  it('at 375 px a record page, a named record page, the edit form and the create form draw no bar', () => {
+    for (const path of [RECORD, `${RECORD}/page/print_sheet`, `${RECORD}/edit`, '/apps/crm/crm_lead/new']) {
+      mountAt(path, 375);
+      expect(barState(), path).toBe('off');
+      expect(insetKeepsBarFree(), path).toBe(false);
+      cleanup();
+    }
+  });
+
+  it('CONTROL — at 768 px and 1440 px no route asks for the bar', () => {
+    for (const width of [768, 1440]) {
+      mountAt('/apps/crm/crm_lead', width);
+      expect(barState(), `${width} px`).toBe('off');
+      expect(insetKeepsBarFree(), `${width} px`).toBe(false);
+      cleanup();
+    }
+  });
+
+  it('hidesPhoneNavBar names the record page and the two record forms, and nothing else', () => {
+    for (const path of [RECORD, `${RECORD}/`, `${RECORD}/page/print_sheet`, `${RECORD}/edit`, '/apps/crm/crm_lead/new']) {
+      expect(hidesPhoneNavBar(path), path).toBe(true);
+    }
+    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/crm_lead/view/all', '/apps/crm/metadata/object/new', '/apps/crm/dashboard/sales']) {
+      expect(hidesPhoneNavBar(path), path).toBe(false);
     }
   });
 });

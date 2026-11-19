@@ -130,7 +130,7 @@ import {
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
-import { PermissionDeniedError, MaskedValueWriteError } from './errors.js';
+import { DelegationScopeViolationError, PermissionDeniedError, MaskedValueWriteError } from './errors.js';
 import { masterGateRefusalUserCopyOf, type MasterQuestion } from './security-plugin-cbp-write-gate.js';
 import {
   QUEUE_FIELD,
@@ -144,7 +144,15 @@ import {
   writesQueue,
 } from './ownership-queue-gate.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
+import {
+  hasEmptyOwner,
+  isActionBodyElevation,
+  stampActionBodyInsertOwners,
+  stampEmptyOwner,
+  writesOwner,
+} from './owner-anchor-stamp.js';
 import { externalGrantPatch } from './external-owd-grant-stamp.js';
+import { computedFieldsReadingThroughReferences } from './field-masker.js';
 
 /**
  * The layered computation's options, as the class declares them: the
@@ -276,8 +284,9 @@ function denialLocaleOf(
 /**
  * The catalog keys this middleware renders. The first three are the `message`
  * of the gates #7414 / #7451 localized; the rest are the `userMessage` of the
- * owner-anchor, queue, field-write and master-detail write refusals
- * ({@link withUserMessage}); the last two are the list rules `field_edit_denied`'s `{{fields}}` is spelled by
+ * owner-anchor, queue, field-write and master-detail write refusals, the
+ * unreadable-query-field refusal and the delegated-administration scope
+ * refusal ({@link withUserMessage}); the last two are the list rules `field_edit_denied`'s `{{fields}}` is spelled by
  * ({@link labelList}).
  */
 type UserFacingDenialKey =
@@ -295,6 +304,8 @@ type UserFacingDenialKey =
   | 'master_record_edit_denied_opaque'
   | 'master_record_read_denied'
   | 'master_record_read_denied_opaque'
+  | 'query_field_not_readable'
+  | 'delegation_scope_violation'
   | 'field_label_quoted'
   | 'field_label_list_separator';
 
@@ -351,7 +362,8 @@ function withUserMessage(refusal: PermissionDeniedError, userMessage: string): P
  *    caller's locale, else the declared label. The API name is never the last
  *    rung (#7414), and a declared label equal to the API name counts as none.
  *  - the caller READS it: the caller's read guard leaves it readable
- *    (`computeQueryGuardFieldPerms`, the guard the read path masks with). A
+ *    (`computeQueryGuardFieldPerms` with the computed fields withheld for
+ *    what they read through a reference, the map the gate beside it asks). A
  *    field withheld from the caller is not named to them, even by label.
  *
  * One field that fails either test makes the whole sentence opaque: naming
@@ -511,7 +523,7 @@ async function readDoorAnswerForGateRefusal(
     throw readRefusal;
   }
   if (row == null && isUnreadableAddressedRowRefusal(refusal)) {
-    return recordNotFoundError(opCtx.object, addressedId as string | number);
+    return recordNotFoundError(opCtx.object, addressedId as string | number, opCtx.context);
   }
   return refusal;
 }
@@ -556,6 +568,7 @@ export interface AuthzMiddlewareHost {
   resolveCallerPosture: SecurityPlugin['resolveCallerPosture'];
   resolveOperationPrincipals: SecurityPlugin['resolveOperationPrincipals'];
   resolvePermissionSetsForContext: SecurityPlugin['resolvePermissionSetsForContext'];
+  resolveHopWithheldFields: SecurityPlugin['resolveHopWithheldFields'];
   resolvePreImageFloorDrop: SecurityPlugin['resolvePreImageFloorDrop'];
   resolveSharingWriteVerdict: SecurityPlugin['resolveSharingWriteVerdict'];
   writeCheckFieldOptions: SecurityPlugin['writeCheckFieldOptions'];
@@ -563,7 +576,7 @@ export interface AuthzMiddlewareHost {
 
 /** The authorization middleware registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerAuthzMiddleware(
-  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'addressedPredicateWrite' | 'assertControlledByParentWrite' | 'callerCannotReadAddressedRow' | 'collectRLSPolicies' | 'composeWriteTenantWall' | 'computeControlledByParentFilter' | 'computeForbiddenFieldWrites' | 'computeLayeredRlsFilter' | 'computePartialMaskRules' | 'computeQueryGuardFieldPerms' | 'computeRlsFilter' | 'computeWriteCheckFilter' | 'delegatedAdminGate' | 'delegatorOwnWriteFloorOptions' | 'engineOperationScope' | 'epoch' | 'extractSingleId' | 'fieldMasker' | 'getCallerPreImage' | 'getObjectFieldNames' | 'logger' | 'maskOperationResult' | 'ownershipQueues' | 'permissionEvaluator' | 'ql' | 'raiseWriteWallRefusal' | 'readableRowsScopeForPredicateWrite' | 'resolveCallerPosture' | 'resolveOperationPrincipals' | 'resolveHopWithheldFields' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingWriteVerdict' | 'writeCheckFieldOptions'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -663,6 +676,21 @@ export function registerAuthzMiddleware(
       (line) => ctx.logger.warn(line),
     );
 
+    // [#34885] An action body's insert is owner-stamped as a direct create
+    // is: the body's `ctx.api` / `ctx.engine` run the invoker's envelope
+    // elevated with the `'action'` mark, and the bypass below skips step 3.5,
+    // so without this the row landed with `owner_id` null and its invoker,
+    // on a private object, could neither read nor update it. An EMPTY owner
+    // only, the envelope's own principal only (nothing for the guest), keyed
+    // on the `'action'` mark only — flows, hooks and every other system write
+    // are unchanged. See `owner-anchor-stamp.ts`.
+    if (opCtx.operation === 'insert' && opCtx.data && typeof opCtx.data === 'object' && isActionBodyElevation(opCtx.context)) {
+      const fields = await this.getObjectFieldNames(metadata, opCtx.object, ql);
+      if (fields?.has('owner_id')) {
+        stampActionBodyInsertOwners(opCtx.data, opCtx.context, isGuestEnvelope(opCtx.context), fields.has(QUEUE_FIELD));
+      }
+    }
+
     // System operations bypass security
     if (opCtx.context?.isSystem) {
       return next();
@@ -761,7 +789,10 @@ export function registerAuthzMiddleware(
           );
         }
         await next();
-        this.maskOperationResult(opCtx, grantCallerSets, grantCallerPosture, null);
+        // The grant stands in for a caller this context does not resolve, so a
+        // computed field read through a reference cannot be judged for it on
+        // the referenced object: it is withheld (fail closed).
+        this.maskOperationResult(opCtx, grantCallerSets, grantCallerPosture, null, computedFieldsReadingThroughReferences(grantCallerPosture.computedFieldInputs));
         return;
       }
       throw new PermissionDeniedError(
@@ -812,7 +843,17 @@ export function registerAuthzMiddleware(
       try {
         await this.delegatedAdminGate.assert(opCtx);
       } catch (refusal) {
-        throw await readDoorAnswerForGateRefusal.call(this, opCtx, refusal, nestedInOperation);
+        const answer = await readDoorAnswerForGateRefusal.call(this, opCtx, refusal, nestedInOperation);
+        // [#34699] The scope refusal's `message` is the gate's reason, in
+        // English and in API names; the user's half rides `userMessage`.
+        if (answer instanceof DelegationScopeViolationError) {
+          (answer as DelegationScopeViolationError & { userMessage?: string }).userMessage = userFacingDenialMessage(
+            ctx,
+            'delegation_scope_violation',
+            denialLocalesOf(opCtx.context),
+          );
+        }
+        throw answer;
       }
     }
 
@@ -859,6 +900,13 @@ export function registerAuthzMiddleware(
     // per-field capability contract, and no grant-based narrowing — see
     // resolveCallerPosture, which the field projections read too.
     const secMeta = await this.resolveCallerPosture(opCtx.object, permissionSets);
+    // Field-level security covers what a value is computed from, on a record
+    // read through a reference too: the computed fields withheld for that
+    // (resolveHopWithheldFields), asked once per operation and only by a
+    // reader that needs them — the query guards (2.5b, 2.9) and step 4.
+    let hopWithheldMemo: Promise<Set<string>> | undefined;
+    const hopWithheld = (): Promise<Set<string>> =>
+      (hopWithheldMemo ??= this.resolveHopWithheldFields(secMeta, opCtx.context, { fallbackOnEmptySets: false }));
 
     // [#3545] Fail CLOSED when the object's own posture could not be resolved.
     // #3545 accepted the API-exposure gate's fail-open on unresolvable metadata
@@ -1451,7 +1499,7 @@ export function registerAuthzMiddleware(
             addressedId !== undefined &&
             (await this.callerCannotReadAddressedRow(opCtx, addressedId))
           ) {
-            throw recordNotFoundError(opCtx.object, addressedId as string | number);
+            throw recordNotFoundError(opCtx.object, addressedId as string | number, opCtx.context);
           }
           if (!visible) {
             // [#7451] The refusal an ordinary business user is most likely to
@@ -1506,7 +1554,7 @@ export function registerAuthzMiddleware(
           // step: a caller whose read is refused makes the caller-context
           // re-read throw for every id, and the record-level 403 is one answer
           // for all of them.)
-          throw recordNotFoundError(opCtx.object, addressedId as string | number);
+          throw recordNotFoundError(opCtx.object, addressedId as string | number, opCtx.context);
         }
       }
     }
@@ -1582,7 +1630,10 @@ export function registerAuthzMiddleware(
     // per-field capability contract (resolveCallerPosture) refuses every
     // capability-gated field it names — "deny on write" — and its evaluator
     // map is empty, so nothing else is refused. The verdict is
-    // computeForbiddenFieldWrites, which `canWriteObject` asks too.
+    // computeForbiddenFieldWrites, which `canWriteObject` asks too; it also
+    // refuses a computed field the payload names that this caller is not
+    // served whole (field-level security covers what a value is computed
+    // from), by the predicate the write projections ask.
     //
     // [#25866 / ruling of record 6408558941] An entry that carries a `when`
     // is judged on a ROW: the incoming row of an insert, or the stored row of
@@ -1623,7 +1674,7 @@ export function registerAuthzMiddleware(
             opCtx.object,
             forbidden,
             typeof ql?.getSchema === 'function' ? ql.getSchema(opCtx.object) as any : undefined,
-            this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets),
+            this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld()),
             denialLocalesOf(opCtx.context),
           ),
         );
@@ -1681,7 +1732,7 @@ export function registerAuthzMiddleware(
       // values outright on a single-row group). One derivation, shared with
       // step 2.9 and the published `getQueryableFields` — see
       // computeQueryGuardFieldPerms.
-      const queryGuard = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets);
+      const queryGuard = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld());
       if (Object.keys(queryGuard).length > 0) {
         const ast: any = opCtx.ast ?? {};
         const referenced = new Set<string>();
@@ -1779,12 +1830,11 @@ export function registerAuthzMiddleware(
     ) {
       const isInsert = opCtx.operation === 'insert';
       const rows = (Array.isArray(opCtx.data) ? opCtx.data : [opCtx.data]) as Record<string, unknown>[];
-      // Own-property test only — never read `owner_id` through the prototype
-      // chain (a polluted `Object.prototype.owner_id` must not make ordinary
-      // field-only updates look like ownership writes).
-      const writesOwner = (r: unknown): r is Record<string, unknown> =>
-        !!r && typeof r === 'object' && !Array.isArray(r) &&
-        Object.prototype.hasOwnProperty.call(r, 'owner_id');
+      // `writesOwner` is an own-property test only — never read `owner_id`
+      // through the prototype chain (a polluted `Object.prototype.owner_id`
+      // must not make ordinary field-only updates look like ownership
+      // writes). It and the insert stamp below are `owner-anchor-stamp.ts`,
+      // shared with the action-body stamp ahead of the `isSystem` bypass.
       // A valid owner id is a NON-EMPTY SCALAR. Anything else (array / object /
       // boolean / '' ) is neither a stampable self-owner nor a tolerable echo —
       // String()-coercing it would let `owner_id: [selfId]` pass as "self" and
@@ -1908,16 +1958,11 @@ export function registerAuthzMiddleware(
                   denyQueueWrite(INSERT_QUEUE_REFUSAL, 'record_queue_assign_denied');
                 }
               }
-              if (!writesOwner(row) || row.owner_id == null || row.owner_id === '') {
-                if (park) row.owner_id = null;
-                // Auto-stamp the acting user (batch rows included — the
-                // single-record-only stamp left bulk-inserted rows NULL-owned
-                // and invisible to their creator).
-                else if (userId) row.owner_id = userId;
-                // [ADR-0138 D1 item 5] A guest is stamped with nothing, and
-                // its empty owner is left UNSET: an empty string would land
-                // in the anchor as a value that is neither an owner nor none.
-                else if (guest && row.owner_id === '') row.owner_id = null;
+              if (hasEmptyOwner(row)) {
+                // Auto-stamp the acting user, batch rows included; the park
+                // leaves it unset, and [ADR-0138 D1 item 5] a guest is
+                // stamped with nothing.
+                stampEmptyOwner(row, { userId, guest, park });
               } else if (guest) {
                 denyGuestOwnerWrite();
               } else if (
@@ -2585,7 +2630,7 @@ export function registerAuthzMiddleware(
       // folded in as non-queryable by the one derivation this guard shares
       // with step 2.5b and the published `getQueryableFields`
       // (computeQueryGuardFieldPerms).
-      const guardPerms = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets);
+      const guardPerms = this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets, await hopWithheld());
       if (Object.keys(guardPerms).length > 0) {
         // [#2982 follow-up] For a bulk WRITE the caller's own predicate is
         // `opCtx.options.where` (untouched); `opCtx.ast.where` may ALREADY
@@ -2602,7 +2647,16 @@ export function registerAuthzMiddleware(
           opCtx.operation === 'update' || opCtx.operation === 'delete'
             ? { where: opCtx.options?.where }
             : (opCtx.ast as unknown as Record<string, unknown>);
-        assertReadableQueryFields(guardTarget, guardPerms, opCtx.object);
+        try {
+          assertReadableQueryFields(guardTarget, guardPerms, opCtx.object);
+        } catch (e) {
+          // [#34699] The guard's `message` names the hidden fields' API names
+          // for a developer; the user's half names none of them.
+          if (e instanceof PermissionDeniedError) {
+            throw withUserMessage(e, userFacingDenialMessage(ctx, 'query_field_not_readable', denialLocalesOf(opCtx.context)));
+          }
+          throw e;
+        }
       }
     }
 
@@ -2787,7 +2841,7 @@ export function registerAuthzMiddleware(
     // closes the read leak on the response image. [#21062] The body is
     // {@link maskOperationResult}, which the ADR-0056 public-form grant
     // branch above reads too — one masker for both.
-    this.maskOperationResult(opCtx, permissionSets, secMeta, delegatorSets);
+    this.maskOperationResult(opCtx, permissionSets, secMeta, delegatorSets, await hopWithheld());
   };
   ql.registerMiddleware(authzMiddleware);
   return authzMiddleware;

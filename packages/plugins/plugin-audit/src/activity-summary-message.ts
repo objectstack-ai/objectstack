@@ -64,10 +64,27 @@ import { ensureJudgedColumnsProjected, isRecord } from './served-fields.js';
 /** The `metadata` key a row's summary code rides in. Read and stripped by {@link installActivitySummaryLocale}. */
 export const ACTIVITY_SUMMARY_MESSAGE_KEY = 'summary_message';
 
-/** One side of a field change: the writer's text, and the option it matched (a select value). */
+/**
+ * One side of a field change: the writer's text, and the option it matched (a
+ * select value) — or, for a yes/no field that declares no option words, the
+ * boolean itself, worded per locale by `messages.activityValueTrue` /
+ * `messages.activityValueFalse`.
+ */
 export interface ActivitySummaryValue {
   text: string;
   option?: string;
+  boolean?: boolean;
+}
+
+/** The catalogue key a boolean value is worded by. */
+function booleanMessageKey(value: boolean): 'activityValueTrue' | 'activityValueFalse' {
+  return value ? 'activityValueTrue' : 'activityValueFalse';
+}
+
+/** A boolean value in this plugin's ENGLISH catalogue: the writer's text, and every locale's floor. */
+export function englishBooleanWord(value: boolean): string {
+  const word = (enMessages as Record<string, unknown>)[booleanMessageKey(value)];
+  return typeof word === 'string' ? word : String(value);
 }
 
 /** A field change inside a `fieldChanges` summary. */
@@ -208,7 +225,9 @@ export function composeActivitySummary(
       const valueIn = (field: string, value: ActivitySummaryValue): string =>
         value.option !== undefined
           ? (translate(`objects.${message.object}.fields.${field}.options.${value.option}`) ?? value.text)
-          : value.text;
+          : typeof value.boolean === 'boolean'
+            ? (translate(`messages.${booleanMessageKey(value.boolean)}`) ?? value.text)
+            : value.text;
       return message.changes
         .map(
           (c) =>
@@ -228,7 +247,10 @@ export function composeStoredSummary(message: ActivitySummaryMessage, locale: Ac
 const SINGLE_TEMPLATE_KEYS: ReadonlySet<string> = new Set(['activityCreated', 'activityDeleted', 'activityUpdated']);
 const isStringList = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
 const isValue = (v: unknown): v is ActivitySummaryValue =>
-  isRecord(v) && typeof v.text === 'string' && (v.option === undefined || typeof v.option === 'string');
+  isRecord(v) &&
+  typeof v.text === 'string' &&
+  (v.option === undefined || typeof v.option === 'string') &&
+  (v.boolean === undefined || typeof v.boolean === 'boolean');
 
 /** A stored code, or `null` for anything this version cannot compose (it then stays as stored). */
 export function readActivitySummaryMessage(value: unknown): ActivitySummaryMessage | null {

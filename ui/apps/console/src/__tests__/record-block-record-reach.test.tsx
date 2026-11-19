@@ -85,6 +85,10 @@ import {
 // binding-reach probe: a hand-copied list would agree with itself.
 import '@object-ui/components';
 import '../register-plugins';
+// `@object-ui/plugin-form` too: the console registers its tags as lazy stubs
+// since its first load stopped carrying the package (objectstack#33581), and
+// this probe renders `record:line_items` synchronously, through its real renderer.
+import '@object-ui/plugin-form';
 
 /** The object every probed block is mounted against. */
 const PROBE_OBJECT = 'probe_object__c';

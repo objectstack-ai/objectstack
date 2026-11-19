@@ -534,6 +534,35 @@ describe("an organization's delete takes its entries with it (ruling Q4)", () =>
   });
 });
 
+/**
+ * A `cascade` dependent the walk's probe finds but the collect phase never
+ * held (a row a hook of this same cascade wrote after the set was collected)
+ * is no member of the root's entry. It is deleted by id, as the root of its
+ * own cascade, so it keeps an entry of its own; a cascade batch (one predicate
+ * delete per chunk, which opens no entry) takes only the collected members.
+ */
+describe('a cascade dependent written after the set was collected keeps its own entry', () => {
+  it('is deleted by id with an entry of its own, while the collected members stay rows of the root entry', async () => {
+    const { engine, driver } = await makeEngine();
+    seedAccountTree(driver);
+    // The contacts are batched; their before phase runs ahead of their own
+    // walk, which probes the notes: n9 lands between the collect and that probe.
+    engine.on('beforeDelete', 'contact', (ctx: any) => {
+      if (ctx.input?.id === 'c1') driver.seed('note', { id: 'n9', body: 'late', contact: 'c1' });
+    });
+
+    await engine.delete('account', { where: { id: 'acc1' }, ...USER } as any);
+
+    expect(driver.rowsOf('note')).toHaveLength(0);
+    const entries = entriesOf(driver);
+    expect(entries.map((e) => `${String(e.object_name)}/${String(e.record_id)}`).sort()).toEqual(['account/acc1', 'note/n9']);
+    const root = entries.find((e) => e.object_name === 'account')!;
+    expect((root.snapshot as any).rows.map((r: any) => `${r.object}/${r.id}`)).toEqual([
+      'account/acc1', 'contact/c1', 'contact/c2', 'note/n1',
+    ]);
+  });
+});
+
 describe('cascadeMembersInOrder', () => {
   it('lists the root first, then breadth-first along the cascading edges, then any member no edge reached', () => {
     const set: CascadeDeleteSet = {

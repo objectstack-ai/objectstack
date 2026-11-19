@@ -17,7 +17,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/core 18.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: platform
   tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
@@ -136,8 +136,7 @@ That read's `contributions` lists what other packages add to the base, one entry
 
 An ObjectStack app is a **simplified implementation of business features**:
 author metadata under the platform's spec and check it
-with the `os` commands ([Verify your work](./references/operations.md#verify-your-work)). Never rebuild
-what the platform owns.
+with the `os` commands ([Verify your work](./references/operations.md#verify-your-work)).
 
 - **Business features belong in the app; capability belongs in the platform.**
   A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
@@ -230,7 +229,7 @@ Two packages exist:
 | Package | Export | Use When |
 |:--------|:-------|:---------|
 | `@objectstack/hono` | `createHonoApp({ kernel, prefix })` | You own the server: embed ObjectStack routes in your own Hono app / deploy target. |
-| `@objectstack/plugin-hono-server` | `HonoServerPlugin` | ObjectStack owns the server: a kernel plugin that hosts the Hono app and opens the listening socket (this is what `os dev` / `os serve` register). |
+| `@objectstack/plugin-hono-server` | `HonoServerPlugin` | ObjectStack owns the server: a kernel plugin that hosts the Hono app and opens the listening socket. |
 
 There are **no** `@objectstack/adapter-*` packages. To integrate another
 framework, mount the Hono app (a web-standard `fetch` handler) or call the
@@ -326,7 +325,7 @@ The authoritative list is `PLATFORM_CAPABILITY_TOKENS`
 (`@objectstack/spec`, `kernel/platform-capabilities.ts`) — an unknown token is
 **rejected by `defineStack` at authoring time**, not at boot.
 
-Five rules that change what you write:
+Six rules that change what you write:
 
 - **Precedence:** `requires` › `tiers` › `--preset` › built-in default. An
   explicit instance in `plugins:` always shadows capability resolution.
@@ -341,6 +340,14 @@ Five rules that change what you write:
 - **Under `--preset minimal`, pair `triggers` with `job`:** `triggers` alone
   arms record-change triggers; schedule and time-relative ones run on the job
   service, so scheduled flows stay silent.
+- **AI-door confirmation is a service you register.** `mcp`'s `run_action` and
+  `resume_run` never run an action declaring `ai.requiresConfirmation: true` on
+  the call, and refuse any call that sends `confirm`. Register an
+  `IActionConfirmationService` under `'ai.actionConfirmation'` and the person gets
+  the hand-off (`status: 'pending_confirmation'`, a `pendingId`); with none (the
+  open build) the call is refused 428, `details.reason: 'no_confirmation_service'`.
+  An AI service account is refused `service_account`; a stdio client asked through
+  `elicitation`, `declined` / `cancelled` / `timed_out`: objectstack-ai → **MCP**.
 
 ### `onEnable` — where an app binds runtime code
 

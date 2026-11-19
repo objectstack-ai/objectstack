@@ -240,6 +240,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Hecho",
           fields: {
             email: "Correo electrónico",
+            pendingAgain: "Ya pendiente",
             notApplied: "Ya estaba pendiente, así que no se aplicó (configúralo en el registro)",
             managerError: "Responsable",
             "host.reason": "Invitación no enviada"
@@ -263,6 +264,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "Ya pendientes, avisados de nuevo",
             "summary.failed": "No añadidos",
             rows: "Resultado por fila"
+          },
+          columns: {
+            rows: {
+              row: "Fila",
+              email: "Correo electrónico",
+              ok: "Correcto",
+              alreadyPending: "Ya pendiente, avisado de nuevo",
+              "host.notified": "Organización de alojamiento avisada",
+              "host.reason": "Por qué no se avisó",
+              "error.message": "No añadido porque",
+              notApplied: "No aplicado (configúralo en el registro)",
+              managerError: "Responsable"
+            }
           }
         }
       },

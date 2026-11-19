@@ -48,12 +48,19 @@
  *     `DRIVER_ROWS` is keyed by it (`satisfies Record<BuiltinDriverId, ...>`),
  *     and a case asserts the key sets are equal, so a new builtin with no row
  *     fails typecheck and this file.
- *   - **timezone class**: UTC, unset, and any other zone. No enum declares
- *     them; the engine's `tzRequiresInMemory` does, inline. `ZONE_CLASSES`
- *     declares each class's probes and the tier the engine gives it, and a
- *     case asserts that tier on a driver that groups every granularity, so a
- *     probe the engine moves to another class is red. `Etc/UTC` is a probe of
- *     the in-memory class: the engine treats only the literal `UTC` as UTC.
+ *   - **timezone class**: UTC (and every name the runtime resolves to it),
+ *     unset, an IANA area/location zone, and a zone that resolves to no
+ *     area/location name. No enum declares them; the engine's
+ *     `judgeBucketZone` does (objectql `engine-delete-and-aggregate.ts`).
+ *     `ZONE_CLASSES` declares each class's probes and the tier the engine
+ *     gives it, and a case asserts that tier on a driver that groups every
+ *     granularity, so a probe the engine moves to another class is red.
+ *     [#33697] `Etc/UTC` and `GMT` are probes of the UTC class: the engine
+ *     reads the resolved name (review item d). An area/location zone is
+ *     pushed down, zone included, on a driver declaring
+ *     `supports.zonedDateBucketing` (PostgreSQL) and bucketed in memory on
+ *     every other, and each face asserts which (ADR-0053 Phase 2 D2 as
+ *     amended); `CST` is a probe of it, asked of the hook as `America/Chicago`.
  *   - **granularity**: `TimeUpdateInterval.options`, the enum
  *     `timeDimensions[].granularity` parses (derived from `DateGranularity`).
  *     The rows are generated from it, so a new granularity has its cells the
@@ -175,19 +182,34 @@ const quiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return q
 
 type Tier = 'pushdown' | 'in-memory';
 
-/** The timezone classes, each with its probes and the tier the engine gives a date bucket in it. */
-const ZONE_CLASSES: ReadonlyArray<{ label: string; probes: ReadonlyArray<string | undefined>; tier: Tier }> = [
-  { label: 'UTC', probes: ['UTC'], tier: 'pushdown' },
+/**
+ * The timezone classes, each with its probes and the tier the engine gives a
+ * date bucket in it on a driver that does not declare
+ * `supports.zonedDateBucketing`. `zoned` marks the class a driver declaring
+ * it takes down instead, with the zone (see {@link tierOn}).
+ */
+const ZONE_CLASSES: ReadonlyArray<{ label: string; probes: ReadonlyArray<string | undefined>; tier: Tier; zoned?: true }> = [
+  { label: 'UTC', probes: ['UTC', 'Etc/UTC', 'GMT'], tier: 'pushdown' },
   { label: 'unset', probes: [undefined], tier: 'pushdown' },
-  { label: 'any other zone', probes: ['Asia/Shanghai', 'America/New_York', 'Etc/UTC'], tier: 'in-memory' },
+  { label: 'an area/location zone', probes: ['Asia/Shanghai', 'America/New_York', 'CST'], tier: 'in-memory', zoned: true },
+  { label: 'no area/location name', probes: ['+08:00', 'EST5EDT'], tier: 'in-memory' },
 ];
+
+/** The tier the engine gives `zoneClass` on a driver whose `supports` is `supports`. */
+const tierOn = (zoneClass: (typeof ZONE_CLASSES)[number], supports: unknown): Tier =>
+  zoneClass.zoned && (supports as { zonedDateBucketing?: unknown } | undefined)?.zonedDateBucketing === true
+    ? 'pushdown'
+    : zoneClass.tier;
+
+/** The runtime's resolved name for `zone`, the one the engine and the echo push down. */
+const resolvedZone = (zone: string): string => new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions().timeZone;
 
 /** The surface of a driver this pin reads: the engine's inputs and the bridges' inputs. */
 interface EnumeratedDriver {
   readonly name: string;
   readonly supports?: unknown;
   readonly dialectName?: unknown;
-  dateBucketSql?(objectName: string, field: string, granularity: string): unknown;
+  dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): unknown;
   connect(): Promise<void>;
   aggregate(...args: unknown[]): Promise<unknown>;
   find(...args: unknown[]): Promise<unknown>;
@@ -390,14 +412,16 @@ async function serve(face: DriverFace) {
     return Array.isArray(result) ? result : (result as { rows: unknown[] }).rows;
   };
 
-  /** The driver's own answer for this bucket, as the bridge receives it. */
-  const expression = (granularity: string): string | undefined => {
+  /** The driver's own answer for this bucket, as the bridge receives it (with the resolved zone for a zoned one). */
+  const expression = (granularity: string, zone?: string): string | undefined => {
     if (typeof driver.dateBucketSql !== 'function') return undefined;
-    const answered = driver.dateBucketSql(DEAL, 'closed_at', granularity);
+    const answered = zone === undefined
+      ? driver.dateBucketSql(DEAL, 'closed_at', granularity)
+      : driver.dateBucketSql(DEAL, 'closed_at', granularity, zone);
     return typeof answered === 'string' && answered !== '' ? answered : undefined;
   };
 
-  return { ask, expression, run, release: async () => { await face.release?.(driver); } };
+  return { ask, expression, run, supports: driver.supports, release: async () => { await face.release?.(driver); } };
 }
 
 describe('[#21647] the echo of a date bucket: driver x timezone class x granularity', () => {
@@ -444,7 +468,15 @@ describe('[#21647] the echo of a date bucket: driver x timezone class x granular
               const { tiers, rows, querySql, dryRun } = await served.ask(granularity, probe);
               expect(tiers, 'the engine reached the driver exactly once').toHaveLength(1);
               const [tier] = tiers;
-              const expression = served.expression(granularity);
+              // [#33697] Which road the engine takes for this class on this
+              // driver, D2 as amended: a face whose granularities all push
+              // down takes a zoned class down only with the bit.
+              if (zoneClass.zoned && tierOn(zoneClass, served.supports) === 'pushdown') {
+                expect(tier, 'a driver declaring zonedDateBucketing groups the zone itself').toBe('pushdown');
+              } else if (zoneClass.tier === 'in-memory') {
+                expect(tier, 'a zone this driver does not bucket stays in memory').toBe('in-memory');
+              }
+              const expression = served.expression(granularity, zoneClass.zoned ? resolvedZone(probe!) : undefined);
               const printed =
                 expression !== undefined &&
                 (tier === 'pushdown' ||

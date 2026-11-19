@@ -261,14 +261,15 @@ decision.
 
 ## What the agent gets
 
-Thirteen tools, generated from your metadata, and two more for files where the
-storage service is installed:
+Thirteen tools, generated from your metadata, two more for files where the
+storage service is installed, and two for governed metrics where the analytics
+service is installed:
 
 | Tool | What it does |
 |:---|:---|
 | `list_objects` / `describe_object` | Discover which objects exist and their fields |
 | `validate_expression` | Check a CEL expression against an object's schema before authoring it into a formula, validation, or flow condition |
-| `query_records` / `get_record` | Read data (list queries are capped at 50 rows per page by default) |
+| `query_records` / `get_record` | Read data (list queries are capped at 50 rows per page by default); `expand` and `related` read related records in the same call |
 | `aggregate_records` | Grouped aggregation (registered when the active driver supports it) |
 | `create_record` / `update_record` / `delete_record` | Write data |
 | `delete_records` | Delete many records of one object, by a filter or an id list, at most 200 per call (an OAuth token needs both `data:read` and `data:write`) |
@@ -276,6 +277,122 @@ storage service is installed:
 | `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
 | `read_file` | Read a file a record carries: its text (text files, PDF, Word `.docx`) or the image itself, with its size, the byte cap and a short-lived download link |
 | `create_upload_link` | Hand the user a single-use link that uploads a file onto a record's file field or its attachments (up to 10 files, sent together, for a multi-file field) |
+| `list_datasets` | List the governed datasets (business metrics) you may query: their measures and dimensions with business labels, descriptions and synonyms, and which of the question's words each one matches exactly |
+| `query_dataset` | Compute a governed metric by the names `list_datasets` gives; the answer carries its provenance (the dataset and measures used) |
+
+### Each X with its latest Y: `latestPer`
+
+"Each account with its latest deal" is one `query_records` call. `latestPer`
+names the groups and the order that picks each group's row:
+
+```json
+{
+  "objectName": "crm_opportunity",
+  "where": { "stage": { "$ne": "closed_won" } },
+  "latestPer": { "by": ["account"], "orderBy": [{ "field": "close_date", "order": "desc" }] }
+}
+```
+
+- `by` takes 1 to 3 fields; `orderBy` takes 1 to 3 keys, each `asc` or `desc`.
+  The answer is one row per group: the group's first row in that order. A tie
+  goes to the record id, in the direction of the last key; an empty order value
+  ranks last.
+- The row is chosen among the rows the caller may read and the `where` admits:
+  a group whose newest row is hidden from the caller answers its newest row the
+  caller can read. Your own `orderBy`, `fields` and `offset` apply to the
+  answered rows.
+- `limit` counts groups (capped at 50, like any list). The answer is
+  `{ object, records, hasMore }` with no `total`; when more groups exist than
+  came back it also carries `truncated: true`.
+- A partition or order field the caller may not read is refused, as it is in
+  `orderBy`. A computed, JSON or multi-value field, or a dotted path, is refused
+  as a partition or order field.
+- The SQL drivers serve it (Postgres, MySQL, SQLite, and Turso on a local or
+  embedded-replica database). Elsewhere (the in-memory driver, Turso's remote
+  connection, MongoDB) the call is refused with `INVALID_QUERY` before anything
+  is read, as it is for an object with an `afterFind` hook or object-scoped read
+  middleware.
+
+### A record with its related records: `expand` and `related`
+
+`query_records` takes `expand`: up to 3 of the object's lookup, master-detail,
+user or tree fields. Each one comes back as the record it names, one level
+deep:
+
+```json
+{ "objectName": "crm_opportunity", "expand": ["account", "owner_id"] }
+```
+
+`get_record` takes `related`: up to 3 child objects that point at the record,
+each answered as a list of at most 20 rows (`limit` lowers it):
+
+```json
+{
+  "objectName": "crm_account",
+  "recordId": "acc_1",
+  "related": [
+    { "object": "crm_opportunity", "orderBy": [{ "field": "close_date", "order": "desc" }] },
+    { "object": "crm_activity", "field": "account", "limit": 5 }
+  ]
+}
+```
+
+- The answer is then `{ record, related: [{ object, field, records, total, hasMore }] }`.
+  A list with more rows than came back also carries `truncated: true`.
+- `field` is the child's field that points at the record. It can be left out
+  when the child has exactly one such field.
+- A related list is filtered only by the link to the record. It takes the
+  child's own `fields` and `orderBy`, and no other filter.
+- Every expanded or related object is read as you, under that object's
+  permissions, row-level security and field masking. A field you may not read is
+  not offered for `expand` or as a link.
+- The record and each related list name the fields withheld from them in
+  `withheldFields`, as a plain `get_record` and `query_records` do.
+- Every object a new read shape reaches is judged by the MCP read guard exactly
+  as the object the call names. An object the guard refuses (a system object
+  that is not opted into AI reads) refuses the whole call with
+  `PERMISSION_DENIED` before anything is read. A related object that is not
+  served to you refuses it too. An expanded field is different: when the guard
+  admits its object but you may not read the record it names (no permission on
+  that object, or a row it hides from you), the call is answered and the field
+  keeps its stored id.
+- Each related list carries the delegation notice (`delegationNarrowed`,
+  `warning`) that `query_records` carries when the agent ceiling narrowed the
+  read.
+- A name that is not a relationship field, or a `field` that does not point at
+  the record, is refused with `INVALID_FIELD`.
+
+### Governed metrics and the `initialize` instructions
+
+`list_datasets` and `query_dataset` are registered with the `data:read` scope,
+and only where the analytics service is installed. Over HTTP, the server's
+`initialize` answer (`result.instructions`) tells the client how to choose
+between a governed metric and an object query, because a client reads a tool's
+description only after it has chosen that tool. Where both dataset tools are
+registered for the connection, the instructions say: look for a governed metric
+first by calling `list_datasets` with the question's business words; a word
+matches only when it equals a name, label or synonym; each word with exactly one
+measure match is answered with `query_dataset`, and two such words are two
+metrics computed both; several matches are a question for the user; a word with
+no match but with `candidates` in the answer (members offered as possible
+readings) is the same question, listing each candidate's label, dataset label
+and description, and is never treated as a match; no match and no candidates
+falls back to `query_records` / `aggregate_records`, saying the answer is not
+from a governed metric. A token without `data:read` gets neither tool and no
+such sentence.
+
+The instructions also name the published skills package and the version to
+install, which is the server's own version
+(`Published skills: @objectstack/skills <version>`), with the command that
+installs it into your agent's skills directory, with or without a project:
+`os skills install --version <version>`, or
+`npx -p @objectstack/cli@<version> os skills install --version <version>` where
+the CLI is not installed. If you only connected an MCP client and have no
+project, run it in the directory your agent works in; it writes
+`.claude/skills/` there (`--dir` names another). See
+[Skills](/docs/ai/skills#installing-skills) for updating and checking it. A deployment that sets
+the MCP plugin's `instructions` option serves that text as written instead, and
+the local stdio server's instructions carry neither part.
 
 ### Files: `read_file` and `create_upload_link`
 
@@ -418,8 +535,11 @@ can reach is the **default exposure policy (v1)**:
   an organization, re-enabling an OAuth application) are exposed. Destructive
   lifecycle acts (banning a user, revoking a session or an API key, removing a
   member, deleting a team, leaving an organization) are exposed with
-  `ai.requiresConfirmation: true`, so `run_action` refuses them until the call
-  carries `confirm: true`. Acts that mint a credential or a session, change
+  `ai.requiresConfirmation: true`, so `run_action` runs them only once the
+  person confirms: in the client when it supports elicitation and the
+  connection can carry the question, and otherwise it hands each one to the
+  person in the app, or refuses it (`428`) on a server with no
+  pending-confirmation service. Acts that mint a credential or a session, change
   ownership or a sign-in factor, or destroy an account or an organization
   (impersonating a user, setting a password, creating an API key, transferring
   ownership, deleting an organization) declare nothing and are not listed. The
@@ -430,7 +550,10 @@ can reach is the **default exposure policy (v1)**:
 - **An approver's decisions are exposed to the approver's agent.** The four
   decisions on an approval request (`sys_approval_request`): approve, reject,
   reassign and send back, are exposed with `ai.requiresConfirmation: true`, so
-  `run_action` decides only once the call carries `confirm: true`. Each forwards
+  `run_action` decides only once the approver confirms: in the client when it
+  supports elicitation and the connection can carry the question, and
+  otherwise in the app, or the call is refused (`428`) on a server with no
+  pending-confirmation service. Once confirmed, each forwards
   to its approvals route as the caller, and the approval service admits the
   same people the console's buttons admit: a current approver of the request,
   and, for approve, reject and reassign, the administrator who may override it.
@@ -498,6 +621,31 @@ answers it as it answers an unknown prompt name. A skill that binds no tool is
 offered as before. When a prompt you expect is missing, connect with a grant
 that registers the skill's tools, or bind the skill only to tools its intended
 connections serve.
+
+**A skill written for the in-product agents opts out.** The binding answers
+whether a connection *can* run a playbook, not whether the playbook is written
+for MCP: a skill can bind tools MCP serves under the same names
+(`create_record`, `action_*` through `run_action`) and still tell the model to
+call in-product tools or wait for the in-product approval card. Set
+`mcpPrompt: false` on such a skill and it is never offered as a prompt:
+`prompts/list` leaves it out and `prompts/get` answers it as an unknown prompt
+name, on every connection (HTTP and stdio) and whatever its `tools`. (The
+stdio server lists its prompts once, at boot, so a skill switched to
+`mcpPrompt: false` while it runs stays listed until restart; its `prompts/get`
+answers unknown at once.) Leave the key out, or set `true`, and the skill is
+offered as above. The key changes
+nothing on the in-product runtime: the `ask` / `build` agents resolve, bind
+and activate the skill exactly as before.
+
+```typescript
+export const RecordWritingSkill = defineSkill({
+  name: 'record_writing',
+  label: 'Record Writing',
+  instructions: 'Open the record, propose the change, and wait for the user to confirm on the card.',
+  tools: ['create_record', 'update_record'],
+  mcpPrompt: false, // written for the in-product agents only
+});
+```
 
 **Only the instructions half projects.** A skill's `tools` / `surface` /
 `triggerConditions` are bound by the **in-product agent runtime** (the `ask` /
@@ -572,16 +720,44 @@ drive this MCP server. Same word, different layer.
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.
 - An action can also declare `ai.requiresConfirmation`; destructive-looking
-  actions (`confirmText`, danger variants) default to requiring it.
+  actions (`confirmText`, danger variants) are listed with
+  `requiresConfirmation: true` by default, so a client asks its human first.
+- **A person confirms a declared-gated action, in the client or in the app.**
+  When the author declared `ai.requiresConfirmation: true`, the agent's call
+  on `run_action` or `resume_run` runs only once the person the agent acts for
+  confirms it. When the client supports elicitation and the connection can
+  carry the question (a stdio connection, today), the person is asked in the
+  client: accept runs the call once; decline, dismissal or no answer in time
+  refuses it (`ACTION_CONFIRMATION_REQUIRED`, `details.reason` `declined`,
+  `cancelled` or `timed_out`). Otherwise the tools do not run the action on
+  the call: they hand it to the person and answer
+  `status: "pending_confirmation"` with a `pendingId`, and the person approves
+  or rejects it in the app. A server with no
+  pending-confirmation service refuses the call (`428`
+  `ACTION_CONFIRMATION_REQUIRED`, `details.reason: "no_confirmation_service"`),
+  and the person performs the action in the app. Neither tool takes `confirm`:
+  a call that carries it is refused, on every action, and the agent resends
+  without it.
 - **An AI service account does not confirm an action for itself.** An action
   declaring `ai.requiresConfirmation: true` refuses an AI service account's key
   (`428` `ACTION_CONFIRMATION_REQUIRED`) at `run_action`, `resume_run` and REST
   `/actions`, whatever the call carries; a person runs that action.
 - **`delete_record` needs `confirm: true` on every call.** A record delete over
-  MCP is permanent, so the tool refuses a call without it with `run_action`'s
+  MCP is destructive, so the tool refuses a call without it with `run_action`'s
   refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, its `details.actionName`
-  naming `delete_record`) and deletes nothing. The agent asks its human, then retries
-  with `confirm: true`; the flag asserts an approval, it does not obtain one.
+  naming `delete_record`) and deletes nothing. A request in which the human
+  names the record to delete, with exactly one record matching, is the human's
+  approval of that delete: the agent sends `confirm: true` on that call,
+  without asking again. When the name matches more than one record, or the
+  request does not identify one record, the agent does not delete yet: it lists
+  the candidates, asks the human which one, and sends `confirm: true` only
+  after the answer. The flag asserts an approval, it does not obtain one. A
+  deleted business record goes to the recycle bin, where it can be restored
+  until the deployment's retention ends (30 days by default); a record of a
+  platform object (`sys_`, `cloud_`, `ai_`), or any record on a deployment
+  with no recycle bin, is deleted permanently. The answer names the
+  recycle-bin entry as `recycleBinEntryId`; an answer without one means the
+  delete was permanent.
   REST `DELETE /api/v1/data/:object/:id` and `update_record` take no
   confirmation.
 - **`delete_records` takes the same gate, and its refusal is the preview.** A
@@ -631,7 +807,8 @@ call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 # → {"result":{"serverInfo":{"name":"objectstack",...},"capabilities":{"tools":{...},"prompts":{}}},...}
 
 call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"[a-z_]*"'
-# → the thirteen tools, list_objects … resume_run (fifteen with read_file and create_upload_link where storage is installed)
+# → the thirteen tools, list_objects … resume_run (plus read_file and create_upload_link where storage is installed,
+#   and list_datasets and query_dataset where the analytics service is installed)
 
 call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_records","arguments":{"objectName":"crm_opportunity","limit":3}}}'
 # → {"result":{"content":[{"type":"text","text":"{ \"object\": \"crm_opportunity\", \"records\": [ ... ], \"total\": 23, \"hasMore\": true }"}]}}

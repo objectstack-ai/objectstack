@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { BulkActionDefSchema, BulkActionParamSchema } from './bulk-action.zod';
+import { BulkActionDefSchema, BulkActionParamSchema, BulkActionResultSchema } from './bulk-action.zod';
 import { FieldSchema } from '../data/field.zod';
 import { formatZodError } from '../shared/error-map.zod';
 
@@ -437,6 +437,104 @@ describe('BulkActionDefSchema — the def shape is typed, not `z.any()`', () => 
       const issues = paramIssues({ min: 1, max: 9, step: 1 });
       const occurrences = issues.split('widget-config keys like').length - 1;
       expect(occurrences).toBe(1);
+    });
+  });
+});
+
+describe('BulkActionResultSchema — the per-row outcome an aggregate handler may resolve with', () => {
+  const parse = (value: unknown) => BulkActionResultSchema.safeParse(value);
+  const paths = (value: unknown): string[] => {
+    const r = parse(value);
+    return r.success ? [] : r.error.issues.map((i) => `${i.path.join('.')}:${i.code}`);
+  };
+
+  describe('— accepts', () => {
+    it('the full shape: rows written and rows refused, each refusal with its own reason', () => {
+      const r = parse({ succeeded: ['opp_1', 'opp_3'], failed: [{ id: 'opp_2', message: 'Plan B is Closed Won and was not moved.' }] });
+      expect(r.success).toBe(true);
+      expect(r.data).toEqual({ succeeded: ['opp_1', 'opp_3'], failed: [{ id: 'opp_2', message: 'Plan B is Closed Won and was not moved.' }] });
+    });
+
+    it('empty lists: a run that wrote every row, and one that wrote none', () => {
+      expect(parse({ succeeded: ['opp_1', 'opp_2'], failed: [] }).success).toBe(true);
+      expect(parse({ succeeded: [], failed: [{ id: 'opp_1', message: 'locked' }] }).success).toBe(true);
+      expect(parse({ succeeded: [], failed: [] }).success).toBe(true);
+    });
+
+    it('members beyond the two lists, kept as written and given no meaning (a handler may return a summary too)', () => {
+      const value = { succeeded: ['opp_1'], failed: [], summary: '1 opportunity moved', failed_total: 0 };
+      const r = parse(value);
+      expect(r.success).toBe(true);
+      expect(r.data).toEqual(value);
+    });
+  });
+
+  describe('— refuses', () => {
+    it('a non-string id, in either list', () => {
+      expect(paths({ succeeded: [42], failed: [] })).toEqual(['succeeded.0:invalid_type']);
+      expect(paths({ succeeded: [], failed: [{ id: 7, message: 'locked' }] })).toEqual(['failed.0.id:invalid_type']);
+    });
+
+    it('a `failed` entry without its `message`', () => {
+      expect(paths({ succeeded: [], failed: [{ id: 'opp_2' }] })).toEqual(['failed.0.message:invalid_type']);
+    });
+
+    it('a value missing either list (the planned reader reports it as unreadable, never as full success)', () => {
+      expect(paths({ succeeded: ['opp_1'] })).toEqual(['failed:invalid_type']);
+      expect(paths({ failed: [] })).toEqual(['succeeded:invalid_type']);
+    });
+
+    it('the neighbouring shapes: the data plane\'s batch counts and the console\'s BulkWriteResult', () => {
+      // `BatchUpdateResponseSchema` spells `succeeded` / `failed` as COUNTS with
+      // the rows under `results`; `BulkWriteResult` names failures
+      // `errors[].error`. Neither is this shape, and neither may parse as it.
+      expect(paths({ success: false, total: 2, succeeded: 1, failed: 1, results: [{ id: 'opp_1', success: true, index: 0 }] }))
+        .toEqual(['succeeded:invalid_type', 'failed:invalid_type']);
+      expect(paths({ succeeded: 1, errors: [{ id: 'opp_2', error: 'locked' }] }))
+        .toEqual(['succeeded:invalid_type', 'failed:invalid_type']);
+      expect(paths({ succeeded: ['opp_1'], failed: [{ id: 'opp_2', error: 'locked' }] }))
+        .toEqual(['failed.0.message:invalid_type']);
+    });
+  });
+
+  describe('— the counting rules are the reader\'s, so the shape admits what they resolve', () => {
+    it('a duplicate id and an id in both lists parse; the planned reader counts the duplicate once and the overlap as failed', () => {
+      expect(parse({ succeeded: ['opp_1', 'opp_1', 'opp_2'], failed: [{ id: 'opp_2', message: 'locked' }] }).success).toBe(true);
+    });
+  });
+
+  describe('— CONTROL: no per-row result keeps the one-outcome report', () => {
+    // The shape is optional. A handler that resolves with nothing, or with a
+    // value of its own, is not a per-row result, so the reader falls back to
+    // the one-outcome report it gives today. Nothing about the action or the
+    // def changes for it: the aggregate def still parses as it always did.
+    it('nothing, null, or a value of the handler\'s own is not a per-row result', () => {
+      for (const value of [undefined, null, true, 3, 'done', [], { ok: true }, { summary: 'all moved' }]) {
+        expect(parse(value).success).toBe(false);
+      }
+    });
+
+    it('an aggregate def declares no result and parses as before', () => {
+      expect(BulkActionDefSchema.safeParse({ name: 'showcase_recalc_selection', operation: 'custom', execution: 'aggregate' }).success).toBe(true);
+    });
+  });
+
+  describe('— a rejection stays the one-outcome report (documents the ruling; not coverage: no reader exists yet)', () => {
+    // The result travels as the RESOLVE value only. A rejection reaches the
+    // console as the ADR-0112 refusal envelope, and the `/actions` door
+    // carries no structured body on a script or flow arm's throw, so a
+    // rejection is one outcome for the selection: the envelope is not a
+    // per-row result, even when a handler tried to attach one inside it.
+    it('the refusal envelope is not a per-row result', () => {
+      expect(parse({ success: false, error: { code: 'HOOK_ABORTED', message: 'Plan B is Closed Won' } }).success).toBe(false);
+    });
+
+    it('nor is an envelope that carries the shape inside its error', () => {
+      const attached = {
+        success: false,
+        error: { code: 'HOOK_ABORTED', message: 'Plan B is Closed Won', details: { succeeded: ['opp_1'], failed: [{ id: 'opp_2', message: 'locked' }] } },
+      };
+      expect(parse(attached).success).toBe(false);
     });
   });
 });

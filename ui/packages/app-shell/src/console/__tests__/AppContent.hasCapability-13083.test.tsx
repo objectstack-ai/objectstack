@@ -30,6 +30,9 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// The page reaches a dynamic `@objectstack/lint` import; its first load is paid
+// here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -137,6 +140,7 @@ function payload(systemPermissions: string[]): MePermissionsAuthenticatedRespons
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     systemPermissions,
     objects: { org_member: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false } },

@@ -57,10 +57,34 @@
  * stubs) keeps its existing behavior, and the caller can read the `false`.
  */
 
+import { permissionSetHoldersMeet } from '@objectstack/core';
+import { installedManifestsOf, isPairOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import {
   assertPermissionSetNotPackageDeclared,
+  classifyPackagedPermissionSet,
   type LayeredProbe,
 } from './packaged-permission-set-lock.js';
+
+/**
+ * [ADR-0150 D2/D9, ADR-0131 D6, #34226] Does a write of the permission set
+ * `name` addressed to the package `writer` override the set the package
+ * `declarer` ships? A set is `(package, name)`, one set per namespace: it does
+ * when `writer` is the declarer's customization pair (ADR-0146, whatever
+ * namespace the pair declares), or a package the declarer meets under the ONE
+ * predicate the install gate and the save door's name rule ask
+ * (`permissionSetHoldersMeet`), the declarer itself included. The metadata protocol's seal judges the same
+ * three relations for the same write (`overridesShippedPermissionSet`,
+ * `protocol-packaged-base-refusal.ts`).
+ */
+function overridesDeclaredSet(ql: any, writer: string, declarer: string, name: string): boolean {
+  const installed = installedManifestsOf(ql?.registry as InstalledPackageSource | undefined);
+  if (isPairOf(writer, declarer, installed)) return true;
+  const namespaceOf = (packageId: string): string | undefined => {
+    const namespace = installed(packageId)?.namespace;
+    return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+  };
+  return permissionSetHoldersMeet(namespaceOf(writer), namespaceOf(declarer), name);
+}
 
 /** The packages a `409` refusal of a read naming no package names (ADR-0150 D5), or `undefined` for any other error. */
 function refusedPackageHolders(error: unknown): string[] | undefined {
@@ -80,6 +104,8 @@ export interface PermissionSetLockGateContext {
   body: unknown;
   /** [#32656] The caller's language ladder, stated by the write door (`MetadataAuthoringGateContext`). */
   userTextLocales?: readonly string[];
+  /** [ADR-0150 D2, #34226] The package the write is addressed to (`MetadataAuthoringGateContext`); absent for none. */
+  packageId?: string | null;
 }
 
 /**
@@ -109,6 +135,16 @@ export function registerPackagedPermissionSetLockGate(protocol: any, ql: any): b
           probe = { status: 'failed', reason: String((failure as Error)?.message ?? failure) };
         }
       }
+    }
+    // [ADR-0150 D2, #34226] A write a package addresses to its own set of a
+    // name only other namespaces' packages declare overrides none of their
+    // sets, so the lock does not judge it. A write naming no package, or one
+    // that overrides any declarer's set ({@link overridesDeclaredSet}), is
+    // judged as before; so is a name no source could classify.
+    const writer = typeof ctx.packageId === 'string' && ctx.packageId !== '' ? ctx.packageId : undefined;
+    if (writer !== undefined) {
+      const verdict = classifyPackagedPermissionSet(ctx.name, ql, probe);
+      if (verdict.status === 'packaged' && !verdict.packageIds.some((declarer) => overridesDeclaredSet(ql, writer, declarer, ctx.name))) return;
     }
     // A metadata-door save that targets a package-declared name is an
     // override of the shipped base whether or not an overlay row exists yet,

@@ -15,6 +15,13 @@
  * an ordinary label truncates and carries its full text in `title`, and a
  * terminal label wraps, as on the desktop rail (#25895).
  *
+ * objectstack#34595 replaced that row with the compact path: rail segments
+ * with no names, a summary line, and a stage list that names every stage in
+ * full. The phone `role="list"` read below is that stage list, so its labels
+ * wrap instead of truncating, and the two equal-share pins became pins on the
+ * compact path (the rest of the compact path is pinned in
+ * `record-path.compact-34595.test.tsx`).
+ *
  * The test DOM resolves no Tailwind, so this file reads class tokens and
  * attributes; the widths themselves are pinned in Chromium by
  * `e2e/record-path-phone-row.spec.ts`.
@@ -63,26 +70,33 @@ const labelOf = (stage: HTMLElement): HTMLElement =>
 const tokens = (el: HTMLElement): string[] => el.className.split(/\s+/).filter(Boolean);
 
 describe('record:path — the phone row fits and ellipsises (objectstack#26897)', () => {
-  it('every phone stage takes an equal share with a floor, instead of its content width', () => {
-    const phone = rows(mount())[1];
-    expect(tokens(phone)).toContain('sm:hidden');
+  it('every phone stage is one rail segment of an equal share, and one full line of the list (objectstack#34595)', () => {
+    const r = mount();
+    const phone = rows(r)[1];
+    const compact = phone.closest('[data-record-path-compact]') as HTMLElement;
+    expect(tokens(compact)).toContain('sm:@sm:hidden'); // objectstack#34696: viewport AND path width
+    const rails = Array.from(compact.querySelectorAll('[data-record-path-rails] > [data-stage-rail]')) as HTMLElement[];
+    expect(rails).toHaveLength(CASE_STAGES.length);
+    for (const rail of rails) {
+      expect(tokens(rail)).toContain('flex-1');
+      expect(tokens(rail)).toContain('min-w-0');
+    }
     for (const stage of within(phone).getAllByRole('listitem')) {
       const t = tokens(stage);
-      expect(t).toContain('flex-1');
-      expect(t).toContain('min-w-10');
-      expect(t).not.toContain('shrink-0');
+      expect(t).toContain('w-full');
+      expect(t).not.toContain('flex-1');
     }
   });
 
-  it('an ordinary phone label truncates and keeps its full text in title', () => {
+  it('an ordinary phone label is shown in full: it wraps instead of truncating (objectstack#34595)', () => {
     const phone = rows(mount())[1];
     for (const label of ['In Progress', 'Waiting on Customer', 'Resolution Proposed']) {
       const el = labelOf(stageNamed(phone, label));
       const t = tokens(el);
-      expect(t).toContain('truncate');
+      expect(t).toContain('[overflow-wrap:anywhere]');
       expect(t).toContain('min-w-0');
+      expect(t).not.toContain('truncate');
       expect(t).not.toContain('whitespace-nowrap');
-      expect(el).toHaveAttribute('title', label);
     }
   });
 
@@ -100,7 +114,7 @@ describe('record:path — the phone row fits and ellipsises (objectstack#26897)'
 
   it('CONTROL: the desktop rail is unchanged — no title, the ordinary label still truncates', () => {
     const desktop = rows(mount())[0];
-    expect(tokens(desktop)).toContain('sm:flex');
+    expect(tokens(desktop)).toContain('sm:@sm:flex'); // objectstack#34696: viewport AND path width
     const el = labelOf(stageNamed(desktop, 'Waiting on Customer'));
     expect(tokens(el)).toContain('truncate');
     expect(el).not.toHaveAttribute('title');

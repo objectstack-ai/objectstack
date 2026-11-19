@@ -1262,7 +1262,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 //
 //   LANE     a seat as the role table spells it: `domain:` or `repo:` plus a lowercase
 //            name (`domain:engine-core` carries a hyphen, measured on the label set),
-//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `review`, `qa`, `eval` or `queue`
+//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `l2-review` (old spelling `review`), `qa`, `eval` or `queue`
 //   N        the seat number, from 1
 //   ACCOUNT  the login a claim's `Account:` line carries — GitHub's own login rule
 //   SESSION  the full id, in the relay envelope's shape (`SESSION_SHAPE`, fleet-write/ops.mjs,
@@ -1286,7 +1286,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // ---------------------------------------------------------------------------
 
 /** The four parts' patterns, unanchored, in order — the ONE spelling every reader and writer composes from. */
-const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|review|qa|eval|queue)';
+const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|l2-review|review|qa|eval|queue)';
 const SIGNATURE_ACCOUNT_SOURCE = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
 /** The relay envelope's session shape without its anchors — `SESSION_SHAPE` in `fleet-write/ops.mjs`. */
 export const SEAT_SIGNATURE_SESSION_SOURCE = 'session_[A-Za-z0-9]{6,}';
@@ -9957,12 +9957,12 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 //
 // ## Why ONE requested account is worse than it looks, which is the whole row
 //
-// `hotlong` is also the login the maintainer's own sessions run as, AND the
-// author of some governed PRs. A request addressed only to it either lands in
-// the account that made it, or cannot be made at all — GitHub answers a review
-// request naming the PR's own author with 422. Meanwhile the account the
-// maintainer actually reads is never asked. So "requested one of the two" is
-// not half a channel; on an approver-authored PR it is frequently zero.
+// (History: written while `GOVERNED_APPROVERS` held two accounts; since 2026-11-17 it is `os-zhuang` alone.)
+// `hotlong` was also the login seat sessions run as, AND the author of some
+// governed PRs. A request addressed only to it either landed in the account that
+// made it, or could not be made at all — GitHub answers a review request naming
+// the PR's own author with 422. The union below stays correct for any set size,
+// and the author-identity 422 still applies to a PR authored by an approver.
 //
 // ⇒ Coverage here is a UNION over three fields, and each term is load-bearing:
 //
@@ -12969,6 +12969,9 @@ export function contractReviewVerdictLines(body) {
  *                               so the record fails CLOSED.
  *                 A delta record may also name what it closes by id alone
  *                 (`S1: closed.`), which mentions no grade.
+ *   securityTouching  the record's ONE `Security-touching:` line, three-valued
+ *                 (`contractReviewSecurityTouching` below) — the line the low-risk
+ *                 skills arm stands on, read by nobody else.
  *
  * Grammar measured on the records of PRs #33686, #33687, #33688 (both rounds),
  * #33711 (all three rounds), #33720, #33726 and #33736 (2026-11-15); nits are
@@ -13067,7 +13070,81 @@ export function contractReviewRecordReading(body) {
       } else if (!CONTRACT_REVIEW_GRADE_NEGATED.test(line.slice(0, mention.index))) unreadable.push(line.trim());
     }
   }
-  return { verdicts, failSpellings, findings: { open, unreadable: [...new Set(unreadable)] } };
+  return { verdicts, failSpellings, findings: { open, unreadable: [...new Set(unreadable)] }, securityTouching: contractReviewSecurityTouching(text) };
+}
+
+/**
+ * The key and the two values of the record's ONE machine line the LOW-RISK SKILLS ARM reads
+ * (`lowRiskArmVerdict`, `check-governed-merges.mjs`). `Security-touching: no` is the reviewer's
+ * statement that no changed hunk teaches permission, sharing, credential, token, authentication
+ * or other security behaviour — the teaching a path's name and a label cannot show; `yes` says
+ * one does. The arm stands on `no` alone.
+ */
+export const CONTRACT_REVIEW_SECURITY_TOUCHING_KEY = 'Security-touching';
+export const CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES = Object.freeze(['no', 'yes']);
+// A DECLARATION line: the key at the line's lead — behind a heading mark, quote, bullet or emphasis, inside
+// a code span, in any case, its two words joined by a hyphen, an underscore or blanks — then a colon.
+const CONTRACT_REVIEW_SECURITY_TOUCHING_LINE = new RegExp(CONTRACT_REVIEW_LINE_LEAD + '`?[*_]{0,3}security[-_ \\t]*touching[*_`]{0,3}[ \\t]*[:：]', 'i');
+
+/**
+ * The record's `Security-touching:` line, read off the WHOLE comment like its `VERDICT:` lines:
+ *
+ *   missing     no declaration line at all — every record written before the line existed;
+ *   read        the one bare line, with its value (`no` or `yes`);
+ *   unreadable  anything else, with the reason.
+ *
+ * Every declaration line counts, fenced and quoted ones included, and exactly ONE may exist:
+ * outside any code fence (`FENCE_LINE`, `FENCE_CLOSE_LINE`) and any `>` quote, indented at most
+ * three spaces, and with its list bullet, bold and a code span around the VALUE stripped reading
+ * EXACTLY `Security-touching: no` or `Security-touching: yes`. So a second declaration (a quoted
+ * `no` beside the record's own `yes`), trailing words (`no — wording only`), another value, a
+ * near-miss key (`Security touching:`), a fenced, quoted or code-indented line and a code span
+ * holding the KEY (the spelling that mentions the line) are each `unreadable` — the same
+ * strictness `readBareDeclaration` holds a PR body's `Clause-②:` line to.
+ * ⚠️ Not read: whether GitHub RENDERS the line. A bare line inside an HTML comment, a `pre` element
+ * or a code span opened on an earlier line is hidden or shown as code there, and a bare line directly
+ * under a quoted line, with no blank line between, is rendered inside that quote; each still reads
+ * here. Only an author the guard trusts can write a record, so the reader is not widened into a renderer.
+ *
+ * ⛔ Fail closed, in the one direction that matters: `missing`, `unreadable` and `yes` each
+ * keep the pull request at Tier H, and no reading here ever DEFAULTS to `no`. Pure.
+ */
+function contractReviewSecurityTouching(body) {
+  const key = CONTRACT_REVIEW_SECURITY_TOUCHING_KEY;
+  const hits = [];
+  let fence = null; // the OPEN fence — its character and run length — or null outside one
+  for (const line of String(body ?? '').split(/\r?\n/)) {
+    if (fence !== null) {
+      if (CONTRACT_REVIEW_SECURITY_TOUCHING_LINE.test(line)) hits.push({ line, fenced: true });
+      const c = FENCE_CLOSE_LINE.exec(line);
+      if (c !== null && c[1][0] === fence.ch && c[1].length >= fence.len) fence = null;
+      continue;
+    }
+    const f = FENCE_LINE.exec(line);
+    if (f !== null) {
+      fence = { ch: f[1][0], len: f[1].length };
+      continue;
+    }
+    if (CONTRACT_REVIEW_SECURITY_TOUCHING_LINE.test(line)) hits.push({ line, fenced: false });
+  }
+  if (hits.length === 0) return { state: 'missing' };
+  const unreadable = (reason) => ({ state: 'unreadable', reason });
+  // A quoted record line is comment text: flattened (no backtick, pipe or angle bracket survives) and cut.
+  const quote = (line) => `\`${String(line).replace(/[`|<>\r\n]+/g, ' ').trim().slice(0, 80)}\``;
+  if (hits.length > 1) return unreadable(`it carries ${hits.length} \`${key}:\` lines, and a record states exactly one`);
+  const [{ line, fenced }] = hits;
+  if (fenced) return unreadable(`its one \`${key}:\` line sits inside a code fence`);
+  if (/^[ \t]*>/.test(line)) return unreadable(`its one \`${key}:\` line is a quote (${quote(line)})`);
+  if (/^(?: {4,}| *\t)/.test(line)) return unreadable(`its one \`${key}:\` line is indented as code (${quote(line)})`);
+  const stated = line.replace(/^[ \t]*(?:[-*+][ \t]+)?/, '').replace(/\*\*/g, '');
+  // A code span that holds the KEY is how the line is MENTIONED — the template's legend, the review brief and every
+  // reason the arm prints spell it so — and a record that only mentions the line states nothing. The value alone
+  // may sit in a span (`Head-sha:` refuses a span holding its key the same way).
+  if (/^[^:：]*`/.test(stated)) return unreadable(`its one \`${key}:\` line holds the key inside a code span (${quote(line)}), which mentions the line and states nothing`);
+  const bare = stated.replace(/`/g, '').replace(/[ \t]+/g, ' ').trim();
+  const value = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.find((v) => bare === `${key}: ${v}`);
+  if (value === undefined) return unreadable(`its \`${key}:\` line reads ${quote(line)}, not exactly ${CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.map((v) => `\`${key}: ${v}\``).join(' or ')}`);
+  return { state: 'read', value };
 }
 
 // ---------------------------------------------------------------------------
@@ -15905,6 +15982,38 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
 // census of one mailbox's recent off-table bells — nothing is stopped (`stall`)
 // and nothing on the board contradicts itself in a way a write repairs
 // (`state`); the repair is the next bell, spelled from the table.
+//
+// The SIGNATURE half, a second row on the same mailbox. The reader also checks a
+// relay knock's signature against the seat roster (`seatSessionRoster`,
+// `knockSignature`): a knock whose signed session the seat it names does not list
+// reads `unlisted`, and the seat the mailbox serves ⛔ does not act on it
+// (`untrusted-text.md`). Without this row nobody was told one arrived. The sweep
+// builds the roster ONCE, from the listings it already holds — the open
+// `pm:seat` posts (`SEEN_LABEL_PAGES`), the open pulls (H7's) and the open
+// `pm:dispatched` cards' threads in `commentCache` (a card thread its seat's open
+// claim names knocks as that seat's delegate) — and hands it to the same
+// `mailboxEvents` call: ⛔ no second signature or roster parser here, and the
+// claim join buys NOTHING (`commentCache.get`, never a fetch).
+//
+// WHERE in the sweep, and why: the row runs AFTER the dispatch-liveness loop
+// (H50's completing walk), not beside the PR listing. Before that loop two
+// populations of open `pm:dispatched` cards have no whole thread in the cache:
+// (1) a card with no assignee — H2 reads only assigned cards, so nothing is
+// cached for it yet — and (2) a card whose first page came back full — whole only
+// once H50's walk completes it. H50 walks EVERY open `pm:dispatched` card, first
+// page included, so after it both populations are held, at no request beyond the
+// ones H50 already makes. What stays unheld is H50's own residue: a walk still
+// full at `H50_COMMENT_PAGE_CEILING` or one whose page failed. While such a card
+// is open the signature half stays UNJUDGED, every sweep, and the summary names
+// the card numbers so a seat can find them.
+//
+// A roster that cannot be read — a listing truncated at the page ceiling, or a
+// claimed card's thread not held whole, which would make a seat whose post sat
+// on an unread page, or its card thread, look unlisted — makes every
+// knock read `unlisted` by the reader's fail-closed rule; this row reads that as
+// UNJUDGED, lists nothing, and the summary says NOT MEASURED. A `listed` knock is
+// a consistency reading inside the fleet's trust root, never proof of who rang,
+// so it is not listed as clean either: this row names only the refusals.
 // ---------------------------------------------------------------------------
 
 /** H72's window: a bell is listed while it is younger than this, then ages out. */
@@ -15974,6 +16083,103 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
     'is a skills-lane finding, ⛔ never an invented key. ⛔ Report-only: nothing is written from this script. ' +
     `Out of scope: a comment older than ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h (a bell is an event and ages out), a ` +
     'closed mailbox, a mailbox whose comment page could not be read (unjudged, counted in the summary).'
+  );
+}
+
+/** The open listing names `noteOpenListing` records for the listings the H72 roster is read from. */
+export const H72_ROSTER_LISTINGS = Object.freeze({ posts: 'listIssues(pm:seat)', mailboxes: 'listOpenPullRequests', claims: 'listIssues(pm:dispatched)' });
+
+/**
+ * The listings the sweep hands `seatSessionRoster` (record-recognisers.mjs): first the open `pm:seat` posts and the
+ * open pulls it already holds. Either one is `null` — which the roster reads as `unreadable`, never as an empty listing —
+ * when the sweep's open listing of it was truncated at the page ceiling (`stats.openListingsTruncated`), or is not an
+ * array. A partial roster would read a knock from a seat whose post sat on an unread page as `unlisted`: a finding
+ * made up from a page nobody read. So it fails to UNJUDGED, never to a smaller roster. Pure.
+ *
+ * The third listing is the open `pm:dispatched` cards, each with its WHOLE thread (`{ card, rows }`): the roster
+ * lists the card thread a seat's open claim names (record-recognisers.mjs `claimThreadSession`). The threads are
+ * the ones the sweep already holds; ⛔ a card whose thread is missing or not whole (`complete` not true — a first
+ * page that came back full may hide the newest claim) makes `claims` null, and so does a truncated
+ * `pm:dispatched` listing: a card thread nobody read would read its delegate's knock `unlisted`. `unheld` names
+ * the numbers of the open `pm:dispatched` cards whose thread is not held whole, so the summary can name them (it is
+ * not a listing; the roster does not read it). Pure.
+ *
+ * @param {object[]} issues — the open issue rows the sweep listed (every label page; `pm:seat` rows are kept).
+ * @param {object[]} pulls — the open pull rows the sweep listed.
+ * @param {string[]} [truncated] — the listing names `noteOpenListing` recorded as truncated.
+ * @param {Map<number, { rows: object[], complete: boolean }>} [threads] — the comment threads the sweep holds, by card.
+ */
+export function h72RosterListings(issues, pulls, truncated = [], threads = new Map()) {
+  const cut = new Set(Array.isArray(truncated) ? truncated : []);
+  const held = (issue) => {
+    const thread = threads instanceof Map ? threads.get(issue.number) : undefined;
+    return thread?.complete === true && Array.isArray(thread.rows) ? { card: issue, rows: thread.rows } : null;
+  };
+  const dispatched = Array.isArray(issues)
+    ? issues.filter((issue) => issue && issue.state === 'open' && labelNames(issue).includes('pm:dispatched'))
+    : null;
+  const claims = dispatched === null || cut.has(H72_ROSTER_LISTINGS.claims) ? null : dispatched.map(held);
+  return {
+    posts:
+      !Array.isArray(issues) || cut.has(H72_ROSTER_LISTINGS.posts)
+        ? null
+        : issues.filter((issue) => labelNames(issue ?? {}).includes('pm:seat')),
+    mailboxes: !Array.isArray(pulls) || cut.has(H72_ROSTER_LISTINGS.mailboxes) ? null : pulls,
+    claims: claims === null || claims.includes(null) ? null : claims,
+    unheld: dispatched === null ? [] : dispatched.filter((issue) => !held(issue)).map((issue) => issue.number),
+  };
+}
+
+/**
+ * The NOT MEASURED reason for H72's signature half when the roster did not read: the roster's own gaps, then — when
+ * the claim threads are among them — the open `pm:dispatched` cards whose thread was not held whole, by number, so a
+ * seat can find them. Pure.
+ *
+ * @param {{ state?: string, gaps?: string[] } | null | undefined} roster — `seatSessionRoster`'s answer
+ * @param {{ unheld?: number[] } | null | undefined} listings — `h72RosterListings`'s answer
+ */
+export function h72RosterReason(roster, listings) {
+  const unheld = Array.isArray(listings?.unheld) ? listings.unheld : [];
+  const cards = unheld.length > 0 ? `; claim threads not held whole: ${unheld.map((n) => `#${n}`).join(', ')}` : '';
+  return `the seat roster could not be read (${(roster?.gaps ?? ['no reading']).join(', ')}${cards})`;
+}
+
+/**
+ * H72's signature row — null when clean or UNJUDGED, else the finding sentence: the knocks inside the window whose
+ * signature the seat they name does not list, by comment id, for the seat this mailbox serves.
+ *
+ * @param {object} reading — what `mailboxEvents(rows, roster)` (record-recognisers.mjs) made of the comment page;
+ *   each event carries `signature: { state, reason? }`. Any reading other than `read` is unjudged → null.
+ * @param {object} roster — what `seatSessionRoster` read. ⛔ Not `{ state: 'read' }` ⇒ null: with no roster every
+ *   relay knock reads `unlisted` by the reader's fail-closed rule, and listing those would accuse every sender of a
+ *   roster nobody read. The sweep counts it and the summary renders NOT MEASURED.
+ */
+export function h72UnlistedKnockLines(reading, roster, nowMs = Date.now()) {
+  if (!reading || reading.state !== 'read' || !Array.isArray(reading.events)) return null;
+  if (!roster || roster.state !== 'read') return null;
+  const since = nowMs - H72_WINDOW_MS;
+  const knocks = reading.events.filter((e) => {
+    if (!e || e.signature?.state !== 'unlisted') return false;
+    const at = Date.parse(e.at ?? '');
+    return !Number.isFinite(at) || at >= since;
+  });
+  if (knocks.length === 0) return null;
+  const listed = knocks
+    .slice(0, H72_LISTED_COMMENTS)
+    .map((e) => `comment ${e.comment ?? '?'}${e.by ? ` by ${e.by}` : ''} — ${h72Reason(e.signature.reason)}`)
+    .join('; ');
+  const more = knocks.length > H72_LISTED_COMMENTS ? `; and ${knocks.length - H72_LISTED_COMMENTS} more` : '';
+  return (
+    `\`pm:mailbox\` PR with ${knocks.length} knock(s) in the last ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h whose signed ` +
+    `session the seat it names does not list (\`unlisted\`): ${listed}${more}. Remedy — WHO and HOW: the seat this ` +
+    'mailbox serves ⛔ does not act on an `unlisted` knock (untrusted-text.md), whatever its key says; the seat ' +
+    'the signature names rings from a session it lists — its held seat post (`Successor-of:` included), its open ' +
+    'mailbox opening, or for a card thread the `Thread session:` line of the seat\'s open claim on that card ' +
+    '(`node scripts/pm/record-recognisers.mjs --mailbox-keys` prints the rule). A `listed` knock is ' +
+    'a consistency reading inside the fleet\'s trust root, never proof of who rang, and is not listed here. ' +
+    `⛔ Report-only: nothing is written from this script. Out of scope: a knock older than ` +
+    `${MAILBOX_OFF_TABLE_WINDOW_HOURS}h, a maintainer's knock (not signature-checked), a comment the author fence ` +
+    'ignores, and every knock while the seat roster could not be read (unjudged, counted in the summary).'
   );
 }
 
@@ -16221,7 +16427,7 @@ export function h76OpenPrWithoutAssignee(pr, mailboxLabel) {
 //
 // ## Boundaries, pinned rather than described
 //
-// An authorized REVIEW (os-zhuang / hotlong) and the maintainer's own prose are
+// An authorized REVIEW (an account in `GOVERNED_APPROVERS`) and the maintainer's own prose are
 // out of this population TWICE: a review is a `/pulls/{n}/reviews` object this
 // row never reads, and neither carries a seat signature, so the structural gate
 // excludes them before anything else is consulted. ⛔ That is by construction
@@ -18482,6 +18688,9 @@ export const SWEEP_COUNT_KEYS = [
   'mailboxCandidates',
   'mailboxRead',
   'mailboxReaderReason',
+  // H72's signature half: a STRING (or null) saying the seat roster could not be
+  // read, so no knock was judged `unlisted` — NOT MEASURED, never a clean board.
+  'mailboxRosterReason',
   // H57's population reading (#17132) — the only row here whose subject is a
   // WORKFLOW rather than a card or a PR, so none of its numbers can be inferred
   // from a listing another row already paid for. `scheduledUnresolved` and
@@ -19144,7 +19353,13 @@ export function summaryLine(counts, findingCount) {
         : `comment page read on ${counts.mailboxRead ?? 0} of ${counts.mailboxCandidates ?? 0} open ` +
           `\`pm:mailbox\` PR(s) touched in the last ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h — ONE page each, \`since\` ` +
           'the window start, and none for a quiet mailbox. An unread page leaves that mailbox UNJUDGED rather ' +
-          'than clean; a comment older than the window ages out, because a bell is an event and not state'
+          'than clean; a comment older than the window ages out, because a bell is an event and not state. ' +
+          `Unlisted knock signatures: ${
+            counts.mailboxRosterReason
+              ? `NOT MEASURED — ${counts.mailboxRosterReason}`
+              : 'judged on the same pages against the seat roster read off the open `pm:seat` posts and mailbox ' +
+                'openings this sweep already listed, at no fetch of its own'
+          }`
     }. ` +
     // H49's coverage pair (#16003). UNCONDITIONAL like every other window's,
     // and it carries the two disclosures this row owes: it fetches NOTHING (the
@@ -24063,54 +24278,6 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (orphan) findings.push([pr, 'H12', orphan]);
   }
 
-  // H72 (#28675) — the open mailboxes this listing already holds, read through
-  // the ONE doorbell reader. Both modules are imported HERE, lazily: the reader's
-  // module imports this one at module scope, and this point runs only after this
-  // module finished evaluating (banner above `h72NeedsThread`). A failed import
-  // silences the row, so it is recorded as the reason and rendered NOT MEASURED
-  // rather than as a clean board; a failed page drops that one mailbox, counted.
-  {
-    const nowMs = Date.now();
-    let reader = null;
-    try {
-      const [{ mailboxEvents }, { MAILBOX_LABEL }] = await Promise.all([
-        import('./record-recognisers.mjs'),
-        import('./mailbox-open.mjs'),
-      ]);
-      reader = { mailboxEvents, MAILBOX_LABEL };
-    } catch (err) {
-      stats.mailboxReaderReason = `the doorbell reader did not load (${String(err?.message ?? err).split('\n')[0]})`;
-    }
-    if (reader) {
-      const since = new Date(nowMs - MAILBOX_OFF_TABLE_WINDOW_HOURS * 3_600_000).toISOString();
-      for (const pr of seenPrs.values()) {
-        if (!h72NeedsThread(pr, reader.MAILBOX_LABEL, nowMs)) continue;
-        stats.mailboxCandidates = (stats.mailboxCandidates ?? 0) + 1;
-        // Every page of the window, oldest first as GitHub serves them, so the
-        // NEWEST bells are never the ones a single page leaves out. A window that
-        // outruns the ceiling is UNJUDGED, not judged on its oldest pages.
-        const rows = [];
-        let complete = false;
-        try {
-          for (let page = 1; page <= H72_COMMENT_PAGE_CEILING; page++) {
-            const batch = await rest(`/repos/${OWNER_REPO}/issues/${pr.number}/comments?since=${encodeURIComponent(since)}&per_page=100&page=${page}`);
-            rows.push(...(Array.isArray(batch) ? batch : []));
-            if (!Array.isArray(batch) || batch.length < 100) {
-              complete = true;
-              break;
-            }
-          }
-        } catch {
-          continue;
-        }
-        if (!complete) continue;
-        stats.mailboxRead = (stats.mailboxRead ?? 0) + 1;
-        const offTable = h72OffTableMailboxLines(reader.mailboxEvents(rows), nowMs);
-        if (offTable) findings.push([pr, 'H72', offTable]);
-      }
-    }
-  }
-
   // H76 — an open PR with no assignee, off the listing above, free. The mailbox
   // label is imported LAZILY for H72's reason (banner above `h72NeedsThread`);
   // a failed import leaves it unread, and every unowned PR then fires UNJUDGED.
@@ -24613,6 +24780,73 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // H19's, so the number cannot be misread as a per-card count.
   stats.dispatchRefTargets = refCache.size;
   stats.dispatchRefRead = [...refCache.values()].filter((r) => r.state !== 'unreadable').length;
+
+  // H72 (#28675) — the open mailboxes the PR listing above holds, read through
+  // the ONE doorbell reader. Placed HERE, after the dispatch-liveness loop, so
+  // every open `pm:dispatched` card's thread is in `commentCache` and walked
+  // (banner above `h72RosterListings`). Both modules are imported HERE, lazily: the reader's
+  // module imports this one at module scope, and this point runs only after this
+  // module finished evaluating (banner above `h72NeedsThread`). A failed import
+  // silences the row, so it is recorded as the reason and rendered NOT MEASURED
+  // rather than as a clean board; a failed page drops that one mailbox, counted.
+  {
+    const nowMs = Date.now();
+    let reader = null;
+    try {
+      const [{ mailboxEvents, seatSessionRoster }, { MAILBOX_LABEL }] = await Promise.all([
+        import('./record-recognisers.mjs'),
+        import('./mailbox-open.mjs'),
+      ]);
+      reader = { mailboxEvents, seatSessionRoster, MAILBOX_LABEL };
+    } catch (err) {
+      stats.mailboxReaderReason = `the doorbell reader did not load (${String(err?.message ?? err).split('\n')[0]})`;
+    }
+    if (reader) {
+      // The signature half's roster, ONCE per sweep, off the listings held above
+      // and the claimed cards' threads H50's walk left in `commentCache` —
+      // `.get`, ⛔ never a fetch. A thread is whole only when its walk says so; a
+      // truncated listing or a thread not held whole reads `unreadable`, the row
+      // goes UNJUDGED and the reason names the cards.
+      const claimThreads = new Map();
+      for (const issue of seen.values()) {
+        if (!labelNames(issue).includes('pm:dispatched')) continue;
+        const rows = commentCache.get(issue.number);
+        claimThreads.set(issue.number, { rows, complete: Array.isArray(rows) && threadWalks.get(issue.number)?.complete === true });
+      }
+      const listings = h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated, claimThreads);
+      const roster = reader.seatSessionRoster(listings);
+      if (roster?.state !== 'read') stats.mailboxRosterReason = h72RosterReason(roster, listings);
+      const since = new Date(nowMs - MAILBOX_OFF_TABLE_WINDOW_HOURS * 3_600_000).toISOString();
+      for (const pr of seenPrs.values()) {
+        if (!h72NeedsThread(pr, reader.MAILBOX_LABEL, nowMs)) continue;
+        stats.mailboxCandidates = (stats.mailboxCandidates ?? 0) + 1;
+        // Every page of the window, oldest first as GitHub serves them, so the
+        // NEWEST bells are never the ones a single page leaves out. A window that
+        // outruns the ceiling is UNJUDGED, not judged on its oldest pages.
+        const rows = [];
+        let complete = false;
+        try {
+          for (let page = 1; page <= H72_COMMENT_PAGE_CEILING; page++) {
+            const batch = await rest(`/repos/${OWNER_REPO}/issues/${pr.number}/comments?since=${encodeURIComponent(since)}&per_page=100&page=${page}`);
+            rows.push(...(Array.isArray(batch) ? batch : []));
+            if (!Array.isArray(batch) || batch.length < 100) {
+              complete = true;
+              break;
+            }
+          }
+        } catch {
+          continue;
+        }
+        if (!complete) continue;
+        stats.mailboxRead = (stats.mailboxRead ?? 0) + 1;
+        const reading = reader.mailboxEvents(rows, roster);
+        const offTable = h72OffTableMailboxLines(reading, nowMs);
+        if (offTable) findings.push([pr, 'H72', offTable]);
+        const unlisted = h72UnlistedKnockLines(reading, roster, nowMs);
+        if (unlisted) findings.push([pr, 'H72', unlisted]);
+      }
+    }
+  }
 
   // H37 (#12629) — the family-dispatch join, in two rounds (banner at the
   // predicate). Placed HERE, after the dispatch-liveness loop, because round 1
@@ -25635,7 +25869,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // shadow a trusted FAIL, an approver's read, two lines and an inline word alone
   // no PASS, no binding UNREAD, the binding's four unloaded reasons and its clause
   // (two more, the real guard's predicate and set, run where the register loads).
-  'H43 hand-off timing': 88,
+  // 88 → 93: the record's `Security-touching:` line, the low-risk skills arm's machine line — the bare
+  // readings, the MISSING record, the unreadable shapes, the fence and reason pins, and the constants.
+  // 93 → 94: a code span holding the KEY mentions the line and is unreadable; only the value may sit in one.
+  // 94 → 103: the nine verdict-reader rows that landed with no pin of their own — the closed finding that
+  // must END, the FAIL spellings, the fail-safe idiom. The battery registers 126 cases beside these rows.
+  'H43 hand-off timing': 103,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside.
   'H70/H71 seat patrol': 30,
@@ -25645,8 +25884,14 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // band, the coverage clause in its three states, and the lazy one-reader import
   // read off this file's source. The end-to-end leg — the REAL reader's readings
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
-  // because this self-test cannot import that module (H62's banner).
-  'H72 mailbox off-table bells': 20,
+  // because this self-test cannot import that module (H62's banner). RAISED 20 → 33
+  // with the signature half (#34013): its predicate both ways, the unjudged roster,
+  // the window, the cap, the text, the roster listings and their truncation names,
+  // the wiring and the summary clause. RAISED 33 → 37 with the claim listing
+  // (#34013 remainder 2): the listing, its unread and truncated cases, its
+  // truncation name and the cache-only wiring. RAISED 37 → 39 with review fix r1:
+  // the row's place after the dispatch-liveness loop and the unheld cards named.
+  'H72 mailbox off-table bells': 39,
   // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
   // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
   'H76 unowned open PR': 11,
@@ -28994,6 +29239,41 @@ async function selfTest() {
   b(BATTERY28675, 'H72: the three count keys ride the enumerated forwarding contract', ['mailboxCandidates', 'mailboxRead', 'mailboxReaderReason'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   b(BATTERY28675, 'H72 summary: the coverage pair is reported, with the window', saidBy('h72Mailbox', summaryLine({ mailboxRead: 3, mailboxCandidates: 4 }, 0)).includes('comment page read on 3 of 4 open `pm:mailbox` PR(s) touched in the last 24h'), true);
   b(BATTERY28675, '⛔ H72 summary: a reader that did not load renders NOT MEASURED, never `0 of N`', (() => { const c = saidBy('h72Mailbox', summaryLine({ mailboxReaderReason: 'the doorbell reader did not load (x)', mailboxCandidates: 0 }, 0)); return c.includes('NOT MEASURED — the doorbell reader did not load (x)') && !c.includes('0 of 0'); })(), true);
+  // -- H72's signature half (#34013): an `unlisted` knock is listed for the seat the
+  //    mailbox serves; a roster nobody could read lists nothing. The readings carry
+  //    `mailboxEvents`' `signature` field; the real reader and the real roster drive
+  //    this predicate in record-recognisers.mjs's signature battery. ----
+  const UNV72 = 'unverified seat signature';
+  const KN72 = (comment, minutes, signature, state = 'read') => ev72(state, comment, minutes, { id: 'notify:landed', signature });
+  const UNL72 = (comment, minutes, why = 'session_01AAAAAAAAAAAAAAAAAAAAAAAA is not a session domain:skills lists') => KN72(comment, minutes, { state: 'unlisted', reason: `${UNV72} — ${why}` });
+  const ROSTER72 = { state: 'read', seats: new Map() };
+  const row72u = (...args) => String(h72UnlistedKnockLines(...args) ?? '');
+  // The source ABOVE the self-test: a wiring pin read off the whole file would match its own literal here.
+  const SRC72 = (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.slice(0, src.indexOf('\nasync function selfTest()')); })();
+  b(BATTERY28675, '⭐ H72 signature: an `unlisted` knock inside the window is listed by comment id, author and the reader\'s reason', ['1 knock(s)', 'comment 9 by objectstack-fleet[bot]', `${UNV72} — session_01AAAAAAAAAAAAAAAAAAAAAAAA is not a session`].every((x) => row72u(reading72(READ72(1, 60), UNL72(9, 30)), ROSTER72, NOW72).includes(x)), true);
+  b(BATTERY28675, '⛔ H72 signature: a `listed` knock, a maintainer\'s knock and a knock with no signature reading are not listed — clean is null', h72UnlistedKnockLines(reading72(KN72(1, 5, { state: 'listed', seat: 'domain:skills#2' }), KN72(2, 5, { state: 'maintainer' }), READ72(3, 5)), ROSTER72, NOW72), null);
+  b(BATTERY28675, '⛔ H72 signature: a roster that was not READ makes the row UNJUDGED — null, never every knock listed as unlisted (the reader fails closed, so all of them read unlisted)', [h72UnlistedKnockLines(reading72(UNL72(9, 30)), { state: 'unreadable', gaps: ['the open `pm:seat` posts'] }, NOW72), h72UnlistedKnockLines(reading72(UNL72(9, 30)), null, NOW72), h72UnlistedKnockLines(reading72(UNL72(9, 30)), { seats: new Map() }, NOW72)].every((v) => v === null), true);
+  b(BATTERY28675, '⛔ H72 signature: a reading that is not `read` is UNJUDGED too', [h72UnlistedKnockLines({ state: 'unreadable', gaps: ['x'] }, ROSTER72, NOW72), h72UnlistedKnockLines(null, ROSTER72, NOW72), h72UnlistedKnockLines({ state: 'read' }, ROSTER72, NOW72)].every((v) => v === null), true);
+  b(BATTERY28675, '⭐ H72 signature: the window boundary — 23h59m old fires, 24h01m has aged out, an unreadable `at` must not read as aged out', [typeof h72UnlistedKnockLines(reading72(UNL72(4, 24 * 60 - 1)), ROSTER72, NOW72), h72UnlistedKnockLines(reading72(UNL72(4, 24 * 60 + 1)), ROSTER72, NOW72), typeof h72UnlistedKnockLines(reading72({ ...UNL72(5, 10), at: 'not a date' }), ROSTER72, NOW72)].join(), 'string,,string');
+  b(BATTERY28675, 'H72 signature: an off-table knock that is ALSO unlisted is named by both rows — the vocabulary and the signature are two readings', (() => { const r = reading72(KN72(6, 10, { state: 'unlisted', reason: `${UNV72} — x` }, 'refused')); return row72(r, NOW72).includes('comment 6') && row72u(r, ROSTER72, NOW72).includes('comment 6'); })(), true);
+  b(BATTERY28675, `H72 signature: it names at most ${H72_LISTED_COMMENTS} knocks and counts the rest`, (() => { const r = row72u(reading72(...[1, 2, 3, 4, 5, 6, 7].map((c) => UNL72(c, 10))), ROSTER72, NOW72); return r.includes('7 knock(s)') && r.includes('comment 5 by') && !r.includes('comment 6 by') && r.includes('and 2 more'); })(), true);
+  b(BATTERY28675, 'H72 signature text: no angle-bracket fragment, names the rule file, the printout, that listed is no proof and the report-only boundary — and no tracker number', (() => { const r = row72u(reading72(UNL72(2, 9, '`<seat>` lists no session'), UNL72(3, 9, 'a<b')), ROSTER72, NOW72); const plain = row72u(reading72(UNL72(2, 9, 'no seat line')), ROSTER72, NOW72); return !/[<>]/.test(r) && r.includes('`SEAT` lists no session') && ['untrusted-text.md', '--mailbox-keys', 'never proof', 'Report-only', '⛔ does not act on'].every((x) => plain.includes(x)) && !/#[0-9]/.test(plain); })(), true);
+  b(BATTERY28675, 'H72 signature: not a loud finding — it never escalates a sweep', isLoudFinding(row72u(reading72(UNL72(2, 9)), ROSTER72, NOW72)), false);
+  b(BATTERY28675, '⭐ H72 roster listings: the open `pm:seat` rows and the open pulls the sweep holds, other cards dropped', (() => { const seat = { number: 1, labels: [{ name: 'pm:seat' }] }; const card = { number: 2, labels: [{ name: 'pm:queue' }] }; const pull = { number: 3 }; const l = h72RosterListings([seat, card, null], [pull]); return l.posts.length === 1 && l.posts[0] === seat && l.mailboxes.length === 1 && l.mailboxes[0] === pull; })(), true);
+  b(BATTERY28675, '⛔ H72 roster listings: a listing truncated at the page ceiling, or not an array, hands the roster NULL — read as unreadable, never as a smaller roster', (() => { const both = h72RosterListings([], [], [H72_ROSTER_LISTINGS.posts, H72_ROSTER_LISTINGS.mailboxes]); const other = h72RosterListings([], [], ['listIssues(pm:queue)']); const bad = h72RosterListings(undefined, 'x'); return both.posts === null && both.mailboxes === null && Array.isArray(other.posts) && Array.isArray(other.mailboxes) && bad.posts === null && bad.mailboxes === null; })(), true);
+  b(BATTERY28675, '⭐ H72 roster listings: the truncation names are the ones the two listings record — `listIssues(pm:seat)` off a label page this sweep lists, `listOpenPullRequests` off the pulls', (() => { const src = SRC72; return SRC72.length > 0 && SEEN_LABEL_PAGES.includes('pm:seat') && src.includes('noteOpenListing(stats, `listIssues(${label})`') && src.includes(`noteOpenListing(stats, '${H72_ROSTER_LISTINGS.mailboxes}'`) && H72_ROSTER_LISTINGS.posts === 'listIssues(pm:seat)'; })(), true);
+  // -- the claim listing (#34013 remainder 2): the open `pm:dispatched` cards with the WHOLE thread the sweep holds;
+  //    the real reader's join of them is pinned in record-recognisers.mjs's card-thread delegate battery. ----
+  const CARD72 = (number, o = {}) => ({ number, state: 'open', labels: [{ name: 'pm:dispatched' }], ...o });
+  const HELD72 = (...pairs) => new Map(pairs.map(([n, complete = true]) => [n, { rows: [{ id: n, body: 'Claim: x' }], complete }]));
+  b(BATTERY28675, '⭐ H72 claim listing: each open `pm:dispatched` card with the whole thread the sweep holds, as `{ card, rows }` — other labels and a closed row dropped', (() => { const a = CARD72(1); const l = h72RosterListings([a, { number: 2, state: 'open', labels: [{ name: 'pm:queue' }] }, CARD72(3, { state: 'closed' }), null], [], [], HELD72([1])); return Array.isArray(l.claims) && l.claims.length === 1 && l.claims[0].card === a && l.claims[0].rows[0].id === 1; })(), true);
+  b(BATTERY28675, '⛔ H72 claim listing: a card whose thread is missing or NOT whole, a truncated `pm:dispatched` listing, or no issue array hands the roster NULL — unread, never a smaller roster', (() => { const cards = [CARD72(1), CARD72(2)]; return [h72RosterListings(cards, [], [], HELD72([1])).claims, h72RosterListings(cards, [], [], HELD72([1], [2, false])).claims, h72RosterListings(cards, [], [H72_ROSTER_LISTINGS.claims], HELD72([1], [2])).claims, h72RosterListings(undefined, []).claims, h72RosterListings(cards, []).claims].every((c) => c === null) && Array.isArray(h72RosterListings(cards, [], [], HELD72([1], [2])).claims) && JSON.stringify(h72RosterListings([], []).claims) === "[]"; })(), true);
+  b(BATTERY28675, '⭐ H72 claim listing: the truncation name is the one the `pm:dispatched` label page records, a page this sweep lists', SEEN_LABEL_PAGES.includes('pm:dispatched') && H72_ROSTER_LISTINGS.claims === 'listIssues(pm:dispatched)' && SRC72.includes('noteOpenListing(stats, `listIssues(${label})`'), true);
+  b(BATTERY28675, '⭐ H72 claim wiring: the threads come out of `commentCache` — `.get`, never a fetch — and a thread is whole only when H50\'s walk says so', (() => { const at = SRC72.indexOf('const claimThreads = new Map();'); const block = at < 0 ? '' : SRC72.slice(at, SRC72.indexOf('const roster = reader.seatSessionRoster(', at)); return block.includes('commentCache.get(issue.number)') && block.includes('threadWalks.get(issue.number)?.complete === true') && !block.includes('H50_COMMENTS_PAGE_SIZE') && !/\brest\(|commentRowsFor|completeCardThread|commentCache\.set/u.test(block); })(), true);
+  b(BATTERY28675, '⭐ H72 runs AFTER the dispatch-liveness loop: the claim join comes after H50\'s walk of every open `pm:dispatched` card, so an unassigned card and a full first page are held by then — at no request of its own', (() => { const walk = SRC72.indexOf('const walk = await completeCardThread(issue);'); const join = SRC72.indexOf('const claimThreads = new Map();'); const mailboxes = SRC72.indexOf('if (!h72NeedsThread(pr, reader.MAILBOX_LABEL, nowMs)) continue;'); return walk > 0 && join > walk && mailboxes > join; })(), true);
+  b(BATTERY28675, '⭐ H72 unheld cards: the listing names each open `pm:dispatched` card whose thread is not held whole, and the NOT MEASURED reason names them by number', (() => { const l = h72RosterListings([CARD72(7), CARD72(8), CARD72(9)], [], [], HELD72([7], [8, false])); const why = h72RosterReason({ state: 'unreadable', gaps: ['the open `pm:dispatched` claim threads'] }, l); return l.claims === null && JSON.stringify(l.unheld) === '[8,9]' && why === 'the seat roster could not be read (the open `pm:dispatched` claim threads; claim threads not held whole: #8, #9)' && JSON.stringify(h72RosterListings([CARD72(7)], [], [], HELD72([7])).unheld) === '[]' && h72RosterReason({ state: 'unreadable', gaps: ['x'] }, { unheld: [] }) === 'the seat roster could not be read (x)' && SRC72.includes('stats.mailboxRosterReason = h72RosterReason(roster, listings);'); })(), true);
+  b(BATTERY28675, '⭐ H72 wiring: the sweep reads the roster ONCE through the reader\'s `seatSessionRoster`, hands it to the same `mailboxEvents` call both rows judge, and parses no signature or roster of its own', (() => { const src = SRC72; return SRC72.length > 0 && src.includes('const listings = h72RosterListings([...seen.values()], [...seenPrs.values()], stats.openListingsTruncated, claimThreads);') && src.includes('const roster = reader.seatSessionRoster(listings);') && src.includes('const reading = reader.mailboxEvents(rows, roster);') && src.includes('h72OffTableMailboxLines(reading, nowMs)') && src.includes('h72UnlistedKnockLines(reading, roster, nowMs)') && !/function (?:seatSessionRoster|knockSignature|readMailboxComment)\b/u.test(src); })(), true);
+  b(BATTERY28675, '⛔ H72 summary: a roster that was not read renders NOT MEASURED for the signature half, a read one says it buys no fetch — and the key rides the forwarding contract', (() => { const no = saidBy('h72Mailbox', summaryLine({ mailboxRead: 1, mailboxCandidates: 1, mailboxRosterReason: 'the seat roster could not be read (x)' }, 0)); const yes = saidBy('h72Mailbox', summaryLine({ mailboxRead: 1, mailboxCandidates: 1 }, 0)); return no.includes('Unlisted knock signatures: NOT MEASURED — the seat roster could not be read (x)') && yes.includes('Unlisted knock signatures: judged on the same pages') && SWEEP_COUNT_KEYS.includes('mailboxRosterReason'); })(), true);
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
 
@@ -32891,7 +33171,7 @@ async function selfTest() {
     requested_reviewers: (extra.requested ?? []).map((login) => ({ login })),
     assignees: (extra.assigned ?? []).map((login) => ({ login })),
   });
-  const APP43 = ['os-zhuang', 'hotlong'];
+  const APP43 = ['os-zhuang', 'hotlong']; // an injected two-account set exercising the union, not the live roster
   const GOV43 = [{ id: 'adr', glob: 'docs/adr/**', what: 'architecture decision records', files: ['docs/adr/0121-x.md'] }];
   // The hand-off timing (the maintainer's 「审核通过才会推送给我审核」): every
   // legacy case below that expects a FINDING is driven with the hand-off DUE —
@@ -32994,7 +33274,7 @@ async function selfTest() {
   // an install that copied this sweeper WITHOUT the governed pair answers with
   // its own NOT MEASURED reason instead, which is the correct signal for it.
   const register43 = GOVERNED_REGISTER.available
-    ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length >= 2}`
+    ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length > 0}`
     : `NOT MEASURED — ${GOVERNED_REGISTER.reason}`;
   t43('H43 register: the imported matcher answers governed and clear, and the approver set is non-empty', register43, 'true/false/true');
   t43('H43 register: the load is three-state — resolved, or a NAMED reason, never silently absent', GOVERNED_REGISTER.available || typeof GOVERNED_REGISTER.reason === 'string', true);
@@ -33142,7 +33422,15 @@ async function selfTest() {
   t43('#33770 r2 S1: the explicit all-caps line read past its first word — `**VERDICT: PASS → FAIL**`, the ASCII arrow, bare, quoted — states PASS AND a FAIL spelling; the plain PASS and FAIL lines stay one word each', ['**VERDICT: PASS → FAIL**', '**VERDICT: PASS -> FAIL**', 'VERDICT: PASS → FAIL', '> **VERDICT: PASS ⇒ FAIL**', '**VERDICT: PASS**', '**VERDICT: FAIL**'].map((l) => { const x = contractReviewRecordReading(PASS43.replace('**VERDICT: PASS**', l)); return `${x.verdicts.join('+')}|${x.failSpellings.length}`; }).join(), 'PASS|1,PASS|1,PASS|1,PASS|1,PASS|0,FAIL|0');
   t43('#33770 r2 S2: a next line led by a grade with no id ends the finding — `must-fix: none` over `should-fix: none`, bulleted or plain, and a closed finding over one; a body under `must-fix: none` keeps it open', ['must-fix: none\nshould-fix: none', '- must-fix: none\nshould-fix: none', 'S1 (should-fix): closed.\nshould-fix: none', 'must-fix: none\nstill open for X'].map(grades43).join(), '|0,|0,|0,-:must-fix|0');
   t43('#33770 r2 nit: as a VALUE only the prose idiom is excused — `FAILED - closed`, `FAILED closed`, `FAIL - closed` read FAIL; `fails closed`, `failed-closed` do not', ['Verdict: FAILED - closed', 'Verdict: FAILED closed', 'Verdict: FAIL - closed', 'Verdict: fails closed', 'Verdict: failed-closed'].map((l) => read43(l).failSpellings.length).join(), '1,1,1,0,0');
-  t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]}}');
+  t43('#33604 reading: no heading is no record (null); the template record reads one PASS, no FAIL, no grade', [contractReviewRecordReading('**VERDICT: PASS**'), JSON.stringify(contractReviewRecordReading(PASS43))].join(), ',{"verdicts":["PASS"],"failSpellings":[],"findings":{"open":[],"unreadable":[]},"securityTouching":{"state":"missing"}}');
+  // The record's `Security-touching:` line — the low-risk skills arm's machine line, three-valued and fail closed.
+  const st43 = (prose) => { const r = read43(prose).securityTouching; return r.state === 'read' ? `read:${r.value}` : r.state; };
+  t43('Security-touching: the one bare line reads its value — `no`, `yes`, and behind a bullet, bold, or with the VALUE alone in a code span', ['Security-touching: no', 'Security-touching: yes', '- Security-touching: no', '**Security-touching:** no', '- **Security-touching**: `no`', 'Security-touching: `yes`', '   Security-touching:  no'].map(st43).join(), 'read:no,read:yes,read:no,read:no,read:no,read:yes,read:no');
+  t43('⛔ Security-touching: a code span that holds the KEY mentions the line and states nothing — UNREADABLE, never `no`, and the reason says so', [...['`Security-touching: no`', '- `Security-touching: no`', '`Security-touching:` no', '`Security-touching`: no', '**`Security-touching: no`**', '`Security-touching: yes`'].map(st43), /holds the key inside a code span \(`Security-touching: no`\), which mentions the line and states nothing$/.test(read43('`Security-touching: no`').securityTouching.reason)].join(), `${Array(6).fill('unreadable').join()},true`);
+  t43('⛔ Security-touching: a record with no such line reads MISSING, never `no` — every record written before the line existed, a mention in prose included', [st43('① Derived judgments: none.'), st43('The record carries no line; the seat reads `Security-touching: no` as the arm asks.'), contractReviewRecordReading(PASS43).securityTouching.state].join(), 'missing,missing,missing');
+  t43('⛔ Security-touching: two lines, a quoted, fenced or code-indented line, trailing words, another value and a near-miss key are each UNREADABLE', ['Security-touching: no\nSecurity-touching: no', '> Security-touching: no\n\nSecurity-touching: yes', '> Security-touching: no', '```\nSecurity-touching: no\n```', '~~~text\nSecurity-touching: no', '    Security-touching: no', '\tSecurity-touching: no', 'Security-touching: no — wording only', 'Security-touching: none', 'Security-touching: No', 'Security-touching:', 'security-touching: no', 'Security touching: no', '### Security-touching: no', 'Security-touching：no'].map(st43).join(), Array(15).fill('unreadable').join());
+  t43('⛔ Security-touching: a fenced `no` beside the record\'s own bare `yes` is two declarations (unreadable); a fence closed before the line leaves it read; the reasons name the shape', [st43('```\nSecurity-touching: no\n```\nSecurity-touching: yes'), st43('```\nsome code\n```\nSecurity-touching: no'), /2 `Security-touching:` lines/.test(read43('Security-touching: no\n> Security-touching: no').securityTouching.reason), /inside a code fence/.test(read43('```\nSecurity-touching: no\n```').securityTouching.reason), /is a quote/.test(read43('> Security-touching: no').securityTouching.reason), /not exactly `Security-touching: no` or `Security-touching: yes`/.test(read43('Security-touching: maybe').securityTouching.reason)].join(), 'unreadable,read:no,true,true,true,true');
+  t43('Security-touching: the key and its two values are this file\'s constants, and the line is read above the heading too (the whole comment, like `VERDICT:`)', [CONTRACT_REVIEW_SECURITY_TOUCHING_KEY, CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join('+'), Object.isFrozen(CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES), contractReviewRecordReading(`Security-touching: no\n\n${PASS43}`).securityTouching.value, contractReviewRecordReading('Security-touching: no') === null].join(), 'Security-touching,no+yes,true,no,true');
   t43('H43 verdict: latestContractReviewOnHead now carries the verdict beside id and sha', [latestContractReviewOnHead(rows43(ACCEPT43, PASS43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(FAIL43), HEAD43)?.verdict, latestContractReviewOnHead(rows43(PASS43), '0123456789abcdef')].join(), 'PASS,FAIL,');
   // The row and the probe, gated on the reading.
   t43('H43 row: ⛔ BEFORE the hand-off, nobody asked is NOT a half state — quiet', h43GovernedReviewRequestGap(h43pr(16), GOV43, APP43, [], BEFORE43), null);

@@ -123,7 +123,11 @@ OS_AUTH_SIGNUP_ENABLED=false
 OS_AUTH_GOOGLE_ENABLED=true
 
 # Optional: what a new user joins (ADR-0093 D1). `auto` (default) binds every
-# new user to the default organization; `invite-only` grants membership only
+# new user to the default organization (except a sign-up admitted by its
+# invitation alone whose address is unverified: under the `invite_only`
+# audience posture, one admitted by the invitation it presents; under
+# `email_domain`, one off the allowlist that an invitation addressed to it
+# admitted. It joins by accepting); `invite-only` grants membership only
 # through an explicit act — creating a workspace, accepting an invitation, an
 # admin adding them, or SSO just-in-time provisioning.
 # Also configurable in Setup → Authentication → Membership.
@@ -313,6 +317,14 @@ the user signs in again with the new password. It is not a setting: the former
 `emailAndPassword.revokeSessionsOnPasswordReset` key is retired, and a
 configuration that still carries it, at any value, is refused at boot — delete
 the key.
+
+Any change to a user's password ends every other reset link and texted reset
+code still outstanding for that user: a completed reset, the user's own
+`POST /api/v1/auth/change-password`, an administrator's
+`POST /api/v1/auth/admin/set-user-password` and a first password set through
+`POST /api/v1/auth/set-initial-password`. An ended link or code answers exactly
+what one that was never issued answers (`400 INVALID_TOKEN` at
+`reset-password`); a link or code requested after the change works as usual.
 
 #### Setting a first local password
 
@@ -633,6 +645,13 @@ credential check resolves the address to. So every refused sign-in on that accou
 counts toward its one lock, whichever spelling of the address it used. A lock refuses
 every sign-in that resolves to the account, the correct password included, and a
 successful sign-in under any spelling clears the counter.
+Every password sign-in door (email and password, phone number and password) counts
+toward that one lock and checks it before the password, and a locked account is
+refused, with the answer password sign-in gives, on every door that ends in a session
+for it: one-time codes, sign-in links, an address-change confirmation opened without a
+session, the second-factor step, sign-in through an identity provider (social, generic
+OAuth, enterprise SSO) and the device grant, so the lock also reaches an account that
+has no password.
 
 Setting `lockout_threshold` to `0` disables the **password-stage** lockout only.
 Two-factor verification keeps a built-in limit of 10 attempts per 15 minutes,
@@ -1158,9 +1177,10 @@ new AuthPlugin({
 
 ### Admin User Management
 
-With `plugins: { admin: true }` (forced on when SCIM is enabled), platform
-admins get email-independent account management on the Users list — the
-`create_user` / `set_user_password` actions there drive these endpoints. All
+Platform admins get email-independent account management on the Users list
+— the `create_user` / `set_user_password` actions there drive these
+endpoints. Creating a user needs `plugins: { admin: true }` (forced on when
+SCIM is enabled); setting a password works with or without it. All
 three routes are gated server-side on the session's `isPlatformAdmin` — the
 `PLATFORM_ADMIN` standing of ADR-0095 D3 — with the legacy better-auth `role`
 scalar of `admin` still accepted as a back-compat fallback; the
@@ -1192,8 +1212,8 @@ organization the administrator has switched to in the console. There is no
 organization choice: to add someone to another organization, switch to it
 first. An administrator with no current organization is refused with
 `400 NO_ACTIVE_ORGANIZATION` and no user is created. Under the `single` posture
-(a degraded wall included) the user joins the default organization, as every new
-user does ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)).
+(a degraded wall included) the user joins the default organization, as every
+user an administrator creates does ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)).
 
 The join is better-auth's `addMember`, the same act as **Add Member**, inside
 the account's transaction: an organization at its membership limit refuses the
@@ -1261,6 +1281,42 @@ every row through better-auth so the accounts are login-capable:
   updates only touch profile fields (`name`, `image`, `phone_number`, `role`)
   — a re-imported file can never modify an existing user's email or reset
   their password.
+- A `positions` column assigns positions: position machine names, several
+  separated by `;` (an array on a JSON row) — the same column
+  `import-sso-users` reads. Each is assigned after every row has landed, as a
+  `sys_user_position` grant written under the importing admin's own access,
+  so it passes the checks Setup applies when you assign a position there (the
+  position must exist, and you must be allowed to assign it). A position that
+  does not exist or is refused is reported on its row and the user is still
+  created: `rows[].positions` is an array with one entry per named position
+  and its outcome (`assigned`, `already_assigned`, `unresolved`, or `refused`
+  with the refusal's `code`), and `summary.positions` counts them. A cell that
+  is not a list of names (a number or an object on a JSON row) assigns
+  nothing, and that row's `rows[].positions` is the **string**
+  `'unreadable'`, not an array — check for it before reading the entries. It
+  counts once under `summary.positions.unresolved`, and the user is still
+  created. The import only adds positions; it never removes one a user holds.
+  Permission sets come with the position (a position carries its sets); a
+  direct grant stays a Setup step.
+- When a file's positions cannot be judged at all, the users are still
+  created and only the positions are refused: every named position is
+  reported `refused` on its row, with code `NOT_IMPLEMENTED` when the server
+  cannot assign positions during an import, or `PERMISSION_DENIED` when your
+  own access cannot be resolved. A dry run never assigns positions, and
+  reports `summary.positions` as zeros.
+- **Which organization the rows join** follows [Create a User Directly](#create-a-user-directly):
+  under a walled posture (`group` / `isolated`) every imported user joins your
+  **current** organization as `member`, each row in the same step as its
+  account, so the `positions` column validates against that organization. A row
+  the organization refuses (its membership limit, say) is failed on its row
+  with that refusal's code, and **that user is not created**: no account, no
+  temporary password, no invitation. The other rows still land. A row that
+  matches an existing user on `upsert` joins too; if the join is refused, the
+  row fails and its profile update is not applied. With no current
+  organization the whole import is refused with `400 NO_ACTIVE_ORGANIZATION`
+  and no user is created — a dry run included, so the preview tells you before
+  you import. Switch to the organization the people belong to first. Under the
+  `single` posture nothing changes: users join the default organization.
 - Synchronous only, at most 500 rows per request (password hashing is
   CPU-bound); split larger files into batches. Imports are not undoable.
 
@@ -1290,6 +1346,20 @@ admin plugin, and both are platform-admin gated:
   with its own message and the good rows land. The answer carries a
   `summary` and one result per row.
 
+Both doors, and `remove-sso-user` below, also take an optional
+`organizationId`. A console action forwarded to the auth mount carries the
+caller's active organization there, so the key is admitted only when it
+equals the organization the caller's session is working in. A different
+organization gets `400 INVALID_REQUEST` naming both organizations; a
+non-string or empty value gets `400 INVALID_REQUEST` saying the key must be
+the id of the organization you are working in (a non-string value is checked
+before the session, so this is the answer even when the session has no
+organization); a string organization from a caller whose session works in no
+organization gets `400 NO_ACTIVE_ORGANIZATION` naming the organization sent. Every refusal
+comes before anything is written or any host is told. The value never
+widens or chooses scope: the organization a person joins is always read from
+the session.
+
 The person is stored **pending** (`sys_user.source` reads `idp_pending`): no
 password, and no session until they sign in through the hosting
 organisation's identity provider. Every password door refuses a pending
@@ -1301,6 +1371,33 @@ sign-in through any other one leaves the person pending. Their positions, permis
 from the moment they are added, so seed data and approval flows can name them
 before they sign in. Off a managed environment both doors answer `409`.
 
+On a cloud-managed environment the organisation that hosts it decides who is a
+member and at which membership tier, so every organization door that writes or
+deletes a membership row (the six below: removing a member, changing a member's tier
+with Make Owner included, leaving, accepting an invitation, creating an
+organization, which makes the caller its owner, and deleting one, which ends
+every membership in it) answers `409 RESOURCE_CONFLICT` there and changes
+nothing, and their seven actions are hidden. The one exception is
+`POST /api/v1/auth/organization/add-member`, which admits exactly a platform
+administrator, adding a membership, so the operator can restore one the
+environment lost. The administrator names the membership tier in the request
+body, where it is required (a request without it is refused `400`), and
+ObjectStack passes it to better-auth unchanged. A signed-in caller who is not a platform
+administrator is refused `403 PERMISSION_DENIED`, and a caller with no session
+is answered `401 UNAUTHENTICATED`. The other
+organization doors write no membership row (teams, invitations, the active
+organization, the organization's own fields) or only read, and answer as before.
+
+{/* os:vendor-wire better-auth */}
+```http
+POST /api/v1/auth/organization/remove-member
+POST /api/v1/auth/organization/update-member-role
+POST /api/v1/auth/organization/leave
+POST /api/v1/auth/organization/accept-invitation
+POST /api/v1/auth/organization/create
+POST /api/v1/auth/organization/delete
+```
+
 Signing in does not lock the manager: a platform administrator still changes
 it with **Set Manager** (`POST /api/v1/auth/admin/set-user-manager`). That
 endpoint refuses only a person a SCIM directory holds, whose manager is changed
@@ -1308,7 +1405,8 @@ in the directory.
 
 A host can be told about people as they come and go: the `environmentUserHost`
 option of the auth plugin is called after a person is added, and before a
-person is deactivated (`admin/ban-user`) or reactivated (`admin/unban-user`).
+person is deactivated (`admin/ban-user`), reactivated (`admin/unban-user`) or,
+while still pending, removed (`admin/remove-sso-user`).
 It is never called inside a database transaction. Each event names the
 administrator who acted, the administrator at the keyboard when the session
 is an impersonation (`impersonatedBy`), and, when the acting administrator
@@ -1327,6 +1425,44 @@ blocks an add or a reactivation: the answer carries `host: { notified: false,
 reason }`. Adding a person who is still pending again tells the host again
 and changes nothing else: positions, permission sets or a manager sent with
 it are listed on the answer as `notApplied`; set them on the person's record.
+
+A pending person who never signs in, for example one added with a mistyped
+address, can be removed: `POST /api/v1/auth/admin/remove-sso-user` takes
+`{ userId }` (and the optional `organizationId` described above), removes
+the person with their positions, permission sets and membership, and cancels
+their invitation at the host. The host is asked first, through its
+`userRemoved` member; a host without that member is asked
+through `userDeactivated` for the pending person instead, which means the same
+thing, but a host should implement `userRemoved`. A host's refusal leaves the
+person as they are. A host that cannot be reached refuses the removal too,
+with `503` and nothing removed, as it refuses a deactivation: the door calls
+the host once and keeps no record to ask again from, so try again once the
+host is back. A person who is not pending (they have signed in, or were not
+added this way) is refused with `409`: deactivate them instead. That holds at
+the removal itself: the person is checked again inside the removal's unit of
+work and the delete carries `source: 'idp_pending'`, so a person whose first
+sign-in lands while the host is asked is not removed either, and the answer
+says the host was already told. Because `sys_user` has cascading lookups, the
+engine deletes the row by id after walking them, so a first sign-in that
+commits in that narrow window is not yet refused. A record that
+still points at the person through a lookup that restricts deletes refuses the
+removal with that lookup's own answer, and nothing is removed; when the host
+had already cancelled the invitation of a person who is still pending and not
+deactivated, the door sends the invitation again through `userAdded`, once,
+and the answer says whether that worked. Like the add doors, it is
+platform-admin gated and answers `409` off a managed environment.
+
+A deactivated person is never sent an invitation: adding a deactivated pending
+person again calls no host and answers `host: { notified: false, reason:
+'deactivated' }`; reactivating them is what tells the host again.
+
+Each door calls the host once and keeps no record of the call. Delivering it
+durably, and keeping each person's invitation status, is the host's job: a
+host may queue and retry a call it could not complete. A call can reach a host
+more than once (adding a person who is still pending again tells the host
+again), so a host should treat a repeat as harmless, and should cancel an
+invitation by the event's `userId`, never by its email address, which an
+administrator may have typed wrong and may type again for someone else.
 
 `admin/ban-user` and `admin/unban-user` work without the admin plugin: on a
 deployment without it the ban is written by the platform, and a banned user is
@@ -1545,7 +1681,7 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/phone-number/request-password-reset` - Request an OTP-based password reset (requires an SMS service)
 - `POST /api/v1/auth/phone-number/reset-password` - Complete an OTP-based password reset
 
-#### Admin User Management (requires `plugins.admin`; platform-admin gated)
+#### Admin User Management (platform-admin gated)
 
 - `POST /api/v1/auth/admin/create-user` - Create a login-capable account (optional one-time temporary password + forced change)
 - `POST /api/v1/auth/admin/set-user-password` - Set/reset a user's password (also provisions a credential for SSO-onboarded users)
@@ -1556,7 +1692,7 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/admin/add-sso-user` - Add one pending person who signs in only through the hosting organisation's identity provider (cloud-managed environments only)
 - `POST /api/v1/auth/admin/import-sso-users` - Add pending people from a CSV or JSON rows (cloud-managed environments only; ≤500 rows, per-row results)
 
-`ban-user`, `unban-user`, `add-sso-user` and `import-sso-users` answer without `plugins.admin` too.
+`create-user` and `import-users` need `plugins.admin` (without it they answer `501 NOT_IMPLEMENTED`). `set-user-password`, `unlock-user`, `ban-user`, `unban-user`, `add-sso-user` and `import-sso-users` answer with or without it.
 
 #### Organization Membership (requires `plugins.organization`; platform-admin gated)
 

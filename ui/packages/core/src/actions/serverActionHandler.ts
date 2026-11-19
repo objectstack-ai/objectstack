@@ -305,6 +305,7 @@ export function createServerActionHandler(config: ServerActionHandlerConfig): Se
           success: false,
           error: outcome.error,
           ...(outcome.fieldErrors ? { fieldErrors: outcome.fieldErrors } : {}),
+          ...(outcome.userMessage !== undefined ? { userMessage: outcome.userMessage } : {}),
         };
       }
       // A declared `operation: 'update'` wrote the record it addresses — that

@@ -37,14 +37,18 @@
  *     CI.
  *
  * [#21630] A non-UTC `timezone` makes the engine bucket in memory on that
- * zone's calendar, on every driver, so no statement the database runs groups
- * by those keys. The echo refuses there on every dialect: `/analytics/sql`
+ * zone's calendar on every driver but one declaring zone-aware bucketing
+ * ([#33697] PostgreSQL, ADR-0053 Phase 2 D2 as amended, which groups it in the
+ * database and whose zoned expression the echo then prints and runs). Where it
+ * is bucketed in memory no statement the database runs groups by those keys,
+ * and the echo refuses there: `/analytics/sql`
  * answers `NOT_IMPLEMENTED` / 501 as a declared refusal, and `/analytics/query`
  * serves the same rows with no `sql`. It used to print `date_trunc`, which
  * PostgreSQL 16.14 ran on the session zone's calendar (timestamp keys, and at
- * `America/New_York` other groupings than the face's). The live cells pin it
- * on SQLite and PostgreSQL, and the dialect matrix below pins it on SQLite,
- * PostgreSQL and MySQL through each driver's own hooks, with no server.
+ * `America/New_York` other groupings than the face's). The live cells pin the
+ * refusal on SQLite and the zoned pushdown on PostgreSQL, and the dialect
+ * matrix below pins both on SQLite, PostgreSQL and MySQL through each driver's
+ * own hooks, with no server.
  *
  * [#21647] At UTC, where the hook answers nothing (a host that wires no hook,
  * or a driver that renders no expression), the echo refuses too, on every
@@ -278,9 +282,29 @@ for (const cell of CELLS) {
       // memory" lived here. Its one input was SQLite `week`, and both cells now
       // group all three, so it had none left: `week` runs in the case above.
 
-      // [#21595, #21630] One rule on every cell. The PostgreSQL cell asserted
-      // `date_trunc('month', closed_at)` here, a statement the engine did not
-      // run: it buckets a non-UTC zone in memory.
+      // [#21595, #21630] One rule on every cell that buckets a non-UTC zone in
+      // memory. The PostgreSQL cell asserted `date_trunc('month', closed_at)`
+      // here, a statement the engine did not run. [#33697] Since ADR-0053
+      // Phase 2 D2's amendment PostgreSQL declares `supports.zonedDateBucketing`
+      // and groups the zone in the database, so that cell has the case after
+      // this one, and this one is SQLite's.
+      if (cell.id === 'pg') {
+        it.each(ZONED)('[#33697] timezone %s, which PostgreSQL buckets in the database: the echo prints the zoned expression the driver ran, and it runs', async (timezone, rows) => {
+          const query = bucketed('closed_at', 'month', { timezone });
+          const { res, ran } = await ask(query);
+          expect(ran.filter((sql) => /group by/i.test(sql)), 'the driver grouped once').toHaveLength(1);
+          // The database's buckets are the zone's calendar, the rows the
+          // in-memory path answers (D2's parity rule).
+          expect(tuples(res.rows, ['closed_at', 'amount_sum'])).toEqual(rows);
+          const zoned = driver.dateBucketSql(DEAL, 'closed_at', 'month', timezone);
+          expect(zoned, 'the driver renders the zoned bucket').toContain(`AT TIME ZONE '${timezone}'`);
+          const dryRun = await analytics.generateSql(query as any);
+          expect(selectedBucket(dryRun.sql, 'closed_at')).toBe(zoned);
+          expect(res.sql).toBe(dryRun.sql);
+          expect(tuples(await run(dryRun.sql, dryRun.params), ['closed_at', 'amount_sum'])).toEqual(rows);
+        });
+        return;
+      }
       it.each(ZONED)('[#21630] REFUSAL: timezone %s, which the engine buckets in memory: the dry run refuses, and the query serves its rows with no `sql`', async (timezone, rows) => {
         const query = bucketed('closed_at', 'month', { timezone });
         const { res, ran } = await ask(query);
@@ -311,11 +335,13 @@ for (const cell of CELLS) {
  * driver is constructed and never connected: its `dialectName` and
  * `dateBucketSql` answer from the client config alone, so this runs with no
  * server. The context is wired with them as `AnalyticsServicePlugin` wires its
- * `sqlDialect` and `dateBucketSql` hooks. The rows are not asked here: the
- * engine buckets a non-UTC zone in memory whatever the dialect, and the live
- * cells above pin them.
+ * `sqlDialect` and `dateBucketSql` hooks, zone included. The rows are not
+ * asked here; the live cells above pin them. [#33697] A non-UTC zone refuses
+ * where the engine buckets it in memory (SQLite, MySQL), and prints the zoned
+ * expression where the driver groups it (PostgreSQL, ADR-0053 Phase 2 D2 as
+ * amended).
  */
-describe('[#21630] the echo of a date bucket, per dialect: a non-UTC timezone refuses, and UTC keeps the driver\'s expression', () => {
+describe('[#21630] the echo of a date bucket, per dialect: a non-UTC timezone refuses where it is bucketed in memory, and UTC keeps the driver\'s expression', () => {
   const DIALECT_CONFIGS = [
     { dialect: 'sqlite', config: { client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } },
     { dialect: 'postgres', config: { client: 'pg', connection: { host: '127.0.0.1', database: 'unconnected' }, pool: { min: 0 } } },
@@ -334,8 +360,8 @@ describe('[#21630] the echo of a date bucket, per dialect: a non-UTC timezone re
       const ctx = {
         getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined),
         sqlDialect: () => (driver as any).dialectName,
-        dateBucketSql: (object: string, field: string, granularity: string) =>
-          driver.dateBucketSql(object, field, granularity as any) ?? undefined,
+        dateBucketSql: (object: string, field: string, granularity: string, timezone?: string) =>
+          driver.dateBucketSql(object, field, granularity as any, timezone) ?? undefined,
       } as unknown as StrategyContext;
 
       it('names its dialect', () => {
@@ -343,12 +369,33 @@ describe('[#21630] the echo of a date bucket, per dialect: a non-UTC timezone re
       });
 
       for (const [timezone] of ZONED) {
+        if (dialect === 'postgres') {
+          it.each(['month', 'week'])(`timezone ${timezone}, %s: the driver's zoned expression`, async (granularity) => {
+            const { sql } = await new ObjectQLStrategy().generateSql(bucketed('closed_at', granularity, { timezone }) as any, ctx);
+            const expected = driver.dateBucketSql(DEAL, 'closed_at', granularity as any, timezone);
+            expect(expected, 'the driver renders the zoned bucket').toContain(`AT TIME ZONE '${timezone}'`);
+            expect(selectedBucket(sql, 'closed_at')).toBe(expected);
+          });
+          continue;
+        }
         it.each(['month', 'week'])(`timezone ${timezone}, %s: refuses`, async (granularity) => {
           const err = await refusalOf(new ObjectQLStrategy().generateSql(bucketed('closed_at', granularity, { timezone }) as any, ctx));
           expect([err.code, err.status, err.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);
           expect(declaredRefusalMessage(err)).toBe(err.message);
         });
       }
+
+      // [#33697] A zone the runtime resolves to no IANA area/location name is
+      // bucketed in memory on every driver, so the echo refuses it on every
+      // dialect, PostgreSQL included; a UTC alias is the UTC expression.
+      it.each(['+08:00', 'EST5EDT'])('timezone %s (no area/location name): refuses', async (timezone) => {
+        const err = await refusalOf(new ObjectQLStrategy().generateSql(bucketed('closed_at', 'month', { timezone }) as any, ctx));
+        expect([err.code, err.status, err.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);
+      });
+      it.each(['Etc/UTC', 'GMT'])('timezone %s (resolves to UTC): the driver\'s UTC expression', async (timezone) => {
+        const { sql } = await new ObjectQLStrategy().generateSql(bucketed('closed_at', 'month', { timezone }) as any, ctx);
+        expect(selectedBucket(sql, 'closed_at')).toBe(driver.dateBucketSql(DEAL, 'closed_at', 'month'));
+      });
 
       for (const timezone of ['UTC', undefined]) {
         it.each(['month', 'week'])(`timezone ${timezone ?? 'unset'}, %s: the driver's own expression`, async (granularity) => {
@@ -383,7 +430,7 @@ describe('[#21647] REFUSAL: a host that wires no dateBucketSql hook', () => {
     },
   );
 
-  it('[#21630] REFUSAL: with a non-UTC timezone, it refuses: the engine buckets that in memory whatever the host wires', async () => {
+  it('[#21630] REFUSAL: with a non-UTC timezone, it refuses: no hook, no expression to print, whichever road the engine takes', async () => {
     const ctx = { getCube: (name: string) => (name === CUBE ? CUBES[0] : undefined) } as unknown as StrategyContext;
     const err = await refusalOf(new ObjectQLStrategy().generateSql(bucketed('closed_on', 'month', { timezone: 'Asia/Shanghai' }) as any, ctx));
     expect([err.code, err.status, err.refusal]).toEqual(['NOT_IMPLEMENTED', 501, true]);

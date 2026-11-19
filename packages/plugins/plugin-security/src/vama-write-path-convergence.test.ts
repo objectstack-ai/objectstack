@@ -392,9 +392,9 @@ describe('[#4647] VAMA holder + private OWD + ownerless record — explain vs. t
     await expect(makeEngine().delete('crm_contract', { id: OWNERLESS.id })).rejects.toThrow(
       ENGINE_DELETE_REJECT_MESSAGE,
     );
-    // The asymmetry that let it hide for so long: plugin-sharing's
-    // `inferTargetId` DOES accept `options.id`, so `canDelete` kept running and
-    // kept answering — one of the two gates, doing the work of two.
+    // `canDelete` itself still answers for the row: the sharing write gate
+    // takes its by-id branch from the engine's own dispatch decision, so it
+    // judges by id only what the engine writes by id, and this bag is not one.
     expect(await stack.sharing.canDelete('crm_contract', OWNERLESS.id, MEMBER_CTX as any)).toBe(false);
   });
 

@@ -274,6 +274,11 @@ const en = {
     // only displace it by authoring a `description`, which makes a VISIBLE
     // subtitle appear on every form — so the fallback has to come from here.
     dialogDescriptionFallback: 'Complete the form fields, then submit or cancel.',
+    // The form section navigation (objectstack#34605): its accessible name,
+    // and the screen-reader text of a section's error count, which is drawn
+    // as a bare number beside the section name.
+    sectionNav: 'Form sections',
+    sectionNavErrors: 'Fields to fix: {{number}}',
     // The hint under a field the caller may read but not write, shown when the
     // field declares no description of its own (objectui#11071).
     deniedDescription: 'You do not have edit access to this field.',
@@ -811,6 +816,7 @@ const en = {
         'This view is grouped, but its data source does not implement queryGroupHeaders, so the groups cannot be counted. Remove the grouping to show the records.',
       needsWholeRows:
         'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
+      draftOnly: 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
     },
     // Column-footer aggregate prefixes, keyed by the spec's `ColumnSummary`
     // vocabulary (objectui#4024). The footer already formatted its NUMBER
@@ -1039,6 +1045,7 @@ const en = {
       succeeded: 'Succeeded {{count}} / {{total}}',
       resultFailed: ' \u00b7 Failed {{count}}',
       succeededRecords: 'Records that succeeded',
+      aggregateNotCompleted: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
       cancel: 'Cancel',
@@ -1217,6 +1224,8 @@ const en = {
     removeGroup: 'Remove',
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
     groupingUnstoredRemove: 'Remove from grouping',
+    draftOnlyQueryDropped: 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
+    withheldFieldsLeftOut: 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
   },
@@ -1507,6 +1516,8 @@ const en = {
     writeStrippedUnknownReason: 'Not applied by the server: {{fields}}',
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
+    approvalPending: 'In approval',
+    approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
     approvalProgressLabel: 'Approval progress',
@@ -1946,6 +1957,9 @@ const en = {
   dashboard: {
     total: 'Total',
     noDataSourceFor: 'No data source available for',
+    drillTooMany: 'Too many records are related to this value to list them here. Narrow the dashboard filters and try again.',
+    drillUnavailable: 'The records behind this value can’t be listed from here.',
+    drillFailed: 'The records behind this value couldn’t be loaded. Try again later.',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -1969,7 +1983,6 @@ const en = {
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
     allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
     details: 'Details',
-    exportCsv: 'Export CSV',
     openInList: 'Open in list',
     config: {
       breadcrumb: {
@@ -2312,6 +2325,10 @@ const en = {
       launcherLabel: 'App launcher',
       menuLabel: 'App navigation',
       menuEmpty: 'This app has no navigation entries you can open.',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: 'App menu bar',
+      searchMenu: 'Search menu',
+      phoneBarHint: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
       // objectui#12427 — the ⋯ menu a sidebar entry shows on hover (`SidebarItemMenu`).
       itemMenu: 'More actions for {{name}}',
       openInNewTab: 'Open in new tab',
@@ -2389,6 +2406,9 @@ const en = {
       // would have left a single translated string among a dozen hardcoded
       // ones — and deferred them to this card, which converts the screen whole.
       cryptoRefusalTitle: 'This deployment cannot encrypt secrets',
+      platformManagedTitle: 'Managed by the platform',
+      platformManagedBody: 'The hosting platform provides and configures this for this environment, so it is not set here.',
+      aiProviderManaged: 'The AI provider, its model and credentials are managed by the platform.',
       // `{{subject}}` is rendered as a `< code >` element by the view, so the
       // sentence is split around it rather than interpolated.
       cryptoRefusalSubjectSuffix: 'is declared encrypted, so nothing was written.',
@@ -2486,6 +2506,8 @@ const en = {
       view: 'View',
       confirm: 'Confirm',
       cancel: 'Cancel',
+      // The folded card's way back in, on a phone (objectstack#34596).
+      continue: 'Continue',
       prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
       organizationName: {
         title: 'Name your organization',
@@ -2532,6 +2554,8 @@ const en = {
         done: 'An AI assistant or API key of yours is connected.',
         action: 'Connect',
       },
+      firstApp: { title: 'Put your first app in', todo: 'No app of your own yet. Install one from the marketplace or build one, and it shows on Home.', done: 'An app of your own is on Home.' },
+      firstRecord: { title: 'Add your first record', todo: 'Nobody has created a record in your apps yet.', done: 'A record was created in your apps.', action: 'Open app' },
     },
     error: {
       connectionFailed: 'Cannot connect to server',
@@ -2613,6 +2637,16 @@ const en = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        publishFromBar_one: '{{count}} unpublished change. Publish it from the draft bar at the top.',
+        publishFromBar_other: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        showDraftToPublish: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraftToPublish_one: '{{count}} unpublished change. Show the draft to review and publish it.',
+        showDraftToPublish_other: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraft: 'Show draft',
+        receipt: 'Published. Your changes are live.',
+        dismissReceipt: 'Dismiss',
         count: '{{count}} change(s) are not published yet — users cannot see them.',
         publish: 'Publish',
         published: 'All pending changes are live.',
@@ -2752,6 +2786,9 @@ const en = {
           titleGeneric: 'Edit this app',
           description:
             'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         },
       },
       clearConversation: 'Clear',
@@ -2851,7 +2888,7 @@ const en = {
       changesApplied: 'Applied',
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
-      discussing: 'Discussing: {{target}}',
+      discussing: 'Viewing: {{target}}',
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
@@ -2959,11 +2996,16 @@ const en = {
       unavailableRetry: 'Try again',
       unavailableHome: 'Back to home',
       dock: {
-        title: 'Assistant',
+        title: 'AI Assistant',
         description: 'AI assistant chat',
         resize: 'Resize chat',
         collapse: 'Collapse chat',
         maximize: 'Open full page',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: 'History',
+        backToChat: 'Back to chat',
+        expand: 'Expand',
+        restore: 'Restore side panel',
         open: 'Open assistant',
         // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
         planAwaitingApproval: 'A proposed plan is waiting for your approval',
@@ -3043,6 +3085,8 @@ const en = {
       },
       passwordsNote: 'Temporary passwords — shown once, never stored. Save them now; each user must change theirs at first sign-in.',
       passwordsMore: 'More entries omitted — use the download.',
+      positionsHint: 'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.',
+      managerHint: 'Manager: map a column holding each user\'s manager, by email address (or phone number where phone sign-in is on). Managers are linked once every row is in, so a manager further down the file counts; a manager that is not found, or cannot be linked, is reported on its row, and the user is still created.',
       passwordsDownload: 'Download CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
@@ -3075,7 +3119,7 @@ const en = {
         unauthorizedHint: 'Holds no permission set beyond the baseline every signed-in member has. Give them a permission set or a position.',
       },
       objectNotFound: 'Object Not Found',
-      objectNotFoundDescription: 'The object "{{objectName}}" does not exist in the current configuration.',
+      objectNotFoundDescription: 'The object "{{objectName}}" does not exist, or you do not have access to it.',
       objectNotFoundHint: 'Check your app navigation settings or select a different object from the sidebar.',
       objectPackageDisabled: 'The object "{{objectName}}" belongs to a package that is disabled, so it is not being served.',
       filterOrGroupNotEditable: 'This filter has an OR group beside other conditions, which the filter editor cannot show, so it is read-only here. The view still applies it.',
@@ -3156,8 +3200,16 @@ const en = {
       viewTypeChartDesc: 'Aggregated bar / line / pie visualisations.',
       viewTypeTree: 'Tree',
       viewTypeTreeDesc: 'Nest self-referencing records into a hierarchy by a parent field.',
+      viewTypeTimesheet: 'Timesheet',
+      viewTypeTimesheetDesc: 'Enter a number per row and weekday; each filled cell is one record.',
       parentField: 'Parent field',
       parentFieldHelp: 'The field pointing to the parent record (same object) that defines the hierarchy. Only self-referencing fields qualify.',
+      timesheetRowField: 'Row field',
+      timesheetRowFieldHelp: 'Each row of the grid is one value of this field, such as a project.',
+      timesheetDateField: 'Date field',
+      timesheetDateFieldHelp: 'Records are placed on the weekday matching this date.',
+      timesheetValueField: 'Value field',
+      timesheetValueFieldHelp: 'The number each cell shows and edits, such as hours.',
       newView: 'New View',
       viewName: 'Name',
       viewNameHelp: 'Machine key (snake_case). Auto-filled from the title — edit if you like.',
@@ -3278,6 +3330,7 @@ const en = {
         retry: "Continue with single sign-on",
       },
       ssoHandoff: 'Continue to {{target}}',
+      ssoHandoffClient: "Sign in to continue to {{clientName}}",
       // Phone/OTP sign-in labels. `LoginForm` interpolates `{seconds}` with a
       // literal `.replace('{seconds}', …)` of its own (in `LoginForm`),
       // so those SINGLE braces must survive translation — i18next never sees
@@ -3395,6 +3448,8 @@ const en = {
         // objectstack#32992 — `access_denied`: the identity provider refused the
         // signed-in account for this environment, with its two ways on.
         ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
+        ssoAccessDeniedNotMember: "The account you signed in with is not a member of this environment's organization. Sign in with an account that is, or ask an administrator of the organization to invite you.",
+        ssoAccessDeniedInvitationPending: "You have been invited to this environment's organization, but the invitation has not been accepted yet. Accept the invitation from your email, then sign in again.",
         ssoSwitchAccount: "Switch account",
         ssoBackToConsole: "Back to console",
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
@@ -3523,6 +3578,10 @@ const en = {
       missingToken: 'Verification link is missing a token.',
       emailMissing: 'Email address is missing',
       resendButton: 'Resend verification email',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        'Your email address has not been verified yet. Send a verification link to {{email}}, then click the link to verify your account.',
+      sendButton: 'Send verification email',
       resending: 'Sending…',
       resent: 'Email sent! Check your inbox',
       resentSuccess: 'Verification email sent!',
@@ -3701,6 +3760,14 @@ const en = {
       granted: 'Access granted',
       denied: 'Access denied',
       noRedirect: 'No redirect URL returned by the server.',
+      // Shown in place of the consent card after a decision whose redirect is
+      // not `http(s)` (a native app's custom scheme): the tab stays here while
+      // the operating system opens the app. `{{appName}}` is the registered
+      // name; the Unnamed forms are used when the client was not identified.
+      returnToApp: 'Return to {{appName}} to continue. You can close this tab.',
+      returnToUnnamedApp: 'Return to the application to continue. You can close this tab.',
+      openApp: 'Open {{appName}}',
+      openUnnamedApp: 'Open the application',
       failed: 'Consent failed',
       footer: 'You can revoke access at any time from your account settings.',
     },
@@ -3825,7 +3892,7 @@ const en = {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
     editApp: 'Edit app',
-    openAppInStudio: 'Open app in Studio',
+    openAppInStudio: 'Open {{app}} in Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4048,7 +4115,6 @@ const en = {
   },
   empty: {
     objectNotFound: 'Object Not Found',
-    objectNotFoundDescription: 'Object "{{name}}" definition missing. Check your configuration or navigate back to select a valid object.',
     interfacePageSourceMissing: 'This interface page references "{{name}}", which is not available.',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
@@ -4118,6 +4184,10 @@ const en = {
       pendingHere: 'Draft preview · {{count}} unpublished changes on this page',
       pendingHere_one: 'Draft preview · {{count}} unpublished change on this page',
       pendingHere_other: 'Draft preview · {{count}} unpublished changes on this page',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
+      pendingInApp_one: 'Draft preview · {{count}} unpublished change in this app. Nothing here is live until you publish.',
+      pendingInApp_other: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
       // Magic-moment hint: a freshly-built draft renders empty (dashboards at 0,
       // lists "Nothing here yet") because seed/sample rows only load on publish.
       // Say so plainly so an empty preview never reads as a broken build.
@@ -4144,7 +4214,7 @@ const en = {
       detailNone: 'No differences detected — the draft matches the published version.',
       fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Includes changes drafted by the AI copilot',
+      draftedByCopilot: 'Includes changes drafted by the AI assistant',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
       draftedByMcp: 'Includes changes drafted by an MCP client',
       detailChangedKeys: 'Also changed:',
@@ -4257,7 +4327,8 @@ const en = {
       securityBlockTitle: 'Publishing will be refused — {{count}} item(s) need a decision first',
       securityBlockTitle_one: 'Publishing will be refused — {{count}} item needs a decision first',
       securityBlockTitle_other: 'Publishing will be refused — {{count}} items need a decision first',
-      securityBlockWhere: 'Fix it on the object under Settings → Record sharing, then publish again.',
+      securityBlockWhere: 'Fix it on the object under Settings → Who can see which records, then publish again.',
+      flowChecksTitle: 'Before you publish — the publish check will report these',
       // The pre-publish security rows, by the rule id of the finding (DraftChangesPanel `SECURITY_RULE_TEXT`).
       securityRule: {
         owdUnset: 'No record-sharing baseline (sharingModel) is declared. The runtime falls back to private, but the baseline must be an authored decision.',
@@ -4269,6 +4340,8 @@ const en = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'This app is not published yet. It works, but only builders can see it. Publish to make it visible to your users.',
       message: 'Unpublished app — fully functional, but only builders can see it. Publish to make it visible to your users.',
       publish: 'Publish',
       publishing: 'Publishing…',
@@ -4596,6 +4669,17 @@ const en = {
       accept: 'Accept invitation',
       accepted: 'Invitation accepted',
       joinedDescription: 'Welcome to {{orgName}}. You joined as {{role}}.',
+      joinedWelcome: 'Welcome to {{orgName}}.',
+      verifyEmailTitle: 'Verify your email address',
+      verifyEmailDescription: 'The email address of this account must be the invited one, and verified. Verify it, then open the invitation link from your mailbox again.',
+      proofInvalid: 'This invitation link can no longer be used. Ask for a new invitation, or sign in to an existing account.',
+      signInInstead: 'Sign in to an existing account',
+      proofTitle: 'Join {{orgName}}',
+      proofDescription: 'Set up your account for {{email}} to accept the invitation.',
+      proofDivider: 'or set a password',
+      proofNameLabel: 'Name',
+      proofPasswordLabel: 'Password',
+      proofSubmit: 'Create account and join',
       continue: 'Continue',
       acceptFailed: 'Failed to accept invitation',
       decline: 'Decline',
@@ -4632,6 +4716,8 @@ const en = {
     viewApprovals: 'View approvals',
     noPendingApprovals: 'No pending approvals',
     openApprovalsInbox: 'Open Approvals Inbox',
+    needsYou: 'Needs your action',
+    viewApprovalDetails: 'View details',
     // Bell-badge breakdown (objectstack-ai/objectstack#7233): the badge sums unread notification topics
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
@@ -4896,13 +4982,11 @@ const en = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     // objectstack#33660 — the composer's model picker: the allowance note and the ×20 confirmation.
     modelPicker: {
@@ -4968,6 +5052,7 @@ const en = {
       get_metadata_schema: 'Read the metadata format',
       get_package: 'Look at the package',
       get_record_history: 'Read the record history',
+      list_flow_runs: 'Check automation runs',
       list_metadata: 'List the existing metadata',
       list_objects: 'List the existing objects',
       list_packages: 'List the existing packages',
@@ -5064,6 +5149,23 @@ const en = {
       needsAttention: '{{count}} need attention',
       needsAttention_one: '{{count}} needs attention',
       needsAttention_other: '{{count}} need attention',
+      // objectstack#32984 — the publish-health line under a Published badge, which was English in every locale.
+      health: {
+        sampleRowsLive: '{{count}} sample rows live',
+        sampleRowsLive_one: '{{count}} sample row live',
+        sampleRowsLive_other: '{{count}} sample rows live',
+        views: '{{count}} views',
+        views_one: '{{count}} view',
+        views_other: '{{count}} views',
+        widgets: '{{count}} widgets',
+        widgets_one: '{{count}} widget',
+        widgets_other: '{{count}} widgets',
+        seeds: '{{count}} sample data sets',
+        seeds_one: '{{count}} sample data set',
+        seeds_other: '{{count}} sample data sets',
+        verified: '{{checks}} verified',
+        seedFailed: 'Sample data failed to load.',
+      },
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',
       nextStepQuote: '“{{step}}”',
@@ -5253,13 +5355,29 @@ const en = {
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    openNextAfterDecision: 'Open next after deciding',
+    queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
+    snapshotChanged: 'Changed',
+    snapshotCurrentValue: 'Current value',
+    snapshotOpenRecord: 'Open record',
+    snapshotCurrentUnreadable: 'The current record cannot be read, so changes made after submission are not marked.',
+    snapshotChildCurrent: 'Current rows: the submission does not keep child rows.',
+    progressTitle: 'Approval progress',
+    attachmentsTitle: 'Attachments',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
     submittedByYou: 'You submitted this',
+    // The approver band's status line and menu on a record under approval
+    // (objectstack#34361): the task, the step number on the served route,
+    // the submitter by name, and the menu holding every non-decision lever.
+    awaitingYourDecision: 'Awaiting your approval',
+    stepNumber: 'Step {{n}}',
+    submittedByName: 'Submitted by {{name}}',
+    moreDecisionActions: 'More approval actions',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',
@@ -5994,6 +6112,52 @@ const en = {
     sourceRequired: 'A {{kind}} page requires a non-empty {{source}}.',
     loading: 'Loading react runtime…',
     error: 'React page error',
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "Mobile App",
+    subtitle: "Connect the ObjectOS mobile app to this server",
+    scanHint: "Open the ObjectOS mobile app and scan this code to connect it to this server.",
+    qrAlt: "QR code that connects the ObjectOS mobile app to this server",
+    linkLabel: "Connection link",
+    copy: "Copy link",
+    copied: "Link copied",
+    privacy: "The code holds only this server's address, never your account.",
+    loadFailed: "Could not read this server's public address. Reload the page to try again.",
+    unreachableTitle: "A phone cannot reach this server's address",
+    unreachableBody: "This server's address is {{address}}, a local or private address a phone cannot open, so no code is shown. Set {{setting}} on the server to its public address, for example {{example}}, and restart it.",
+    insecureTitle: "This server's address does not use HTTPS",
+    insecureBody: "This server's address is {{address}}. The mobile app signs in through it, so it must use HTTPS, and no code is shown. Serve this server over HTTPS, set {{setting}} to its https:// address, for example {{example}}, and restart it.",
+    unpublishedTitle: "This server does not publish its public address",
+    unpublishedBody: "No code is shown: this server does not offer its public address to the mobile app yet. Update the server to a version that does.",
+  },
+  notificationSettings: {
+    title: "Notification Settings",
+    subtitle: "Choose which notifications reach you, and on which channels",
+    loading: "Loading your notification settings…",
+    loadFailed: "Could not read your notification settings. Reload the page to try again.",
+    saveFailed: "The change was not saved: {{reason}}",
+    general: "General",
+    generalWarning: "Changing your digest or quiet hours saves your own general setting. It then applies to every topic and channel you have not set yourself, in place of your organization's defaults.",
+    digest: "Digest",
+    digestNone: "No digest",
+    digestDaily: "Daily",
+    digestWeekly: "Weekly",
+    digestNoOff: "\"No digest\" is not offered: saving it does not turn off a digest your organization sets, so it might not take effect.",
+    quietHours: "Quiet hours",
+    quietHoursNoClear: "An empty window cannot be saved: it does not turn off quiet hours your organization sets, so it might not take effect. Set a start and an end time instead.",
+    save: "Save",
+    matrix: "Topics and channels",
+    topic: "Topic",
+    allTopics: "All topics",
+    alwaysDelivered: "Always delivered",
+    notConfigured: "Not set up",
+    toggleLabel: "{{topic}} by {{channel}}",
+    sourceOwn: "Your setting",
+    sourceDefault: "Organization default",
+    sourceBuiltin: "Default",
+    sourceMandatory: "Required",
   },
 } as const;
 

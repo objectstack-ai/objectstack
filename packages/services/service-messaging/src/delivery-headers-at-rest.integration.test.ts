@@ -87,7 +87,7 @@ function makeFetch(): {
 } {
     const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
     const impl: FetchImpl = async (url, init) => {
-        calls.push({ url, headers: init.headers, body: init.body });
+        calls.push({ url, headers: init.headers, body: init.body ?? '' });
         return { ok: true, status: 204, async text() { return ''; } };
     };
     return { impl, calls };

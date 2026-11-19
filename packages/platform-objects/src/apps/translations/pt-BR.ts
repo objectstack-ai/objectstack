@@ -18,7 +18,9 @@ export const ptBR: TranslationData = {
         grp_account_developer: { label: 'Desenvolvedor' },
         grp_account_ai_assistant: { label: 'Assistente de IA' },
         nav_account_profile: { label: 'Perfil' },
+        nav_account_mobile_app: { label: 'Aplicativo móvel' },
         nav_account_notifications: { label: 'Notificações' },
+        nav_account_notification_settings: { label: 'Configurações de notificação' },
         nav_account_approvals: { label: 'Minhas aprovações pendentes' },
         nav_account_memberships: { label: 'Minhas organizações' },
         nav_account_linked: { label: 'Contas vinculadas' },
@@ -37,7 +39,6 @@ export const ptBR: TranslationData = {
       navigation: {
         group_overview: { label: 'Visão geral' },
         group_apps: { label: 'Aplicativos' },
-        nav_packaged_actions: { label: 'Ações fornecidas por pacotes' },
         nav_marketplace_browse: { label: 'Explorar o Marketplace' },
         nav_marketplace_installed: { label: 'Aplicativos instalados' },
         nav_cloud_connection: { label: 'Conexão com a nuvem' },
@@ -189,13 +190,55 @@ export const ptBR: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Número de usuários' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Número de organizações' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Número de sessões' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Número de instalações' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Número de usuários',
+          description: 'Número de contas de usuário registradas, ativas ou não.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Número de organizações',
+          description: 'Número de organizações registradas; cada uma tem seus próprios membros, dados e configurações.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Número de sessões',
+          description: 'Número de sessões de login registradas, uma por login feito em um navegador ou dispositivo.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Número de instalações',
+          description: 'Número de instalações de pacotes registradas, uma por pacote instalado.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Tipo de ação' }, user_id: { label: 'Usuário' } },
-      measures: { event_count: { label: 'Número de eventos' } },
+      dimensions: {
+        action: {
+          label: 'Tipo de ação',
+          description: 'Tipo de ação registrada por uma entrada do log de auditoria, como criar, atualizar, excluir, fazer login ou alterar a configuração.',
+        },
+        user_id: {
+          label: 'Usuário',
+          description: 'Usuário que realizou a ação auditada; as entradas gravadas pela própria plataforma são agrupadas em "Sistema".',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Número de eventos',
+          description: 'Número de entradas do log de auditoria; cada uma registra uma ação realizada no sistema por um usuário ou pela própria plataforma.',
+        },
+      },
     },
   },
 

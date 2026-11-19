@@ -15,8 +15,7 @@
 - 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
 - 成功序列读伴随不读次序:`removed_from_merge_queue` 与 `merged` 同秒或数秒内到,次序实测不定。
 - 真被踢是其后无 `merged`、几分钟后 PR 仍 open;两种退出的 actor 同为 `github-merge-queue[bot]`。
-- 不在 `origin/main` 上是二义读数:在队列里等 / 没入队,两者处置相反。
-- ⇒ 落地检查恒两个读数:队列成员资格 和 `origin/main`,缺一不可。
+- 不在 `origin/main` 二义(在队等/没入队)⇒ 落地检查恒读两数:队列成员资格与 `origin/main`。
 - `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
 - 队列落的是另一个提交:`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO。
 - 同 PR 的 `list_pull_requests` 会回 `merged: false` 与 `merged_at` 并存 ⇒ 只读布尔即读成没合。
@@ -41,6 +40,7 @@
 - 本仓转 draft 同秒掉 auto-merge 仅见于未入队时,转正后重挂;已入队者 2026-08-08、09-29 照合。
 - 补救:转 draft 与卸载 auto-merge 都做,卸载单独不踢队;两手齐做未见踢队(08-08、09-28、10-24)。
 - 出队按队列 ref 阳性探针答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论。
+- 中继 `pr_dequeue` 实测出队(run 43767458575,审计 6902190812):mutation 200,回读离队,仍开未合。
 - `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
 - 它不碰 draft 位 ⇒ 请审恒走它;MCP 兜底已拒。
@@ -158,7 +158,7 @@
 - 账号停用销毁其名下 PR、卡与评论;分支与 commit 属仓库照留远端 ⇒ 代码从未真丢。
 - 停用同抹其事件:标签留在卡上而写它的 `labeled` 事件消失 ⇒ 谁打的标签事后不可重建。
 - 被销毁的 PR 仍占分支名:API 答 404,同名开新 PR 仍被拒 ⇒ 同批 commit 推新分支名再开。
-- 本地对象库是最后备份:复核时 fetch 过的每条分支,其 head 在停用后仍在本地可推。
+- 本地对象库是最后备份:L1/L2 审核时 fetch 过的每条分支,其 head 在停用后仍在本地可推。
 - 重建 PR 正文自报四件:head 逐字节同、无 rebase/amend/squash、数字出自旧基底、CI 为准。
 - 文档载明未实测:条件请求答 `304` 不计 core 池;公开仓零配额读法两档,payload 档优先。
 - 网页档可达性逐会话逐 URL 形状分叉:一处容器 `/actions/**` 与 api. 回 403,另一处网页全 200。
@@ -359,7 +359,7 @@
 - 并行 spec PR 同动 pin 计数断言:被踢不是事故,按 os-regen 序再解一轮。
 - 解冲突两侧收据都保留、按合并顺序堆叠;新计数从合并后源码重数,⛔ 不从收据做算术。
 - 操作数是文件本身不是历史;双方占同一编号是常态,重编号后进侧。
-- 容器重启杀死在飞 dev,三态 ①:分支已推加 PR 已开 ⇒ 只欠验收,CI 重跑加复核,不动代码。
+- 容器重启杀死在飞 dev,三态 ①:分支已推加 PR 已开 ⇒ 只欠验收,CI 重跑加 L1,不动代码。
 - ②:死在 regen 中途(未提交全是生成物、merge commit 已在)⇒ PM 直接续作。
 - 续作序:build,整链 regen,生成物门禁全绿,提交推送;恢复 commit 带 `Recovery commit:` 前缀。
 - 有的现场 regen 一件没跑,推送前先跑生成物门禁别赌。
@@ -433,7 +433,7 @@
 - ③:行内反引号里的关键词不触发,code span 不建闭合链接;围栏块未实测,按同规则对待。
 - PR body 与 squash commit message 是两个独立解析源:commit 干净不等于 body 干净,只查 commit 会漏。
 - 误关的卡以 `completed` 状态对一切只看 open 的过滤与巡检隐身,无机械守卫覆盖这条路径。
-- 消费侧检查 = 合并后读 `closed_by_pull_requests`,在复核清单里。
+- 消费侧检查 = 合并后读 `closed_by_pull_requests`,在 L1 清单里。
 - 被 `Fixes` PR 自动关闭的卡保留 `pm:*` 标签;`Refs` PR 不关卡 ⇒ 状态转移归席位不归平台。
 
 ## 断粮检测与跨墙恢复(5 小时用量墙)
@@ -455,4 +455,4 @@
 - 用量墙杀死席位与全部在飞子代理而 worktree 存活;`SendMessage` 幂等重启文本可整批复活。
 - 定时器只在轮次之间投递:可迟到数分钟,也可在轮内被吃掉而无通知 ⇒ 醒来先重读状态。
 - 撞墙期间到点的定时器在重置后按序补投 ⇒ ⛔ 不为它们重建 Routine。
-- 墙杀后别席可能在共享分支留下抢救 WIP 提交:未过门禁的分支尖不是复核输入。
+- 墙杀后别席可能在共享分支留下抢救 WIP 提交:未过门禁的分支尖不是 L1/L2 审核输入。

@@ -176,20 +176,26 @@ export const SysUser = ObjectSchema.create({
 
     // ── Platform admin operations ───────────────────────────────────────
     //
-    // `unlock_user`, `create_user` and the actions further down that carry
-    // `requiresFeature: 'admin'` (#2874) are gated on the better-auth `admin`
+    // `create_user` and `impersonate_user`, the actions here that carry
+    // `requiresFeature: 'admin'` (#2874), are gated on the better-auth `admin`
     // plugin: when `features.admin` is off the UI hides them instead of
     // rendering buttons that 404. SCIM deployments keep them: SCIM forces the
     // admin plugin (and `features.admin`) on (ADR-0134).
     //
-    // Ban / Unban carry NO `requiresFeature: 'admin'`, deliberately. Their
-    // doors, plugin-auth's `admin/ban-user` / `admin/unban-user`, are
-    // ObjectStack mounts registered whether or not the vendor plugin is on
-    // (`admin-ban-endpoints.ts`): without it the ban is written through the
-    // data engine and the session refusal answers `403 BANNED_USER`
-    // (`user-session-admission.ts`). So `features.admin == true` would hide a
-    // working Deactivate / Reactivate on every kernel that runs without the
-    // plugin, managed environments included. Pinned in
+    // Ban / Unban / Unlock / Set Password carry NO `requiresFeature: 'admin'`,
+    // deliberately. Their doors, plugin-auth's `admin/ban-user` /
+    // `admin/unban-user` / `admin/unlock-user` / `admin/set-user-password`,
+    // are ObjectStack mounts registered whether or not the vendor plugin is
+    // on. Without it the ban is written through the data engine and the
+    // session refusal answers `403 BANNED_USER` (`admin-ban-endpoints.ts`,
+    // `user-session-admission.ts`); the lockout is plugin-auth's own
+    // (ADR-0069 D2, stamped by its sign-in path), and the unlock clears it
+    // through the data engine; the password is hashed and written through
+    // better-auth's core `internalAdapter`, which every kernel carries. So
+    // `features.admin == true` would hide a working Deactivate / Reactivate /
+    // Unlock / Set Password on every kernel that runs without the plugin,
+    // managed environments included (Set Password keeps its own
+    // hide-when-cloud-managed rule). Pinned in
     // `action-state-visibility.test.ts` (the offer) and plugin-auth's
     // `pending-sso-users.test.ts` (the declared targets, driven live).
     //
@@ -218,9 +224,11 @@ export const SysUser = ObjectSchema.create({
     // list row the console projects every `record.<field>` an object action's
     // predicate reads (objectui `listViewPredicates`), so the default Users
     // view carries `banned` without showing it; the record header reads the
-    // whole row. `banned` stays true past `ban_expires` until better-auth
-    // clears it at the user's next sign-in, so Unban is offered while the row
-    // says banned. Pinned in `action-state-visibility.test.ts`.
+    // whole row. `banned` stays true past `ban_expires` until the user's next
+    // sign-in clears it (better-auth's admin plugin where it is mounted,
+    // plugin-auth's `user-session-admission.ts` where it is not), so Unban is
+    // offered while the row says banned. Pinned in
+    // `action-state-visibility.test.ts`.
     {
       name: 'ban_user',
       label: 'Ban User',
@@ -287,7 +295,8 @@ export const SysUser = ObjectSchema.create({
     {
       // ADR-0069 D2 — clear a brute-force lockout early (locked_until auto-
       // expires, but an admin can release a user immediately). Hits the
-      // plugin-auth custom route, which is admin-guarded server-side.
+      // plugin-auth custom route, which is admin-guarded server-side and
+      // works without the better-auth admin plugin (block header above).
       name: 'unlock_user',
       label: 'Unlock Account',
       icon: 'lock-open',
@@ -308,7 +317,6 @@ export const SysUser = ObjectSchema.create({
       // `failed_login_count` at the threshold, so one more failure re-locks,
       // and Unlock is what resets that counter.
       visible: 'current_user.isPlatformAdmin == true && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Account unlocked',
       refreshAfter: true,
@@ -501,11 +509,14 @@ export const SysUser = ObjectSchema.create({
         title: 'User Added',
         acknowledge: 'Done',
         // Each field is skipped when its path is absent from the answer:
-        // `notApplied` only on a re-add of a person still pending, `managerError`
-        // only when no manager was linked, `host.reason` only when the hosting
-        // organisation was not told.
+        // `pendingAgain` only on a re-add of a person still pending (the door
+        // answers it only then, so no `false` row is drawn on a fresh add),
+        // `notApplied` only on such a re-add that sent grants or a manager,
+        // `managerError` only when no manager was linked, `host.reason` only
+        // when the hosting organisation was not told.
         fields: [
           { path: 'email', label: 'Email', format: 'text' },
+          { path: 'pendingAgain', label: 'Already pending', format: 'json' },
           { path: 'notApplied', label: 'Already pending, so not applied (set these on the record)', format: 'json' },
           { path: 'managerError', label: 'Manager', format: 'text' },
           { path: 'host.reason', label: 'Invitation not sent', format: 'text' },
@@ -540,11 +551,32 @@ export const SysUser = ObjectSchema.create({
       resultDialog: {
         title: 'Import Finished',
         acknowledge: 'Done',
+        // `rows` is the door's per-row report (plugin-auth
+        // `ImportSsoUserRowResult`), drawn as a table: one row per CSV line, a
+        // cell per answer member. A member a row does not carry draws an empty
+        // cell: `alreadyPending` and `host` only on a row that was added,
+        // `error` only on one that was not, `notApplied` only on a re-add that
+        // sent columns, `managerError` only when no manager was linked.
         fields: [
           { path: 'summary.added', label: 'Added', format: 'text' },
           { path: 'summary.alreadyPending', label: 'Already pending, told again', format: 'text' },
           { path: 'summary.failed', label: 'Not added', format: 'text' },
-          { path: 'rows', label: 'Result per row', format: 'json' },
+          {
+            path: 'rows',
+            label: 'Result per row',
+            format: 'table',
+            columns: [
+              { path: 'row', label: 'Row', format: 'json' },
+              { path: 'email', label: 'Email' },
+              { path: 'ok', label: 'Succeeded', format: 'json' },
+              { path: 'alreadyPending', label: 'Already pending, told again', format: 'json' },
+              { path: 'host.notified', label: 'Hosting organization told', format: 'json' },
+              { path: 'host.reason', label: 'Why not told' },
+              { path: 'error.message', label: 'Not added because' },
+              { path: 'notApplied', label: 'Not applied (set these on the record)', format: 'code-list' },
+              { path: 'managerError', label: 'Manager' },
+            ],
+          },
         ],
       },
     },
@@ -564,11 +596,9 @@ export const SysUser = ObjectSchema.create({
       // The door's platform-admin gate, declared where both action doors read it (#30771).
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above —
-      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on).
-      // Console only: the server keeps answering it on an `env_native` row, so
-      // the break-glass admin stays editable (ruling 6341690661, Q4 A).
+      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on):
+      // the door refuses every target there (plugin-auth `cloud-managed.ts`).
       visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Password updated',
       refreshAfter: false,

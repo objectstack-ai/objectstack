@@ -95,6 +95,10 @@ function refusingData(err: unknown): any {
 }
 
 const duplicate = () => new DuplicateRecordError('crm_account', new Error('driver: unique violation'), 'name');
+/** The engine's duplicate as a write in `locale` builds it: the field's label in that locale, the sentence rendered there. */
+const duplicateIn = (locale: string, label: string) => new DuplicateRecordError(
+    'crm_account', new Error('driver: unique violation'), 'name', { field: label, messages: { locale } },
+);
 const validation = () => new ValidationError([
     { field: 'amount', code: 'rule_violation', message: 'Amount must be positive' } as any,
 ]);
@@ -132,8 +136,11 @@ function engineOver(err: unknown): AutomationEngine {
 }
 
 describe('#24914 — create_record: the refusal reaches AutomationResult, the text does not move', () => {
-    it('a unique refusal carries { code: UNIQUE_VIOLATION, message } — the wire spelling, not DUPLICATE_RECORD', async () => {
-        const err = duplicate();
+    it.each([
+        ['zh-CN', '客户名称', '已存在相同客户名称的记录'],
+        ['en', 'Account Name', 'A record with this Account Name already exists'],
+    ])('a unique refusal (%s) carries { code: UNIQUE_VIOLATION, message } — the wire spelling, not DUPLICATE_RECORD — and the declared userMessage', async (locale, label, sentence) => {
+        const err = duplicateIn(locale, label);
         const engine = engineOver(err);
         engine.registerFlow('convert', createFlow());
 
@@ -141,12 +148,14 @@ describe('#24914 — create_record: the refusal reaches AutomationResult, the te
 
         expect(result.success).toBe(false);
         expect(result.status).toBe('failed');
+        // `message` keeps the diagnostic: the engine's thrown sentence.
         expect(result.innerRefusal).toEqual({ code: 'UNIQUE_VIOLATION', message: err.message });
+        expect(err.message).toMatch(/^Duplicate record refused on '/);
         // The diagnostic text is the composition it always was, byte for byte.
         expect(result.error).toBe(`Node 'mk' failed: create_record(crm_account) failed: ${err.message}`);
-        // Unmarked: the engine's duplicate carries no producer marking, so NO
-        // userMessage — absent, never an empty string a runner would render.
-        expect('userMessage' in result).toBe(false);
+        // The engine's duplicate declares its end-user sentence, in the
+        // writer's locale, on the marked channel: the run carries it verbatim.
+        expect(result.userMessage).toBe(sentence);
     });
 
     it('a validation refusal carries VALIDATION_FAILED and the author\'s rule text', async () => {

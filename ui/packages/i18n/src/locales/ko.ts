@@ -189,6 +189,8 @@ const ko = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "양식 필드를 작성한 다음 제출하거나 취소하세요.",
+    sectionNav: "양식 섹션",
+    sectionNavErrors: "수정할 필드: {{number}}",
     deniedDescription: "이 필드를 편집할 권한이 없습니다.",
     serverDefaultHint: "저장 시 자동으로 설정됩니다.",
     requiredForAction: "'{{action}}' 실행에 필요합니다.",
@@ -543,6 +545,7 @@ const ko = {
       succeeded: "성공 {{count}} / {{total}}",
       resultFailed: " · 실패 {{count}}",
       succeededRecords: "성공한 레코드",
+      aggregateNotCompleted: "선택한 레코드에 대한 작업이 완료되지 않았습니다. 일부 레코드는 이미 변경되었을 수 있습니다. 닫으면 목록에 현재 값이 표시됩니다.",
       retry: "다시 시도",
       downloadErrorCsv: "오류 CSV 다운로드",
       cancel: "취소",
@@ -580,6 +583,7 @@ const ko = {
         "이 뷰는 그룹화되어 있지만 데이터 소스가 queryGroupHeaders를 구현하지 않아 그룹 개수를 셀 수 없습니다. 레코드를 표시하려면 그룹화를 제거하세요.",
       needsWholeRows:
         "그룹화에는 모든 레코드가 필요하지만 이 그리드에는 한 페이지만 전달되어 그룹 개수를 셀 수 없습니다. 모든 레코드를 전달하거나 queryGroupHeaders를 구현하는 데이터 소스에서 그리드가 불러오도록 하세요.",
+      draftOnly: "{{fields}}(으)로 그룹화되지 않았습니다: 게시할 때까지 초안에만 존재합니다.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -931,6 +935,8 @@ const ko = {
     removeGroup: "제거",
     groupingUnstoredNotice: "{{fields}} 기준으로 이 목록을 그룹화할 수 없습니다. 값이 표시될 때 계산되며 저장되지 않습니다. 해당 그룹화 없이 목록을 표시합니다.",
     groupingUnstoredRemove: "그룹화에서 제거",
+    draftOnlyQueryDropped: "{{fields}} 기준 필터와 정렬이 적용되지 않았습니다. 초안에만 있으며 게시 후 적용됩니다.",
+    withheldFieldsLeftOut: "{{fields}} 기준 표시, 필터, 정렬, 그룹화가 적용되지 않았습니다. 이 필드를 추가하는 패키지가 비활성화되어 있습니다. 패키지를 활성화하면 다시 나타납니다.",
     inlineEditShort: "인라인 편집",
     inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
   },
@@ -1376,6 +1382,8 @@ const ko = {
     writeStrippedUnknownReason: "다음 필드는 서버에서 적용되지 않았습니다: {{fields}}",
     approvalPendingEditable: "승인 진행 중 · 편집 가능",
     approvalPendingTooltip: "이 레코드에 대기 중인 승인 요청이 있지만 이 단계에서는 편집할 수 있습니다",
+    approvalPending: "승인 진행 중",
+    approvalPendingNotEditableTooltip: "이 레코드에 대기 중인 승인 요청이 있습니다",
     approvalProgress: "승인 — {{need}}건 중 {{got}}건",
     approvalProgressGroups: "합의 — {{need}}개 그룹 중 {{got}}개",
     approvalProgressLabel: "승인 진행 상황",
@@ -1555,7 +1563,6 @@ const ko = {
     widgetForbiddenMessage: "이 위젯의 데이터를 볼 수 있는 권한이 없습니다.",
     allWidgetsForbiddenMessage: "이 대시보드의 데이터를 볼 수 있는 권한이 없습니다.",
     details: "세부 정보",
-    exportCsv: "CSV 내보내기",
     openInList: "목록에서 열기",
     filters: {
       label: "대시보드 필터",
@@ -1585,6 +1592,9 @@ const ko = {
     },
     total: "합계",
     noDataSourceFor: "데이터 소스 없음:",
+    drillTooMany: '이 값과 관련된 레코드가 너무 많아 여기에 나열할 수 없습니다. 대시보드 필터 범위를 좁힌 후 다시 시도하세요.',
+    drillUnavailable: '이 값에 해당하는 레코드는 여기에서 나열할 수 없습니다.',
+    drillFailed: '이 값에 해당하는 레코드를 불러오지 못했습니다. 잠시 후 다시 시도하세요.',
     config: {
       breadcrumb: {
         dashboard: "대시보드",
@@ -1916,10 +1926,22 @@ const ko = {
       },
       passwordsNote: "임시 비밀번호 — 한 번만 표시되며 저장되지 않습니다. 지금 저장하세요. 각 사용자는 첫 로그인 시 변경해야 합니다.",
       passwordsMore: "이후 항목은 생략되었습니다 — 다운로드를 이용하세요.",
+      positionsHint: "직위: 직위 머신 이름 열을 매핑할 수 있습니다(여러 개는 \";\"로 구분). 각 직위는 Setup과 같은 규칙으로 할당됩니다. 존재하지 않거나 할당 권한이 없는 직위는 해당 행에 오류로 표시되며, 사용자는 그대로 생성됩니다.",
+      managerHint: "관리자: 각 사용자의 관리자를 나타내는 열을 매핑할 수 있습니다(이메일 주소, 전화번호 로그인이 켜져 있으면 전화번호). 관리자는 모든 행을 가져온 뒤 연결되므로 파일 뒤쪽에 있는 관리자도 인정됩니다. 찾을 수 없거나 연결할 수 없는 관리자는 해당 행에 오류로 표시되며, 사용자는 그대로 생성됩니다.",
       passwordsDownload: "CSV 다운로드",
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        publishFromBar_one: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        publishFromBar_other: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        showDraftToPublish: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraftToPublish_one: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraftToPublish_other: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraft: '초안 보기',
+        receipt: '게시했습니다. 변경 사항이 반영되었습니다.',
+        dismissReceipt: '닫기',
         count: "게시되지 않은 변경이 {{count}}건 있습니다 — 사용자에게는 보이지 않습니다.",
         publish: "게시",
         published: "대기 중인 변경 사항이 모두 반영되었습니다.",
@@ -2015,6 +2037,9 @@ const ko = {
           title: "“{{app}}” 편집 중",
           titleGeneric: "이 앱 편집",
           description: "무엇을 바꿀까요? 이 앱을 그 자리에서 수정합니다 — 필드, 객체, 뷰, 대시보드를 추가하거나 기존 내용을 조정할 수 있습니다.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "이 앱의 데이터(건수, 목록, 요약)를 물어보거나 바꿀 점을 알려 주세요. 필드, 개체, 뷰, 대시보드를 그 자리에서 수정합니다.",
         },
       },
       clearConversation: "지우기",
@@ -2154,7 +2179,7 @@ const ko = {
       changesApplied: "적용됨",
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
-      discussing: "논의 중: {{target}}",
+      discussing: "보는 중: {{target}}",
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -2202,11 +2227,16 @@ const ko = {
       unavailableRetry: "다시 시도",
       unavailableHome: "홈으로 돌아가기",
       dock: {
-        title: "어시스턴트",
+        title: "AI 어시스턴트",
         description: "AI 어시스턴트 채팅",
         resize: "채팅 크기 조정",
         collapse: "채팅 접기",
         maximize: "전체 페이지로 열기",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "기록",
+        backToChat: "채팅으로 돌아가기",
+        expand: "펼치기",
+        restore: "사이드 패널로 복원",
         open: "어시스턴트 열기",
         planAwaitingApproval: "제안된 계획이 승인을 기다리고 있습니다",
       },
@@ -2253,6 +2283,9 @@ const ko = {
       fieldErrorsToast_one: "확인이 필요한 설정 {{count}}개: {{settings}}",
       fieldErrorsToast_other: "확인이 필요한 설정 {{count}}개: {{settings}}",
       cryptoRefusalTitle: "이 배포는 시크릿을 암호화할 수 없습니다",
+      platformManagedTitle: "플랫폼에서 관리합니다",
+      platformManagedBody: "호스팅 플랫폼이 이 환경을 위해 제공하고 구성하므로 여기에서 설정하지 않습니다.",
+      aiProviderManaged: "AI 공급자, 모델 및 자격 증명은 플랫폼에서 관리합니다.",
       cryptoRefusalSubjectSuffix: "은(는) 암호화 대상으로 선언되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalNoSubject: "암호화 대상으로 선언된 값이 거부되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalToast: "시크릿을 암호화할 수 없습니다: {{subject}}",
@@ -2305,6 +2338,7 @@ const ko = {
       view: "보기",
       confirm: "확인",
       cancel: "취소",
+      continue: "계속",
       prefilled: "아직 설정되지 않은 값은 브라우저를 기준으로 제안되었습니다. 확인하기 전에는 아무것도 저장되지 않습니다.",
       organizationName: {
         title: "조직 이름 정하기",
@@ -2351,6 +2385,8 @@ const ko = {
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },
+      firstApp: { title: '첫 번째 앱 추가', todo: '아직 자체 앱이 없습니다. 마켓플레이스에서 설치하거나 직접 만들면 홈에 표시됩니다.', done: '자체 앱이 홈에 있습니다.' },
+      firstRecord: { title: '첫 번째 레코드 추가', todo: '아직 앱에서 레코드를 만든 사람이 없습니다.', done: '앱에서 레코드가 만들어졌습니다.', action: '앱 열기' },
     },
     error: {
       connectionFailed: "서버에 연결할 수 없습니다",
@@ -2489,8 +2525,16 @@ const ko = {
       },
       viewTypeTree: "트리",
       viewTypeTreeDesc: "상위 필드를 기준으로 자기 참조 레코드를 계층 구조로 중첩합니다.",
+      viewTypeTimesheet: "타임시트",
+      viewTypeTimesheetDesc: "행과 요일별로 숫자를 입력합니다. 입력된 셀 하나가 레코드 하나입니다.",
       parentField: "상위 필드",
       parentFieldHelp: "계층 구조를 정의하는 상위 레코드(같은 객체)를 가리키는 필드입니다. 자기 참조 필드만 사용할 수 있습니다.",
+      timesheetRowField: "행 필드",
+      timesheetRowFieldHelp: "그리드의 각 행은 이 필드의 값 하나(예: 프로젝트)입니다.",
+      timesheetDateField: "날짜 필드",
+      timesheetDateFieldHelp: "레코드는 이 날짜에 해당하는 요일 열에 놓입니다.",
+      timesheetValueField: "값 필드",
+      timesheetValueFieldHelp: "각 셀에 표시되고 편집되는 숫자(예: 시간)입니다.",
       viewName: "이름",
       viewNameHelp: "머신 키(snake_case)입니다. 제목에서 자동으로 채워집니다 — 원하면 수정하세요.",
       viewNameRequired: "키를 입력하세요(소문자, 숫자, 밑줄). 비라틴 문자 제목에서는 자동으로 채워지지 않습니다.",
@@ -2519,7 +2563,7 @@ const ko = {
       expandToPage: "전체 페이지로 열기",
       openAsPage: "전체 페이지로 열기",
       objectNotFound: "객체를 찾을 수 없음",
-      objectNotFoundDescription: "객체 \"{{objectName}}\"이(가) 현재 구성에 존재하지 않습니다.",
+      objectNotFoundDescription: "객체 \"{{objectName}}\"이(가) 존재하지 않거나 액세스 권한이 없습니다.",
       objectNotFoundHint: "앱 탐색 설정을 확인하거나 사이드바에서 다른 객체를 선택하세요.",
       objectPackageDisabled: "객체 \"{{objectName}}\"이(가) 속한 패키지가 비활성화되어 있어 제공되지 않습니다.",
       filterOrGroupNotEditable: "이 필터에는 다른 조건과 함께 OR 그룹이 있어 필터 편집기에서 표시할 수 없으므로 여기서는 읽기 전용입니다. 뷰에는 계속 적용됩니다.",
@@ -2674,6 +2718,10 @@ const ko = {
       launcherLabel: "앱 런처",
       menuLabel: "앱 탐색",
       menuEmpty: "이 앱에는 열 수 있는 탐색 항목이 없습니다.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "앱 메뉴 바",
+      searchMenu: "메뉴 검색",
+      phoneBarHint: "별표를 누르면 항목이 하단 바에 고정됩니다. 하단 바에는 처음 4개가 표시됩니다.",
       itemMenu: "{{name}} 더 많은 작업",
       openInNewTab: "새 탭에서 열기",
       copyLink: "링크 복사",
@@ -2704,6 +2752,7 @@ const ko = {
         retry: "싱글 사인온으로 계속",
       },
       ssoHandoff: "{{target}}(으)로 계속",
+      ssoHandoffClient: "{{clientName}}(으)로 계속하려면 로그인하세요",
       devAdminHint: {
         title: "로컬 개발 인스턴스",
         signIn: "개발용 관리자로 로그인",
@@ -2733,6 +2782,8 @@ const ko = {
         directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
         networkNotAllowed: "이 시스템은 현재 네트워크에서의 로그인을 허용하지 않습니다. 허용된 네트워크(예: 조직의 사무실 네트워크나 VPN)에서 접속하거나 관리자에게 문의하세요.",
         ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
+        ssoAccessDeniedNotMember: "로그인한 계정은 이 환경 조직의 멤버가 아닙니다. 멤버인 계정으로 로그인하거나, 조직 관리자에게 초대를 요청하세요.",
+        ssoAccessDeniedInvitationPending: "이 환경 조직에 초대되었지만 아직 초대를 수락하지 않았습니다. 이메일에서 초대를 수락한 후 다시 로그인하세요.",
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
         ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",
@@ -2911,6 +2962,10 @@ const ko = {
       missingToken: "확인 링크에 토큰이 없습니다.",
       emailMissing: "이메일 주소 누락",
       resendButton: "확인 이메일 다시 보내기",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "이메일 주소가 아직 확인되지 않았습니다. {{email}}(으)로 확인 링크를 보낸 후 링크를 클릭하여 계정을 확인하세요.",
+      sendButton: "확인 이메일 보내기",
       resending: "전송 중…",
       resent: "이메일이 전송되었습니다! 받은 편지함을 확인하세요",
       resentSuccess: "확인 이메일이 전송되었습니다!",
@@ -3045,6 +3100,10 @@ const ko = {
       granted: "액세스가 허용되었습니다",
       denied: "액세스 거부됨",
       noRedirect: "서버가 리디렉션 URL을 반환하지 않았습니다.",
+      returnToApp: "{{appName}}(으)로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      returnToUnnamedApp: "애플리케이션으로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      openApp: "{{appName}} 열기",
+      openUnnamedApp: "애플리케이션 열기",
       failed: "동의 실패",
       footer: "계정 설정에서 언제든지 액세스를 취소할 수 있습니다.",
     },
@@ -3181,7 +3240,7 @@ const ko = {
     aiAssistant: "AI 어시스턴트",
     designInStudio: "Studio에서 디자인",
     editApp: "앱 편집",
-    openAppInStudio: "Studio에서 앱 보기",
+    openAppInStudio: "Studio에서 {{app}} 보기",
   },
   home: {
     build: {
@@ -3371,7 +3430,6 @@ const ko = {
   },
   empty: {
     objectNotFound: "오브젝트를 찾을 수 없습니다",
-    objectNotFoundDescription: "\"{{name}}\" 오브젝트 정의가 없습니다. 구성을 확인하거나 뒤로 이동하세요.",
     interfacePageSourceMissing: "이 인터페이스 페이지는 \"{{name}}\"을(를) 참조하지만 사용할 수 없습니다.",
     pageNotFound: "페이지를 찾을 수 없습니다",
     pageNotFoundDescription: "\"{{name}}\" 페이지를 찾을 수 없습니다. 삭제되거나 이름이 변경되었을 수 있습니다.",
@@ -3707,6 +3765,17 @@ const ko = {
       accept: "초대 수락",
       accepted: "초대를 수락함",
       joinedDescription: "{{orgName}}에 오신 것을 환영합니다. {{role}}(으)로 참여했습니다.",
+      joinedWelcome: "{{orgName}}에 오신 것을 환영합니다.",
+      verifyEmailTitle: "이메일 주소를 인증하세요",
+      verifyEmailDescription: "이 계정의 이메일 주소는 초대받은 주소여야 하며 인증되어 있어야 합니다. 인증한 다음 메일함에서 초대 링크를 다시 여세요.",
+      proofInvalid: "이 초대 링크는 더 이상 사용할 수 없습니다. 새 초대를 요청하거나 기존 계정으로 로그인하세요.",
+      signInInstead: "기존 계정으로 로그인",
+      proofTitle: "{{orgName}}에 참여",
+      proofDescription: "초대를 수락하려면 {{email}} 계정을 설정하세요.",
+      proofDivider: "또는 비밀번호 설정",
+      proofNameLabel: "이름",
+      proofPasswordLabel: "비밀번호",
+      proofSubmit: "계정 만들고 참여",
       continue: "계속",
       acceptFailed: "초대 수락 실패",
       decline: "거절",
@@ -3740,6 +3809,8 @@ const ko = {
     viewApprovals: "승인 보기",
     noPendingApprovals: "대기 중인 승인 없음",
     openApprovalsInbox: "승인 보관함 열기",
+    needsYou: "처리가 필요한 항목",
+    viewApprovalDetails: "자세히 보기",
     badgeTotal: "총 {{total}}건",
     badgeNotifications: "읽지 않은 주제 {{count}}건",
     badgeNotifications_one: "읽지 않은 주제 {{count}}건",
@@ -3970,13 +4041,11 @@ const ko = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 사용 한도가 {{left}} 남았습니다. ×N으로 표시된 모델은 기본 모델보다 N배 빠르게 한도를 사용합니다.',
@@ -4041,6 +4110,7 @@ const ko = {
       get_metadata_schema: "메타데이터 형식 살펴보기",
       get_package: "패키지 정보 확인하기",
       get_record_history: "이 레코드의 변경 기록 읽기",
+      list_flow_runs: "플로우 실행 기록 확인하기",
       list_metadata: "기존 메타데이터 나열하기",
       list_objects: "기존 오브젝트 나열하기",
       list_packages: "기존 패키지 나열하기",
@@ -4137,6 +4207,22 @@ const ko = {
       needsAttention: "확인 필요 {{count}}건",
       needsAttention_one: "확인 필요 {{count}}건",
       needsAttention_other: "확인 필요 {{count}}건",
+      health: {
+        sampleRowsLive: "샘플 데이터 {{count}}건 게시됨",
+        sampleRowsLive_one: "샘플 데이터 {{count}}건 게시됨",
+        sampleRowsLive_other: "샘플 데이터 {{count}}건 게시됨",
+        views: "뷰 {{count}}개",
+        views_one: "뷰 {{count}}개",
+        views_other: "뷰 {{count}}개",
+        widgets: "위젯 {{count}}개",
+        widgets_one: "위젯 {{count}}개",
+        widgets_other: "위젯 {{count}}개",
+        seeds: "샘플 데이터 세트 {{count}}개",
+        seeds_one: "샘플 데이터 세트 {{count}}개",
+        seeds_other: "샘플 데이터 세트 {{count}}개",
+        verified: "{{checks}} 확인 완료",
+        seedFailed: "샘플 데이터를 불러오지 못했습니다.",
+      },
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",
@@ -4321,13 +4407,26 @@ const ko = {
     progressBar: '결정 진행 상황',
     declaredActions: '작업',
     decisionPanelOffRequestPage: '승인 결정 패널은 승인 요청 페이지에서만 작동합니다.',
+    openNextAfterDecision: '결정 후 다음 열기',
+    queueDone: '이 목록에 대기 중인 요청이 더 이상 없습니다.',
     snapshotAsSubmitted: '제출 당시 내용',
+    snapshotChanged: '변경됨',
+    snapshotCurrentValue: '현재 값',
+    snapshotOpenRecord: '레코드 열기',
+    snapshotCurrentUnreadable: '현재 레코드를 읽을 수 없어 제출 후 변경 사항을 표시하지 않습니다.',
+    snapshotChildCurrent: '현재 값: 제출 당시 하위 행은 저장되지 않습니다.',
+    progressTitle: '승인 진행 상황',
+    attachmentsTitle: '첨부 파일',
     attachmentChip: '첨부 파일',
     attachmentOpenFailed: '첨부 파일을 열 수 없습니다. 다시 시도해 주세요',
     approveOneTitle: '"{{title}}"을(를) 승인할까요?',
     approveOneBody: '내 이름으로 이 요청을 승인합니다. 의견이나 첨부 파일을 추가하려면 요청을 열어 처리하세요.',
     flowOrigin: '플로우 시작',
     submittedByYou: '내가 제출함',
+    awaitingYourDecision: '내 승인 대기 중',
+    stepNumber: '{{n}}단계',
+    submittedByName: '제출자 {{name}}',
+    moreDecisionActions: '기타 승인 작업',
     sortBy: '정렬',
     sortRecent: '최신순',
     sortOldest: '오래된순',
@@ -4503,6 +4602,10 @@ const ko = {
       pendingHere: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
       pendingHere_one: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
       pendingHere_other: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
+      pendingInApp_one: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
+      pendingInApp_other: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
     },
     changes: {
       title: '대기 중인 변경 사항',
@@ -4519,7 +4622,7 @@ const ko = {
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
       fieldOrderChanged: '필드 순서가 변경됨',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
+      draftedByCopilot: 'AI 어시스턴트가 초안으로 작성한 변경 사항 포함',
       draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',
       draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',
@@ -4627,7 +4730,8 @@ const ko = {
       securityBlockTitle: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_one: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_other: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
-      securityBlockWhere: '객체의 설정 → 레코드 공유에서 수정한 후 다시 게시하세요.',
+      securityBlockWhere: '객체의 설정 → 누가 어떤 레코드를 볼 수 있는지에서 수정한 후 다시 게시하세요.',
+      flowChecksTitle: '게시하기 전에 확인하세요 — 게시 검사에서 다음 사항을 알립니다',
       securityRule: {
         owdUnset: '레코드 공유 기준(sharingModel)이 선언되지 않았습니다. 런타임은 private로 처리하지만 기준은 명시적으로 결정해야 합니다.',
         owdAlias: '레코드 공유 기준(sharingModel)이 정식 값이 아니므로 런타임은 이 개체를 private로 처리합니다.',
@@ -4638,6 +4742,8 @@ const ko = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: '이 앱은 아직 게시되지 않았습니다. 작동하지만 빌더만 볼 수 있습니다. 게시하면 사용자에게 표시됩니다.',
       message: '게시되지 않은 앱 — 기능은 모두 작동하지만 빌더만 볼 수 있습니다. 게시하면 사용자에게 표시됩니다.',
       publish: '게시',
       publishing: '게시 중…',
@@ -5088,6 +5194,52 @@ const ko = {
     sourceRequired: "{{kind}} 페이지에는 비어 있지 않은 {{source}} 값이 필요합니다.",
     loading: "React 런타임을 불러오는 중…",
     error: "React 페이지 오류",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "모바일 앱",
+    subtitle: "ObjectOS 모바일 앱을 이 서버에 연결합니다",
+    scanHint: "ObjectOS 모바일 앱을 열고 이 코드를 스캔하면 이 서버에 연결됩니다.",
+    qrAlt: "ObjectOS 모바일 앱을 이 서버에 연결하는 QR 코드",
+    linkLabel: "연결 링크",
+    copy: "링크 복사",
+    copied: "링크를 복사했습니다",
+    privacy: "이 코드에는 이 서버의 주소만 들어 있으며 계정 정보는 들어 있지 않습니다.",
+    loadFailed: "이 서버의 공개 주소를 읽지 못했습니다. 페이지를 새로 고친 후 다시 시도하세요.",
+    unreachableTitle: "휴대폰에서 이 서버의 주소에 접속할 수 없습니다",
+    unreachableBody: "이 서버의 주소는 {{address}}이며, 휴대폰에서 열 수 없는 로컬 또는 사설 주소이므로 코드를 표시하지 않습니다. 서버의 {{setting}}을(를) 공개 주소(예: {{example}})로 설정하고 서버를 다시 시작하세요.",
+    insecureTitle: "이 서버의 주소는 HTTPS를 사용하지 않습니다",
+    insecureBody: "이 서버의 주소는 {{address}}입니다. 모바일 앱은 이 주소로 로그인하므로 HTTPS를 사용해야 하며, 코드를 표시하지 않습니다. 서버를 HTTPS로 제공하고 {{setting}}을(를) https:// 주소(예: {{example}})로 설정한 뒤 서버를 다시 시작하세요.",
+    unpublishedTitle: "이 서버는 공개 주소를 게시하지 않습니다",
+    unpublishedBody: "코드를 표시하지 않습니다. 이 서버는 아직 모바일 앱에 공개 주소를 제공하지 않습니다. 이를 지원하는 버전으로 서버를 업데이트하세요.",
+  },
+  notificationSettings: {
+    title: "알림 설정",
+    subtitle: "어떤 알림을 어떤 채널로 받을지 선택합니다",
+    loading: "알림 설정을 불러오는 중…",
+    loadFailed: "알림 설정을 읽을 수 없습니다. 페이지를 새로 고친 후 다시 시도하세요.",
+    saveFailed: "변경 내용이 저장되지 않았습니다: {{reason}}",
+    general: "일반",
+    generalWarning: "요약 또는 방해 금지 시간을 변경하면 본인의 일반 설정이 저장됩니다. 이후 직접 설정하지 않은 모든 주제와 채널에 조직 기본값 대신 이 설정이 적용됩니다.",
+    digest: "요약",
+    digestNone: "요약 없음",
+    digestDaily: "매일",
+    digestWeekly: "매주",
+    digestNoOff: "'요약 없음'은 선택할 수 없습니다. 저장해도 조직이 설정한 요약이 꺼지지 않아 적용되지 않을 수 있습니다.",
+    quietHours: "방해 금지 시간",
+    quietHoursNoClear: "빈 시간대는 저장할 수 없습니다. 조직이 설정한 방해 금지 시간이 꺼지지 않아 적용되지 않을 수 있습니다. 시작 시간과 종료 시간을 설정하세요.",
+    save: "저장",
+    matrix: "주제 및 채널",
+    topic: "주제",
+    allTopics: "모든 주제",
+    alwaysDelivered: "항상 전달",
+    notConfigured: "설정되지 않음",
+    toggleLabel: "{{channel}}(으)로 받는 {{topic}}",
+    sourceOwn: "내 설정",
+    sourceDefault: "조직 기본값",
+    sourceBuiltin: "기본값",
+    sourceMandatory: "필수",
   },
 };
 

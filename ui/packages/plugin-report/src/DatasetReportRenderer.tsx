@@ -47,8 +47,9 @@
  * keys, most significant first — is lowered onto the dataset selection, so the
  * SERVER orders the whole grid (after measure-scoped filters merge and derived
  * measures evaluate) and this renderer only places the rows it is handed. It is
- * never a client-side re-sort: sorting here would order the truncated page
- * rather than the query, and could not sort by a derived measure at all.
+ * never a client-side re-sort of the ROWS: sorting them here would order the
+ * truncated page rather than the query, and could not sort by a derived measure
+ * at all.
  *
  * Declaring NO `order` leaves the grid in the dataset's `GROUP BY` order — the
  * stored values' alphabetical order — which for a select dimension is not the
@@ -61,11 +62,27 @@
  * nothing the server ordered on the author's behalf (see
  * `arrangeByDeclaredOptions`).
  *
- * For a matrix that also decides the ACROSS axis: `colHeaders` are collected in
- * row-arrival order, so ordering the rows by the across dimension is what makes
- * the columns read left-to-right in that order. Declaring nothing still reads
- * correctly — the server defaults a selected time dimension to ascending, which
- * is what makes month/quarter columns chronological out of the box.
+ * A matrix decides its two axes PER DIMENSION, not per report (objectstack#34364).
+ * Its headers are collected in row-arrival order, and the arrival order of one
+ * axis's buckets says nothing reliable once the rows are ordered by anything
+ * else: the server's empty-bucket fill and its default ascending time order do
+ * not run under limit/offset, a measure order, `compareTo` or a large grid, and
+ * then a date axis arrives in first-seen order (one ascending run per row
+ * bucket, end to end). So each header dimension is laid out on its own:
+ *
+ * - a dimension the report's scoped `order` NAMES keeps the server's order — an
+ *   author's explicit order on it (`desc` included) is the author's;
+ * - a select dimension it does not name takes its declared option order (the
+ *   rule above);
+ * - a date dimension it does not name (its answer column types `time`, at any
+ *   `dateGranularity`) takes its bucket KEYS ascending — the raw values, minted
+ *   sort-stable by the server, never the localized label — the empty bucket
+ *   last;
+ * - any other dimension keeps its arrival order.
+ *
+ * Sorting the HEADERS is not the client-side re-sort ruled out above: the pivot
+ * places every cell by its bucket ids, so no row moves, no page is re-sorted and
+ * no measure is re-ordered — only the two header lists are permuted.
  *
  * Drill-down (ADR-0021 D2): when the report's `drilldown` flag is not `false`
  * and the host supplies `onDrill`, every aggregated row / matrix cell is
@@ -84,6 +101,8 @@ import {
   formatDimensionValue,
   buildDatasetFieldHelpers,
   buildDatasetDrillFilter,
+  datasetDrillHasRelationshipPath,
+  resolveDatasetDrillFilter,
   FilterOperatorError,
   relabelDimensions,
   // The dataset→chart derivation the dashboard and the chart view have always
@@ -483,9 +502,11 @@ function declaredOptionPosition(value: unknown, rank: ReadonlyMap<string, number
  *   dataset's order among themselves); a dimension without keeps arrival order;
  * - each bucket is then laid out by the next level.
  *
- * `null` — nothing moves — when no dimension declares options, and the caller
- * passes `null` ranks when the report declares its own `order`: an author's
- * explicit order is the author's, and the server already applied it.
+ * `null` — nothing moves — when no dimension declares options. The table and
+ * the chart pass `null` ranks when the report declares its own `order`: an
+ * author's explicit order is the author's, and the server already applied it.
+ * The matrix passes, per dimension, no rank for a dimension that order names
+ * (see `matrixAxisComparators`).
  *
  * Indices, never a reordered copy of the rows: the drill payload is read off
  * `state.rows[i]` / `drillRawRows[i]` / `drillRanges[i]`, which stay aligned
@@ -497,7 +518,47 @@ function arrangeByDeclaredOptions<T>(
   valueOf: (item: T, dim: string) => unknown,
   ranks: DimensionRanks | null,
 ): number[] | null {
-  if (!ranks || !dims.some((d) => ranks[d])) return null;
+  if (!ranks) return null;
+  return arrangeGroups(items, dims, valueOf, (dim) => {
+    const rank = ranks[dim];
+    return rank
+      ? (a, b) => declaredOptionPosition(valueOf(a, dim), rank) - declaredOptionPosition(valueOf(b, dim), rank)
+      : null;
+  });
+}
+
+/**
+ * Where one date bucket sits on its axis (objectstack#34364): by its KEY — the
+ * raw value the server minted sort-stable (`2026-03`, `2026-Q1`, `2026-W03`,
+ * `2026-03-07`, or an ISO instant), compared as a string by code unit, never the
+ * localized label — ascending, the empty bucket last as in
+ * {@link declaredOptionPosition}. Two numbers compare as numbers.
+ */
+function compareDateBucketKeys(a: unknown, b: unknown): number {
+  const aEmpty = a == null || a === '';
+  const bEmpty = b == null || b === '';
+  if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const sa = String(a);
+  const sb = String(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
+/**
+ * The level-by-level layout {@link arrangeByDeclaredOptions} describes, with
+ * the ORDER of each level's buckets supplied per dimension: `compareFor(dim)`
+ * compares two items' buckets at that level, or is `null` to keep the buckets in
+ * arrival order. Items are bucketed by `valueOf`, the sort is STABLE, and the
+ * answer is `null` — nothing moves — when no level has a comparator.
+ */
+function arrangeGroups<T>(
+  items: readonly T[],
+  dims: readonly string[],
+  valueOf: (item: T, dim: string) => unknown,
+  compareFor: (dim: string) => ((a: T, b: T) => number) | null,
+): number[] | null {
+  const comparators = dims.map((d) => compareFor(d));
+  if (!comparators.some(Boolean)) return null;
   const arrange = (indices: number[], level: number): number[] => {
     if (level >= dims.length || indices.length < 2) return indices;
     const dim = dims[level];
@@ -509,14 +570,8 @@ function arrangeByDeclaredOptions<T>(
       else buckets.set(id, [i]);
     }
     const groups = [...buckets.values()];
-    const rank = ranks[dim];
-    if (rank) {
-      groups.sort(
-        (a, b) =>
-          declaredOptionPosition(valueOf(items[a[0]], dim), rank) -
-          declaredOptionPosition(valueOf(items[b[0]], dim), rank),
-      );
-    }
+    const compare = comparators[level];
+    if (compare) groups.sort((a, b) => compare(items[a[0]], items[b[0]]));
     return groups.flatMap((group) => arrange(group, level + 1));
   };
   return arrange(items.map((_, i) => i), 0);
@@ -812,6 +867,59 @@ function drillFilterOrRefusal(
   }
 }
 
+/**
+ * The drill filter of a bucket whose dimensions cross a relationship
+ * (`relationship.field` paths in `dimensionFields`), handed to `emit` once the
+ * related ids are read — `resolveDatasetDrillFilter` in `@object-ui/core`.
+ * The data API refuses the dotted path itself, so the filter names the
+ * relationship field `$in` the related ids matching the clicked value.
+ *
+ * A bucket it cannot resolve (a path past ADR-0071's hop limit, an unknown
+ * relationship, the empty bucket, more related records than the drill may
+ * list) or a read that fails emits no drill and logs why: the host builds its
+ * own fallback from an absent `objectFilter`, which would drop the scope, so
+ * there is no drill rather than a wider one — the posture
+ * {@link drillFilterOrRefusal} takes for a refused filter.
+ */
+function resolveRelationshipDrill(
+  object: string,
+  scope: MeasureDrillScope,
+  rawRow: Record<string, unknown> | undefined,
+  drillDims: string[],
+  dimensionFields: Record<string, string>,
+  runtimeFilter: Record<string, unknown> | undefined,
+  rawRanges: Record<string, DatasetDrillRange> | undefined,
+  dataSource: unknown,
+  emit: (objectFilter: Record<string, unknown>) => void,
+): void {
+  resolveDatasetDrillFilter({
+    object,
+    rawRow,
+    drillDims,
+    dimensionFields,
+    runtimeFilter: scopeDrillFilter(runtimeFilter, scope),
+    rawRanges,
+    dataSource,
+  }).then(
+    (resolution) => {
+      if (resolution.status === 'resolved') {
+        emit(resolution.filter);
+        return;
+      }
+      console.warn(
+        `[DatasetReportRenderer] drill-down not opened — the relationship dimension cannot be listed (${
+          resolution.status === 'too-many'
+            ? `more than ${resolution.cap} related '${resolution.object}' records`
+            : `${resolution.reason}: ${resolution.field}`
+        }).`,
+      );
+    },
+    (error: unknown) => {
+      console.warn('[DatasetReportRenderer] drill-down not opened — its relationship dimension could not be resolved:', error);
+    },
+  );
+}
+
 function EmptyMeasures({ dataset }: { dataset: string }) {
   return (
     <div className="flex items-center justify-center rounded-md border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground">
@@ -1004,6 +1112,12 @@ function DatasetReportTable({
       : state.drillRanges?.[index];
     const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
     let objectFilter: Record<string, unknown> | undefined;
+    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
+      const object = state.object;
+      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges, dataSource, (resolved) =>
+        onDrill!({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved }));
+      return;
+    }
     if (state.object && (drillDims.length > 0 || hasRange)) {
       const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
       // Refused: no drill at all — see `drillFilterOrRefusal`.
@@ -1907,6 +2021,42 @@ function bucketLabel(
   return dims.map((d) => dimensionText(fields, d, row[d], locale)).join(' / ');
 }
 
+/** One matrix axis header: the RAW bucket (`key`) and how it reads (`display`). */
+type MatrixHeader = { id: string; label: string; key: Row; display: Row };
+
+/**
+ * How a matrix lays out each header dimension (objectstack#34364), decided per
+ * DIMENSION rather than per report — the comparator `arrangeGroups` sorts that
+ * level's buckets by, or `null` to keep the server's arrival order:
+ *
+ * - named by the report's scoped `order` → `null`: the author's order, which
+ *   the server applied (an explicit `desc` on a date axis stays descending);
+ * - a select (it has declared-option `ranks`) → its declared option order,
+ *   read off the DISPLAY value (objectui#12243);
+ * - a date → its bucket KEY ascending ({@link compareDateBucketKeys}). Date-ness
+ *   is read off the answer's own column descriptor — a date dimension's column
+ *   is typed `time` (`AnalyticsResult.fields[].type`) at every
+ *   `dateGranularity` — never sniffed from the values;
+ * - anything else → `null`.
+ */
+function matrixAxisComparators(
+  fields: readonly DatasetResultField[] | undefined,
+  ranks: DimensionRanks | null,
+  ordered: ReadonlySet<string>,
+): (dim: string) => ((a: MatrixHeader, b: MatrixHeader) => number) | null {
+  return (dim) => {
+    if (ordered.has(dim)) return null;
+    const rank = ranks?.[dim];
+    if (rank) {
+      return (a, b) => declaredOptionPosition(a.display[dim], rank) - declaredOptionPosition(b.display[dim], rank);
+    }
+    if (fields?.find((f) => f.name === dim)?.type === 'time') {
+      return (a, b) => compareDateBucketKeys(a.key[dim], b.key[dim]);
+    }
+    return null;
+  };
+}
+
 /**
  * True cross-tab for `type: 'matrix'` — one dataset query over
  * `[...rows, ...columns]`, pivoted client-side. Cells show every measure
@@ -1941,9 +2091,9 @@ function DatasetMatrixTable({
   // objectstack-ai/objectstack#3916: the ordering rides on the PRIMARY query only — the server drops it
   // for the totals sub-queries by design (a total covers the whole selection,
   // and an order key may name a dimension the totals grouping doesn't have).
-  // The across-axis header sequence follows from it: `pivot` below collects
-  // `colHeaders` in row-ARRIVAL order, so ordering the rows by the across
-  // dimension is what makes the columns read left-to-right in that order.
+  // `pivot` below collects both header lists in row-ARRIVAL order, so a header
+  // dimension the order NAMES reads in the order the server applied; every
+  // other header dimension is laid out per `matrixAxisComparators`.
   const state = useDatasetRows(
     dataset,
     [...rows, ...columnsAcross],
@@ -1972,18 +2122,20 @@ function DatasetMatrixTable({
     () => deriveDimensionDisplay(dimensionMeta, fieldOptionLabel),
     [dimensionMeta, fieldOptionLabel],
   );
-  // objectui#12243 — a report that declares its own `order` for this selection
-  // keeps the server's arrival order on both axes; otherwise each axis is laid
-  // out in its select dimensions' declared option order.
-  const hasAuthoredOrder = scopeOrder(order, [...rows, ...columnsAcross], values) !== undefined;
+  // objectstack#34364 — the keys of the report's `order` this selection
+  // carries, read PER DIMENSION: a header dimension it names keeps the server's
+  // order; every other one is laid out by the renderer (see
+  // `matrixAxisComparators`). Serialized so the pivot memo keys on the names,
+  // not on an object rebuilt every render.
+  const orderedDimensionsKey = JSON.stringify(Object.keys(scopeOrder(order, [...rows, ...columnsAcross], values) ?? {}));
 
   const pivot = React.useMemo(() => {
     if (state.status !== 'ok') return null;
     // `key` is the RAW bucket (drill identity); `display` is the same bucket as
     // it reads on screen, per dimension — the two are deliberately separate
     // (objectui#4330).
-    const rowHeaders: Array<{ id: string; label: string; key: Row; display: Row }> = [];
-    const colHeaders: Array<{ id: string; label: string; key: Row; display: Row }> = [];
+    const rowHeaders: MatrixHeader[] = [];
+    const colHeaders: MatrixHeader[] = [];
     const seenRow = new Set<string>();
     const seenCol = new Set<string>();
     const cells = new Map<string, { row: Row; index: number }>();
@@ -2019,17 +2171,21 @@ function DatasetMatrixTable({
       // server's own row.
       cells.set(pivotCellKey(rid, cid), { row: raw, index });
     });
-    // objectui#12243 — the headers were collected in row-ARRIVAL order, which
-    // with no authored `order` is the dataset's `GROUP BY` order (alphabetical
-    // by stored value). Each axis is laid out by its own dimensions' declared
-    // option order, read off the DISPLAY values the headers carry, so a
-    // `priority` column axis reads Low, Medium, High as a `status` row axis
-    // reads New, In Progress, Closed. A time or text dimension keeps its
-    // arrival order (the server's chronological default for a time axis).
-    // Only the header lists move: every cell is still looked up by bucket id.
-    const ranks = hasAuthoredOrder ? null : dimensionRanks;
-    const rowLayout = arrangeByDeclaredOptions(rowHeaders, rows, (h, d) => h.display[d], ranks);
-    const colLayout = arrangeByDeclaredOptions(colHeaders, columnsAcross, (h, d) => h.display[d], ranks);
+    // The headers were collected in row-ARRIVAL order, which says nothing
+    // reliable about either axis once the rows are ordered by anything else.
+    // Each header dimension is laid out on its own (objectstack#34364): one the
+    // report's `order` names keeps that arrival order, an unnamed select takes
+    // its declared option order read off the DISPLAY values (objectui#12243),
+    // an unnamed date takes its bucket KEYS ascending, anything else stays put.
+    // This permutes only the two header lists, never a row: every cell is still
+    // looked up by bucket id, and each header carries its own drill `key`.
+    const comparatorsFor = matrixAxisComparators(
+      state.fields,
+      dimensionRanks,
+      new Set<string>(JSON.parse(orderedDimensionsKey) as string[]),
+    );
+    const rowLayout = arrangeGroups(rowHeaders, rows, (h, d) => h.display[d], comparatorsFor);
+    const colLayout = arrangeGroups(colHeaders, columnsAcross, (h, d) => h.display[d], comparatorsFor);
     return {
       rowHeaders: rowLayout ? rowLayout.map((i) => rowHeaders[i]) : rowHeaders,
       colHeaders: colLayout ? colLayout.map((i) => colHeaders[i]) : colHeaders,
@@ -2041,7 +2197,7 @@ function DatasetMatrixTable({
     // that switches locale without refetching keeps the previous locale's
     // headers, and the pin for that is the "re-labels the across header when
     // only the locale changes" case in DatasetReportRenderer.measureLocale.test.tsx.
-  }, [state, rows, columnsAcross, dimensionLabels, dimensionRanks, hasAuthoredOrder, displayLocale]);
+  }, [state, rows, columnsAcross, dimensionLabels, dimensionRanks, orderedDimensionsKey, displayLocale]);
 
   if (values.length === 0) return <EmptyMeasures dataset={dataset} />;
   if (state.status === 'loading' || state.status === 'idle') return <FetchStates status={state.status} />;
@@ -2077,6 +2233,12 @@ function DatasetMatrixTable({
     const cellRanges = state.drillRanges?.[index];
     const hasRange = !!cellRanges && Object.keys(cellRanges).length > 0;
     let objectFilter: Record<string, unknown> | undefined;
+    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
+      const object = state.object;
+      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges, dataSource, (resolved) =>
+        onDrill!({ dataset, groupKey: { ...rowKey, ...colKey }, runtimeFilter, object, objectFilter: resolved }));
+      return;
+    }
     if (state.object && (drillDims.length > 0 || hasRange)) {
       const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges);
       // Refused: no drill at all — see `drillFilterOrRefusal`.

@@ -78,6 +78,7 @@ export default defineConfig({
       // Pinned by the published-subpath rule in `scripts/check-test-source-alias.mjs`,
       // which derives the population from `@objectstack/core`'s own `exports` map.
       { find: /^@objectstack\/core\/logger$/, replacement: path.resolve(__dirname, '../../core/src/logger.ts') },
+      { find: '@objectstack/core/egress', replacement: path.resolve(__dirname, '../../core/src/egress.ts') },
       { find: '@objectstack/core', replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       // Subpath BEFORE the bare package, same prefix-match reason: `./node` is a
       // published subpath served by a FILE (`types/src/node.ts` — the node-only slice

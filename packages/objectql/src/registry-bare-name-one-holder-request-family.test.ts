@@ -781,15 +781,15 @@ describe('function — the engine function registry, through the hook binder\'s 
   });
 });
 
-describe('the refusal\'s reason names the consumers of the types it lists', () => {
+describe('the refusal\'s reason states the rule of the types it lists', () => {
   it('one sentence per refusal, naming only the types it carries', async () => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { api: ['a1'], action: ['r1'] }))).toBeUndefined();
     const err = await register(coOwner('com.acme.alpha', 'com.acme.beta', { api: ['a1'], action: ['r1'] }));
     expect(err!.conflicts!.map((c) => `${c.type}/${c.name}`)).toEqual(['api/a1', 'action/r1']);
     expect(err!.message).toContain(bareNameReason(['api', 'action']));
-    expect(bareNameReason(['api', 'action'])).toMatch(/^An API and an object-less action each hold one name per deployment: /);
-    expect(bareNameReason(['function'])).toMatch(/^A function holds one name per deployment: /);
+    expect(bareNameReason(['api', 'action'])).toMatch(/^An API and an object-less action each hold one name per namespace: /);
+    expect(bareNameReason(['function'])).toMatch(/^A function holds one name per namespace: /);
   });
 
   it('a built-in name is refused to a package at the package door, naming the platform', async () => {

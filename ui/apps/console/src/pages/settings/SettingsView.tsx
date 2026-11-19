@@ -12,10 +12,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ConsolePageHeader } from '@object-ui/app-shell';
-import { Loader2, ArrowLeft, ChevronRight, RotateCcw, ShieldAlert } from 'lucide-react';
+import { Loader2, ArrowLeft, ChevronRight, RotateCcw, ShieldAlert, Cloud } from 'lucide-react';
 import { Button, Card, CardContent, Skeleton, Badge, getLazyIcon } from '@object-ui/components';
 import { ExpressionEvaluator } from '@object-ui/core';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { useAuth } from '@object-ui/auth';
 import { SettingsField } from './SettingsField';
 import type { MapRefusalAt } from './SettingsMapField';
 import { fieldWording, settingsFieldRefusals } from './settingsFieldRefusals';
@@ -28,6 +29,7 @@ import {
   type JudgedClientAddress,
   type JudgedClientAddressRoute,
 } from './api';
+import { AI_PROVIDER_NAMESPACE, aiProviderManagedByPlatform, isPlatformManagedRefusal } from './platformManaged';
 import { resolveLabel, type SettingsNamespacePayload, type Specifier } from './types';
 import { useSettingsLabel, type SettingsLabelHelpers } from './useSettingsLabel';
 import { useUnsavedLeaveGuard } from './useUnsavedLeaveGuard';
@@ -371,7 +373,12 @@ export function SettingsView() {
    * when it sent one; without one the card shows `console.settingsView.loadError`,
    * translated at render so the fetch below reads no `t` (objectui#13254).
    */
-  const [error, setError] = useState<{ message?: string } | null>(null);
+  /**
+   * The load's failure, or null. `managed` marks the hosted refusal
+   * (`platformManaged.ts`): the platform provides this page's settings, so the
+   * page says so instead of drawing an error or a form.
+   */
+  const [error, setError] = useState<{ message?: string; managed?: boolean } | null>(null);
   /** Live edit map keyed by spec.key. Falls back to resolved value when undefined. */
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   /**
@@ -448,13 +455,46 @@ export function SettingsView() {
         setFieldErrors({});
         setCryptoRefusal(null);
       } catch (err: any) {
-        setError({ message: err?.message });
+        setError(
+          isPlatformManagedRefusal(err?.status, err?.payload)
+            ? { managed: true }
+            : { message: err?.message },
+        );
       } finally {
         setLoading(false);
       }
     };
     void loadNamespace();
   }, [namespace]);
+
+  /**
+   * The served auth config's `features`, read once per page that can use them:
+   * the AI page draws one line when the platform manages its provider
+   * ({@link aiProviderManagedByPlatform}). The auth client holds the config
+   * sign-in already read, so this asks no new request. The read goes through a
+   * ref so the effect keys on the namespace alone (AGENTS.md #10).
+   */
+  const { getAuthConfig } = useAuth();
+  const getAuthConfigRef = useRef(getAuthConfig);
+  useEffect(() => {
+    getAuthConfigRef.current = getAuthConfig;
+  });
+  const [authFeatures, setAuthFeatures] = useState<{ cloudManaged?: unknown } | null>(null);
+  const readsAuthFeatures = namespace === AI_PROVIDER_NAMESPACE;
+  useEffect(() => {
+    if (!readsAuthFeatures) return;
+    let live = true;
+    Promise.resolve(getAuthConfigRef.current?.())
+      .then((config) => {
+        if (live) setAuthFeatures(config?.features ?? null);
+      })
+      .catch(() => {
+        // Unreadable: no line, the page is what it serves.
+      });
+    return () => {
+      live = false;
+    };
+  }, [readsAuthFeatures]);
 
   /**
    * The caller's address as the server judges it, on a page that draws it
@@ -529,6 +569,24 @@ export function SettingsView() {
     );
   }
 
+  if (error?.managed) {
+    // No form and no retry: nothing here is the administrator's to set.
+    return (
+      <div className="p-6 max-w-3xl">
+        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+          <ArrowLeft className="h-4 w-4 mr-1" /> {t('console.settingsView.back')}
+        </Button>
+        <Card className="mt-3" data-testid="settings-platform-managed">
+          <CardContent className="py-8 text-center text-sm">
+            <Cloud className="h-6 w-6 mx-auto mb-2 text-muted-foreground" aria-hidden="true" />
+            <p className="font-medium">{t('console.settingsView.platformManagedTitle')}</p>
+            <p className="mt-1 text-muted-foreground">{t('console.settingsView.platformManagedBody')}</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="p-6 max-w-3xl">
@@ -550,6 +608,7 @@ export function SettingsView() {
   const Icon = manifest.icon ? getLazyIcon(manifest.icon) : null;
   const title = labels.title(resolveLabel(manifest.label));
   const description = labels.description(manifest.description);
+  const aiProviderManaged = aiProviderManagedByPlatform(namespace, manifest.specifiers, authFeatures);
 
   /**
    * Read the namespace again after a successful save or action and take the
@@ -650,6 +709,10 @@ export function SettingsView() {
             ? t('console.settingsView.cryptoRefusalToast', { subject: refusal.subject })
             : t('console.settingsView.cryptoRefusalToastNoSubject'),
         );
+      } else if (isPlatformManagedRefusal(err?.status, err?.payload)) {
+        // A page read before the environment became hosted wrote a key the
+        // platform now manages: nothing was written.
+        toast.error(t('console.settingsView.platformManagedTitle'));
       } else {
         // Per-field rejections render against the inputs that caused them
         // (objectstack#4224). `extractFieldErrors` reads `details.fields`, so it
@@ -731,7 +794,11 @@ export function SettingsView() {
         toast.error(result.message ?? t('console.settingsView.actionFailed'));
       }
     } catch (err: any) {
-      toast.error(err?.message ?? t('console.settingsView.actionFailed'));
+      toast.error(
+        isPlatformManagedRefusal(err?.status, err?.payload)
+          ? t('console.settingsView.platformManagedTitle')
+          : (err?.message ?? t('console.settingsView.actionFailed')),
+      );
     } finally {
       setSaving(false);
     }
@@ -788,6 +855,17 @@ export function SettingsView() {
     <div className="p-6 max-w-3xl mx-auto pb-32">
       {manifest.helpText ? (
         <p className="text-sm text-muted-foreground whitespace-pre-wrap">{manifest.helpText}</p>
+      ) : null}
+
+      {aiProviderManaged ? (
+        <Card className="mt-4" data-testid="settings-ai-provider-managed">
+          <CardContent className="py-3">
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Cloud className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {t('console.settingsView.aiProviderManaged')}
+            </p>
+          </CardContent>
+        </Card>
       ) : null}
 
       {cryptoRefusal ? (

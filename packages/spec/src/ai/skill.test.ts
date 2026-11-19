@@ -159,6 +159,25 @@ describe('SkillSchema', () => {
   });
 });
 
+describe('SkillSchema.mcpPrompt — the owner\'s opt-out of MCP projection (#34167)', () => {
+  const base = { name: 'record_writing', label: 'Record Writing', instructions: 'Write records.', tools: ['create_record'] };
+
+  it('accepts true and false, and refuses a non-boolean', () => {
+    expect(SkillSchema.parse({ ...base, mcpPrompt: false }).mcpPrompt).toBe(false);
+    expect(SkillSchema.parse({ ...base, mcpPrompt: true }).mcpPrompt).toBe(true);
+    expect(SkillSchema.safeParse({ ...base, mcpPrompt: 'no' }).success).toBe(false);
+  });
+
+  it('has no default: a skill without it parses with no mcpPrompt key, as before', () => {
+    expect('mcpPrompt' in SkillSchema.parse(base)).toBe(false);
+  });
+
+  it('changes nothing the in-product runtime reads: surface, tools, triggerConditions and active parse the same', () => {
+    const { mcpPrompt: _optOut, ...declared } = SkillSchema.parse({ ...base, surface: 'build', mcpPrompt: false });
+    expect(declared).toEqual(SkillSchema.parse({ ...base, surface: 'build' }));
+  });
+});
+
 describe('defineSkill', () => {
   it('should return a parsed skill', () => {
     const skill = defineSkill({

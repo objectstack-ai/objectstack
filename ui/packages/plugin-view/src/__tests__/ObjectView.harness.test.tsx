@@ -2343,6 +2343,7 @@ describe('ObjectView.createGrant-12082', () => {
     userId: 'u-pin',
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: ['member'],
     permissionSets: ['member'],
     objects: { [OBJECT]: bits },

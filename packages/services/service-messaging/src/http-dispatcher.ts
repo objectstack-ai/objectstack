@@ -2,6 +2,7 @@
 
 import type { DispatchCluster, DispatchLockHandle } from './dispatcher.js';
 import { DispatchLoop } from '@objectstack/core';
+import { defaultEgressGuard, type EgressGuard } from '@objectstack/core/egress';
 import { classifyAttempt, sendOnce, type FetchImpl } from './http-sender.js';
 import type { HttpAckResult, HttpClaimCredential, HttpDelivery, IHttpOutbox } from './http-outbox.js';
 
@@ -99,7 +100,18 @@ export interface HttpDispatcherOptions {
     lockTtlMs?: number;
     /** Visibility timeout for claimed rows. Default = 2 × lockTtlMs. */
     claimTtlMs?: number;
-    /** Override `globalThis.fetch` (tests). */
+    /**
+     * The outbound-request guard every delivery connects through (the
+     * messaging plugin passes the one it installed). Omitted, the process's
+     * default guard for `OS_EGRESS_ALLOWED_TARGETS` — constructing a
+     * dispatcher with a malformed allowlist throws.
+     */
+    egress?: EgressGuard;
+    /**
+     * Replace the guarded fetch outright — tests only. A dispatcher given
+     * this sends without the outbound-request guard, so it is outside the
+     * rule; nothing in the platform passes it.
+     */
     fetchImpl?: FetchImpl;
     /** RNG override for the retry-jitter schedule (tests). */
     rng?: () => number;
@@ -113,13 +125,15 @@ export interface HttpDispatcherOptions {
 
 export class HttpDispatcher {
     private readonly opts: Required<
-        Omit<HttpDispatcherOptions, 'fetchImpl' | 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now' | 'maxIdleIntervalMs' | 'soleWriter'>
+        Omit<HttpDispatcherOptions, 'fetchImpl' | 'rng' | 'logger' | 'onAttempt' | 'cluster' | 'now' | 'maxIdleIntervalMs' | 'soleWriter' | 'egress'>
     > &
         Pick<HttpDispatcherOptions, 'fetchImpl' | 'rng' | 'logger' | 'onAttempt' | 'now'> & {
             cluster: DispatchCluster;
         };
     /** [#17623] The timer loop — idle backoff, wake, stop — shared with `NotificationDispatcher`. */
     private readonly loop: DispatchLoop;
+    /** The guard the default fetch sends through. */
+    private readonly egress: EgressGuard;
 
     constructor(options: HttpDispatcherOptions) {
         const intervalMs = options.intervalMs ?? 500;
@@ -139,6 +153,7 @@ export class HttpDispatcher {
             logger: options.logger,
             onAttempt: options.onAttempt,
         };
+        this.egress = options.egress ?? defaultEgressGuard();
         const { outbox } = options;
         this.loop = new DispatchLoop({
             intervalMs,
@@ -275,19 +290,11 @@ export class HttpDispatcher {
     }
 
     private async processRow(row: HttpDelivery): Promise<void> {
-        const fetchImpl = (this.opts.fetchImpl ?? (globalThis.fetch as unknown as FetchImpl)) as
-            | FetchImpl
-            | undefined;
-        if (!fetchImpl) {
-            this.opts.logger?.warn?.('http-dispatcher: no fetch impl available', { rowId: row.id });
-            await this.ackAttempt(row, {
-                success: false,
-                error: 'no fetch implementation',
-                durationMs: 0,
-                dead: true,
-            });
-            return;
-        }
+        // Every delivery connects through the egress guard, judged for the
+        // row's own source and organization — never a bare fetch.
+        const fetchImpl: FetchImpl =
+            this.opts.fetchImpl
+            ?? ((url, init) => this.egress.fetch(url, init, { source: row.source, organizationId: row.organizationId }));
         const outcome = await sendOnce(row, fetchImpl);
         const result = classifyAttempt(outcome, row.attempts, this.opts.now?.() ?? Date.now(), this.opts.rng);
         await this.ackAttempt(row, result);

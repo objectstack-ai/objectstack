@@ -62,6 +62,11 @@ export interface ActionResponseOutcome {
      */
     fieldErrors?: ActionFieldError[];
     /**
+     * The refusal's producer-marked user-facing text (`error.userMessage`),
+     * when it carried one. Only on a failure; `error` stays the whole text.
+     */
+    userMessage?: string;
+    /**
      * The ACTION ENVELOPE (`body.data`) — `{ success, data }`. Kept as-is
      * because `ActionResult.data` has always carried this level and
      * `resultDialog` field paths in the wild may compensate for it; see the
@@ -126,16 +131,34 @@ export function interpretActionResponse(
         // string — handing that object to `toast.error()` as a React child
         // crashes the page, React #31).
         const fieldErrors = refusalFieldErrors(innerFailed ? envelope : json);
+        const userMessage = refusalUserMessage(innerFailed ? envelope : json);
         return {
             ok: false,
             error: innerFailed
                 ? actionErrorDetail(envelope, `${label} failed`)
                 : actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
             ...(fieldErrors ? { fieldErrors } : {}),
+            ...(userMessage !== undefined ? { userMessage } : {}),
         };
     }
 
     return { ok: true, envelope, payload: readActionPayload(envelope) };
+}
+
+/**
+ * The producer-marked user-facing text of a refusal body
+ * (`ApiErrorSchema.userMessage`), as `ActionResult.userMessage` carries it.
+ * The ADR-0112 envelope carries it beside `message` on the `error` object —
+ * the `/actions` door answers a thrown `userMessage`, from a script body or a
+ * server action's handler alike, there. Presence is the marking: a blank or
+ * non-string value is no marking, and nothing else is promoted into it (the
+ * same predicate `@objectstack/client` applies when it lifts the field).
+ * Returned verbatim, untrimmed.
+ */
+export function refusalUserMessage(body: unknown): string | undefined {
+    const b = body as { error?: { userMessage?: unknown } } | null | undefined;
+    const raw = b?.error && typeof b.error === 'object' ? b.error.userMessage : undefined;
+    return typeof raw === 'string' && raw.trim() ? raw : undefined;
 }
 
 /**

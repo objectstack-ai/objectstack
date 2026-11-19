@@ -73,9 +73,11 @@ customer has since edited.
 |:-----|:---------|:---------|
 | `ignore` | **Default.** Create-only: insert a record whose row is missing (a boot or organization replay skips one a person [deleted](#a-deleted-seed-row-stays-deleted)), leave an existing row exactly as it is | Business and starter data the customer owns once it is loaded |
 | `upsert` | Create if new (a boot or organization replay skips one a person [deleted](#a-deleted-seed-row-stays-deleted)), and on **every** replay write each declared column back onto the matched row | Reference data the package must keep current |
-| `insert` | Insert **every** record unconditionally — no existing-row check, so it **duplicates the table on each replay boot** ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)). Rarely what you want | Append-only rows loaded exactly once (never re-run) |
 | `update` | Update only, skip if not found | Migration patches on existing rows |
-| `replace` | Insert without checking for an existing match — the seed loader does **not** delete anything itself; the target table must already be empty (or cleared by the caller) | Cache / lookup tables rebuilt from an already-truncated table |
+
+Every mode matches on `externalId`, so a replay finds the row an earlier load wrote.
+The unkeyed modes `insert` and `replace` are retired: see
+[Moving off `insert` and `replace`](#moving-off-insert-and-replace).
 
 ### `ignore` — The Default (Create-Only)
 
@@ -126,32 +128,57 @@ customer or a job owns, mark those columns create-only — see
   `mode: 'upsert'` on the datasets that must stay current.
 </Callout>
 
-### `replace` — Insert Into an Already-Cleared Table
+### Moving off `insert` and `replace`
+
+`insert` and `replace` matched no existing row, so every replay inserted each
+record again: a 3-row fixture became 6, then 9
+([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)), and a person
+reference the first load had to leave empty stayed empty on the first row while
+only a later copy named the person. `replace` expected the caller to clear the
+table first, and no load ever clears one. Both were removed in
+`@objectstack/spec` 18.7.0 ([#34613](https://github.com/objectstack-ai/objectstack/issues/34613)):
+
+- **Authoring refuses them.** `defineSeed`, `defineStack`, `os validate`, `os build`
+  and the metadata save and publish doors reject `mode: 'insert'` or
+  `mode: 'replace'` with a message that names the fix.
+- **A stored dataset is refused alone.** A package or a compiled artifact
+  (`objectstack.json`) built before the change, or a seed already stored, can
+  still carry one. The environment still boots: the boot seed, the organization
+  replay, the dev hot reload and a package install or upgrade refuse that one
+  dataset. It writes nothing, the load reports it as an error with the same
+  message, and every other dataset and definition loads.
+- **Rows already duplicated stay.** Earlier replays wrote them as data; nothing
+  deletes them. Remove the extra copies yourself if they matter.
+
+To convert a dataset, declare which field identifies a row, then drop the mode
+(or declare `upsert` for reference data the package keeps current):
+
+1. **A field names the row** (a code, a slug, an email): set `externalId` to it.
+2. **No single field does** (a join table, a line item under a parent): set
+   `externalId` to the list of fields that together identify a row, for example
+   `['team', 'project']`. Reference fields are matched by their resolved ids. A
+   reference the first load has to leave empty (a person who has not signed up
+   yet) still belongs in the key: each later load finds that row again by the
+   key as authored, and the load that can resolve the person fills it in. See
+   [Composite natural key](#composite-externalid--join--junction-tables).
+3. **The records carry their own ids**: set `externalId: 'id'`.
 
 ```typescript
-// ⚠️ The seed loader does NOT delete existing records for you — `replace`
-// always inserts. Truncate/clear the table yourself before this seed runs,
-// or every load will attempt to insert duplicate rows.
-// Only use for cache or lookup tables with no user-generated data.
-defineSeed(ExchangeRateCache, {
-  externalId: 'key',
+// Before — refused since @objectstack/spec 18.7.0
+defineSeed(ExchangeRate, {
   mode: 'replace',
-  env: ['dev'],
-  records: [
-    { key: 'USD_EUR', rate: 0.92 },
-    { key: 'USD_GBP', rate: 0.79 },
-  ],
+  records: [{ key: 'USD_EUR', rate: 0.92 }],
+});
+
+// After — one row per key, written once
+defineSeed(ExchangeRate, {
+  externalId: 'key',
+  records: [{ key: 'USD_EUR', rate: 0.92 }],
 });
 ```
 
-### `insert` — Not Idempotent (Avoid for Replayed Seeds)
-
-Seeds are **replayed** — they re-load on every dev-server boot and every package
-re-publish, not applied once. `insert` writes every record with **no existing-row
-check**, so a replayed `insert` dataset duplicates its table on each restart
-(a 3-row fixture becomes 6, then 9 — [#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
-It is almost never the right mode: leave `mode` unset (create-only), or declare
-`upsert` for reference data, with a stable `externalId` instead. `os validate` warns on any `mode: 'insert'` seed.
+Rebuild the package (and reinstall it where it was installed with
+`os package install`) so the stored body carries the new declaration.
 
 ### A Deleted Seed Row Stays Deleted
 
@@ -163,19 +190,22 @@ organization. A row an upgrade adds to the seed has never landed, so it
 is still inserted. A reference to the deleted row from another seed row is left
 unwritten rather than reported as an error.
 
-The record is kept and honoured only where AppPlugin runs the load for a known
-organization: the single-tenant boot seed (`objectstack serve`, `os start`, on
-every restart; a multi-tenant boot seeds through the per-organization replay
-instead), the per-organization replay (`seed-replayer`), and the dev hot reload.
-A seed publish, a package install or upgrade (`os package install`, the
-marketplace install, its heal and its sample-data reseed) keep no record, so a
-deleted row comes back on those. So do a load with no organization, a
-composition that does not register `sys_seed_landed_key`
-(`@objectstack/platform-objects`), and the marketplace's fallback
-`seed-replayer`, which it registers when no app has seed data.
+The record is kept and honoured where a load seeds a known organization: the
+single-tenant boot seed (`objectstack serve`, `os start`, on every restart; a
+multi-tenant boot seeds through the per-organization replay instead), the
+per-organization replay (`seed-replayer`, the marketplace's fallback one
+included, which it registers when no app has seed data), the dev hot reload,
+and a package install or upgrade (`os package install`, the marketplace
+install, into the installing person's organization) with its restart heal. A
+seed publish keeps no record, so a deleted row comes back on that. So do a load
+with no organization and a composition that does not register
+`sys_seed_landed_key` (`@objectstack/platform-objects`).
 
-A row deleted before your runtime had this rule comes back once, on the first
-replay after the upgrade, and stays deleted from then on.
+A row deleted before any load recorded it comes back once, on the first load
+that keeps the record, and stays deleted from then on. For the boot seed that
+is the first boot after the upgrade. An installed package records nothing
+until its next install, upgrade, reseed, replay or restart heal, so a row
+deleted before that load, even after the upgrade, comes back on it.
 
 To bring the deleted rows back on purpose, a host or plugin calls the
 `seed-replayer` kernel service with `{ reseed: true }`:
@@ -184,6 +214,10 @@ To bring the deleted rows back on purpose, a host or plugin calls the
 const replay = ctx.getService('seed-replayer');   // ctx: the plugin's context
 await replay(organizationId, { reseed: true });   // inserts every missing seed row
 ```
+
+For an installed package, the sample-data reseed
+(`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`) does
+the same in the caller's organization.
 
 ---
 
@@ -236,8 +270,8 @@ defineSeed(Instalment, {
   out of the write: the row keeps the values the jobs gave it, while `amount`
   (`applyOn: 'always'`, the default) is refreshed. A row whose only differences
   are create-only columns is not written at all.
-- An `update` dataset never writes a create-only column. `insert`, `ignore` and
-  `replace` never update a matched row, so the policy changes nothing there.
+- An `update` dataset never writes a create-only column. `ignore` never updates
+  a matched row, so the policy changes nothing there.
 - A create-only **reference** on a matched row is not resolved at all, so a
   replay neither re-points it nor reports it.
 - A column of the `externalId` is what the row was matched by, so it stays in
@@ -331,6 +365,62 @@ loads the new locale's dataset **alongside** the rows the previous locale's
 dataset wrote: both sets stay resident and queryable, because the switch is
 additive and not a migration. Clearing the market you left behind is the
 operator's job — to switch locales cleanly, start from a fresh database.
+
+### A Fallback Set — `fallback: true`
+
+A locale that no dataset of an object names gets **none** of that object's
+locale-scoped rows. Where the seed is functional rather than decorative — the
+standard price book that quotes fall back to — an organization on `ja-JP` would
+end up with no price book at all when you ship only a `zh-CN` and an `en` set.
+Mark one set `fallback: true` and it also loads for every locale no other set
+of the object names:
+
+```typescript
+defineSeed(PriceBook, {
+  locale: ['zh-CN'],
+  records: [{ name: '标准价格表' }],
+});
+
+defineSeed(PriceBook, {
+  locale: ['en', 'en-US'],
+  fallback: true,          // also loads for ja-JP, es-ES, … — any locale no PriceBook set names
+  records: [{ name: 'Standard' }],
+});
+```
+
+| Resolved locale | `PriceBook` rows loaded |
+|:---|:---|
+| `zh-CN` | the `zh-CN` set |
+| `en`, `en-US` | the `en` set (its own locales) |
+| `ja-JP`, `es-ES`, … | the `en` set, as the fallback |
+| none (package apply, draft publish, an unresolved install) | both sets, with the usual warning |
+
+The rules:
+
+- **The fallback set lists its own locales.** `fallback: true` on a dataset with
+  no `locale` is refused when the seed is parsed: an unscoped dataset already
+  loads for every locale, so it cannot also be the set that loads only when no
+  other set matches. Write the locales the set is in and keep the marker.
+- **A set with no `locale` does not count as a match.** It is locale-neutral: it
+  loads beside whichever set is chosen, and the fallback still fills in.
+- **Matching is per object**, case-insensitive and otherwise exact, as above. A
+  `ja-JP` set of some *other* object does not stop the price book's fallback.
+- **`env` is applied first.** A set `env` scoped out of the load neither matches
+  nor falls back.
+- **At most one fallback set per object in a load.** Two different sets of one
+  object both marked `fallback: true` leave no single choice, so only the
+  fallback choice is refused: no marked set fills in for a locale no set lists,
+  and the load's error (also logged at warn) names the object. Every marked set
+  still loads for the locales it lists, exactly as an unmarked set would, and
+  every other object still seeds. Identical copies of one set — the same
+  package's datasets merged twice — count once. Two versions of one package
+  whose marked set changed are two sets: an upgrade keeps the earlier
+  version's datasets on the per-organization replay list until the process
+  restarts, so until then an organization on an unlisted locale gets no
+  fallback for that object.
+
+The loader logs, at info, each fallback set it loaded and the locale it filled
+in for. Datasets without the marker load exactly as before.
 
 <Callout type="info">
   **Where the loading locale comes from.** On the normal boot path your stack
@@ -457,7 +547,7 @@ const contactsSeed = defineSeed(Contact, {
   ],
 });
 
-// Export in dependency order — parents before children
+// The loader puts accounts first because `contact.account` looks them up
 export const SeedData = [accountsSeed, contactsSeed];
 ```
 
@@ -534,8 +624,59 @@ const membershipsSeed = defineSeed(ProjectMembership, {
 });
 ```
 
-Without a composite key such a table can only fall back to `mode: 'insert'`, which
-duplicates on every replay boot ([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)).
+Without a composite key such a table has nothing to match a replay on. The
+unkeyed `mode: 'insert'` it once fell back to duplicated on every replay boot
+([#3434](https://github.com/objectstack-ai/objectstack/issues/3434)) and is retired.
+
+---
+
+## Load Order — `dependsOn`
+
+A load orders its datasets by the relationships between their objects: a `lookup`,
+`master_detail` or `user` field makes its object load after the object it points
+at, however the datasets are listed. The order of your `data` array only breaks
+ties between objects that are ready at the same moment.
+
+Some dependencies are not fields. A `beforeInsert` hook that **reads** another
+seeded object while a row is written (a rating scored from seeded bands, a price
+computed from a seeded rate table) needs those rows to be there first, and no
+lookup says so. Declare it with `dependsOn`, naming the objects:
+
+```typescript
+export const ratingBandsSeed = defineSeed(RatingBand, {
+  externalId: 'code',
+  records: [/* … */],
+});
+
+// The rating's beforeInsert hook scores each row from crm_rating_band rows,
+// so this dataset must load after them.
+export const customerRatingsSeed = defineSeed(CustomerRating, {
+  dependsOn: ['crm_rating_band'],
+  records: [/* … */],
+});
+```
+
+Each name adds an edge to the same dependency graph the lookup fields feed. A
+dataset that declares no `dependsOn` loads exactly where its lookups put it.
+
+The loader refuses the **whole load**, writing no row, and reports why, when a
+`dependsOn`:
+
+- names the dataset's own object (`defineSeed` also refuses this when it runs);
+- names an object no other dataset of the same load seeds: a misspelling, or a
+  dataset that `env` or `locale` scoped out of this load. A seed published on its
+  own is its own load, so publish it together with the seeds it depends on. Two
+  more loads carry only part of an app's seeds and refuse the same way: the dev
+  hot-reload seeder loads only the datasets of objects first seen in that reload,
+  so restart the dev server after adding a seed that depends on an object seeded
+  earlier, and a marketplace install loads one package's datasets, so name only
+  objects your own package seeds;
+- closes a cycle with the other edges, lookups included: `crm_rating_rule`
+  declaring `dependsOn: ['crm_customer_rating']` while the rating looks up its
+  rule. No order can keep that edge.
+
+A cycle made only of lookup fields is still loaded in several passes (each row is
+written first and its missing reference filled in afterwards), as before.
 
 ---
 
@@ -705,11 +846,11 @@ import { contactsSeed }  from './contacts.seed';
 import { leadsSeed }     from './leads.seed';
 import { productsSeed }  from './products.seed';
 
-/** All seed datasets — order determines load sequence */
+/** All seed datasets — the loader orders them by their lookups and dependsOn */
 export const SeedData = [
   accountsSeed,   // no dependencies
   productsSeed,   // no dependencies
-  contactsSeed,   // depends on accounts
+  contactsSeed,   // looks up accounts, so it loads after them
   leadsSeed,      // no dependencies
 ];
 ```
@@ -744,19 +885,23 @@ When the same records need different display strings per language, author both
 datasets and scope each with `locale`. Selecting between them in application
 code instead bakes the choice into your build output, so shipping another
 market means another build. Neither approach removes what the market you left
-behind already wrote — see [Locale Scoping](#locale-scoping).
+behind already wrote — see [Locale Scoping](#locale-scoping). Mark one set
+`fallback: true` so a market you did not author still gets functional rows —
+see [A Fallback Set](#a-fallback-set--fallback-true).
 
 ### Leave `mode` unset for data the customer owns
 
 The default, `ignore`, is idempotent and never overwrites an edit. Declare a mode only
 when the use case requires it — `upsert` for reference data the package keeps current
-(with `applyOn: 'create'` on the columns the customer or a job owns), or `replace`
-for ephemeral cache tables.
+(with `applyOn: 'create'` on the columns the customer or a job owns), or `update`
+for a migration patch on rows that already exist.
 
-### Seed in dependency order
+### Declare a dependency no field expresses
 
-Always export parent datasets before child datasets. If `contact` has a lookup to
-`account`, `accountsSeed` must appear before `contactsSeed` in the exported array.
+Lookup fields order the load for you: if `contact` has a lookup to `account`,
+accounts load first wherever `accountsSeed` sits in the array. Listing parents
+first keeps the file readable, but it orders nothing. When a hook reads another
+seeded object, declare it with `dependsOn` (see "Load Order").
 
 ### Keep records realistic
 
@@ -779,10 +924,12 @@ function defineSeed<
   objectDef: TObj,
   config: {
     externalId?: string | string[];         // single field, or a composite list (join tables); default: 'name'
-    mode?: 'insert' | 'update' | 'upsert' | 'replace' | 'ignore'; // default: 'ignore'
+    mode?: 'update' | 'upsert' | 'ignore'; // default: 'ignore'
     columns?: { [field: string]: { applyOn?: 'create' | 'always' } }; // per-column write policy; default: 'always'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     locale?: string[];                      // BCP-47 tags; omitted = every locale
+    fallback?: true;                        // also load for a locale no other set of the object names (needs locale)
+    dependsOn?: string[];                   // objects this dataset loads after (see "Load Order")
     records: Array<SeedRecord<TObj['fields']>>;  // declared fields + injectable system columns
   }
 ): Seed

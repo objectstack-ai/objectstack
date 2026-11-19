@@ -100,6 +100,7 @@ import {
   RelatedEnlargeContext,
   RelatedListCompactContext,
   RelatedListEnlargedContext,
+  RelatedListTotalReportContext,
   useSeenOnce,
 } from './relatedListCompact';
 import { relatedCardId } from './synth/relatedArrangement';
@@ -1256,7 +1257,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    *    (objectui#10690), so the first query carries the operands;
    *  - the mobile card gallery's cover (`MOBILE_GALLERY_COVER_FIELD`), which
    *    no column shows and the gallery reads off every row — through the same
-   *    declared-and-readable gate, once the child schema has landed.
+   *    declared-and-readable gate, once the child schema has landed;
+   *  - the child object's DECLARED name field, which the row Delete confirm
+   *    names the row by — through the same gates, never drawn.
    *
    * ⛔ `pruneEmpty` is NOT applied: it judges emptiness from the rows this
    * request fetches, so the projection is taken before it — it only ever
@@ -1326,6 +1329,23 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       if (parentRelationshipFieldDef(fields, MOBILE_GALLERY_COVER_FIELD) !== undefined
           && readable(MOBILE_GALLERY_COVER_FIELD)) {
         projection.add(MOBILE_GALLERY_COVER_FIELD);
+      }
+      // The object's DECLARED name field (ADR-0079 D2/D4). The row Delete
+      // confirm names the row from the row this projection fetched
+      // (`getRecordDisplayName`), so a `nameField` no column shows must still
+      // be on the row, or the sentence reads the `Record #<id>` floor. Fetched,
+      // never drawn: it joins the projection, not the columns — the arm
+      // `ObjectGrid` and `ListView` carry for their own confirms. Asked by
+      // name whatever its type (the server serves a formula field like any
+      // other), through the operands' gates: declared or a platform column,
+      // readable when declared, and not one the block redacts. A derived or
+      // `titleFormat` title is not asked for: it is no declared pointer.
+      const declaredName = declaredNameField(objectSchema);
+      if (typeof declaredName === 'string' && declaredName !== '' && !redactedFields.has(declaredName)) {
+        const declared = parentRelationshipFieldDef(fields, declaredName) !== undefined;
+        if ((declared || PLATFORM_RECORD_COLUMNS.has(declaredName)) && (!declared || readable(declaredName))) {
+          projection.add(declaredName);
+        }
       }
     }
     return Array.from(projection);
@@ -3065,6 +3085,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   React.useEffect(() => {
     onEmptyChange?.(emptyAnswer);
   }, [emptyAnswer, onEmptyChange]);
+  // objectstack#34250 — the number this list holds, said to the `page:tabs`
+  // panel around it when `record:related_list` hands down a reporter (its
+  // parent is bound by `parentDataSource`; see `RelatedListTotalReportContext`).
+  // The header's own count, said once the read has settled: a list still
+  // reading, whose read failed, or whose filter was refused holds no number
+  // yet, and says none.
+  const reportTotal = React.useContext(RelatedListTotalReportContext);
+  const settledTotal = loading || loadFailure || filterRefusal ? null : recordCount;
+  React.useEffect(() => {
+    if (settledTotal !== null) reportTotal?.(settledTotal);
+  }, [reportTotal, settledTotal]);
   React.useEffect(() => {
     if (enlargedFace && enlargedChip === 'all' && !filterActive && !loading && !loadFailure) setAllCount(recordCount);
   }, [enlargedFace, enlargedChip, filterActive, loading, loadFailure, recordCount]);

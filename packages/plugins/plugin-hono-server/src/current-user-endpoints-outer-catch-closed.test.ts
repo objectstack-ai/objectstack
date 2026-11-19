@@ -179,6 +179,7 @@ describe('[#23047] a throw inside the try, after the caller is known, answers th
             // [#28508] On the closed body too, as `false`: no ownership-queue
             // service is registered here, and a fault vouches for nothing.
             hasAnyQueue: false,
+            objectsUsingQueues: [],
         });
         // The load-bearing key, stated on its own: present-and-empty is "no
         // capabilities"; absent is "unknown", which the console fails open on.
@@ -232,7 +233,7 @@ describe('[#23047] controls — what the fix must not move', () => {
             + '"positions":["org_member","everyone"],"permissionSets":[],"objects":{},"fields":{},'
             // [#28508] The degraded branch carries the queue boolean too; no
             // ownership-queue service is registered in this mount, so `false`.
-            + '"hasAnyQueue":false}',
+            + '"hasAnyQueue":false,"objectsUsingQueues":[]}',
         );
         expect(failedCalls(warn)).toHaveLength(0);
     });

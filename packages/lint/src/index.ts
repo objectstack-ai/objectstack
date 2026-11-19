@@ -73,6 +73,16 @@ export {
 } from './validate-dataset-measure-aggregates.js';
 export type { DatasetMeasureAggregateFinding, GroupKeyClass } from './validate-dataset-measure-aggregates.js';
 
+// ADR-0149 D1 — a dataset measure or dimension that declares neither
+// `synonyms` nor a `description` is advised: a question asked in a user's own
+// words will not find it. The rule id is published for `--json` consumers
+// (`rule-id-barrel-exports.test.ts`).
+export {
+  validateDatasetMemberVocabulary,
+  DATASET_MEMBER_NO_VOCABULARY,
+} from './validate-dataset-member-vocabulary.js';
+export type { DatasetMemberVocabularyFinding } from './validate-dataset-member-vocabulary.js';
+
 export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 // [#32872] The gate's verdict on one validation rule, formula field or
@@ -338,8 +348,9 @@ export {
   APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
   APPROVAL_DECISION_OUTPUTS_RESERVED,
   APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
+  APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED,
 } from './validate-approval-approvers.js';
-export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
+export type { ApprovalApproverFinding, ApprovalApproverSeverity, ValidateApprovalApproversOptions } from './validate-approval-approvers.js';
 
 export {
   validateAssignmentRules,
@@ -347,12 +358,6 @@ export {
   ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
 } from './validate-assignment-rules.js';
 export type { AssignmentRuleFinding, AssignmentRuleSeverity } from './validate-assignment-rules.js';
-
-export {
-  validateSeedReplaySafety,
-  SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
-} from './validate-seed-replay-safety.js';
-export type { SeedReplaySafetyFinding, SeedReplaySafetySeverity } from './validate-seed-replay-safety.js';
 
 export {
   validateSeedStateMachine,
@@ -1009,6 +1014,17 @@ export type {
   ActionBodyWriteExclusion,
 } from './validate-action-body-writes.js';
 
+// An action body must compile in the wrapper the runtime runs it in, which the
+// runtime builds from `actionBodyFunctionExpression` — the same function the
+// rule compiles inside, so the two cannot disagree about the wrapper.
+export {
+  validateActionBodyCompiles,
+  hostCompileFailure,
+  ACTION_BODY_DOES_NOT_COMPILE,
+} from './validate-action-body-compiles.js';
+export type { ActionBodyCompileFinding, HostCompileFailure } from './validate-action-body-compiles.js';
+export { ACTION_BODY_PARAMETERS, actionBodyFunctionExpression } from './action-body-wrapper.js';
+
 // The same write-set question on the third surface — a flow `update_record`
 // node's structural `config.fields`. Shares the hook rule's field index and
 // implicit-field set so all three agree on what is writable without being
@@ -1202,6 +1218,7 @@ export {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
   lintDataModel,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
@@ -1213,6 +1230,7 @@ export {
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
 
@@ -1248,10 +1266,15 @@ export type {
 // ladder (request locale, then the workspace default, then `en`) over the
 // platform locale table. The door that holds the request puts it on the wire
 // as `RuntimeAuthoringIssueSchema.userMessage`; also on
-// `@objectstack/lint/runtime`. The catalogs and the ladder itself stay
-// internal: `findingUserMessage` is their one caller-facing door.
-export { findingUserMessage } from './finding-user-text.js';
-export type { UserTextParams } from './finding-user-text.js';
+// `@objectstack/lint/runtime`. The rules' catalogs stay internal:
+// `findingUserMessage` is their one caller-facing door. The ladder is exported
+// beside it (`userTextLocaleOf`, `renderUserText`) for a producer outside this
+// package that keeps its own catalog next to its own findings, such as the
+// post-publish build probes in `@objectstack/metadata-protocol`
+// (`RuntimeBuildIssueSchema.userMessage`), so every producer's sentences go
+// through the one ladder and none writes a second.
+export { findingUserMessage, renderUserText, userTextLocaleOf } from './finding-user-text.js';
+export type { UserTextEntry, UserTextParams } from './finding-user-text.js';
 
 // The runtime publish gate over that registry. Also published as the
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.

@@ -790,42 +790,8 @@ export async function runAdminCreateUser(
   // the join runs in the account's own unit of work, so an administrator with
   // no current organization, or a host that cannot run the join, is refused
   // with nothing created — never handed a member-less account.
-  let join:
-    | { seam: AdminCreateGrantSeam; addMember: AddMemberCapableApi['addMember']; organizationId: string }
-    | undefined;
-  if (multiOrgCreationJoinsCurrentOrganization(deps)) {
-    const organizationId = await deps.getCallerActiveOrganizationId!();
-    if (typeof organizationId !== 'string' || organizationId.length === 0) {
-      return {
-        status: 400,
-        body: {
-          success: false,
-          error: {
-            code: 'NO_ACTIVE_ORGANIZATION',
-            message:
-              'You are not working in an organization, so no user was created. '
-              + 'Switch to the organization the new user belongs to, then create them there.',
-          },
-        },
-      };
-    }
-    const seam = deps.createGrant;
-    const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
-    if (!seam || typeof authApi.addMember !== 'function') {
-      return {
-        status: 501,
-        body: {
-          success: false,
-          error: {
-            code: 'NOT_IMPLEMENTED',
-            message:
-              'This server cannot add a new user to your organization while creating them, so no user was created.',
-          },
-        },
-      };
-    }
-    join = { seam, addMember: authApi.addMember.bind(authApi), organizationId };
-  }
+  const join = await settleCurrentOrganizationJoin(deps);
+  if (join && 'status' in join) return join;
 
   // [#25338] Everything the grant needs is settled BEFORE the account exists,
   // so a host that cannot judge the grant refuses with nothing created.
@@ -1024,6 +990,15 @@ export async function joinCurrentOrganization(
   addMember: AddMemberCapableApi['addMember'],
   userId: string,
   organizationId: string,
+  /**
+   * Whose membership this is. `'created'` (the default): an account this unit
+   * of work just created, so the refusal says no user was created and a
+   * membership found already there was written during the creation.
+   * `'existing'`: an account that was there before — `import-users` matching a
+   * CSV row to a user — so the refusal names only the join, and a membership
+   * already there is reported as not created by this call.
+   */
+  account: 'created' | 'existing' = 'created',
 ): Promise<{ organizationId: string; membershipCreated: boolean }> {
   const engine = deps.getDataEngine();
   if (engine?.find) {
@@ -1032,26 +1007,87 @@ export async function joinCurrentOrganization(
       { where: { organization_id: organizationId, user_id: userId }, limit: 1 },
       { context: SYSTEM_CTX },
     );
-    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: true };
+    if (Array.isArray(existing) && existing.length > 0) {
+      return { organizationId, membershipCreated: account === 'created' };
+    }
   }
   try {
     await addMember({ body: { userId, role: 'member', organizationId } });
   } catch (error) {
     const refused = mapAuthApiError(error, 'organization/add-member failed', deps.logger);
+    const lead = account === 'created'
+      ? 'The user could not be added to the organization, so no user was created'
+      : 'The user could not be added to the organization';
     throw new CreationRefused({
       status: refused.status,
       body: {
         success: false,
         error: {
           code: refused.body.error?.code ?? 'INTERNAL_ERROR',
-          message: `The user could not be added to the organization, so no user was created: ${
-            refused.body.error?.message ?? 'organization/add-member failed'
-          }`,
+          message: `${lead}: ${refused.body.error?.message ?? 'organization/add-member failed'}`,
         },
       },
     });
   }
   return { organizationId, membershipCreated: true };
+}
+
+/** What a multi-org creation settled before any account exists: its unit of work, the vendor's add, the organization. */
+export interface CurrentOrganizationJoin {
+  seam: AdminCreateGrantSeam;
+  addMember: AddMemberCapableApi['addMember'];
+  organizationId: string;
+}
+
+/**
+ * Settle, before any account exists, the multi-org join of the administrator's
+ * current organization (ADR-0093 D3 amendment) — the one settlement both doors
+ * that create local accounts read: `create-user` for one user and
+ * `import-users` for each row of a file.
+ *
+ * Answers `undefined` when this creation joins nothing (single-org, a degraded
+ * wall, or a host that wires no way to read the caller's current
+ * organization — see {@link multiOrgCreationJoinsCurrentOrganization}); the
+ * refusal to answer when the administrator has no current organization
+ * (`400 NO_ACTIVE_ORGANIZATION`) or the host cannot run the join inside the
+ * account's unit of work (`501 NOT_IMPLEMENTED`), so nothing is created; or
+ * the join to run.
+ */
+export async function settleCurrentOrganizationJoin(
+  deps: Pick<AdminUserEndpointDeps, 'getTenancy' | 'getCallerActiveOrganizationId' | 'createGrant' | 'getAuthApi'>,
+): Promise<CurrentOrganizationJoin | EndpointResult | undefined> {
+  if (!multiOrgCreationJoinsCurrentOrganization(deps)) return undefined;
+  const organizationId = await deps.getCallerActiveOrganizationId!();
+  if (typeof organizationId !== 'string' || organizationId.length === 0) {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: {
+          code: 'NO_ACTIVE_ORGANIZATION',
+          message:
+            'You are not working in an organization, so no user was created. '
+            + 'Switch to the organization the new user belongs to, then create them there.',
+        },
+      },
+    };
+  }
+  const seam = deps.createGrant;
+  const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
+  if (!seam || typeof authApi.addMember !== 'function') {
+    return {
+      status: 501,
+      body: {
+        success: false,
+        error: {
+          code: 'NOT_IMPLEMENTED',
+          message:
+            'This server cannot add a new user to your organization while creating them, so no user was created.',
+        },
+      },
+    };
+  }
+  return { seam, addMember: authApi.addMember.bind(authApi), organizationId };
 }
 
 /**

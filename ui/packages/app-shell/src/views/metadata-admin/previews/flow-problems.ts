@@ -160,6 +160,39 @@ function repeatedEdgeProblems(edges: FlowDesignerEdge[], nodes: FlowDesignerNode
   return out;
 }
 
+/**
+ * objectstack#34818 item 4 — an approval node missing its `approve` or
+ * `reject` out-edge. The engine resumes an approval down the out-edge whose
+ * label matches the decision (ADR-0019), so a decision with no such edge has
+ * nowhere to go; the publish does not refuse it, which is why the designer
+ * says so here. One warning per missing outcome, on the node. `revise`
+ * (ADR-0044) is optional and is not asked for.
+ */
+function approvalOutcomeProblems(edges: FlowDesignerEdge[], nodes: FlowDesignerNode[], locale?: string): FlowProblem[] {
+  const out: FlowProblem[] = [];
+  for (const node of nodes) {
+    if (node?.type !== 'approval' || typeof node.id !== 'string') continue;
+    const labels = new Set(
+      edges.filter((e) => e.source === node.id && typeof e.label === 'string').map((e) => e.label!.trim().toLowerCase()),
+    );
+    for (const outcome of ['approve', 'reject'] as const) {
+      if (labels.has(outcome)) continue;
+      const target: FlowProblemTarget = { kind: 'node', nodeId: node.id };
+      out.push({
+        id: `structural:warning:approval-${outcome}:${targetKey(target)}`,
+        level: 'warning',
+        message: tFormat('engine.flowProblems.approvalMissingOutcome', locale, {
+          name: flowNodeDisplayName(node, locale),
+          outcome: t(outcome === 'approve' ? 'engine.inspector.flowEdge.branchApprove' : 'engine.inspector.flowEdge.branchReject', locale),
+        }),
+        target,
+        source: 'structural',
+      });
+    }
+  }
+  return out;
+}
+
 /** Resolve an edge's selection key (`edgeKey`) from its endpoints. */
 function resolveEdgeKey(edges: FlowDesignerEdge[], source: string, target: string): string {
   const idx = edges.findIndex((e) => e.source === source && e.target === target);
@@ -282,6 +315,7 @@ export function buildFlowProblems({ nodes, edges, serverDiagnostics, variables, 
   pushStructural('error', missingNodeRefDiagnostics({ nodes, edges, variables }, locale), ':ref');
   problems.push(...repeatedEdgeProblems(edges, nodes, locale));
   pushStructural('warning', v.warnings);
+  problems.push(...approvalOutcomeProblems(edges, nodes, locale));
 
   (serverDiagnostics ?? []).forEach((diag, i) => {
     const level: DiagnosticLevel = diag.severity === 'warning' ? 'warning' : 'error';

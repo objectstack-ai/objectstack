@@ -167,14 +167,10 @@ const declaresTranslationArray = (body: unknown): boolean => {
  *   `resolveArtifactPackageOrder` when `packages` is present but not loadable:
  *   `INVALID_ARTIFACT_PACKAGES` (not an array, `null` included), `INVALID_ARTIFACT_PACKAGE_ENTRY`
  *   (an entry that is not `{ manifest: … }`, a body carrying authoring-time
- *   globs where definitions belong, or a manifest with no usable id) or
- *   `DUPLICATE_ARTIFACT_PACKAGE`.
- * @throws A **bare** `Error` — no `code`, no `status` — from `resolvePluginOrder`
- *   when two packages in `packages[]` depend on each other
- *   (`[Kernel] Circular dependency detected: …`). Documented because it is the
- *   one failure here that does NOT carry the envelope every other refusal in
- *   this repo does, so a caller matching on `code` alone will miss it. Measured,
- *   not inferred from the sorter's prose.
+ *   globs where definitions belong, or a manifest with no usable id),
+ *   `DUPLICATE_ARTIFACT_PACKAGE`, or `CYCLIC_ARTIFACT_PACKAGES` when packages
+ *   in `packages[]` depend on each other in a cycle (`details.cycle` names the
+ *   package ids along it).
  */
 export function stackDeclaresTranslations(stack: unknown): boolean {
   // The caller's ORIGINAL expression, first and unchanged.

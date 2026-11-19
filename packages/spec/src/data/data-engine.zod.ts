@@ -503,8 +503,16 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
   /**
    * Reference timezone (IANA name) for date bucketing (ADR-0053 Phase 2).
    * When set to a non-UTC zone, `groupBy` items carrying a `dateGranularity`
-   * bucket on that zone's calendar days. Unset or `'UTC'` keeps the UTC
-   * fast path (native driver `date_trunc`).
+   * bucket on that zone's calendar days. Unset, or a name the runtime resolves
+   * to `UTC` (`Etc/UTC`, `GMT`, `Zulu`), keeps the UTC path (the driver's
+   * native bucket). Any other zone is bucketed in the database by a driver
+   * that declares `supports.zonedDateBucketing` (PostgreSQL), which receives
+   * the RESOLVED area/location name (`CST` goes down as `America/Chicago`),
+   * and in memory otherwise — and always in memory for a string the runtime
+   * cannot resolve or that resolves to no area/location name (`+08:00`,
+   * `EST5EDT`). Both paths answer the same buckets (D2 as amended). The
+   * spellings are examples as Node 22 resolves them; the rule is the
+   * runtime's resolution.
    */
   timezone: z.string().optional(),
   /**

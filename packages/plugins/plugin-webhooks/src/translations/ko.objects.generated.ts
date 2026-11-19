@@ -53,7 +53,6 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "HTTP 메서드",
         help: "콜백 요청에 사용하는 HTTP 메서드",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

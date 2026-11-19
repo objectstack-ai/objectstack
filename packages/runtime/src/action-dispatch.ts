@@ -59,7 +59,7 @@ import {
 import { readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { actionsDoorAnswerOf, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
-import type { AIActionConfirmation } from '@objectstack/spec/contracts';
+import type { AIActionConfirmation, ActionConfirmationPending } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import * as actionExec from './action-execution.js';
 import type { ActionExecutionDeps } from './action-execution.js';
@@ -150,6 +150,29 @@ export interface ResolvedActionCall {
     /** The AI-door confirmation member, read under the `ai` posture only. */
     confirmation?: AIActionConfirmation;
     /**
+     * [#33690] Present at an AI door that hands a declared-gated call to the
+     * person it runs as (the MCP `run_action` tool) instead of reading
+     * {@link confirmation}: under the amended contract the caller's `confirm`
+     * never counts there. An AI service account is refused as before; every
+     * other caller's gated call is handed off once every gate, the subject
+     * load and its verdict included, has passed ({@link ResolvedActionRun}'s
+     * `handedOff`), and nothing dispatches. `door` and `namespace` are the
+     * hand-off's own members (`ActionConfirmationHandOff`). A door without it
+     * (REST, a host's door) keeps the member gate.
+     */
+    confirmationHandOff?: {
+        door: string;
+        namespace?: string;
+        /**
+         * [#33712] The door's channel to the person's client (step 1 of the
+         * amended contract), present only when the client can be elicited. The
+         * person is then asked in place, after the same verdict the hand-off
+         * asks: `accept` dispatches the call as any admitted call, any other
+         * answer refuses it, and nothing is handed off.
+         */
+        elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+    };
+    /**
      * [ADR-0106 D1] This door's answer for a name nothing declares, where it
      * is not the sequence's own undeclared `404` ({@link undeclaredActionRefusal}):
      * an addressed call's resolver refuses a miss by name in its scope
@@ -230,6 +253,8 @@ export interface AdmittedActionCall {
 /** What {@link runResolvedAction} answers. */
 export type ResolvedActionRun =
     | { refused: ActionRefusal }
+    /** [#33690] Handed to the person it runs as; nothing ran and no row is written. */
+    | { handedOff: ActionConfirmationPending }
     | { admitted: AdmittedActionCall; outcome: ActionDispatchOutcome };
 
 /**
@@ -261,8 +286,23 @@ export async function runResolvedAction(
     requestContext: HttpProtocolContext,
     call: ResolvedActionCall,
 ): Promise<ResolvedActionRun> {
-    const admission = await admitResolvedAction(deps, requestContext, call);
+    let admission = await admitResolvedAction(deps, requestContext, call);
     if ('refused' in admission) return admission;
+    if (admission.handOff) {
+        const confirmation = await confirmAdmittedAction(deps, requestContext, call, admission);
+        // [#33712] Only an elicited `accept` falls through to the dispatch.
+        if (confirmation !== 'accepted') return confirmation;
+        // [#33712] The person answered some time after the admission was read.
+        // The call dispatches on a read taken AFTER the answer: every gate and
+        // the subject load again, then the caller-scope verdict on that fresh
+        // subject, exactly as the question was preceded. A refusal there runs
+        // nothing; the dispatch never sees the read taken before the question.
+        const fresh = await admitResolvedAction(deps, requestContext, call);
+        if ('refused' in fresh) return fresh;
+        const verdict = await subjectVerdictRefusal(deps, requestContext, call, fresh);
+        if (verdict) return verdict;
+        admission = fresh;
+    }
     const outcome = await dispatchAdmittedAction(deps, requestContext, call, admission);
     return {
         admitted: { actionDef: admission.actionDef, objectName: call.objectName, actionName: call.actionName, recordId: admission.recordId },
@@ -276,6 +316,110 @@ interface Admission {
     recordId: any;
     params: Record<string, unknown>;
     subject: actionExec.ActionSubjectRecordLoad;
+    /** [#33690] The call is handed to the person, never dispatched ({@link ResolvedActionCall.confirmationHandOff}). */
+    handOff: boolean;
+    /**
+     * [ADR-0150 D4] The package coordinate the owner gate judged: the
+     * declaration's own, or the attributed holder's
+     * (`actionExec.attributeActionHandler`). `undefined`: none.
+     */
+    dispatchPackageId?: string;
+    /** [ADR-0150 D4] Whose handler the script dispatch runs, when the declaration names no package and its holder is attributed: that holder's handler, or none. */
+    holder?: actionExec.ActionHandlerHolder;
+}
+
+/**
+ * [#33690] The hand-off of an admitted, declared-gated call at a door that
+ * hands off: the caller-scope subject verdict as the arm would read it, then
+ * the host's pending-confirmation service (or the `no_confirmation_service`
+ * refusal). Nothing dispatches, and no invocation row is written: the call
+ * did not run. A verdict refusal is the arm's own, rendered as a refusal.
+ * [#33712] At a door that holds the person's client (`elicitConfirmation`),
+ * the person is asked there instead, after the same verdict: `'accepted'`
+ * sends the caller on to the dispatch, any other answer is the refusal.
+ */
+/** The admitted record id as the hand-off and the question carry it: absent for a record-less call. */
+function subjectRecordIdOf(recordId: unknown): string | undefined {
+    return recordId === undefined || recordId === null || recordId === '' ? undefined : String(recordId);
+}
+
+/**
+ * [#33690] The caller-scope subject verdict on an admission, as the dispatch
+ * arm would read it, rendered as a refusal; `undefined` when the call may go
+ * on. [#33712] Asked before the person is asked, and again on the read taken
+ * after an elicited `accept`.
+ */
+async function subjectVerdictRefusal(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    call: ResolvedActionCall,
+    admission: Admission,
+): Promise<{ refused: ActionRefusal } | undefined> {
+    const { objectName, wiring } = call;
+    try {
+        await actionExec.refuseDeniedSubjectBeforeHandOff(deps, requestContext, admission.actionDef, {
+            objectName, recordId: subjectRecordIdOf(admission.recordId), subject: admission.subject, ec: wiring.ec, envId: wiring.envId,
+        });
+    } catch (error) {
+        const thrown = error as Error & { code?: unknown; status?: unknown };
+        if (typeof thrown?.status !== 'number' || typeof thrown?.code !== 'string') throw error;
+        return { refused: { message: thrown.message, status: thrown.status, details: { code: thrown.code } } };
+    }
+    return undefined;
+}
+
+async function confirmAdmittedAction(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    call: ResolvedActionCall,
+    admission: Admission,
+): Promise<ResolvedActionRun | 'accepted'> {
+    const { objectName, wiring } = call;
+    const { actionDef, recordId, params, subject } = admission;
+    const subjectRecordId = subjectRecordIdOf(recordId);
+    const verdict = await subjectVerdictRefusal(deps, requestContext, call, admission);
+    if (verdict) return verdict;
+    const handOff = call.confirmationHandOff!;
+    const actionName = typeof actionDef?.name === 'string' && actionDef.name ? actionDef.name : call.actionName;
+    // [#33712] Step 1: a client that can be elicited is asked in place, after
+    // the same verdict, and its answer stands: `accept` dispatches, anything
+    // else refuses. The hand-off below is the step-2 path for every other call.
+    if (handOff.elicitConfirmation) {
+        const elicited = await actionExec.elicitActionConfirmation(
+            handOff.elicitConfirmation,
+            actionExec.actionConfirmationElicitSubject(
+                actionDef, actionName, objectName, subjectRecordId, call.declaration?.obj, subject?.record,
+            ),
+        );
+        if ('accepted' in elicited) return 'accepted';
+        const { refused } = elicited;
+        return {
+            refused: {
+                message: refused.message,
+                status: refused.status,
+                details: { code: refused.code, ...(refused.details as unknown as Record<string, unknown>) },
+            },
+        };
+    }
+    const answer = await actionExec.handOffActionConfirmation(deps, requestContext, wiring.envId, {
+        actionName,
+        ...(actionExec.isObjectLessActionKey(objectName) ? {} : { objectName }),
+        ...(handOff.namespace !== undefined ? { namespace: handOff.namespace } : {}),
+        ...(subjectRecordId !== undefined ? { recordId: subjectRecordId } : {}),
+        params,
+        door: handOff.door,
+    }, wiring.ec);
+    if ('refused' in answer) {
+        const { refused } = answer;
+        return {
+            refused: {
+                message: refused.message,
+                status: refused.status,
+                details: { code: refused.code, ...(refused.details as unknown as Record<string, unknown>) },
+            },
+        };
+    }
+    return { handedOff: answer.pending };
 }
 
 async function admitResolvedAction(
@@ -388,6 +532,33 @@ async function admitResolvedAction(
         return refuse({ message: activationRefusal.message, status: activationRefusal.status, details: { code: activationRefusal.code } });
     }
 
+    // [ADR-0150 D4] Whose handler the script dispatch runs, so it is the
+    // declared item's: the resolved declaration's package, else — for a
+    // declaration that names none — the holder `attributeActionHandler`
+    // attributes. Asked after D4 and the activation consult (it may read the
+    // store), before the owner gate, which judges the handler this dispatch runs.
+    const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
+    const attribution: actionExec.ActionHandlerAttribution = declaration.packageId !== undefined
+        ? { packageId: declaration.packageId }
+        : await actionExec.attributeActionHandler(ql, {
+            action: actionDef, objectName, candidates, obj: actionSchema,
+            readServiceActions: async () => {
+                const meta = await deps.resolveService(requestContext, 'metadata', wiring.envId);
+                return typeof meta?.loadMany === 'function' ? ((await meta.loadMany('action')) ?? []) : undefined;
+            },
+        });
+    if ('degraded' in attribution) {
+        return refuse({
+            message:
+                `Cannot verify which declared action owns the handler that action '${actionName}' on '${objectName}' ` +
+                `dispatches to — the metadata plane is unavailable (${attribution.reason}). ` +
+                'Refusing rather than running it ungated.',
+            status: 503,
+            details: { code: standardErrorCodeForHttpStatus(503) },
+        });
+    }
+    const dispatchPackageId = attribution.packageId;
+
     // The handler the dispatch reaches may be one a DIFFERENT declared action
     // owns: that owner's gates apply too. The candidates are the ones the
     // script arm hands `executeRegisteredAction`.
@@ -395,11 +566,11 @@ async function admitResolvedAction(
         ql,
         action: actionDef,
         objectName,
-        candidates: actionExec.resolveActionHandlerKeys(actionDef, actionName),
+        candidates,
         ec: wiring.ec,
         envId: wiring.envId,
         obj: actionSchema,
-        ...(declaration.packageId !== undefined ? { packageId: declaration.packageId } : {}),
+        ...(dispatchPackageId !== undefined ? { packageId: dispatchPackageId } : {}),
     });
     if (ownerRefusal) {
         return refuse({ message: ownerRefusal.message, status: ownerRefusal.status, details: { code: ownerRefusal.code } });
@@ -457,7 +628,22 @@ async function admitResolvedAction(
     // rule 3] Asked under BOTH postures for an AI service account, which never
     // confirms an action for itself; under `ai` only for everyone else, so REST
     // stays outside the gate for a person and a delegated agent.
-    if (posture === 'ai' || actionExec.isAiServiceAccountCaller(wiring.ec)) {
+    //
+    // [#33690] At a door that hands off (MCP `run_action`) the member is not
+    // read: an account is refused here as before, and every other caller's
+    // gated call is handed to the person after the subject load below.
+    let handOff = false;
+    if (call.confirmationHandOff && posture === 'ai') {
+        const step = actionExec.aiDoorConfirmation(deps, actionDef, objectName, wiring.ec);
+        if (step.kind === 'refuse') {
+            return refuse({
+                message: step.refusal.message,
+                status: step.refusal.status,
+                details: { code: step.refusal.code, ...(step.refusal.details as unknown as Record<string, unknown>) },
+            });
+        }
+        handOff = step.kind === 'hand-off';
+    } else if (posture === 'ai' || actionExec.isAiServiceAccountCaller(wiring.ec)) {
         const confirmationRefusal = actionExec.actionConfirmationRefusal(
             deps, actionDef, call.confirmation ?? {}, objectName, wiring.ec,
         );
@@ -475,7 +661,11 @@ async function admitResolvedAction(
     // CALLER's own scope delivered the row (commit f19475c0a).
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         wiring.callData('get', { object: objectName, id: recordId }, wiring.driver, wiring.envId, wiring.ec));
-    return { actionDef, actionType, recordId, params, subject };
+    return {
+        actionDef, actionType, recordId, params, subject, handOff,
+        ...(dispatchPackageId !== undefined ? { dispatchPackageId } : {}),
+        ...(attribution.holder !== undefined ? { holder: attribution.holder } : {}),
+    };
 }
 
 /**
@@ -508,7 +698,7 @@ async function dispatchAdmittedAction(
         // implementation of the rule (#16370), ahead of everything that builds
         // a trusted context. [#28657] Except ahead of an api forward that needs
         // nothing from the row: its target authorizes the caller itself.
-        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject);
+        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject, ec);
 
         // ── api forward (#27506) ── a same-origin `type: 'api'` action is
         // forwarded IN-PROCESS to its declared `target` with the caller's own
@@ -610,20 +800,19 @@ async function dispatchAdmittedAction(
         };
         // [ADR-0110 D2] "resolve, then address": the handler KEY is derived from
         // the resolved declaration; [ADR-0150 D4] the resolved holder's package
-        // picks its own handler.
-        const dispatch = await actionExec.executeRegisteredAction(
-            deps, ql, objectName,
-            actionExec.resolveActionHandlerKeys(actionDef, actionName),
-            actionContext,
-            call.declaration.packageId,
-        );
-        if (!dispatch.dispatched) {
-            // No key carried a handler: a routing miss, not a server fault.
-            return {
-                kind: 'refused',
-                refusal: { message: `Action '${actionName}' on object '${objectName}' not found`, status: 404 },
-            };
-        }
+        // picks its own handler, and an attributed holder its own.
+        const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
+        // No key carried a handler: a routing miss, not a server fault.
+        const notFound: ActionDispatchOutcome = {
+            kind: 'refused',
+            refusal: { message: `Action '${actionName}' on object '${objectName}' not found`, status: 404 },
+        };
+        // [ADR-0150 D4] An attributed holder runs its own handler or none: the
+        // entry is chosen and run in one synchronous step.
+        const dispatch = admission.holder !== undefined
+            ? await actionExec.executeAttributedAction(ql, objectName, candidates, actionContext, admission.holder)
+            : await actionExec.executeRegisteredAction(deps, ql, objectName, candidates, actionContext, admission.dispatchPackageId);
+        if (!dispatch.dispatched) return notFound;
         // [#11519] Doubled post-success navigation — observe LOUDLY, never
         // rewrite the wire.
         const doubled = actionExec.doubledPostSuccessNavigationWarning(deps, actionDef, dispatch.result, objectName);
@@ -748,6 +937,10 @@ export async function runResolvedActionAsRest(
 ): Promise<HttpDispatcherResult> {
     const run = await runResolvedAction(deps, requestContext, call);
     if ('refused' in run) return { handled: true, response: restRefusalResponse(deps, run.refused) };
+    // [#33690] Only a door that sets `confirmationHandOff` (MCP `run_action`)
+    // hands off; a REST-rendered call never does. Answered as the success it
+    // is, should a door ever set it here, and like a refusal it writes no row.
+    if ('handedOff' in run) return { handled: true, response: deps.success(run.handedOff) };
     const { response } = restAnswerOf(deps, run.admitted, run.outcome);
     // [#27908] THE INVOCATION ROW: one row for every call that cleared the
     // gates, whatever the arm answered. A call a gate refused writes none.
@@ -871,6 +1064,37 @@ export interface ActionDispatchRequest extends AIActionConfirmation {
     credentialHeaders?: Record<string, string>;
     /** Which door's rules admit the call; default `'rest'`. */
     posture?: ActionDispatchPosture;
+}
+
+/**
+ * [#34386] One resume from a host's own door: {@link dispatchActionResume}'s
+ * input. The approval leg of a handed-off `resume_run`
+ * (`ActionConfirmationHandOff.run`): the run and the values the hand-off
+ * carried, the approving person, and that person's confirmation.
+ */
+export interface ActionResumeRequest extends AIActionConfirmation {
+    /**
+     * The approving person, as the host authenticated them; used as given,
+     * exactly as {@link ActionDispatchRequest.executionContext} is. The run
+     * resumes only for the person who started it, so this is that person.
+     * An anonymous caller is refused `401`.
+     */
+    executionContext: ExecutionContext;
+    /** The environment the run lives in, placed as {@link ActionDispatchRequest.environmentId} is. */
+    environmentId?: string;
+    /** The paused run to resume (`ActionConfirmationHandOff.run.runId`). */
+    runId: string;
+    /** The screen's field values the handed-off call carried (`ActionConfirmationHandOff.run.values`). */
+    values?: Record<string, unknown>;
+    /**
+     * [#34515] The screen the handed-off call was given on
+     * (`ActionConfirmationHandOff.run.screenNodeId`), which binds the approval
+     * to it: a run no longer paused on that screen (a wizard that moved on,
+     * by an earlier approval of the same call or in the app) is refused
+     * `409 RESOURCE_CONFLICT` and stays where it is. Omitted, the run's
+     * current screen is resumed, whichever it is.
+     */
+    screenNodeId?: string;
 }
 
 /**
@@ -1092,4 +1316,53 @@ export async function dispatchAction(kernel: ObjectKernel, request: ActionDispat
         hostDispatchers.set(kernel, dispatcher);
     }
     return dispatcher.dispatchHostAction(request);
+}
+
+/**
+ * [#34386] Resume a handed-off `resume_run` as the person who approved it —
+ * the MCP `resume_run` door's steps, as a function a host's approve door
+ * calls instead of keeping a copy of them. It is the approval leg the
+ * confirmation contract promises (`IActionConfirmationService`,
+ * `@objectstack/spec/contracts`): approving a hand-off that carries a run
+ * resumes THAT parked run with the values the call carried, as the approver,
+ * who must be the run's owner, every gate re-checked at that moment; it never
+ * starts a new run.
+ *
+ * The steps are `resume_run`'s, asked again as `executionContext`: the run
+ * must still be paused and started by this person (else the door's one
+ * not-found `404`); the flow action that admits it must pass every
+ * `run_action` gate, its confirmation gate reading `confirm` as
+ * {@link dispatchAction}'s does (`428 ACTION_CONFIRMATION_REQUIRED` without
+ * it on a declared-gated action, and an AI service account refused whatever
+ * it carries); the subject record is read again as the person; the run must
+ * be paused on a screen (else `409`). Then it resumes, and nothing is
+ * handed off again.
+ *
+ * A run that is no longer paused is the only replay refused here. A wizard
+ * that this call moved on to its next screen is still paused under the same
+ * run id, so a second call with the same hand-off passes every step again and
+ * resumes that next screen with the values given. Deciding a pending item
+ * once, and voiding an item whose run has moved on, are the host's.
+ *
+ * `kernel`, the placement and the gates that stay the host's job are
+ * {@link dispatchAction}'s, and so is the answer's shape: `200` with
+ * `resume_run`'s `{ ok, action, objectName, recordId?, result }` as `data`,
+ * where a run that pauses on its next screen answers `result.status:
+ * 'paused'` with its `screen`, or the refusal's envelope.
+ *
+ * @example
+ * // In the host's approve door, after a person's signed-in session approved
+ * // a pending item whose hand-off carries `run`:
+ * const answer = await dispatchActionResume(kernel, {
+ *   executionContext: approver, runId: handOff.run.runId, values: handOff.run.values, confirm: true,
+ * });
+ * if (answer.status !== 200) recordRefusal(pendingId, answer.body.error);
+ */
+export async function dispatchActionResume(kernel: ObjectKernel, request: ActionResumeRequest): Promise<ActionDispatchAnswer> {
+    let dispatcher = hostDispatchers.get(kernel);
+    if (!dispatcher) {
+        dispatcher = new HttpDispatcher(kernel);
+        hostDispatchers.set(kernel, dispatcher);
+    }
+    return dispatcher.resumeHostActionRun(request);
 }

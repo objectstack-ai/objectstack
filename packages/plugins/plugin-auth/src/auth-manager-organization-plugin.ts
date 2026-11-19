@@ -60,6 +60,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { mintInvitationProof, withInvitationProof } from './invitation-mailbox-proof.js';
 import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import { isCloudManaged } from '@objectstack/core';
 import { MEMBERSHIP_ROLE_DELEGATED_ADMIN, MEMBERSHIP_ROLE_EXTERNAL } from '@objectstack/spec';
@@ -80,11 +81,12 @@ import {
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { resolveInvitationLimitOption } from './invitation-limit.js';
+import { refuseUnverifiedInvitationAnswer } from './invitation-accept-verified-email.js';
 import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
 import { invitationRoleLabel } from './invitation-role-label.js';
-import { applyDeclaredInvitationVerificationToListing } from './list-user-invitations-verification.js';
+import { requireVerifiedAddressOnListing } from './list-user-invitations-verification.js';
 import { resolveMembershipLimitOption } from './membership-limit.js';
 import { withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { isDefaultOrganizationTarget, removeOrganizationAuthStructure } from './organization-delete.js';
@@ -103,6 +105,7 @@ export interface OrganizationPluginHost {
   readonly config: AuthManager['config'];
   emailLocaleArg: AuthManager['emailLocaleArg'];
   getAppName: AuthManager['getAppName'];
+  getAuthContext: AuthManager['getAuthContext'];
   getAudience: AuthManager['getAudience'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
@@ -191,11 +194,14 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     // portal exposes a Teams page; without this flag those endpoints
     // 404 and the section silently breaks.
     teams: { enabled: true },
-    // Without a mailer wired in framework, requiring email verification
-    // before accepting invitations dead-ends every invite flow with
-    // FORBIDDEN EMAIL_VERIFICATION_REQUIRED…. Default-off here keeps
-    // the built-in /accept-invitation route usable for pilots; operators
-    // who wire a real mailer can re-enable downstream.
+    // The vendor's switch governs accept, reject and get-invitation
+    // together, and is read once, at boot. Declared off here so that
+    // get-invitation stays open: the accept page names the invitation before
+    // the person verifies. Accepting and declining still need a verified
+    // address, on every deployment: `beforeAcceptInvitation` and
+    // `beforeRejectInvitation` below refuse an unverified session
+    // (`invitation-accept-verified-email.ts`), and the listing refuses it
+    // too (`list-user-invitations-verification.ts`).
     requireEmailVerificationOnInvitation: false,
     // Cap how many orgs a user can CREATE (OS_ORG_LIMIT). Counts only orgs
     // the user OWNS (role=owner) — never orgs they were merely invited into —
@@ -424,6 +430,27 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
           });
         }
       },
+      // An unverified session may neither accept nor decline: the address it
+      // holds was never proven to be the invitee's mailbox. Fired by the
+      // vendor inside each endpoint, after its recipient and expiry checks
+      // and before anything is written, with the `session.user` its own
+      // verification check reads. Asked on every deployment, whatever the
+      // state of its mail transport. `invitation-accept-verified-email.ts`
+      // states the rule.
+      beforeAcceptInvitation: async ({ user }: any) => {
+        await refuseUnverifiedInvitationAnswer(user, {
+          verificationRequired:
+            organizationPlugin?.$ERROR_CODES
+              ?.EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION,
+        });
+      },
+      beforeRejectInvitation: async ({ user }: any) => {
+        await refuseUnverifiedInvitationAnswer(user, {
+          verificationRequired:
+            organizationPlugin?.$ERROR_CODES
+              ?.EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION,
+        });
+      },
       // [ADR-0105 D8] Accept-time application + host seam. The placement
       // the issuance gate approved lands WITH the better-auth membership,
       // so the invitee arrives already in the right unit and role. The
@@ -647,11 +674,23 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
         if (this.config.logger) this.config.logger.warn(msg, meta);
         else console.warn(msg, meta);
       }
+      // [#34257] The mail's link carries the invitation's mailbox proof; the
+      // copied link and the stored mail row never do. Minted only for a send
+      // that goes out; one that cannot be minted goes out as today's link.
+      // [#35107] A send from the host's own code, outside any endpoint, mints
+      // through the manager's own auth context, read at send time only.
+      const proof = expiry.expiresAt === undefined
+        ? undefined
+        : await mintProofForSend(
+            { id: String(invitation.id), email: recipientEmail, expiresAt: invitation.expiresAt },
+            () => this.getAuthContext(),
+          );
       try {
         await emailService.sendTemplate({
           template: 'auth.invitation',
           to: recipientEmail,
           ...mailLocale,
+          ...(proof ? { deliverOnlyData: { acceptUrl: withInvitationProof(acceptUrl, proof) } } : {}),
           data: {
             inviter: {
               name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
@@ -689,14 +728,12 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
   } satisfies OrganizationOptions;
   const organizationPlugin: any = organization(organizationOptions);
 
-  // [#16569] `GET /organization/list-user-invitations` — make the vendor's
-  // listing honour the `requireEmailVerificationOnInvitation: false`
-  // declared above, the way `accept-invitation`, `reject-invitation` and
-  // `get-invitation` already do. better-auth 1.7.2's `listUserInvitations`
-  // refuses every unverified session UNCONDITIONALLY (it never reads the
-  // option), so on exactly the no-mailer deployment the declaration exists
-  // for, an invitee could accept an invitation but never list it and the
-  // SDK's `organizations.invitations.listMine()` inbox was empty-by-403.
+  // [#16569] `GET /organization/list-user-invitations` — the listing needs a
+  // verified address, on every deployment, whatever the option above says:
+  // a session whose address is not verified is refused, so the listing never
+  // hands it an invitation's id. better-auth's own `listUserInvitations`
+  // refuses that session today without reading the option; the rebuild makes
+  // the rule this plugin's, so no vendor change to that handler can open it.
   // Rebuilt IN PLACE on this plugin's own endpoints record — the same
   // shape as `applyPlatformAdminImpersonation` above, for the same reasons
   // (one owner for the path; every hook keyed on it still fires; the
@@ -705,24 +742,20 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
   // .listUserInvitations(sessionEmail)`: no second definition of which
   // rows a session may see. `list-user-invitations-verification.ts`
   // carries the full reading.
-  const listingRewired = await applyDeclaredInvitationVerificationToListing(
+  const listingRewired = await requireVerifiedAddressOnListing(
     organizationPlugin,
     organizationOptions,
   );
   if (!listingRewired) {
-    // The vendor renamed or dropped the endpoint. Say so loudly: the
-    // route then falls back to the vendor's own handler, which refuses
-    // every unverified session — an empty inbox, not an open door.
-    // `warn`, not `error` (AGENTS.md → Degradation log levels): the
-    // system is VISIBLY smaller — the inbox answers a 403 the caller sees
-    // — and nothing claims a persistence it did not perform.
+    // The vendor renamed or dropped the endpoint. Say so loudly: whatever
+    // the vendor now serves for the inbox does not carry this plugin's rule.
+    // `warn`, not `error` (AGENTS.md → Degradation log levels): nothing
+    // claims a persistence it did not perform.
     console.warn(
       '[AuthManager] better-auth\'s organization plugin no longer exposes a ' +
       '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
-      'so the declared `requireEmailVerificationOnInvitation` could NOT be ' +
-      'applied to the invitation inbox. Unverified users will be refused ' +
-      '(403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION) until ' +
-      'list-user-invitations-verification.ts is updated for the new vendor shape.',
+      'so the invitation inbox could NOT be held to a verified address by ' +
+      'list-user-invitations-verification.ts; update it for the new vendor shape.',
     );
   }
   return organizationPlugin;
@@ -736,6 +769,41 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
  * than rendered as `Invalid Date`; the template declares the variable
  * required, so that send is refused rather than sent with a dangling sentence.
  */
+/**
+ * Mint the invitation's mailbox proof through the verification store of the
+ * request that sends the mail (better-auth calls `sendInvitationEmail` inside
+ * invite-member, a resend included).
+ *
+ * [#35107] A send with no endpoint context at all is a host calling the
+ * plugin's `sendInvitationEmail` from its own code; it mints through the
+ * auth manager's own context (`managerContext`), the same internal adapter and
+ * so the same verification store. That getter is read here, at send time,
+ * never while the plugin is built: the callback is reachable only from a built
+ * auth instance, so the read never waits on the build that is calling it.
+ * An endpoint context without a store, or a store that refuses the write: no
+ * proof, and the mail carries today's link.
+ */
+async function mintProofForSend(
+  invitation: { id: string; email: string; expiresAt: unknown },
+  managerContext: () => Promise<any>,
+): Promise<string | undefined> {
+  try {
+    // `try…` answers `undefined` outside an endpoint; the `get…` form throws
+    // there, which is what sent today's link (with a warn) before #35107.
+    const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+    const ctx: any = tryGetCurrentAuthEndpointContext();
+    const store = ctx ? ctx.context?.internalAdapter : (await managerContext())?.internalAdapter;
+    if (!store) return undefined;
+    return await mintInvitationProof(store, invitation);
+  } catch (err: any) {
+    console.warn(
+      `[AuthManager] invitation mail: no mailbox proof for invitation '${invitation.id}' (${err?.message ?? err}); ` +
+        'the mail carries the accept link without it',
+    );
+    return undefined;
+  }
+}
+
 function invitationExpiryArg(expiresAt: unknown): { expiresAt?: string } {
   if (!(expiresAt instanceof Date) && typeof expiresAt !== 'string' && typeof expiresAt !== 'number') return {};
   const instant = new Date(expiresAt);

@@ -16,8 +16,8 @@
  * one rule wherever it is drawn (the page, the split pane, the overlay drawer,
  * the maximized pane, a phone):
  *
- *  - 760 px and up: details | the right column (320 px) — the 动态 panel
- *    first, then the related panels;
+ *  - 760 px and up: details | the right column (320 px) — the related
+ *    panels, then the 动态 panel last (objectstack#34590);
  *  - 1120 px and up: the same, wide — the details field grid takes three
  *    columns, the right column 380 px, the 动态 panel five entries;
  *  - below 760 px: ONE column — the details sections, then the right
@@ -39,7 +39,8 @@
  * carries (`buildDefaultTabs`, objectui#2257): `details` is the details
  * column, `timeline` (the one stream, objectstack#27055) is the right
  * column's 动态 panel, and `related`, `approvals` and `attachments` are its
- * panels after it. The synthesized page has one region (`main`); a page with
+ * panels before it (objectstack#34590: 动态 is drawn last, and the strip
+ * lists it last too). The synthesized page has one region (`main`); a page with
  * any other region is not the synthesized page (objectstack#27055 removed the
  * opt-in rail and the `rightRail` slot that used to add an `aside`).
  *
@@ -138,8 +139,8 @@ export const RECORD_PAGE_TIMELINE_PANEL = 'timeline';
 
 /**
  * Where a synthesized tab's blocks land: the details column, the 动态 panel
- * (`timeline`, the first panel of the right column) or the related panels
- * after it.
+ * (`timeline`, the last panel of the right column, objectstack#34590) or the
+ * related panels before it.
  */
 export type RecordPageColumn = 'details' | 'timeline' | 'related';
 

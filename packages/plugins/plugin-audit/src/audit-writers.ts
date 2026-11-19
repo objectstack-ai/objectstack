@@ -17,7 +17,7 @@ import type { IDataEngine, WriteObservabilityOptions } from '@objectstack/spec/c
 // data path", and the engine's read path OMITS it. The ledger is a second exit
 // for the same value, so it honours the same declaration the same way — the
 // producer's declaration consumed, not a masking rule of this package's own.
-import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields } from '@objectstack/objectql/core';
+import { SECRET_MASK, collectInternalReadFields, collectMaskedReadFields, platformSystemApi } from '@objectstack/objectql/core';
 // [#24625] The mask of a mail-log row's body columns in a copy of it.
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 // The key-material columns no copy of a row carries (`key-material-copy.ts`).
@@ -94,6 +94,12 @@ import { SIGN_IN_STAMP_EVENT, isSignInStamp } from './sign-in-stamp.js';
 import { IMPERSONATED_BY_KEY, IMPERSONATED_BY_NAME_KEY, impersonatorOf } from './impersonation-attribution.js';
 import { SCIM_CONNECTION_ID_KEY, scimConnectionOf } from './scim-connection-attribution.js';
 import type { MentionGateInput } from './mention-recipient-gate.js';
+import {
+  MENTION_EMAIL_CHANNEL,
+  MENTION_TOPIC,
+  mentionEmailDedupKey,
+  type MentionBuiltinTemplate,
+} from './mention-email.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
 // withheld-row rule reads, shared with the before-insert hook and the backfill.
 import {
@@ -107,6 +113,7 @@ import {
 import {
   ACTIVITY_SUMMARY_MESSAGE_KEY,
   composeStoredSummary,
+  englishBooleanWord,
   withEnglishMessages,
   type ActivitySummaryFieldChange,
   type ActivitySummaryLocale,
@@ -130,7 +137,19 @@ export interface MessagingEmitSurface {
     source?: { object: string; id: string };
     actorId?: string;
     organizationId?: string;
+    /**
+     * The channels to fan out to; absent, messaging's `['inbox']` default.
+     * The mention e-mail names `['email']` (`mention-email.ts`).
+     */
+    channels?: string[];
   }): Promise<unknown>;
+  /**
+   * `MessagingService.registerBuiltinTemplates` — the code-declared template
+   * tier the mention e-mail's text is registered in (`mention-email.ts`).
+   * Optional: a messaging service without it renders the e-mail from the
+   * notification's title and body alone.
+   */
+  registerBuiltinTemplates?(templates: readonly MentionBuiltinTemplate[]): void;
 }
 
 /**
@@ -213,6 +232,14 @@ export interface AuditWriterOptions {
    * tell on its own who may see the comment a notification would preview.
    */
   admitMentionRecipients?(input: MentionGateInput): Promise<string[]>;
+  /**
+   * The absolute URL of a Console page — the auth service's `getConsoleUrl`
+   * (`${origin}${uiBasePath}${path}`), the one composer of Console page links
+   * in mail. The mention e-mail links the comment's record through it
+   * (`mention-email.ts`). Absent, or answering nothing, the link stays the
+   * app-relative `/{object}/{id}` the inbox notice carries.
+   */
+  getConsoleUrl?(path: string): string | undefined;
 }
 
 /**
@@ -237,8 +264,10 @@ export interface AuditWriterOptions {
  *    separately and only over the objects a deployment opts in: record-detail
  *    views, batched off the request path. This writer stays write-only.
  *
- * All writes go through `ctx.api.sudo()` so they bypass record-level
- * permissions and always succeed regardless of the calling user's RBAC.
+ * All writes go through the platform's own system api over `ctx.api`
+ * (`platformSystemApi`, objectql) so they bypass record-level permissions and
+ * always succeed regardless of the calling user's RBAC — and so they are the
+ * platform's rows, never an insert of the automation whose write they record.
  */
 
 /**
@@ -469,6 +498,96 @@ const NOISE_FIELDS = new Set<string>([
 export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
 /**
+ * [#33694] The `sys_audit_log.metadata` keys that ride beside `performed_by` /
+ * `on_behalf_of` when the in-product AI performed an operation for a person:
+ * the AI conversation it ran in, and the pending item the person's approval
+ * decided before it ran. Copied from `ExecutionContext.performedBy` (for a
+ * record write, through `HookContext.provenance`), never from the request.
+ */
+const PERFORMED_IN_CONVERSATION_KEY = 'conversation_id';
+const PERFORMED_UNDER_CONFIRMATION_KEY = 'confirmation_id';
+
+/**
+ * One server-stamped attribution mark, read only as a non-blank string
+ * (trimmed); anything else reads as absent.
+ */
+function attributionMark(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * The performer of one operation, in the shape of `ExecutionContext.performedBy`
+ * (`HookContext.provenance` carries the same four marks as
+ * `performedByClientId` / `performedByAgentId` / `performedByConversationId` /
+ * `performedByConfirmationId`). Each member is read only as a non-blank string.
+ */
+export interface AuditPerformerSource {
+  clientId?: unknown;
+  agentId?: unknown;
+  conversationId?: unknown;
+  confirmationId?: unknown;
+}
+
+/** The performer keys one `sys_audit_log.metadata` object carries. */
+export interface AuditPerformerMetadata {
+  performed_by: string;
+  on_behalf_of: string | null;
+  conversation_id?: string;
+  confirmation_id?: string;
+}
+
+/**
+ * [ADR-0090 D10 rule 4; #33694, owner ruling on objectstack-ai/cloud#3826
+ * 「3826 照建议（征询版）」] The ONE rule every `sys_audit_log` writer applies to
+ * the performer of an operation — the record-write mirror below and the
+ * action-invocation, data-export and dataset-query rows alike — so the four row
+ * kinds can never disagree about what `performed_by` means.
+ *
+ * Two server-side producers name a performer, each only its own key: the /mcp
+ * OAuth door names its client in `clientId`; the server-constructed in-product
+ * AI path, which runs AS the signed-in person, names the agent it ran in
+ * `agentId`, the conversation it ran in and, when the person confirmed the
+ * call, the confirmation. The ruling reuses the existing `performed_by` /
+ * `on_behalf_of` pair and adds no actor vocabulary, so the agent lands in
+ * `performed_by` exactly where an OAuth client does; if one envelope ever
+ * carried both, the OAuth client keeps the column it has always held and the
+ * agent is dropped with its marks.
+ *
+ * The conversation and the confirmation are the in-product path's own marks,
+ * so they are written ONLY when the in-product agent is the performer the row
+ * records — never beside an OAuth client id. That is what the spec promises a
+ * reader of `performed_by`, which holds either kind. Each is present only when
+ * the producer stamped it: no confirmation key ⇒ the operation needed none.
+ *
+ * `onBehalfOf` is the row's own `user_id` value, so the two sides of rule 4
+ * come from one source and never disagree. Answers `undefined` when no
+ * performer is named: the principal acted for itself and the row carries none
+ * of these keys.
+ */
+export function auditPerformerMetadata(
+  performer: AuditPerformerSource | undefined,
+  onBehalfOf: string | null | undefined,
+): AuditPerformerMetadata | undefined {
+  const performedByClientId = attributionMark(performer?.clientId);
+  const performedByAgentId = attributionMark(performer?.agentId);
+  const performedBy = performedByClientId ?? performedByAgentId;
+  if (performedBy === undefined) return undefined;
+  const agentIsRecordedPerformer: boolean = !performedByClientId && performedByAgentId !== undefined;
+  const performedInConversationId = agentIsRecordedPerformer
+    ? attributionMark(performer?.conversationId)
+    : undefined;
+  const performedUnderConfirmationId = agentIsRecordedPerformer
+    ? attributionMark(performer?.confirmationId)
+    : undefined;
+  return {
+    performed_by: performedBy,
+    on_behalf_of: onBehalfOf ?? null,
+    ...(performedInConversationId ? { [PERFORMED_IN_CONVERSATION_KEY]: performedInConversationId } : {}),
+    ...(performedUnderConfirmationId ? { [PERFORMED_UNDER_CONFIRMATION_KEY]: performedUnderConfirmationId } : {}),
+  };
+}
+
+/**
  * Action name produced from a HookContext.event string.
  *
  * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
@@ -503,14 +622,30 @@ function activityTypeFor(action: 'create' | 'update' | 'delete'): 'created' | 'u
  * [#21081] Also answers WHICH field the label was read from (`null` for the id
  * floor), so the activity row can declare it: the label is a field value, and
  * the read side serves it only to a reader served that field.
+ *
+ * A title field that is a REFERENCE (an app's join object titled by its
+ * person: `nameField: 'person'`, a lookup to `sys_user`) stores a foreign key,
+ * which is no title. `titlesFor` is the pre-resolved id → title map of that
+ * field's target ({@link planLabelLookupRead} + `resolveLookupTitles`), so the
+ * label is the target record's own title, the one the record header shows. An
+ * id with no entry keeps the stored value it rendered before, so this can only
+ * replace an id with a title, never a title with an id; and the label is still
+ * a value of the reference field, which is the field it declares.
  */
 function recordLabel(
   record: any,
   titleField: string | undefined,
   id: string,
+  titlesFor?: Map<string, string>,
 ): { text: string; field: string | null } {
   if (!titleField || !record || typeof record !== 'object') return { text: id, field: null };
   const value = record[titleField];
+  if (titlesFor) {
+    const refs = referenceIdsOf(value);
+    if (refs.some((ref) => titlesFor.has(ref))) {
+      return { text: refs.map((ref) => titlesFor.get(ref) ?? ref).join(', '), field: titleField };
+    }
+  }
   // A structured value has no text face; it floors to the id rather than
   // rendering as a serialised object.
   if (value === null || value === undefined || typeof value === 'object') return { text: id, field: null };
@@ -700,7 +835,9 @@ type WarnSink = { warn?: (message: string) => void };
  * a tracked reference points at? Asked of the spec's one exposure decision
  * (ADR-0049) for `get`, the read `GET /data/{target}/{id}` performs and the
  * operation the data door's `$expand` and the dataset door's labels ask of the
- * same target. It takes no caller: the title is read under `api.sudo()`.
+ * same target. It takes no caller: it judges the target's declaration, and
+ * the read that follows is in the WRITER's scope (see `resolveLookupTitles`),
+ * for a summary's titles and a record label alike.
  *
  * A refused target is not read, so the summary names its records by their
  * stored ids, the answer an unresolvable reference already gets. A declaration
@@ -761,7 +898,8 @@ function referenceIdsOf(value: any): string[] {
  * (`renderMilestoneSummary`), each from its own read plan.
  *
  * An id with no entry in the map — record deleted, object unregistered, title
- * field unresolvable — falls back to the raw id, which is what this function
+ * field unresolvable, or a record or title column the writer may not read —
+ * falls back to the raw id, which is what this function
  * returned before the branch existed. The change is therefore restore-invariant:
  * it can only replace an id with a title, never a title with an id.
  *
@@ -789,6 +927,11 @@ function displayFieldValue(
   optionLabelFor?: (optionValue: string) => string | undefined,
 ): string {
   const shown = summaryValueOf(field, value, titlesFor);
+  // A milestone's sentence is the author's, in the author's language, and is
+  // never re-composed per reader (#7290): an English yes/no word interpolated
+  // into it would be the very mixed-language sentence the field-change wording
+  // removes, so a boolean token keeps rendering its stored value here.
+  if (shown.boolean !== undefined) return String(value);
   return shown.option !== undefined ? (optionLabelFor?.(shown.option) ?? shown.text) : shown.text;
 }
 
@@ -814,8 +957,19 @@ function summaryValueOf(field: any, value: any, titlesFor?: Map<string, string>)
       }
     }
   }
+  // A boolean the field declares no words for is a yes/no, never the literal
+  // `true` / `false`: the value rides in the code itself, and the composer
+  // words it in the locale it composes in (`activity-summary-message.ts`). The
+  // writer's text is the English catalogue's word, so a locale with none still
+  // reads a word.
+  if (typeof value === 'boolean' && typeof field?.type === 'string' && BOOLEAN_FIELD_TYPES.has(field.type)) {
+    return { text: englishBooleanWord(value), boolean: value };
+  }
   return { text: String(value) };
 }
+
+/** The field types whose value is a yes/no (`FieldType`: `boolean`, and its `toggle` face). */
+const BOOLEAN_FIELD_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
 
 /**
  * [#7230] Every tracked-change field of `fields` that is a reference, grouped
@@ -849,6 +1003,27 @@ function planTrackedLookupReads(
     }
   }
   return byObject;
+}
+
+/**
+ * The read plan for a record's own LABEL when its title field is a reference:
+ * the ids the label names, keyed by the field's target object — the plan shape
+ * `resolveLookupTitles` reads. Empty (so no read at all) when the title field
+ * is not a reference, its target is unreadable from the declaration, or the
+ * record holds no id there: an object titled by a text field pays nothing.
+ */
+function planLabelLookupRead(
+  fields: Record<string, any> | undefined | null,
+  titleField: string | undefined,
+  record: Record<string, any> | null,
+): Map<string, Set<string>> {
+  const plan = new Map<string, Set<string>>();
+  const field = titleField ? fields?.[titleField] : undefined;
+  if (!field || !record || typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) return plan;
+  const target = referenceTargetForSummary(field);
+  const ids = referenceIdsOf(record[titleField!]);
+  if (target && ids.length > 0) plan.set(target, new Set(ids));
+  return plan;
 }
 
 /**
@@ -1331,6 +1506,16 @@ export function installAuditWriters(
    * writer advances it before the activity row, so after a throw it still names
    * the table whose insert threw. ⛔ Not caught here — the failure must keep
    * reaching the caller's `catch`, which is the site the gate holds at `error`.
+   *
+   * [#35052] Both rows are written through the platform's own system api
+   * (`platformSystemApi`, objectql), never `api.sudo()`. `sudo()` keeps the
+   * write's provenance — the app-automation elevation mark of an action body
+   * or a system hook, a flow run's `flowRunId` — so under such a write the
+   * platform's own ledger rows were judged as the automation's insert into an
+   * append-only object (plugin-security's deprecation today, its refusal once
+   * that arm ships, which would lose the audit trail of every such write). An
+   * api the engine did not build has no context to derive from and keeps its
+   * own `sudo()`.
    */
   const persistAuditTrailRow = async (
     api: any,
@@ -1338,7 +1523,7 @@ export function installAuditWriters(
     activityRow: Record<string, any> | undefined,
     progress: AuditTrailWriteProgress,
   ): Promise<void> => {
-    const sys = api.sudo();
+    const sys = platformSystemApi(api) ?? api.sudo();
     await sys.object('sys_audit_log').create(auditRow);
     if (activityRow) {
       progress.writing = 'sys_activity';
@@ -1727,13 +1912,28 @@ export function installAuditWriters(
    * raw id exactly as it did before this branch existed. [#22738] So does a
    * target whose declared exposure does not serve `get`
    * ({@link servesSummaryTitleTarget}): it is not read at all.
+   *
+   * ## Whose read it is
+   *
+   * The WRITER's: an activity row names a referenced record by a title the
+   * writer may read, else by its id. Every caller — the record's own label
+   * ({@link planLabelLookupRead}, an object whose `nameField` is a reference)
+   * and both summary branches — hands `writerApi` the hook's own `api`, the
+   * scope the write itself ran in, ⛔ never an elevated one. A title is the
+   * text the record header shows a reader who may read the target, so a
+   * writer the security layer refuses the target (its object, or the row by
+   * its row scope), or serves it without its title column, writes no title it
+   * could not have read itself: a refusal throws into the catch below, a row
+   * left out of the result is an id with no title, and a stripped column reads
+   * as no title. Each of those ids keeps its stored value, per id, so one read
+   * can title the ids the writer may read and leave the rest as ids. A system
+   * write reads as the system, which is the scope it wrote in.
    */
   const resolveLookupTitles = async (
-    api: any,
+    writerApi: any,
     plan: Map<string, Set<string>>,
   ): Promise<Map<string, Map<string, string>> | undefined> => {
     if (plan.size === 0) return undefined;
-    const sys = api.sudo();
     const out = new Map<string, Map<string, string>>();
     for (const [objectName, idSet] of plan) {
       if (!servesSummaryTitleTarget(objectName, (name) => (engine as any).getSchema?.(name), (engine as any).logger)) continue;
@@ -1741,7 +1941,7 @@ export function installAuditWriters(
       if (!titleField) continue;
       const ids = Array.from(idSet);
       try {
-        const rows: any[] = await sys.object(objectName).find({
+        const rows: any[] = await writerApi.object(objectName).find({
           where: { id: { $in: ids } },
           fields: ['id', titleField],
           limit: ids.length,
@@ -2114,11 +2314,25 @@ export function installAuditWriters(
     // wrote in the Console, and 「这是 AI 代替人类执行」 was not recoverable
     // from the ledger at all. Stamped from `provenance`, never from `session`,
     // because no caller-gating hook may read the client as the caller.
-    const performedByClientId: string | undefined =
-      typeof (ctx as any).provenance?.performedByClientId === 'string' &&
-      (ctx as any).provenance.performedByClientId.trim()
-        ? (ctx as any).provenance.performedByClientId.trim()
-        : undefined;
+    //
+    // [#33694, owner ruling on objectstack-ai/cloud#3826 「3826 照建议（征询版）」]
+    // The SAME channel from its second producer: the server-constructed
+    // in-product AI path, which writes AS the signed-in person in `userId` and
+    // names the agent it ran, the conversation it ran in and, when the person
+    // confirmed the call, the confirmation. `auditPerformerMetadata` holds the
+    // one rule (which performer the row records, and when the conversation and
+    // confirmation ride beside it) that the action-invocation, data-export and
+    // dataset-query rows apply too.
+    const provenance = (ctx as any).provenance;
+    const performer: AuditPerformerMetadata | undefined = auditPerformerMetadata(
+      {
+        clientId: provenance?.performedByClientId,
+        agentId: provenance?.performedByAgentId,
+        conversationId: provenance?.performedByConversationId,
+        confirmationId: provenance?.performedByConfirmationId,
+      },
+      userId,
+    );
     // The ADMINISTRATOR who made this write from an impersonation session. A
     // FOURTH channel, for the same reason as the agent's: `session.userId` is
     // the impersonated user — the session is theirs, the write authorizes as
@@ -2267,12 +2481,18 @@ export function installAuditWriters(
     // SCIM connection performed, beside the `svc:scim:CONNECTION_ID` actor it
     // is read from and a `user_id` that stays null. No key ⇒ no SCIM
     // connection acted.
-    if (performedByClientId || impersonatedBy || signInStamp || scimConnectionId) {
+    //
+    // `conversation_id` / `confirmation_id` (#33694) ride ONLY beside a
+    // `performed_by` naming the in-product agent: the conversation it
+    // performed the write in, and the pending item the person's approval
+    // decided for it. Each is present only when the producer stamped it — no
+    // confirmation key ⇒ the write needed none.
+    if (performer || impersonatedBy || signInStamp || scimConnectionId) {
       auditRow.metadata = safeStringify({
         // A sign-in stamp names its event the way a `config_change` row does
         // (`metadata.event`); every other CRUD row still carries no event.
         ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
-        ...(performedByClientId ? { performed_by: performedByClientId, on_behalf_of: userId ?? null } : {}),
+        ...(performer ?? {}),
         ...(impersonatedBy ? { [IMPERSONATED_BY_KEY]: impersonatedBy } : {}),
         ...(scimConnectionId ? { [SCIM_CONNECTION_ID_KEY]: scimConnectionId } : {}),
       });
@@ -2285,11 +2505,25 @@ export function installAuditWriters(
     // activity summary through the label.
     // [#21878] The title field is ADR-0079's answer for the object — the field
     // every renderer titles this record by — not a guess from a key list.
-    const { text: label, field: labelField } = recordLabel(
+    // A title field that is a reference is followed to the target record's own
+    // title, read as the WRITER (see `resolveLookupTitles`): one `$in` read of
+    // the target per write, and none at all for any other title field, nor for
+    // an object whose writes mirror no activity row (the label lives only there).
+    const labelView =
       ledgerView(ctx.object, after, { dropComputed: false, storedType: storedBodyType }) ??
-        ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType }),
-      titleFieldOf(ctx.object),
+      ledgerView(ctx.object, before, { dropComputed: false, storedType: storedBodyType });
+    const labelTitleField = titleFieldOf(ctx.object);
+    const labelTitles = await resolveLookupTitles(
+      api,
+      getObjectDef(ctx.object)?.enable?.activities === false
+        ? new Map()
+        : planLabelLookupRead(getFieldDefs(ctx.object), labelTitleField, labelView),
+    );
+    const { text: label, field: labelField } = recordLabel(
+      labelView,
+      labelTitleField,
       recordId ?? '',
+      labelTitles?.values().next().value,
     );
     // [#21081] Which parent fields each text column carries a value of — the
     // declaration the read side redacts by (`activity-field-redaction.ts`). The
@@ -2345,7 +2579,9 @@ export function installAuditWriters(
         //
         // The plan reads the same MASKED after-view the interpolation renders
         // from, so a credential field can no more become a read key here than
-        // it can reach the summary text.
+        // it can reach the summary text. The titles are read as the WRITER
+        // (see `resolveLookupTitles`): a token names a title the writer may
+        // read, else the stored id.
         const lookupTitles = await resolveLookupTitles(
           api,
           planMilestoneTokenReads(milestone.template, summaryFields, afterView),
@@ -2361,7 +2597,9 @@ export function installAuditWriters(
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
         // renders, and only reached once a milestone has declined — a write
-        // that changes no tracked reference field issues no read at all.
+        // that changes no tracked reference field issues no read at all. The
+        // titles are read as the WRITER (see `resolveLookupTitles`): each side
+        // of a change names a title the writer may read, else the stored id.
         const lookupTitles = await resolveLookupTitles(
           api,
           planTrackedLookupReads(summaryFields, oldValue, newValue),
@@ -2699,6 +2937,19 @@ export function installAuditWriters(
       actorName = api?.sudo ? (await resolveActorSnapshot(api, editorId)).name : null;
     }
     const bodyPreview = String(row.body ?? '').slice(0, 240);
+    // The mention e-mail's link (`mention-email.ts`): the record the comment
+    // is on — the inbox notice's own `/{object}/{id}` link — as a Console page
+    // under the deployment's address. No record, no e-mail: a mail with no
+    // way back to the thread is not worth the daily mail budget.
+    const recordPath = source_object && source_id ? `/${source_object}/${source_id}` : null;
+    let mentionUrl: string | null = null;
+    if (recordPath) {
+      try {
+        mentionUrl = opts.getConsoleUrl?.(recordPath) || recordPath;
+      } catch {
+        mentionUrl = recordPath;
+      }
+    }
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
 
@@ -2770,6 +3021,33 @@ export function installAuditWriters(
             actorName,
           },
         });
+        // The e-mail (`mention-email.ts`): a second emit through the same
+        // ingress, `email` only, deduplicated per person and 10-minute
+        // window — the first mention of a person in a window sends it, every
+        // later one there is inbox-only. The person's own preference rows
+        // filter it like any channel.
+        if (mentionUrl) {
+          try {
+            await messaging.emit({
+              topic: MENTION_TOPIC,
+              audience: [uid],
+              severity: 'info',
+              source: { object: source_object, id: source_id },
+              actorId: actorId ?? undefined,
+              organizationId: tenantId ?? undefined,
+              channels: [MENTION_EMAIL_CHANNEL],
+              dedupKey: mentionEmailDedupKey(tenantId, uid, Date.now()),
+              payload: {
+                title,
+                body: bodyPreview,
+                actorName,
+                mentionUrl,
+              },
+            });
+          } catch (err) {
+            try { (engine as any).logger?.warn?.('Mention e-mail emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
+          }
+        }
       } catch (err) {
         try { (engine as any).logger?.warn?.('Mention notification emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
       }

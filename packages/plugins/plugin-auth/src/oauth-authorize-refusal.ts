@@ -60,6 +60,29 @@
  *    must also accept the URI, as it has the last word at the provider.
  *
  * Anything else, including any failure to read the client, answers the page.
+ *
+ * ## The host's reason
+ *
+ * The gate may answer a refusal object instead of `false`
+ * ({@link OidcAuthorizeGateRefusal}): a reason code from the host's own closed
+ * set and the sentence the person should read. A boolean is answered exactly
+ * as before, byte for byte, on all three doors. A refusal object adds:
+ *
+ *  - the envelope's `reason` beside the unchanged `code`, and the host's
+ *    sentence as its `message`;
+ *  - on the redirect, the host's sentence as `error_description` and the
+ *    reason as {@link OAUTH_REFUSAL_REASON_PARAM}; `error` stays
+ *    `access_denied`;
+ *  - on the page, the host's sentence, escaped, in place of the fixed one.
+ *
+ * Nothing the host answers is trusted as markup or as a URL fragment. A reason
+ * outside {@link REFUSAL_REASON_PATTERN} is dropped (the refusal stands, with
+ * no reason). A sentence that is not plain text (a control character, an
+ * angle bracket) or is longer than {@link REFUSAL_MESSAGE_MAX_LENGTH} is
+ * replaced by the fixed sentence; on the redirect, a sentence outside the
+ * character set RFC 6749 §4.1.2.1 allows `error_description` (printable ASCII
+ * without `"` and `\`) is replaced by the fixed sentence too, so the client
+ * always receives a conforming value.
  */
 
 import { isPageNavigation } from './one-time-token-handoff.js';
@@ -76,12 +99,86 @@ export const OAUTH_ACCESS_DENIED_ERROR = 'access_denied';
 /** The provider's RP-initiated logout, relative to the auth base URL: the page's "switch account". */
 export const OAUTH_END_SESSION_PATH = '/oauth2/end-session';
 
+/**
+ * The redirect parameter that carries the host's reason beside
+ * `error=access_denied`. RFC 6749 §8.2 asks an unregistered extension
+ * parameter to carry a vendor prefix, so it cannot collide with a registered
+ * name or another vendor's (`error_reason` is one some providers already send
+ * with their own values).
+ */
+export const OAUTH_REFUSAL_REASON_PARAM = 'objectstack_error_reason';
+
+/** The shape a host's reason code must have to travel: lower-case letters and `_`, at most 40. */
+export const REFUSAL_REASON_PATTERN = /^[a-z_]{1,40}$/;
+
+/** The longest host sentence that is shown or sent; a longer one is replaced by the fixed sentence. */
+export const REFUSAL_MESSAGE_MAX_LENGTH = 300;
+
+/**
+ * A refusal with the host's reason: what `oidcAuthorizeGate` may answer in
+ * place of `false`. `reason` is a code from the host's own closed set (the
+ * cloud control plane answers `not_member`, `invitation_pending`,
+ * `unavailable`); `message` is the sentence the refused person reads, plain
+ * text.
+ */
+export interface OidcAuthorizeGateRefusal {
+  readonly allowed: false;
+  readonly reason: string;
+  readonly message: string;
+}
+
+/** What the gate may answer: `true` admits, `false` or a refusal object refuses. */
+export type OidcAuthorizeGateAnswer = boolean | OidcAuthorizeGateRefusal;
+
+/** The host's reason and sentence, as validated here; both absent for a boolean refusal. */
+export interface RefusalDetail {
+  /** The reason code, when it has {@link REFUSAL_REASON_PATTERN}'s shape. */
+  readonly reason?: string;
+  /** The host's sentence, when it is plain text within {@link REFUSAL_MESSAGE_MAX_LENGTH}. */
+  readonly message?: string;
+}
+
+/**
+ * Whether a gate answer refuses. A boolean (and any other value) keeps the
+ * truthiness the gate has always been read with; an object refuses only when
+ * it says `allowed: false`.
+ */
+export function gateAnswerRefuses(answer: unknown): boolean {
+  if (answer !== null && typeof answer === 'object') return (answer as { allowed?: unknown }).allowed === false;
+  return !answer;
+}
+
+/** The reason and sentence a refusing gate answer carries, validated; empty for a boolean. */
+export function refusalDetailOf(answer: unknown): RefusalDetail {
+  if (answer === null || typeof answer !== 'object') return {};
+  const { reason, message } = answer as { reason?: unknown; message?: unknown };
+  return {
+    ...(typeof reason === 'string' && REFUSAL_REASON_PATTERN.test(reason) ? { reason } : {}),
+    ...(isPlainSentence(message) ? { message: message.trim() } : {}),
+  };
+}
+
+/** Plain text, one line, no angle brackets, within the length bound. */
+function isPlainSentence(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  // eslint-disable-next-line no-control-regex
+  return text.length > 0 && text.length <= REFUSAL_MESSAGE_MAX_LENGTH && !/[\u0000-\u001f\u007f<>]/.test(text);
+}
+
+/** RFC 6749 §4.1.2.1: `error_description` is limited to %x20-21 / %x23-5B / %x5D-7E. */
+function isOAuthErrorDescription(value: string): boolean {
+  return /^[\x20\x21\x23-\x5b\x5d-\x7e]*$/.test(value);
+}
+
 /** What the gate hands this module beside the request. */
 export interface RefusedAuthorizationContext {
   /** The refused subject. */
   readonly userId: string;
   /** The absolute URL of the console's home page: the page's "back to console". */
   readonly consoleUrl: string;
+  /** The host's reason and sentence ({@link refusalDetailOf}); absent for a boolean refusal. */
+  readonly detail?: RefusalDetail;
 }
 
 const NO_STORE_HEADERS = {
@@ -97,11 +194,13 @@ const NO_STORE_HEADERS = {
  */
 export async function answerRefusedAuthorization(ctx: any, refused: RefusedAuthorizationContext): Promise<Response> {
   const headers: Headers | undefined = ctx?.request?.headers ?? ctx?.headers;
+  const { reason, message } = refused.detail ?? {};
   if (!(headers instanceof Headers) || !isPageNavigation(headers)) {
     const { APIError } = await import('better-auth/api');
     throw new APIError('FORBIDDEN', {
-      message: ENV_ACCESS_DENIED_MESSAGE,
+      message: message ?? ENV_ACCESS_DENIED_MESSAGE,
       code: ENV_ACCESS_DENIED_CODE,
+      ...(reason ? { reason } : {}),
     });
   }
 
@@ -109,7 +208,11 @@ export async function answerRefusedAuthorization(ctx: any, refused: RefusedAutho
   if (back) {
     const location = new URL(back.redirectUri);
     location.searchParams.append('error', OAUTH_ACCESS_DENIED_ERROR);
-    location.searchParams.append('error_description', ENV_ACCESS_DENIED_MESSAGE);
+    location.searchParams.append(
+      'error_description',
+      message && isOAuthErrorDescription(message) ? message : ENV_ACCESS_DENIED_MESSAGE,
+    );
+    if (reason) location.searchParams.append(OAUTH_REFUSAL_REASON_PARAM, reason);
     if (back.state !== undefined) location.searchParams.append('state', back.state);
     location.searchParams.append('iss', back.issuer);
     return new Response(null, {
@@ -119,6 +222,7 @@ export async function answerRefusedAuthorization(ctx: any, refused: RefusedAutho
   }
 
   return refusalPage({
+    message,
     email: await signedInEmail(ctx, refused.userId),
     switchAccountUrl: `${String(ctx?.context?.baseURL ?? '').replace(/\/$/, '')}${OAUTH_END_SESSION_PATH}`,
     consoleUrl: refused.consoleUrl,
@@ -180,10 +284,16 @@ function escapeHtml(value: string): string {
 }
 
 /** The page a browser sees when no registered `redirect_uri` can carry the refusal. */
-function refusalPage(page: { email?: string; switchAccountUrl: string; consoleUrl: string }): Response {
-  const who = page.email
-    ? `You are signed in as <strong>${escapeHtml(page.email)}</strong>, and this account does not have access to this environment.`
-    : 'The account you are signed in with does not have access to this environment.';
+function refusalPage(page: { message?: string; email?: string; switchAccountUrl: string; consoleUrl: string }): Response {
+  const account = page.email
+    ? `You are signed in as <strong>${escapeHtml(page.email)}</strong>`
+    : undefined;
+  // The host's sentence says why; the account line still says who is refused.
+  const who = page.message
+    ? `${account ? `${account}. ` : ''}${escapeHtml(page.message)}`
+    : account
+      ? `${account}, and this account does not have access to this environment.`
+      : 'The account you are signed in with does not have access to this environment.';
   const html = [
     '<!doctype html>',
     '<html lang="en"><head><meta charset="utf-8">',

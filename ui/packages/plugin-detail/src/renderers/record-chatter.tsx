@@ -109,8 +109,20 @@ import { useRecordContext, useDiscussionContext } from '@object-ui/react';
 import type { FeedItem, RecordActivityComponentProps, RecordChatterComponentProps } from '@object-ui/types';
 import { RecordChatterPanel } from '../RecordChatterPanel';
 import type { FeedFilterMode } from '../RecordActivityTimeline';
-import { applyFeedConfig, describeRefusedFeedLimit, normalizeFilterMode, normalizeLimit } from './recordActivityFeed';
+import {
+  applyFeedConfig,
+  describeRefusedFeedLimit,
+  feedTypesAdmitComments,
+  normalizeFilterMode,
+  normalizeLimit,
+  warnWithheldCommentComposer,
+} from './recordActivityFeed';
 import { useRecordAriaProps } from './recordComponentAria';
+
+/** Dev mode, read per call — the guard `record-activity.tsx` puts on the same diagnostic. */
+const isDevBuild = (): boolean =>
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.NODE_ENV !== 'production';
 
 const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
@@ -258,6 +270,22 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
     setExtraPages((n) => n + 1);
   }, [setExtraPages]);
 
+  // A `feed.types` that leaves out `comment` filters every comment out of this
+  // panel, the ones posted here included, so the panel offers no composer and
+  // no Comments-only filter — `record:activity`'s rule, through the same
+  // predicate and the same block name `applyFeedConfig` filters by
+  // (objectstack#34525). Where the composer would have been offered, the
+  // author is told why once, in development.
+  const commentsShown = feedTypesAdmitComments(feed?.types, blockName);
+  const composerWithheld = !commentsShown && feed?.showCommentInput !== false;
+  const nodeId: string | undefined = typeof schema.id === 'string' ? schema.id : undefined;
+  const typesKey = JSON.stringify(feed?.types ?? null);
+  React.useEffect(() => {
+    if (composerWithheld && isDevBuild()) {
+      warnWithheldCommentComposer(`${blockName} feed`, nodeId, JSON.parse(typesKey));
+    }
+  }, [composerWithheld, blockName, nodeId, typesKey]);
+
   // `enableMentions` — withholding the suggestion list is what turns the
   // composer's @-autocomplete off, which is what the registration publishes for
   // this key ("Off withholds the suggestions"). `!== false` rather than a
@@ -288,6 +316,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         filterMode={filterMode}
         onFilterChange={setFilterMode}
         onAddComment={discussion?.onAddComment as any}
+        commentsShown={commentsShown}
         onAddReply={discussion?.onAddReply as any}
         onToggleReaction={discussion?.onToggleReaction as any}
         // objectui#12268: same two handlers `record:activity` forwards, off the

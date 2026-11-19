@@ -156,7 +156,8 @@
  * holds (`password-reset-ends-sessions.ts`), and a session it ends leaves the
  * same kind of trail an interactive revoke leaves, so the reset doors are in
  * {@link INTERACTIVE_REVOKE_REASON} with their own value, `password_reset`.
- * The seam is the same one: measured against the installed better-auth
+ * The one-step invitation acceptance, which replaces the password of an
+ * unverified account the same way, records the same value. The seam is the same one: measured against the installed better-auth
  * `1.7.12`, every reset door runs `resetCredentialPassword`
  * (`dist/utils/password.mjs`), which ends the sessions with
  * `internalAdapter.deleteUserSessions`; with no `secondaryStorage` that is
@@ -239,6 +240,12 @@ export const INTERACTIVE_REVOKE_REASON: Readonly<Record<string, string>> = {
   // that plugin today; the entry is keyed on the plugin's declared path, so
   // the door records the same trail the day the platform mounts it.
   '/email-otp/reset-password': 'password_reset',
+  // The one-step invitation acceptance (`invitation-mailbox-proof.ts`,
+  // `ACCEPT_INVITATION_ONE_STEP_PATH`), which replaces the password of an
+  // unverified account and ends its sessions, as a reset does. Spelled as the
+  // literal so this ledger imports no door module; the card's test pins the
+  // two equal.
+  '/organization/accept-invitation-one-step': 'password_reset',
 };
 
 /**

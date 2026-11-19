@@ -9,8 +9,9 @@
 /**
  * objectui#10423: the mobile card's amount reads the FIELD's currency, exactly
  * as the desktop cell of the same row does. Since objectstack#28484 the card
- * draws the amount on its subtitle line through that same desktop cell, so the
- * two faces are one face.
+ * draws the amount through that same desktop cell, so the two faces are one
+ * face; since objectstack#34615 it sits on the card's own amount line
+ * (`grid-card-amount`) rather than inside the subtitle.
  *
  * objectui#10354 made the desktop cell and the summary footer carry the
  * field's `currencyConfig`. The mobile card's amount line did not follow: it
@@ -64,7 +65,7 @@ const OBJECT = 'os_10423_deal';
 const FIELDS: Record<string, Record<string, unknown>> = {
   id: { type: 'text' },
   name: { type: 'text', label: 'Deal Name' },
-  // The first subtitle value after the title.
+  // The card's amount (its first `currency` column).
   amount: {
     type: 'currency',
     label: 'Yen Amount',
@@ -114,13 +115,13 @@ async function renderGrid(schemaExtra: Record<string, unknown>) {
   return utils;
 }
 
-/** The card's amount: the first value of its subtitle line. */
+/** The card's amount: its own amount slot (objectstack#34615). */
 async function cardAmountLine(schemaExtra: Record<string, unknown>): Promise<string> {
   setWidth(390);
   const { container } = await renderGrid(schemaExtra);
   expect(container.querySelector('table'), 'expected the mobile card layout, not the table').toBeNull();
-  const line = container.querySelector('[data-testid="grid-card-subtitle-part"]');
-  expect(line, 'the card rendered no subtitle value').not.toBeNull();
+  const line = container.querySelector('[data-testid="grid-card-amount"]');
+  expect(line, 'the card rendered no amount').not.toBeNull();
   return (line!.textContent ?? '').trim();
 }
 

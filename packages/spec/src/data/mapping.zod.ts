@@ -409,7 +409,7 @@ export const MappingSchema = lazySchema(() => strictObject({
 }, {
   /** Identity */
   name: SnakeCaseIdentifierSchema.describe('Mapping unique name (lowercase snake_case)'),
-  label: z.string().optional(),
+  label: z.string().optional().describe('Display label, shown where the mapping is offered by name (the import wizard); translated per locale at `mappings.<name>.label` in the translation bundle'),
 
   /** Scope */
   sourceFormat: z.enum(['csv', 'json', 'xml', 'sql']).default('csv'),
@@ -479,7 +479,11 @@ export const MappingSchema = lazySchema(() => strictObject({
     ),
     input: z.record(z.string(), z.unknown()).optional().describe(
       'Fixed input passed to the action on every pull (e.g. `{ method: \'GET\', path: \'/contacts\' }` '
-      + 'for `rest`)',
+      + 'for `rest`). Judged against the action\'s `inputSchema` before the call, as a `connector_action` '
+      + 'node\'s input is: a key the action does not declare is refused, never sent — the watermark '
+      + 'parameter the pull adds to `query` included, so an `openapi` operation that declares any parameter '
+      + 'or a body must declare it in its OpenAPI document. An operation that declares neither has no '
+      + '`inputSchema` and is not judged, until the day it gains its first parameter or a body',
     ),
     recordsPath: z.string().min(1).optional().describe(
       'Dot path, within the action\'s result, to the array of records (e.g. `body.results`); '

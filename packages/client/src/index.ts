@@ -3316,7 +3316,9 @@ export class ObjectStackClient {
      * conditional receipts (`seedApplied` / `materializeApplied` /
      * `unhiddenApps` / `unhideError` / `rebindError`) each report their own
      * outcome: a 200 does not mean the data plane or the visibility flip
-     * caught up. `probes` is deliberately opaque in the contract (#9406).
+     * caught up. `probes` is the modeled post-publish probe report: each of
+     * its `issues[]` has `message` / `fix` for an agent and `userMessage`,
+     * the sentence to show a person, already in the request's language.
      *
      * `opts.backfill` (#24253) names fields this publish adds whose literal
      * `defaultValue` is written into the object's existing rows, as the
@@ -5398,7 +5400,8 @@ export class ObjectStackClient {
      * Discriminate on `authenticated`: an anonymous caller RESOLVES
      * `{ authenticated: false }` (the route answers it at 200, so a client can
      * tell "signed out" from a fault), unlike {@link me}, which rejects. The
-     * authenticated answer carries `hasAnyQueue` among the rest;
+     * authenticated answer carries `hasAnyQueue` and `objectsUsingQueues`
+     * among the rest;
      * `systemPermissions` / `tabPermissions` are absent only on a server
      * without SecurityPlugin, where absent means unknown and an empty array
      * means none.
@@ -7714,6 +7717,12 @@ export class ObjectStackClient {
      * Reads and decisions are separately permissioned server-side (`ai:read`
      * vs `ai:approve`), so a caller that can list the queue may still be
      * refused on approve — handle the 403, do not assume one implies the other.
+     *
+     * Deciding (approve or reject) is the person's own act: only the person
+     * the call ran as decides their item, and only on their signed-in session
+     * to the app. Another user's `ai:approve` does not decide it; a client on
+     * an API key or token (even the person's own) can list and get, never
+     * decide; an AI identity is refused too.
      */
     pendingActions: {
       /** Queued actions, newest first. */
@@ -7743,6 +7752,9 @@ export class ObjectStackClient {
        * back `{ status: 'failed', error }` with HTTP 200, because the approval
        * succeeded even though the execution did not. Treating 2xx as "the write
        * happened" reports a failed write as a success.
+       *
+       * Only the person the call ran as approves, on their own signed-in
+       * session; an API key, a token or an AI identity is refused.
        */
       approve: async (id: string): Promise<ApproveAiPendingActionResponse> => {
         const route = this.getRoute('ai');
@@ -7753,7 +7765,11 @@ export class ObjectStackClient {
         return this.unwrapResponse<ApproveAiPendingActionResponse>(res);
       },
 
-      /** Reject with an optional reason. Executes nothing. */
+      /**
+       * Reject with an optional reason. Executes nothing. Only the person the
+       * call ran as rejects, on their own signed-in session; an API key, a
+       * token or an AI identity is refused.
+       */
       reject: async (id: string, reason?: string): Promise<RejectAiPendingActionResponse> => {
         const route = this.getRoute('ai');
         const res = await this.fetch(`${this.baseUrl}${route}/pending-actions/${encodeURIComponent(id)}/reject`, {

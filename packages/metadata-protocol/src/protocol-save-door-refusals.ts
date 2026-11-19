@@ -357,9 +357,10 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
  * set of a name ACTIVE under an owner other than a holder it meets is refused
  * here, with nothing written — a package never writes into a record another
  * owns (ADR-0086 D4). The environment meets every holder, as before. A set
- * another package STORES meets every writer too: the registry keeps one entry
- * per stored set of a name, so two stored sets of one name are not yet kept
- * apart there (#31698), and a second one stays refused.
+ * another package STORES is judged by the same predicate as a shipped one: the
+ * registry keeps each package's stored set of a name in that package's own
+ * slot (the hydrator's package overlay slot, ADR-0150 D2/D4), so a second
+ * namespace's stored set lands beside the first, each served at its package.
  *
  * ## The owner
  *
@@ -376,8 +377,8 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
  *
  *  - **The stored active rows** of the environment (ADR-0131 D6), by
  *    `package_id`. A set published through the metadata door is stored, and
- *    the registry holds it in the bare slot with no package (hydration and the
- *    write-through register a stored row without one), so only the row says
+ *    the registry holds it in its package's overlay slot, which the
+ *    registry's package-held reading does not count, so only the row says
  *    which package it belongs to — the half the registry's reading cannot see,
  *    and why this door's reading is wider than the cold boot's.
  *  - **The registry's package half** ({@link registryPackageHoldersOf}): a set
@@ -444,18 +445,17 @@ export async function permissionSetNameCollisionRefusal(
     // holder the writing package does not meet under the ONE predicate the
     // install gate asks ({@link permissionSetHoldersMeet}) holds its own set of
     // the name, not this one. The environment, on either side, still meets
-    // every holder. ⛔ A STORED row of another package still holds the name
-    // whatever its namespace: the registry keeps one entry per stored set of a
-    // name, so a second stored set would take the first one's place there. Two
-    // namespaces' sets of one name are admitted where the first is shipped (an
-    // installed package's own), never beside another package's stored set.
+    // every holder. A STORED set of another package is judged the same way:
+    // the registry keeps each package's stored set in that package's own slot,
+    // so a second namespace's set lands beside it and neither takes the
+    // other's place.
     const namespaceOf = (packageId: string): string | undefined => {
         const namespace = (this.engine?.registry as { getPackage?: (id: string) => { manifest?: { namespace?: unknown } } | undefined } | undefined)
             ?.getPackage?.(packageId)?.manifest?.namespace;
         return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
     };
     const meets = (holder: string | null): boolean =>
-        holder === null || written === null || storedPackages.has(holder)
+        holder === null || written === null
         || permissionSetHoldersMeet(namespaceOf(written), namespaceOf(holder), name);
     const foreign = [...holders]
         .filter((holder) => holder !== written && meets(holder))
@@ -465,19 +465,26 @@ export async function permissionSetNameCollisionRefusal(
 
     const holderPhrase = (holder: string | null) => (holder === null ? 'the environment catalog' : `package "${holder}"`);
     const writer = written === null ? 'this environment' : `package "${written}"`;
-    const releases = foreign
-        .map((holder) => (holder === null ? 'rename or delete the environment catalog\'s set' : `rename it in package "${holder}"`))
+    // The steps the WRITER can take: a name of its own, or deleting a set the
+    // environment or another package STORES (a stored set is deleted through
+    // the metadata door); never an edit inside another package. A set a
+    // package ships leaves the writer only the rename.
+    const deletable = foreign.filter((holder) => holder === null || storedPackages.has(holder));
+    const releases = deletable
+        .map((holder) => (holder === null ? 'delete the environment catalog\'s set' : `delete the set package "${holder}" stores`))
         .join(', or ');
     const remedy = verb === 'restore'
-        ? `Restore it once the name is free (${releases} first), or save this version's body as a set of a name no other `
-          + 'holder holds.'
-        : `Rename this set to a name no other holder holds (prefix it with your own module prefix), or ${releases} first.`;
+        ? (releases === ''
+            ? 'Save this version\'s body as a set of a name no other holder holds.'
+            : `Restore it once the name is free (${releases} first), or save this version's body as a set of a name no other `
+              + 'holder holds.')
+        : `Rename this set to a name no other holder holds (prefix it with your own module prefix)${releases === '' ? '' : `, or ${releases} first`}.`;
     const err = new Error(
         `Security catalog name conflict: ${writer} cannot ${verb} the permission set "${name}" — it is already held by `
         + `${foreign.map(holderPhrase).join(' and ')}. Nothing was ${verb === 'publish' ? 'published' : 'written'}. ${remedy} `
         + 'A permission set holds one name per namespace: two packages of one namespace, a platform package '
         + '(`base`, `system`, `sys`), a package with no namespace, the environment, or a name the platform requests '
-        + 'by spelling share one set of it, and a set another package stores holds its name. See ADR-0150 D2.',
+        + 'by spelling share one set of it. See ADR-0150 D2.',
     ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
     err.code = 'NAMESPACE_CONFLICT';
     err.status = 422;
@@ -985,7 +992,12 @@ export function namespaceObjectNameClashOf(
     return clashes.length > 0 ? clashes.map((c) => c.message).join(' ') : null;
 }
 
-/** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */
+/**
+ * The seed modes whose load matches incoming records to existing rows by the
+ * dataset's `externalId`: every live mode since the unkeyed `insert` and
+ * `replace` were retired (#34613). A retired mode is the schema's refusal, not
+ * this one's.
+ */
 const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'ignore']);
 
 /**
@@ -1048,7 +1060,8 @@ export async function seedExternalIdSaveRefusal(
     if (missing.length === 0) return undefined;
     const consequence = `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each `
         + `replay would ${mode === 'update' ? 'skip every record' : 'insert every record again'}. Name a field the object `
-        + "declares, or use `mode: 'insert'` for rows with no natural key.";
+        + "declares, a list of fields when no single field names a row, or `'id'` when the records carry "
+        + 'their own ids.';
     const issues: MetadataIssueEntry[] = missing.map(({ member, index }) => ({
         path: composite ? `externalId.${index}` : 'externalId',
         message: (declared

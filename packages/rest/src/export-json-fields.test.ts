@@ -142,7 +142,7 @@ async function jsonOf(route: any, query: Record<string, string>): Promise<Array<
 describe('format=json honours an explicit ?fields= (#24183)', () => {
   it('the CSV arm, measured: `?fields=title` writes that one column and no always-written key', async () => {
     const { route, readRows } = await boot({ withSecurity: true });
-    const lines = (await exportOf(route, { format: 'csv', fields: 'title' })).split('\r\n').filter(Boolean);
+    const lines = (await exportOf(route, { format: 'csv', fields: 'title' })).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
     expect(lines).toEqual(['Title', 'Note 1', 'Note 2']);
     // The read handed the route more than the one column it wrote.
     expect(Object.keys(readRows[0])).toEqual(expect.arrayContaining(['id', 'title', 'internal_code', 'done']));
@@ -173,7 +173,7 @@ describe('format=json honours an explicit ?fields= (#24183)', () => {
     expect(readRows.every((r) => !('__search' in r))).toBe(true);
     expect(rows).toEqual([{ title: 'Note 1' }, { title: 'Note 2' }]);
     // The CSV arm answers the same list with an empty column.
-    const lines = (await exportOf(route, { format: 'csv', fields: 'title,__search' })).split('\r\n').filter(Boolean);
+    const lines = (await exportOf(route, { format: 'csv', fields: 'title,__search' })).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
     expect(lines).toEqual(['Title,Search Index', 'Note 1,', 'Note 2,']);
   });
 
@@ -206,7 +206,7 @@ describe('format=json honours an explicit ?fields= (#24183)', () => {
     // Not vacuous: the read returned a key the csv default drops (the hidden
     // `internal_code`), so a no-fields json cut to that default reddens here.
     expect(Object.keys(readRows[0])).toContain('internal_code');
-    const csvHeader = (await exportOf(route, { format: 'csv' })).split('\r\n')[0];
+    const csvHeader = (await exportOf(route, { format: 'csv' })).replace(/^\uFEFF/, '').split('\r\n')[0];
     expect(csvHeader.split(',')).not.toContain('Internal Code');
   });
 });

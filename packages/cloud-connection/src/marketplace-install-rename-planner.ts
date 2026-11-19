@@ -46,9 +46,18 @@ export function convertPackageBodyForward(ctx: PluginContext, manifest: unknown)
     return typeof ql?.convertPackageBodyForward === 'function' ? ql.convertPackageBodyForward(manifest) : manifest;
 }
 
-/** One side of a package version comparison, a multi-package artifact folded as `planUpgrade` folds it. */
+/**
+ * One side of a package version comparison, a multi-package artifact folded as
+ * `planUpgrade` folds it: `objects`, `objectExtensions` (#34095: the comparison
+ * merges each extension's fields onto its target, so the verdict judges an
+ * extension field like an owned one) and `data`.
+ */
 export function packageUpgradeSideOf(artifact: unknown): PackageUpgradeSide {
-    return { objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') };
+    return {
+        objects: resolveStackCollection(artifact, 'objects'),
+        objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
+        data: resolveStackCollection(artifact, 'data'),
+    };
 }
 
 /**

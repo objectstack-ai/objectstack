@@ -154,6 +154,36 @@ function inZone(timeZone: string | undefined): Intl.DateTimeFormatOptions {
   return timeZone ? { timeZone } : {};
 }
 
+/** Per locale tag (`''` for the runtime default): whether it writes a date month → day → year. */
+const monthDayYearLocales = new Map<string, boolean>();
+
+/**
+ * Whether `locale` writes a date with the month first, then the day, then the
+ * year (`en-US`: `Nov 15, 2026`), the order `formatDate`'s compact `'short'`
+ * face is laid out in. `zh-CN` (`2026年11月15日`), `de` (`15. Nov. 2026`) and
+ * `en-GB` (`15 Nov 2026`) do not. Asked of `Intl` itself, so no table of
+ * locales is kept here. A tag `Intl` refuses answers `true`: the compact face
+ * then runs as it always did and meets the same refusal.
+ */
+function writesMonthDayYear(locale: string | undefined): boolean {
+  const key = locale ?? '';
+  let answer = monthDayYearLocales.get(key);
+  if (answer === undefined) {
+    try {
+      const order = new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric' })
+        .formatToParts(new Date(2026, 10, 15))
+        .filter((p) => p.type === 'year' || p.type === 'month' || p.type === 'day')
+        .map((p) => p.type)
+        .join(',');
+      answer = order === 'month,day,year';
+    } catch {
+      answer = true;
+    }
+    monthDayYearLocales.set(key, answer);
+  }
+  return answer;
+}
+
 const dayPartsFormats = new Map<string, Intl.DateTimeFormat>();
 
 /** The calendar day `date` falls on in `timeZone` (the viewer's when `undefined`); `month` is 0-based. */
@@ -595,12 +625,22 @@ export function formatDate(value: string | Date | number, style?: string, option
   const zone = zoneFor(date);
 
   if (effectiveStyle === 'short') {
-    // Compact format for mobile: "Jan 15, '24" / "1月 15, '24".
-    // Only the MONTH token is localized: the surrounding compact shape (day,
-    // apostrophe + 2-digit year) is a deliberate fixed layout for narrow
-    // cards, not a locale-derived one. The tag comes from `options.locale`
-    // like the default branch below — hardcoding `'en-US'` here made this the
-    // one branch that ignored a locale its caller had threaded (objectui#4272).
+    // Compact format with the year: "Jan 15, '24". The tag comes from
+    // `options.locale` like the default branch below — hardcoding `'en-US'`
+    // here made this the one branch that ignored a locale its caller had
+    // threaded (objectui#4272).
+    //
+    // The compact layout (day, apostrophe + 2-digit year after the month) is
+    // the order a month-first locale writes a date in, and only there. A
+    // locale that writes the date in another order gets its OWN face with the
+    // year, the one the default branch below draws with the year shown
+    // (objectstack#34228): `2026年11月15日` in `zh-CN`, `15. Nov. 2026` in
+    // `de`. Before, only the month token was localized into the fixed layout,
+    // so a `zh-CN` record page and its printed document read `11月 15, '26` —
+    // an English-order date in Chinese month words.
+    if (!writesMonthDayYear(options?.locale)) {
+      return date.toLocaleDateString(options?.locale, { year: 'numeric', month: 'short', day: 'numeric', ...inZone(zone) });
+    }
     const month = date.toLocaleDateString(options?.locale, { month: 'short', ...inZone(zone) });
     const { day, year } = dayIn(date, zone);
     return `${month} ${day}, '${String(year).slice(-2)}`;

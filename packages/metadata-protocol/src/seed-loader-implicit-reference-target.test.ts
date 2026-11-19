@@ -58,8 +58,14 @@ const taskWith = (owner: Record<string, unknown>) => ({
 const graphOver = (schemas: Record<string, unknown>, names: string[] = ['crm_account', 'crm_task']) =>
   new SeedLoaderService(engineWith(schemas), emptyMetadata(), createLogger()).buildDependencyGraph(names);
 
+/**
+ * The references `crm_task` derives from its DECLARED fields. [#33791] It is a
+ * user-owned object, so the graph also carries a row for the `owner_id` the
+ * platform injects on it; these cases judge the declared `owner` field only.
+ */
 const referencesOf = async (schemas: Record<string, unknown>, names?: string[]) =>
-  (await graphOver(schemas, names)).nodes.find((n) => n.object === 'crm_task')?.references ?? [];
+  ((await graphOver(schemas, names)).nodes.find((n) => n.object === 'crm_task')?.references ?? [])
+    .filter((r) => r.field !== 'owner_id');
 
 describe('[#19289] seed dependency graph — a `user` field takes its target from the TYPE', () => {
   it('a `{ type: "user" }` field with NO `reference` still produces a reference row targeting `sys_user`', async () => {

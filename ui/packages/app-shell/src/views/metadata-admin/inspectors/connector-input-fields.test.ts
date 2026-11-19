@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import {
   CONNECTOR_INPUT_PATH,
   connectorActionInputSchema,
+  connectorInputContractKeys,
   connectorInputFields,
   connectorInputExtras,
   mergeConnectorInputExtras,
@@ -34,6 +35,12 @@ const SLACK_POST_MESSAGE = {
     thread_ts: { type: 'string', description: 'Thread root ts to reply into' },
     blocks: { type: 'array', description: 'Block Kit blocks' },
   },
+};
+
+/** The slack schema without `blocks` — every key it declares gets a typed field. */
+const SLACK_TYPED_ONLY = {
+  ...SLACK_POST_MESSAGE,
+  properties: Object.fromEntries(Object.entries(SLACK_POST_MESSAGE.properties).filter(([k]) => k !== 'blocks')),
 };
 
 /** A registry payload shaped like the dispatcher's `{ data: { connectors } }`. */
@@ -183,20 +190,46 @@ describe('connectorInputFields — re-rooting onto connectorConfig.input', () =>
   });
 });
 
-describe('connectorInputFields — measured additionalProperties semantics', () => {
-  it('treats an ABSENT additionalProperties as OPEN (every shipped connector omits it)', () => {
-    expect(connectorInputFields(SLACK_POST_MESSAGE)!.open).toBe(true);
+/**
+ * objectstack#33838 — the run's rule, mirrored. Since objectstack#33614 the
+ * `connector_action` node refuses an input key the action's schema does not
+ * declare (`service-automation` `connector-input-schema.ts` `declaredKeysOf`),
+ * reading `properties` as the contract rather than JSON Schema's open default.
+ */
+describe('connectorInputContractKeys — the run\'s declared-keys rule', () => {
+  it('a schema listing `properties` (every shipped connector, no `additionalProperties`) is CLOSED', () => {
+    expect(connectorInputContractKeys(SLACK_POST_MESSAGE)).toEqual(['channel', 'text', 'thread_ts', 'blocks']);
+    expect(connectorInputFields(SLACK_POST_MESSAGE)!.open).toBe(false);
   });
 
-  it('treats `additionalProperties: false` as CLOSED', () => {
-    expect(connectorInputFields({ ...SLACK_POST_MESSAGE, additionalProperties: false })!.open).toBe(false);
+  it('declares the `required` names too, even ones `properties` does not list', () => {
+    expect(connectorInputContractKeys({ type: 'object', properties: { a: { type: 'string' } }, required: ['a', 'b'] }))
+      .toEqual(['a', 'b']);
   });
 
-  it('treats `additionalProperties: true` / a value schema as OPEN', () => {
+  it('`additionalProperties: false` is CLOSED, and with no `properties` declares none', () => {
+    expect(connectorInputContractKeys({ ...SLACK_POST_MESSAGE, additionalProperties: false }))
+      .toEqual(['channel', 'text', 'thread_ts', 'blocks']);
+    expect(connectorInputContractKeys({ type: 'object', additionalProperties: false })).toEqual([]);
+  });
+
+  it('`additionalProperties` / `unevaluatedProperties` set to `true` or a schema is OPEN', () => {
+    expect(connectorInputContractKeys({ ...SLACK_POST_MESSAGE, additionalProperties: true })).toBeNull();
+    expect(connectorInputContractKeys({ ...SLACK_POST_MESSAGE, additionalProperties: { type: 'string' } })).toBeNull();
+    expect(connectorInputContractKeys({ ...SLACK_POST_MESSAGE, unevaluatedProperties: true })).toBeNull();
     expect(connectorInputFields({ ...SLACK_POST_MESSAGE, additionalProperties: true })!.open).toBe(true);
-    expect(
-      connectorInputFields({ ...SLACK_POST_MESSAGE, additionalProperties: { type: 'string' } })!.open,
-    ).toBe(true);
+  });
+
+  it('a key-admitting keyword (`$ref`, `allOf`, `patternProperties`, …) is OPEN', () => {
+    for (const k of ['$ref', 'allOf', 'anyOf', 'oneOf', 'patternProperties', 'if', 'dependentSchemas']) {
+      expect(connectorInputContractKeys({ ...SLACK_POST_MESSAGE, [k]: k === '$ref' ? '#/x' : [] })).toBeNull();
+    }
+  });
+
+  it('a schema listing no `properties` (and not closed) is OPEN; a non-object is not judged', () => {
+    expect(connectorInputContractKeys({ type: 'object' })).toBeNull();
+    expect(connectorInputContractKeys(undefined)).toBeNull();
+    expect(connectorInputContractKeys([])).toBeNull();
   });
 });
 
@@ -265,21 +298,24 @@ describe('applyConnectorInputForm — splicing into the connector_action group',
       'connectorConfig.input.channel',
       'connectorConfig.input.text',
       'connectorConfig.input.thread_ts',
-      'connectorConfig.input', // the extras repeater, still open-schema
+      'connectorConfig.input', // the repeater, kept for the declared `blocks` no field types
       'timeoutMs',
     ]);
   });
 
-  it('an OPEN schema keeps the repeater, carrying the declared keys as omitKeys', () => {
-    const form = connectorInputFields(SLACK_POST_MESSAGE)!;
+  it('an OPEN schema keeps the repeater, carrying the typed keys as omitKeys and judging no key', () => {
+    const form = connectorInputFields({ ...SLACK_POST_MESSAGE, allOf: [{ type: 'object' }] })!;
+    expect(form.open).toBe(true);
     const repeater = applyConnectorInputForm(base(), form).find((f) => f.id === 'connectorConfig.input')!;
     expect(repeater.kind).toBe('keyValue');
     expect(repeater.omitKeys).toEqual(['channel', 'text', 'thread_ts']);
+    expect(repeater.acceptedKeys).toBeUndefined();
   });
 
-  it('a CLOSED schema drops the repeater entirely', () => {
-    const form = connectorInputFields({ ...SLACK_POST_MESSAGE, additionalProperties: false })!;
-    const out = applyConnectorInputForm(base(), form);
+  it('a CLOSED schema whose every declared key is typed drops the repeater entirely', () => {
+    const form = connectorInputFields(SLACK_TYPED_ONLY)!;
+    expect(form.open).toBe(false);
+    const out = applyConnectorInputForm(base(), form, { channel: 'C123' });
     expect(out.some((f) => f.id === 'connectorConfig.input')).toBe(false);
     expect(out.map((f) => f.id)).toEqual([
       'connectorConfig.connectorId',
@@ -289,6 +325,49 @@ describe('applyConnectorInputForm — splicing into the connector_action group',
       'connectorConfig.input.thread_ts',
       'timeoutMs',
     ]);
+  });
+
+  it('a CLOSED schema keeps the repeater for a declared key no field types (slack `blocks`), judging every key', () => {
+    const form = connectorInputFields(SLACK_POST_MESSAGE)!;
+    const repeater = applyConnectorInputForm(base(), form, { channel: 'C123' }).find((f) => f.id === 'connectorConfig.input')!;
+    expect(repeater.omitKeys).toEqual(['channel', 'text', 'thread_ts']);
+    expect(repeater.acceptedKeys).toEqual(['channel', 'text', 'thread_ts', 'blocks']);
+  });
+
+  it('an openapi operation whose `$ref` / schemaless body is declared as `body: {}` offers `body` in the repeater', () => {
+    // openapi-connector.ts `buildInputSchema`: an unresolved `$ref` request
+    // body (or content with no `schema`) is declared `body: {}` — any value.
+    // No field can type it, so the repeater is its only editor; the top level
+    // stays closed, so anything else typed there is judged.
+    const form = connectorInputFields({
+      type: 'object',
+      properties: {
+        path: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+        body: {},
+      },
+      required: ['path'],
+    })!;
+    expect(form.open).toBe(false);
+    expect(form.declaredKeys).toEqual(['path']);
+    const repeater = applyConnectorInputForm(base(), form).find((f) => f.id === 'connectorConfig.input')!;
+    expect(repeater.omitKeys).toEqual(['path']);
+    expect(repeater.acceptedKeys).toEqual(['path', 'body']);
+  });
+
+  it('a body-only openapi operation still resolves: the closed schema keeps a judged repeater with no typed field', () => {
+    const form = connectorInputFields({ type: 'object', properties: { body: {} } })!;
+    expect(form).not.toBeNull();
+    expect(form.fields).toEqual([]);
+    const repeater = applyConnectorInputForm(base(), form).find((f) => f.id === 'connectorConfig.input')!;
+    expect(repeater.acceptedKeys).toEqual(['body']);
+  });
+
+  it('a stored key a CLOSED schema does not declare keeps the repeater, judged — never dropped', () => {
+    const form = connectorInputFields(SLACK_TYPED_ONLY)!;
+    const stored = { channel: 'C123', legacy_note: 'keep me' };
+    const repeater = applyConnectorInputForm(base(), form, stored).find((f) => f.id === 'connectorConfig.input')!;
+    expect(repeater.acceptedKeys).toEqual(['channel', 'text', 'thread_ts']);
+    expect(connectorInputExtras(stored, repeater.omitKeys!)).toEqual({ legacy_note: 'keep me' });
   });
 
   it('leaves a group that has no Input field untouched', () => {

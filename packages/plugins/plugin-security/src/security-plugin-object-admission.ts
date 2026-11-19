@@ -298,8 +298,8 @@ export async function canWriteObject(
     //    the payload.
     if (permissionSets.length === 0) return false;
 
-    const { isPrivate, unresolved, requiredPermissions, fieldRequiredPermissions } =
-      await this.getObjectSecurityMeta(objectName);
+    const posture = await this.getObjectSecurityMeta(objectName);
+    const { isPrivate, unresolved, requiredPermissions } = posture;
     // 5. [#3545] Posture unresolvable → deny.
     if (unresolved) return false;
 
@@ -357,11 +357,12 @@ export async function canWriteObject(
     //    [#25866] This reader holds no stored row: an insert is judged on the
     //    payload rows as the middleware judges them; an update applies each
     //    row-conditioned entry as its lock (no `preImage`), so the answer here
-    //    is never wider than the gate's.
+    //    is never wider than the gate's. A computed field the payload names
+    //    that this caller is not served whole is refused there as well.
     if (data) {
       const forbidden = await this.computeForbiddenFieldWrites(
         objectName, data as Record<string, any> | Record<string, any>[],
-        { fieldRequiredPermissions }, permissionSets, delegatorSets,
+        posture, permissionSets, delegatorSets,
         { operation, context },
       );
       if (forbidden.length > 0) return false;

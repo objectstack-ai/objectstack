@@ -57,7 +57,7 @@ import {
   toast,
   cn,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1096,6 +1096,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     recordIds: pageRecordIds,
     update: canEdit || inlineEditable,
     delete: canDelete,
+    // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
+    updateOnMount: inlineEditable,
   });
 
   // The projection keys and the filter, sort, search and server-paging state,
@@ -1178,6 +1180,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // grouping refusals and the fetch window (`./objectGridGroupingDecisions`).
   const {
     unmaskedGroupingFields,
+    draftOnlyGroupingFields,
     groupingRefusesNothing,
     groupingKeyReadable,
     serverGroupedFetch,
@@ -1612,7 +1615,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       exportData.forEach(record => {
         rows.push(fields.map((f: string) => escapeCsvValue(record[f])).join(','));
       });
-      downloadFile(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' }), fileNameFor('csv'));
+      downloadFile(csvBlob(rows.join('\n')), fileNameFor('csv'));
     } else if (format === 'json') {
       const unmasked = exportData.map((record) =>
         Object.fromEntries(Object.entries(record).filter(([key]) => !isMaskedKey(key))),
@@ -1729,6 +1732,31 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       </div>
     );
   }
+
+  // objectstack#34898 — the grouping sentences' non-blocking sibling. A
+  // grouping entry on a field only the draft declares is dropped
+  // (`draftOnlyGroupingFields`) and the grid draws ungrouped, or grouped by the
+  // published entries left. Unlike the two refusals above nothing is withheld,
+  // so this is no panel replacing the grid: it is one line drawn above the
+  // rows, under the description, by every branch that draws them (the card
+  // view and the table), in the strip `ListView` draws its own draft-preview
+  // note in, so it is read before the rows it explains.
+  const groupingDraftOnlyNote = draftOnlyGroupingFields.length > 0 ? (
+    <p
+      role="status"
+      className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
+      data-testid="grid-grouping-draft-only"
+    >
+      {t('grid.grouping.draftOnly', {
+        fields: draftOnlyGroupingFields
+          .map((field) => {
+            const fallback = (objectFields?.[field] as { label?: string } | undefined)?.label || field;
+            return schema.objectName ? resolveFieldLabel(schema.objectName, field, fallback) : fallback;
+          })
+          .join(', '),
+      })}
+    </p>
+  ) : null;
 
   // The generated columns, enriched and folded, with the persisted widths and
   // order applied (`./objectGridPersistedColumns`).
@@ -2183,8 +2211,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     } as any);
     // Reject so the executor records this row under its own id in the result
     // (and the error CSV) instead of counting a failed action as succeeded.
+    // The refusal's producer-marked `userMessage` rides on the rejection, as
+    // on the aggregate path below: the row shows it, and `message` stays the
+    // whole text the error CSV keeps (objectstack#34215).
     if (!res?.success) {
-      throw new Error(res?.error || `Action ${def.name} failed`);
+      const error = new Error(res?.error || `Action ${def.name} failed`);
+      throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
   };
 
@@ -2217,7 +2249,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       toast: { showOnSuccess: false, showOnError: false },
     } as any);
     if (!res?.success) {
-      throw new Error(res?.error || `Action ${def.name} failed`);
+      // The refusal's producer-marked `userMessage` rides on the rejection,
+      // so the result reports the ONE outcome for the selection in the words
+      // the handler wrote for the user (objectstack#34173). `message` stays
+      // the whole text.
+      const error = new Error(res?.error || `Action ${def.name} failed`);
+      throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
   };
   const handleBulkDialogClose = (result?: BulkResult | null) => {
@@ -2231,6 +2268,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     if (result && result.succeeded > 0) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
+      setRefreshKey(k => k + 1);
+    } else if (result?.aggregateRejection) {
+      // A rejected aggregate run (objectstack#34173) is ONE call that may have
+      // written some rows before it stopped, so the grid re-reads them by the
+      // same path. The selection stays: re-running the whole action is the
+      // retry, as for a total failure.
       setRefreshKey(k => k + 1);
     }
   };
@@ -3345,7 +3388,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // or empty value rather than drawing it.
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
-    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol).slice(0, 2);
+    // objectstack#34615 — the card's AMOUNT is the first shown body column whose
+    // field type is `currency` (the column draft's resolved type, so a view
+    // that presents the field as another type keeps it a plain value). It
+    // never shares the subtitle's width: it gets a line of its own under the
+    // subtitle, drawn whole at the right edge, and the status chip moves to
+    // that line's left so the two never compete for one row. A masked amount
+    // is not promoted; it stays a subtitle candidate, which skips it.
+    const amountCol = bodyColumns.find(
+      (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
+    );
+    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol && c !== amountCol).slice(0, 2);
     const isEmptyCardValue = (value: unknown) => value == null || value === '';
     const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
       const value = row[col.accessorKey];
@@ -3357,6 +3410,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         (col) => !isMaskedCardColumn(col.accessorKey) && !isEmptyCardValue(row[col.accessorKey]),
       );
       const showStatus = statusCol !== undefined && !isEmptyCardValue(row[statusCol.accessorKey]);
+      const showAmount = amountCol !== undefined && !isEmptyCardValue(row[amountCol.accessorKey]);
+      // With an amount column every card of the list draws the status on the
+      // amount line, an empty amount included, so the cards keep one shape.
+      const statusOnAmountLine = amountCol !== undefined;
+      const statusChip = (className: string) => statusCol !== undefined && (
+        <div data-testid="grid-card-status" className={className}>
+          {cardCell(statusCol, row)}
+        </div>
+      );
 
       return (
         <div
@@ -3394,12 +3456,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
                 ))}
               </div>
             )}
+            {statusOnAmountLine && (showStatus || showAmount) && (
+              <div data-testid="grid-card-amount-line" className="mt-1 flex min-w-0 items-center gap-2">
+                {showStatus && statusChip('min-w-0 truncate text-xs')}
+                {showAmount && (
+                  <div
+                    data-testid="grid-card-amount"
+                    className="ml-auto shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums"
+                  >
+                    {cardCell(amountCol, row)}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {showStatus && (
-            <div data-testid="grid-card-status" className="max-w-[45%] shrink-0 truncate text-xs">
-              {cardCell(statusCol, row)}
-            </div>
-          )}
+          {showStatus && !statusOnAmountLine && statusChip('max-w-[45%] shrink-0 truncate text-xs')}
           {/* objectstack#29150 — the row's actions, the desktop row's own
               resolver and handlers in one 44 px "⋮" (inline budget 0, as the
               row context menu reads it). The menu stops its own clicks, so a
@@ -3472,6 +3543,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           data-testid="object-grid-card-scroller"
         >
         {gridDescription}
+        {groupingDraftOnlyNote}
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
@@ -4081,6 +4153,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         </div>
       )}
       {gridDescription}
+      {groupingDraftOnlyNote}
       {gridToolbar}
       {renderedGridContent}
       {isGrouped && onRowGroupsChange && (

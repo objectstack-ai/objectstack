@@ -165,8 +165,8 @@ import {
 // [#20061 / #20062 / #20139] The DECLARED request schemas the change log and the
 // audit trail parse their numeric parameters through — see
 // `readDeclaredQueryNumber` in `rest-server.ts`.
-import { AuditMetaItemRequestSchema, HistoryMetaItemRequestSchema, RollbackMetaItemRequestSchema } from '@objectstack/spec/api';
-import type { AuditMetaItemRequest, HistoryMetaItemRequest, PublishMetaItemRequest } from '@objectstack/spec/api';
+import { AuditMetaItemRequestSchema, DiffMetaItemRequestSchema, HistoryMetaItemRequestSchema, RollbackMetaItemRequestSchema } from '@objectstack/spec/api';
+import type { AuditMetaItemRequest, DiffMetaItemRequest, HistoryMetaItemRequest, PublishMetaItemRequest } from '@objectstack/spec/api';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { handleRouteError, sendFieldVisibilityFault, thrownAnswerIsBareNotFound } from './error-response.js';
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
@@ -179,7 +179,6 @@ import {
     META_ITEM_HISTORY_PARAMS,
     META_ITEM_PUBLISH_PARAMS,
     META_ITEM_ROLLBACK_PARAMS,
-    UNDECLARED_WHOLE_NUMBER_PARAM,
     metaItemPackageBinding,
     readDeclaredQueryNumber,
     refuseNonAuthoringCaller,
@@ -221,7 +220,8 @@ export interface MetaItemHistoryRouteHost {
  * [ADR-0150 D3/D4, #32905] The `?package=` of the history and rollback doors,
  * read as `/layers?package=` reads it ({@link metaItemPackageBinding}: `all`
  * and the empty string name no package): the holder whose versions the door
- * reads, or whose row it restores.
+ * reads, or whose row it restores. [#33308] And the diff door's: the holder
+ * whose versions it compares.
  */
 function historyPackageSelector(query: unknown): { packageId?: string } {
     const packageId = metaItemPackageBinding((query as { package?: unknown } | undefined)?.package);
@@ -949,15 +949,16 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 // pair of versions and answered 200.
                 // [#23072] Recognition first, over the measured closed set.
                 if (refuseUnknownQueryParams(req, res, META_ITEM_DIFF_PARAMS)) return;
-                if (refuseRepeatedQueryParams(req, res, ['from', 'fromVersion', 'to', 'toVersion'])) return;
+                if (refuseRepeatedQueryParams(req, res, ['from', 'fromVersion', 'to', 'toVersion', 'package'])) return;
                 // [#20139] The same drop for a SINGLE unreadable value: the
                 // `parseV` helper that stood here answered `undefined` for
                 // `?from=abc` (and `Infinity`), so `diffMetaItem` substituted
                 // "the version before `to`" — or, for `?to=abc`, the CURRENT
                 // body — and the door answered 200 with a comparison nobody
                 // asked for; `?from=1.5` was forwarded and diffed against a
-                // version that cannot exist. No request schema is declared for
-                // this door, so a version reads as a whole number. The name the
+                // version that cannot exist. [#33308] A version reads through
+                // the door's declaration (`DiffMetaItemRequestSchema`), a whole
+                // number, as it read before the request was declared. The name the
                 // caller used is the one read (and the one a refusal names):
                 // `from` / `to` win over `fromVersion` / `toVersion` exactly as
                 // the old `??` had it, and an empty value stays absent, as
@@ -965,9 +966,9 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 const fromParam = req.query?.from != null ? 'from' : 'fromVersion';
                 const toParam = req.query?.to != null ? 'to' : 'toVersion';
                 const fromVersion = readDeclaredQueryNumber(req.query, fromParam,
-                    UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
+                    DiffMetaItemRequestSchema.shape.fromVersion, { emptyIsAbsent: true });
                 const toVersion = readDeclaredQueryNumber(req.query, toParam,
-                    UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
+                    DiffMetaItemRequestSchema.shape.toVersion, { emptyIsAbsent: true });
                 // [#20156] A diff discloses BOTH versions' values — for a
                 // doc its `content`, for an app its `navigation`, for an
                 // object its `fields` — so it owes the plain read's
@@ -1031,13 +1032,20 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 // `version` is a per-(org, type, name) lineage counter, so
                 // the environment lineage is the one every `/meta` write
                 // now extends.
-                const result = await (p as any).diffMetaItem({
+                // [#33308] Compiled against the declared request, as the
+                // history twin's is: an undeclared member is a type error.
+                const diffRequest: TransportScopedMetaRequest<DiffMetaItemRequest> = {
                     type: req.params.type,
                     name: req.params.name,
                     ...(environmentId ? { environmentId } : {}),
                     ...(fromVersion !== undefined ? { fromVersion } : {}),
                     ...(toVersion !== undefined ? { toVersion } : {}),
-                });
+                    // [ADR-0150 D3/D4, #33308] ONE holder's versions, for a type
+                    // stored per `(package, name)`, as the history door reads
+                    // them: naming none of two holders is refused 409.
+                    ...historyPackageSelector(req.query),
+                };
+                const result = await (p as any).diffMetaItem(diffRequest);
                 // [#20156] Judge the current document and both sides, with
                 // ONE judge (one books read, one holdings resolution): a
                 // side the caller may not read is not served beside one
@@ -1101,7 +1109,8 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 }
                 res.json(served);
             } catch (error: any) {
-                handleRouteError(res, error);
+                // [#33308] A two-holder refusal names its holders (`details.candidates`), as the history door renders it.
+                handleRouteError(res, error, undefined, { packageScopedCandidates: true });
             }
         },
         metadata: {
@@ -1331,6 +1340,11 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     // read the protocol takes at that package's address,
                     // `servedHolderAddressOf`), and every registry holder of
                     // the name. Two served holders are refused above.
+                    // [#34041, ADR-0150 D3] …and of every other type that read
+                    // re-addresses (a `doc`, `view`, `translation`, …), all but
+                    // an `action`, which its own bare judge serves: the
+                    // metadata service keeps such a type by name alone, so its
+                    // snapshot can be the disabled holder's body.
                     let mixedOwner: string | undefined;
                     let mixedHolders: readonly string[] = [];
                     if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
@@ -1348,7 +1362,7 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                             const owner = envelope?.packageId;
                             const ownerType = canonicalMetaUrlType(type);
                             if (!withheld && typeof owner === 'string' && typeof registry.packageScopedHoldersOf === 'function'
-                                && typeof registry.readsByPackage === 'function' && registry.readsByPackage(ownerType) === true) {
+                                && ownerType !== 'action') {
                                 const holders: readonly string[] = registry.packageScopedHoldersOf(
                                     ownerType, name, null, { includeDisabledPackages: true },
                                 ) ?? [];
@@ -1472,6 +1486,15 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                         : await (svc as any).getPublished(canonicalMetaUrlType(type), name, ...(mixedOwner !== undefined ? [mixedOwner] : []));
                     const stamp = (data as { _packageId?: unknown } | null | undefined)?._packageId;
                     if (mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)) {
+                        data = publishedCode;
+                    }
+                    // [#34248, ruling 6893582352] …and a bare doc's package copy
+                    // where the layered read's code layer is the environment's
+                    // own package-less entry (two enabled holders beside it):
+                    // that entry answers first, never the holder registered last.
+                    const codeStamp = (publishedCode as { _packageId?: unknown } | null | undefined)?._packageId;
+                    if (canonicalMetaUrlType(type) === 'doc' && publishedCode != null && (typeof codeStamp !== 'string' || codeStamp === '' || codeStamp === 'sys_metadata')
+                        && typeof stamp === 'string' && stamp !== '' && stamp !== 'sys_metadata') {
                         data = publishedCode;
                     }
                     // The 404 this route could never produce before. An

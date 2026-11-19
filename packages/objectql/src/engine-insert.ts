@@ -4,8 +4,8 @@
  * [#29986 codemod] The "Write preparation and insert" section of `ObjectQL`:
  * the bodies of `staticReadonlyCreateStrip`, `updateByIdExpecting`,
  * `ownershipQueueService`, `assignment`, `readUpdatePriorRow`, `insert`,
- * `insertMany` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `insertMany` moved out of `engine.ts` whole (split
+ * by #30012 and #31922).
  *
  * A MOVE, not a redesign. {@link InsertFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -60,13 +60,14 @@ import { coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFiel
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedRequiredWhen, preserveAuditIgnoredOnInsertWarning, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import type { staticReadonlyInsertSubject } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { resolveMasterDetailRelation } from './master-detail.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import {
   WRITE_PRECONDITION_OPTION, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  droppedFieldEvents, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
+  droppedFieldEvents, formulaValuesFor, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
   planStoredExpressions, recomputeAutonumberReaders, replacedStoredExpressionFields, shouldSkipStateMachine,
   storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, withholdInsertReadonlyFromHooks,
   callerInputRefusalLogMeta, writeFailureLogMeta,
@@ -178,13 +179,23 @@ export class InsertFacet {
    * need it. Scoped to the TAKEN keys: those are the only defaults this pass
    * keeps, so no other field's default can make it ask, or fail.
    *
+   * [#34672] A taken roll-up `summary` is then re-SEEDED, after its default:
+   * `initializeSummaryFields` over the stripped row, copied back for the
+   * taken keys only, so the column starts at the empty-child-list value (`0`
+   * for `count` / `sum`) exactly as a create that never named it does. The
+   * re-default alone never asked the seed, so a value taken from a
+   * `readonly: true` roll-up left the column `null` (the #5749 state, which
+   * the seed exists to rule out) while the write still succeeded. The seed
+   * yields nothing for `min` / `max` / `avg`, which stay empty as on any
+   * create.
+   *
    * @returns the row as the strip leaves it (the SAME reference when nothing
    *   was taken) and the keys taken, in the row's key order. When the
    *   re-default's permission resolution fails, `error` carries it and `row`
    *   is the row as it arrived: the caller decides whether that fails the
    *   write or culls the row, and the taken keys are still reported.
    */
-  static async staticReadonlyCreateStrip(this: Pick<InsertHost, 'applyFieldDefaults' | 'resolveDefaultPermissions'>, object: string, readonlySubject: NonNullable<ReturnType<typeof staticReadonlyInsertSubject>>, row: Record<string, unknown>, supplied: Readonly<Record<string, unknown>>, context: ExecutionContext | undefined, pass: {
+  static async staticReadonlyCreateStrip(this: Pick<InsertHost, 'applyFieldDefaults' | 'initializeSummaryFields' | 'resolveDefaultPermissions'>, object: string, readonlySubject: NonNullable<ReturnType<typeof staticReadonlyInsertSubject>>, row: Record<string, unknown>, supplied: Readonly<Record<string, unknown>>, context: ExecutionContext | undefined, pass: {
       logger: Parameters<typeof stripReadonlyFields>[3];
       strictReadonlyWrites: boolean;
       hookWrittenKeys: ReadonlySet<string> | undefined;
@@ -213,6 +224,10 @@ export class InsertFacet {
       const redefaulted = this.applyFieldDefaults(object, stripped, context, pass.nowSnap, redefaultPermissions);
       for (const k of taken) {
         if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+      }
+      const reseeded = this.initializeSummaryFields(object, stripped) as Record<string, unknown>;
+      for (const k of taken) {
+        if (stripped[k] == null && reseeded[k] !== undefined) stripped[k] = reseeded[k];
       }
     }
     return { row: stripped, taken };
@@ -311,7 +326,8 @@ export class InsertFacet {
   /** The body of `ObjectQL#insert`; the method's docblock there is its contract. */
   static async insert(this: Pick<InsertHost, '_registry' | 'admittedViolationSink' | 'applyAutonumbers' | 'applyFieldDefaults' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'assignment' | 'autonumberCounters' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'createWithAutonumberResync' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'getSummaryDescriptors' | 'homeAmountServing' | 'inAfterAbortUnit' | 'initializeSummaryFields' | 'insert' | 'insertRecomputeListeners' | 'invalidateOrganizationProbe' | 'isIssuedAutonumberCollision' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'releaseSecretHandles' | 'resolveDefaultPermissions' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'resolveSystemInsertOrganization' | 'staticReadonlyCreateStrip' | 'triggerHooks' | 'validationMessageContext' | 'valueShapeStrictFor' | 'warnAutonumberReadersUnserved'>, object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
-    // [#22782] An aborting `afterInsert` rolls this write back — see `opensAfterAbortUnit`.
+    // [#22782, #34412] An aborting `afterInsert`, or a refusal after a `beforeInsert` hook's
+    // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
     if (this.opensAfterAbortUnit('afterInsert', object, options?.context)) {
       return this.inAfterAbortUnit(() => this.insert(object, data, options));
     }
@@ -325,7 +341,7 @@ export class InsertFacet {
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'insert');
+    this.enforceTransactionOrigin(object, driver, 'insert', options?.context?.transaction);
 
     // [#20308] A blank on a non-string-typed column is `null` from here on —
     // before the middleware, the caller snapshot, the defaults, the hooks and
@@ -1315,6 +1331,16 @@ export class InsertFacet {
         const batchSummaries = rows.length > 1
           ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
           : undefined;
+        // [#34466] The same overlay for the master-detail header a field-level
+        // `parent.` predicate reads (`requiredWhen: parent.line_count >= 3`):
+        // `insertParentForRow` above was read once too, before the batch.
+        const insertParentMaster = batchSummaries && insertParentForRow
+          ? resolveMasterDetailRelation(schemaForValidation as any)?.master
+          : undefined;
+        const insertParentOf = (row: Record<string, unknown>) => {
+          const header = insertParentForRow?.(row);
+          return insertParentMaster ? batchSummaries!.overlayRow(insertParentMaster, header) : header;
+        };
         // [#18783] The subject's effective object permissions, for an option
         // gated on `current_user.can(…)`: ONE resolution for the whole batch,
         // and none at all unless a row picks such an option. A resolution
@@ -1333,7 +1359,9 @@ export class InsertFacet {
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
-            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+            // [ADR-0113 D1, as amended] `'deferred'`: a field required only when shown
+            // is judged by `evaluateValidationRules` below, against its visibility.
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.
@@ -1348,7 +1376,7 @@ export class InsertFacet {
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
             if (referencesFirst) await checkReferences();
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]), formulaValues: formulaValuesFor(schemaForValidation, opCtx.context, insertPermissionsFor(rows[i])) }), this.logger, object);
             if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);

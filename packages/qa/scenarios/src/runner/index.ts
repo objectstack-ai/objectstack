@@ -9,6 +9,7 @@
  */
 
 export * from './app.js';
+export * from './door.js';
 export * from './driver.js';
 export * from './drivers/codex.js';
 export * from './drivers/external.js';
@@ -20,4 +21,5 @@ export * from './project.js';
 export * from './prompts.js';
 export * from './scorecard.js';
 export * from './seed.js';
+export * from './summary.js';
 export * from './transcript.js';

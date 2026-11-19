@@ -41,11 +41,12 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "تغيير صلاحية مسؤول المنصّة",
           action_invocation: "استدعاء إجراء",
           package_uninstall: "إلغاء تثبيت حزمة",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "استيراد حزمة غير مُدارة",
+          credential_use: "استخدام بيانات الاعتماد",
+          scim_refused: "رفض طلب SCIM",
+          audit_signing_key_change: "تغيير مفتاح توقيع التدقيق",
+          dataset_query: "استعلام مجموعة بيانات",
+          scim_manager_unresolved: "تعذّر تحديد مدير SCIM"
         }
       },
       user_id: {

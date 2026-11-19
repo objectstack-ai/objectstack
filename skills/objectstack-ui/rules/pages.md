@@ -59,7 +59,7 @@ A `slotted` record page has no `tabs` slot — see [Record Page](./record-page.m
 > `{current_quarter_start}` etc. resolve from the page's `variables` block,
 > the bound record, and the runtime context. Declare `variables: [...]` at
 > the page root for any non-record value; relative-date placeholders:
-> [Date Macros](../SKILL.md#date-macros--filter-placeholders).
+> objectstack-query → `rules/filters.md`.
 
 ### Print pages
 
@@ -76,10 +76,12 @@ page and a `slotted` / `html` / `react` page.
 `repeatFooter` repeat the page's own `header` / `footer` region on every sheet
 (refused without that region; off = printed once); `pageNumbers` prints sheet
 number and count; the page-break hints `repeatTableHeaders` (on by default)
-and `avoidBreakInside` (keep each block whole).
+and `avoidBreakInside` (keep each block whole on one sheet when it fits).
+Where sections may break between sheets, author one `record:details` block
+per section: a multi-section block moves to the next sheet whole.
 
-Every block, at any depth, must draw all it declares, in full, the same at
-any width: the containers `page:section` / `page:card` /
+Every block, at any depth, must draw all it declares, the same at any
+width: the containers `page:section` / `page:card` /
 `page:footer`, the field blocks `record:details` / `record:highlights`, the
 all-lines child table `record:line_items`, `element:text` / `element:image` /
 `element:divider` / `element:definition-list` / `element:repeater`, and the
@@ -92,9 +94,8 @@ to print** (`record:path`, tabs, buttons, inputs, forms — values print through
 `record:details`), or it is **outside the vocabulary** (`flex`, `object-chart`,
 a plugin widget), so nothing answers for how it prints.
 
-Validated today; the console's print rendering that applies it follows, so
-`os validate` warns the layout is not yet applied. List export has no `'pdf'`;
-a list prints as shown via the view's `allowPrinting`.
+List export has no `'pdf'`; a list prints as shown via the view's
+`allowPrinting`.
 
 <!-- os:check -->
 ```typescript
@@ -347,7 +348,7 @@ behind the screen is not.
 ### Routing model — platform-level viewer, opt-in entry
 
 The viewer is **platform-level**: one global `/docs/<name>` route
-resolves any doc regardless of which app you came from. The URL is
+resolves any doc. The URL is
 **single-coordinate** — no package or app prefix — so a doc has exactly
 one URL. Do **not** design per-app or per-package doc URLs.
 

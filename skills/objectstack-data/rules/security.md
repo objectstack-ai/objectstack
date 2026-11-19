@@ -29,7 +29,7 @@ export const salesUser = definePermissionSet({
   (`security-anchor-high-privilege`) and the binding refuse it. With none, invited
   members get nothing until an admin assigns each; no gate counts them. Its
   `systemPermissions` may name only app capabilities declared under `capabilities:`.
-- `tabPermissions` hides an app from the set's holders, never gates it: objectstack-ui → Navigation.
+- `tabPermissions` hides an app, never gates it: objectstack-ui → Who sees or opens an app.
 
 ## Assigning a permission set to a user
 
@@ -47,14 +47,16 @@ index (none on `driver-memory`) holds grants naming no package to one per user, 
 organization. Name `permission_set_package` on insert when two packages hold the name, or
 the grant is refused `409 RESOURCE_CONFLICT`, naming each holder.
 
-Assignment is one `POST /api/v1/data/sys_user_permission_set`. Only a tenant admin —
-or a delegated `adminScope` carrying `manageAssignments` for that set and user
-— may write it; plain CRUD bits on the table are not enough.
+Only a tenant admin — or a delegated `adminScope` carrying `manageAssignments`
+for that set and user — may `POST /api/v1/data/sys_user_permission_set`; plain
+CRUD bits on the table are not enough.
 
 **Grant looks inert?** Check in order: the set is switched off; the validity
 window has passed; `organization_id` mismatch.
 `GET /api/v1/security/explain?object=&operation=&userId=` answers from the
-enforcing code path.
+enforcing code path. Explaining another user takes `manage_users`,
+administering one of their organizations, or a delegated `adminScope` covering
+them.
 
 ## Row-Level Security (RLS)
 
@@ -75,7 +77,6 @@ none applies the policies restrict nothing — an
 `select` policies.
 
 ```typescript
-// in a permission set
 rowLevelSecurity: [
   {
     name: 'own_records',
@@ -85,13 +86,18 @@ rowLevelSecurity: [
     check: 'owner_id == current_user.id',
   },
   {
-    name: 'org_isolation',
-    object: 'contact',
-    operation: 'select',
-    using: 'organization_id == current_user.organization_id',
+    name: 'own_tasks',   // task.assignee: { type: 'user', defaultValue: 'current_user' }
+    object: 'task',
+    operation: 'insert',
+    check: 'assignee == current_user.id',
   },
 ]
 ```
+
+A `check` over a field the request never names refuses a plain create ("add a
+task" answers 403). Give the tying field a default the check admits:
+`defaultValue: 'current_user'` fills an omitted `user` field before `check` is
+judged, so `own_tasks` admits a create that names no assignee.
 
 Predicates are **canonical CEL** (ADR-0058): `field == current_user.<prop>`,
 `field == 'literal'`, `field in current_user.<array>`, comparisons (`>`/`<`/`>=`/`<=`),
@@ -113,8 +119,6 @@ traversal or subqueries — those are a compile error (ADR-0055), never silently
   hand-written policies for the common cases.
 
 ## Membership keys — a `current_user.KEY` set the roster object declares
-
-Declare the set on the **roster** object, not one policy per record.
 
 <!-- os:check -->
 ```typescript
@@ -152,9 +156,8 @@ rowLevelSecurity: [
 - With `id` the set is the ids of the caller's own roster rows; it grants
   nothing by itself. Tested against a column not referencing the roster, or another
   object's `id`, it is refused (`rls-predicate-membership-key-target`).
-- One name per stack: a key on two objects, a kernel name (`id`,
-  `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
-  `email`, `queues`) and a key on an object extension are refused.
+- One name per stack: a key on two objects, a kernel name (a fixed
+  placeholder above, `accessible_org_ids`) and a key on an object extension are refused.
 - Read once per request as a system read in the caller's organization, at
   most 1,000 values; more, a failed read or a
   `filter` that does not compile matches **no rows**. Whoever writes roster
@@ -179,20 +182,18 @@ rowLevelSecurity: [
 - A position distributes **only** the sets its `permissionSets` names
   (ADR-0131 D3/D4): `{ name: 'crm_sales_rep', label: 'Sales Rep', permissionSets:
   ['crm_sales_user'] }`. A set that merely shares the position's name is reported,
-  never granted; a name matching no set, or refused below, confers nothing.
+  never granted; a name matching no set confers nothing.
 - A package's position reads each name as its package's set, else the one holder
   in its declared `dependencies` closure plus `sys`; else it is refused. It
   still loads; the boot's catalog reference report logs each refusal with every
   candidate, and the position grants nothing through that name (its other sets
-  still do). `outside-closure`: only a non-dependency holds it or only the
-  environment (a set authored in Setup). `ambiguous-in-closure`: two holders
-  it reaches (a second package shipping a name is refused at install). Fix:
-  declare the dependency. Stored grants,
+  still do). `outside-closure` / `ambiguous-in-closure` as for a queue above
+  (the environment: a set authored in Setup; a second package shipping a name
+  is refused at install). Fix: declare the dependency. Stored grants,
   environment-authored positions, admin overlays of a package position and the
   `everyone`/`guest` anchors resolve environment-wide.
 - A portal or partner user is an organization member on the `external`
-  membership tier (closed list `owner`, `admin`, `delegated_admin`, `member`,
-  `external`, one per member —
+  membership tier (one per member —
   https://objectstack.ai/docs/permissions/authentication#membership-tiers-are-a-closed-list).
   The `everyone` baseline does not reach it, it sees no
   member directory and holds no business unit, and every org-wide default is
@@ -323,7 +324,11 @@ what changed and what an administrator re-checks after upgrading.
 **Renaming a position:** declare `renamedFrom: ['old_name']` on the renamed
 position, never delete and re-add (holders lose its sets). At boot its
 holders (`sys_user_position`) move to the new name in every organization,
-idempotently. Only holders: the boot log lists other references (sharing,
-queue and share recipients, pending approvers, invitations) for an admin. Not
-carried (warned): an old name still a position anywhere, claimed twice,
-recorded under another package, switched off, or a disabled claimant.
+idempotently. Only holders: no other reference to the old name is rewritten,
+Setup-authored ones included. Re-point your own source naming the old one: a
+`type: 'position'` sharing recipient, queue member or approver, a policy's
+`positions`, a `current_user.positions` predicate. The boot log lists stored
+references by table (sharing, queue and share recipients, pending approvers,
+invitations) for an admin. Not carried (warned): an old name still a position anywhere,
+claimed twice, recorded under another owner (a package or the environment),
+switched off, or a disabled claimant.

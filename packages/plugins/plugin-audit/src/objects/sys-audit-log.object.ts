@@ -471,6 +471,21 @@ export const SysAuditLog = ObjectSchema.create({
     // row. Its shipped surfaces are the unfiltered `recent` and `all_events`
     // views above.
     //
+    // [#33918] `scim_manager_unresolved` joins the enum WRITER-FIRST. Its
+    // writer is `scim-refusal-audit.ts` (`recordScimManagerUnresolved`, on the
+    // `audit` slot beside `recordScimRefusal`, through the same write), called
+    // by plugin-auth's SCIM door for a user write it SERVED whose Enterprise
+    // `manager` reference named no User the connection provisioned (maintainer
+    // ruling record 6909383114: served, `manager_id` unchanged, one operator
+    // warn and one row), at the warn's rate: one per connection per window,
+    // with the dropped count as `metadata.suppressed`. The row names the
+    // connection (`actor` `svc:scim:CONNECTION_ID`), the user the write was
+    // about (`object_name` `sys_user`, `record_id`), the connection's
+    // organization and, in `metadata`, the reference kind and the reference
+    // itself capped at 256 characters — nothing else of the request or the
+    // user. Its shipped surfaces are the unfiltered `recent` and `all_events`
+    // views above and the user's own ledger history.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -497,6 +512,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'SCIM Refused', value: 'scim_refused' },
           { label: 'Audit Signing Key Change', value: 'audit_signing_key_change' },
           { label: 'Dataset Query', value: 'dataset_query' },
+          { label: 'SCIM Manager Unresolved', value: 'scim_manager_unresolved' },
         ],
         label: 'Action',
         required: true,

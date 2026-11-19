@@ -13,7 +13,7 @@
  *    {@link AUDIT_CHECKPOINT_SIGNER_SERVICE}. The open build ships the local
  *    signer (ADR-0154 D6: one deployment Ed25519 key whose private half is a
  *    `sys_secret` handle under scope `audit_seal`); stage 2 registers a
- *    KMS-held one.
+ *    KMS-held one, which signs Ed25519 or ES256 (ADR-0154 D4, D6, amended).
  *  - **export** — {@link IAuditCheckpointSink}, in the service slot
  *    {@link AUDIT_CHECKPOINT_SINK_SERVICE}. The open build ships none; with none
  *    registered, checkpoints stay on the host.
@@ -29,16 +29,30 @@ export const AUDIT_CHECKPOINT_SIGNER_SERVICE = 'audit.checkpointSigner';
 /** The service slot a {@link IAuditCheckpointSink} is registered under (ADR-0154 D11). */
 export const AUDIT_CHECKPOINT_SINK_SERVICE = 'audit.checkpointSink';
 
-/** One signature, and the key that made it. */
+/**
+ * One signature, and the key that made it.
+ *
+ * Two algorithms, closed (ADR-0154 D4, D6, amended): **Ed25519** and **ES256**
+ * (ECDSA on P-256 with SHA-256). Which one a signature is checked by is the
+ * type of the key {@link IAuditCheckpointSigner.trustedPublicKey} answers for
+ * `keyId` — never a field of the record, which carries none. Any other key
+ * type, curve or encoding is no trusted key: what it signed verifies nothing.
+ */
 export interface AuditCheckpointSignature {
   /**
    * The id of the key that signed: its fingerprint, the lowercase hex SHA-256
-   * of the raw public key. Returned WITH the signature, never asked for
-   * separately, so a rotation between two calls cannot pair a signature with
-   * the wrong key.
+   * of the public key's bytes exactly as `trustedPublicKey` answers them
+   * (an Ed25519 key's raw 32 bytes; an ES256 key's DER SubjectPublicKeyInfo),
+   * so the key's type is bound under the id. Returned WITH the signature,
+   * never asked for separately, so a rotation between two calls cannot pair a
+   * signature with the wrong key.
    */
   readonly keyId: string;
-  /** The Ed25519 signature over the bytes given, base64. */
+  /**
+   * The signature over the bytes given, base64: Ed25519's 64 bytes, or for an
+   * ES256 key `r || s`, 64 bytes (IEEE P1363, the JWS form). A signer whose
+   * KMS returns a DER-encoded ECDSA signature converts it; DER never verifies.
+   */
   readonly signature: string;
 }
 
@@ -65,14 +79,26 @@ export interface IAuditCheckpointSigner {
   sign(bytes: Uint8Array): Promise<AuditCheckpointSignature>;
 
   /**
-   * The public key (base64, raw 32 bytes) this signer vouches for under
-   * `keyId`, or `null` when it vouches for none.
+   * The public key this signer vouches for under `keyId`, base64, or `null`
+   * when it vouches for none. An Ed25519 key is its raw 32 bytes; an ES256 key
+   * is the DER SubjectPublicKeyInfo of a P-256 key with its point
+   * uncompressed. `keyId` must be the SHA-256 of exactly these bytes, or the
+   * key is not trusted.
    *
    * This is the trust anchor `os audit verify`'s live check reads. ⛔ A public
    * key is never trusted because a row carries it: the local signer answers
    * only for a key whose wrapped private half opens under that key's own
    * fingerprint and derives exactly that public key (ADR-0154 D6); a KMS
    * signer answers with the public half its KMS serves for the key id.
+   *
+   * A host signer registered in place of the local one is the ONLY anchor:
+   * the local derivation is not asked, so the history the local key signed
+   * stays trusted only if the host signer pins it (ADR-0154 D6, amended).
+   * Before the switch the operator runs `os audit verify --out`; its proof
+   * bundle lists each trusted fingerprint with its public key. The host keeps
+   * those keys off the host and answers for exactly those fingerprints,
+   * beside its own key; a fingerprint it does not pin — a key row planted on
+   * the host after the switch included — is untrusted.
    */
   trustedPublicKey(keyId: string): Promise<string | null>;
 }

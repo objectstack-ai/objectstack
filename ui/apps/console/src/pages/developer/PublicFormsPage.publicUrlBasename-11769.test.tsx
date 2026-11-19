@@ -41,7 +41,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 /** One published public form, and one FormView not yet published (so the
  *  Publish dialog, which needs a candidate, can be opened), on the `ViewItem`
  *  shape `GET /meta/view` serves: the form under `config` (objectui#11545). */
-const { ADAPTER } = vi.hoisted(() => {
+const { ADAPTER, METADATA_CLIENT } = vi.hoisted(() => {
   const form = (name: string, sharing?: Record<string, unknown>) => ({
     name,
     label: name,
@@ -72,12 +72,24 @@ const { ADAPTER } = vi.hoisted(() => {
       },
     }),
   };
-  return { ADAPTER };
+  // objectstack#35054 — the writers (and the Edit dialog's prefill) start
+  // from the layered read: here the stored item is the served one, read from
+  // the same list (no translation in play).
+  const METADATA_CLIENT = {
+    layered: async (_type: string, name: string) => {
+      const listed: any = await ADAPTER.getClient().meta.getItems('view');
+      const items: any[] = Array.isArray(listed) ? listed : listed?.items ?? [];
+      const found = items.find((i) => i?.name === name) ?? null;
+      return { code: null, overlay: found, overlayScope: found ? 'env' : null, effective: found };
+    },
+  };
+  return { ADAPTER, METADATA_CLIENT };
 });
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAdapter: () => ADAPTER,
+  useMetadataClient: () => METADATA_CLIENT,
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

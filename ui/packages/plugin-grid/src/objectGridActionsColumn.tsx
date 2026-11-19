@@ -149,6 +149,17 @@ export function resolveObjectGridActionsColumn({
       // verdict this line carried before the prop existed.
       canEdit: rowVerdicts.canEdit,
       canDelete: rowVerdicts.canDelete,
+      // [objectstack#34208] The record-grained verdicts above are asked only
+      // once a row's actions are reached for — this is the one channel both
+      // menus and the cell signal it through — and an item whose answer is
+      // still on the wire shows inert rather than clickable.
+      onActionsDemand: recordVerdict.requestVerdicts,
+      crudVerdictPending: recordVerdict.pending
+        ? {
+            edit: recordVerdict(rowRecordId(row), 'update') === undefined,
+            delete: recordVerdict(rowRecordId(row), 'delete') === undefined,
+          }
+        : undefined,
       editPredicates,
       deletePredicates,
       onEdit,

@@ -92,6 +92,8 @@
     "FlowNode": "automation/FlowNode",
     "FlowNodeAction": "automation/FlowNodeAction",
     "FlowNodeSchema": "automation/FlowNode",
+    "FlowRecordFieldValue": "automation/FlowRecordFieldValue",
+    "FlowRecordFieldValueSchema": "automation/FlowRecordFieldValue",
     "FlowRegion": "automation/FlowRegion",
     "FlowRegionSchema": "automation/FlowRegion",
     "FlowRunGateSummary": "automation/FlowRunGateSummary",

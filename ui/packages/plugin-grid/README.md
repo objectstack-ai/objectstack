@@ -791,6 +791,16 @@ const schema: ObjectGridBlockNode = {
 };
 ```
 
+Edit and Delete also fold the server's verdict on each row: `writeScope`,
+sharing rules and row-level security can refuse a record the object grant
+allows. The grid asks for that verdict (`POST /api/v1/security/explain`, one
+batch per operation for the rows on the page) when a row's actions are first
+reached for — a pointer or the focus on the actions cell, or a row menu opening
+— and never on the list's first paint. Until the answer lands every row keeps
+the object-level verdict, and an open menu shows Edit and Delete inert; an item
+the answer refuses then goes. A failed or missing answer keeps the object-level
+verdict.
+
 ### Row callbacks are component props
 
 `onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`, `onBatchSave`, `onEdit`,

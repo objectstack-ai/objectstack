@@ -230,6 +230,8 @@ export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
  *   `prompts/list` / `prompts/get` a skill authored in the open framework.
  *   Where `registerSkillPrompts` installs that prompt surface, the skill is
  *   offered only on a server that serves every tool it binds (see `tools`).
+ *   A skill whose owner sets `mcpPrompt: false` is written for the in-product
+ *   agents only and is never projected (see `mcpPrompt`).
  * - **`tools`** — **bound** by the cloud runtime, **read** by MCP. The
  *   in-product `ask` / `build` agent runtime, which ships in the cloud /
  *   Enterprise distribution, composes an agent's tool set from it. In the open
@@ -346,9 +348,10 @@ export const SkillSchema = lazySchema(() => strictObject({
    * primitive, so a connected client can list this skill by name and fetch this
    * text, on a server that serves the tools the skill binds (see `tools`). A
    * skill with no `instructions` has nothing to project and is not listed as a
-   * prompt at all.
+   * prompt at all. Instructions written for the in-product agents only (their
+   * tools, their approval card) opt out with `mcpPrompt: false`.
    */
-  instructions: z.string().optional().describe('LLM instructions when skill is active — also served as an MCP prompt'),
+  instructions: z.string().optional().describe('LLM instructions when skill is active — also served as an MCP prompt unless mcpPrompt is false'),
 
   /**
    * References to tool names that belong to this skill.
@@ -362,8 +365,11 @@ export const SkillSchema = lazySchema(() => strictObject({
    * A `tool` record is NEVER required, and the default third-party path
    * declares none (ADR-0109). A name here resolves against, in order: the
    * stack's own `stack.tools[]` names; `PLATFORM_PROVIDED_TOOL_NAMES`, the
-   * curated registry of tools the cloud AI runtime registers at boot; and the
-   * `action_<name>` family the runtime materialises from the app's own
+   * curated registry of tools the cloud AI runtime registers at boot;
+   * `MCP_FILE_TOOL_NAMES`, the file tools the MCP door registers (`read_file`,
+   * `create_upload_link`), only when the skill is offered over MCP
+   * (`mcpPrompt` is not `false`), since an in-product turn runs without them;
+   * and the `action_<name>` family the runtime materialises from the app's own
    * AI-exposed declarative actions (`ai.exposed` + `ai.description` on a
    * headless action type — ADR-0011). The first of those is the OPTIONAL
    * AI-presentation refinement layer (Phase 2: LLM-facing description,
@@ -389,6 +395,11 @@ export const SkillSchema = lazySchema(() => strictObject({
    *   through `list_actions` / `run_action`, never as `action_<name>` tools.
    * - A skill that binds no tool is offered as before, and `prompts/get`
    *   answers a withheld skill as it answers a prompt name no skill derives.
+   * - The binding answers whether a connection CAN run the playbook, not
+   *   whether the playbook is written for MCP: a skill can bind tools MCP
+   *   serves under the same names and still be written for the in-product
+   *   agent loop. Its owner opts it out of MCP projection with
+   *   `mcpPrompt: false`, which no binding overrides.
    *
    * That is the reach of `registerSkillPrompts`: `MCPServerRuntime`'s HTTP
    * door, and any host that drives its own `McpServer` and calls it, stdio
@@ -400,7 +411,7 @@ export const SkillSchema = lazySchema(() => strictObject({
    * registers that tool. The references are still checked at authoring time in
    * both distributions (`ai-skill-tool-unresolved`).
    */
-  tools: z.array(z.string().regex(/^[a-z_][a-z0-9_]*\*?$/)).describe('Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime; an MCP server whose prompts `registerSkillPrompts` installs offers the skill only when it serves every tool named here (an `action_` entry also through `run_action`)'),
+  tools: z.array(z.string().regex(/^[a-z_][a-z0-9_]*\*?$/)).describe('Tool names belonging to this skill (supports trailing wildcard, e.g. `action_*`) — bound by the cloud agent runtime; an MCP server whose prompts `registerSkillPrompts` installs offers the skill only when it serves every tool named here (an `action_` entry also through `run_action`); `mcpPrompt: false` withholds it from MCP whatever this binding'),
 
   /**
    * Programmatic conditions for skill activation.
@@ -418,6 +429,33 @@ export const SkillSchema = lazySchema(() => strictObject({
    * MCP prompt (#3905).
    */
   active: z.boolean().default(true).describe('Whether the skill is enabled'),
+
+  /**
+   * Whether this skill is offered as an MCP prompt — the owner's opt-out of
+   * MCP projection.
+   *
+   * `false` declares the skill written for the **in-product** `ask` / `build`
+   * agents only: its instructions assume their tool set and their approval
+   * card, which an MCP client does not have. Such a skill is never listed by
+   * `prompts/list` and is answered by `prompts/get` as an unknown prompt name,
+   * on every MCP connection and whatever its `tools` binding — even on a
+   * connection that serves every tool it binds (`@objectstack/mcp`
+   * `projectSkillPrompt`, which both the per-request HTTP prompt surface and the
+   * long-lived stdio server read). The stdio server lists its prompts once, at
+   * boot: a skill saved with `false` while it runs stays on that list until
+   * restart, but its `prompts/get` answers it as unknown at once.
+   *
+   * Absent or `true`: offered as before, where the server serves the tools the
+   * skill binds (see `tools`). The key changes nothing else at run time: the
+   * in-product agent runtime resolves, binds and activates the skill exactly as
+   * without it, and its `surface` is validated as before. One authoring verdict
+   * reads it: with `false`, `ai-skill-tool-unresolved` resolves `tools` without
+   * the MCP door's file tools (`MCP_FILE_TOOL_NAMES`), since no in-product turn
+   * registers them; every other name is checked as before.
+   */
+  mcpPrompt: z.boolean().optional().describe(
+    'Whether this skill is offered as an MCP prompt. false = written for the in-product agents only: never listed by prompts/list and unknown to prompts/get on any MCP connection, whatever its tools binding. Absent or true = offered where the server serves its tools',
+  ),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here, in a code package's source;

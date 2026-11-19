@@ -38,6 +38,7 @@ const envelope = (objects: MePermissionsAuthenticatedResponse['objects']): MePer
   userId: 'u-auditor',
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['auditor'],
   permissionSets: ['auditor'],
   objects,

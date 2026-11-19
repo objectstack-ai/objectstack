@@ -57,7 +57,7 @@ Which optional better-auth route families are mounted under routes.auth
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **admin** | `boolean` | ✅ | Whether the better-auth admin family (`{routes.auth}`/admin/*: list-users, set-role, update-user, ban-user, …) is mounted. Same value as features.admin on GET `{routes.auth}`/config, read from the same source; false means those routes answer a plain 404 on this deployment. |
+| **admin** | `boolean` | ✅ | Whether the better-auth admin family (`{routes.auth}`/admin/*: list-users, set-role, update-user, impersonate-user, …) is mounted. Same value as features.admin on GET `{routes.auth}`/config, read from the same source; false means those routes answer a plain 404 on this deployment. ban-user and unban-user are not in the family: they are ObjectStack mounts, served whatever this says. |
 
 
 ---
@@ -166,7 +166,7 @@ Which optional better-auth route families are mounted under routes.auth
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **admin** | `boolean` | ✅ | Whether the better-auth admin family (`{routes.auth}`/admin/*: list-users, set-role, update-user, ban-user, …) is mounted. Same value as features.admin on GET `{routes.auth}`/config, read from the same source; false means those routes answer a plain 404 on this deployment. |
+| **admin** | `boolean` | ✅ | Whether the better-auth admin family (`{routes.auth}`/admin/*: list-users, set-role, update-user, impersonate-user, …) is mounted. Same value as features.admin on GET `{routes.auth}`/config, read from the same source; false means those routes answer a plain 404 on this deployment. ban-user and unban-user are not in the family: they are ObjectStack mounts, served whatever this says. |
 
 
 ---

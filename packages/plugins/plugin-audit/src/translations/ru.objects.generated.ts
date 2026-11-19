@@ -41,11 +41,12 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Изменение статуса администратора платформы",
           action_invocation: "Вызов действия",
           package_uninstall: "Удаление пакета",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "Импорт неуправляемого пакета",
+          credential_use: "Использование учётных данных",
+          scim_refused: "Запрос SCIM отклонён",
+          audit_signing_key_change: "Изменение ключа подписи аудита",
+          dataset_query: "Запрос к набору данных",
+          scim_manager_unresolved: "Руководитель SCIM не найден"
         }
       },
       user_id: {

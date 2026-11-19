@@ -53,6 +53,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import {
   CLI,
   childEnv,
@@ -303,8 +304,15 @@ beforeAll(async () => {
   rec.reseededDeals = byName(owned(await http(a, 'GET', `/api/v1/data/${DEAL}`, admin.token)))
     .filter((r) => r.name !== REAL_DEAL);
 
-  // Empty both seeded tables by id — not a purge, which would tell the heal
-  // the emptiness is wanted — so the next boot heals them.
+  // Empty both seeded tables by id, then, with boot 1 stopped, clear the
+  // database's landed-key record too. Not a purge, and not a person's
+  // deletion alone: both are emptiness the heal now leaves alone (a purge by
+  // its ledger flag; a deletion since #34405, because the heal honours the
+  // record and does not insert again a recorded key whose row is gone). The
+  // heal is for a database that lost the seeded rows AND their record under
+  // a kept ledger, so that is the state boot 2 finds; the users stay, so the
+  // installer the ledger records still resolves. Ruling 6670861426 (#30324)
+  // is about who owns the healed rows; the assertions below read that.
   rec.emptied = [];
   for (const object of [NOTE, DEAL]) {
     for (const row of owned(await http(a, 'GET', `/api/v1/data/${object}`, admin.token))) {
@@ -312,6 +320,18 @@ beforeAll(async () => {
     }
   }
   await stopGroup(a.child);
+  // No `-d` and no project config: `os start` stores at `<home>/data/objectstack.db`.
+  const dbFile = join(home, 'data', 'objectstack.db');
+  const store = new Database(dbFile, { fileMustExist: true });
+  try {
+    const recorded = store
+      .prepare('SELECT COUNT(*) AS n FROM sys_seed_landed_key WHERE object_name IN (?, ?)')
+      .get(DEAL, NOTE) as { n: number };
+    if (recorded.n === 0) throw new Error(`precondition: ${dbFile} records no landed key for ${DEAL} or ${NOTE}`);
+    store.prepare('DELETE FROM sys_seed_landed_key').run();
+  } finally {
+    store.close();
+  }
 
   // ── boot 2: the same home; the rehydrate finds every seeded table empty ───
   const b = await bootStart(cwd, home);

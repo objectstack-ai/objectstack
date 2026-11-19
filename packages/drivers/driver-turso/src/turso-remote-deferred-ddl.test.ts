@@ -230,7 +230,10 @@ describe('lit control — remote ordinary boot sync (deferral NOT armed) still p
 
     expect(rec.ddl()).toEqual([
       expect.stringMatching(/^CREATE TABLE "fresh"/),
+      // [#33695] The implicit default-order index, on the new table and the existing one.
+      'CREATE INDEX IF NOT EXISTS "idx_fresh_created_at_id" ON "fresh" ("created_at", "id")',
       'ALTER TABLE "probe" ADD COLUMN "why" TEXT',
+      'CREATE INDEX IF NOT EXISTS "idx_probe_created_at_id" ON "probe" ("created_at", "id")',
     ]);
     expect(tablesOf(stub)).toEqual(['fresh', 'probe']);
     expect(columnsOf(stub, 'probe')).toContain('why');
@@ -244,7 +247,11 @@ describe('lit control — remote ordinary boot sync (deferral NOT armed) still p
 
     await driver.syncSchema('probe', PROBE);
 
-    expect(rec.ddl()).toEqual(['ALTER TABLE "probe" ADD COLUMN "why" TEXT']);
+    expect(rec.ddl()).toEqual([
+      'ALTER TABLE "probe" ADD COLUMN "why" TEXT',
+      // [#33695] The implicit default-order index the seeded table never had.
+      'CREATE INDEX IF NOT EXISTS "idx_probe_created_at_id" ON "probe" ("created_at", "id")',
+    ]);
     expect(rec.rowWrites().length).toBeGreaterThan(0);
     expect(rec.rowWrites().every((s) => /^\s*update "probe" set "at"/i.test(s))).toBe(true);
     expect(atOf(stub)).toBe('2025-07-28T00:00:00.000Z');

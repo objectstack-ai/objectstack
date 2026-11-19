@@ -70,6 +70,7 @@ const envelope = (objects: Record<string, Record<string, unknown>>): MePermissio
   tenantId: null,
   positions: ['member'],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: ['member'],
   objects: objects as never,
   fields: {},

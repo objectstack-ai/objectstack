@@ -19,6 +19,8 @@ function makeDriver(opts: { onParentUpdate?: (parentId: string, callN: number) =
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      // A field's `$in`: a recompute naming several parents groups them under it (#33795).
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row?.[k]);
       return row?.[k] === v;
     });
   };

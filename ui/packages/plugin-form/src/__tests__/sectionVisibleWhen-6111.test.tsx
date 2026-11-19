@@ -122,7 +122,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { PredicateScopeProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
@@ -179,6 +179,13 @@ afterEach(() => {
 });
 
 /**
+ * Section names are read inside the `<form>`: with two sections drawn, the
+ * dialog and the full-page form also repeat each name in their section
+ * navigation above the form (objectstack#34605).
+ */
+const inForm = () => within(document.querySelector('form') as HTMLElement);
+
+/**
  * Two sections: `Always` carries no predicate and is the paired control that
  * proves the form rendered AT ALL — so a missing `Compensation` heading is a
  * verdict and not an inability. `Compensation` carries the gate.
@@ -209,7 +216,7 @@ const renderObjectForm = async (
     </PredicateScopeProvider>,
   );
   // The un-gated sibling heading is the readiness signal AND the control.
-  await waitFor(() => expect(screen.getByText('Always')).toBeTruthy());
+  await waitFor(() => expect(inForm().getByText('Always')).toBeTruthy());
 };
 
 /** Mount `ModalForm` directly — the shape `resolveFormViewLayout` produces. */
@@ -233,11 +240,11 @@ const renderModalFormDirect = async (
       />
     </PredicateScopeProvider>,
   );
-  await waitFor(() => expect(screen.getByText('Always')).toBeTruthy());
+  await waitFor(() => expect(inForm().getByText('Always')).toBeTruthy());
 };
 
 /** The gated section's heading — `null` when the layout hid it. */
-const gatedHeading = () => screen.queryByText('Compensation');
+const gatedHeading = () => inForm().queryByText('Compensation');
 
 /**
  * The gated section's claimed MEMBER field (#6236) — `null` when the layout's

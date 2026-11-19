@@ -61,6 +61,19 @@
  * declares both as free-form strings, so there is no contract for a door to
  * state.
  *
+ * ## A write starts from the view as its author stored it
+ *
+ * objectstack#35054 (route D): the served list is translated for the
+ * console's locale (a form view's `label`, its section titles, its thank-you
+ * title and message), and the metadata door stores a view body verbatim. Both
+ * writers used to spread the served item into the body, and the edit dialog
+ * prefilled the thank-you text from it, so a Publish or a Save in a zh-CN
+ * session stored the translations as the form's source text. The served list
+ * still decides what is listed and under which slug; every body a write sends,
+ * and the dialog's prefill, come from the untranslated layered read
+ * (`authoredPublished`: these writers write the live row, never a draft). A
+ * form with nothing stored to read is not written from the served copy.
+ *
  * ## The anonymous URL is the router's answer, not a hard-coded mount
  *
  * The anonymous route is `/f/:slug` UNDER the console router's basename (the
@@ -76,7 +89,8 @@
 
 import { useEffect, useState } from 'react';
 import { useHref } from 'react-router-dom';
-import { useAdapter, DeveloperNamespaceGate } from '@object-ui/app-shell';
+import { useAdapter, useMetadataClient, DeveloperNamespaceGate } from '@object-ui/app-shell';
+import { authoredPublished, formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Card,
@@ -125,6 +139,16 @@ interface PublicFormRow {
   /** The served item, saved back whole with its `config` replaced. */
   item: ServedViewItem;
   /** The form the rule found open: the item's `config` on a served ViewItem. */
+  form: Record<string, any>;
+}
+
+/** A form view as its author stored it, for the edit dialog (objectstack#35054). */
+interface StoredFormView {
+  name: string;
+  /** The served (display) label, for the dialog's title only: it is never written. */
+  label?: string;
+  item: Record<string, any>;
+  /** The stored item's `config`: the form the writes replace. */
   form: Record<string, any>;
 }
 
@@ -229,6 +253,22 @@ function PublicFormsPageBody() {
   const { t } = useObjectTranslation();
   const adapter = useAdapter();
   const client: any = adapter?.getClient?.();
+  const metadataClient = useMetadataClient();
+
+  /**
+   * The published view as its author stored it (module header): the layered
+   * read, untranslated, at the address the writes name (no package). Throws
+   * when the read fails or holds nothing, so no write starts from the served
+   * copy.
+   */
+  const readStoredFormView = async (name: string): Promise<StoredFormView> => {
+    const item = authoredPublished('view', await metadataClient.layered('view', name)) as Record<string, any>;
+    const form = item.config;
+    if (!form || typeof form !== 'object' || Array.isArray(form)) {
+      throw new Error(`view/${name}: no stored form to read`);
+    }
+    return { name, item, form };
+  };
 
   const [rows, setRows] = useState<PublicFormRow[]>([]);
   const [publishable, setPublishable] = useState<PublishableFormRow[]>([]);
@@ -241,7 +281,7 @@ function PublicFormsPageBody() {
   const [publishing, setPublishing] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
-  const [editRow, setEditRow] = useState<PublicFormRow | null>(null);
+  const [editRow, setEditRow] = useState<StoredFormView | null>(null);
   const [editSlug, setEditSlug] = useState('');
   const [editBehavior, setEditBehavior] = useState<SubmitBehaviorKind>('thank-you');
   const [editBehaviorTitle, setEditBehaviorTitle] = useState('');
@@ -354,22 +394,23 @@ function PublicFormsPageBody() {
       toast.error(t('console.developer.publicForms.invalidSlug', { defaultValue: 'Invalid slug' }));
       return;
     }
-    // The form body of a served ViewItem is its `config` (module header).
-    const config = cand.item.config;
-    const next = {
-      ...cand.item,
-      config: {
-        ...config,
-        sharing: {
-          ...(config.sharing ?? {}),
-          enabled: true,
-          allowAnonymous: true,
-          publicLink: `/forms/${slug}`,
-        },
-      },
-    };
     setPublishing(true);
     try {
+      // The form body is the STORED item's `config` (module header).
+      const stored = await readStoredFormView(cand.name);
+      const config = stored.form;
+      const next = {
+        ...stored.item,
+        config: {
+          ...config,
+          sharing: {
+            ...(config.sharing ?? {}),
+            enabled: true,
+            allowAnonymous: true,
+            publicLink: `/forms/${slug}`,
+          },
+        },
+      };
       await client.meta.saveItem('view', cand.name, next);
       toast.success(t('console.developer.publicForms.published', { defaultValue: 'Published {{name}}', name: cand.name }));
       setPublishOpen(false);
@@ -377,16 +418,26 @@ function PublicFormsPageBody() {
       setPublishSlug('');
       await load();
     } catch (e: any) {
-      toast.error(t('console.developer.publicForms.publishFailed', { defaultValue: 'Publish failed: {{message}}', message: String(e?.message ?? e) }));
+      toast.error(t('console.developer.publicForms.publishFailed', { defaultValue: 'Publish failed: {{message}}', message: formatMetadataError(e) }));
     } finally {
       setPublishing(false);
     }
   };
 
-  const openEditor = (row: PublicFormRow) => {
-    setEditRow(row);
+  const openEditor = async (row: PublicFormRow) => {
+    // The dialog edits the stored form (module header): its thank-you text is
+    // prefilled from the stored `submitBehavior`, never the served one. The
+    // slug is the served rule's, which reads no translated key.
+    let stored: StoredFormView;
+    try {
+      stored = await readStoredFormView(row.name);
+    } catch (e: any) {
+      toast.error(t('console.developer.publicForms.saveFailed', { defaultValue: 'Save failed: {{message}}', message: formatMetadataError(e) }));
+      return;
+    }
+    setEditRow({ ...stored, label: row.label });
     setEditSlug(row.slug);
-    const sb = row.form.submitBehavior;
+    const sb = stored.form.submitBehavior;
     const kind = (sb?.kind as any) ?? 'thank-you';
     setEditBehavior(kind);
     setEditBehaviorTitle(sb?.title ?? '');
@@ -430,8 +481,9 @@ function PublicFormsPageBody() {
         submitBehavior = { kind: editBehavior };
         break;
     }
-    // `sharing` and `submitBehavior` both belong to the form, which on a served
-    // ViewItem is its `config` (module header).
+    // `sharing` and `submitBehavior` both belong to the form, which on a
+    // ViewItem is its `config`: the stored one the dialog was opened on
+    // (module header).
     const form = editRow.form;
     const next = {
       ...editRow.item,
@@ -454,7 +506,7 @@ function PublicFormsPageBody() {
       setEditRow(null);
       await load();
     } catch (e: any) {
-      toast.error(t('console.developer.publicForms.saveFailed', { defaultValue: 'Save failed: {{message}}', message: String(e?.message ?? e) }));
+      toast.error(t('console.developer.publicForms.saveFailed', { defaultValue: 'Save failed: {{message}}', message: formatMetadataError(e) }));
     } finally {
       setSaving(false);
     }

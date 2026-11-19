@@ -60,7 +60,7 @@
 import { GroupingConfigSchema, ListViewSchema, ViewFilterRuleSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig, ViewFilterRule } from '@objectstack/spec/ui';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { toFilterGroup } from '@object-ui/plugin-view';
+import { toFilterGroup } from '@object-ui/plugin-view/core';
 import { foldFilterGroupToSpecRules } from './viewFilterFold.js';
 
 const PREFIX = 'uf_';

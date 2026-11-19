@@ -55,6 +55,16 @@ let apps: Array<Record<string, unknown>> = [];
 vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => ({ apps, refresh }),
 }));
+// objectstack#35054 — Publish sends the stored app (the layers read): the
+// listed app minus its read decorations, which no layer carries.
+vi.mock('../../providers/AdapterProvider', () => ({
+  useAdapter: () => ({
+    getAuthoredItem: async (_type: string, name: string) => {
+      const app = apps.find((a) => a.name === name);
+      return app ? Object.fromEntries(Object.entries(app).filter(([k]) => !k.startsWith('_'))) : null;
+    },
+  }),
+}));
 
 // The commit timeline is a dialog with its own fetches; this file measures the
 // bar's read point and its publish body, not ADR-0067 history.
@@ -63,9 +73,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { UnpublishedAppBar } from '../UnpublishedAppBar';
 
-function renderBar() {
+function renderBar(path = '/apps/crm') {
   return render(
-    <MemoryRouter initialEntries={['/apps/crm']}>
+    <MemoryRouter initialEntries={[path]}>
       <UnpublishedAppBar />
     </MemoryRouter>,
   );
@@ -156,6 +166,23 @@ describe('UnpublishedAppBar — the Publish write', () => {
     // silently rewrote the author's navigation choice.
     expect(body).not.toHaveProperty('hidden');
     await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  // objectstack#34610 — an app the AI builds is routed at its package id
+  // (ADR-0048); the write is keyed by the app's own name, which the meta door
+  // requires to agree with the key it is saved under.
+  it('routed at its package id, it saves the app under its own name', async () => {
+    apps = [{ name: 'tracker_app', _packageId: 'app.tracker', _unpublished: true }];
+    mockPutOk();
+    renderBar('/apps/app.tracker/tracker_task');
+    screen.getByTestId('unpublished-app-publish').click();
+
+    await waitFor(() => {
+      expect((global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    });
+    const [url, init] = (global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/meta/app/tracker_app');
+    expect(JSON.parse(String(init.body))).toMatchObject({ name: 'tracker_app', _unpublished: false });
   });
 
   it('carries the app\'s existing `hidden` through untouched — publishing is not an unhide', async () => {

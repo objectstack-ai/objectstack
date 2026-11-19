@@ -10,6 +10,7 @@ import {
 import { explainRule } from './rule-explanations.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import { SEMANTIC_ROLE_FIELD_UNKNOWN, validateSemanticRoles } from './validate-semantic-roles.js';
+import { FieldSchema } from '@objectstack/spec/data';
 
 const obj = (over: Record<string, unknown> = {}) => ({
   name: 'proj_task',
@@ -705,6 +706,231 @@ describe('validateObjectFieldRefs — lookupFilters[].field (addresses the REFER
   });
 });
 
+describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD BEING EDITED, one hop, #34200)', () => {
+  // A quote's Price Book picker (the `LookupFilterRecordReference` example):
+  // `$record` reads the quote — the object that OWNS the picker field — or one
+  // relationship hop from it, never the price book the filter runs on.
+  const quote = (filters: unknown[], over: Record<string, unknown> = {}) => ({
+    objects: [
+      {
+        name: 'sales_quote',
+        fields: {
+          quote_date: { type: 'date' },
+          notes: { type: 'text' },
+          account: { type: 'lookup', reference: 'crm_account' },
+          partner: { type: 'lookup', reference: 'elsewhere_partner' },
+          parent_quote: { type: 'tree', reference: 'sales_quote' },
+          approver_user: { type: 'user' },
+          price_book: { type: 'lookup', reference: 'sales_price_book', lookupFilters: filters },
+          ...over,
+        },
+      },
+      {
+        name: 'crm_account',
+        fields: {
+          name: { type: 'text' },
+          cb_market: { type: 'select' },
+          parent: { type: 'lookup', reference: 'crm_account' },
+          markets: { type: 'multiselect' },
+        },
+      },
+      {
+        name: 'sales_price_book',
+        fields: { valid_from: { type: 'date' }, valid_to: { type: 'date' }, cb_market: { type: 'select' } },
+      },
+    ],
+  });
+  const at = (i: number) => `objects[0].fields.price_book.lookupFilters[${i}].value.$record`;
+  const entry = (path: string, field = 'cb_market') => ({ field, operator: 'eq', value: { $record: path } });
+
+  it('REFUSES an unknown head, naming the segment and the edited object', () => {
+    const findings = validateObjectFieldRefs(quote([entry('acount.cb_market')]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: 'error', rule: OBJECT_FIELD_REF_UNKNOWN, path: at(0) });
+    expect(findings[0]!.message).toBe(
+      'fields.price_book.lookupFilters[0].value.$record "acount.cb_market" traverses "acount", which is not a '
+        + 'field on object "sales_quote". Did you mean "account"?',
+    );
+    expect(findings[0]!.hint).toContain('`$record` reads the record being edited');
+  });
+
+  it('REFUSES an unknown leaf, judged against the object the hop references', () => {
+    const findings = validateObjectFieldRefs(quote([entry('account.cb_markt')]));
+    expect(findings.map((f) => f.path)).toEqual([at(0)]);
+    expect(findings[0]!.message).toContain('"account.cb_markt" is not a field on object "crm_account"');
+    expect(findings[0]!.message).toContain('Did you mean "cb_market"?');
+  });
+
+  it('REFUSES a hop through a field that is not a relationship', () => {
+    const findings = validateObjectFieldRefs(quote([entry('notes.cb_market')]));
+    expect(findings.map((f) => f.path)).toEqual([at(0)]);
+    expect(findings[0]!.message).toContain('traverses "notes", which is a `text` field on object "sales_quote"');
+  });
+
+  it('REFUSES two hops at the second one, even when every segment exists (the raw `os lint` path)', () => {
+    const findings = validateObjectFieldRefs(quote([entry('account.parent.cb_market')]));
+    expect(findings.map((f) => f.path)).toEqual([at(0)]);
+    expect(findings[0]!.message).toBe(
+      'fields.price_book.lookupFilters[0].value.$record "account.parent.cb_market" takes a second hop at '
+        + '"parent"; it reads at most one relationship hop from the record being edited.',
+    );
+  });
+
+  it('REFUSES a single name the edited record does not carry — a field of the FILTERED object is not one', () => {
+    // `valid_from` is a column of the price book the filter runs on; `$record`
+    // reads the quote. Writing the candidate's own column is `{ $field }`.
+    const findings = validateObjectFieldRefs(quote([entry('valid_from', 'valid_to')]));
+    expect(findings.map((f) => f.path)).toEqual([at(0)]);
+    expect(findings[0]!.message).toContain('"valid_from" is not a field on object "sales_quote"');
+  });
+
+  it('passes a single field of the edited record, and an injected column of it', () => {
+    expect(validateObjectFieldRefs(quote([
+      { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true },
+      { field: 'valid_to', operator: 'gte', value: { $record: 'created_at' } },
+    ]))).toEqual([]);
+  });
+
+  it('passes a single hop to a field of the referenced object', () => {
+    expect(validateObjectFieldRefs(quote([entry('account.cb_market')]))).toEqual([]);
+  });
+
+  // [review S1] The hop set is the family's `RELATIONSHIP_FIELD_TYPES`, not
+  // lookup / master_detail alone: a `user` field is a lookup to `sys_user`
+  // and a `tree` a self-lookup, each one stored foreign key the picker
+  // resolves the same way. An injected relationship column is unjudged.
+  it('passes a hop through a `tree` field (a self-lookup)', () => {
+    expect(validateObjectFieldRefs(quote([entry('parent_quote.quote_date', 'valid_from')]))).toEqual([]);
+  });
+
+  it('passes a hop through a `user` field (a lookup to `sys_user`, unjudged past the hop here)', () => {
+    expect(validateObjectFieldRefs(quote([entry('approver_user.department')]))).toEqual([]);
+  });
+
+  it('passes a hop through an injected column (`owner_id.NAME`): the graph cannot judge it', () => {
+    expect(validateObjectFieldRefs(quote([entry('owner_id.anything')]))).toEqual([]);
+  });
+
+  it('stays silent on a hop whose referenced object is not in this stack, as `dependsOn` does', () => {
+    expect(validateObjectFieldRefs(quote([entry('partner.anything')]))).toEqual([]);
+  });
+
+  it('reports the `$record` miss and the `.field` miss of one entry as two findings: two objects, two fixes', () => {
+    const findings = validateObjectFieldRefs(quote([
+      { field: 'cb_markt', operator: 'eq', value: { $record: 'cb_markt' } },
+    ]));
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.price_book.lookupFilters[0].field',
+      at(0),
+    ]);
+  });
+
+  it('reads the whole value only: a list member is the parse\'s refusal, not this rule\'s', () => {
+    // `refuseMalformedLookupFilterEntry` refuses `{ $record }` as a list member
+    // ("never a member of a list"), so nothing judged here could add to it.
+    expect(validateObjectFieldRefs(quote([
+      { field: 'cb_market', operator: 'in', value: [{ $record: 'acount.cb_market' }, 'domestic'] },
+    ]))).toEqual([]);
+    expect(FieldSchema.safeParse({
+      type: 'lookup',
+      reference: 'sales_price_book',
+      lookupFilters: [{ field: 'cb_market', operator: 'in', value: [{ $record: 'account.cb_market' }, 'domestic'] }],
+    }).success).toBe(false);
+  });
+
+  it('leaves a `$record` nested deeper inside a literal unnamed — an opaque literal to the parse too', () => {
+    expect(validateObjectFieldRefs(quote([
+      { field: 'cb_market', operator: 'eq', value: { market: { $record: 'acount.cb_market' } } },
+    ]))).toEqual([]);
+  });
+
+  it('stays silent on a type with no picker: nothing reads the key there', () => {
+    expect(validateObjectFieldRefs(quote([], {
+      memo: { type: 'text', lookupFilters: [entry('acount.cb_market')] },
+    }))).toEqual([]);
+  });
+
+  it('judges a `user` field\'s picker too, against the record being edited', () => {
+    const findings = validateObjectFieldRefs(quote([], {
+      approver: { type: 'user', lookupFilters: [{ field: 'name', operator: 'eq', value: { $record: 'acount.name' } }] },
+    }));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.approver.lookupFilters[0].value.$record']);
+  });
+
+  // [#34378] A path that names real fields can still read a LIST. The
+  // comparand is one value under a scalar operator, so a multi-valued head
+  // (a plain path to it, or a hop through it) or a multi-valued leaf behind a
+  // single-valued hop is refused — by `isMultiValueField`, `FieldSchema`'s own
+  // predicate: an inherently multi type, or `multiple: true` on a
+  // multi-capable one.
+  describe('a path through or to a multi-valued field (#34378)', () => {
+    const multi = {
+      tags: { type: 'tags' },
+      regions: { type: 'select', multiple: true },
+      stage: { type: 'select', multiple: false },
+      accounts: { type: 'lookup', reference: 'crm_account', multiple: true },
+      partners: { type: 'lookup', reference: 'elsewhere_partner', multiple: true },
+      watchers: { type: 'user', multiple: true },
+    };
+    const refused = (path: string) => {
+      const findings = validateObjectFieldRefs(quote([entry(path)], multi));
+      expect(findings.map((f) => f.path)).toEqual([at(0)]);
+      expect(findings[0]).toMatchObject({ severity: 'error', rule: OBJECT_FIELD_REF_UNKNOWN });
+      expect(findings[0]!.hint).toContain('Point `$record` at a single-valued field');
+      return findings[0]!.message;
+    };
+
+    it('REFUSES a plain path to an inherently multi-valued field (`tags`)', () => {
+      expect(refused('tags')).toBe(
+        'fields.price_book.lookupFilters[0].value.$record "tags" names "tags", a multi-valued field on object '
+          + '"sales_quote"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it('REFUSES a plain path to a `multiple: true` select', () => {
+      expect(refused('regions')).toContain('names "regions", a multi-valued field on object "sales_quote"');
+    });
+
+    it('REFUSES a hop through a `multiple: true` lookup, at the hop', () => {
+      expect(refused('accounts.cb_market')).toBe(
+        'fields.price_book.lookupFilters[0].value.$record "accounts.cb_market" goes through "accounts", a '
+          + 'multi-valued field on object "sales_quote"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it('REFUSES a hop through a `multiple: true` user field, its target unjudged past the hop', () => {
+      expect(refused('watchers.department')).toContain('goes through "watchers", a multi-valued field');
+    });
+
+    it('REFUSES a hop through a multi-valued lookup to an object outside the stack: the head is this object\'s', () => {
+      expect(refused('partners.anything')).toContain('goes through "partners", a multi-valued field');
+    });
+
+    it('REFUSES a multi-valued leaf behind a single-valued hop, naming the leaf and its object', () => {
+      expect(refused('account.markets')).toBe(
+        'fields.price_book.lookupFilters[0].value.$record "account.markets" ends at "markets", a multi-valued '
+          + 'field on object "crm_account"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it('reports a misspelt leaf behind a multi-valued hop once, as the miss', () => {
+      const findings = validateObjectFieldRefs(quote([entry('accounts.cb_markt')], multi));
+      expect(findings.map((f) => f.path)).toEqual([at(0)]);
+      expect(findings[0]!.message).toContain('"accounts.cb_markt" is not a field on object "crm_account"');
+    });
+
+    it('passes single-valued paths: a plain field, a single lookup, a hop, a `multiple: false` select', () => {
+      expect(validateObjectFieldRefs(quote([
+        { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } },
+        entry('account', 'cb_market'),
+        entry('account.cb_market'),
+        entry('stage'),
+        entry('account.created_at', 'valid_to'),
+      ], multi))).toEqual([]);
+    });
+  });
+});
+
 describe('validateObjectFieldRefs — summaryOperations.filter (addresses the CHILD object, #31224)', () => {
   // `crm_account` is the parent; `crm_invoice` (with an FK to it) the child.
   const rollup = (filter: unknown, over: Record<string, unknown> = {}) => ({
@@ -1030,6 +1256,9 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       '`compactLayout`',
       '`relatedListColumns` against the object that owns the field',
       '`lookupColumns` and `lookupFilters[].field` against the REFERENCED object',
+      '`lookupFilters[].value.$record`',
+      'at most one relationship hop',
+      'a path through or to a multi-valued field',
       '`lookup`, `master_detail` and `user`',
       'reported once, there',
       'read verbatim',
@@ -1056,6 +1285,7 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       '.relatedListColumns[',
       '.lookupColumns[',
       '.lookupFilters[',
+      '.value.$record',
       '.dependsOn[',
       '.summaryOperations.filter.',
       '.nameField',
@@ -1079,7 +1309,7 @@ describe('[#22161] one-line fix — object-field-ref-unknown', () => {
     const converted = fired.filter((f) => f.rule === OBJECT_FIELD_REF_UNKNOWN);
     // Coverage control: every position fired (the verdict block above names
     // them), so the bound reads each prescription.
-    for (const position of ['.highlightFields[', '.publicSharing.redactFields[', '.indexes[', '.relatedListColumns[', '.lookupColumns[', '.lookupFilters[', '.dependsOn[', '.summaryOperations.filter.', '.nameField', '.displayNameField', '.activityMilestones[']) {
+    for (const position of ['.highlightFields[', '.publicSharing.redactFields[', '.indexes[', '.relatedListColumns[', '.lookupColumns[', '.lookupFilters[', '.value.$record', '.dependsOn[', '.summaryOperations.filter.', '.nameField', '.displayNameField', '.activityMilestones[']) {
       expect(converted.some((f) => f.path.includes(position)), position).toBe(true);
     }
     for (const f of converted) {

@@ -109,6 +109,7 @@ const ANSWER: MePermissionsAuthenticatedResponse = {
   tenantId: null,
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: ['sales'],
   systemPermissions: [],
   objects: {

@@ -1,8 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#15942 / #16293] The `run_action` door carries the confirmation member —
- * and the ADR-0112 refusal that member exists to satisfy.
+ * [#15942 / #16293] The `run_action` door carried the confirmation member —
+ * and the ADR-0112 refusal that member existed to satisfy.
+ *
+ * [#34209] RETIRED (maintainer ruling 6909355256). Since the hand-off (#33690)
+ * the member confirmed nothing, so it is no longer declared: the closed input
+ * refuses a call that carries it, and the tool forwards no member to the
+ * bridge. The pins below that asserted the member was advertised, forwarded
+ * and satisfied the gate are FLIPPED to assert the opposite; the strip story
+ * that follows is why the closed shape, and not a silent drop, is the answer.
  *
  * ## Why this file drives the REAL door
  *
@@ -49,10 +56,10 @@ import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
 const GATED = 'archive_account';
 
 /**
- * A bridge that reproduces the runtime gate's OBSERVABLE contract: it refuses
- * the gated action unless the request carries the member as boolean `true`,
- * throwing the same `code` / `status` / `details` envelope
- * `actionConfirmationRefusal` produces.
+ * A bridge that reproduces the runtime door's OBSERVABLE answer for a gated
+ * action on a host with no pending-confirmation service: it refuses the gated
+ * action whatever the request carries, throwing the `code` / `status` /
+ * `details` envelope the runtime produces (#33690).
  */
 function makeBridge(): McpDataBridge & McpActionBridge & { calls: any[] } {
   const calls: any[] = [];
@@ -86,7 +93,7 @@ function makeBridge(): McpDataBridge & McpActionBridge & { calls: any[] } {
     },
     async runAction(name: string, input: any) {
       calls.push([name, input]);
-      if (name === GATED && input?.[AI_ACTION_CONFIRMATION_MEMBER] !== true) {
+      if (name === GATED) {
         throw Object.assign(
           new Error(
             `Action '${GATED}' on 'account' declares ai.requiresConfirmation: true — nothing was run.`,
@@ -98,6 +105,7 @@ function makeBridge(): McpDataBridge & McpActionBridge & { calls: any[] } {
               actionName: GATED,
               objectName: 'account',
               confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+              reason: 'no_confirmation_service',
             },
           },
         );
@@ -133,73 +141,68 @@ describe('run_action carries the confirmation member through the real MCP door (
     bridge = makeBridge();
   });
 
-  it('advertises the member on the tool schema, so a model can DISCOVER the retry', async () => {
+  it('[#34209] no longer advertises the member on the tool schema, and the shape is closed', async () => {
     const json = await call({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
     const runAction = json.result.tools.find((t: any) => t.name === 'run_action');
     const props = runAction.inputSchema.properties;
-    // Control: the pre-existing members are still advertised, so a missing
-    // `confirm` below would be a real absence and not an empty read.
+    // Control: the pre-existing members are still advertised, so the missing
+    // `confirm` below is a real absence and not an empty read.
     expect(Object.keys(props)).toEqual(
       expect.arrayContaining(['actionName', 'objectName', 'recordId', 'params']),
     );
-    expect(Object.keys(props)).toContain(AI_ACTION_CONFIRMATION_MEMBER);
-    expect(props[AI_ACTION_CONFIRMATION_MEMBER].type).toBe('boolean');
+    expect(Object.keys(props)).not.toContain(AI_ACTION_CONFIRMATION_MEMBER);
+    expect(runAction.inputSchema.additionalProperties).toBe(false);
   });
 
-  it('REFUSES a gated action with no member — code, status and the retry details', async () => {
+  it('relays a gated refusal with its code, status and details, and forwards no member', async () => {
     const json = await call(toolsCall(2, 'run_action', { actionName: GATED, recordId: 'a1' }));
     expect(json.result.isError).toBe(true);
     const envelope = JSON.parse(json.result.content[0].text);
     expect(envelope.error.code).toBe('ACTION_CONFIRMATION_REQUIRED');
     expect(envelope.error.status).toBe(428);
-    // The machine-readable half: a refused agent rebuilds the retry from this
-    // WITHOUT re-parsing the message prose.
+    // The machine-readable half survives the tool unflattened.
     expect(envelope.error.details).toEqual({
       actionName: GATED,
       objectName: 'account',
       confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+      reason: 'no_confirmation_service',
     });
-    // …and the door really did forward a request with no confirmation.
     expect(bridge.calls).toHaveLength(1);
-    expect(bridge.calls[0][1][AI_ACTION_CONFIRMATION_MEMBER]).toBeUndefined();
+    expect(bridge.calls[0][1]).not.toHaveProperty(AI_ACTION_CONFIRMATION_MEMBER);
   });
 
-  it('SUCCEEDS on the retry — the member survives both strip layers', async () => {
+  it('[#34209] REFUSES a retry carrying `confirm: true` at the input: the bridge never sees it', async () => {
     const json = await call(
       toolsCall(3, 'run_action', { actionName: GATED, recordId: 'a1', [AI_ACTION_CONFIRMATION_MEMBER]: true }),
     );
-    // The assertion the whole card turns on: before this change the member was
-    // dropped here and this call was refused exactly like the one above.
-    expect(bridge.calls[0][1][AI_ACTION_CONFIRMATION_MEMBER]).toBe(true);
-    expect(json.result.isError).toBeFalsy();
-    expect(JSON.parse(json.result.content[0].text)).toMatchObject({ ok: true, result: { archived: true } });
+    // Flipped: before the retirement this call reached the bridge with the
+    // member set. Now the closed shape refuses it before dispatch.
+    expect(json.result.isError).toBe(true);
+    expect(json.result.content[0].text).toContain(`\`${AI_ACTION_CONFIRMATION_MEMBER}\``);
+    expect(bridge.calls).toHaveLength(0);
   });
 
-  it('forwards `recordId` and `params` unchanged beside the member', async () => {
+  it('forwards exactly `objectName`, `recordId` and `params`, and no member', async () => {
     await call(
       toolsCall(4, 'run_action', {
-        actionName: GATED,
+        actionName: 'other_action',
         objectName: 'account',
         recordId: 'a1',
         params: { reason: 'dupe' },
-        [AI_ACTION_CONFIRMATION_MEMBER]: true,
       }),
     );
-    expect(bridge.calls[0][1]).toEqual({
+    expect(bridge.calls[0][1]).toStrictEqual({
       objectName: 'account',
       recordId: 'a1',
       params: { reason: 'dupe' },
-      [AI_ACTION_CONFIRMATION_MEMBER]: true,
     });
   });
 
-  it('is a CLOSED boolean — a truthy string is refused by the door, not passed on', async () => {
+  it('a truthy string is refused at the input too, never passed on', async () => {
     const json = await call(
       toolsCall(5, 'run_action', { actionName: GATED, recordId: 'a1', [AI_ACTION_CONFIRMATION_MEMBER]: 'true' }),
     );
     expect(json.result.isError).toBe(true);
-    // A transport artefact must never read as an attestation, and the wrong
-    // failure here would be it reaching the bridge as a truthy value.
     expect(bridge.calls).toHaveLength(0);
   });
 

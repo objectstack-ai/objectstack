@@ -7,12 +7,14 @@ import { z } from 'zod';
  * Defines how the engine handles existing records when a seed is applied.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { enumWithRetiredValues } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { LocaleSchema } from '../system/translation.zod';
 import { findClosestMatches, formatSuggestion } from '../shared/suggestions.zod';
 import { resolveInjectedSystemColumns, type InjectedSystemColumnName } from './injected-system-columns';
 import { ColumnApplyOnSchema } from './column-apply-on.zod';
+import { dependentRequired } from '../shared/refinement-projection';
 import { FILE_REFERENCE_TYPES } from './field-value.zod';
 import {
   SeedFileContentSchema,
@@ -20,13 +22,58 @@ import {
   SeedFileReferenceSchema,
   isSeedFileReference,
 } from './seed-file.zod';
-export const SeedMode = z.enum([
-  'insert',    // Insert every record, no match: each replay inserts them again (a row the database refuses is that row's error)
+/**
+ * The fix both retired modes share: a seed row's identity is declared, never
+ * guessed by the loader (#34613, ruling 6942780880).
+ */
+const SEED_MODE_RETIRED_FIX =
+  'Declare the rows\' identity instead: keep the default `mode: \'ignore\'` (or `\'upsert\'`) and set '
+  + '`externalId` to the field that names a row, to a list of fields when no single field does (a junction '
+  + 'table\'s `[\'team\', \'project\']`), or to `\'id\'` when the '
+  + 'records carry their own ids.';
+
+/**
+ * The parse refusals an author meets for the two unkeyed modes (ADR-0049
+ * enforce-or-remove; `enumWithRetiredValues`, `../shared/retired-key.ts`).
+ * A seed is replayed — every single-tenant boot, every package install or
+ * upgrade, every publish — and neither mode matched a row, so each replay
+ * inserted every record again: the table grew by the dataset on every restart,
+ * and a person reference the first load had to leave NULL stayed NULL on the
+ * first row while a later copy got it (#34613, measured 1 → 2 → 3 rows over
+ * three boots). `replace` promised a table "the caller cleared" and no load
+ * path ever cleared one. No D2 conversion: which field names a row is the
+ * author's to say. The D3 semantic entry `seed-mode-insert-replace-retired`
+ * carries that judgement.
+ */
+const SEED_MODE_INSERT_RETIRED =
+  "`seed.mode: 'insert'` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — a seed is "
+  + 'replayed on every boot, package install and publish, and `insert` matched no existing row, so every replay '
+  + 'inserted each record again. ' + SEED_MODE_RETIRED_FIX;
+const SEED_MODE_REPLACE_RETIRED =
+  "`seed.mode: 'replace'` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it inserted "
+  + 'every record and left clearing the table to the caller, and no load ever clears one, so every replay '
+  + 'inserted each record again. ' + SEED_MODE_RETIRED_FIX;
+
+/** The live seed modes, in the order the reference documents them. */
+const SEED_MODE_VALUES = [
   'update',    // Only update found records, ignore new
   'upsert',    // Create new or update existing: every replay writes the declared columns back
-  'replace',   // Insert every record, no match, deleting nothing: for a cache table the caller cleared
-  'ignore'     // Create-only (the default): insert missing rows, leave existing rows alone
-]);
+  'ignore',    // Create-only (the default): insert missing rows, leave existing rows alone
+] as const;
+
+const SEED_MODE_RETIRED = { insert: SEED_MODE_INSERT_RETIRED, replace: SEED_MODE_REPLACE_RETIRED };
+
+/**
+ * [#34613] The retired `SeedMode` values, for the doors that hold a STORED
+ * seed (a compiled artifact, an installed package body, a stored seed item):
+ * such a door hands a dataset declaring one to the seed load, which refuses
+ * that dataset alone with `SeedMode`'s own prescription, instead of failing
+ * every other dataset and definition with it. Membership only: the
+ * prescription is always read from `SeedMode`, never restated.
+ */
+export const RETIRED_SEED_MODE_VALUES: readonly string[] = Object.freeze(Object.keys(SEED_MODE_RETIRED));
+
+export const SeedMode = enumWithRetiredValues(SEED_MODE_VALUES, SEED_MODE_RETIRED);
 
 /**
  * Seed Column — the write policy a seed dataset declares for one of its
@@ -46,8 +93,8 @@ export const SeedColumnSchema = lazySchema(() => strictObject({
    * replay's no-op check, not written, and — a reference column — not
    * resolved and not deferred to pass 2, so nothing the load does afterwards
    * writes it back. A row the load creates gets it like any other column.
-   * `insert`, `ignore` and `replace` never update a matched row, so the policy
-   * changes nothing on those modes.
+   * `ignore` never updates a matched row, so the policy changes nothing on
+   * that mode.
    *
    * A column of the dataset's `externalId` is the key the row was matched by:
    * it stays in the matched row's update whatever it declares, as an import's
@@ -154,8 +201,9 @@ export const SeedSchema = lazySchema(() => strictObject({
    * — a list of field names — is required for objects with no single-field
    * natural key, most commonly a **join / junction table** keyed by both of its
    * foreign keys (e.g. `externalId: ['team', 'project']`). Without it such a
-   * dataset can only run `mode: 'insert'`, which re-inserts every row on each
-   * replay boot and duplicates the table (framework#3434). The reference fields
+   * dataset has no key to match a replay on (the unkeyed `insert` mode, which
+   * re-inserted every row on each replay boot and duplicated the table —
+   * framework#3434 — is retired, #34613). The reference fields
    * are matched by their RESOLVED ids, so a composite of foreign keys dedupes
    * correctly across restarts.
    */
@@ -177,19 +225,23 @@ export const SeedSchema = lazySchema(() => strictObject({
    * (ruling 6631016988 on objectstack#30081, which measured exactly that on a
    * production boot and on both upgrade paths while the default was `upsert`).
    *
-   * A row a person deleted is not brought back by every replay. The loads
-   * AppPlugin (`@objectstack/runtime`) runs for an organization — the
-   * single-tenant boot seed, the per-organization replay (the `seed-replayer`
-   * service) and the dev hot reload, where the composition registers
-   * `sys_seed_landed_key` (`@objectstack/platform-objects`) — record, per
-   * organization, the key of every keyed row an `ignore` or `upsert` dataset
-   * landed, and do not insert again a recorded row that is now gone. A key
-   * never recorded still lands, so a row an upgrade adds to the seed is
-   * inserted. A seed publish and a package
-   * install or upgrade (`os package install`, the marketplace install) keep no
-   * record, so the row comes back on those. The deliberate re-seed,
-   * `seed-replayer(organizationId, { reseed: true })`, inserts every missing
-   * row whatever the record says.
+   * A row a person deleted is not brought back by every replay. The loads that
+   * seed an organization — AppPlugin's (`@objectstack/runtime`) single-tenant
+   * boot seed and dev hot reload, the per-organization replay (the
+   * `seed-replayer` service, AppPlugin's or the marketplace's fallback one),
+   * and the package install or upgrade (`os package install`, the marketplace
+   * install) with its restart heal, into the installing person's organization
+   * or the sole organization — record, per organization, where the
+   * composition registers `sys_seed_landed_key`
+   * (`@objectstack/platform-objects`), the key of every keyed row an `ignore`
+   * or `upsert` dataset landed, and do not insert again a recorded row that is
+   * now gone. A key never recorded still lands, so a row an upgrade adds to
+   * the seed is inserted. A seed publish keeps no record, nor does a load with
+   * no `config.organizationId` and no sole organization, so the row comes back
+   * on those. The deliberate re-seed —
+   * `seed-replayer(organizationId, { reseed: true })`, or the installed
+   * package's sample-data reseed — inserts every missing row whatever the
+   * record says.
    *
    * An author who wants a replay to refresh the rows — reference data the
    * package keeps current — declares `mode: 'upsert'`, and can still exempt
@@ -210,12 +262,12 @@ export const SeedSchema = lazySchema(() => strictObject({
       'is create-only: a missing row is inserted and an existing row is left as it is, so a replay ' +
       '(every boot, a package install or upgrade, a publish) never writes a seeded value back over a ' +
       'later edit. `upsert` also writes every declared column back onto the matched row on each replay; ' +
-      'declare it for reference data the package keeps current. `update` writes matched rows only, ' +
-      '`insert` inserts every record with no match, so each replay inserts them again, and `replace` does the ' +
-      'same and deletes nothing: it is for a table the caller cleared. On the loads AppPlugin runs for an ' +
-      'organization (the boot seed, the seed-replayer replay, the dev hot reload), an `ignore` or `upsert` row ' +
-      'that landed once and was later deleted is not inserted again; a publish or package install keeps no such ' +
-      'record, and seed-replayer called with { reseed: true } inserts every missing row.',
+      'declare it for reference data the package keeps current. `update` writes matched rows only. Every mode ' +
+      'matches on `externalId`, so a replay finds the row an earlier load wrote instead of inserting it again. On the loads that seed an organization ' +
+      '(the boot seed, a seed-replayer replay, the dev hot reload, a package install or upgrade), an `ignore` or ' +
+      '`upsert` row that landed once and was later deleted is not inserted again; a publish, or a load that ' +
+      'names no organization and finds no sole one, keeps no such record, and seed-replayer called with ' +
+      '{ reseed: true } or the sample-data reseed inserts every missing row.',
     ),
 
   /**
@@ -308,9 +360,100 @@ export const SeedSchema = lazySchema(() => strictObject({
    *   That is the bound ruled on #17011 (2026-09-10), narrowed to these two
    *   paths when the maintainer ruled that the install paths pick by locale
    *   (2026-11-05).
+   *
+   * A locale no dataset of an object names gets none of that object's
+   * locale-scoped rows — unless one of them is marked
+   * {@link SeedSchema.shape.fallback}.
    */
   locale: z.array(LocaleSchema).min(1).optional()
-    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn'),
+    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn. A locale no dataset of the object names gets none of its locale-scoped rows, unless one is marked `fallback: true`'),
+
+  /**
+   * Fallback Locale Set
+   *
+   * Marks this locale-scoped dataset as its object's fallback: it loads for the
+   * locales it lists, like any other, AND for a locale that no other dataset of
+   * the same object lists. An app that splits a seed by language — a `zh-CN`
+   * set and an `en` set of the standard price book — marks one of them, and an
+   * organization whose language is neither (`ja-JP`, `es-ES`) receives that
+   * set instead of no price book at all.
+   *
+   * ```ts
+   * defineSeed(PriceBook, { locale: ['zh-CN'], records: [{ name: '标准价格表' }] }),
+   * defineSeed(PriceBook, { locale: ['en', 'en-US'], fallback: true, records: [{ name: 'Standard' }] }),
+   * ```
+   *
+   * - **Requires `locale`.** A dataset with no `locale` already loads for every
+   *   locale, so `fallback: true` on it could only mean something it does not
+   *   do; the schema refuses the pair rather than read the marker as redundant.
+   *   The fallback set lists the locales it is written in, the way every
+   *   locale-scoped set does.
+   * - **"Matches" means a locale-scoped dataset of the same object lists the
+   *   resolved locale.** A dataset with no `locale` is locale-neutral: it loads
+   *   beside whichever set is chosen and does not stop the fallback from
+   *   filling in. Matching is the `locale` rule's own: case-insensitive, and
+   *   otherwise exact.
+   * - **Judged after `env`.** A dataset `env` scoped out of the load neither
+   *   matches nor falls back.
+   * - **At most one per object in a load.** Two different datasets of one
+   *   object both marked `fallback: true` leave the loader no single choice,
+   *   so only the fallback choice is refused: no marked set is used as the
+   *   fallback for a locale no set lists, and the load reports the object at
+   *   `warn`. Every marked set still loads for the locales it lists, exactly as
+   *   an unmarked set would, and every other object still seeds. Identical
+   *   copies of one dataset (a package's list merged twice) count once; two
+   *   versions of one package whose marked set changed are two datasets (an
+   *   upgrade keeps the earlier version's on the replay list until restart).
+   * - **A load with no locale** (package apply, draft publish, or a load no rung
+   *   resolved a locale for) loads every dataset, the fallback set included,
+   *   and warns, as for any locale-scoped dataset.
+   *
+   * The one value is `true`; omitted, the dataset loads only for the locales it
+   * lists, as before this key existed.
+   */
+  fallback: z.literal(true).optional()
+    .describe(
+      'Marks this locale-scoped dataset as its object\'s fallback: it also loads for a resolved locale that no ' +
+      'other locale-scoped dataset of the same object lists. Requires `locale`: a dataset with no locale already ' +
+      'loads everywhere, and the pair is refused. At most one dataset per object in a load may be marked; with ' +
+      'two different marked datasets of one object, none is used as the fallback and the load reports the object, ' +
+      'while each still loads for the locales it lists, as an unmarked dataset would (identical copies count once). ' +
+      'A load with no locale loads it like every other dataset. Omitted, the dataset loads only for the locales it ' +
+      'lists.',
+    ),
+
+  /**
+   * Load-Order Dependencies
+   *
+   * The objects this dataset must be loaded after, by object name — for a
+   * dependency no field expresses: most often a lifecycle hook on this object
+   * (`beforeInsert`) that reads another seeded object while the row is
+   * written, e.g. a rating scored from seeded bands:
+   * `defineSeed(CustomerRating, { dependsOn: ['crm_rating_band'], records })`.
+   *
+   * A load orders its datasets by the dependency graph of their objects:
+   * a `lookup` / `master_detail` / `user` field already makes its object load
+   * after the one it points at, and the order the datasets are written in
+   * only breaks ties between objects ready at the same moment. Each name here
+   * adds one more edge to that same graph, so this dataset's object lands
+   * after the named object's rows. A dataset that declares none keeps the
+   * order the fields alone give.
+   *
+   * Every name must be an object another dataset of the same load seeds. The
+   * loader refuses the whole load, writing no row, when a name is this
+   * dataset's own object, when no dataset of the load seeds it (a misspelling,
+   * or a dataset that `env` / `locale` scoped out of this load), or when the
+   * edge closes a cycle with the other edges (lookup fields included). A cycle
+   * made of lookup fields alone is still loaded in several passes, as before.
+   * `defineSeed` refuses a dataset that names its own object when it runs.
+   */
+  dependsOn: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/)).optional()
+    .describe(
+      'Objects (by name) this dataset loads after, for an order no lookup field gives — e.g. a beforeInsert ' +
+      'hook that reads another seeded object. Each name adds an edge to the load\'s dependency graph. The load ' +
+      'is refused, writing nothing, when a name is the dataset\'s own object, is not seeded by another dataset of ' +
+      'the same load, or closes a cycle with the other edges. Omitted, the order comes from lookup fields alone.',
+    ),
 
   /**
    * The Payload
@@ -356,6 +499,19 @@ export const SeedSchema = lazySchema(() => strictObject({
   // (#4001 findings log, entry 2). Declared here so closing the shape cannot
   // repeat it.
   ...MetadataProtectionFields,
+}).refine(dependentRequired({ fallback: ['locale'] }), {
+  // [Seed.fallback] Declared through the closed projection list, so the
+  // published JSON Schema carries the rule as `dependentRequired` instead of
+  // accepting what this parse refuses. A dataset with no `locale` already loads
+  // for every locale, so the marker could only promise a behaviour the loader
+  // does not have: refused, with the fix, rather than read as redundant — a
+  // marker that is silently a no-op is the declared-not-enforced shape ADR-0049
+  // forbids.
+  path: ['fallback'],
+  message:
+    '`fallback: true` needs `locale`. A dataset with no locale already loads for every locale, so it cannot ' +
+    'also be the set that loads only when no other set matches. List the locales this dataset is written in ' +
+    '(`locale: [\'en\']`) and keep `fallback: true`, or drop `fallback`.',
 }));
 
 /** Parsed/output type — all defaults are applied (env, mode, externalId always present) */
@@ -541,6 +697,9 @@ function assertSeedFilesOnFileFields(
  * The keys of {@link SeedSchema.shape.columns} are held to the same set, both
  * times ({@link SeedColumns}).
  *
+ * A `dependsOn` that names the dataset's own object is refused when it runs
+ * ({@link SeedSchema.shape.dependsOn}).
+ *
  * A `seedFile(path)` value is refused when it runs on a field that is not a
  * file field (`file`, `image`, `avatar`, `video`, `audio`) — see
  * {@link SeedSchema.shape.files} for how the bytes reach the loader.
@@ -573,5 +732,24 @@ export function defineSeed<
   const seed = SeedSchema.parse({ ...config, object: objectDef.name });
   assertSeedKeysDeclared(objectDef, seed.records, seed.columns);
   assertSeedFilesOnFileFields(objectDef, seed.records);
+  assertSeedNotDependingOnItself(objectDef, seed.dependsOn);
   return seed;
+}
+
+/**
+ * The call-time half of the load's `dependsOn` refusals: the one a dataset
+ * can be judged on alone. A dataset that names its own object asks to load
+ * after itself, which no order satisfies. The other two refusals (a name no
+ * dataset of the load seeds, an edge that closes a cycle) need the whole load,
+ * so only the seed loader can make them.
+ */
+function assertSeedNotDependingOnItself(
+  objectDef: { name: string },
+  dependsOn: readonly string[] | undefined,
+): void {
+  if (!dependsOn?.includes(objectDef.name)) return;
+  throw new Error(
+    `defineSeed('${objectDef.name}'): dependsOn names the dataset's own object '${objectDef.name}'. ` +
+      'A dataset cannot load after itself: list the other seeded objects its hooks read, or drop the entry.',
+  );
 }

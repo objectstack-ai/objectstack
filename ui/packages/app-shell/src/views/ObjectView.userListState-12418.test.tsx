@@ -170,6 +170,11 @@ function wire() {
       puts.push(path);
       return json({ success: true }, 200);
     }
+    // objectstack#35054: the view editor edits the saved view as stored, read
+    // from its layers; no draft is pending (the draft read answers 404 below).
+    if (path.endsWith(`/meta/view/${SAVED_ID}/layers`)) {
+      return json({ code: null, overlay: SAVED_ROW, overlayScope: 'env', effective: SAVED_ROW, draft: null }, 200);
+    }
     if (path.includes('/meta/view/')) return json({ success: false }, 404);
     if (path.endsWith('/meta/dataset')) return json([], 200);
     return json({ data: [] }, 200);

@@ -28,6 +28,15 @@
  *   every face with one message, also under an `$or`. Before: `DATASET_INVALID`
  *   (native), the cross-object filter refusal (ObjectQL), `[]` or the other
  *   arm's rows (preview).
+ *
+ * [ADR-0149 D1] A SELECTION member is one of the dataset's declared names: a
+ * dotted spelling the dataset does not declare (`account.name`,
+ * `account.bogus`, `account.founded_at`, `OBJECT.region`, `CUBE.region`, the
+ * bare lookup column `account`) is refused by the closed-member rule on every
+ * face, ahead of the path gates above, with one message. The path gates stay
+ * pinned through what still reaches them: a declared member over a related
+ * field, a declared measure over a missing column, and a `runtimeFilter`
+ * member (filter keys are fields, not members).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -83,7 +92,6 @@ const BOGUS_MEASURE = DatasetSchema.parse({
 
 type Face = 'native' | 'objectql' | 'preview';
 const FACES: readonly Face[] = ['native', 'objectql', 'preview'];
-const LIVE = ['native', 'objectql'] as const;
 
 const quiet = { debug() {}, info() {}, warn() {}, error() {}, trace() {}, fatal() {}, child() { return quiet; } };
 
@@ -95,6 +103,7 @@ type Selection = {
   measures: string[];
   runtimeFilter?: Record<string, unknown>;
   timeDimensions?: Array<Record<string, unknown>>;
+  compareTo?: Record<string, unknown>;
 };
 
 const refusalOf = (p: Promise<unknown>): Promise<Refusal> =>
@@ -143,6 +152,13 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
     expect(refusals[1].message).toBe(refusals[0].message);
     expect(refusals[2].message).toBe(refusals[0].message);
     return refusals[0];
+  };
+
+  /** The closed-member refusal, alike on every face. */
+  const undeclaredAlike = async (dataset: typeof UNBACKED, selection: Selection, param: string, member: string) => {
+    const err = await refusedAlike(dataset, selection, param, member);
+    expect(err.message).toContain(`The dataset "${dataset.name}" does not declare the dimension "${member}".`);
+    return err;
   };
 
   beforeAll(async () => {
@@ -196,27 +212,14 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
   });
 
   describe('#28555 — the draft preview joins nothing', () => {
-    it("refuses a backed 'account.name' that both live strategies serve, where it served one null group", async () => {
-      for (const face of LIVE) {
-        expect(await rowsOf(face, BACKED, { dimensions: ['account.name'], measures: ['total'] }, 'account.name'), face)
-          .toEqual([{ key: 'Acme', total: 130 }, { key: 'Globex', total: 50 }]);
-      }
-      const err = await refusalOf(ask('preview', BACKED, { dimensions: ['account.name'], measures: ['total'] }));
-      expect(err.code, err.message).toBe('INVALID_FIELD');
-      expect(err.status).toBe(400);
-      expect(err.param).toBe('dimensions');
-      expect(err.member).toBe('account.name');
-      expect(err.cube).toBe(BACKED.name);
-      expect(err.message).toContain(
-        `Dimension 'account.name' on cube '${BACKED.name}' reads 'account.name' through relationship path 'account'. ${PREVIEW_JOINS_NOTHING}`,
-      );
+    it("refuses a backed but undeclared 'account.name' on every face, live strategies included", async () => {
+      await undeclaredAlike(BACKED, { dimensions: ['account.name'], measures: ['total'] }, 'dimensions', 'account.name');
     });
 
     for (const [label, dataset, selection, param, member] of [
       ["a declared dimension over 'account.name'", DECLARED, { dimensions: ['account_name'], measures: ['total'] }, 'dimensions', 'account_name'],
       ["a declared measure over 'account.score'", DECLARED, { dimensions: ['region'], measures: ['score_max'] }, 'measures', 'score_max'],
       ["a backed 'runtimeFilter' member", BACKED, { dimensions: ['region'], measures: ['total'], runtimeFilter: { 'account.name': 'Acme' } }, 'where', 'account.name'],
-      ['a backed windowed time dimension', BACKED, { measures: ['total'], timeDimensions: [{ dimension: 'account.founded_at', dateRange: ['2026-01-01', '2026-01-31'] }] }, 'timeDimensions', 'account.founded_at'],
     ] satisfies Array<[string, typeof UNBACKED, Selection, string, string]>) {
       it(`refuses ${label} with the same refusal`, async () => {
         const err = await refusalOf(ask('preview', dataset, selection));
@@ -228,33 +231,62 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
       });
     }
 
-    it('CONTROL: the native strategy serves the backed runtimeFilter member and the windowed time dimension', async () => {
+    it('refuses an undeclared backed windowed time dimension on every face', async () => {
+      await undeclaredAlike(
+        BACKED,
+        { measures: ['total'], timeDimensions: [{ dimension: 'account.founded_at', dateRange: ['2026-01-01', '2026-01-31'] }] },
+        'timeDimensions',
+        'account.founded_at',
+      );
+    });
+
+    it('CONTROL, in place of the served windowed key: a compare window over the backed \'account.founded_at\' is refused on every face, naming no declare-it remedy', async () => {
+      // A dashboard compare widget lowers a dotted date filter into this very
+      // key. No dimension can be named `account.founded_at` (the dimension
+      // name grammar has no dot), so the refusal states what the comparison
+      // needs instead: a date field of the dataset's own object.
+      const err = await undeclaredAlike(
+        BACKED,
+        {
+          measures: ['total'],
+          timeDimensions: [{ dimension: 'account.founded_at', dateRange: ['2026-01-01', '2026-01-31'] }],
+          compareTo: { kind: 'previousPeriod' },
+        },
+        'timeDimensions',
+        'account.founded_at',
+      );
+      expect(err.message).toContain('the date key of this query\'s comparison window');
+      expect(err.message).not.toMatch(/declare a date dimension named/i);
+      // Nor the generic select-or-declare sentence: the key is the only member.
+      expect(err.message).not.toContain('declare the member on the dataset');
+      expect(err.message).toContain('"account.founded_at" cannot be a dimension name');
+      expect(err.message).toContain(
+        'this comparison cannot run on a dataset query unless the dashboard\'s date field is a field of the dataset\'s own object that a declared date dimension names.',
+      );
+    });
+
+    it('CONTROL: the native strategy serves the backed runtimeFilter member', async () => {
       expect(await rowsOf('native', BACKED, { dimensions: ['region'], measures: ['total'], runtimeFilter: { 'account.name': 'Acme' } }, 'region'))
         .toEqual([{ key: 'amer', total: 100 }, { key: 'emea', total: 30 }]);
-      expect(await rowsOf('native', BACKED, { measures: ['total'], timeDimensions: [{ dimension: 'account.founded_at', dateRange: ['2026-01-01', '2026-01-31'] }] }, 'none'))
-        .toEqual([{ key: undefined, total: 130 }]);
     });
 
     for (const member of [`${OBJECT}.region`, `${UNBACKED.name}.region`]) {
-      it(`answers '${member}', which resolves to the declared 'region', with the live faces' groups`, async () => {
-        for (const face of FACES) {
-          expect(await rowsOf(face, UNBACKED, { dimensions: [member], measures: ['total'] }, member), face)
-            .toEqual([{ key: 'amer', total: 150 }, { key: 'emea', total: 30 }]);
-        }
+      it(`refuses '${member}', a spelling the dataset does not declare, on every face`, async () => {
+        await undeclaredAlike(UNBACKED, { dimensions: [member], measures: ['total'] }, 'dimensions', member);
       });
     }
 
-    it('CONTROL: the base lookup column itself groups alike on every face', async () => {
-      for (const face of FACES) {
-        expect(await rowsOf(face, BACKED, { dimensions: ['account'], measures: ['total'] }, 'account'), face)
-          .toEqual([{ key: 'a1', total: 130 }, { key: 'a2', total: 50 }]);
-      }
+    it('refuses the undeclared base lookup column on every face', async () => {
+      await undeclaredAlike(BACKED, { dimensions: ['account'], measures: ['total'] }, 'dimensions', 'account');
     });
   });
 
   describe('#28558 — a declared path to a column the related object lacks', () => {
+    it('as an undeclared selection dimension, is refused on every face by the closed-member rule', async () => {
+      await undeclaredAlike(BACKED, { dimensions: ['account.bogus'], measures: ['total'] }, 'dimensions', 'account.bogus');
+    });
+
     for (const [label, selection, param, member] of [
-      ['as a dimension', { dimensions: ['account.bogus'], measures: ['total'] }, 'dimensions', 'account.bogus'],
       ['as a runtimeFilter member', { dimensions: ['region'], measures: ['total'], runtimeFilter: { 'account.bogus': 'x' } }, 'where', 'account.bogus'],
     ] satisfies Array<[string, Selection, string, string]>) {
       it(`is refused before SQL on every face ${label}, with one message`, async () => {
@@ -284,10 +316,8 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
       ['windowed', { dimension: 'account.founded_at', dateRange: ['2026-01-01', '2026-01-31'] }],
     ] as const) {
       it(`is refused on every face when ${label}, with one message`, async () => {
-        const err = await refusedAlike(UNBACKED, { measures: ['total'], timeDimensions: [{ ...entry }] }, 'timeDimensions', 'account.founded_at');
-        expect(err.message).toContain(
-          `Time dimension 'account.founded_at' on cube '${UNBACKED.name}' traverses relationship path 'account', which the dataset does not declare`,
-        );
+        // [ADR-0149 D1] The closed-member rule answers it, ahead of the path gate.
+        await undeclaredAlike(UNBACKED, { measures: ['total'], timeDimensions: [{ ...entry }] }, 'timeDimensions', 'account.founded_at');
       });
     }
   });

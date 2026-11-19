@@ -387,3 +387,47 @@ describe('SEED_WRITE_EXECUTION_CONTEXT — one spelling of the seed posture', ()
     expect(holdersOf('SEED_WRITE_EXECUTION_CONTEXT')).toEqual(['./kernel']);
   });
 });
+
+// ADR-0090 D10 rule 4, as the owner's ruling on objectstack-ai/cloud#3826
+// reads it: the server-constructed in-product AI path is a second producer of
+// `performedBy`, beside the /mcp OAuth door.
+describe('ExecutionContextSchema.performedBy — two producers, one performer each', () => {
+  it('CONTROL: an OAuth-door context carrying only clientId parses unchanged', () => {
+    const ctx = ExecutionContextSchema.parse({ userId: 'u1', performedBy: { clientId: 'app_1' } });
+    expect(ctx.performedBy).toEqual({ clientId: 'app_1' });
+  });
+
+  it('keeps the in-product AI keys through a parse instead of stripping them', () => {
+    const performedBy = { agentId: 'data_chat', conversationId: 'conv_1', confirmationId: 'pa_1' };
+    const ctx = ExecutionContextSchema.parse({ userId: 'u1', performedBy });
+    expect(ctx.performedBy).toEqual(performedBy);
+    expect(ctx.userId).toBe('u1');
+  });
+
+  it('accepts an in-product AI write that needed no confirmation', () => {
+    const res = ExecutionContextSchema.safeParse({ userId: 'u1', performedBy: { agentId: 'data_chat', conversationId: 'conv_1' } });
+    expect(res.success).toBe(true);
+  });
+
+  it('REJECTS a performedBy naming no performer, as it did when clientId was required', () => {
+    for (const performedBy of [{}, { conversationId: 'conv_1' }, { confirmationId: 'pa_1' }]) {
+      const res = ExecutionContextSchema.safeParse({ userId: 'u1', performedBy });
+      expect(res.success, JSON.stringify(performedBy)).toBe(false);
+      expect(res.error?.issues[0]?.path).toEqual(['performedBy']);
+    }
+  });
+
+  it('REJECTS a non-string performer key', () => {
+    const res = ExecutionContextSchema.safeParse({ performedBy: { agentId: 7 } });
+    expect(res.success).toBe(false);
+  });
+
+  it('names both producers in the published description, and keeps it server-constructed', () => {
+    const description = ExecutionContextSchema.shape.performedBy.description ?? '';
+    expect(description).toContain('/mcp OAuth door');
+    expect(description).toContain('in-product AI path');
+    expect(description).toContain('Server-constructed only, never client-supplied');
+    expect(description).toContain('never becomes the authorization subject');
+    expect(description).not.toMatch(/Set only at the \/mcp OAuth door/);
+  });
+});

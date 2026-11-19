@@ -72,7 +72,9 @@ interface HeldAnswer {
   state: LauncherAppsState;
 }
 
-const NOTHING_HELD: HeldAnswer = { owner: null, state: { status: 'idle' } };
+const IDLE: LauncherAppsState = { status: 'idle' };
+const PENDING: LauncherAppsState = { status: 'pending' };
+const NOTHING_HELD: HeldAnswer = { owner: null, state: IDLE };
 
 /** A non-2xx answer, kept apart so `404` (route not served) reads as absence. */
 class LauncherAppsReadError extends Error {
@@ -178,7 +180,20 @@ export function LauncherAppsProvider({ children, endpoint, fetcher }: LauncherAp
     };
   }, [owner, loading, namesKey, endpoint, fetcher]);
 
-  const state: LauncherAppsState = held.owner === owner ? held.state : { status: 'idle' };
+  const heldState: LauncherAppsState = held.owner === owner ? held.state : IDLE;
+  // The first read is pending from the render that makes it due, not from the
+  // effect that starts it. The effect runs after the commit, so answering
+  // `idle` here would hand every consumer one frame with nothing narrowed and
+  // nothing pending: Home would draw its page, swap it for its loading state
+  // once the effect publishes `pending`, then draw it again, mounting
+  // everything inside twice (and reading what those children read twice).
+  const firstReadDue =
+    heldState.status === 'idle' &&
+    owner !== null &&
+    !loading &&
+    namesKey !== '[]' &&
+    !notServed.current.has(owner);
+  const state = firstReadDue ? PENDING : heldState;
   return <LauncherAppsContext.Provider value={state}>{children}</LauncherAppsContext.Provider>;
 }
 

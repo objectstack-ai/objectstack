@@ -59,7 +59,7 @@ import {
 import { isActionSwitchedOff, type ActionDef } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { Loader2, MoreHorizontal, ShieldAlert } from 'lucide-react';
+import { ChevronDown, Loader2, MoreHorizontal, ShieldAlert } from 'lucide-react';
 import { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 // Straight from `@object-ui/react`, NOT through `../providers/MetadataProvider`
@@ -85,6 +85,7 @@ import {
   isOverrideDecision,
   isOverrideOnlyViewer,
 } from '../utils/approvalOverride.js';
+import { currentStepNumber, isActingApprover, isLeadDecision } from '../utils/approvalDecisionFold.js';
 import {
   approverCopyFrom,
   approverDisplay,
@@ -147,6 +148,22 @@ export interface DeclaredActionsBarProps {
    * server sent no `viewer` block for render exactly as without it.
    */
   foldOverrides?: boolean;
+  /**
+   * Fold the approver's own band (objectstack#34361, ruling A): for a viewer
+   * the server says can act (`viewer.can_act === true`) and more than two
+   * shown actions, one status line naming the task, the step and the
+   * submitter, the decisions as the only buttons, and every other lever
+   * behind one neutral menu.
+   *
+   * "The decisions" are the actions whose declared `variant` is `primary` or
+   * `danger` (`isLeadDecision`), not a name list, so an action shipped as
+   * metadata alone lands in the menu. Placement only, like `foldOverrides`:
+   * every folded lever keeps its own gates and dialog, and the request it
+   * sends is unchanged. A viewer who cannot act (the submitter alone, the
+   * override-only administrator, a backend that sent no `viewer` block)
+   * renders exactly as without it.
+   */
+  foldDecisions?: boolean;
   /**
    * Told which declared actions the bar DRAWS for this viewer, by name, each
    * time that set changes, and an empty list when the bar goes away
@@ -254,6 +271,11 @@ function useReportDrawn(
   }, [name, drawn, onDrawn]);
 }
 
+/** Own-key presence on a plain record, never the prototype chain. */
+function hasOwnKey(record: Readonly<Record<string, unknown>>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
 /**
  * One declared-action button. Extracted so the `visible` CEL predicate can be
  * evaluated with a hook (rules-of-hooks) and so the dispatch can carry the
@@ -273,7 +295,12 @@ const DeclaredActionButton: React.FC<{
   asMenuItem?: boolean;
   /** The toolbar's drawn-set reporter (objectstack#25877). */
   onDrawn?: (name: string, drawn: boolean) => void;
-}> = ({ action, objectName, record, asMenuItem = false, onDrawn }) => {
+  /**
+   * Share the row's width below `sm` (objectstack#34361): the approver band's
+   * decisions sit side by side at equal width on a phone.
+   */
+  fill?: boolean;
+}> = ({ action, objectName, record, asMenuItem = false, onDrawn, fill = false }) => {
   const { execute } = useAction();
   const [loading, setLoading] = useState(false);
   // Localize the SERVER-DECLARED strings through the `_actions.<name>.*`
@@ -685,6 +712,7 @@ const DeclaredActionButton: React.FC<{
       // Below `sm` a 44 px touch target (objectstack#29071).
       className={cn(
         'h-11 sm:h-9',
+        fill && (disabledReason ? 'w-full sm:w-auto' : 'flex-1 sm:flex-none'),
         isOverride
           && 'border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
         pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
@@ -728,7 +756,10 @@ const DeclaredActionButton: React.FC<{
             tabIndex={0}
             aria-describedby={reasonId}
             data-disabled-reason=""
-            className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className={cn(
+              'inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+              fill && 'flex-1 sm:flex-none',
+            )}
           >
             {button}
             <span id={reasonId} className="sr-only">{disabledReason}</span>
@@ -749,8 +780,67 @@ const DeclaredActionButton: React.FC<{
  * each folded lever shows (`bypassedApproverNames` over the shared approver
  * directory), so the line and the dialog never name different people. An
  * unstaffed step has no one to name, and then the line says pending alone.
+ *
+ * `forApprover` is the approver band's line (objectstack#34361): the task is
+ * theirs, so it names the task, the step (its number on the served route and
+ * its label) and who submitted, instead of who the step waits on.
  */
-const ApprovalWaitingStatus: React.FC<{ record: any }> = ({ record }) => {
+const ApprovalWaitingStatus: React.FC<{ record: any; forApprover?: boolean }> = ({ record, forApprover = false }) => {
+  if (forApprover) return <ApproverTaskStatus record={record} />;
+  return <OverrideWaitingStatus record={record} />;
+};
+
+/**
+ * The approver band's status line: 「待你审批 · 第 N 步 · STEP · 提交人 NAME」.
+ * Every part but the first is drawn only when the served row carries it: the
+ * step number off `flow_route` (`currentStepNumber`), the step's label off
+ * `step_label`, and the submitter as "you" when the server's `viewer` block
+ * says so, else by the name the server resolved.
+ */
+const ApproverTaskStatus: React.FC<{ record: any }> = ({ record }) => {
+  const { t } = useObjectTranslation();
+  const row = record != null && typeof record === 'object' ? (record as Record<string, any>) : {};
+  const stepNumber = currentStepNumber(row);
+  const stepLabel = typeof row.step_label === 'string' ? row.step_label.trim() : '';
+  const submitterName = typeof row.submitter_name === 'string' ? row.submitter_name.trim() : '';
+  const submittedByViewer = row.viewer?.is_submitter === true;
+  const parts: Array<{ key: string; text: string }> = [];
+  if (stepNumber !== undefined) {
+    parts.push({
+      key: 'step',
+      text: String(t('approvalsInbox.stepNumber', { defaultValue: 'Step {{n}}', n: stepNumber })),
+    });
+  }
+  if (stepLabel) parts.push({ key: 'label', text: stepLabel });
+  if (submittedByViewer) {
+    parts.push({ key: 'submitter', text: String(t('approvalsInbox.submittedByYou', { defaultValue: 'You submitted this' })) });
+  } else if (submitterName) {
+    parts.push({
+      key: 'submitter',
+      text: String(t('approvalsInbox.submittedByName', { defaultValue: 'Submitted by {{name}}', name: submitterName })),
+    });
+  }
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+      data-testid="declared-actions-approval-status"
+      data-approval-status="approver"
+    >
+      <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+        {String(t('approvalsInbox.awaitingYourDecision', { defaultValue: 'Awaiting your approval' }))}
+      </Badge>
+      {parts.map((part) => (
+        <React.Fragment key={part.key}>
+          <span aria-hidden="true" className="text-muted-foreground">·</span>
+          <span className="min-w-0 text-muted-foreground" data-approval-status-part={part.key}>{part.text}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
+
+/** The override-only viewer's line (objectstack#25877): pending, and who the step waits on. */
+const OverrideWaitingStatus: React.FC<{ record: any }> = ({ record }) => {
   const { t } = useObjectTranslation();
   const refs = useMemo(() => unresolvedApproverRefs(record), [record]);
   const directory = useApproverDirectory(refs);
@@ -854,12 +944,12 @@ const DeclaredActionVisibilityProbe: React.FC<{
 const DeclaredActionsToolbar: React.FC<
   Pick<
     DeclaredActionsBarProps,
-    'objectName' | 'record' | 'className' | 'label' | 'foldOverrides' | 'onDrawnActionsChange'
+    'objectName' | 'record' | 'className' | 'label' | 'foldOverrides' | 'foldDecisions' | 'onDrawnActionsChange'
   > & {
     /** The located set, pre-filtered by `location` / `exclude`, ungated. */
     actions: ActionDef[];
   }
-> = ({ actions, objectName, record, className, label, foldOverrides, onDrawnActionsChange }) => {
+> = ({ actions, objectName, record, className, label, foldOverrides, foldDecisions, onDrawnActionsChange }) => {
   const { t } = useObjectTranslation();
   const mayInvoke = useCapabilityGate();
   const permitted = useMemo(
@@ -883,8 +973,10 @@ const DeclaredActionsToolbar: React.FC<
   // the set is read against `permitted`, so a lever the capability gate
   // removed never counts however it last reported.
   const [drawnByName, setDrawnByName] = useState<Readonly<Record<string, boolean>>>({});
+  // A `false` verdict is recorded too, so "every lever has reported" can be
+  // read off the keys (the approver fold below waits on it).
   const reportDrawn = useCallback((name: string, isDrawn: boolean) => {
-    setDrawnByName((prev) => ((prev[name] ?? false) === isDrawn ? prev : { ...prev, [name]: isDrawn }));
+    setDrawnByName((prev) => (hasOwnKey(prev, name) && prev[name] === isDrawn ? prev : { ...prev, [name]: isDrawn }));
   }, []);
   const drawnNames = permitted
     .map((action) => action.name)
@@ -899,9 +991,114 @@ const DeclaredActionsToolbar: React.FC<
   React.useEffect(() => () => onDrawnRef.current?.([]), []);
   const foldedDrawn = folded.some((action) => !!action.name && drawnByName[action.name] === true);
 
+  // objectstack#34361 (ruling A) — the approver's band. For a viewer the
+  // server says can act, the decisions (`isLeadDecision`: a `primary` or
+  // `danger` variant) stay buttons and every other permitted lever folds into
+  // one menu, once more than two levers are shown. Until every lever has
+  // reported its `visible` verdict the count is unknown and the band folds,
+  // so the common case never paints a flat row first. Disjoint from the
+  // override fold by construction: that viewer's `can_act` is `false`.
+  const decisionLeads = foldDecisions && folded.length === 0 && isActingApprover(record)
+    ? permitted.filter((action) => isLeadDecision(action))
+    : [];
+  const decisionBand = decisionLeads.length > 0;
+  const decisionOthers = decisionBand ? permitted.filter((action) => !decisionLeads.includes(action)) : [];
+  const everyLeverReported = permitted.every((action) => !action.name || hasOwnKey(drawnByName, action.name));
+  const foldDecisionOthers = decisionOthers.length > 0 && (!everyLeverReported || drawnNames.length > 2);
+  const decisionOthersDrawn = decisionOthers.some((action) => !!action.name && drawnByName[action.name] === true);
+
   // Nothing this viewer may invoke renders nothing — no toolbar chrome, no
   // orphan divider, same degrade as "nothing declared at this location".
   if (permitted.length === 0) return null;
+
+  if (decisionBand) {
+    const moreLabel = String(t('approvalsInbox.moreDecisionActions', { defaultValue: 'More approval actions' }));
+    return (
+      <div className={cn('space-y-2', className)} data-approval-decision-folded="">
+        {label && (
+          <>
+            <Separator />
+            <div className="text-xs font-medium text-muted-foreground">{label}</div>
+          </>
+        )}
+        {/* Phone: the status line on top, then one row — the decisions at
+            equal width and the menu at its end. From `sm` up: one row, the
+            line at the start and the levers at the end. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <ApprovalWaitingStatus record={record} forApprover />
+          <div
+            role="toolbar"
+            aria-label={label || t('common.actions')}
+            className="flex w-full flex-row flex-wrap items-center gap-2 sm:ml-auto sm:w-auto"
+          >
+            {decisionLeads.map((action) => (
+              <DeclaredActionButton
+                key={action.name}
+                action={action}
+                objectName={objectName}
+                record={record}
+                onDrawn={reportDrawn}
+                fill
+              />
+            ))}
+            {decisionOthers.map((action) => (foldDecisionOthers ? (
+              <DeclaredActionVisibilityProbe
+                key={action.name}
+                action={action}
+                record={record}
+                onDrawn={reportDrawn}
+              />
+            ) : (
+              <DeclaredActionButton
+                key={action.name}
+                action={action}
+                objectName={objectName}
+                record={record}
+                onDrawn={reportDrawn}
+              />
+            )))}
+            {/* As in the override fold: the trigger appears once a folded
+                lever is actually shown, so no empty menu is left behind. A
+                neutral control — the amber shield marks the exception path
+                only.
+
+                objectstack#35016 — the entry is NAMED, at every width, with a
+                disclosure chevron and no `⋯`: the record page's header row
+                (and, on a phone, its bottom bar) keeps the page's one `⋯`, so
+                the two menus on one screen are told apart by look before
+                either is opened. */}
+            {foldDecisionOthers && decisionOthersDrawn && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-11 shrink-0 gap-1 px-3 sm:h-9"
+                    data-testid="declared-actions-decision-menu"
+                  >
+                    <span>{moreLabel}</span>
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48">
+                  {decisionOthers.map((action) => (
+                    <DeclaredActionButton
+                      key={action.name}
+                      action={action}
+                      objectName={objectName}
+                      record={record}
+                      asMenuItem
+                    />
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (folded.length > 0) {
     const inline = permitted.filter((action) => !folded.includes(action));
@@ -1011,6 +1208,7 @@ export function DeclaredActionsBar({
   className,
   label,
   foldOverrides,
+  foldDecisions,
   onDrawnActionsChange,
 }: DeclaredActionsBarProps) {
   const dataSource = useAdapter();
@@ -1067,6 +1265,7 @@ export function DeclaredActionsBar({
         className={className}
         label={label}
         foldOverrides={foldOverrides}
+        foldDecisions={foldDecisions}
         onDrawnActionsChange={onDrawnActionsChange}
       />
       {runtime.dialogs}

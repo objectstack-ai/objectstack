@@ -62,6 +62,7 @@ function envelope(objectBits: Record<string, boolean> = {}): MePermissionsAuthen
     userId: 'u-rep',
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: [],
     permissionSets: ['rep'],
     objects: {

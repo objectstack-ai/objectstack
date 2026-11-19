@@ -53,7 +53,6 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "HTTP-Methode",
         help: "HTTP-Methode für die Callback-Anfrage",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

@@ -542,11 +542,32 @@ A sectioned form renders as ONE grid, and two keys decide its shape:
 | a section's `columns` | how densely THAT section fills the grid (via per-field `colSpan`) |
 
 The view's `columns` wins; without it the grid takes the widest section's
-density, and without either it is single-column. Every sectioned host resolves it
-the same way — `ObjectForm` (simple), `ModalForm`, `TabbedForm`, `WizardForm` —
-so one piece of metadata lays out identically wherever it is
-rendered. (`WizardForm` has no widest-section fallback: its steps never share a
-viewport, so each step keeps its own authored width.)
+density. Every sectioned host resolves it through the same rule
+(`sectionedGridLayout`) — `ObjectForm` (simple), `ModalForm`, `TabbedForm`,
+`WizardForm`. (`WizardForm` has no widest-section fallback: its steps never share
+a viewport, so each step keeps its own authored width.)
+
+A declared `columns` — on the view or on a section, `1` included — is drawn as
+written on every host. Where neither the view nor a section declares one, the
+count is the renderer's choice, and it differs by host:
+
+| Host | Undeclared count |
+|---|---|
+| page hosts (`ObjectForm`, `TabbedForm`, `WizardForm`) | 2 per row (`UNDECLARED_SECTION_COLUMNS`) |
+| the form dialog (`ModalForm`) | by field count: 2 for up to eight fields, 3 from nine; 4 from sixteen in a `full` dialog (`dialogUndeclaredColumns`) |
+
+The dialog's count applies to a flat form, to undeclared sections and to the
+object's `fieldGroups` alike. A bounded dialog (`lg` / `xl`) stops at 3 because
+the `xl` dialog's field area already reaches the four-column container tier;
+the fourth column is the `full` dialog's.
+
+Every count is a container-query grid, so it is an upper bound: the form draws
+as many columns as its container is wide enough for, and one column below the
+`@md` tier (a phone, a narrow drawer). Wide field kinds (textarea, rich text,
+markdown, html, an inline `grid`), `file` / `image` fields whose object field
+declares `multiple: true`, and `span: 'full'` fields take the whole row — the
+detail view widens multi-file fields by the same rule. A single file or image
+keeps one cell, and an authored `span` / `colSpan` is drawn as written.
 
 The grid is applied to the field container **inside** the form, never wrapped
 around the `<form>` (which would put the whole form in cell 1 and leave the other

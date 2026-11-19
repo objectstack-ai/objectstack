@@ -61,7 +61,7 @@ ObjectStack provides lifecycle events organized by operation type:
 | **Purpose** | Validation, enrichment, transformation | Side effects, notifications, logging |
 | **Can modify** | `ctx.input` (mutable) | `ctx.result` (mutable) |
 | **Can abort** | Yes (throw error → rollback) | A sync after-hook's throw still rolls back the transaction (see error handling) |
-| **Transaction** | Within transaction | **Within the transaction** (unless `async: true` — then in the background, after commit) |
+| **Transaction** | Within transaction | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
 | **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default** — `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
 
 ---
@@ -214,9 +214,6 @@ CEL has no overload for does **not** degrade to "the hook did not fire" — it
 
 ## Sandboxed Hook Bodies (`body`) — What the Sandbox `ctx` Can Call
 
-A hook carries its logic as a **`body`** — the form a metadata-only runtime
-executes — or as the deprecated inline **`handler`**.
-
 ### `body` (sandboxed) vs `handler` (inline) — pick one
 
 | | **`body`** — sandboxed script | **`handler`** — inline function (deprecated) |
@@ -295,6 +292,8 @@ same DSL as the [objectstack-query](../../objectstack-query/SKILL.md) skill:
 await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
 await ctx.api.object('candidate').find({ where: { stage: 'hired' } });
 await ctx.api.object('invoice').count({ where: { amount: { $gte: 1000 } } });
+const uid = ctx.session?.userId;
+if (!uid) return;
 await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner_id: uid }] } });
 ```
 
@@ -319,12 +318,7 @@ await ctx.api.object('candidate').find({ limit: 1 });            // any row will
 ```
 
 An unpredicated `find` / `count` is fine — returning or counting every row is an
-honest answer. It is `findOne`'s implicit "just one of them" that turns a missing
-predicate into a confidently wrong record.
-
-**Update by id.** `update` reads the primary key out of `data`, so the
-single-record form is `update({ id, ...fieldsToChange })` — e.g.
-`update({ id: pos, status: 'filled' })`.
+honest answer.
 
 ### Capabilities — the complete list
 
@@ -819,8 +813,11 @@ cross-object operations; refuse a business rule by a
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); let a
 hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
-`after*` unless the failure must abort the operation; assume `ctx.session` exists
-— system operations carry no user.
+`after*` unless the failure must abort the operation; react to a refused or
+rolled-back write from an `async: true` hook, which never runs then — use a sync
+hook (its `ctx.api` writes roll back with the write) or record it in the caller,
+where the write is made; assume `ctx.session` exists — system operations carry
+no user.
 
 
 ---

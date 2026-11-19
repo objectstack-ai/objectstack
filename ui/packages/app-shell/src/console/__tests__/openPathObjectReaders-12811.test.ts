@@ -81,9 +81,9 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
     why: 'read when a label is resolved for a nav entry without its own label, or a view entry; with { byName: true } (Home, recent rows) the object is read by name',
   },
   'packages/app-shell/src/hooks/useNavTargetIcon.ts': { kind: 'byName', why: "an object nav entry with no icon, its object's icon by name, as the sidebar reads that entry's label (objectstack#30126)" },
-  'packages/app-shell/src/console/ai/AiChatPage.tsx': {
+  'packages/app-shell/src/console/ai/changeCardLabels.ts': {
     kind: 'byName',
-    why: "the chat pane's change card names its objects and fields by label, each object by name when a card asks; the chat dock mounts the pane on an app open (objectstack#32984)",
+    why: "the chat pane's change card names its objects and fields by label, each object by name when a card asks (the published registry, then the draft overlay); the chat dock mounts the pane on an app open (objectstack#32984)",
   },
   'packages/app-shell/src/hooks/useRecentItemLabel.ts': { kind: 'byName', why: "a recent object or view entry's object, by name (objectstack#29121)" },
   'packages/app-shell/src/layout/ActivityObjectLabel.tsx': { kind: 'byName', why: "the inbox's and the home rail's activity rows, each row's object by name (objectstack#29121)" },
@@ -105,6 +105,7 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   },
   'packages/app-shell/src/views/RecordFormPage.tsx': { kind: 'off', why: 'a record form route' },
   'packages/app-shell/src/views/SearchResultsPage.tsx': { kind: 'off', why: 'the search route: every searchable object' },
+  'packages/app-shell/src/views/approval-decision/SubmittedRecord.tsx': { kind: 'off', why: "the approval request page's child tables: the record's owned children from every object" },
   'packages/app-shell/src/views/global-search-renderer.tsx': {
     kind: 'action',
     why: 'the global search block reads every object only once the user types, after ensureType(\'object\') (objectui#12980)',

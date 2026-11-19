@@ -10,7 +10,7 @@
  * `setDefaultBodyRunner`, `getDefaultBodyRunner`, `setDefaultActionRunner`,
  * `getDefaultActionRunner`, `triggerHooks`, `hasHooksFor`,
  * `opensAfterAbortUnit`, `dispatchUnscopedMultiWriteHooks` moved out of
- * `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * `engine.ts` whole (split by #30012 and #31151).
  *
  * A MOVE, not a redesign. {@link HooksAndFunctionsFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -90,6 +90,13 @@ export interface HooksAndFunctionsHost {
   readonly residualOwnerSources: ObjectQL['residualOwnerSources'];
   readonly txStore: ObjectQL['txStore'];
 }
+
+/** [#34412] The `before*` event of the same verb as an `after*` one — see `opensAfterAbortUnit`. */
+const BEFORE_EVENT_OF = {
+  afterInsert: 'beforeInsert',
+  afterUpdate: 'beforeUpdate',
+  afterDelete: 'beforeDelete',
+} as const;
 
 /** The bodies of the "Class head: units, hooks, functions, body runners, hook dispatch" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 
@@ -514,6 +521,18 @@ export class HooksAndFunctionsFacet {
    * after the commit, never through the rollback. Only the write's OWN refusal
    * arrives here: one a hook's `ctx.api` write raised was already converted
    * where it left the handler (#29422, `hookStoppedRefusal`), so it rolls back.
+   *
+   * [#34412] Yes too when a metadata-bound `before*` hook on the same verb
+   * matches `object`: such a hook may write through `ctx.api` before the row is
+   * stored, and a refusal later in the same write (a declared validation, a
+   * later `before*` hook, a driver constraint) must roll that side write back
+   * with it, as `HookSchema.onError` `abort` says. Every `before*` hook is
+   * blocking (`async` is ignored there), so neither `async` nor `onError`
+   * narrows it. Whether the hook really writes cannot be known before it runs,
+   * so the answer is "it can". The same three exits apply: an open unit, an
+   * object off the default driver, a driver with no transactions; on the last
+   * two the side write stays written, as `hookStoppedRefusal` says.
+   * Code-registered hooks (no `meta`) open no unit, the #22782 line.
    */
   static opensAfterAbortUnit(this: Pick<HooksAndFunctionsHost, 'defaultDriver' | 'drivers' | 'getDriver' | 'hooks' | 'isClosedUnitHandle' | 'txStore'>, event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
     const threaded = context?.transaction;
@@ -522,7 +541,9 @@ export class HooksAndFunctionsFacet {
     const aborting = (this.hooks.get(event) ?? []).some((entry) =>
       entry.meta && hookMatchesObject(entry, object)
       && ((!entry.meta.async && (entry.meta.onError ?? 'abort') === 'abort') || declaredHookCondition(entry.meta) !== undefined));
-    if (!aborting) return false;
+    const sideWriting = (this.hooks.get(BEFORE_EVENT_OF[event]) ?? []).some((entry) =>
+      entry.meta && hookMatchesObject(entry, object));
+    if (!aborting && !sideWriting) return false;
     const defaultDriver = this.defaultDriver ? this.drivers.get(this.defaultDriver) : undefined;
     try {
       return this.getDriver(object) === defaultDriver && driverSupportsTransactions(defaultDriver);

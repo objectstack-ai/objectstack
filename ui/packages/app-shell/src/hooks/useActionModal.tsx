@@ -51,7 +51,7 @@ import {
 } from '@object-ui/components';
 import { SchemaRenderer, useMetadata } from '@object-ui/react';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { ModalForm } from '@object-ui/plugin-form';
+import { LazyModalForm } from '../views/lazyFormSurfaces.js';
 import { resolveFormViewLayout } from '../utils/recordFormNavigation.js';
 import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 
@@ -87,6 +87,14 @@ export interface ModalDescriptor {
   mode?: string;
   recordId?: string;
   fields?: any;
+  /**
+   * The values an object CREATE form opens with — a DESCRIPTOR-only key, like
+   * `objectName`, with the same one producer: the lookup field's "+ New",
+   * which seeds the new record with the `dependsOn` values its picker filters
+   * by (objectstack#35050), so the record made is one the picker lists. Read
+   * on a create alone; an edit opens the stored record.
+   */
+  initialValues?: Record<string, unknown>;
   /**
    * An UNRESOLVED string target, straight off a `type: 'modal'` action. It
    * names a PAGE; whether that page exists is only knowable by asking the
@@ -287,13 +295,14 @@ export function useActionModal(dataSource?: any) {
           })
           : undefined);
       modalElement = (
-        <ModalForm
+        <LazyModalForm
           schema={{
             type: 'object-form',
             formType: 'modal',
             objectName: d.objectName,
             mode: formMode,
             recordId: d.recordId,
+            ...(formMode === 'create' && d.initialValues ? { initialValues: d.initialValues } : {}),
             title,
             description: d.description,
             fields: d.fields,

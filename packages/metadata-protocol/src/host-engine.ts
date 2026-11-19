@@ -64,6 +64,15 @@ export interface MetadataHostEngine extends IDataEngine {
    * see `protocol-stored-expression-fill.ts`.
    */
   captureStoredExpressions?(object: string): StoredExpressionFillCapture;
+  /**
+   * [#33795] The engine's roll-up batch scope, typed off the `objectql` slot
+   * contract for the reason `transaction` is, and optional there as here by
+   * ruling 6922040858. The bulk update doors (`runUpdateManyLoop`, and the
+   * update arm of `runBatchDataLoop`) run their per-row loop inside it, so a
+   * batch recomputes its parents' summaries once. Degrading means today's
+   * per-row recompute: the same values, more statements.
+   */
+  deferSummaryRecompute?: IObjectQLEngine['deferSummaryRecompute'];
   // Protocol accesses additional engine members structurally; keep it permissive
   // for this relocation (behavior unchanged — the concrete engine is injected).
   [key: string]: any;

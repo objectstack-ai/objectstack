@@ -82,10 +82,12 @@ describe('lintDuplicateFieldLabels', () => {
     expect(lintDuplicateFieldLabels({ objects: [obj] })).toEqual([]);
   });
 
-  it('is a gating entry the three commands and the object publish door run', () => {
+  it('is a gating entry the three commands and the object and object_extension publish doors run', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'lintDuplicateFieldLabels');
     expect(entry?.tier).toBe('gating');
-    expect(entry?.runtimeTypes).toEqual(['object']);
+    // [#33644] `object_extension` joins; its door pins live in
+    // `runtime-gate.object-writes.test.ts`.
+    expect(entry?.runtimeTypes).toEqual(['object', 'object_extension']);
     const stack = { objects: [ticketObject()] };
     for (const command of ['validate', 'build', 'lint'] as const) {
       const rules = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter((f) => f.rule === FIELD_LABEL_DUPLICATE);

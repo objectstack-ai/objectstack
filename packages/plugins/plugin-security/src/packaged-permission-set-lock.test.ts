@@ -30,6 +30,8 @@ import {
   PackagedPermissionSetProvenanceUnknownError,
 } from './packaged-permission-set-lock.js';
 import { registerPackagedPermissionSetLockGate } from './packaged-permission-set-lock-gate.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SchemaRegistry } from '@objectstack/objectql';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doubles
@@ -365,5 +367,65 @@ describe('[#31698] a name two packages declare: the lock names every holder', ()
     });
     const unknown = await gate({ type: 'permission', name: 'ops_reader', body: {} }).catch((e: unknown) => e);
     expect(unknown).toBeInstanceOf(PackagedPermissionSetProvenanceUnknownError);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [ADR-0150 D2, #32780] A stored set in its package's registry slot is tenant-authored
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The host kernel's boot hydration (`loadMetaFromDb`, the real
+ * `ObjectStackProtocolImplementation` over a real `SchemaRegistry`) keeps each
+ * package's stored set of a name in that package's own registry slot. The
+ * classifier reads those slots as the tenant-authored sets they are, in either
+ * order the store reads the rows: two namespaces' stored sets of one name lock
+ * nothing, and a set stored beside a set another namespace ships never lends
+ * the lock its own package.
+ */
+describe('[#32780] a stored permission set in its package\'s registry slot is never read as shipped', () => {
+  const CRM = 'com.qa.crm';
+  const HR = 'com.qa.hr';
+  const N = 'qa_shared_reader';
+  const set = (label: string) => ({ name: N, label, objects: {} });
+
+  async function hydrate(rows: Array<{ packageId: string; label: string }>, ships?: string) {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    for (const id of [CRM, HR]) {
+      registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'authored');
+    }
+    if (ships) registry.registerItem('permission', set(`shipped:${ships}`) as never, 'name' as never, ships);
+    const stored = rows.map((r, i) => ({
+      id: `row_${i}`, type: 'permission', name: N, organization_id: null, package_id: r.packageId, state: 'active',
+      metadata: JSON.stringify(set(r.label)),
+    }));
+    const engine: any = {
+      async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+        if (table !== 'sys_metadata') return [];
+        const where = opts?.where ?? {};
+        const found = stored.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || typeof v === 'object' || (r as any)[k] === v));
+        return typeof opts?.limit === 'number' ? found.slice(0, opts.limit) : found;
+      },
+      registry,
+    };
+    const load = await new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_prod').loadMetaFromDb();
+    const label = (id: string) => (registry.getPackageScopedItem('permission', N, id) as { label?: string } | undefined)?.label;
+    return { load, ql: { registry }, label };
+  }
+
+  for (const order of [[CRM, HR], [HR, CRM]] as const) {
+    it(`two packages' stored sets (${order[0].split('.').pop()}'s row read first): each is its package's own, and the name is not locked`, async () => {
+      const { load, ql, label } = await hydrate(order.map((id) => ({ packageId: id, label: `row:${id}` })));
+      expect(load).toMatchObject({ loaded: 2, errors: 0 });
+      expect([label(CRM), label(HR)]).toEqual([`row:${CRM}`, `row:${HR}`]);
+      expect(classifyPackagedPermissionSet(N, ql)).toEqual({ status: 'org' });
+    });
+  }
+
+  it('a set stored beside the set another namespace ships: the lock names the shipper alone, and each package serves its own set', async () => {
+    const { ql, label } = await hydrate([{ packageId: HR, label: `row:${HR}` }], CRM);
+    expect([label(CRM), label(HR)]).toEqual([`shipped:${CRM}`, `row:${HR}`]);
+    expect(classifyPackagedPermissionSet(N, ql)).toEqual({ status: 'packaged', packageId: CRM, packageIds: [CRM] });
   });
 });

@@ -13,12 +13,12 @@
 
 ## Summary
 
-155 records under `docs/adr/` (150 numbers), 11 under `ui/docs/adr/` (listed separately below).
+157 records under `docs/adr/` (152 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
-| Accepted | 133 |
-| Proposed | 8 |
+| Accepted | 136 |
+| Proposed | 7 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **155** |
+| **Total** | **157** |
 
 ## Shared numbers
 
@@ -217,11 +217,13 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
 | [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
 | [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Accepted — 2026-11-08, recording two rulings of the maintainer: the placem… | 2026-11-08 | — | — |
-| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Proposed — 2026-11-08. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-08 | ADR-0028 | — |
+| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Accepted — 2026-11-08, merged in #31586. `docs/adr/` is Tier H (Prime Dire… | 2026-11-08 | ADR-0028 | — |
 | [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) | An AI service account — a headless agent is a registered principal of its own, with its own keys and its own… | Proposed — 2026-11-08 — draft. `docs/adr/` is a Tier H governed surface: t… | 2026-11-08 | — | — |
 | [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) | A SCIM group grants only an ordinary permission set, through a per-connection mapping row a platform administ… | Accepted — implemented, 2026-11-08, recording the maintainer's ruling of 2… | 2026-11-08 | — | — |
 | [ADR-0153](./0153-one-way-sync-in-beside-federation.md) | One-way sync-in beside federation — a connector or a federated object, a warehouse table included, fills an o… | Proposed — 2026-11-10. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-10 | — | — |
 | [ADR-0154](./0154-audit-ledger-tamper-evidence-sealer-signed-checkpoints-amendments-verify.md) | The audit ledger is tamper-evident — an asynchronous sealer signs per-organization checkpoints, redaction and… | Proposed — 2026-11-10 — draft. This record declares; it implements nothing… | 2026-11-10 | — | — |
+| [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Accepted — 2026-11-17, recording the maintainer's answers to questions ①–③… | 2026-11-15 | — | — |
+| [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

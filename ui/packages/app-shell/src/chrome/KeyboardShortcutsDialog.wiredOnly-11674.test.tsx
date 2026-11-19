@@ -32,6 +32,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The layout reaches `import('@objectstack/lint')` (the draft bar's publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React, { useState } from 'react';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
@@ -51,12 +54,11 @@ vi.mock('../layout/ChatDock', () => ({
     expanded: false,
     width: 420,
     dragging: false,
-    maximized: false,
+    fullWindow: false,
+    setFullWindow: vi.fn(),
     toggle: () => {},
     expand: () => {},
     collapse: () => {},
-    maximize: () => {},
-    restore: () => {},
     onResizePointerDown: () => {},
   }),
   ChatDockPanel: () => null,

@@ -11,13 +11,11 @@
  *
  *   1. the plugin's manifest carries the page, so the registry — and the
  *      metadata API reading it — has it;
- *   2. the page body is the one the ruling's build list names (a slotted page
- *      until the `tabs` slot retired, objectstack#27053; rebuilt as the same
- *      nodes in a `kind: 'full'` page): a header, one
- *      `record:approval_decision` node, `record:details`, `sys_approval_action`
- *      as the related list, no discussion thread, and a highlights strip that
- *      leaves `record_id` to the details grid (the seat's choice on the ui
- *      seat's design input `6081889955`) and names nothing by a machine name;
+ *   2. the page body: a header, a highlights strip that leaves `record_id`
+ *      out and names nothing by a machine name, and ONE
+ *      `record:approval_decision` node that draws the rest of the page, the
+ *      business record as submitted and the rail of progress, attachments and
+ *      activity (objectstack#34588); no tabs and no discussion thread;
  *   3. the page passes what `os validate` judges a page by — the parse, the
  *      component-type vocabulary, the props rows and the build rules — with a
  *      control for each half that can go red;
@@ -49,8 +47,7 @@ const PAGE = SysApprovalRequestDetailPage as AnyRec;
 const COMPONENTS = (PAGE.regions?.[0]?.components ?? []) as AnyRec[];
 const nodeOf = (type: string): AnyRec | undefined => COMPONENTS.find((c) => c.type === type);
 const HIGHLIGHTS = (nodeOf('record:highlights') ?? {}) as AnyRec;
-const TAB_ITEMS = (nodeOf('page:tabs')?.properties?.items ?? []) as AnyRec[];
-/** Where the decision panel sits in the region: after the header, before the highlights. */
+/** Where the decision panel sits in the region: after the header and the highlights, last. */
 const DECISION_AT = COMPONENTS.findIndex((c) => c.type === 'record:approval_decision');
 
 /** The plugin's one manifest, as `init` registers it. */
@@ -134,15 +131,15 @@ describe('sys_approval_request detail page — served through the manifest', () 
 });
 
 describe('sys_approval_request detail page — the page body', () => {
-  it('authors exactly the header, the decision panel, the highlights and the tabs, in the slotted order', () => {
-    // The nodes the slotted page rendered, in the synthesizer's order: the
-    // header it fell through to, its `actions` slot, its `highlights` slot and
-    // its tab strip, whose first tab is the details body. Its `discussion`
-    // slot was empty, so there is no discussion node. The header reads the
-    // object's placed header actions live, as the synthesized one did: a bare
-    // `page:header` drew none, so an action another package places on the
-    // object at `record_header` was dropped (#29951).
-    expect(COMPONENTS.map((c) => c.type)).toEqual(['page:header', 'record:approval_decision', 'record:highlights', 'page:tabs']);
+  it('authors exactly the header, the highlights and the decision panel, the panel last (objectstack#34588)', () => {
+    // The panel draws the rest of the page: the business record as submitted,
+    // whole, and the rail of progress, attachments and activity, the activity
+    // last (maintainer 2026-11-17). The header reads the object's placed
+    // header actions live: a bare `page:header` drew none, so an action
+    // another package places on the object at `record_header` was dropped
+    // (#29951).
+    expect(COMPONENTS.map((c) => c.type)).toEqual(['page:header', 'record:highlights', 'record:approval_decision']);
+    expect(DECISION_AT).toBe(COMPONENTS.length - 1);
     expect(nodeOf('page:header')).toEqual({ type: 'page:header', properties: { placedActions: true } });
   });
 
@@ -153,10 +150,10 @@ describe('sys_approval_request detail page — the page body', () => {
   });
 
   it('highlights the object\'s highlightFields minus record_id, which the object itself keeps', () => {
-    // The seat's choice on the ui seat's design input: the page's strip drops
-    // `record_id` so the details grid keeps it (that grid is where the console
-    // draws the target-record card of the `record_id` / `object_name` pointer
-    // pair), and the object's `highlightFields` keeps it.
+    // The page reaches the record the `record_id` / `object_name` pointer pair
+    // names through the decision panel, which draws that record whole and
+    // links to it, so the strip leaves the pair out; the object's
+    // `highlightFields` keeps `record_id` for the other surfaces that read it.
     const declared = SysApprovalRequest.highlightFields ?? [];
     expect(declared).toContain('record_id');
     expect(HIGHLIGHTS.type).toBe('record:highlights');
@@ -167,9 +164,7 @@ describe('sys_approval_request detail page — the page body', () => {
   it('names the flow by its label, process_label, in the strip and in the object\'s list alike', () => {
     // `process_name` is the machine source (`flow:NAME`); `process_label` is the
     // flow's label, served under that name by the approvals get. The object's
-    // list moves with the strip: the Details tab's bare `record:details` node
-    // draws the object's `highlightFields` minus the strip, so a strip-only
-    // change would put `process_name` in that tab.
+    // list moves with the strip, never the strip alone.
     const strip = HIGHLIGHTS.properties.fields as string[];
     const declared = SysApprovalRequest.highlightFields ?? [];
     expect(strip[0]).toBe('process_label');
@@ -197,23 +192,16 @@ describe('sys_approval_request detail page — the page body', () => {
     expect(fields.current_step).toMatchObject({ type: 'text' });
   });
 
-  it('draws no Object chip: object_name, the target\'s API name, is in neither list, and the Details tab is the pointer pair\'s card', () => {
+  it('draws no Object chip: object_name, the target\'s API name, is in neither list', () => {
     // `object_name` holds the target object's API name (`showcase_announcement`)
-    // and the object declares no field holding that object's label. The page
-    // names the target object on the card the console draws for the
-    // `record_id` / `object_name` pair in the Details tab, which heads the
-    // record with its object's label. The object's list moves with the strip
-    // for the reason the flow chip's does: dropped from the strip alone,
-    // `object_name` would be drawn as a row in that tab.
+    // and the object declares no field holding that object's label. The
+    // decision panel names the target object beside the submitted record's
+    // heading, read from the object's definition.
     const strip = HIGHLIGHTS.properties.fields as string[];
     const declared = SysApprovalRequest.highlightFields ?? [];
     const fields = SysApprovalRequest.fields as AnyRec;
     expect({ strip: strip.includes('object_name'), declared: declared.includes('object_name') })
       .toEqual({ strip: false, declared: false });
-    // The Details tab's bare `record:details` node draws the object's list
-    // minus the strip: the id half of the pair, whose type half names the
-    // target object.
-    expect(TAB_ITEMS[0].children).toEqual([{ type: 'record:details' }]);
     expect(declared.filter((f: string) => !strip.includes(f))).toEqual(['record_id']);
     expect(fields.record_id?.referenceVia).toBe('object_name');
     // Control: the type half stays a declared, required field. It is dropped
@@ -221,42 +209,18 @@ describe('sys_approval_request detail page — the page body', () => {
     expect(fields.object_name).toMatchObject({ type: 'text', required: true });
   });
 
-  it('tabs: Details is record:details, Timeline is sys_approval_action as a related list on request_id', () => {
-    expect(TAB_ITEMS.map((t) => t.label?.en)).toEqual(['Details', 'Timeline']);
-    expect(TAB_ITEMS[0].children).toEqual([{ type: 'record:details' }]);
-    const [timeline] = TAB_ITEMS[1].children as AnyRec[];
-    expect(timeline.type).toBe('record:related_list');
-    expect(timeline.properties).toMatchObject({ objectName: 'sys_approval_action', relationshipField: 'request_id' });
-    // The relationship really points back at this object.
+  it('has no tabs: the panel draws the record and, last in its rail, the request\'s thread (objectstack#34588)', () => {
+    // The page had two tabs, Details (the pointer pair's card) and Timeline
+    // (`sys_approval_action` as a related list). Neither is a node any more.
+    const types = nodesOf(COMPONENTS).map((n) => n.type);
+    expect(types.filter((t) => t === 'page:tabs' || t === 'record:details' || t === 'record:related_list')).toEqual([]);
+    // The thread the panel reads really points back at this object.
     expect((SysApprovalAction.fields as AnyRec).request_id).toMatchObject({ type: 'lookup', reference: 'sys_approval_request' });
-  });
-
-  it('names each Timeline step by its label, step_label, never by the node\'s machine id, step_name', () => {
-    // Both are stored on every `sys_approval_action` row: `step_name` is the
-    // Approval node's id (`dual_signoff`), `step_label` the step's label the
-    // service copies from the request (`actionRow`). The existence check below
-    // cannot tell them apart, since both are declared fields, so the choice is
-    // pinned here, the way the strip's `current_step_label` is.
-    const [timeline] = TAB_ITEMS[1].children as AnyRec[];
-    const columns = timeline.properties.columns as string[];
-    const fields = SysApprovalAction.fields as AnyRec;
-    expect({ label: columns.includes('step_label'), machine: columns.includes('step_name') })
-      .toEqual({ label: true, machine: false });
-    expect(fields.step_label).toMatchObject({ type: 'text', label: 'Approval Step' });
-    // Control: the machine id stays a declared field. It is dropped from the
-    // Timeline, not from the object.
-    expect(fields.step_name).toMatchObject({ type: 'text' });
   });
 
   it('every field the page names exists on its object', () => {
     const requestFields = Object.keys(SysApprovalRequest.fields);
-    const actionFields = Object.keys(SysApprovalAction.fields);
-    const [timeline] = TAB_ITEMS[1].children as AnyRec[];
-    const missing = [
-      ...(HIGHLIGHTS.properties.fields as string[]).filter((f) => !requestFields.includes(f)).map((f) => `request.${f}`),
-      ...(timeline.properties.columns as string[]).filter((f) => !actionFields.includes(f)).map((f) => `action.${f}`),
-      ...(timeline.properties.sort as AnyRec[]).map((s) => s.field).filter((f) => !actionFields.includes(f)).map((f) => `action.${f}`),
-    ];
+    const missing = (HIGHLIGHTS.properties.fields as string[]).filter((f) => !requestFields.includes(f)).map((f) => `request.${f}`);
     expect(missing).toEqual([]);
   });
 

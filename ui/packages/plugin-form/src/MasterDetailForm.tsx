@@ -30,7 +30,7 @@
  * `lookup`) FK on the child object.
  */
 
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
 import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
@@ -48,6 +48,8 @@ import { dataChangeMatches, subscribeDataChanges } from '@object-ui/react';
 import { ObjectForm } from './ObjectForm';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
+import { FormDirtyReportContext } from './formDirtyReport';
+import { MasterDetailFrameContext } from './masterDetailFrame';
 import { useFormChromeTranslation } from './formChrome';
 import {
   buildMasterDetailBatch,
@@ -1766,6 +1768,44 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     }));
   }, []);
 
+  /**
+   * Whether this document holds input a close would discard, reported to the
+   * hosting overlay's close guard (`formDirtyReport.ts`): the header form's
+   * renderer verdict, the open row editor's, or any collection whose lines the
+   * save would write ({@link linesUnsaved}, the edit save's own row diff — so a
+   * blank ghost line is not input and a reverted edit reads as saved).
+   *
+   * The header and the row editor report through reporters this form provides
+   * around them, never to the host directly. A save clears the header's
+   * verdict (a create remounts it; an edit's next keystroke reports again) and
+   * advances or empties the lines, so a saved document reads as pristine.
+   */
+  const reportUnsaved = useContext(FormDirtyReportContext);
+  // A host frame of fixed height (the record dialog, objectstack#34819): the
+  // body scrolls in its own box and the bar sits below it. See `masterDetailFrame`.
+  const frame = useContext(MasterDetailFrameContext);
+  const [headerDirty, setHeaderDirty] = useState(false);
+  const [rowEditorDirty, setRowEditorDirty] = useState(false);
+  const linesDirty = useMemo(
+    () =>
+      entries.some((e) =>
+        linesUnsaved(rowState[e.id], e.config, parentIdKey, childSchemasRef.current[e.config.childObject]),
+      ),
+    [entries, rowState, parentIdKey],
+  );
+  // A closed row editor holds no draft: Apply wrote it into the lines, and
+  // cancel dropped it. Its renderer reports nothing on its way out.
+  useEffect(() => {
+    if (!expanded) setRowEditorDirty(false);
+  }, [expanded]);
+  const unsavedInput = headerDirty || rowEditorDirty || linesDirty;
+  useEffect(() => {
+    reportUnsaved?.(unsavedInput);
+  }, [reportUnsaved, unsavedInput]);
+  // Unmounted (the overlay closed, or the host swapped forms): nothing of this
+  // document is on screen to discard any more.
+  useEffect(() => () => reportUnsaved?.(false), [reportUnsaved]);
+
   // Header tax-rate field name — the live value is read by <MasterDetailLines>
   // (from the header record and the user's edits) and drives the Subtotal / Tax
   // / Total stack.
@@ -1826,6 +1866,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   const handleSaved = useCallback(
     async (parent: any) => {
       releaseSave();
+      setHeaderDirty(false);
       if (!schema.onSuccess) {
         toast.success(
           isEdit
@@ -2142,12 +2183,13 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
 
   useEffect(() => () => { if (saveGuardTimer.current) clearTimeout(saveGuardTimer.current); }, []);
 
-  return (
-    <UploadGateProvider gate={uploadGate}>
-    <div className={cn('space-y-6', className, schema.className)}>
+  const body = (
+    <>
       {/* 1) Header fields on top */}
       <div ref={formHostRef}>
-        <ObjectForm key={formKey} schema={parentSchema as any} dataSource={headerDataSource} />
+        <FormDirtyReportContext.Provider value={setHeaderDirty}>
+          <ObjectForm key={formKey} schema={parentSchema as any} dataSource={headerDataSource} />
+        </FormDirtyReportContext.Provider>
       </div>
 
       {/* 2) Line items + document totals, in a sibling component that owns the
@@ -2204,6 +2246,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 row its id. A disabled fieldset disables every control in the
                 editor, "Apply" included, until the save has settled. */}
             <fieldset disabled={saving} className="min-w-0">
+              <FormDirtyReportContext.Provider value={setRowEditorDirty}>
               <ObjectForm
                 key={`row-${expanded.entryId}-${expanded.rowIdx}`}
                 schema={{
@@ -2225,15 +2268,50 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 } as any}
                 dataSource={dataSource}
               />
+              </FormDirtyReportContext.Provider>
             </fieldset>
           </CardContent>
         </Card>
       )}
+    </>
+  );
+
+  return (
+    <UploadGateProvider gate={uploadGate}>
+    <div className={cn(frame ? 'flex min-h-0 flex-1 flex-col' : 'space-y-6', className, schema.className)}>
+      {frame ? (
+        <div className={cn('min-h-0 flex-1 overflow-y-auto space-y-6', frame.bodyClassName)} data-testid="md-form-body">
+          {body}
+        </div>
+      ) : (
+        body
+      )}
 
       {/* Single action bar at the bottom — suppressed when the host opts out
-          (e.g. the Studio screen-preview, which must never persist). */}
+          (e.g. the Studio screen-preview, which must never persist).
+          Pinned to the bottom edge of whatever scroll frame hosts this form —
+          the dialog body, the drawer, the record page — so Save and Cancel
+          stay in view at any scroll position (objectstack#34599). Sticky
+          resolves against the nearest scrolling ancestor, so it is a direct
+          child of this form's root and nothing between it and the host's
+          scroller may set `overflow`. Sticky stops at the scroller's CONTENT
+          edge: the `after:` strip paints over the host's bottom padding below
+          it, so lines never scroll through that gap. Owned here, not by the
+          host (ADR-0035 Decision §6: the form owns its Save).
+          In a host frame of fixed height (objectstack#34819) the bar is not
+          sticky: it is the flex row below the body's own scroller, outside
+          the scrolled content, so nothing the body holds can lift it off the
+          frame's bottom edge. */}
       {schema.showSubmit !== false && (
-        <div className="border-t border-border pt-4">
+        <div
+          className={cn(
+            'border-t border-border bg-background',
+            frame
+              ? cn('shrink-0', frame.actionsClassName)
+              : 'sticky bottom-0 z-10 pt-4 pb-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-6 after:bg-background',
+          )}
+          data-testid="md-form-actions"
+        >
           {/* Why Save is unavailable — above the row so it reads before the
               dead control (objectui#10166). */}
           <UploadInFlightNotice gate={uploadGate} />

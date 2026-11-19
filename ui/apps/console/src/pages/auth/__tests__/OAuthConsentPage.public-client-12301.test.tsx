@@ -25,7 +25,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, within, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ObjectStackClient } from '@objectstack/client';
 import { AuthProvider } from '@object-ui/auth';
@@ -53,6 +53,7 @@ const ADMIN_REGISTERED: Answer = {
 };
 
 const CONSENT_REQUEST_PATH = '/api/v1/auth/oauth-consent/request';
+const CONSENT_DECISION_PATH = '/api/v1/auth/oauth2/consent';
 
 function respond(answer: Answer) {
   if (answer.kind === 'never') return new Promise(() => {});
@@ -67,6 +68,7 @@ function respond(answer: Answer) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** The URL `@objectstack/client` requests for `oauth.applications.getPublic`. */
@@ -94,11 +96,16 @@ function authClient(signedIn: boolean): AuthClient {
   } as unknown as AuthClient;
 }
 
-function stubLookup(answer: Answer, request: Answer = ADMIN_REGISTERED) {
+function stubLookup(
+  answer: Answer,
+  request: Answer = ADMIN_REGISTERED,
+  decision: () => ReturnType<typeof respond> = () => respond({ kind: 'http', status: 404, body: {} }),
+) {
   // Typed as `fetch` is called (input, init), so a recorded call reads as both.
   const fetchMock = vi.fn((input: unknown, _init?: RequestInit) => {
     const url = String(input);
     if (url.includes(CONSENT_REQUEST_PATH)) return respond(request);
+    if (url.includes(CONSENT_DECISION_PATH)) return decision();
     if (!url.includes('/oauth2/public-client')) {
       return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
     }
@@ -317,5 +324,118 @@ describe('OAuthConsentPage — where the grant goes, and an unverified client', 
     expect(screen.queryByTestId('oauth-consent-destination')).toBeNull();
     expect(authorizeButton().hasAttribute('disabled')).toBe(true);
     expect(denyButton().hasAttribute('disabled')).toBe(false);
+  });
+});
+
+/**
+ * A posted decision answered with a redirect spends the signed query, so the
+ * page never offers Authorize or Deny again. A redirect the tab does not leave
+ * for (a native app's custom scheme) replaces the consent card with the
+ * outcome and a link that opens the same redirect; an `http(s)` redirect keeps
+ * navigating the tab away.
+ */
+describe('OAuthConsentPage — after a decision', () => {
+  const APP_REDIRECT = 'workbuddy://workbuddy/mcp/custom-mcp%3Aobjectstack/oauth/callback';
+  const decided = (redirect: string) => () =>
+    respond({ kind: 'http', status: 200, body: { redirect_uri: redirect } });
+
+  // While a decision is in flight Authorize reads "Authorizing…".
+  const authorizeOrPending = () => screen.getByRole('button', { name: /Authoriz/ });
+
+  function spyAssign() {
+    return vi.spyOn(window.location, 'assign').mockImplementation(() => undefined);
+  }
+
+  const decisionCalls = (fetchMock: ReturnType<typeof stubLookup>) =>
+    fetchMock.mock.calls.filter(([input]) => String(input).includes(CONSENT_DECISION_PATH));
+
+  it.each<[string, () => HTMLElement, boolean, string]>([
+    ['Authorize', authorizeButton, true, 'Access granted'],
+    ['Deny', denyButton, false, 'Access denied'],
+  ])('%s with a custom-scheme redirect ends on the outcome, with no decision buttons left', async (_label, button, accept, outcome) => {
+    const redirect = `${APP_REDIRECT}?${accept ? 'code=c1' : 'error=access_denied'}&state=s1`;
+    const assign = spyAssign();
+    const fetchMock = stubLookup(NAMED, requestAnswer(APP_REDIRECT, false), decided(redirect));
+    renderConsent();
+
+    await screen.findByTestId('oauth-consent-destination');
+    fireEvent.click(button());
+
+    const done = await screen.findByTestId('oauth-consent-handed-off');
+    expect(within(done).getByText(outcome)).toBeTruthy();
+    expect(within(done).getByText('Return to Acme Notes to continue. You can close this tab.')).toBeTruthy();
+    const open = within(done).getByTestId('oauth-consent-open-app');
+    expect(open.tagName).toBe('A');
+    expect(open.getAttribute('href')).toBe(redirect);
+    expect(open.textContent).toBe('Open Acme Notes');
+    // The redirect is still handed to the operating system, exactly once.
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith(redirect);
+    // Nothing on the page can post the spent query again.
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(screen.queryByTestId('oauth-consent-destination')).toBeNull();
+    const calls = decisionCalls(fetchMock);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String((calls[0] as [string, RequestInit])[1].body))).toEqual({
+      accept,
+      oauth_query: SEARCH.slice(1),
+    });
+  });
+
+  it('names no application on the outcome when the client was not identified', async () => {
+    spyAssign();
+    stubLookup({ kind: 'http', status: 404, body: {} }, requestAnswer(APP_REDIRECT, false), decided(`${APP_REDIRECT}?code=c1`));
+    renderConsent();
+
+    await screen.findByTestId('oauth-consent-destination');
+    fireEvent.click(authorizeButton());
+
+    const done = await screen.findByTestId('oauth-consent-handed-off');
+    expect(within(done).getByText('Return to the application to continue. You can close this tab.')).toBeTruthy();
+    expect(within(done).getByTestId('oauth-consent-open-app').textContent).toBe('Open the application');
+  });
+
+  it.each<[string, string]>([
+    ['an https redirect', 'https://acme.example/cb?code=c1&state=s1'],
+    ['a loopback redirect', 'http://127.0.0.1:56789/callback?code=c1&state=s1'],
+  ])('CONTROL: %s keeps navigating the tab, shows no outcome card, and never enables the buttons again', async (_label, redirect) => {
+    const assign = spyAssign();
+    stubLookup(NAMED, requestAnswer(redirect, true), decided(redirect));
+    renderConsent();
+
+    await screen.findByTestId('oauth-consent-destination');
+    fireEvent.click(authorizeButton());
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith(redirect));
+    expect(assign).toHaveBeenCalledTimes(1);
+    // Let the decision's `finally` run before reading the buttons.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByTestId('oauth-consent-handed-off')).toBeNull();
+    expect(authorizeOrPending().hasAttribute('disabled')).toBe(true);
+    expect(denyButton().hasAttribute('disabled')).toBe(true);
+  });
+
+  it('CONTROL: a refused decision keeps the consent card and enables the buttons again', async () => {
+    const assign = spyAssign();
+    let refuse: (value: unknown) => void = () => {};
+    const refused = new Promise((resolve) => {
+      refuse = resolve;
+    });
+    stubLookup(NAMED, requestAnswer(APP_REDIRECT, false), () =>
+      refused.then(() => respond({ kind: 'http', status: 400, body: { message: 'invalid_request' } })),
+    );
+    renderConsent();
+
+    await screen.findByTestId('oauth-consent-destination');
+    fireEvent.click(authorizeButton());
+    await waitFor(() => expect(denyButton().hasAttribute('disabled')).toBe(true));
+    expect(authorizeOrPending().hasAttribute('disabled')).toBe(true);
+
+    refuse(undefined);
+    await waitFor(() => expect(authorizeButton().hasAttribute('disabled')).toBe(false));
+    expect(denyButton().hasAttribute('disabled')).toBe(false);
+    expect(screen.queryByTestId('oauth-consent-handed-off')).toBeNull();
+    expect(screen.getByTestId('oauth-consent-destination')).toBeTruthy();
+    expect(assign).not.toHaveBeenCalled();
   });
 });

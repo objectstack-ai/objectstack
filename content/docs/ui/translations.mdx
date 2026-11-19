@@ -76,6 +76,7 @@ export default defineStack({
 | Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
 | Action labels, confirm text, success messages, disabled reasons, param dialog submit labels, confirm and param dialog dismiss labels | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
+| Column headers of a table in an action's result dialog or preflight panel | `objects.<name>._actions.<action>.resultDialog.columns.<field path>.<column path>` / `.preflight.columns.<field path>.<column path>` — a sibling of `fields`, both paths written literally, dots included |
 | Form sections | `objects.<name>._sections.<section>` |
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
@@ -90,16 +91,21 @@ export default defineStack({
 | Page tab labels (`page:tabs` items) | `pages.<name>.components.<tabsId>.items.<value>.label` — keyed by the tabs component's `id` and the item's `value`; an item without a `value` has no key (localize it with an inline locale map), and `page:accordion` panels have none |
 | A page `object-form`'s thank-you panel | `pages.<name>.components.<formId>.submitBehavior.title` / `.message` — keyed by the `object-form` component's `id` (a form without an `id` has no key), by the same rules as a form view's panel |
 | Screen-flow wizards (flow label, screen headings and body text, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.description` / `.fields.<field>.label` / `.placeholder` / `.inlineHelpText` — a screen field's help text is `inlineHelpText`, the key the field itself declares, not `help`; see the boundary note below |
+| Text a flow writes into a record (a `create_record` / `update_record` field value marked `{ dialect: 'template', source }`) | `flows.<flow>.records.<node_id>.fields.<field>` — picked in the organization's language (the Localization setting when set, else the app's `i18n.defaultLocale`), never the run starter's; see [Flows](/docs/automation/flows#text-a-record-keeps--a-field-value-marked-as-text) |
 | Hook refusal messages | `hooks.<hook>.refusals.<CODE>.message` — one per entry of the hook's `refusals` catalogue — and `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`, one per reason an entry declares. A hook (a `js` body or a TypeScript `handler`) refuses by code, optionally with a declared reason, and the server answers the refusal with this sentence in the caller's locale, else the declared one. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
+| Hook texts | `hooks.<hook>.texts.<key>.message` — one per entry of the hook's `texts`. A hook asks for the sentence with `ctx.text(key, params)` when it writes it into a record, and the server answers it in the **organization's** language (the Localization setting somebody set, else the app's `i18n.defaultLocale`), never the caller's, else the declared one. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
+| Action refusal messages | `objects.<object>._actions.<action>.refusals.<CODE>.message` — one per entry of the action's `refusals` catalogue — and `….refusals.<CODE>.reasons.<REASON>.message`, one per reason an entry declares; `globalActions.<action>.refusals.…` for an action with no `objectName`. A `script` action's `js` body refuses by code, and the server answers the refusal with this sentence in the caller's locale, else the declared one, on the refusal's `userMessage`. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
+| Action texts | `objects.<object>._actions.<action>.texts.<key>.message` — one per entry of the action's `texts`; `globalActions.<action>.texts.<key>.message` for an action with no `objectName`. A `script` action's `js` body asks for the sentence with `ctx.text(key, params)` when it writes it into a record, and the server answers it in the **organization's** language (the Localization setting somebody set, else the app's `i18n.defaultLocale`), never the caller's, else the declared one. A translation of an entry that declares `params` keeps its `{{ name }}` holes; the server fills them after picking the translation |
 | Position label / description | `positions.<name>.label` / `description` — keyed by the position's `name`; overlaid on every served position, which is the list the console's position picker draws |
 | Permission-set label / description | `permissions.<name>.label` / `description` — the group is spelled as the stack spells the collection (`permissions[]`), keyed by the set's `name` |
 | Doc book title, description and section titles | `books.<name>.label` / `description` / `groups.<key>.label` — keyed by the book's `name` and each group's `key`; overlaid on every served book and on the book tree, which is what the docs sidebar draws. A doc's own title and body localize through `doc.translations` instead |
+| Import mapping label | `mappings.<name>.label` — keyed by the mapping's `name`; overlaid on every served mapping, which is the list the import wizard offers by name. A mapping's `fieldMapping` holds column and field names, not copy: a target field's label is translated under `objects.<object>.fields.<field>.label` |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
 
 The metadata types resolved per request are **object, view, action, app,
-dashboard, dataset, report, page, picklist, position, permission and book** — a field's labels are translated as part of
+dashboard, dataset, report, page, picklist, position, permission, book and mapping** — a field's labels are translated as part of
 its object document, and so are the labels of any actions the object declares
 inline
 (#3370). Before that, an object document went out with its authored action
@@ -157,7 +163,9 @@ is resolved by this one rule.
 `resultDialog` shown by actions like `create_user` (temporary password), 2FA
 backup codes, and OAuth client-secret rotation carries its own
 `_actions.<action>.resultDialog` slot (`title` / `description` / `acknowledge`
-and `fields` keyed by the literal result-field path, e.g. `"user.email"`).
+and `fields` keyed by the literal result-field path, e.g. `"user.email"`; a
+`format: 'table'` field's column headers sit beside `fields` under
+`columns.<field path>.<column path>`).
 `os i18n extract` emits these keys; the shipped platform dialogs ship
 en / zh-CN / ja-JP / es-ES copy. Separately, **platform notification and
 storage strings localize to the recipient's locale** — collaboration
@@ -188,9 +196,10 @@ the next best text.
 
 Two rules keep the declaration honest (#14882, #15711):
 
-- **The authored label is the default locale's text.** A request for
-  `defaultLocale` consults that locale's own bundle and then answers with the
-  inline `label:` — it never walks the fallback chain. A stack declaring
+- **The authored label is the source locale's text.** A request for the
+  language the inline labels are written in — `sourceLocale` when declared,
+  else `defaultLocale` (#33634) — consults that locale's own bundle and then
+  answers with the inline `label:`; it never walks the fallback chain. A stack declaring
   `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` and only an `en` bundle
   serves its authored Chinese to a `zh-CN` request, and its `en` bundle to
   everyone else. Shipping a `zh-CN` bundle (`os i18n extract --locales=zh-CN`)
@@ -372,9 +381,9 @@ default one, and your inline `label:` is already that locale's text — so there
 is no gap to report and no need to reach for `--skip-i18n`. The same holds if
 your source language isn't English: declare `defaultLocale: 'zh-CN'` and the
 tooling stops asking for English you never promised. The runtime reads the
-declaration the same way (#15711): a request for the default locale answers
-with the authored label, so what the gate counts as covered is what gets
-served.
+declaration the same way (#15711, #33634): a request for the source locale
+answers with the authored label, so what the gate counts as covered is what
+gets served.
 
 #### When users default to a language you did not author in
 
@@ -400,12 +409,12 @@ language every user without a preference is served. Declare `defaultLocale: 'zh-
 reads your English labels as Chinese: it reports every key missing in `en` and
 never reports a `zh-CN` gap.
 
-`sourceLocale` is read by the authoring tools only. The runtime's
-authored-label rule above still keys on `defaultLocale`, so in this setup it is
-the `zh-CN` request that skips the fallback chain, and an `en` request walks
-the declared fallback (`fallbackLocale`, else `defaultLocale`) before it
-reaches the English inline label. Declare `fallbackLocale: 'en'` to keep an
-`en` request on the authored text.
+The runtime reads `sourceLocale` too (#33634): its authored-label rule above
+keys on it, so in this setup an `en` request answers the English inline label
+without walking the fallback chain, a `zh-CN` request is served the `zh-CN`
+rows, and any other locale walks the declared fallback (`fallbackLocale`, else
+`defaultLocale`) before it reaches the inline text. No `fallbackLocale: 'en'`
+is needed to keep an `en` request on the authored text.
 
 Translating is therefore opt-in, but once you opt in it covers the **whole**
 declared surface — every row of the table above, including action labels

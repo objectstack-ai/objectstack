@@ -29,8 +29,8 @@ Traditional frontend development chains you to specific frameworks and platforms
   />
   <Card
     icon={<Globe />}
-    title="Write Once, Run Everywhere"
-    description="One JSON definition renders natively on Web (React/Vue), iOS (SwiftUI), Android (Compose), Desktop (Tauri)."
+    title="One Definition, Every Screen"
+    description="The Console renders one JSON definition on desktop and on phones, in a browser or inside the ObjectStack mobile app, which hosts the same Console."
   />
   <Card
     icon={<Package />}
@@ -57,16 +57,21 @@ Traditional frontend development chains you to specific frameworks and platforms
 │  Layout DSL • Widget Contract • Action Definitions           │
 └─────────────────────────────────────────────────────────────┘
                             ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    Console (the renderer)                    │
+│  Reads the JSON • Paints forms, lists, dashboards            │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
         ┌───────────────────┴────────────────────┐
         ↓                   ↓                     ↓
-  ┌──────────┐      ┌──────────┐         ┌──────────┐
-  │   Web    │      │  Mobile  │         │ Desktop  │
-  │ Renderer │      │ Renderer │         │ Renderer │
-  │  React   │      │  Swift   │         │  Tauri   │
-  └──────────┘      └──────────┘         └──────────┘
+  ┌──────────┐      ┌──────────┐         ┌──────────────┐
+  │ Desktop  │      │  Phone   │         │  Mobile app  │
+  │ browser  │      │ browser  │         │  (hosts the  │
+  │          │      │          │         │   Console)   │
+  └──────────┘      └──────────┘         └──────────────┘
 ```
 
-**Key Insight:** The protocol is the contract. Any renderer that implements ObjectUI can paint the same interface.
+**Key Insight:** The protocol is the contract. The Console is the renderer that ships, and it paints the same definition on every screen; the ObjectStack mobile app is a native shell that hosts the Console, not a second renderer.
 
 ## Core Components
 
@@ -180,7 +185,7 @@ actions:
 - 15 lines vs 300 lines (95% reduction)
 - Validation inherited from `customer.object.yml` (no duplication)
 - Change field order? Edit YAML, refresh page (5 seconds)
-- Mobile app? Same YAML file renders natively (zero code)
+- Mobile app? The Console renders the same YAML file on a phone, in a browser or inside the ObjectStack mobile app (zero code)
 
 **Result:** What took 2 days now takes 2 minutes.
 
@@ -243,10 +248,7 @@ defineView({
 });
 ```
 
-**Renders as:**
-- **Web:** Material-UI tabs with collapsible sections
-- **Mobile:** SwiftUI NavigationView with grouped lists
-- **Desktop:** Native tabs with keyboard shortcuts
+**Renders as:** a tabbed form in the Console, one tab per section. The same definition drives the Console on desktop and on a phone.
 
 ### ListView: Data Tables
 
@@ -492,26 +494,15 @@ formview.us.yml:
 - Avoided $500K regulatory fine
 - Market entry time: 1 week (was 3 months)
 
-### Offline-First Mobile Apps
+### Field Teams on Phones
 
-**Challenge:** Field service technicians work in areas with no connectivity. App must work offline and sync when online.
+**Challenge:** Field service technicians need the same forms on their phones that the office uses at a desk.
 
-**ObjectUI Solution:**
-```yaml
-# Same definition used by web and mobile
-customer.formview.yml:
-  object: customer
-  fields: [name, email, phone]
-
-# Mobile renderer caches layout + data
-mobile_renderer:
-  offline_cache: true
-  sync_strategy: periodic
-```
+**ObjectUI Solution:** nothing extra to define. The Console renders the same `customer.formview.yml` in a phone browser, and the ObjectStack mobile app hosts that same Console. There is no separate mobile renderer and no mobile-only metadata.
 
 **Value:**
-- UI consistency eliminates confusion
-- $100K/year saved on support tickets
+- One definition to maintain: the phone and the desk show the same fields in the same order
+- A layout change on the server reaches the phone without a new app release
 
 ## What's Next?
 

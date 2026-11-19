@@ -24,6 +24,13 @@
  * The refusal's `fix` names the caller's read access; a third leg, a query that
  * cannot compile, keeps the dataset fix, so the fix follows the failure rather
  * than the plane.
+ *
+ * [ruling record 6929121584] The last block drives the same door for the other
+ * channel of a finding: `userMessage`, the sentence for the person who
+ * published, composed by the probe in the language THIS request states (the
+ * caller's locale, else the workspace default, else `en`). The door states
+ * those locales off the caller's execution context and the protocol hands them
+ * to `runBuildProbes`; the block pins that hand-off end to end.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatasetSchema } from '@objectstack/spec/ui';
@@ -70,11 +77,12 @@ const ITEMS_UNDECLARED_JOIN = itemsWithDataset(DATASET_UNDECLARED_JOIN);
 const DATASET_FIX = `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`;
 
 /** Both callers may publish; only the reader may read `task_item`. */
-const caller = (userId: string) => ({
+const caller = (userId: string, localization: { locale?: string; workspaceLocale?: string } = {}) => ({
     request: {},
     executionContext: {
         userId,
         systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+        ...localization,
     },
 }) as any;
 const READER = 'u_reader';
@@ -155,10 +163,14 @@ function makeDoor(items: Record<string, unknown> = ITEMS) {
     return { dispatcher: new HttpDispatcher(kernel), admissionContexts, engineFinds, metaReads };
 }
 
-async function publishAs(userId: string, items: Record<string, unknown> = ITEMS) {
+async function publishAs(
+    userId: string,
+    items: Record<string, unknown> = ITEMS,
+    localization: { locale?: string; workspaceLocale?: string } = {},
+) {
     const door = makeDoor(items);
     const result = await door.dispatcher.handlePackages(
-        '/com.tasks/publish-drafts', 'POST', {}, {}, caller(userId),
+        '/com.tasks/publish-drafts', 'POST', {}, {}, caller(userId, localization),
     );
     expect(result.response?.status).toBe(200);
     const data: any = (result.response as any)?.body?.data;
@@ -213,5 +225,67 @@ describe('publish-drafts widget probes run as the publishing caller (#25484)', (
         expect(failed).toHaveLength(1);
         expect(failed[0]).toMatchObject({ layer: 'runtime', severity: 'error', fix: DATASET_FIX });
         expect(failed[0].message).toContain('is not declared in the dataset');
+    });
+});
+
+describe('publish-drafts probe findings carry the person\'s sentence in the request\'s language (ruling record 6929121584)', () => {
+    /**
+     * The same app with the labels a person knows it by. `task_item` carries a label
+     * too, so the refusal legs show that the probe does not read it for a caller
+     * who was refused that object.
+     */
+    const LABELLED: Record<string, unknown> = {
+        ...ITEMS,
+        'dashboard task_board': {
+            name: 'task_board',
+            label: { en: 'Task board', 'zh-CN': '任务看板' },
+            widgets: [{ id: 'w_tasks', title: { en: 'Open tasks', 'zh-CN': '未完成任务' }, dataset: 'task_metrics', values: ['task_count'] }],
+        },
+        'object task_item': { name: GATED, label: 'Tasks' },
+    };
+    const refusalOf = (probes: any) => {
+        const failed = probes.issues.filter((i: any) => i.code === 'widget_query_failed'); // adr0112-ok: D6c build-probe diagnostics code
+        expect(failed).toHaveLength(1);
+        return failed[0];
+    };
+
+    it('the caller\'s locale picks the sentence, and the sentence names the labels, not the API names', async () => {
+        // The one exception is the object the caller was refused: the probe reads
+        // nothing of it for this caller, so the sentence names it as the fix does.
+        const { probes } = await publishAs(NON_READER, LABELLED, { locale: 'zh-CN', workspaceLocale: 'en' });
+        const issue = refusalOf(probes);
+
+        expect(issue.userMessage).toBe(
+            `仪表盘“任务看板”中的组件“未完成任务”无法加载数据：发布时使用的账号没有“${GATED}”的读取权限。`
+                + '请让管理员授予该权限，然后重新发布。已有该权限的人可以正常看到这个组件。',
+        );
+        for (const apiName of ['task_board', 'w_tasks', 'task_metrics']) {
+            expect(issue.userMessage).not.toContain(apiName);
+        }
+        // The refused object's label is not read, so it is not shown.
+        expect(issue.userMessage).not.toContain('Tasks');
+        // The agent's channel is untouched by the locale: English, API names, the thrown text.
+        expect(issue.message).toContain(`reading "${GATED}" is not permitted for this user`);
+        expect(issue.fix).toContain(`read access to object "${GATED}"`);
+    });
+
+    it('with no request locale the workspace default answers, and with neither, en', async () => {
+        const french = refusalOf((await publishAs(NON_READER, LABELLED, { workspaceLocale: 'fr-FR' })).probes);
+        expect(french.userMessage).toContain('Le widget « Open tasks » du tableau de bord « Task board »');
+
+        const english = refusalOf((await publishAs(NON_READER, LABELLED)).probes);
+        expect(english.userMessage).toBe(
+            'The widget "Open tasks" on dashboard "Task board" could not load its data: the account that published it '
+                + `does not have read access to "${GATED}". Ask an administrator for that access, then publish again. `
+                + 'People who already have it can see the widget.',
+        );
+        // One finding, two readers: only the person's sentence moved.
+        expect(french.message).toBe(english.message);
+        expect(french.fix).toBe(english.fix);
+    });
+
+    it('CONTROL: a publish with nothing wrong carries no sentence at all', async () => {
+        const { probes } = await publishAs(READER, LABELLED, { locale: 'zh-CN' });
+        expect(probes.issues).toEqual([]);
     });
 });

@@ -46,13 +46,13 @@
  *
  * The footer text a user reads, from a real `ObjectView` mount inside a real
  * i18next instance booted in the language under test; `t` is not mocked. The
- * count is the `total` the view's own `$top: 0` count query returns. `en` at 3
- * is the control.
+ * count is the `total` the list's own answer carries (the page's `$top: 0`
+ * count probe is gone, objectstack#34207 below). `en` at 3 is the control.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen } from '@testing-library/react';
+import { render, cleanup, screen, act, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
@@ -108,6 +108,9 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
   useMetadataClient: () => ({ save: vi.fn(async () => ({})), get: vi.fn(async () => null) }),
 }));
 
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
@@ -275,5 +278,92 @@ describe('ObjectView record-count footer reads right at one and at every other c
       }
       expect(at(lang, 'console.objectView.recordCountOne'), `${lang} recordCountOne`).toBeUndefined();
     }
+  });
+});
+
+/**
+ * objectstack#34207 — a list page load sends ONE `data/OBJECT` read.
+ *
+ * The page used to send a `$top: 0` count probe beside the list's own read
+ * (both answers carried `total`), on every mount and every `refreshKey` bump,
+ * for a page-level count nothing drew any more. The bar's count is the list
+ * answer's `total`: the answers below carry 3 rows and a larger total, so the
+ * bar can only read the total from the list's answer, and a probe — were one
+ * still sent — answers a number of its own (999) the bar must never show.
+ */
+describe('a list page load reads its object once, and the bar counts that answer (objectstack#34207)', () => {
+  function mount(total: { value: number }) {
+    const rows = [1, 2, 3].map((i) => ({ id: `r${i}`, name: `Row ${i}` }));
+    const find = vi.fn(async (_object: string, params?: { $top?: number }) =>
+      params?.$top === 0 ? { data: [], total: 999 } : { data: rows, total: total.value },
+    );
+    const dataSource = {
+      find,
+      findOne: vi.fn(async () => null),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    } as never;
+    let bump: () => void = () => {};
+    function Harness() {
+      const [externalRefreshKey, setExternalRefreshKey] = React.useState(0);
+      React.useEffect(() => {
+        bump = () => setExternalRefreshKey((n) => n + 1);
+      }, []);
+      return (
+        <I18nProvider instance={boot('en')}>
+          <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'user' }}>
+            <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}/view/${VIEW_ID}`]}>
+              <Routes>
+                <Route
+                  path="/apps/:appName/:objectName/view/:viewId"
+                  element={
+                    <ObjectView
+                      dataSource={dataSource}
+                      objects={OBJECTS}
+                      onEdit={() => {}}
+                      externalRefreshKey={externalRefreshKey}
+                    />
+                  }
+                />
+              </Routes>
+            </MemoryRouter>
+          </ExpressionProvider>
+        </I18nProvider>
+      );
+    }
+    render(<Harness />);
+    const reads = () => find.mock.calls.filter(([object]) => object === OBJECT_NAME);
+    const barCount = async () =>
+      (await screen.findByTestId('record-count-bar', undefined, { timeout: 5000 })).querySelector('span')
+        ?.textContent ?? '';
+    return { reads, barCount, bump: () => act(async () => { bump(); }) };
+  }
+
+  /** A window long enough for every effect a step schedules to have fired. */
+  const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 400)));
+
+  it('the load sends one read of the object, no `$top: 0` probe, and the bar shows its total', async () => {
+    const page = mount({ value: 42 });
+    await waitFor(async () => expect(await page.barCount()).toBe('42 records'), { timeout: 5000 });
+    await settle();
+    expect(page.reads().filter(([, params]) => params?.$top === 0), 'a `$top: 0` count probe was sent').toEqual([]);
+    expect(page.reads(), 'one list page load, one `data/OBJECT` read').toHaveLength(1);
+  });
+
+  it('a refresh re-reads once and the bar follows the new answer\'s total', async () => {
+    const total = { value: 42 };
+    const page = mount(total);
+    await waitFor(async () => expect(await page.barCount()).toBe('42 records'), { timeout: 5000 });
+    await settle();
+    const before = page.reads().length;
+
+    total.value = 43;
+    await page.bump();
+    await settle();
+
+    expect(page.reads().length - before, 'one refresh, one read').toBe(1);
+    expect(page.reads().filter(([, params]) => params?.$top === 0)).toEqual([]);
+    await waitFor(async () => expect(await page.barCount()).toBe('43 records'), { timeout: 5000 });
   });
 });

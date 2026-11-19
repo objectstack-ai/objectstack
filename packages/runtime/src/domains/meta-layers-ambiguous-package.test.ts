@@ -27,6 +27,8 @@
  * `Request` into the real `HttpDispatcher.dispatch()`.
  */
 
+// Pays the metadata service's first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -204,12 +206,20 @@ for (const [doorName, boot] of DOORS) {
                 const read = await door.send('GET', path, query);
                 expect([read.status, codeOf(read.body)], `${spelling}: ${JSON.stringify(read.body)}`)
                     .toEqual([save.status, codeOf(save.body)]);
-                // The same envelope this door wraps the writes' refusal in.
+                // The same envelope this door wraps the writes' refusal in, and
+                // [#32622, ADR-0150 D5] the read's holders as `details.candidates`
+                // where this door's envelope carries the refusal's fields.
                 const keys = (b: any) => Object.keys(b ?? {}).sort();
-                expect(keys(read.body), spelling).toEqual(keys(save.body));
-                if (read.body?.error && typeof read.body.error === 'object') {
-                    expect(keys(read.body.error), spelling).toEqual(keys(save.body.error));
-                }
+                const withDetails = (b: any) => [...Object.keys(b ?? {}), 'details'].sort();
+                const nested = read.body?.error && typeof read.body.error === 'object';
+                expect(keys(read.body), spelling).toEqual(nested ? keys(save.body) : withDetails(save.body));
+                if (nested) expect(keys(read.body.error), spelling).toEqual(withDetails(save.body.error));
+                const fields = nested ? read.body.error : read.body;
+                expect(fields?.details?.candidates, spelling).toEqual([
+                    { kind: 'package', packageId: PKG_A },
+                    { kind: 'package', packageId: PKG_B },
+                ]);
+                expect((nested ? save.body.error : save.body)?.details, `${spelling}: the writes' answer does not move`).toBeUndefined();
                 const message = messageOf(read.body);
                 expect(message.startsWith('Name the package this layered read is for, then send it again'), message).toBe(true);
                 expect(message, spelling).toContain('?package=');

@@ -41,11 +41,12 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Alteração do status de administrador da plataforma",
           action_invocation: "Invocação de ação",
           package_uninstall: "Desinstalação de pacote",
-          package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use",
-          scim_refused: "SCIM Refused",
-          audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          package_unmanaged_import: "Importação de pacote não gerenciado",
+          credential_use: "Uso de credencial",
+          scim_refused: "Solicitação SCIM recusada",
+          audit_signing_key_change: "Alteração da chave de assinatura de auditoria",
+          dataset_query: "Consulta de conjunto de dados",
+          scim_manager_unresolved: "Gestor SCIM não resolvido"
         }
       },
       user_id: {

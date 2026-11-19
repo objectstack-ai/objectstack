@@ -42,9 +42,11 @@
  *    `requested_limit`, `limit_cap`, `limit_capped`), `truncated`, a bounded
  *    `filter` summary, `search` (whether a term was applied), `search_fields`,
  *    `outcome`, and on a failure the HTTP `status` and the error's machine code;
- *    `performed_by` / `on_behalf_of` when an agent performed the call and
- *    `impersonated_by` under an impersonation session, the pairs the CRUD
- *    mirror and the action-invocation row write.
+ *    `performed_by` / `on_behalf_of` when an agent performed the call (with
+ *    `conversation_id` / `confirmation_id` beside an in-product AI agent) and
+ *    `impersonated_by` under an impersonation session, the keys the CRUD
+ *    mirror and the action-invocation row write, by the same rule
+ *    (`auditPerformerMetadata`).
  *
  * ## No exported value, ever
  *
@@ -61,6 +63,7 @@ import { isMissingTableError } from '@objectstack/types';
 import {
   auditFailureCauseKey,
   auditFailureCauseSummary,
+  auditPerformerMetadata,
   createFieldPresenceProbe,
 } from './audit-writers.js';
 import type { AuthEventAuditLogger } from './auth-event-audit.js';
@@ -314,7 +317,6 @@ export function buildDataExportAuditRow(
 ): Record<string, unknown> {
   const ctx = event.context ?? {};
   const userId = nonEmpty(ctx.userId);
-  const performedBy = nonEmpty(ctx.performedBy?.clientId);
   const query = event.readQuery ?? {};
 
   const limit = wholeNumber(event.limit);
@@ -348,11 +350,11 @@ export function buildDataExportAuditRow(
   }
   // [ADR-0090 D10 rule 4] The same pair, under the same names, the CRUD mirror
   // writes for a delegated write — present only when an agent performed the
-  // call, so the two shapes stay distinguishable by absence.
-  if (performedBy) {
-    metadata.performed_by = performedBy;
-    metadata.on_behalf_of = userId ?? null;
-  }
+  // call, so the two shapes stay distinguishable by absence. [#33694] Read by
+  // the CRUD mirror's own rule (`auditPerformerMetadata`): an OAuth client or
+  // the in-product AI agent, and beside the agent only, the conversation it
+  // ran in and the confirmation the person gave.
+  Object.assign(metadata, auditPerformerMetadata(ctx.performedBy, userId));
   // The impersonating administrator, under the key the CRUD mirror writes,
   // present only when an impersonation session made the call.
   const impersonatedBy = impersonatorOf(ctx);

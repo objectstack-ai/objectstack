@@ -2,7 +2,7 @@
 
 > **🔶 Cloud-owned — superseded in part by cloud ADR-0025 (2026-06-25).** The in-UI AI runtime and the `ask` / `build` agents described here moved to the **cloud / Enterprise** distribution (`@objectstack/service-ai` → `cloud/packages/service-ai`, closed); the open framework exposes AI only via `@objectstack/mcp` (BYO-AI) and ships no in-product `ask` / `build` chat. Retained as historical design context, now **cloud-owned** — see [`cloud/docs/adr/0025-service-ai-to-cloud-open-mcp-only`](https://github.com/objectstack-ai/cloud/blob/main/docs/adr/0025-service-ai-to-cloud-open-mcp-only.md).
 
-**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2026-06-11). cloud-owned; implemented: L1 graph lint and L4 `verify_build` self-correction in cloud `service-ai-studio` (`verify/graph-lint.ts`), L3 runtime probes in the framework (`metadata-protocol/src/build-probes.ts`, `RuntimeBuildIssue` contract, post-publish probe report in `protocol.zod.ts`), L5 golden-prompt harness built (cloud `eval-golden-prompts.yml`, `scripts/eval/golden-prompts.mjs` on `ai_eval_cases` / `ai_eval_runs`) but unarmed — nightly schedule off since 2026-08-04 and no eval environment (cloud#1119); pending: L2 renderability contract (dataset compile only today), L5 arming.
+**Status**: Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2026-06-11). cloud-owned; implemented: L1 graph lint and L4 `verify_build` self-correction in cloud `service-ai-studio` (`verify/graph-lint.ts`), L3 runtime probes in the framework (`metadata-protocol/src/build-probes.ts`, `RuntimeBuildIssue` contract, post-publish probe report in `protocol.zod.ts`), L5 golden-prompt harness built (cloud `eval-golden-prompts.yml`, `scripts/eval/golden-prompts.mjs` on `ai_eval_cases` / `ai_eval_runs`) but unarmed — nightly schedule off since 2026-08-04 and no eval environment (cloud#1119); pending: L2 renderability contract (dataset compile only today), L5 arming. · **Amended** (2026-11-16, #32984 — two readers, two channels: a finding carries `userMessage`, the person's sentence beside the agent's `message` / `fix`, and the L3 probe report is modeled in spec; see the amendment at the end).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (drafts as the staging layer — this ADR **replaces its human-approval assumption for AI builds** with a machine gate; HITL stays for destructive actions), [ADR-0021](./0021-analytics-dataset-semantic-layer.md) (datasets — what most verification probes exercise), ADR-0037 / [framework#1694](https://github.com/objectstack-ai/objectstack/pull/1694) (Live Canvas — the *human-visibility* complement to this ADR's *machine-verification*)
 **Consumers**: `@objectstack/service-analytics` + `@objectstack/objectql` (verification probes), `../cloud/service-ai-studio` (graph lint, `verify_build` tool, self-correction protocol, eval intelligence), `../objectui` (build health card in chat), `ai_eval_cases`/`ai_eval_runs` (existing, currently-unused storage)
@@ -155,3 +155,30 @@ Each phase is independently shippable; Phase 1 alone converts this week's discov
 | Probes mutate state | all probes are reads; seeds are upserts keyed on externalId (idempotent) |
 | Eval env drift vs prod | eval runs on the same image staging runs; ephemeral env per run |
 | LLM intent-review cost | cheap model, single pass, warnings-only |
+
+## Amendment (2026-11-16, #32984): two readers, two channels
+
+A `BuildIssue` has two readers, and the contract above names one. `message` and `fix` are written for the agent that
+builds and corrects: English, exact artifact and member names, a remedy the agent can act on. The build-health card
+showed that same text to the person who asked for the app, who cannot act on it (#32984 item 4).
+
+Ruling records 6819749037 (on #32440, option C) and 6929121584 (on #32984, option B) decide who writes the person's
+text, and this amendment records the decision for the verification contract:
+
+- **`userMessage?: string` is the person's sentence.** One finding carries both channels. `message` and `fix` stay
+  the agent's text, unchanged, and `code` stays the stable id.
+- **The producer writes it, in the request's language**, under the ladder the platform already declares: the
+  request's locale, else the workspace default, else `en`. A sentence names an artifact by its label where the
+  producer can read one for the caller; an object the caller was refused is named by the machine name the refusal
+  carries, and nothing of it is read.
+- **No consumer keeps a per-code translation table.** A client renders `userMessage` as received, and shows its own
+  generic sentence when the field is absent.
+- **The L3 probe report is modeled in spec** (`BuildProbeReportSchema`, `RuntimeBuildIssueSchema` in
+  `@objectstack/spec/api`), because a consumer now reads fields of it. The schemas' docblocks are the reference for
+  each field; this ADR does not restate them. Modeling narrows `PublishPackageDraftsResponseSchema.probes` from
+  `unknown` to the report: a value that is not the report no longer parses (a declared narrowing, BREAKING for a
+  hand-written producer or test double of that response).
+
+Scope: the L3 runtime probes (`metadata-protocol/src/build-probes.ts`, sentences in `build-probes.user-text.ts`)
+compose `userMessage` for every finding they emit. The cloud half (the L1 graph lint's findings) is parked under the
+same ruling and is not part of this amendment.

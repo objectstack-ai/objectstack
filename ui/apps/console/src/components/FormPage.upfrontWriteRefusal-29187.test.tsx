@@ -98,6 +98,7 @@ function permissions(grants: Record<string, boolean>): MePermissionsAuthenticate
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     systemPermissions: [],
     objects: { [OBJECT]: { allowRead: true, ...grants } },

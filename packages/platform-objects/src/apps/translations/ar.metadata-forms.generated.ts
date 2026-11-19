@@ -967,7 +967,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "حالات الرفض",
-        helpText: "فهرس حالات الرفض، مفهرس برمز SCREAMING_SNAKE الذي يرميه المتن (مثل CLEAN_VERSION_REQUIRED). يقرأ المستدعي الرسالة المُعلنة، مترجمة إلى لغته، مع الحالة المُعلنة. لمتون JavaScript ‏(L2) فقط"
+        helpText: "فهرس حالات الرفض، مفهرس برمز SCREAMING_SNAKE الذي يرميه الخطاف (مثل CLEAN_VERSION_REQUIRED). يقرأ المستدعي الرسالة المُعلنة، مترجمة إلى لغته، مع الحالة المُعلنة. لمتن JavaScript ‏(L2) أو معالج؛ ويُرفض في متن التعبير"
       },
       "refusals.message": {
         label: "الرسالة",

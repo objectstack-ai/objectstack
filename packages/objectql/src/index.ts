@@ -269,6 +269,17 @@ export type { DatasourceDef } from './engine.js';
 // refuses the filter rather than truncate it, and its words name this number.
 // Exported so a caller running the two-step route itself can page by it.
 export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
+// Groups ordered by an aggregated column, cut and counted in the driver's own
+// statement: the engine-internal read option a door carries to `aggregate`,
+// and the request it carries. Carriers that do not import this package spell
+// the key `Symbol.for`, as it does.
+export { AGGREGATE_ORDER_CUT } from './aggregate-order-cut.js';
+export type { AggregateOrderCutRequest, AggregateOrderKey, AggregateOrderCutOutcome } from './aggregate-order-cut.js';
+// "Each X with its latest Y": the engine-internal read option a door carries
+// to `find` for one row per group, and the request it carries. The carriers
+// that do not import this package spell the key `Symbol.for`, as it does.
+export { LATEST_PER, LATEST_PER_MAX_KEYS } from './latest-per.js';
+export type { LatestPerRequest, LatestPerOrder, LatestPerOutcome } from './latest-per.js';
 // [#16159] `SUMMARY_RECOMPUTE_CODE` joins the class it names. The refusal's own
 // docblock tells a caller to identify it by `code` rather than `instanceof`
 // (the two-realm split #14936 measured: this package declares BOTH realms in
@@ -382,6 +393,9 @@ export {
   seedHookUserGrants,
   seedHookUnreadMembership,
 } from './hook-run-as.js';
+// The platform's own system api over a hook's api: the context elevated, with
+// no app-automation provenance. Read by plugin-audit's ledger writer.
+export { platformSystemApi } from './platform-system-api.js';
 // Whether a write runs inside a transaction a write beside it joins, or one it
 // cannot reach: read by the runtime's script-body doors.
 export { openTransactionKind } from './open-transaction.js';
@@ -633,6 +647,9 @@ export type {
     SummaryBackfillLogger,
     SummaryBackfillOptions,
 } from './summary-backfill.js';
+// [#34096] What `ObjectQL.materialiseAddedSummaries` (run by every install
+// door's `syncSchemas`) did with the roll-ups an install or upgrade added.
+export type { SummaryMaterialiseOutcome } from './summary-install-materialise.js';
 // [#29961] The backfill behind `os migrate stored-expressions`: stored computed
 // fields over rows no write has computed since the field was declared, and the
 // boot advisory naming it. Same split as the roll-up backfill above.
@@ -915,3 +932,12 @@ export {
   SCHEMA_MIGRATION_PG_LOCK_KEY,
 } from './schema-migration-lock.js';
 export type { SchemaMigrationLock } from './schema-migration-lock.js';
+// [ADR-0154 D3 amended] The database session lock both named locks ride on:
+// `@objectstack/plugin-audit`'s audit seal lock takes it under its own name,
+// so a sealer pass and an `os migrate audit-* --apply` run exclude each other.
+export {
+  acquireDatabaseSessionLock,
+  databaseSessionLockPgKey,
+  tryDatabaseSessionLock,
+} from './database-session-lock.js';
+export type { DatabaseSessionLock, DatabaseSessionLockRunOptions, DatabaseSessionLockWait } from './database-session-lock.js';

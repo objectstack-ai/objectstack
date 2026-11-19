@@ -49,6 +49,7 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { packagelessRowWithheld, withWithheldFieldsDecoration } from './protocol-meta-item-face.js';
 import {
     declinesPackageLessRowAt,
     disabledExactAddressHolder,
@@ -161,7 +162,7 @@ function disabledHolderListing(
 }
 
 /** The body of `ObjectStackProtocolImplementation#readFlattenedMetaItems`; the method's docblock there is its contract. */
-export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'baseServesBundleMember' | 'convertStoredItem' | 'declinesStoredRow' | 'disabledActionsOf' | 'engine' | 'environmentId' | 'expandStoredViewContainers' | 'findEnvironmentRows' | 'flowRegistrationsOf' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'hydrateOverlayIntoRegistry' | 'isStoredEntryOfDeclinedName' | 'isUnservedSealedOverlay' | 'isWritablePackage' | 'lookupArtifactItem' | 'namesWithOwnStoredRow' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName' | 'storedOverlayEntries'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
+export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'baseServesBundleMember' | 'convertStoredItem' | 'declinesStoredRow' | 'disabledActionsOf' | 'engine' | 'environmentId' | 'expandStoredViewContainers' | 'findEnvironmentRows' | 'flowRegistrationsOf' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'hydrateOverlayIntoRegistry' | 'isStoredEntryOfDeclinedName' | 'isUnservedSealedOverlay' | 'isWritablePackage' | 'lookupArtifactItem' | 'namesWithOwnStoredRow' | 'readActiveOverlayRows' | 'readItemActiveRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'shippedArtifactsOf' | 'shippingPackagesOf' | 'shipsBundleName' | 'storedOverlayEntries'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
         layer: 'effective' | 'per-package' = 'effective',) {
     const { packageId } = request;
@@ -952,6 +953,22 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                 const bound = boundPackageOf((it as { _packageId?: unknown })._packageId);
                 return bound === undefined || !withheld(itemName, bound, 'unscoped');
             });
+            // [#33401, review#2 S1] …and the list naming no package leaves out a
+            // package-less item whose key only disabled packages hold, as the
+            // by-name read withholds it ({@link packagelessRowWithheld}): that
+            // holder's customization, never served while it is disabled. The
+            // environment's own item stays listed, and so does the row while an
+            // enabled package holds the name through a stored row.
+            if (!packageId) {
+                const kept: unknown[] = [];
+                for (const it of items as any[]) {
+                    const itemName = (it as { name?: unknown } | null)?.name;
+                    if (typeof itemName === 'string' && boundPackageOf((it as { _packageId?: unknown })._packageId) === undefined
+                        && await packagelessRowWithheld(host, request.type, itemName, it) !== undefined) continue;
+                    kept.push(it);
+                }
+                items = kept as typeof items;
+            }
         }
     }
     // [#28877] …and, on the effective served list, an action that launches
@@ -1081,7 +1098,18 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // Execution: the stored bodies — see `getMetaItemsForExecution`.
         // [#31399] An item served its row's `name` (a body that states none)
         // is judged as stored, without it, then served with it.
-        items: audience === 'served' ? governed.map((it) => decorateListedItem(request.type, it)) : governed,
+        //
+        // [#34901] …and, on the EFFECTIVE served list of objects only, the
+        // fields a disabled package withholds ({@link withWithheldFieldsDecoration});
+        // never the per-package layer (a package's export) or the execution face.
+        items: audience === 'served'
+            ? governed.map((it) => {
+                const listed = decorateListedItem(request.type, it);
+                return request.type === 'object' && layer === 'effective'
+                    ? withWithheldFieldsDecoration(host.engine?.registry, listed)
+                    : listed;
+            })
+            : governed,
         // [#23316] Served only: the engine's verdict on each listed flow —
         // see {@link flowRegistrationsOf}. The execution face is the
         // engine's own read, so it carries none.

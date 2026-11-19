@@ -189,8 +189,16 @@ function metaValue(world: World, read: Set<string> = new Set()): MetadataContext
   } as unknown as MetadataContextValue;
 }
 
-function makeAdapter(saveItem: ReturnType<typeof vi.fn>, getItem?: ReturnType<typeof vi.fn>) {
-  return { getClient: () => ({ meta: { saveItem, ...(getItem ? { getItem } : {}) } }) } as any;
+function makeAdapter(saveItem: ReturnType<typeof vi.fn>, getItem?: ReturnType<typeof vi.fn>, apps: any[] = []) {
+  return {
+    getClient: () => ({ meta: { saveItem, ...(getItem ? { getItem } : {}) } }),
+    // objectstack#35054 — a navigation write starts from the stored app (the
+    // layers read): the listed app minus its read decorations.
+    getAuthoredItem: async (_type: string, name: string) => {
+      const app = apps.find((a) => a.name === name);
+      return app ? Object.fromEntries(Object.entries(app).filter(([k]) => !k.startsWith('_'))) : null;
+    },
+  } as any;
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -234,7 +242,7 @@ async function withWrites(
   render(
     <MemoryRouter>
       <PreviewModeProvider force={preview}>
-        <AdapterCtx.Provider value={makeAdapter(saveItem, getItem)}>
+        <AdapterCtx.Provider value={makeAdapter(saveItem, getItem, world.apps)}>
           <MetadataCtx.Provider value={metaValue(world, read)}>
             <Caller />
           </MetadataCtx.Provider>

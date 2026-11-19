@@ -495,7 +495,14 @@ export interface SignOutOfIdpCapabilityInput {
   stored?: { samlConfig?: unknown; oidcConfig?: unknown };
   /** The request body's `samlConfig` / `oidcConfig`. */
   body?: { samlConfig?: unknown; oidcConfig?: unknown };
+  /** The request's trusted-origin predicate: the discovery read uses this one. */
   isTrustedOrigin: (url: string) => boolean;
+  /**
+   * The predicate the verdict on the OIDC logout endpoint reads, when it
+   * trusts more than the discovery read does (the origins a register or update
+   * body names, `trustingBodyNamedOrigins`). Absent: `isTrustedOrigin`.
+   */
+  isTrustedLogoutOrigin?: (url: string) => boolean;
   /** The discovery fetch (the vendor's `fetchDiscoveryDocument`); injectable for tests. */
   fetchDiscovery?: (url: string, isTrustedOrigin: (url: string) => boolean) => Promise<Record<string, unknown>>;
 }
@@ -555,7 +562,7 @@ export async function judgeSignOutOfIdpCapability(input: SignOutOfIdpCapabilityI
     } catch {
       return refuse(`The end_session_endpoint of SSO provider "${input.providerId}" is not a URL: ${raw}`);
     }
-    if (!input.isTrustedOrigin(endpoint)) {
+    if (!(input.isTrustedLogoutOrigin ?? input.isTrustedOrigin)(endpoint)) {
       return refuse(
         `The end_session_endpoint of SSO provider "${input.providerId}" (${endpoint}) is not on an origin this deployment trusts, so it was not saved.`,
       );

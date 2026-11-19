@@ -53,7 +53,6 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "HTTP 方法",
         help: "回呼請求使用的 HTTP 方法",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

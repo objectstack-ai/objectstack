@@ -167,6 +167,21 @@ describe('validateFunctionalCompleteness — the walk', () => {
     expect(findings[0].path).toBe('objects[0].listViews.plan.gantt');
   });
 
+  it('flags a block-less `timesheet` view through the nested door, and is silent once it binds (#34382)', () => {
+    expect(validateFunctionalCompleteness({
+      objects: [{ name: 'time_entry', fields: [], listViews: { week: { type: 'timesheet' } } }],
+    }).map((f) => [f.rule, f.severity, f.path])).toEqual([
+      ['view/layout-without-binding', 'warning', 'objects[0].listViews.week.timesheet'],
+    ]);
+    expect(validateFunctionalCompleteness({
+      objects: [{
+        name: 'time_entry',
+        fields: [],
+        listViews: { week: { type: 'timesheet', timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' } } },
+      }],
+    })).toEqual([]);
+  });
+
   it('walks the object-nested default `list` slot too', () => {
     expect(validateFunctionalCompleteness({
       objects: [{ name: 'task', fields: [], list: { type: 'timeline' } }],

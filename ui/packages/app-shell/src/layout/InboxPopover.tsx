@@ -8,7 +8,14 @@
  *   - Activity (the recent activity the caller may read; no tab at all for a
  *     caller without read on `sys_activity`, objectui#12081)
  *
- * Rendered as a single bell button + popover with a tabbed body. The badge
+ * Rendered as a single bell button + a full-height panel on the right with a
+ * tabbed body (objectstack#34589): the page beside it stays visible and usable,
+ * so opening a notification lands its record in the page while the panel
+ * stays open on the next one. Pending approvals are pinned on top of the
+ * Notifications tab under "Needs your action", each decidable in place
+ * through the request's own declared actions. The panel yields when the record
+ * drawer opens (the two never stack on the right), and fills a phone. The
+ * badge
  * shows the combined unread pressure — distinct unread *topics* + pending
  * approvals — so a recurring notification (e.g. a scheduled digest that fires
  * once a minute) can't inflate the badge to "9+" on its own (#2765).
@@ -22,20 +29,22 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Button,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
   Tabs,
   TabsList,
   TabsTrigger,
   TabsContent,
+  useIsMobile,
 } from '@object-ui/components';
-import { Bell, CheckSquare, Activity as ActivityIcon, ChevronRight, CircleAlert, Lock } from 'lucide-react';
+import { Bell, Check, CheckSquare, Activity as ActivityIcon, ChevronRight, CircleAlert, Lock } from 'lucide-react';
 import { useObjectTranslation, useDisplayLocale } from '@object-ui/i18n';
-import type { ActivityFeedReading } from '../hooks/sharedUserFeeds.js';
+import type { ActivityFeedReading, PendingApprovalRequest } from '../hooks/sharedUserFeeds.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { resolveHostAppSegment } from '../utils/appRoute.js';
@@ -45,6 +54,8 @@ import type { InboxNotification, NotificationGroup } from './inboxGrouping.js';
 import { openInboxNotification } from './openInboxNotification.js';
 import { ActivityObjectLabel } from './ActivityObjectLabel.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
+import { RECORD_DRAWER_PARAM } from '../urlParams.js';
+import { InboxApprovalItem } from './InboxApprovalItem.js';
 
 // Re-exported so importers of the notification/group shapes keep resolving
 // through this module (the pure logic itself lives in inboxGrouping.ts).
@@ -113,9 +124,27 @@ const PHONE_TAP = 'max-md:min-h-11';
 
 /**
  * Below `md` the three tabs share the strip by content width with their icons
- * dropped, so the third tab is not pushed past a 359 px popover.
+ * dropped, so the third tab is never pushed off a phone's width.
  */
 const TAB_TRIGGER_CLASS = `text-xs gap-1.5 data-[state=active]:bg-transparent ${PHONE_TAP} max-md:flex-auto max-md:px-1.5`;
+
+/**
+ * The panel (objectstack#34589): the full height of the viewport on the right,
+ * 440 px wide from `md` up and the whole screen below it, a flex column whose
+ * open tab takes the height the header and tab strip leave.
+ */
+const PANEL_CLASS = 'flex w-full max-w-none flex-col gap-0 p-0 sm:max-w-none md:w-[440px]';
+
+/** An open tab: fills the panel's remaining height, the rows scroll inside it. */
+const TAB_PANEL_CLASS = 'm-0 flex min-h-0 flex-1 flex-col';
+
+/**
+ * The per-row "mark read" lever: an icon that shows on hover or keyboard focus
+ * instead of a column every row pays for; a phone has no hover, so it stays
+ * shown below `md`.
+ */
+const MARK_READ_ICON_CLASS =
+  'shrink-0 self-center mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md border text-muted-foreground hover:text-foreground hover:bg-accent transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100 max-md:opacity-100 max-md:h-11 max-md:w-11';
 
 export interface InboxPopoverProps {
   notifications: InboxNotification[];
@@ -150,16 +179,27 @@ export interface InboxPopoverProps {
    * the component still works for callers that only wire the single-mark path.
    */
   onMarkManyRead?: (ids: string[]) => void;
+  /**
+   * The first page of the requests `pendingApprovalsCount` counts, from the
+   * same read (objectstack#34589), pinned on top of the Notifications tab and
+   * listed in the Approvals tab. Absent ⇒ the panel lists none and keeps the
+   * count and the drill into the Approvals inbox.
+   */
+  pendingApprovals?: PendingApprovalRequest[];
+  /** A declared decision on one of them succeeded: re-read the approvals. */
+  onApprovalDecided?: () => void;
 }
 
 export function InboxPopover({
   notifications,
   unreadCount,
-  pendingApprovalsCount,
+  pendingApprovalsCount: servedApprovalsCount,
   activity,
   onMarkAllRead,
   onMarkRead,
   onMarkManyRead,
+  pendingApprovals,
+  onApprovalDecided,
 }: InboxPopoverProps) {
   const { t } = useObjectTranslation();
   // Every relative time below reads the DISPLAY locale, never the UI language
@@ -169,7 +209,22 @@ export function InboxPopover({
   const params = useParams();
   const { currentAppName } = useNavigationContext();
   const { apps } = useMetadata();
+  const location = useLocation();
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  // Requests decided from this panel, hidden until the feed's re-read drops
+  // them, so a decided row leaves at once (objectstack#34589).
+  const [decidedIds, setDecidedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const shownApprovals = useMemo(
+    () => (pendingApprovals ?? []).filter((r) => !decidedIds.has(r.id)),
+    [pendingApprovals, decidedIds],
+  );
+  // The count the panel shows, less the decided requests the feed still lists:
+  // the same optimistic overlay, so the badge drops with the row.
+  const pendingApprovalsCount = Math.max(
+    0,
+    servedApprovalsCount - ((pendingApprovals?.length ?? 0) - shownApprovals.length),
+  );
   // Chosen on every open by `handleOpenChange` below, never while open, so a
   // count that changes under an open popover does not move the tab.
   const [tab, setTab] = useState<InboxTab>('notifications');
@@ -195,6 +250,13 @@ export function InboxPopover({
   const unreadTopics = allGroups.reduce((sum, g) => sum + (g.unreadCount > 0 ? 1 : 0), 0);
 
   const totalBadge = unreadTopics + pendingApprovalsCount;
+
+  // The record drawer opens on the right too: the panel yields to it rather
+  // than stacking beside it (objectstack#34589).
+  const drawerRecordId = new URLSearchParams(location.search).get(RECORD_DRAWER_PARAM);
+  useEffect(() => {
+    if (drawerRecordId) setOpen(false);
+  }, [drawerRecordId]);
   // The bell's accessible name carries what its badge says: the badge is
   // content inside a named button, so a screen reader never reads it. Each
   // non-zero addend is spelled out with the plural forms the popover's own
@@ -289,6 +351,18 @@ export function InboxPopover({
     leaveTo(`/apps/${hostAppSegment}/system/approvals`);
   };
 
+  // One request in the Approvals inbox — the target Home's "My work" approvals
+  // row opens. The panel stays open beside the page, as for a notification.
+  const openApproval = (r: PendingApprovalRequest) => {
+    if (isMobile) setOpen(false);
+    leaveTo(`/apps/${hostAppSegment}/system/approvals?request=${encodeURIComponent(r.id)}`);
+  };
+
+  const handleApprovalDecided = (r: PendingApprovalRequest) => {
+    setDecidedIds((prev) => new Set(prev).add(r.id));
+    onApprovalDecided?.();
+  };
+
   const goToAllNotifications = () => {
     setOpen(false);
     // `?view=mine` selects the user-scoped "Notifications" view, matching the
@@ -334,12 +408,18 @@ export function InboxPopover({
   // the same question. `goToAllNotifications` closes the popover and lands on
   // the same `?view=mine` page the row came from, which is where a linkless
   // notification can still be read in full.
+  //
+  // A followed link leaves the panel OPEN (objectstack#34589): the record
+  // lands in the page beside it and the next notification is one click away.
+  // On a phone the panel covers the page, so it closes there.
   const handleNotificationClick = (n: InboxNotification) =>
     openInboxNotification({ id: n.id, actionUrl: n.action_url }, hostAppSegment, {
       markRead: onMarkRead,
       goTo: leaveTo,
       openInbox: goToAllNotifications,
-      beforeFollow: () => setOpen(false),
+      beforeFollow: () => {
+        if (isMobile) setOpen(false);
+      },
     });
 
   const toggleGroup = (key: string) => {
@@ -363,10 +443,11 @@ export function InboxPopover({
   // component) so it closes over `displayLocale`/`handleNotificationClick` without
   // remounting the subtree on every parent render.
   const renderRow = (n: InboxNotification, nested: boolean) => (
+    <div className={`group flex items-stretch ${n.is_read ? '' : 'bg-accent/40'}`}>
     <button
       type="button"
       onClick={() => handleNotificationClick(n)}
-      className={`w-full text-left ${nested ? 'pl-9 pr-3 py-2' : 'px-3 py-2.5'} hover:bg-accent transition-colors duration-150 ${n.is_read ? '' : 'bg-accent/40'}`}
+      className={`min-w-0 flex-1 text-left ${nested ? 'pl-9 pr-3 py-2' : 'px-3 py-2.5'} hover:bg-accent transition-colors duration-150`}
     >
       <div className="flex items-start gap-2">
         <span
@@ -384,11 +465,36 @@ export function InboxPopover({
         </div>
       </div>
     </button>
+    {!n.is_read && (
+      <button
+        type="button"
+        onClick={() => onMarkRead(n.id)}
+        className={MARK_READ_ICON_CLASS}
+        aria-label={t('notifications.groupMarkRead', { defaultValue: 'Mark read' }) as string}
+        title={t('notifications.groupMarkRead', { defaultValue: 'Mark read' }) as string}
+      >
+        <Check className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    )}
+    </div>
+  );
+
+  // "Needs your action" (objectstack#34589): the pending requests, each
+  // decidable in place. Rendered inside one open tab at a time, so each
+  // request mounts one set of declared levers.
+  const renderApprovals = () => (
+    <ul className="divide-y" data-testid="inbox-approvals-list">
+      {shownApprovals.map((r) => (
+        <li key={r.id}>
+          <InboxApprovalItem request={r} onOpen={openApproval} onDecided={handleApprovalDecided} />
+        </li>
+      ))}
+    </ul>
   );
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
+    <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
+      <SheetTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
@@ -401,25 +507,33 @@ export function InboxPopover({
             <span
               key={totalBadge}
               data-testid="inbox-bell-badge"
-              className="absolute -top-0.5 -right-0.5 h-4 min-w-[16px] rounded-full bg-red-500 text-[10px] leading-4 text-white text-center px-1 motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in-0 motion-safe:duration-200"
+              // Below `md` the trigger is a 44 px target that fills the 48 px
+              // bar, so the badge sits inside it, on the glyph's corner, where
+              // the bar's edge cannot cut it (objectstack#34596).
+              className="absolute -top-0.5 -right-0.5 max-md:top-1 max-md:right-1 h-4 min-w-[16px] rounded-full bg-red-500 text-[10px] leading-4 text-white text-center px-1 motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in-0 motion-safe:duration-200"
             >
               {totalBadge > 9 ? '9+' : totalBadge}
             </span>
           )}
         </Button>
-      </PopoverTrigger>
-      {/* Never wider than the viewport less a 0.5 rem gutter on each side, and
-          kept that far from its edges: a 375 px phone is narrower than w-96. */}
-      <PopoverContent
-        align="end"
-        sideOffset={8}
-        collisionPadding={8}
-        className="w-96 max-w-[calc(100vw-1rem)] p-0"
+      </SheetTrigger>
+      {/* Non-modal, no overlay, and a click in the page does not close it: the
+          page beside the panel stays usable (objectstack#34589). It closes on
+          its own close button, Escape, the bell, or when the record drawer
+          opens. */}
+      <SheetContent
+        side="right"
+        hideOverlay
+        aria-describedby={undefined}
+        onInteractOutside={(e) => e.preventDefault()}
+        data-testid="inbox-panel"
+        className={PANEL_CLASS}
       >
-        <div className="flex items-center justify-between px-3 pt-3 pb-1">
-          <div className="text-sm font-semibold">
+        {/* pr-12 keeps "Mark all read" clear of the panel's close button. */}
+        <div className="flex items-center justify-between gap-2 pl-3 pr-12 pt-3 pb-1 max-sm:pr-14">
+          <SheetTitle className="text-sm font-semibold">
             {t('sidebar.inbox', { defaultValue: 'Inbox' })}
-          </div>
+          </SheetTitle>
           {tab === 'notifications' && unreadCount > 0 && (
             <button
               type="button"
@@ -468,8 +582,8 @@ export function InboxPopover({
             </span>
           </div>
         )}
-        <Tabs value={shownTab} onValueChange={handleTabChange} className="w-full">
-          <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-1 h-9 max-md:h-auto">
+        <Tabs value={shownTab} onValueChange={handleTabChange} className="flex min-h-0 w-full flex-1 flex-col">
+          <TabsList className="w-full shrink-0 justify-start rounded-none border-b bg-transparent px-1 h-9 max-md:h-auto">
             <TabsTrigger value="notifications" className={TAB_TRIGGER_CLASS}>
               <Bell className="h-3.5 w-3.5 max-md:hidden" aria-hidden />
               {t('sidebar.notifications', { defaultValue: 'Notifications' })}
@@ -502,11 +616,11 @@ export function InboxPopover({
             )}
           </TabsList>
 
-          <TabsContent value="notifications" className="m-0 max-h-80 overflow-auto">
+          <TabsContent value="notifications" className={TAB_PANEL_CLASS}>
             {/* Unread/All sub-filter. Keeps the surface compact (matches the
                 Linear / GitHub inbox pattern) without bloating the primary
                 Tabs strip. */}
-            <div className="flex items-center gap-1 border-b px-2 py-1.5">
+            <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
               <button
                 type="button"
                 onClick={() => setNotifFilter('unread')}
@@ -533,6 +647,15 @@ export function InboxPopover({
                 {t('notifications.filterAll', { defaultValue: 'All' })}
               </button>
             </div>
+            <div className="min-h-0 flex-1 overflow-auto" data-testid="inbox-notifications-scroll">
+            {shownApprovals.length > 0 && (
+              <section aria-labelledby="inbox-needs-you" data-testid="inbox-needs-you" className="border-b">
+                <h3 id="inbox-needs-you" className="px-3 pt-2.5 text-xs font-medium text-muted-foreground">
+                  {t('notifications.needsYou', { defaultValue: 'Needs your action' })}
+                </h3>
+                {renderApprovals()}
+              </section>
+            )}
             {(() => {
               const visible =
                 notifFilter === 'unread'
@@ -567,12 +690,12 @@ export function InboxPopover({
                     const isExpanded = expandedGroups.has(group.key);
                     return (
                       <li key={group.key} {...animation}>
-                        <div className="flex items-stretch">
+                        <div className={`group flex items-stretch ${group.unreadCount > 0 ? 'bg-accent/40' : ''}`}>
                           <button
                             type="button"
                             onClick={() => toggleGroup(group.key)}
                             aria-expanded={isExpanded}
-                            className={`flex-1 min-w-0 text-left px-3 py-2.5 hover:bg-accent transition-colors duration-150 ${group.unreadCount > 0 ? 'bg-accent/40' : ''}`}
+                            className="flex-1 min-w-0 text-left px-3 py-2.5 hover:bg-accent transition-colors duration-150"
                           >
                             <div className="flex items-start gap-2">
                               <span
@@ -624,14 +747,19 @@ export function InboxPopover({
                             <button
                               type="button"
                               onClick={() => markGroupRead(group)}
-                              className="shrink-0 px-2 text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors border-l"
+                              className={MARK_READ_ICON_CLASS}
+                              aria-label={
+                                t('notifications.groupMarkReadTitle', {
+                                  defaultValue: 'Mark all of this type read',
+                                }) as string
+                              }
                               title={
                                 t('notifications.groupMarkReadTitle', {
                                   defaultValue: 'Mark all of this type read',
                                 }) as string
                               }
                             >
-                              {t('notifications.groupMarkRead', { defaultValue: 'Mark read' })}
+                              <Check className="h-3.5 w-3.5" aria-hidden />
                             </button>
                           )}
                         </div>
@@ -648,10 +776,12 @@ export function InboxPopover({
                 </ul>
               );
             })()}
-            {/* Footer link to the dedicated /sys_inbox_message list. The popover
-                only shows the 20 most-recent rows; users need a path to the
-                full inbox for bulk operations and older history. */}
-            <div className="border-t px-3 py-2 text-center">
+            </div>
+            {/* Footer link to the dedicated /sys_inbox_message list, pinned
+                under the scrolling rows. The panel only shows the 20
+                most-recent rows; users need a path to the full inbox for bulk
+                operations and older history. */}
+            <div className="shrink-0 border-t px-3 py-2 text-center">
               <button
                 type="button"
                 onClick={goToAllNotifications}
@@ -662,7 +792,8 @@ export function InboxPopover({
             </div>
           </TabsContent>
 
-          <TabsContent value="approvals" className="m-0 max-h-80 overflow-auto">
+          <TabsContent value="approvals" className={`${TAB_PANEL_CLASS} overflow-auto`}>
+            {shownApprovals.length > 0 && renderApprovals()}
             <div className="px-3 py-6 text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
               {pendingApprovalsCount > 0 ? (
                 <>
@@ -697,7 +828,7 @@ export function InboxPopover({
           </TabsContent>
 
           {showActivity && (
-            <TabsContent value="activity" className="m-0 max-h-80 overflow-auto">
+            <TabsContent value="activity" className={TAB_PANEL_CLASS}>
               {/*
                 "No recent activity" is an ASSERTION about the feed, so it is made
                 only once the feed has answered (objectui#12081, the #4235 rule).
@@ -729,6 +860,7 @@ export function InboxPopover({
                   )}
                 </div>
               )}
+              <div className="min-h-0 flex-1 overflow-auto">
               {activity.value.length === 0 ? (
                 activity.status === 'ready' && (
                   <div className="px-3 py-8 text-sm text-muted-foreground text-center motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
@@ -754,11 +886,12 @@ export function InboxPopover({
                   ))}
                 </ul>
               )}
+              </div>
               {/* Footer link to dedicated /sys_activity list. Symmetric with
                   the Notifications tab footer — the popover caps at 20 rows;
                   users need a path to the full activity stream. Rendered even
                   in the empty state so users can still browse historical data. */}
-              <div className="border-t px-3 py-2 text-center">
+              <div className="shrink-0 border-t px-3 py-2 text-center">
                 <button
                   type="button"
                   onClick={goToAllActivity}
@@ -770,7 +903,7 @@ export function InboxPopover({
             </TabsContent>
           )}
         </Tabs>
-      </PopoverContent>
-    </Popover>
+      </SheetContent>
+    </Sheet>
   );
 }

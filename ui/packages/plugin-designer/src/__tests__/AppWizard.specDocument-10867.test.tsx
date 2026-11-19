@@ -48,7 +48,15 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    useAdapter: () => ({ getClient: () => ({ meta: { saveItem } }) }),
+    useAdapter: () => ({
+      getClient: () => ({ meta: { saveItem } }),
+      // objectstack#35054 — the page edits the app as stored (the layers read):
+      // the served app minus its read decorations, which no layer carries.
+      getAuthoredItem: async (_type: string, name: string) => {
+        const served = apps.find((a) => a.name === name);
+        return served ? Object.fromEntries(Object.entries(served).filter(([k]) => !k.startsWith('_'))) : null;
+      },
+    }),
     useMetadata: () => ({ apps, objects: OBJECTS, refresh: () => Promise.resolve() }),
   };
 });
@@ -131,6 +139,7 @@ describe('objectui#10867 — member 2: an edit keeps every stored `branding` key
     apps.push(stored);
     routeParams = { editAppName: 'acme_crm' };
     render(<EditAppPage />);
+    await screen.findByTestId('edit-app-page');
     next(); // → objects
     next(); // → navigation
     next(); // → branding

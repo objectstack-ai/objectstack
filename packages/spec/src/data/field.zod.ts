@@ -192,10 +192,13 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * (#12017 two-copies failure shape; the #11875 lesson that a hand-written
  * enumeration goes one revision stale).
  *
- * Package-internal on purpose: it is the superRefine's membership test, not a
- * third answer to "is this field multi-valued". That question has exactly one
- * answer — `isMultiValueField` (`field-value.zod.ts`) — and both of the sets
- * this one unions stay untouched.
+ * Exported for ONE reader beside this file's superRefine: the AI blueprint
+ * field (`ai/solution-blueprint.zod.ts`), which refuses `multiple: true` on
+ * exactly the types this file refuses it on, reading this set rather than a
+ * copy. It answers "may an author DECLARE `multiple: true` here", and
+ * is not a third answer to "is this field multi-valued". That question has
+ * exactly one answer — `isMultiValueField` (`field-value.zod.ts`) — and both of
+ * the sets this one unions stay untouched.
  *
  * ⚠️ Computed on FIRST USE, never at module top level. `field-value.zod` reaches
  * back into this module through `shared/strict-object` → `shared/suggestions.zod`,
@@ -206,7 +209,7 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * module has settled) is the same discipline `lazySchema` applies above.
  */
 let multiDeclarableTypes: ReadonlySet<string> | undefined;
-function multiDeclarableTypeSet(): ReadonlySet<string> {
+export function multiDeclarableFieldTypes(): ReadonlySet<string> {
   return (multiDeclarableTypes ??= new Set([...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]));
 }
 
@@ -221,7 +224,7 @@ function multiDeclarableTypeSet(): ReadonlySet<string> {
  */
 let multiDeclarableRemedyTypes: readonly string[] | undefined;
 function multiDeclarableRemedyTypeList(): readonly string[] {
-  return (multiDeclarableRemedyTypes ??= [...multiDeclarableTypeSet()].filter((t) => t !== 'radio'));
+  return (multiDeclarableRemedyTypes ??= [...multiDeclarableFieldTypes()].filter((t) => t !== 'radio'));
 }
 
 /**
@@ -1266,6 +1269,169 @@ const COLUMN_CONSTRAINT_FLAT_KEYS: KeySetGuidance = {
     + 'column nullable. Write whichever of the two you meant, or both.',
 };
 
+/**
+ * [#34009] The six comparisons a `lookupFilters` entry may pair with a
+ * `{ $record }` comparand or with `orEmpty: true` — the scalar orderings and
+ * equalities. The same six a filter `{ $field }` reference or a `$now` anchor
+ * may be the whole comparand of (`filter.zod.ts`), for the same reason: each
+ * compares ONE candidate column with ONE value. `contains`, `in` and `notIn`
+ * are left out: a list member or a substring has no single value for a
+ * record reference to stand for, and "or empty" over a list has no one reading.
+ */
+const LOOKUP_FILTER_SCALAR_COMPARISONS: ReadonlySet<string> = new Set(['eq', 'ne', 'gt', 'lt', 'gte', 'lte']);
+
+/**
+ * [#34009] A `$record` path: a field of the record being edited, or one lookup
+ * hop from it (`account.cb_market`) — snake_case machine names, at most one dot.
+ */
+const LOOKUP_FILTER_RECORD_PATH_RE = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?$/;
+
+/**
+ * [#34009] A `lookupFilters` comparand that reads the RECORD BEING EDITED —
+ * the form's own record — instead of a literal:
+ *
+ * ```ts
+ * // a quote's Price Book picker: only books valid on the quote's date,
+ * // in the customer's market or in none (a generic book)
+ * lookupFilters: [
+ *   { field: 'is_active', operator: 'eq',  value: true },
+ *   { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true },
+ *   { field: 'valid_to',   operator: 'gte', value: { $record: 'quote_date' }, orEmpty: true },
+ *   { field: 'cb_market',  operator: 'eq',  value: { $record: 'account.cb_market' }, orEmpty: true },
+ * ]
+ * ```
+ *
+ * ⭐ `$record` is NOT `$field`. A filter `{ $field: 'col' }` reference
+ * (`FieldReferenceSchema`) names a column of the CANDIDATE row — the row the
+ * filter is testing — and compiles to a column-to-column comparison. `$record`
+ * names a value of the record the user is editing, which the candidate query
+ * knows nothing about: it is a placeholder the PICKER replaces with that
+ * value before the query leaves the browser, exactly like the `{record_id}`
+ * context token (`context-tokens.zod.ts`). The name also matches the flow
+ * engine's `$record` — the record the run acts on — which is the same idea.
+ *
+ * Its rules, each stated in the field's describe:
+ *
+ * - **Path.** A field of the edited record (`quote_date`), or ONE lookup hop
+ *   from it (`account.cb_market`: the `account` lookup on the edited record,
+ *   then `cb_market` on the account it points at). Two hops are refused.
+ *   [#34378] A path through or to a MULTI-VALUED field (`isMultiValueField`:
+ *   one flagged `multiple: true`, or a multiselect, checkboxes or tags field)
+ *   has no single value — `accounts.cb_market` through a `multiple: true`
+ *   lookup, `tags`, or `account.markets` ending at one — so it is not resolved,
+ *   and `os lint` refuses it (`object-field-ref-unknown`). The picker's
+ *   handling of such a path is #34389.
+ * - **Operator.** Only the six scalar comparisons
+ *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}), and the reference is the whole
+ *   value: never a member of an `in` / `notIn` list.
+ * - **Where it resolves.** In a record form only, whatever its layout (the
+ *   auto layout, authored or field-group sections, a modal, drawer, tabbed or
+ *   wizard form, a master-detail header form). Every other picker host leaves
+ *   every `{ $record }` entry out — inline edit on a record page, a record
+ *   page's header or related list, an action's parameter dialog, and a
+ *   picker with no single record being edited (a bulk action over selected
+ *   rows).
+ * - **An empty value.** When the referenced value is empty (null, unset, an
+ *   empty string, or a hop whose lookup is unset) or cannot be read (the
+ *   hop's row or field does not come back, no object is named for the hop,
+ *   or the host has no single-row reader), the entry is left out of the
+ *   candidate query, so a quote whose account has no market is offered
+ *   every book the other entries admit.
+ * - **Re-query.** The picker re-queries its candidates whenever a referenced
+ *   field changes — the first segment of the path (`quote_date`, `account`).
+ *   Those fields are implied by the `$record` paths. Do NOT list them in
+ *   `dependsOn` for this: a `dependsOn` entry also scopes the candidate query
+ *   by equality (`param = value`, `param` defaulting to the field's own
+ *   name), so `dependsOn: ['quote_date']` would add `quote_date = …` to the
+ *   query over the referenced object and gate the picker while the date is
+ *   unset.
+ * - **Unresolved on a server.** No server path knows which record a form is
+ *   editing, so a `$record` that reaches a server filter is a picker defect:
+ *   it is refused, never read as null and never compared as a literal object.
+ *
+ * Today's date needs no new comparand: the date placeholders
+ * (`date-macros.zod.ts`, e.g. `'{today}'`) and the now-anchored comparand
+ * (`{ $now: true, addDays }`) already ride `lookupFilters` values, and the
+ * engine resolves both on every read.
+ */
+export const LookupFilterRecordReferenceSchema = lazySchema(() => strictObject({
+  surface: 'this lookupFilters record reference',
+  history: 'A new shape, closed from its first release: a misspelt key beside $record would otherwise be sent to the server as part of the filter.',
+  guidance: {
+    addDays: 'a { $record } reference carries no offset — compare against the referenced value as it is, or use a { "$now": true, "addDays": N } comparand for a date relative to today',
+    $field: '{ $field } and { $record } are two different comparands: { $field } names a column of the CANDIDATE row, { $record } a field of the record being edited — write one or the other as the whole value',
+  },
+}, {
+  $record: z.string().regex(LOOKUP_FILTER_RECORD_PATH_RE, {
+    error: (issue) => `A { $record } path names a field of the record being edited, or one lookup hop from it ("account.cb_market") — snake_case names, at most one dot; received ${JSON.stringify(issue.input)}.`,
+  }).describe('Path of the value on the record being edited: a field name (`quote_date`) or one lookup hop (`account.cb_market`) — at most one dot.'),
+})).describe(
+  'A lookupFilters comparand read from the record being edited: { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup hop). '
+  + 'The picker replaces it with that value before querying; unlike { $field }, which names a column of the candidate row. '
+  + 'A path through or to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) '
+  + 'has no single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`).',
+);
+
+export type LookupFilterRecordReference = z.input<typeof LookupFilterRecordReferenceSchema>;
+export type LookupFilterRecordReferenceParsed = z.infer<typeof LookupFilterRecordReferenceSchema>;
+
+/**
+ * [#34009] Is `value` written as a `{ $record }` comparand — a non-array object
+ * carrying an own `$record` key? SHAPE only, so a malformed reference is
+ * refused by its own sentence instead of passing as an opaque literal.
+ */
+function isLookupFilterRecordReferenceShape(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, '$record');
+}
+
+/**
+ * [#34009] The cross-key rules of one `lookupFilters` entry: a `{ $record }`
+ * value is well formed, pairs with a scalar comparison and is never a list
+ * member; `orEmpty` pairs with a scalar comparison. Issues sit at the
+ * offending key.
+ */
+function refuseMalformedLookupFilterEntry(
+  entry: { operator: string; value?: unknown; orEmpty?: boolean },
+  ctx: z.RefinementCtx,
+): void {
+  if (Array.isArray(entry.value)) {
+    entry.value.forEach((member, index) => {
+      if (isLookupFilterRecordReferenceShape(member)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['value', index],
+          message: 'A { $record } reference is the whole value of an entry, never a member of a list: it stands for ONE value of the record being edited. '
+            + 'Write it as the value of its own entry with eq, ne, gt, lt, gte or lte; a list holds literal values only.',
+        });
+      }
+    });
+  }
+  if (isLookupFilterRecordReferenceShape(entry.value)) {
+    const parsed = LookupFilterRecordReferenceSchema.safeParse(entry.value);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue({ code: 'custom', path: ['value', ...issue.path], message: issue.message });
+      }
+    }
+    if (!LOOKUP_FILTER_SCALAR_COMPARISONS.has(entry.operator)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['value'],
+        message: `A { $record } value pairs only with eq, ne, gt, lt, gte or lte, not with "${entry.operator}": it stands for ONE value of the record being edited. `
+          + 'For a list of literal values write the array itself with operator "in" or "notIn".',
+      });
+    }
+  }
+  if (entry.orEmpty !== undefined && !LOOKUP_FILTER_SCALAR_COMPARISONS.has(entry.operator)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['orEmpty'],
+      message: `orEmpty applies only to eq, ne, gt, lt, gte or lte, not to "${entry.operator}": it also matches a candidate whose column is null, which a substring or list comparison has no single reading for. Remove orEmpty from this entry.`,
+    });
+  }
+}
+
 export const FieldSchema = lazySchema(() => {
   const base = strictObject({
   surface: 'this field',
@@ -1346,7 +1512,7 @@ export const FieldSchema = lazySchema(() => {
    * fail it. The describe is form help in Studio and carries the rule, not the
    * ruling date (#22093).
    */
-  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. With the field\'s own `visibleWhen` it is required WHEN SHOWN: a write whose record the predicate hides does not need it, a write that reveals the field empty is refused, and a predicate the server cannot evaluate counts as shown. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
   /**
    * Physical storage constraints (ADR-0113). Deliberately separate from the
@@ -2086,7 +2252,10 @@ export const FieldSchema = lazySchema(() => {
   lookupFilters: z.array(strictObject({
     surface: 'this lookup filter',
     history: FIELD_HISTORY,
-    aliases: { name: 'field', fieldName: 'field', op: 'operator', comparator: 'operator', condition: 'operator' },
+    aliases: {
+      name: 'field', fieldName: 'field', op: 'operator', comparator: 'operator', condition: 'operator',
+      orNull: 'orEmpty', orBlank: 'orEmpty', allowEmpty: 'orEmpty', allowNull: 'orEmpty', includeEmpty: 'orEmpty', includeNull: 'orEmpty',
+    },
     guidance: {
       // A filter that silently does nothing on a PICKER is a filter that offers
       // records the author meant to exclude — worth naming the vocabulary.
@@ -2096,8 +2265,37 @@ export const FieldSchema = lazySchema(() => {
   }, {
     field: z.string(),
     operator: z.enum(['eq', 'ne', 'gt', 'lt', 'gte', 'lte', 'contains', 'in', 'notIn']),
-    value: z.any(),
-  })).optional().describe('Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter.'),
+    value: z.any().describe(
+      'The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a '
+      + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
+      + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
+      + 'only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced '
+      + 'value in place of the reference; every other picker host leaves the entry out. A { $record } path through or '
+      + 'to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) has no '
+      + 'single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`). A { $record } that '
+      + 'reaches a server unresolved is refused (INVALID_FILTER), never read as null.',
+    ),
+    orEmpty: z.boolean().optional().describe(
+      'TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no '
+      + 'start date". Only with eq, ne, gt, lt, gte or lte. The picker sends the comparison or a null match on the same column.',
+    ),
+  }).superRefine(refuseMalformedLookupFilterEntry)).optional().describe(
+    'Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. '
+    + 'Each entry compares a column of the CANDIDATE record (`field`, on the referenced object) with `value`. A value may '
+    + 'read the record being edited as { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup '
+    + 'hop). In a record form, whatever its layout, the picker sends that value in its place and re-queries whenever a '
+    + 'referenced field changes; every other picker host leaves every { $record } entry out: inline edit on a record '
+    + 'page, a record page\'s header or related list, an action\'s parameter dialog, and a picker with no single record '
+    + 'being edited (a bulk action over selected rows). The referenced fields '
+    + 'are implied: do not list them in `dependsOn`, which also scopes the candidate query by equality '
+    + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
+    + 'empty or cannot be read (the hop\'s row or field does not come back, no object is named for the hop, or the host '
+    + 'has no single-row reader), the entry is left out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
+    + 'server unresolved is refused (INVALID_FILTER), never read as null: by name, naming the field and the path, when '
+    + 'it arrives as the eq shorthand on a column other than a date, datetime or time column; any other operator, and '
+    + 'eq on a date, datetime or time column, is refused earlier, in generic words. The picker narrows the choice only: '
+    + 'a rule the save must enforce belongs on the server too.',
+  ),
   dependsOn: z.array(z.union([z.string(), strictObject({
     surface: 'this dependsOn entry',
     history: FIELD_HISTORY,
@@ -2317,8 +2515,17 @@ export const FieldSchema = lazySchema(() => {
    * ADR-0137 D2 refuses the write. `objectstack validate` refuses it (#20078);
    * a `validations[]` `script` rule is the seam that reads one hop through a
    * reference.
+   *
+   * `visibleWhen` is display only, except on a `required` field: there the
+   * write path reads it too (ADR-0113 D1, as amended), and the field is
+   * required only on a write whose record the predicate shows: a clean TRUE,
+   * as the form reads it, with `formula` fields computed over the record being
+   * written. The form computes the same formulas over the record being edited
+   * (`planObjectFormulas`, `@object-ui/core`); where it cannot compute one (a
+   * hop, `label()`, `can()`, `os`, or no signed-in user) it shows the field,
+   * keeps it required, and the server decides.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`. On a `required` field the server reads it on every write: where it is not TRUE (FALSE, or null such as an unset boolean) the field is not required for that write, and a predicate the server cannot evaluate counts as shown, so the field stays required. Reads the record's own columns, with `formula` fields computed over the record being written, as the form computes them over the record being edited; a read THROUGH a reference field, or a formula that reads through one, calls label(), calls can() on a write that picks no permission-gated option, or reads current_user on a system write with no user, cannot be evaluated there."),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every update that writes the field — `objectstack validate` refuses it. Put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference."),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
@@ -3027,7 +3234,7 @@ export const FieldSchema = lazySchema(() => {
   //
   // `radio` is INSIDE the set and is therefore never refused here — its own
   // narrower #11437 check above owns that pair, so the two never double-fire.
-  if (field.multiple === true && !multiDeclarableTypeSet().has(field.type)) {
+  if (field.multiple === true && !multiDeclarableFieldTypes().has(field.type)) {
     const alternative = REFERENCE_VALUE_TYPES.has(field.type)
       ? 'a `lookup` with `reference` naming the same object (`multiple: true` there stores several related records)'
       : FILE_REFERENCE_TYPES.has(field.type)

@@ -35,10 +35,22 @@
  *
  * A context that is not system and carries no capability holds none, so it
  * reads no namespace at all: the deny baseline, not a hand-through.
+ *
+ * ## Cloud-managed (#33891)
+ *
+ * In a cloud-managed process the door also ANDs in
+ * {@link cloudManagedRowScope}: no row of a namespace the platform manages
+ * whole (`storage`), and no row of a key it manages (`ai`'s provider, model,
+ * credentials and generation defaults). The settings routes hide the same
+ * table (`cloud-managed-settings.ts`), so a caller reading the rows here
+ * learns nothing the settings door would not show. A system context still
+ * reads every row, which is how the storage and AI services keep reading
+ * the values the platform configured.
  */
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { SettingsService } from './settings-service.js';
+import { cloudManagedRowScope } from './cloud-managed-settings.js';
 
 /** The objects whose rows carry a settings `namespace`. */
 export const SETTINGS_READ_DOOR_OBJECTS: readonly string[] = Object.freeze([
@@ -86,6 +98,10 @@ export function settingsReadDoorMiddleware(service: SettingsService): EngineMidd
     const scope = service.namespaceReadScope(capabilitiesOf(context));
     if (scope) {
       ast.where = ast.where ? { $and: [ast.where, scope] } : scope;
+    }
+    const hosted = cloudManagedRowScope();
+    if (hosted) {
+      ast.where = ast.where ? { $and: [ast.where, hosted] } : hosted;
     }
     return next();
   };

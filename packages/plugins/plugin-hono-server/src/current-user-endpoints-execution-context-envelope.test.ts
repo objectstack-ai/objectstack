@@ -278,6 +278,8 @@ describe('[#15747] the current-user faces assemble through the shared assembler'
             tabPermissions: { exports: 'visible' },
             // [#28508] No ownership-queue service in this mount: `false`.
             hasAnyQueue: false,
+            // [#34602] No queue, so no object uses one.
+            objectsUsingQueues: [],
         });
     });
 

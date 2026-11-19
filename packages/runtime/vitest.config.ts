@@ -112,6 +112,7 @@ export default defineConfig({
       // client, see route-ledger.conformance.test.ts) resolves to the garbage
       // path `…/core/src/index.ts/logger`.
       { find: '@objectstack/core/logger', replacement: path.resolve(__dirname, '../core/src/logger.ts') },
+      { find: '@objectstack/core/egress', replacement: path.resolve(__dirname, '../core/src/egress.ts') },
       { find: '@objectstack/core', replacement: path.resolve(__dirname, '../core/src/index.ts') },
       // #7828 / PR #8128: action-execution-destructive.test.ts reads the REAL
       // `sys_*` identity declarations to prove that today's platform objects

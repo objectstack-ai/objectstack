@@ -68,13 +68,15 @@ import {
   Eye,
   MoreHorizontal,
   Info,
+  ChevronLeft,
 } from 'lucide-react';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
 import { PresenceAvatars, useTenantPresence, type PresenceUser } from '@object-ui/collaboration';
 import { ModeToggle } from './ModeToggle.js';
-import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
+import { WorkspaceSwitcher, WorkspaceSwitcherMenu } from './WorkspaceSwitcher.js';
 import { CurrentOrganizationIndicator } from './CurrentOrganizationIndicator.js';
 import { LocaleSwitcher } from './LocaleSwitcher.js';
 import { NotificationPreferencesMenu } from './NotificationPreferencesMenu.js';
@@ -105,12 +107,15 @@ import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
 import { useSharedActivityFeed, type ActivityFeedReading } from '../hooks/sharedUserFeeds.js';
 import { useInboxBell } from '../hooks/useInboxBell.js';
 import { useHomePath } from '../hooks/useHomePath.js';
+import { orgMenuEntries, useOrgMenuPosture } from '../hooks/useOrgMenuPosture.js';
+import { postureHasOrgWall } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from '../views/viewTabLabel.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
 import { getProductName, getLogoUrl } from '../runtime-config.js';
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { PreviewBadge } from './PreviewBadge.js';
+import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { AboutDialog } from './AboutDialog.js';
 import { getConsoleBuild } from '../buildIdentity.js';
 import { GO_HOME_SHORTCUT, useAdvertiseShortcut, type ShortcutChord } from '../chrome/advertisedShortcuts.js';
@@ -444,6 +449,10 @@ export function AppHeader({
   // landing, so the chrome cannot offer a second, contradicting "home".
   const homePath = useHomePath();
   useGoHomeShortcut(isApp, homePath);
+  // objectstack#34594 — on a phone inside an app the menu is the bottom bar
+  // (its 「More」 opens the drawer), so the bar's leftmost control goes back
+  // to the environment's home instead of opening the drawer.
+  const phone = usePhoneViewport();
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
   // synthetic `⌘K` KeyboardEvent re-dispatch that did nothing under automation.
@@ -468,7 +477,6 @@ export function AppHeader({
     organizations,
     activeOrganization,
     isOrganizationsLoading,
-    getAuthConfig,
   } = useAuth();
   const dataSource = useAdapter();
   // Runtime AI gating: hide the top-bar AI entry point when the server serves
@@ -576,6 +584,8 @@ export function AppHeader({
     notifications,
     unreadCount,
     pendingApprovalsCount,
+    pendingApprovals,
+    refreshPendingApprovals,
     markAllRead,
     markRead: markNotificationRead,
     markManyRead,
@@ -602,24 +612,17 @@ export function AppHeader({
     : apiActivity;
   const orgList = organizations ?? [];
   const hasOrgSection = isOrganizationsLoading || orgList.length > 0 || !!activeOrganization;
-  // Mirror the server's `beforeCreateOrganization` gate so the "Create
-  // workspace" entry only shows where multi-org self-service is enabled.
-  // Default to allowed until the config resolves (avoids hiding it on slow
-  // networks); the server still enforces.
-  const [multiOrgDisabled, setMultiOrgDisabled] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    getAuthConfig?.()
-      .then((cfg) => {
-        if (!cancelled) setMultiOrgDisabled(cfg?.features?.multiOrgEnabled === false);
-      })
-      .catch(() => {
-        /* leave default — server still enforces */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [getAuthConfig]);
+  // The avatar menu's organization entries follow the served deployment
+  // signals (objectstack-ai/objectstack#34591): none on a single-tenant
+  // deployment, no create entry on a cloud-managed one, and the switcher only
+  // at two or more memberships. Until the config resolves, the spec's absent
+  // readings keep today's rendering; the server still enforces.
+  const orgMenuPosture = useOrgMenuPosture();
+  const orgMenu = orgMenuEntries({
+    posture: orgMenuPosture,
+    hasOrgSection,
+    membershipCount: orgList.length,
+  });
 
   // Build path segments (only used in `app` variant)
   const pathParts = location.pathname.split('/').filter(Boolean);
@@ -670,12 +673,18 @@ export function AppHeader({
   //
   // #27356 row 12 — a read-only package's app is not left with no way in: the
   // same gate answers it with the `view` posture, and this bar and the app
-  // switcher draw a browse entry (an eye, 「Open app in Studio」) where a
+  // switcher draw a browse entry (an eye, 「Open {app} in Studio」) where a
   // writable package's app gets the pencil. The posture is the gate's, read
   // once; the console's own apps and an unread list still draw neither.
   const studioEntry = useStudioEntryGate(
     isApp ? appStudioRoutePath(currentApp, true, { type: routeType, name: pathParts[3] }) : null,
   );
+  // ADR-0146 D5 — the read-only entry's words: 「Open {app} in Studio」, the
+  // app switcher's row text, named for the app the bar is in.
+  const viewInStudioText = t('topbar.openAppInStudio', {
+    defaultValue: 'Open {{app}} in Studio',
+    app: currentApp ? appLabel(currentApp) : (appName ?? ''),
+  });
 
   // The crumbs drawn after the app pill from `sm` up: a report or `system/*`
   // route's.
@@ -875,12 +884,24 @@ export function AppHeader({
     <div className="flex items-center justify-between w-full h-full">
       {/* ── LEFT: Logo / App / Object path ── */}
       <div className="flex items-center min-w-0 flex-1">
-        {/* The shell's one sidebar trigger, at every width (objectui#12429):
-            the drawer button on a phone, the collapse/expand toggle for the
-            sidebar and its icon rail above that. It is the bar's leftmost
-            control inside an app, so it never moves when the sidebar
-            collapses; the sidebar itself carries no trigger. */}
-        {isApp ? (
+        {/* The shell's one sidebar trigger (objectui#12429): the
+            collapse/expand toggle for the sidebar and its icon rail from
+            768 px up. It is the bar's leftmost control inside an app, so it
+            never moves when the sidebar collapses; the sidebar itself carries
+            no trigger. On a phone that slot goes back to the environment's
+            home, and the drawer opens from the bottom menu bar's 「More」
+            (objectstack#34594). */}
+        {isApp && phone ? (
+          <Link
+            to={homePath}
+            data-testid="app-bar-phone-home"
+            aria-label={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            title={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden />
+          </Link>
+        ) : isApp ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every
@@ -927,12 +948,13 @@ export function AppHeader({
             reports GA. */}
         {!isApp && <PreviewBadge className="ml-2 hidden sm:inline-flex" />}
 
-        {/* Organization context — "which org am I in", right after the brand and
-            before the app/section breadcrumb. Two mutually exclusive renderers:
-            the switcher for multi-membership users (name + switch dropdown),
-            and the read-only indicator for the single-membership case the
-            switcher declines to render, on walled deployments only
-            (objectui#5287 — the switcher's own visibility rule is unchanged). */}
+        {/* Organization context, right after the brand. The web organization
+            switcher lives in the avatar menu (objectstack-ai/objectstack#34591):
+            the left of the bar is the product mark and the app switcher. What
+            stays here: the mobile shell's own connection-switcher button
+            (renders only inside a shell that announces it), and the read-only
+            organization name on a walled deployment, at any membership count
+            (objectui#5287). */}
         <WorkspaceSwitcher />
         <CurrentOrganizationIndicator />
 
@@ -996,8 +1018,10 @@ export function AppHeader({
 
             {/* Mobile: the current page's label. A list's view switcher is
                 the list's own title, drawn in its toolbar row on a phone
-                (objectstack#27058), so the bar draws no view dropdown. */}
-            <span className="text-sm font-medium sm:hidden truncate min-w-0 ml-1">
+                (objectstack#27058), so the bar draws no view dropdown. No
+                margin of its own: the pill's padding already parts the two,
+                and the width goes to the label (objectstack#34596). */}
+            <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
               {lastSegmentLabel}
             </span>
           </>
@@ -1015,10 +1039,12 @@ export function AppHeader({
           With the search centered, the search group here holds only the icon
           button and leaves at 960 px; the three `min-[960px]:` rules keyed on
           `data-topbar-search` keep the group after it from drawing a divider
-          next to nothing. */}
+          next to nothing. Below `sm` the groups draw no divider and no gap
+          beyond the cluster's own: the phone bar's 44 px controls sit side by
+          side and the room goes to the page title (objectstack#34596). */}
       <div
         className={cn(
-          'flex items-center gap-0.5 sm:gap-1 shrink-0 [&>*+*[data-topbar-group]]:ml-1 [&>[data-topbar-group]+[data-topbar-group]]:border-l [&>[data-topbar-group]+[data-topbar-group]]:border-border/60 [&>[data-topbar-group]+[data-topbar-group]]:pl-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
+          'flex items-center gap-0.5 sm:gap-1 shrink-0 sm:[&>*+*[data-topbar-group]]:ml-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:border-l sm:[&>[data-topbar-group]+[data-topbar-group]]:border-border/60 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
           centersSearch &&
             'min-[960px]:flex-1 min-[960px]:min-w-max min-[960px]:justify-end min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:ml-1 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:border-l-0 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:pl-0',
         )}
@@ -1098,19 +1124,25 @@ export function AppHeader({
             </Button>
           )}
           {/* #27356 row 12 — a read-only package's app: the same slot, an eye
-              that opens it in Studio's browse-only posture. */}
+              that opens it in Studio's browse-only posture. ADR-0146 D5 — it
+              draws WITH its text, 「Open {app} in Studio」, so a look is not
+              mistaken for the pencil's edit. The name truncates inside a
+              capped width, and below `sm` the button is not drawn at all
+              (objectstack#29075: the app switcher's Studio row carries it). */}
           {studioEntry?.posture === 'view' && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 max-sm:hidden shrink-0"
+              size="sm"
+              className="h-8 max-md:h-11 max-sm:hidden shrink-0 gap-1.5 px-2 max-w-[14rem]"
               asChild
               data-testid="app-view-in-studio-button"
-              aria-label={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
-              title={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
+              title={viewInStudioText}
             >
               <Link to={studioEntry.path}>
-                <Eye className="h-4 w-4" />
+                <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span data-slot="view-in-studio-text" className="truncate text-xs font-medium">
+                  {viewInStudioText}
+                </span>
               </Link>
             </Button>
           )}
@@ -1138,24 +1170,15 @@ export function AppHeader({
               onMarkAllRead={markAllRead}
               onMarkRead={markNotificationRead}
               onMarkManyRead={markManyRead}
+              pendingApprovals={pendingApprovals}
+              onApprovalDecided={refreshPendingApprovals}
             />
           </span>
 
           {/* AI Assistant — only when the runtime serves AI (hidden on
-              Community Edition so it can't dead-end on an agent-less chat). */}
-          {aiEnabled && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 shrink-0"
-              asChild
-              aria-label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
-            >
-              <Link to="/ai">
-                <Bot className="h-4 w-4" />
-              </Link>
-            </Button>
-          )}
+              Community Edition so it can't dead-end on an agent-less chat).
+              objectstack#34608: it opens and closes the drawer in place. */}
+          {aiEnabled && <AssistantTopBarButton />}
 
           {/* Help & Documentation — an aggregated menu rather than a bare
               external link: contextual "This app's docs" (only when the
@@ -1290,34 +1313,50 @@ export function AppHeader({
                 </DropdownMenuItem>
               )}
               {/*
-               * Workspace entries. The header-left WorkspaceSwitcher carries
-               * the same destinations, but it renders NOTHING below two orgs
-               * (`orgList.length <= 1` → null) — so for the single-org majority
-               * the avatar menu is the ONLY door to workspace management.
-               * Leaving just the create shortcut here is what shut every path
-               * to Members / Invitations / Organization settings for them
-               * (objectstack#8096): the picker at `/organizations` auto-skips
-               * with one org, and the switcher never appears.
+               * Organization entries, by deployment posture (`orgMenuEntries`,
+               * objectstack-ai/objectstack#34591, ruling 6937513776).
                *
-               * "My Organizations" → `?manage=1`, which OrganizationsPage reads as
-               * "the user came here to MANAGE": multi-org users get the picker,
-               * a single-org user is deep-linked straight to that org's members
-               * page (there is no choice worth showing them). Deliberately NOT
-               * gated on `multiOrgDisabled` — that flag governs CREATING orgs;
-               * where self-service creation is off this entry is the only way
-               * in, so gating it there would re-close the door.
+               * Single-tenant (`multiOrgEnabled` off): none. Member management
+               * for the one organization is Setup → Organization (ruling
+               * 6384629949), so dropping these closes no door.
+               *
+               * Multi-organization: "My Organizations" → `?manage=1`, which
+               * OrganizationsPage reads as "came here to MANAGE" — a member of
+               * one organization is deep-linked to its members page, since the
+               * picker auto-skips at one organization (objectstack#8096: this
+               * entry is that member's door, as the switcher is not offered at
+               * one membership). Then the switcher, at two or more memberships,
+               * and "Create organization" unless the cloud manages this
+               * environment (organizations are created on the cloud there).
+               *
+               * On a walled posture the active organization's name also rides
+               * under "My Organizations", beside the entries that act on it; the
+               * bar names it read-only (`CurrentOrganizationIndicator`).
                */}
-              {hasOrgSection && (
+              {orgMenu.myOrganizations && (
                 <DropdownMenuItem
                   onClick={() => leaveTo('/organizations?manage=1')}
                   className="cursor-pointer"
                   data-testid="header-my-organizations"
                 >
                   <Building2 className="mr-2 h-4 w-4" />
-                  {t('organizations.mine', { defaultValue: 'My Organizations' })}
+                  <span className="grid min-w-0 flex-1 leading-tight">
+                    <span>{t('organizations.mine', { defaultValue: 'My Organizations' })}</span>
+                    {activeOrganization && postureHasOrgWall(orgMenuPosture.tenancyPosture) && (
+                      <span
+                        className="truncate text-xs text-muted-foreground"
+                        data-testid="header-my-organizations-current"
+                      >
+                        {activeOrganization.name}
+                      </span>
+                    )}
+                  </span>
                 </DropdownMenuItem>
               )}
-              {hasOrgSection && !multiOrgDisabled && (
+              {orgMenu.switchOrganization && (
+                <WorkspaceSwitcherMenu isGroupPosture={orgMenuPosture.tenancyPosture === 'group'} />
+              )}
+              {orgMenu.createOrganization && (
                 <DropdownMenuItem
                   onClick={() => leaveTo('/organizations?create=1')}
                   className="cursor-pointer"

@@ -150,6 +150,7 @@ describe('[#21325] the object comes from --object or the stack, never the item n
       pluralLabel: 'Things',
       fields: ['title', 'body'],
       displayField: 'title',
+      displayFieldLabel: 'Title',
     });
   });
 });

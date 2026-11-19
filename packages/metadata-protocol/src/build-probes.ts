@@ -14,50 +14,70 @@
 // shape the cloud L1 graph lint emits) with `layer: 'runtime'`, so agents,
 // chat surfaces, and eval harnesses consume one stream regardless of which
 // verification plane found the problem.
+//
+// A finding has two readers, so it carries two channels (ruling records
+// 6819749037 and 6929121584, ADR-0038's amendment): `message` and `fix` are
+// for the agent that published and stay English; `userMessage` is the
+// sentence for the person who asked for the app, composed HERE, by the
+// producer, in the request's language (`build-probes.user-text.ts` holds the
+// sentences, `userTextLocales` the ladder's candidates). No consumer keeps a
+// per-code table of its own.
 
-import type { StandardErrorCode } from '@objectstack/spec/api';
+import type { BuildProbeReport, RuntimeBuildIssue, StandardErrorCode } from '@objectstack/spec/api';
+import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { PackageScopedNameRefusedError, describePackageScopedHolder, type PackageScopedRefusal } from '@objectstack/core';
+import { buildProbeUserMessage, buildProbeUserTextLocale } from './build-probes.user-text.js';
 
-/** One runtime-verification finding (ADR-0038 BuildIssue, layer 'runtime'). */
-export interface RuntimeBuildIssue {
-    layer: 'runtime';
-    severity: 'error' | 'warning';
-    /** The artifact whose runtime behaviour is broken. */
-    artifact: { type: string; name: string };
-    /** What it exercised, when narrower than the artifact (e.g. a widget). */
-    ref?: { type: string; name: string; member?: string };
-    /**
-     * 'seed_not_applied' | 'view_read_failed' | 'object_field_ref_unknown'
-     * | 'object_field_ref_rule_failed' | 'empty_query' | 'widget_query_failed'
-     * | 'probes_unavailable' | 'widget_not_probed'
-     *
-     * [#15494] `object_field_ref_rule_failed` is the odd one out and belongs
-     * here anyway: it reports that a PROBE could not run, not that an artifact
-     * is broken. A probe plane that can only ever emit findings has no way to
-     * say "I was unable to judge this", and the absence of that vocabulary is
-     * what let a thrown rule read as a clean object.
-     */
-    code: string;
-    message: string;
-    fix?: string;
-}
+/**
+ * One runtime-verification finding (ADR-0038 BuildIssue, layer 'runtime'),
+ * and the aggregate result of one post-publish probe pass.
+ *
+ * Both are the spec's own types (`RuntimeBuildIssueSchema`,
+ * `BuildProbeReportSchema` in `@objectstack/spec/api`), re-exported rather
+ * than declared a second time: `probes` on the publish response is modeled
+ * there, so what this module returns and what the response declares are one
+ * type and cannot drift.
+ *
+ * [#15254] `checked.objects` joined the planes because its ABSENCE was the
+ * tell. A publish of a package Studio's app builder authored reported
+ * `{seeds: 0, views: 0, widgets: 0}` — three zeroes, no `objects` key — and
+ * that receipt was accurate: the builder mints no `view` items, so every
+ * plane the report carried had genuinely nothing to inspect while the objects
+ * it DID publish were probed by nothing. A count that cannot go up is
+ * indistinguishable from a plane that found nothing wrong.
+ */
+export type { BuildProbeReport, RuntimeBuildIssue };
 
-/** Aggregate result of one post-publish probe pass. */
-export interface BuildProbeReport {
-    /** Findings, empty when every probe passed. */
-    issues: RuntimeBuildIssue[];
-    /** How many probes actually ran, per plane (0s mean nothing to probe). */
-    /**
-     * [#15254] `objects` joined the planes because its ABSENCE was the tell.
-     * A publish of a package Studio's app builder authored reported
-     * `{seeds: 0, views: 0, widgets: 0}` — three zeroes, no `objects` key —
-     * and that receipt was accurate: the builder mints no `view` items, so
-     * every plane the report carried had genuinely nothing to inspect while
-     * the objects it DID publish were probed by nothing. A count that cannot
-     * go up is indistinguishable from a plane that found nothing wrong.
-     */
-    checked: { seeds: number; views: number; widgets: number; objects: number };
-}
+/**
+ * The codes a build probe emits, one per kind of finding. Closed here, where
+ * the producer and its sentences live (`BUILD_PROBE_USER_TEXT` is keyed by
+ * it); `code` stays an open string on the wire (`RuntimeBuildIssueSchema.code`),
+ * because a consumer reads it as an id and must not fail on one it has not
+ * seen.
+ *
+ * [#15494] `object_field_ref_rule_failed` is the odd one out and belongs here
+ * anyway: it reports that a PROBE could not run, not that an artifact is
+ * broken. A probe plane that can only ever emit findings has no way to say
+ * "I was unable to judge this", and the absence of that vocabulary is what
+ * let a thrown rule read as a clean object.
+ */
+export type RuntimeBuildIssueCode =
+    | 'seed_not_applied'
+    | 'view_read_failed'
+    | 'object_field_ref_unknown'
+    | 'object_field_ref_rule_failed'
+    | 'widget_not_probed'
+    | 'empty_query'
+    | 'widget_query_failed'
+    | 'probes_unavailable';
+
+/**
+ * A finding as this module builds it: the wire shape, with the code closed
+ * and the user sentence owed. Optional on the wire (an older producer, or a
+ * code with no sentence yet, omits it), required here, so an emit site that
+ * forgets the person's sentence does not compile.
+ */
+type ProbeFinding = RuntimeBuildIssue & { code: RuntimeBuildIssueCode; userMessage: string };
 
 /** The single read the probes need from the data engine. */
 export interface ProbeEngine {
@@ -97,6 +117,16 @@ export interface RunBuildProbesOptions {
      * it — a refusal, reported as such.
      */
     context?: unknown;
+    /**
+     * The locale candidates of every finding's `userMessage`, in ladder
+     * order: the request's locale, then the workspace default
+     * (`publishPackageDrafts` passes its `request.userTextLocales` through).
+     * A candidate that names no platform locale takes the next rung, and
+     * `en` answers when none does, which is also the answer when this is
+     * absent. It picks the language of the sentence and of the labels the
+     * sentence names; `message` and `fix` never read it.
+     */
+    userTextLocales?: readonly (string | null | undefined)[];
 }
 
 type Rec = Record<string, unknown>;
@@ -244,10 +274,14 @@ export function publishedItemReader(
             const address = protocol.resolveCallerPackageAddress({ type, name, callerPackageId: publishingPackageId });
             if (address.kind === 'package') packageId = address.packageId;
         }
-        const wrapper = (await protocol.getMetaItem({ type, name, ...(packageId !== undefined ? { packageId } : {}) })) as
+        const envelope = (await protocol.getMetaItem({ type, name, ...(packageId !== undefined ? { packageId } : {}) })) as
             | { item?: unknown }
             | undefined;
-        return wrapper?.item ?? wrapper ?? undefined;
+        // [#34560] The by-name read answers a missing item with its envelope,
+        // `item` empty, never `undefined`: the body is the envelope's `item`
+        // alone, so a dataset nothing holds reads as no body (the widget
+        // plane's dangling-dataset skip), never as the envelope itself.
+        return envelope?.item;
     };
 }
 
@@ -257,7 +291,10 @@ export function publishedItemReader(
  * {@link publishedItemReader}) is refused for its closure, so the fix is that
  * package's; a read with no package is refused for the environment.
  */
-function datasetNotProbed(refused: PackageScopedRefusal, dsName: string): { why: string; fix: string } {
+function datasetNotProbed(
+    refused: PackageScopedRefusal,
+    dsName: string,
+): { why: string; fix: string; cause: 'outside-closure' | 'ambiguous-in-closure' | 'several-holders' } {
     const holders = refused.candidates.map((h) => (h.kind === 'package' ? h.packageId : describePackageScopedHolder(h)));
     const caller = refused.callerPackageId;
     if (caller !== null && refused.reason === 'outside-closure') {
@@ -269,6 +306,7 @@ function datasetNotProbed(refused: PackageScopedRefusal, dsName: string): { why:
             fix: `Declare package "${caller}"'s dependency on the package whose dataset "${dsName}" the widget means, `
                 + `or hold the dataset in "${caller}" itself; if that package already depends on "${caller}", the `
                 + 'dependency would be a cycle, so move the dashboard into that package or hold the dataset here. Then republish.',
+            cause: 'outside-closure',
         };
     }
     if (caller !== null) {
@@ -277,18 +315,21 @@ function datasetNotProbed(refused: PackageScopedRefusal, dsName: string): { why:
                 + `(${holders.join(', ')}), so the dashboard's read of it is refused`,
             fix: `Make "${dsName}" mean one dataset from package "${caller}": hold it in "${caller}" itself, `
                 + 'or depend on only one of the packages that hold it, then republish.',
+            cause: 'ambiguous-in-closure',
         };
     }
     return {
         why: `dataset "${dsName}" has ${holders.length} holders (${holders.join(', ')}), so a read of it by name is refused`,
         fix: `Keep one dataset named "${dsName}": rename or remove the others, then republish.`,
+        cause: 'several-holders',
     };
 }
 
 export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<BuildProbeReport> {
-    const issues: RuntimeBuildIssue[] = [];
+    const issues: ProbeFinding[] = [];
     const checked = { seeds: 0, views: 0, widgets: 0, objects: 0 };
     const { engine, getItem, published, analytics, organizationId, context } = opts;
+    const userTextLocales = opts.userTextLocales ?? [];
 
     // Memoized active-item reads (a dashboard and its widgets share datasets).
     const itemCache = new Map<string, unknown | undefined>();
@@ -310,6 +351,26 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
         return item;
     };
 
+    // ── The person's sentence (`userMessage`) ───────────────────────────────
+    //
+    // Each finding below carries, beside the agent's `message` / `fix`, the
+    // sentence its code has in the catalog, in the language the ladder picks
+    // from `userTextLocales`. A sentence names an artifact by its LABEL where
+    // the probe can read one: the published body's own `label` (a widget's
+    // `title`), resolved for that same language. A body the read does not
+    // return, and a body with no label, show the API name. The label reads go
+    // through `readItem`, so they are memoized, never throw, and only happen
+    // on a finding.
+    const userTextLocale = buildProbeUserTextLocale(userTextLocales);
+    const say = (code: RuntimeBuildIssueCode, params: Readonly<Record<string, string>>): string =>
+        buildProbeUserMessage(code, params, userTextLocales);
+    const labelIn = (body: Rec | undefined, name: string, key: 'label' | 'title' = 'label'): string => {
+        const label = resolveI18nLabel(body?.[key] as I18nLabel | undefined, userTextLocale);
+        return typeof label === 'string' && label.trim() ? label : name;
+    };
+    const labelOf = async (type: string, name: string): Promise<string> =>
+        labelIn(asRec(await readItem(type, name)), name);
+
     // ── Seeds: rows must exist after publish ────────────────────────────────
     for (const p of published.filter((x) => x.type === 'seed')) {
         const body = asRec(await readItem('seed', p.name));
@@ -326,6 +387,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     code: 'seed_not_applied',
                     message: `Seed "${p.name}" was published but object "${objectName}" has no rows — the sample data never materialized.`,
                     fix: `Check the publish response's seedApplied for the load error, fix the seed rows (field names/types), and republish the seed.`,
+                    userMessage: say('seed_not_applied', { object: await labelOf('object', objectName), cause: 'no-rows' }),
                 });
             }
         } catch (e) {
@@ -336,6 +398,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 ref: { type: 'object', name: objectName },
                 code: 'seed_not_applied',
                 message: `Seed "${p.name}" probe could not read object "${objectName}": ${String((e as Error)?.message ?? e)}`,
+                userMessage: say('seed_not_applied', { object: await labelOf('object', objectName), cause: 'unreadable' }),
             });
         }
     }
@@ -367,6 +430,10 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 code: 'view_read_failed',
                 message: `View "${p.name}" cannot read object "${objectName}": ${String((e as Error)?.message ?? e)} — it will render as an error for every user.`,
                 fix: `Verify object "${objectName}" published successfully (its table must exist) and that the view's binding is correct.`,
+                userMessage: say('view_read_failed', {
+                    view: labelIn(body, p.name),
+                    object: await labelOf('object', objectName),
+                }),
             });
         }
     }
@@ -448,6 +515,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                         `Object "${p.name}" was NOT checked: the object field-reference rule threw — ` +
                         `${String((e as Error)?.message ?? e)}. Its field-name lists are unverified.`,
                     fix: `This is a defect in the lint rule, not necessarily in object "${p.name}". Report it with the message above; the object published, but nothing judged its field-name lists.`,
+                    userMessage: say('object_field_ref_rule_failed', { object: labelIn(body, p.name) }),
                 });
                 findings = [];
             }
@@ -459,6 +527,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     code: 'object_field_ref_unknown',
                     message: `Object "${p.name}" names a field that does not exist (${f.path}): ${f.message}`,
                     fix: f.hint,
+                    userMessage: say('object_field_ref_unknown', { object: labelIn(body, p.name) }),
                 });
             }
         }
@@ -477,6 +546,10 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
         for (const w of datasetBound) {
             const widgetId = String(w.id ?? w.title ?? '?');
             const dsName = w.dataset as string;
+            // What the sentence calls this widget and its dashboard: the
+            // widget's title and the dashboard's label, else the names the
+            // `message` uses.
+            const named = { dashboard: labelIn(body, p.name), widget: labelIn(w, widgetId, 'title') };
             const dataset = asRec(await readItem('dataset', dsName));
             if (!dataset) {
                 // [#32072] A name the read refused: nothing is probed, and the
@@ -485,7 +558,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 // that package's, and so is the remedy.
                 const refused = refusals.get(`dataset ${dsName}`);
                 if (refused) {
-                    const { why, fix } = datasetNotProbed(refused, dsName);
+                    const { why, fix, cause } = datasetNotProbed(refused, dsName);
                     issues.push({
                         layer: 'runtime',
                         severity: 'warning',
@@ -494,6 +567,10 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                         code: 'widget_not_probed',
                         message: `Dashboard "${p.name}" widget "${widgetId}" not probed: ${why}.`,
                         fix,
+                        // The dataset by its API name: its read was refused,
+                        // so there is no body to take a label from, and the
+                        // name itself is what two holders share.
+                        userMessage: say('widget_not_probed', { ...named, dataset: dsName, cause }),
                     });
                 }
                 continue; // dangling dataset is an L1 (graph) finding, not a runtime one
@@ -536,6 +613,11 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                         code: 'empty_query',
                         message: `Dashboard "${p.name}" widget "${widgetId}" returns NO data from dataset "${dsName}" although object "${objectName}" has rows — the widget will render empty for every user.`,
                         fix: `Run the dataset query directly to see the compiled strategy/SQL; check the dataset's measure/dimension field bindings against object "${objectName}".`,
+                        userMessage: say('empty_query', {
+                            ...named,
+                            dataset: labelIn(dataset, dsName),
+                            object: await labelOf('object', objectName),
+                        }),
                     });
                 }
             } catch (e) {
@@ -561,6 +643,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                       `so the query was not run (SERVICE_UNAVAILABLE). This is a server-side fault, not a denial: ` +
                       `check the server log for the permission or API-exposure resolver that failed, then republish once it is healthy.`
                     : `Fix the dataset definition (or the widget's values/dimensions) so the query compiles, then republish.`;
+                const saidObject = refusal ? refusedObject : unavailable ? undecidedObject : objectName;
                 issues.push({
                     layer: 'runtime',
                     severity: 'error',
@@ -569,6 +652,23 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     code: 'widget_query_failed',
                     message: `Dashboard "${p.name}" widget "${widgetId}" query against dataset "${dsName}" failed: ${String((e as Error)?.message ?? e)}`,
                     fix,
+                    userMessage: say('widget_query_failed', {
+                        ...named,
+                        dataset: labelIn(dataset, dsName),
+                        // The object the sentence names is the one the `fix`
+                        // names: the refused or undecided object when the
+                        // error carries one, else the dataset's own. Empty
+                        // when there is none, and the sentence says so.
+                        // After a refusal, or a read gate that could not
+                        // decide, it is named exactly as the `fix` names it,
+                        // by the API name: the caller was not admitted to
+                        // that object, so the probe reads nothing of it (not
+                        // its label either) for this caller's sentence. Only
+                        // a query that failed for another reason reads the
+                        // dataset's object for its label.
+                        object: !saidObject ? '' : refusal || unavailable ? saidObject : await labelOf('object', saidObject),
+                        cause: refusal ? (refusal.fields.length ? 'field-access' : 'access') : unavailable ? 'unavailable' : 'query',
+                    }),
                 });
             }
         }
@@ -583,6 +683,8 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
             artifact: { type: 'dashboard', name: dashboards.map((d) => d.name).join(', ') },
             code: 'probes_unavailable',
             message: `${widgetsToProbe} dashboard widget(s) could not be probed: no analytics service is mounted on this kernel.`,
+            // No name: one finding stands for every dashboard of the publish.
+            userMessage: say('probes_unavailable', { count: String(widgetsToProbe) }),
         });
     }
 

@@ -195,7 +195,7 @@ describe.each(STRATEGY_PATHS)('queryDataset leaves the shared registries alone â
     expect(entry?.public).toBe(false);
   });
 
-  it('a request under a fresh name leaves no entry â€” refused or admitted, augmented measures included', async () => {
+  it('a request under a fresh name leaves no entry â€” refused (by read admission or by the closed-member rule) or admitted', async () => {
     const h = makeService(capabilities);
     const names = h.svc.cubeRegistry.names();
     const before = await observe(h);
@@ -203,19 +203,18 @@ describe.each(STRATEGY_PATHS)('queryDataset leaves the shared registries alone â
     await expect(
       h.svc.queryDataset(inline('fresh_walled', WALLED), { measures: ['inline_total'] }, CALLER_A),
     ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
-    // `amount_sum` is not declared by the dataset: `ensureCube` augments the
-    // request's cube with a suffix-inferred measure, and that augmentation is
-    // the request's too.
+    // `amount_sum` is not declared by the dataset: the dataset door refuses it
+    // (ADR-0149 D1) before `ensureCube` could augment the request's cube with
+    // a suffix-inferred measure, and nothing reaches the driver.
+    const refusedFrom = h.calls.length;
+    await expect(
+      h.svc.queryDataset(inline('fresh_open', 'other_obj'), { measures: ['inline_total', 'amount_sum'] }, CALLER_A),
+    ).rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400, member: 'amount_sum' });
+    expect(h.calls.slice(refusedFrom)).toEqual([]);
     const from = h.calls.length;
-    await h.svc.queryDataset(
-      inline('fresh_open', 'other_obj'),
-      { measures: ['inline_total', 'amount_sum'] },
-      CALLER_A,
-    );
+    await h.svc.queryDataset(inline('fresh_open', 'other_obj'), { measures: ['inline_total'] }, CALLER_A);
     const driven = h.calls.slice(from);
     expect(driven.map((c) => c.object)).toEqual(['other_obj']);
-    // â€¦and the augmented measure really reached the driver (`SUM(amount)`).
-    expect(JSON.stringify(driven[0].detail)).toContain('amount');
 
     expect(h.svc.cubeRegistry.names()).toEqual(names);
     expect(await observe(h)).toEqual(before);

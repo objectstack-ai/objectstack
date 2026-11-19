@@ -250,7 +250,8 @@ describe.each([undefined, SHANGHAI, NEW_YORK] as const)('[#20599] GET /export th
         expect(rows).toHaveLength(ROWS.length);
         body = { format, rows, writeMode: 'insert' };
       } else {
-        const [header, ...lines] = exported._text().split('\r\n').filter((l: string) => l.length > 0);
+        // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+        const [header, ...lines] = exported._text().replace(/^\uFEFF/, '').split('\r\n').filter((l: string) => l.length > 0);
         expect(header).toBe('ID,At');
         expect(lines).toHaveLength(ROWS.length);
         const csv = [header, ...lines.map((l: string) => {

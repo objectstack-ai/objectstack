@@ -224,9 +224,9 @@ describe('buildSections', () => {
 
 describe('readPrefill', () => {
   const fields = [
-    { name: 'first_name', label: 'First name', type: 'text', required: false, readonly: false, hidden: false, colSpan: 1 as const },
-    { name: 'company', label: 'Company', type: 'text', required: false, readonly: false, hidden: false, colSpan: 1 as const, defaultValue: 'Acme' },
-    { name: 'phone', label: 'Phone', type: 'text', required: false, readonly: false, hidden: false, colSpan: 1 as const },
+    { name: 'first_name', label: 'First name', labelSource: 'object' as const, type: 'text', required: false, readonly: false, hidden: false, colSpan: 1 as const },
+    { name: 'company', label: 'Company', labelSource: 'object' as const, type: 'text', required: false, readonly: false, hidden: false, colSpan: 1 as const, defaultValue: 'Acme' },
+    { name: 'phone', label: 'Phone', labelSource: 'object' as const, type: 'text', required: false, readonly: false, hidden: false, colSpan: 1 as const },
   ];
 
   it('applies defaultValue from the field definition', () => {
@@ -327,6 +327,7 @@ describe('readPrefill', () => {
       {
         name: 'remind_at',
         label: 'Remind at',
+        labelSource: 'object' as const,
         type: 'datetime',
         required: false,
         readonly: false,

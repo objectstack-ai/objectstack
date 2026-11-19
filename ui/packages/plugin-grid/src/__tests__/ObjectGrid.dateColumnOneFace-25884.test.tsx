@@ -27,7 +27,7 @@
  * wording moving to the cell's tooltip.
  */
 import React from 'react';
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import {
   assertNoOtherNetworkEscape,
   installRecordSecurityExplainDouble,
@@ -55,6 +55,16 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+// [#34543] One instant for the whole file. The rows below are built at
+// collection, from "today", and every cell reads "today" again when it
+// renders. On the real clock a run that crosses midnight between the two
+// reads a row stored as +2 days as "Tomorrow". The clock is frozen before the
+// rows are built, a second before midnight UTC, the worst instant to read it.
+// Only `Date` is faked: the timers `waitFor` and React run on stay real.
+vi.useFakeTimers({ toFake: ['Date'] });
+vi.setSystemTime(new Date('2026-06-15T23:59:59.900Z'));
+afterAll(() => vi.useRealTimers());
 
 /** A calendar day `offset` days from today, as a `date` field stores it. */
 function storedDay(offset: number): string {

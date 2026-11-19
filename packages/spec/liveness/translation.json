@@ -222,6 +222,22 @@
           },
           "note": "[#28251] Seeded `live` together with its reader: the key and the engine read that makes it true land in one change (Prime Directive 10). A `save_notice` node runs inside the record write that started its flow, so the sentence is rendered in the locale of the person who made that write, before the write answers. The translation is a text slot like the source: `TranslationDataSchema` refuses a single-brace `{token}` in it through `textSlotTemplateRefusal`, and `objectstack validate` (`validate-translation-references.ts`) refuses a key over an unknown flow, an unknown node, or a node that is not a `save_notice`. No objectui reader is involved: the console draws the served `notice` verbatim. DRILLED to its one key, `message`, so no blanket verdict covers an unclassified child: the entry's face is closed (`.strict()`)."
         },
+        "records": {
+          "status": "live",
+          "verifiedAt": "2026-11-16",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/services/service-automation/src/builtin/crud-nodes.ts#resolveFieldValues (the one reader of the group: the `create_record` / `update_record` executors read each `records.<node_id>` entry for its `fields`, the drilled child below)",
+          "children": {
+            "fields": {
+              "status": "live",
+              "verifiedAt": "2026-11-16",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/services/service-automation/src/builtin/crud-nodes.ts#resolveFieldValues (for each field value marked as text, `{ dialect: 'template', source }`, asks `flows.<flow>.records.<node_id>.fields.<field>`, spelled by `flowRecordFieldTextKey`, in the ORGANIZATION's language read through `AutomationEngine.organizationLocale`, and writes the rendered pick in place of the authored template); packages/services/service-automation/src/node-text-rendering.ts#renderFlowTextSlot (picks the translated template through the `i18n` service, negotiated by `resolveBundleLocale`, then fills its holes; a miss echoes the key and the authored template renders)",
+              "producer": "packages/runtime/src/app-plugin.ts#loadTranslations (hands each bundle's locale data to the i18n service whole, `flows` included); packages/services/service-automation/src/plugin.ts#i18nServiceReader (the engine's lazy reader of that service); packages/services/service-automation/src/plugin.ts#organizationLocaleReader (answers the language through `@objectstack/core`'s `resolveOrganizationLocale`: the `localization.locale` setting somebody set, else the `i18n` service's `getDefaultLocale()`)"
+            }
+          },
+          "note": "[#34062, ruling 6913660232] Seeded `live` together with its reader: the key and the engine read that makes it true land in one change (Prime Directive 10). A record keeps the sentence for everyone in the organization, so it is picked in the organization's language, never the run starter's, once, when it is written: no backfill, and a later setting change rewrites nothing. Only a value MARKED as text is read (`FlowRecordFieldValueSchema`); a bare string is a literal and has no key. The translation is a text slot like the source: `TranslationDataSchema` refuses a single-brace `{token}` in it through `textSlotTemplateRefusal`, and `objectstack validate` (`validate-translation-references.ts`) refuses a key over an unknown flow, an unknown node, a node that is not a `create_record` / `update_record`, or a field the node does not mark as text. DRILLED to its one key, `fields`, so no blanket verdict covers an unclassified child: the entry's face is closed (`.strict()`)."
+        },
         "approvals": {
           "status": "live",
           "verifiedAt": "2026-10-21",
@@ -278,6 +294,22 @@
               }
             }
           }
+        },
+        "texts": {
+          "status": "live",
+          "verifiedAt": "2026-11-16",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildHookTextSurface (each `texts.<key>` entry is read for its `message`, the drilled child below)",
+          "children": {
+            "message": {
+              "status": "live",
+              "verifiedAt": "2026-11-16",
+              "evidenceScope": "in-repo",
+              "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildHookTextSurface (reads `hooks.<hook>.texts.<key>.message` through the `i18n` service, spelled by `hookTextMessageKey`, in the organization's language negotiated by `resolveBundleLocale`; a miss echoes the key and the declared message is written, its holes filled after)",
+              "producer": "packages/runtime/src/app-plugin.ts#loadTranslations (hands each bundle's locale data to the i18n service whole, `hooks` included)"
+            }
+          },
+          "note": "[#34374, ruling 6913660232 parameter 7] Seeded `live` with its reader. `objectstack validate` refuses a key over a text the hook does not declare; the i18n walk counts each declared text."
         }
       },
       "note": "[#26170, maintainer ruling 6431311681 letter A] Seeded `live` together with its reader, the flow `refusals` precedent: the key and the body-runner read that makes it true land in one change (Prime Directive 10). A hook's refusal leaves the server already rendered (the error envelope's message and `userMessage`), so the body runner picks the translation before it serves the refusal, the validation-message posture (`objectValidationMessageKey`). Keyed by hook name, never by object, so a hook bound to several objects or to `'*'` owns one translation per code. `objectstack validate` (`validate-translation-references.ts`) refuses a key over an unknown hook or an undeclared code, and the i18n extract/check walk counts each declared entry. No objectui reader: the console draws the served refusal verbatim. DRILLED two levels, to `refusals.message`; each entry face is closed (`.strict()`)."
@@ -353,6 +385,20 @@
               "note": "The group's section title in the docs sidebar and in the resolved tree's `groups[].label`."
             }
           }
+        }
+      }
+    },
+    "mappings": {
+      "status": "live",
+      "verifiedAt": "2026-11-17",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#translateMapping (`mappings.<name>.label`, registered in METADATA_DOCUMENT_TRANSLATORS); packages/rest/src/meta-item-read-gate.ts#translateMetaList (the /meta list read that applies it per request locale)",
+      "note": "Seeded LIVE with its reader in the same change (the datasets precedent): a served `mapping` document is localized at the REST boundary, list and item, and `GET /meta/mapping` is what the console's import wizard offers by label in its saved-mapping selector. The face stops at the one string a mapping authors for a reader; its `fieldMapping` is column and field names.",
+      "children": {
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupMappingLabel (`mappings.<name>.label`, read by translateMapping)",
+          "note": "Overlays the served mapping's own `label`."
         }
       }
     },

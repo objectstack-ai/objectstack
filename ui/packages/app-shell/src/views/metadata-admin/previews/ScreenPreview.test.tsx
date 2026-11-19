@@ -101,13 +101,16 @@ describe('ScreenPreview — flat fields', () => {
 });
 
 describe('ScreenPreview — object-form mode', () => {
-  it('renders the runtime ObjectForm with the configured object/mode/defaults', () => {
+  // ScreenView draws `ObjectForm` through `lazy()` since the console's first
+  // load stopped carrying the form package (objectstack#33581), so the form
+  // appears a tick after the render: these two wait for it.
+  it('renders the runtime ObjectForm with the configured object/mode/defaults', async () => {
     render(
       <ScreenPreview
         node={{ id: 's1', config: { objectName: 'crm_account', mode: 'edit', defaults: { stage: 'new' } } }}
       />,
     );
-    expect(screen.getByTestId('object-form')).toBeInTheDocument();
+    expect(await screen.findByTestId('object-form')).toBeInTheDocument();
     const schema = objectFormSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect(schema.type).toBe('object-form');
     expect(schema.objectName).toBe('crm_account');
@@ -117,13 +120,14 @@ describe('ScreenPreview — object-form mode', () => {
     expect(screen.queryByRole('button', { name: 'Submit' })).not.toBeInTheDocument();
   });
 
-  it('passes derived master-detail subforms from the enriched object def to ObjectForm', () => {
+  it('passes derived master-detail subforms from the enriched object def to ObjectForm', async () => {
     // useMetadata().objects already carries `form.subforms` derived from inline-edit
     // relationships (attachInlineSubforms) — the preview just forwards them.
     objectsRef.current = [
       { name: 'showcase_invoice', form: { subforms: [{ childObject: 'showcase_invoice_line', relationshipField: 'invoice', inlineMode: 'grid' }] } },
     ];
     render(<ScreenPreview node={{ id: 's1', config: { objectName: 'showcase_invoice', mode: 'create' } }} />);
+    await screen.findByTestId('object-form');
     const schema = objectFormSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect(schema.objectName).toBe('showcase_invoice');
     expect(schema.subforms).toEqual([

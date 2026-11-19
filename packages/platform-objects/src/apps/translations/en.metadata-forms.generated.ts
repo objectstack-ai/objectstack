@@ -967,7 +967,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "Refusals",
-        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the body throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. JavaScript (L2) bodies only"
+        helpText: "Refusal catalogue, keyed by the SCREAMING_SNAKE code the hook throws (e.g. CLEAN_VERSION_REQUIRED). The caller reads the declared message, translated into their language, with the declared status. For a JavaScript (L2) body or a handler; refused on an expression body"
       },
       "refusals.message": {
         label: "Message",
