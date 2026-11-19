@@ -19,6 +19,9 @@ import { act, fireEvent, render } from '@testing-library/react';
 import React from 'react';
 import { SchemaRenderer } from '@object-ui/react';
 import '../renderers';
+// `react-page` reaches this dynamically; load it during collection, not in a
+// clocked case (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const TABS = ['Details', 'Positions', 'Permission Sets', 'Sessions'].map((label) => ({
   label,
