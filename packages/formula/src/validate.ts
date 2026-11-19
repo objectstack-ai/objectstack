@@ -24,6 +24,8 @@ import {
   firstDateTextVerdict,
   firstTypeMismatch,
   inferCelType,
+  recordRootReadsFaultDateArith,
+  RECORD_ROOT_READ_RE,
   parseCelToAst,
   parseCelToAstWithReason,
   type CelAstNode,
@@ -508,7 +510,9 @@ const DATE_FAIL_CLOSED_CLAUSE =
  *    the Timestamp typing passes, re-checked with a date field declared as the
  *    text the runtime holds — see {@link dateTextIssue}; in a flow condition
  *    and on a fail-closed site the fault takes the same outcome codes as
- *    `date-arith`.
+ *    `date-arith`. A flattened condition's `record.<field>` / `previous.<field>`
+ *    read takes the date-text family as its bare name does
+ *    ({@link recordRootDateTextIssue}, #34662).
  * `scope` selects `record.<field>` vs bare field binding, shaping the message.
  */
 function typeSoundnessIssue(
@@ -548,7 +552,8 @@ function typeSoundnessIssue(
       : celFieldTypes;
     // [#34363] The `date` fields (never `datetime`) by name: `timestamp()` faults on their text.
     const dateOnly = new Set(Object.keys(bareCelTypes).filter((name) => fieldTypes[name] === 'date'));
-    return dateTextIssue(source, bareCelTypes, scope, role, dateArm(scope, faultOutcome, bareNamesUnproven), dateOnly);
+    const bare = dateTextIssue(source, bareCelTypes, scope, role, dateArm(scope, faultOutcome, bareNamesUnproven), dateOnly);
+    return bare ?? (scope === 'flattened' ? recordRootDateTextIssue(source, fieldTypes, celFieldTypes, role, faultOutcome) : null);
   }
   const reference = mismatch.field
     ? (mismatch.root !== undefined
@@ -657,7 +662,9 @@ function typeSoundnessIssue(
  * fault (ADR-0032 §1c) on every flow: a date verdict there never reads null.
  * `run-fails` where the caller declares the run proven to hold the field
  * (`faultOutcome: 'run-fails'`) and no node can rebind a bare name
- * (`bareNamesUnproven`) — the date verdicts read bare names only. Anywhere
+ * (`bareNamesUnproven`) — for a bare-name verdict; a `record.<field>` /
+ * `previous.<field>` read keeps the row's outcome whatever binds the bare
+ * names (#30025, {@link recordRootDateTextIssue} passes `false`). Anywhere
  * else in a flow the name holds what the entrance handed the run (an API body
  * whose value is a number answers `close_date + 1`), so the run fails only
  * where it holds the date: `run-may-fail`. A `record`-scoped site that fails
@@ -713,6 +720,9 @@ function dateArmFault(arm: DateArm, ref: string | null, held: 'date' | 'text'): 
  *    (`today() - record.d > duration('72h')`) evaluates, and is not touched.
  * Runs only when there is something to find: a date field to retype, or a
  * `value` whose computed type is the question.
+ *
+ * [#34662] `recordRoots` (flattened scope only) is the record-root pass's
+ * typing of `record.<field>` / `previous.<field>` ({@link recordRootDateTextIssue}).
  */
 function dateTextIssue(
   source: string,
@@ -721,14 +731,18 @@ function dateTextIssue(
   role: 'predicate' | 'value',
   flowArm: DateArm | null,
   dateOnlyFields: ReadonlySet<string>,
+  recordRoots?: Readonly<Record<string, FieldCelType>>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
-  if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
-  const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
+  const anyDate = [celFieldTypes, recordRoots].some((types) => types && Object.values(types).includes('timestamp'));
+  if (role !== 'value' && !anyDate) return null;
+  const verdict = firstDateTextVerdict(source, celFieldTypes, scope, recordRoots);
   // [#32595] A call the date text cannot take faults that typing too, so it is
   // asked only where the date-text check faulted on something but arithmetic.
-  if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm, dateOnlyFields);
+  if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm, dateOnlyFields, recordRoots);
   const reference = verdict.field
-    ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
+    ? (verdict.root !== undefined
+      ? `${verdict.root}.${verdict.field}`
+      : scope === 'record' ? `record.${verdict.field}` : verdict.field)
     : undefined;
   const ref = reference !== undefined ? `\`${reference}\`` : null;
   // A span under a day has no stdlib helper; the Duration of two parsed sides does it.
@@ -791,8 +805,9 @@ function dateTextCallIssue(
   scope: 'record' | 'flattened',
   flowArm: DateArm | null,
   dateOnlyFields: ReadonlySet<string>,
+  recordRoots?: Readonly<Record<string, FieldCelType>>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
-  const found = firstDateTextCall(source, celFieldTypes, scope, dateOnlyFields);
+  const found = firstDateTextCall(source, celFieldTypes, scope, dateOnlyFields, recordRoots);
   if (!found) return null;
   const params = {
     call: found.call,
@@ -824,6 +839,45 @@ function dateTextCallIssue(
 
 /** [#34451] The date-text verdict family: `date-text-call` / `date-text-arithmetic` and their outcome arms. */
 const DATE_TEXT_FAMILY_RE = /^date-text-(?:call|arithmetic)(?:-|$)/;
+
+/**
+ * [#34662] The record-root pass of the date-text family in a flattened (flow)
+ * condition: what {@link typeSoundnessIssue}'s bare-name pass leaves, judged
+ * over the `record.<field>` / `previous.<field>` reads.
+ *
+ * A flow run binds the record it was handed as `record` beside the flattened
+ * bare names, and the row before the write as `previous` (#29959), so
+ * `timestamp(record.borrow_date)` faults on the `YYYY-MM-DD` text exactly as
+ * `timestamp(borrow_date)` does — the bare spelling was refused while the
+ * root read, left `dyn`, checked clean. Typed here with every field's type
+ * (a flow variable shadows a bare name, never a root member), every bare name
+ * `dyn`, the same verdict, code and words come back, naming the read as
+ * written. The order is the bare name's own: there {@link firstTypeMismatch}
+ * answers `date-arith` when the Timestamp typing's first fault is date/duration
+ * arithmetic against a number, and the date-text check is asked only once it
+ * answers null. So the pass stands down exactly where the roots' first
+ * Timestamp-typing fault is that shape (`record.due_date + 1`, the
+ * `date-arithmetic` family's, {@link recordRootReadsFaultDateArith}), and on no
+ * other fault: `record.due_date - record.borrow_date > 3` (a Duration ordered
+ * against a number) and an expression that orders a date field against a text
+ * literal before it calls `timestamp()` are judged, as their bare spellings
+ * are. Only `date-text-call*` / `date-text-arithmetic*` are kept. The outcome arm is
+ * the row's: a root read keeps the declared outcome whatever binds the bare
+ * names (#30025), so `bareNamesUnproven` is not asked.
+ */
+function recordRootDateTextIssue(
+  source: string,
+  fieldTypes: Readonly<Record<string, string>>,
+  celFieldTypes: Readonly<Record<string, FieldCelType>>,
+  role: 'predicate' | 'value',
+  faultOutcome: ExprSchemaHint['faultOutcome'],
+): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
+  if (!RECORD_ROOT_READ_RE.test(source) || !Object.values(celFieldTypes).includes('timestamp')) return null;
+  if (recordRootReadsFaultDateArith(source, celFieldTypes)) return null;
+  const dateOnly = new Set(Object.keys(celFieldTypes).filter((name) => fieldTypes[name] === 'date'));
+  const found = dateTextIssue(source, {}, 'flattened', role, dateArm('flattened', faultOutcome, false), dateOnly, celFieldTypes);
+  return found && DATE_TEXT_FAMILY_RE.test(found.issue.code) ? found : null;
+}
 
 /**
  * [#34451] The verdict a flow value envelope gets ({@link ExprSchemaHint.flowValueEnvelope}):
