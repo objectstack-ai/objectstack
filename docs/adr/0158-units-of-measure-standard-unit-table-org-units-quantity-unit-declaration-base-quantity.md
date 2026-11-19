@@ -43,7 +43,9 @@ Four kinds of text feed this record. Each section says which kind it carries.
    > 3. R2 converts both by dimension ratio and by a suite-supplied factor.
 
 2. **Left to this record.** The ruling hands this record three items ("Left to the ADR"), and U6 hands it one more
-   sentence. Each is a section of [Left to this record](#left-to-this-record) that states the question as ruled.
+   sentence. Each is a section of [Left to this record](#left-to-this-record) that states the question as ruled. L3
+   carries the owning seat's settlement, marked as such; L1, L2 and L4 carry no settlement yet. The consequences
+   noted under U3 are the same seat's, and are not new rules.
 3. **The card.** The business reason and the review questions in #35339's body. They are the analysis the ruling
    answered; a detail that appears only there is not ruled.
 4. **Readings.** Current behaviour, read at `3819afec` and cited by file or symbol. The commands are under
@@ -119,7 +121,7 @@ Decision wins.
 | ISO 4217 membership, read from `CURRENCY_FRACTION_DIGITS`'s key set | U1: a closed constant of UN/ECE Rec 20 codes with dimension and ratio; a separate table, not a fourth value domain |
 | `sys_exchange_rate`, organization-owned | U3: `sys_unit`, organization-owned, org-added units only, zero platform rows |
 | `currencyConfig`: `fixed`, or `record` with `currencyField` (D2) | U4: a unit declaration on `number`: `fixed`, or `record` with a pointer to a sibling `text` field |
-| The D2 amendment: an amount follows its parent through `master_detail` | U4 leaves it to this record ([L3](#l3--u4s-key-spellings-and-following-a-parent)) |
+| The D2 amendment: an amount follows its parent through `master_detail` | Not admitted by this record; the spelling is reserved ([L3](#l3--u4s-key-spellings-and-following-a-parent)) |
 | D8 rule 2: `currency_code` is a convention, never a contract | U4: `unit_code` is a convention, never a contract |
 | The code field's `valueDomain`, judged by the pure predicate | U5: a new asynchronous write-path check over U1 and `sys_unit`; the predicate stays pure and unchanged |
 | D6: a raw aggregate over a `record`-mode amount refuses unless grouped by its code field | U7 R1: the same refusal over a `record`-mode quantity and its unit field |
@@ -155,6 +157,16 @@ ruling's. A line outside a quotation is a cross-reference, never a decision.
 > live in a reserved namespace, at least 4 characters or containing an underscore. Rec 20 codes are at most 3
 > alphanumerics, so a later standard code cannot collide with an org code.
 
+*Consequences of U3, not new rules* (the owning seat's settlement, 2026-11-19):
+
+- `sys_unit` must be readable by members, so that a quantity's unit label displays to everyone who reads the
+  quantity. `sys_exchange_rate`'s grant is not copied: an ordinary member neither reads nor writes that table
+  (`packages/platform-objects/src/system/sys-exchange-rate.object.ts#SysExchangeRate`).
+- Its label and documentation say "unit of measure" throughout. `sys_business_unit` and `sys_business_unit_member`
+  already sit in the platform object list
+  (`packages/spec/src/system/constants/platform-object-names.ts#PLATFORM_OBJECTS_BY_PACKAGE`), and the name
+  `sys_unit` is ruled.
+
 ### U4 — Quantity shape
 
 > **U4 · Quantity shape.** A `number` field gains a unit declaration that mirrors `currencyConfig`:
@@ -168,7 +180,9 @@ ruling's. A line outside a quotation is a cross-reference, never a decision.
 > - Whether a unit may follow a parent through `master_detail`, as ADR-0144's D2 amendment allows for currency, is
 >   also the ADR's to fix. A `lookup` path is not admitted.
 
-The last two sub-bullets are [L3](#l3--u4s-key-spellings-and-following-a-parent).
+The last two sub-bullets are settled under [L3](#l3--u4s-key-spellings-and-following-a-parent): the keys are
+`unitConfig: { unitMode, unit, unitField, unitDimension }`, and following a parent through `master_detail` is not
+admitted by this record.
 
 ### U5 — Membership at write
 
@@ -207,10 +221,10 @@ The last sentence is [L4](#l4--u6s-decimals-and-the-fields-scale).
 ## Left to this record
 
 The ruling leaves three items to this record under "Left to the ADR", and U6's last sentence leaves a fourth. Each
-section below states its question as ruled and nothing else.
+section below states its question as ruled.
 
-**PENDING.** The settlement of each item comes from the seat, with the maintainer's pick where an item is a product
-choice. This draft settles none of them.
+**PENDING: L1, L2 and L4.** Their settlement comes from the seat, with the maintainer's pick where an item is a
+product choice; until then each states its question and nothing else. L3 is settled.
 
 ### L1 — The ratio lock
 
@@ -229,8 +243,6 @@ The home-currency lock it compares with is ADR-0144 D4.
 
 ### L3 — U4's key spellings, and following a parent
 
-<!-- PENDING: settlement from the seat -->
-
 > The key spellings from U4.
 
 The two sub-bullets of U4 that this item settles:
@@ -238,6 +250,69 @@ The two sub-bullets of U4 that this item settles:
 > - The key spelling (proposed `unitConfig: { unitMode, unit, unitField, dimension }`) is the ADR's to fix.
 > - Whether a unit may follow a parent through `master_detail`, as ADR-0144's D2 amendment allows for currency, is
 >   also the ADR's to fix. A `lookup` path is not admitted.
+
+**Settled on 2026-11-19 by the owning seat (repo:objectstack#5), as a technical item.** This is the seat's
+settlement of what the ruling handed to this record, not ruling text. One change from the ruling's proposal:
+`dimension` becomes `unitDimension`.
+
+```ts
+unitConfig: {
+  unitMode: 'fixed' | 'record',   // required; no default
+  unit: 'KGM',                    // `fixed` only, and required there: a U1 code in exact uppercase
+  unitField: 'unit_code',         // `record` only, and required there: one segment in this record
+  unitDimension: 'mass',          // `record` only, optional
+}
+```
+
+The values are illustrations: which codes U1 holds, and the dimension vocabulary, are [Open item](#open-items) 2.
+
+- **The mirror.** `unitConfig`, `unitMode` and `unitField` mirror `currencyConfig`, `currencyMode` and
+  `currencyField` (`packages/spec/src/data/field.zod.ts#CurrencyConfigSchema`). `unitMode`'s two values reuse `fixed`
+  and `record` with the meaning they have there.
+- **`unitMode` is required and has no default.** `currencyMode` defaults to `dynamic` because an absent config
+  already means the tenant currency. No tenant unit exists, and the platform does not guess one.
+- **`unit`, not `defaultUnit`.** `defaultCurrency` is a recorded misnomer: it once defaulted to `'CNY'`, and under
+  `fixed` it is the field's one currency, not a default (the docblock above `CurrencyConfigSchema`). On the field
+  surface `default*` means a value applied on insert (`packages/spec/src/data/field.zod.ts#defaultValue`), so
+  `defaultUnit` would read as a pre-fill for `record` mode, which is a different feature.
+- **`unitDimension`, not `dimension`.** `dimension` already means a group-by axis in the analytics schemas
+  (`packages/spec/src/api/analytics.zod.ts#dimension`, `packages/spec/src/data/analytics.zod.ts#dimension`,
+  `packages/spec/src/ui/dashboard.zod.ts#dimension`), and U7 R1's aggregate rule ("unless it groups by that
+  quantity's unit field") is stated in that sense. The bare word would carry two meanings in one record.
+- **Cross-refusals**, mirroring `packages/spec/src/data/field.zod.ts#refuseRecordModeKeyMismatch`: `fixed` requires
+  `unit` and refuses `unitField` and `unitDimension` (U1 already gives a fixed code its dimension); `record` requires
+  `unitField` and refuses `unit`.
+- **Refusal prescriptions**, as `aliases` rows, which are did-you-mean answers and never accepted spellings
+  (`packages/spec/src/shared/strict-object.ts#strictObject`). Inside `unitConfig`: `mode` to `unitMode`;
+  `defaultUnit`, `unitCode`, `code` and `uom` to `unit`; `field` and `codeField` to `unitField`; `dimension` to
+  `unitDimension`. On the field itself, prose guidance for a bare `unit`, `uom`, `unitCode` or `dimension` key, the
+  form the guidance for a bare `currency` key takes.
+- **Read on `type: 'number'` only** (U4). On `formula` and `summary` the declaration is refused until a reader exists
+  (U8). So a roll-up of a `fixed`-unit quantity shows a bare number; the gap is declared here, not discovered later.
+- **The object door.** `unitField` names a `text` field of the same object. That field carries no marker, because U1
+  is not a value domain (ruled); the pointer is the declaration. Two quantities that share one unit field must not
+  declare different `unitDimension` values, the check `packages/spec/src/data/object.zod.ts#refuseDishonestHomeAmount`
+  makes for amounts that share a rate field.
+- **No numeric key at `unitConfig`'s top level.** `check:duration-unit-keys` exempts a numeric key that has a sibling
+  literally named `unit` (`packages/spec/scripts/check-duration-unit-keys.ts#collectDurationKeys`). A later R2 block
+  is an object of its own, as `homeAmount` is.
+
+**Following a parent through `master_detail` is not admitted by this record; the spelling is reserved.**
+
+- A two-segment `unitField` is refused at the object door, with a message saying that a child cannot follow its
+  parent's unit yet. The reserved form is currency's, `PARENT_FIELD.UNIT_FIELD` through a `master_detail` field. A
+  `lookup` path stays refused (U4).
+- No named shape pulls it. The card's shapes are a sibling code on the row (`srm_material.uom`,
+  `srm_delivery_record.uom`) or an order line that follows its product, which is a `lookup` and refused by U4. This
+  reads the card's description; the suites' source was not read.
+- For currency the same path took a ruling of its own, a lock on the parent's code field, three child cards and new
+  readers in the engine (ADR-0144, the D2 and D6 amendments), and two edges of ADR-0144's Open item 14 are still open.
+- In R1, a `summary` over `record`-mode child quantities is therefore always refused, as every such currency roll-up
+  was before ADR-0144's D6 amendment
+  (`packages/objectql/src/record-currency-aggregate-door.ts#recordCurrencySummaryRefusal` is the currency
+  counterpart). A parent whose children all share its unit cannot say so until an amendment admits the path.
+- Precedent for adding it later: ADR-0144 was accepted on 2026-10-28 and amended on 2026-11-09 to admit the same
+  path for currency.
 
 ### L4 — U6's decimals and the field's `scale`
 
@@ -274,7 +349,9 @@ U7 is the ruled plan; this table restates it and adds nothing.
 - **The declaration is additive.** U4 adds a unit declaration to `number`; a `number` field that declares no unit is
   not touched by any decision here.
 - **A new organization-owned system object, `sys_unit`,** behind the tenant wall like `sys_exchange_rate`, with zero
-  platform rows (U3).
+  platform rows (U3), readable by members (the notes under U3).
+- **A child quantity cannot follow its parent's unit** in this record (L3). A `summary` over `record`-mode child
+  quantities is refused until an amendment admits the reserved path.
 - **A write that U5 guards reads rows.** U5's check "is asynchronous and reads rows".
 - **No standard code can ever collide with an organization code** (U3): org codes are at least 4 characters or carry
   an underscore, and Rec 20 codes are at most 3 alphanumerics.
@@ -305,7 +382,8 @@ The ruling does not decide the items below, and this record does not settle them
 builds the piece, settled under that card's review; this record is amended with each answer, the way ADR-0144's open
 items were.
 
-1. **[L1](#l1--the-ratio-lock)–[L4](#l4--u6s-decimals-and-the-fields-scale)**, pending in this draft.
+1. **[L1](#l1--the-ratio-lock), [L2](#l2--organization-unit-label-translation) and
+   [L4](#l4--u6s-decimals-and-the-fields-scale)**, pending in this draft.
 2. **U1's membership.** Which Rec 20 common codes the curated subset holds, each one's dimension and ratio, and which
    package codes it lists. U2 fixes one code (`H87`) and refuses two (`C62`, `EA`).
 3. **`sys_unit`'s owning package, and its fields** beyond what U3, U6 and U7 R2 name, against
@@ -314,8 +392,12 @@ items were.
 4. **The codes of the new refusals**: U5's membership refusal, U7 R1's aggregate refusal and U7 R2's refusal of a
    write with no ratio and no factor. [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) sets their codes and
    envelope.
-5. **R2's declaration spelling.** U7 R2 names `factorField`. The spelling of the base-quantity field's declaration,
-   and of where "the factor used" is stored, is not ruled. ADR-0144 D5 is the mirrored precedent.
+5. **R2's key spellings.** U7 R2 names `factorField`, the pointer to a suite-supplied factor: an input, written by
+   the suite. The field where the engine stores "the factor used" is an output, engine-written and `readonly`, the
+   counterpart of `homeAmount.rateField` (`packages/spec/src/data/field.zod.ts#HomeAmountSchema`). The input pointer
+   and the output field get two different names (the owning seat's settlement, 2026-11-19). The rest of the R2
+   block's spelling, the base-quantity field's declaration included, is the R2 card's, the way ADR-0144 left
+   `rateDate` and `rateField` to its card.
 6. **How R2 rounds a projected base quantity.** Not ruled.
 7. **The release of each declaration.** U7 lists readers; U8 binds each key to its reader's release
    ([Releases](#releases)).
