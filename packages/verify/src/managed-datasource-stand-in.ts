@@ -20,8 +20,9 @@
 // A managed datasource whose engine has no faithful in-memory stand-in (a
 // non-SQL kind such as `mongodb`, or a driver a plugin supplies, which this
 // factory never builds) keeps its real driver too, and `deriveCrudCases`
-// withholds its objects the way it withholds external ones, naming why. Verify
-// never writes through to it.
+// withholds its objects the way it withholds external ones, naming why. Only
+// verify's own derived writes are withheld: the app's seed, hooks and flows
+// still write to that real store during the run.
 //
 // ## One reading of "is this datasource managed"
 //

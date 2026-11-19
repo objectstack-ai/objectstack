@@ -86,7 +86,8 @@ don't exercise, silently breaks at runtime." Point this at *your* app.
 > stays in memory. A managed datasource whose engine has no faithful in-memory
 > stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
 > and every derived write family leaves its objects out as `managed datasource
-> "<name>" (driver "<driver>"): not exercised`. Only the `--flow` run refuses
+> "<name>" (driver "<driver>"): not exercised`; the app's own seed, hooks and
+> flows still write to that real database during the run. Only the `--flow` run refuses
 > every write routed away from the in-memory default database.
 
 ## CLI (zero-config)
