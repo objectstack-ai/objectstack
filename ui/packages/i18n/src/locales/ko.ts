@@ -598,6 +598,7 @@ const ko = {
       countEmpty: "빈 값",
       countFilled: "채워짐",
       countUnique: "고유",
+      countLead: "개수 {{value}}",
       percentEmpty: "빈 값",
       percentFilled: "채워짐",
       sum: "합계",

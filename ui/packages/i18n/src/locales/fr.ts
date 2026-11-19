@@ -608,6 +608,7 @@ const fr = {
       countEmpty: "Vides",
       countFilled: "Remplis",
       countUnique: "Uniques",
+      countLead: "Nombre {{value}}",
       percentEmpty: "Vides",
       percentFilled: "Remplis",
       sum: "Somme",

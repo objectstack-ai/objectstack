@@ -1363,6 +1363,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     borderless = false,
     disableInnerScroll = false,
     rowGroups,
+    summaryRow,
     isRowEditable,
     // Read ONLY to diagnose it. `data-table` does not resolve `bind` and the
     // objectui#6575 ruling is explicit that it must not start — see
@@ -3594,7 +3595,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         )}
                         {/* The full label on hover wherever the cell is too narrow
                             for it and the ellipsis cuts it (objectstack#29945). */}
-                        <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
+                        <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
                         {fieldAuthoring?.columnMarks?.[col.accessorKey]}
                         {isColumnSortable(col) && getSortIcon(col.accessorKey)}
                         {editColumnEnabled && (
@@ -3648,7 +3649,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                   </TableHead>
                 );
               })}
-              {/* The label sits in the same `text-xs` muted span every data
+              {/* The label sits in the same 13px muted span every data
                   column's header label uses (objectui#11816): a bare string
                   here took the cell's larger default type. */}
               {rowActions && (rowActionsColumnIsEditOnly ? (
@@ -3662,7 +3663,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                 </TableHead>
               ) : (
                 <TableHead className="w-24 text-right bg-background">
-                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
+                  <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
                 </TableHead>
               ))}
               {addColumnEnabled && (
@@ -4429,6 +4430,56 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               </>
             )}
           </TableBody>
+          {/* The summary row (objectstack#35548): the table's own last row,
+              held at the bottom of the scroll box, each figure in its
+              column's cell — so it lines up with its column at any width and
+              scrolls sideways with it; a frozen column's cell stays frozen. */}
+          {summaryRow && (
+            <tfoot className="sticky bottom-0 z-10 bg-background" data-testid="data-table-summary-row">
+              <TableRow className="border-t border-b-0 hover:bg-transparent">
+                {leadingCellCount > 0 && (
+                  <TableCell className={cn("w-10 h-8 py-0 bg-background", frozenColumns > 0 && "sticky left-0 z-20")} />
+                )}
+                {columns.map((col, colIndex) => {
+                  const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;
+                  const isPinnedRight = isPinnedRightColumn(col);
+                  const pinnedRightOffset = isPinnedRight ? measuredStickyRights?.[col.accessorKey] : undefined;
+                  const figure = summaryRow.cells[col.accessorKey];
+                  const lead = colIndex === 0 ? summaryRow.lead : undefined;
+                  return (
+                    <TableCell
+                      key={col.accessorKey}
+                      data-column-key={col.accessorKey}
+                      data-testid={figure != null ? `data-table-summary-${col.accessorKey}` : undefined}
+                      className={cn(
+                        "h-8 px-3 py-0 whitespace-nowrap text-[13px] font-medium text-muted-foreground tabular-nums bg-background",
+                        col.align === 'right' && 'text-right',
+                        col.align === 'center' && 'text-center',
+                        isFrozen && 'sticky z-20',
+                        isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
+                        isPinnedRight && 'sticky right-0 z-20',
+                      )}
+                      style={{
+                        ...(isFrozen && { left: measuredStickyLefts?.[leadingCellCount + colIndex] }),
+                        ...(pinnedRightOffset ? { right: pinnedRightOffset } : {}),
+                      }}
+                    >
+                      {lead != null && figure != null ? (
+                        <span className="flex items-center justify-between gap-3">
+                          <span data-testid="data-table-summary-lead">{lead}</span>
+                          <span>{figure}</span>
+                        </span>
+                      ) : lead != null ? (
+                        <span data-testid="data-table-summary-lead">{lead}</span>
+                      ) : figure}
+                    </TableCell>
+                  );
+                })}
+                {rowActions && <TableCell className="w-24 h-8 py-0 bg-background" />}
+                {addColumnEnabled && <TableCell aria-hidden className="w-10 h-8 py-0" />}
+              </TableRow>
+            </tfoot>
+          )}
         </Table>
       </div>
       {rightShadow && (

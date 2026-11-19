@@ -613,6 +613,7 @@ const es = {
       countEmpty: "Vacíos",
       countFilled: "Rellenos",
       countUnique: "Únicos",
+      countLead: "Recuento {{value}}",
       percentEmpty: "Vacíos",
       percentFilled: "Rellenos",
       sum: "Suma",

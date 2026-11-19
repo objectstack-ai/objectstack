@@ -644,6 +644,7 @@ const ar = {
       countEmpty: "فارغة",
       countFilled: "ممتلئة",
       countUnique: "فريدة",
+      countLead: "العدد {{value}}",
       percentEmpty: "فارغة",
       percentFilled: "ممتلئة",
       sum: "المجموع",

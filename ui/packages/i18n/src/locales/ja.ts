@@ -598,6 +598,7 @@ const ja = {
       countEmpty: "空欄",
       countFilled: "入力済み",
       countUnique: "一意",
+      countLead: "件数 {{value}}",
       percentEmpty: "空欄",
       percentFilled: "入力済み",
       sum: "合計",

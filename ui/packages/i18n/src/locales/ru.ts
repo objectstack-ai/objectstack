@@ -621,6 +621,7 @@ const ru = {
       countEmpty: "Пустые",
       countFilled: "Заполненные",
       countUnique: "Уникальные",
+      countLead: "Количество {{value}}",
       percentEmpty: "Пустые",
       percentFilled: "Заполненные",
       sum: "Сумма",

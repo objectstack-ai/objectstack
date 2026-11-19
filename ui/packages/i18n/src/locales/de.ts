@@ -598,6 +598,7 @@ const de = {
       countEmpty: "Leer",
       countFilled: "Ausgefüllt",
       countUnique: "Eindeutig",
+      countLead: "Anzahl {{value}}",
       percentEmpty: "Leer",
       percentFilled: "Ausgefüllt",
       sum: "Summe",

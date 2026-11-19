@@ -550,6 +550,13 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  * review floor") governs nothing now. It was asking for the ruling to be taken
  * deliberately at that package's floor, and that is exactly how `bf97b98c8` took it.
  */
+/**
+ * The grid table's frame (objectstack#35548): every header cell 32px tall at
+ * 13px, and the row lines a shade off the background rather than a rule.
+ */
+export const OBJECT_GRID_TABLE_DENSITY =
+  '[&_thead_th]:h-8 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50';
+
 type RemoveIndexSignature<T> = {
   [K in keyof T as string extends K ? never : number extends K ? never : K]: T[K];
 };
@@ -1778,9 +1785,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
   // `h-*` enforces a minimum row height so the action-button column doesn't dictate it.
+  // objectstack#35548 — the default (`compact`) row is 33px: a 32px cell and
+  // the row's 1px line.
   const rowHeightCellClass =
     rowHeightMode === 'compact'
-      ? 'px-3 py-1 h-9 text-[13px] leading-tight'
+      ? 'px-3 py-1 h-8 text-[13px] leading-tight'
       : rowHeightMode === 'short'
         ? 'px-3 py-1 h-9 text-[13px] leading-normal'
         : rowHeightMode === 'tall'
@@ -2783,6 +2792,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
   };
 
+  // objectstack#35548 — the column summaries as the table's own last row, each
+  // under its column, led by the count of the records they summarise. A host
+  // that draws them itself (`onColumnSummaryChange`) gets no row here.
+  const summaryRow: ObjectGridDataTableSchema['summaryRow'] = hasSummary && !onColumnSummaryChange
+    ? {
+        lead: t('grid.summary.countLead', {
+          value: (typeof resolvedTotalMatching === 'number' ? resolvedTotalMatching : data.length).toLocaleString(displayLocale),
+        }),
+        cells: Object.fromEntries(Array.from(summaries, ([key, summary]) => [key, summary.label])),
+      }
+    : undefined;
   const dataTableSchema: ObjectGridDataTableSchema = {
     type: 'data-table',
     // The deprecated `title` fallback resolves like `label` (objectui#10993):
@@ -2792,6 +2812,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       || resolveInlineI18nLabel(schema.title, displayLocale),
     columns: tableColumns,
     data,
+    summaryRow,
     pagination: paginationEnabled,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
     // Rows-per-page selector options sourced from view metadata
@@ -2935,7 +2956,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
     // The save bar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).
-    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', schema.className].filter(Boolean).join(' '),
+    // objectstack#35548 — a 32px header at 13px over faint row lines.
+    className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', OBJECT_GRID_TABLE_DENSITY, schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
       ? 'px-3 py-1 text-[13px] leading-tight'
       : rowHeightMode === 'short'
@@ -3065,6 +3087,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     caption: undefined,
     data: rowGroups.flatMap((group) => group.rows),
     rowGroups,
+    // A grouped grid draws no summary row (its summaries are withheld).
+    summaryRow: undefined,
     // Pages are the grid's: whole groups (`groupedPager`), and on a
     // server-grouped grid each open group's own rows (its band footer).
     pagination: false,
@@ -3670,6 +3694,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `FooterSummaryReport` mounted where the row would be, what it would have
   // drawn. Mounted in the same place, so whatever withholds the row (a
   // grouped grid, the card view, a loading or error face) reports `null`.
+  // Without such a host the table draws them (`summaryRow`, objectstack#35548).
   const summaryColumnsShown: Array<{ accessorKey: string; header?: React.ReactNode }> = hasSummary
     ? orderedColumns.filter((col: { accessorKey: string }) => summaries.has(col.accessorKey))
     : [];
@@ -3682,19 +3707,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       }))}
       onChange={onColumnSummaryChange}
     />
-  ) : hasSummary ? (
-    <div className="border-t bg-muted/30 px-2 py-1.5" data-testid="column-summary-footer">
-      <div className="flex gap-4 text-xs text-muted-foreground font-medium">
-        {summaryColumnsShown.map((col) => {
-          const summary = summaries.get(col.accessorKey)!;
-          return (
-            <span key={col.accessorKey} data-testid={`summary-${col.accessorKey}`}>
-              {col.header}: {summary.label}
-            </span>
-          );
-        })}
-      </div>
-    </div>
   ) : null;
 
   // Render grid content: grouped (recursive nested headers + leaf table) or

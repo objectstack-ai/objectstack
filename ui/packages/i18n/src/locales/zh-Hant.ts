@@ -578,6 +578,7 @@ const zhHant = {
       countEmpty: '空值',
       countFilled: '非空',
       countUnique: '去重',
+      countLead: '計數 {{value}}',
       percentEmpty: '空值',
       percentFilled: '非空',
       sum: '合計',

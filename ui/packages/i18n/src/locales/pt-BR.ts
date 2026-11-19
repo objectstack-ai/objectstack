@@ -608,6 +608,7 @@ const pt = {
       countEmpty: "Vazios",
       countFilled: "Preenchidos",
       countUnique: "Únicos",
+      countLead: "Contagem {{value}}",
       percentEmpty: "Vazios",
       percentFilled: "Preenchidos",
       sum: "Soma",

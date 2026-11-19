@@ -844,6 +844,7 @@ const en = {
       countEmpty: 'Empty',
       countFilled: 'Filled',
       countUnique: 'Unique',
+      countLead: 'Count {{value}}',
       percentEmpty: 'Empty',
       percentFilled: 'Filled',
       sum: 'Sum',
