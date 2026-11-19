@@ -4408,6 +4408,7 @@ const ar = {
     composer: {
       queued: "سيُرسل عند انتهاء الرد الحالي",
       queuedCancel: "إلغاء",
+      fileTooLarge: "الملف أكبر من أن يُرفق (الحد {{limit}}): {{files}}",
     },
     answer: {
       showFull: 'عرض الإجابة كاملة',

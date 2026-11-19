@@ -4146,6 +4146,7 @@ const fr = {
     composer: {
       queued: "Sera envoyé à la fin de la réponse en cours",
       queuedCancel: "Annuler",
+      fileTooLarge: "Trop volumineux pour être joint (limite {{limit}}) : {{files}}",
     },
     answer: {
       showFull: 'Afficher toute la réponse',
