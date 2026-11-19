@@ -50,6 +50,10 @@
  * `CONTEXT_SUBJECTS`. An over-narrowing reddens here rather than shipping.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -94,7 +98,9 @@ async function defaultSubjects(): Promise<string[]> {
     />,
   );
   await userEvent.click(container.querySelectorAll('[role="combobox"]')[0] as HTMLElement);
-  return (await screen.findAllByRole('option')).map((o) => o.textContent ?? '');
+  // A field subject reads by its label, its spelling the `.font-mono` hint
+  // (objectstack#34122); read the spelling, which is what the engine judges.
+  return (await screen.findAllByRole('option')).map((o) => (o.querySelector('.font-mono') ?? o).textContent ?? '');
 }
 
 /** The CONTEXT half of the default vocabulary — what is not a catalog field. */
