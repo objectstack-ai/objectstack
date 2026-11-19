@@ -9389,7 +9389,9 @@ export function seatPostLastEventMs(seat, commentRows) {
  *   TWO spellings reach it: a line-initial key naming no `#<n>`, and a
  *   declaration the key line cannot see at all (mid-sentence, inside a code
  *   span, inside a subscript tag, behind a `> - ` prefix).
- * · Otherwise the number the line names.
+ * · Otherwise the number the line names: the FIRST `#<n>` of the payload, so a
+ *   trailing note (`… (#35205)`) never moves it — except the epic shape
+ *   `epic:#<N>#<k>`, whose first `#<N>` is the epic and whose seat is `k`.
  *
  * ⚠️ The second spelling of the second answer is the repair, and the cost it
  * removes is measured: a wrong answer that is a REAL seat does not surface as
@@ -9422,7 +9424,11 @@ export function claimSeatNumber(body) {
   const text = String(body ?? '');
   const m = CLAIM_SEAT_KEY_LINE.exec(text);
   if (!m) return CLAIM_SEAT_DECLARATION_ANYWHERE.test(text) ? null : 1;
-  const n = /#(\d+)\b/.exec(String(m[1] ?? ''));
+  const payload = String(m[1] ?? '');
+  // An epic seat names its epic first: `epic:#<N>#<k>` is seat k, never seat N.
+  const epic = /^`?epic:#[1-9][0-9]*#(\d+)\b/.exec(payload);
+  if (epic) return Number(epic[1]);
+  const n = /#(\d+)\b/.exec(payload);
   return n ? Number(n[1]) : null;
 }
 
@@ -33054,6 +33060,11 @@ async function selfTest() {
   t('H38 seat: a mid-line `repo:` declaration is unreadable, ⛔ not seat 1', claimSeatNumber('**Claim:** by the seat. `Seat: repo:objectstack#3` · claimed'), null);
   t('H38 seat: …and so is a mid-line `epic:` declaration', claimSeatNumber('**Claim:** by the seat. `Seat: epic:#31527#1` · claimed'), null);
   t('H38 seat: a line-initial `Seat: repo:objectstack#3` reads 3', claimSeatNumber('Claim: x\nSeat: repo:objectstack#3'), 3);
+  // The epic shape names its epic before its seat: `epic:#<N>#<k>` is seat k. Every other spelling keeps the FIRST `#<n>`.
+  t('H38 seat: a line-initial `Seat: epic:#31527#1` reads 1, ⛔ not the epic number', claimSeatNumber('Claim: x\nSeat: epic:#31527#1'), 1);
+  t('H38 seat: …backticked, `epic:#31527#2` reads 2', claimSeatNumber('Claim: x\nSeat: `epic:#31527#2`'), 2);
+  t('H38 seat: …and a trailing note does not move the epic seat', claimSeatNumber('Claim: x\nSeat: epic:#31527#1 (filed under #35205)'), 1);
+  t('H38 seat: a repo seat keeps its FIRST `#<n>` — a trailing note does not move it', claimSeatNumber('Claim: x\nSeat: repo:objectstack#3 (filed under #35205)'), 3);
   t('H38 seat: prose naming a repo seat is still not a declaration, so seat 1', claimSeatNumber('the seat: repo:objectstack#2 is busy'), 1);
   t('H38 seat: a lane token with no `Seat:` key is not a declaration, so the absent default holds', claimSeatNumber('Claim: x\nre-graded for `domain:spec#3` work'), 1);
   t('H38 seat: a body with no declaration at all is still seat 1 — every pre-line claim keeps its default', claimSeatNumber('Claim: x\nSession: `session_y`\nWorktree: `objectstack-issue-1`'), 1);
