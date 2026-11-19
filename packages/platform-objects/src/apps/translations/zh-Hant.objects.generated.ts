@@ -72,6 +72,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "須修改密碼",
         help: "開啟後，使用者必須先修改密碼才能繼續使用。管理員建立帳號、匯入使用者或重設密碼時會自動開啟；系統維護。"
       },
+      dev_seed_credential: {
+        label: "開發種子憑證",
+        help: "開發種子建立的帳號會帶上此標記。只要其密碼仍是種子密碼，正式環境伺服器就拒絕其登入及任何新工作階段；使用 os user set-password 設定新密碼後會清除。系統維護；讀取時從不傳回。"
+      },
       mfa_required_at: {
         label: "MFA 強制生效時間",
         help: "強制 MFA 首次對該使用者生效的時間（寬限期計時起點）。支撐 mfa_required；系統維護。"

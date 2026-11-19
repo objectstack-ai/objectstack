@@ -102,6 +102,9 @@
       },
       "storage": {
         "description": "Inspect stored files: report orphaned attachments"
+      },
+      "user": {
+        "description": "Maintain user accounts on the server: set a password"
       }
     }
   },
