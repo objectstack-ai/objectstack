@@ -85,7 +85,9 @@
       "Bash(node --use-env-proxy scripts/pm/issue-transfer.mjs *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/objectstack/issues/* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/hotcrm/issues/* *)",
-      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/mobile/issues/* *)"
+      "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/mobile/issues/* *)",
+      "Bash(git commit -F *)",
+      "Bash(git push -u origin claude/issue-* *)"
     ],
     "deny": [
       "mcp__github__issue_write",
