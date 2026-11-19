@@ -97,8 +97,11 @@ describe('sys_unit — declaration (ADR-0158 U3)', () => {
       await new PlatformObjectsPlugin().init(ctx as any);
       const owner = manifests.find((m) => (m.objects ?? []).some((o: any) => o.name === 'sys_unit'));
       expect(owner).toBeDefined();
+      // No manifest this plugin registers seeds a row of it.
+      for (const m of manifests) {
+        for (const entry of (m.data ?? []) as Array<{ object?: string }>) expect(entry.object, m.id).not.toBe('sys_unit');
+      }
       expect(owner.data ?? []).toEqual([]);
-      expect(JSON.stringify(manifests)).not.toMatch(/"object":"sys_unit"/);
     });
   });
 
@@ -197,17 +200,19 @@ describe('sys_unit — declaration (ADR-0158 U3)', () => {
   const violates = (name: string, record: Record<string, unknown>, previous: Record<string, unknown> | null): boolean | string => {
     const r = rule(name);
     const scope = previous === null ? { record, extra: { previous: null } } : { record, previous };
-    const out = celEngine.evaluate({ dialect: 'cel', source: r.condition }, scope as any);
+    // The built rule carries the lowered expression envelope; its CEL source is what the validator evaluates.
+    const source = typeof r.condition === 'string' ? r.condition : r.condition?.source;
+    if (typeof source !== 'string') throw new Error(`rule ${name} has no CEL source`);
+    const out = celEngine.evaluate({ dialect: 'cel', source }, scope as any);
     if (!out.ok) return `FAULT ${out.error.message.split('\n')[0].trim()}`;
     return out.value as boolean;
   };
   const ROW = { code: 'BOX_12', label: 'Box of 12', dimension: 'count', ratio: 12, decimal_places: 0, retired: false };
 
   describe('code and dimension are immutable after create (L1)', () => {
-    it('are update-only script rules', () => {
-      for (const name of ['unit_code_immutable', 'unit_dimension_immutable']) {
-        expect(rule(name)).toMatchObject({ type: 'script', events: ['update'], severity: 'error' });
-      }
+    it('are update-only rules attached to the field they guard', () => {
+      expect(rule('unit_code_immutable')).toMatchObject({ type: 'cross_field', events: ['update'], fields: ['code'], severity: 'error' });
+      expect(rule('unit_dimension_immutable')).toMatchObject({ type: 'cross_field', events: ['update'], fields: ['dimension'], severity: 'error' });
     });
 
     it('refuse an update that changes the code or the dimension', () => {
@@ -238,12 +243,16 @@ describe('sys_unit — declaration (ADR-0158 U3)', () => {
     it('attach the refusal to the ratio field, on insert and update', () => {
       for (const name of ['unit_ratio_required', 'unit_package_has_no_ratio']) {
         expect(rule(name)).toMatchObject({ type: 'cross_field', fields: ['ratio'], severity: 'error' });
-        expect(rule(name).events).toBeUndefined();
+        expect(rule(name).events ?? ['insert', 'update']).toEqual(['insert', 'update']);
       }
     });
   });
 
   describe('a retired unit stays retired (Open item 11)', () => {
+    it('is an update-only rule attached to retired', () => {
+      expect(rule('unit_retired_one_way')).toMatchObject({ type: 'cross_field', events: ['update'], fields: ['retired'], severity: 'error' });
+    });
+
     it('refuses bringing a retired unit back, whichever way the flag is cleared', () => {
       const retired = { ...ROW, retired: true };
       expect(violates('unit_retired_one_way', { ...ROW, retired: false }, retired)).toBe(true);

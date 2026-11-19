@@ -92,6 +92,22 @@ async function refusal(run: () => Promise<unknown>): Promise<{ status: number; c
   return { status: wire.status, code: String(wire.body.code) };
 }
 
+/** A validation refusal: the wire envelope, and which field failed which constraint (the rule that fired). */
+async function invalid(run: () => Promise<unknown>): Promise<{ status: number; code: string; fields: string[] }> {
+  let thrown: unknown;
+  try {
+    await run();
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown, `the ${OBJ} write was refused`).toBeDefined();
+  const wire = mapDataError(thrown, OBJ);
+  const fields = ((wire.body as { fields?: Array<{ field: string; code: string }> }).fields ?? []).map((f) => `${f.field}:${f.code}`);
+  return { status: wire.status, code: String(wire.body.code), fields };
+}
+
+const FAILED = (...fields: string[]) => ({ status: 400, code: 'VALIDATION_FAILED', fields });
+
 describe('sys_unit on a real stack: member read, administrator write, and the rules a write meets', () => {
   let kernel: ObjectKernel;
   let ql: ObjectQL;
@@ -186,37 +202,35 @@ describe('sys_unit on a real stack: member read, administrator write, and the ru
         const id = String((await insert(as[key], { code, label: 'Box', dimension: 'count', ratio: 12 })).id);
         await update(as[key], id, { label: 'Box of 12' });
         await update(as[key], id, { ratio: 10 });
-        expect(await storedById(id)).toMatchObject({ code, label: 'Box of 12', dimension: 'count', ratio: 10, retired: false });
+        // Stamped with the writer's organization: the row is the organization's (U3).
+        expect(await storedById(id)).toMatchObject({ code, label: 'Box of 12', dimension: 'count', ratio: 10, retired: false, organization_id: ORG });
       });
     });
   }
 
   describe('the rules a write meets', () => {
     for (const code of ['KGM', 'H87', 'C62', 'EA', 'box_12']) {
-      it(`refuses the code ${code} outside the organization namespace: 400 VALIDATION_ERROR, nothing stored`, async () => {
-        expect(await refusal(() => insert(as.carol, { code, label: 'Taken', dimension: 'count', ratio: 1 }))).toEqual({
-          status: 400,
-          code: 'VALIDATION_ERROR',
-        });
+      it(`refuses the code ${code} outside the organization namespace: 400 VALIDATION_FAILED on code, nothing stored`, async () => {
+        expect(await invalid(() => insert(as.carol, { code, label: 'Taken', dimension: 'count', ratio: 1 }))).toEqual(
+          FAILED('code:invalid_format'),
+        );
         expect(await stored({ code })).toEqual([]);
       });
     }
 
-    it('refuses changing a code or a dimension: 400 VALIDATION_ERROR, the row unchanged', async () => {
-      expect(await refusal(() => update(as.carol, seeded, { code: 'JIN2' }))).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
-      expect(await refusal(() => update(as.carol, seeded, { dimension: 'volume' }))).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+    it('refuses changing a code or a dimension: 400 VALIDATION_FAILED on that field, the row unchanged', async () => {
+      expect(await invalid(() => update(as.carol, seeded, { code: 'JIN2' }))).toEqual(FAILED('code:rule_violation'));
+      expect(await invalid(() => update(as.carol, seeded, { dimension: 'volume' }))).toEqual(FAILED('dimension:rule_violation'));
       expect(await storedById(seeded)).toMatchObject({ code: 'JIN1', dimension: 'mass' });
     });
 
-    it('refuses a ratio dimension with no ratio and a package unit with one: 400 VALIDATION_ERROR', async () => {
-      expect(await refusal(() => insert(as.carol, { code: 'NO_RATIO', label: 'x', dimension: 'length' }))).toEqual({
-        status: 400,
-        code: 'VALIDATION_ERROR',
-      });
-      expect(await refusal(() => insert(as.carol, { code: 'CRATE_X', label: 'x', dimension: 'package', ratio: 4 }))).toEqual({
-        status: 400,
-        code: 'VALIDATION_ERROR',
-      });
+    it('refuses a ratio dimension with no ratio and a package unit with one: 400 VALIDATION_FAILED on ratio', async () => {
+      expect(await invalid(() => insert(as.carol, { code: 'NO_RATIO', label: 'x', dimension: 'length' }))).toEqual(
+        FAILED('ratio:rule_violation'),
+      );
+      expect(await invalid(() => insert(as.carol, { code: 'CRATE_X', label: 'x', dimension: 'package', ratio: 4 }))).toEqual(
+        FAILED('ratio:rule_violation'),
+      );
       expect(await stored({ code: 'NO_RATIO' })).toEqual([]);
       expect(await stored({ code: 'CRATE_X' })).toEqual([]);
       const pallet = String((await insert(as.carol, { code: 'PALLET_EU', label: 'Euro pallet', dimension: 'package' })).id);
@@ -230,13 +244,13 @@ describe('sys_unit on a real stack: member read, administrator write, and the ru
       await update(as.carol, id, { retired: true });
       expect((await storedById(id))?.retired).toBe(true);
 
-      expect(await refusal(() => update(as.carol, id, { retired: false }))).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+      expect(await invalid(() => update(as.carol, id, { retired: false }))).toEqual(FAILED('retired:rule_violation'));
       expect((await storedById(id))?.retired).toBe(true);
 
       // The same code with another dimension, ratio and label: the hazard
       // ADR-0158 Open item 11 names. The retired row holds the key.
       const again = await refusal(() => insert(as.carol, { code: 'SACK_50', label: 'Sack (new)', dimension: 'volume', ratio: 0.05 }));
-      expect(again.status).toBe(409);
+      expect(again).toEqual({ status: 409, code: 'UNIQUE_VIOLATION' });
       expect(await stored({ code: 'SACK_50' })).toHaveLength(1);
       expect((await storedById(id))).toMatchObject({ label: 'Sack', dimension: 'mass', ratio: 50, retired: true });
     });

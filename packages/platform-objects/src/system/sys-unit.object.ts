@@ -209,20 +209,23 @@ export const SysUnit = ObjectSchema.create({
         'Shorter codes are reserved for the standard units.',
     },
     {
-      // L1: a unit's code is immutable after create.
-      type: 'script',
+      // L1: a unit's code is immutable after create. `cross_field` so the
+      // refusal is attached to the field it is about.
+      type: 'cross_field',
       name: 'unit_code_immutable',
       events: ['update'],
       condition: 'previous != null && record.code != previous.code',
+      fields: ['code'],
       severity: 'error',
       message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead.",
     },
     {
       // L1: a unit's dimension is immutable after create.
-      type: 'script',
+      type: 'cross_field',
       name: 'unit_dimension_immutable',
       events: ['update'],
       condition: 'previous != null && record.dimension != previous.dimension',
+      fields: ['dimension'],
       severity: 'error',
       message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead.",
     },
@@ -246,10 +249,11 @@ export const SysUnit = ObjectSchema.create({
     },
     {
       // Open item 11: retiring is one-way, like the delete it stands for.
-      type: 'script',
+      type: 'cross_field',
       name: 'unit_retired_one_way',
       events: ['update'],
       condition: 'previous != null && previous.retired == true && record.retired != true',
+      fields: ['retired'],
       severity: 'error',
       message: 'A retired unit cannot be brought back. Create a unit with a new code instead.',
     },
