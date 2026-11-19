@@ -1458,7 +1458,7 @@ export class MisplacedDefaultPageError extends Error {
 }
 
 /**
- * Every package-held position and permission-set name the environment catalog
+ * Every package-held position, permission-set and capability name the environment catalog
  * also holds, read off `registry` — the conflicts the engine plugin's cold-boot
  * check refuses the boot with (`ObjectQLPlugin`, right after `sys_metadata`
  * hydration; the reading itself is the registry's private
@@ -1473,7 +1473,7 @@ export function findEnvironmentHeldSecurityCatalogNames(registry: SchemaRegistry
 }
 
 /**
- * Every position and permission-set name a package holds, with the packages
+ * Every position, permission-set and capability name a package holds, with the packages
  * that hold it, read off `registry` — the PACKAGE half of the reading the
  * cold-boot check refuses with ({@link findEnvironmentHeldSecurityCatalogNames}
  * is this list met with the environment catalog's bare slot, and nothing else).

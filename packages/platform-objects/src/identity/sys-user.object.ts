@@ -73,6 +73,16 @@ const SERVICE_ACCOUNT_ADMIN_VISIBLE = [
 const MANAGED_ADD_PERSON_VISIBLE =
   'current_user.isPlatformAdmin == true && has(features.cloudManaged) && features.cloudManaged == true';
 
+/**
+ * Who is offered `remove_sso_user`, and on which row: the same standing and
+ * managed flag as Add / Import, then a row that is still pending
+ * (`source == 'idp_pending'`), the one row its door removes. Any other row is
+ * answered `409` there (a person who has signed in is deactivated instead).
+ * `has()` keeps it hidden on a row the console did not project `source` for.
+ */
+const MANAGED_REMOVE_PENDING_PERSON_VISIBLE =
+  `${MANAGED_ADD_PERSON_VISIBLE} && has(record.source) && record.source == 'idp_pending'`;
+
 const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
@@ -582,6 +592,30 @@ export const SysUser = ObjectSchema.create({
           },
         ],
       },
+    },
+    // The undo of the two above: take a pending person back out, which also
+    // cancels their invitation. The door is plugin-auth's
+    // `admin/remove-sso-user` (`{ userId }`), platform-admin gated, answering
+    // only on a managed environment and only for a row that is still pending;
+    // it asks the hosting organisation first and removes no one when that
+    // organisation cannot be reached or refuses. No params, so the question
+    // rides `confirmText`. No `ai` block, as for its siblings.
+    {
+      name: 'remove_sso_user',
+      label: 'Remove Pending User',
+      icon: 'user-minus',
+      variant: 'danger',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/admin/remove-sso-user',
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: MANAGED_REMOVE_PENDING_PERSON_VISIBLE,
+      recordIdParam: 'userId',
+      confirmText:
+        'Remove this person, who has not signed in yet, and cancel their invitation? '
+        + 'If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.',
+      successMessage: 'Pending user removed',
+      refreshAfter: true,
     },
     {
       name: 'set_user_password',

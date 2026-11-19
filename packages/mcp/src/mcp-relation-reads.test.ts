@@ -128,11 +128,14 @@ describe('query_records expand — the tool', () => {
     expect(reads(calls)[0]).toMatchObject({ object: OPP, opts: { expand: ['account', 'owner_id'] } });
   });
 
-  it('control: a call without expand hands the bridge no expand key and reads no definition', async () => {
+  it('control: a call without expand hands the bridge no expand key and judges no target definition', async () => {
     const { bridge, calls } = makeBridge();
     await call(bridge, 'query_records', { objectName: OPP });
     expect('expand' in reads(calls)[0].opts).toBe(false);
-    expect(calls.some((c) => c.op === 'definition')).toBe(false);
+    // [#35138] The one definition read is the queried object's, after the
+    // read, for the labels its source line names fields by.
+    expect(calls.filter((c) => c.op === 'definition')).toEqual([{ op: 'definition', object: OPP }]);
+    expect(calls.findIndex((c) => c.op === 'definition')).toBeGreaterThan(calls.findIndex((c) => c === reads(calls)[0]));
   });
 
   it('⭐ a field whose target the read guard refuses refuses the whole call: PERMISSION_DENIED, nothing read', async () => {

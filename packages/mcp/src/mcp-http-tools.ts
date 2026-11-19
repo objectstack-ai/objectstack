@@ -58,6 +58,8 @@ import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // The repo's ONE not-found envelope, which the HTTP bridge's `get` throws:
 // `get_record` refuses a null read with it, so both doors answer one 404.
 import { pickSentenceLocale, recordNotFoundError } from '@objectstack/core';
+import type { ObjectQuerySource } from '@objectstack/spec/ai';
+import { composeObjectQuerySource, servedLabelsOf, type ExecutedObjectRead } from './object-query-source.js';
 import { SystemFieldName } from '@objectstack/spec/system';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
@@ -843,26 +845,15 @@ function errorResult(message: string) {
 }
 
 /**
- * [#35138] The fields of `objectName` as this caller is served them
- * ({@link McpDataBridge.servedObjectDefinitionOf}): the map
- * `aggregate_records` reads a group key's declared options and an amount's
- * fixed currency from. A field the caller's view removed is not in it, so
- * nothing read from it names a field the caller cannot see.
- *
- * `undefined` when the bridge cannot say — no member, no object, or a throw —
- * and the tool then renders exactly what it rendered before. ⛔ This read
- * never fails the aggregate it annotates.
- */
-async function servedFieldsOf(
-  bridge: McpDataBridge,
-  objectName: string,
-): Promise<Record<string, unknown> | undefined> {
-  return fieldMapOf(await servedDefinitionOf(bridge, objectName));
-}
-
-/**
- * The object `objectName` as this caller is served it, or `undefined` when the
- * bridge cannot say (no member, no object, or a throw).
+ * [#35138] The object `objectName` as this caller is served it
+ * ({@link McpDataBridge.servedObjectDefinitionOf}), or `undefined` when the
+ * bridge cannot say (no member, no object, or a throw). `aggregate_records`
+ * reads a group key's declared options and an amount's fixed currency off its
+ * field map ({@link fieldMapOf}), and the read tools' `source` line the labels
+ * it names fields by. A field the caller's view removed is not in it, so
+ * nothing read from it names a field the caller cannot see. ⛔ This read never
+ * fails the answer it annotates: without it the tool renders what it rendered
+ * before, and the line names the caller's own names.
  */
 async function servedDefinitionOf(
   bridge: McpDataBridge,
@@ -1693,12 +1684,7 @@ async function notRecordedMembersOf(
     if (absent.length === 0) return undefined;
     notRecorded = { object: objectName, fields: absent };
   }
-  let locales: readonly string[] = [];
-  try {
-    locales = (await bridge.userTextLocales?.()) ?? [];
-  } catch {
-    locales = [];
-  }
+  const locales = await sentenceLocalesOf(bridge);
   return { notRecorded, ifNotRecorded: NOT_RECORDED_SENTENCE[pickSentenceLocale(locales, NOT_RECORDED_LOCALES)] };
 }
 
@@ -2529,6 +2515,84 @@ const WITHHELD_FIELDS_NOTE =
 const WITHHELD_FIELDS_DESCRIPTION =
   'A field that field-level security hides from you is left out of the records and named in withheldFields: '
   + 'it exists but is not visible to you, which is not the same as empty.';
+
+/**
+ * [#35138] What the object read tools tell the model about the `source`
+ * block beside a successful answer ({@link composeObjectQuerySource}): it is
+ * how the figures were computed, and `source.line` is that source already
+ * written in the caller's language, to quote as the answer's source.
+ */
+const OBJECT_QUERY_SOURCE_DESCRIPTION =
+  'A successful answer carries source: the object, filter, measures and grouping it was computed from, and '
+  + 'source.line, that source already written in the user\'s language: quote source.line as the source of '
+  + 'any figure you give from this answer.';
+
+/**
+ * [#35138] The caller's locale ladder for a sentence the tools compose into a
+ * result ({@link McpDataBridge.userTextLocales}): `[]`, which the shared
+ * picker writes in `en`, when the bridge has no member or its answer throws.
+ */
+async function sentenceLocalesOf(bridge: McpDataBridge): Promise<readonly string[]> {
+  try {
+    return (await bridge.userTextLocales?.()) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * [#35138] The `source` block for a read the tool executed, composed from
+ * that read, the caller's served definition (labels only) and the caller's
+ * locale ladder; `undefined` when the composer cannot state it
+ * ({@link composeObjectQuerySource}). ⛔ Its reads never fail the answer it
+ * annotates: a definition or ladder the bridge cannot give leaves machine
+ * names and `en`.
+ */
+async function objectQuerySourceOf(
+  bridge: McpDataBridge,
+  read: ExecutedObjectRead,
+  served: Record<string, unknown> | undefined,
+): Promise<ObjectQuerySource | undefined> {
+  return composeObjectQuerySource(read, servedLabelsOf(served), await sentenceLocalesOf(bridge));
+}
+
+/**
+ * [#35138] `value` with its `source` block as a top-level key, as the
+ * schema places it. Anything that is not a plain object is served as it
+ * came, the {@link withDelegationNotice} posture: no wrapper is invented to
+ * carry a block about a shape this tool cannot read.
+ */
+function withObjectQuerySource(value: unknown, source: ObjectQuerySource | undefined): unknown {
+  if (source === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  return { ...(value as Record<string, unknown>), source };
+}
+
+/** A page answer's counted `total`, the records a page read covers; `undefined` when the door counted none. */
+function countedTotalOf(answer: unknown): number | undefined {
+  if (answer === null || typeof answer !== 'object' || Array.isArray(answer)) return undefined;
+  const total = (answer as { total?: unknown }).total;
+  return typeof total === 'number' && Number.isInteger(total) && total >= 0 ? total : undefined;
+}
+
+/**
+ * The records an uncut aggregate covers: its bare `count` (no field, no
+ * filter) summed over every group, or `undefined` when the call asked none or
+ * a group's value is not a count. Never guessed.
+ */
+function aggregateRecordsOf(
+  rows: readonly unknown[],
+  aggregations: ReadonlyArray<{ function: string; field?: string; alias: string; filter?: unknown }>,
+): number | undefined {
+  const bare = aggregations.find((a) => a.function === 'count' && (a.field === undefined || a.field === '') && a.filter === undefined);
+  if (bare === undefined) return undefined;
+  let sum = 0;
+  for (const row of rows) {
+    const value = row !== null && typeof row === 'object' ? (row as Record<string, unknown>)[bare.alias] : undefined;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return undefined;
+    sum += value;
+  }
+  return sum;
+}
 
 /**
  * [#35137] Which fields `query_records` / `get_record` name as withheld: of
@@ -3681,6 +3745,8 @@ export function registerObjectTools(
           'The answer is one page of at most limit rows. When more records match, it carries "truncated": true: ' +
           'the rows are not all of them, so do not sum, count or rank them as if whole; read on with offset, ' +
           'or, where it is offered, use aggregate_records for totals and breakdowns. ' +
+          // [#35138] The answer's source, written for the answer to quote.
+          OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
           'A filter value "{current_user_id}" stands for you. ' +
           // [#32442] The console's My Pending list, filter for filter: the
           // participant read alone also serves requests the caller submitted
@@ -3820,7 +3886,19 @@ export function registerObjectTools(
             : undefined;
           // [#35137] …and the fields field-level security withheld from these
           // rows named beside them, so a left-out field is not read as blank.
-          const answer = withWithheldFields(result, await withheldFieldsFor(bridge, objectName, fields));
+          const withheld = withWithheldFields(result, await withheldFieldsFor(bridge, objectName, fields));
+          // [#35138] …and the source of the page, composed from the read
+          // that ran: object, filter, order, cut, expanded lookups, the
+          // one-per-group reading, and the door's counted total.
+          const answer = withObjectQuerySource(withheld, await objectQuerySourceOf(bridge, {
+            object: objectName,
+            where,
+            orderBy,
+            limit: page,
+            ...(expanded !== undefined ? { related: expanded } : {}),
+            ...(latestPer !== undefined ? { latestPer: { by: latestPer.by, orderBy: latestPer.orderBy } } : {}),
+            records: countedTotalOf(result),
+          }, await servedDefinitionOf(bridge, objectName)));
           if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(answer);
           return textResult(withDelegationNotice(answer, diagnosed.statement));
         } catch (err) {
@@ -3847,6 +3925,8 @@ export function registerObjectTools(
             'read with the caller\'s own permissions. Name such a group by its __label, never by the id; ' +
             'where a group has no __label, its record cannot be named, so say that rather than quoting the id. ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
+            // [#35138] The figures' source, written for the answer to quote.
+            OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
             // cut, and the number of groups before the cut stated.
@@ -3950,10 +4030,26 @@ export function registerObjectTools(
             // declared option order of a select group key, and the one
             // currency of a fixed-currency amount. Only when the call has a
             // group key or an amount column to read it for.
-            const readServedFields = () => (groupBy?.length ?? 0) > 0
-              || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string')
-              ? servedFieldsOf(bridge, objectName)
-              : Promise.resolve(undefined);
+            // [#35138] The definition itself is read on every call, for the
+            // labels the `source` line names fields by; the facts above are
+            // still read off it only for a call with a key or an amount.
+            const readsFacts = (groupBy?.length ?? 0) > 0
+              || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string');
+            let servedDef: Record<string, unknown> | undefined;
+            const readServedFields = async () => {
+              servedDef = await servedDefinitionOf(bridge, objectName);
+              return readsFacts ? fieldMapOf(servedDef) : undefined;
+            };
+            // [#35138] The source of the figures, composed from the aggregate
+            // that ran: object, filter, measures, grouping, the caller's own
+            // order and the cut beside it, and the records the groups cover.
+            const sourceOf = (read: Pick<ExecutedObjectRead, 'orderBy' | 'limit' | 'records'>) => objectQuerySourceOf(bridge, {
+              object: objectName,
+              where,
+              groupBy,
+              aggregations,
+              ...read,
+            }, servedDef);
             // [#35138] Each lookup key's record named beside it, read as the
             // caller, for the groups served only: one rule for both paths,
             // applied after the cap or the cut.
@@ -3992,12 +4088,16 @@ export function registerObjectTools(
               const groups = Array.isArray(answer?.rows) ? answer.rows : [];
               const cut = groups.length > cap;
               const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
-              return textResult({
+              // The groups after the cut are not all of them, so the records
+              // they cover are not stated; the cut is, beside the caller's
+              // own order (an order the tool supplied is not the caller's).
+              const source = await sourceOf({ orderBy, limit: cap });
+              return textResult(withObjectQuerySource({
                 rows: await labelServed(cut ? groups.slice(0, cap) : groups, fields),
                 totalGroups: answer.totalGroups,
                 ...(cut ? { truncated: true } : {}),
                 ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
-              });
+              }, source));
             }
             const rows = (await aggregateFn(objectName, {
               where,
@@ -4011,13 +4111,16 @@ export function registerObjectTools(
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
             const truncated = groups.length > maxLimit;
-            const served = truncated ? groups.slice(0, maxLimit) : groups;
-            return textResult({
-              rows: await labelServed(served, fields),
+            const servedGroups = truncated ? groups.slice(0, maxLimit) : groups;
+            // Every group came back, so a bare count summed over them is the
+            // records the figures cover, the groups past the cap included.
+            const source = await sourceOf({ records: aggregateRecordsOf(rows, aggregations) });
+            return textResult(withObjectQuerySource({
+              rows: await labelServed(servedGroups, fields),
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
               ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
-            });
+            }, source));
           } catch (err) {
             // [#35138] …with what the call named that the caller's schema does not show.
             return recordReadErrorResult(
