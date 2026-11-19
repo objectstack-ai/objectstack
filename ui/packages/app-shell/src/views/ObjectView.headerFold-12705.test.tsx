@@ -18,6 +18,11 @@
  *
  * Labels read as their i18n keys: this harness mounts no translation bundle.
  *
+ * objectstack#35548 — the list's page bar is one 44px line: the object's icon
+ * and name, then the actions, ⋮ (description, Import, favorites) and New last.
+ * With the description in the ⋮, the bar folds only when the name itself would
+ * be cut, so the narrow cases below are narrower than the 600 px they were.
+ *
  * happy-dom lays nothing out, so `installLayout` models the header as in
  * `layout/__tests__/PageHeader.actionsFold-12705.test.tsx`: a labelled button
  * is 100 px, an icon button 32 px, 8 px between them; a title character 10 px,
@@ -80,11 +85,17 @@ vi.mock('sonner', () => ({
 // a plugin bundle. Same posture as the sibling RecordDetailView render tests.
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-list')>()),
-  ListView: () => null,
+  ListView: (props: any) => {
+    // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
+    const lead = props.toolbarLeading;
+    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+  },
 }));
 vi.mock('@object-ui/plugin-view', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ObjectView: () => null,
+  ObjectView: (props: any) =>
+    // objectstack#35548 — the list (and the view bar the switcher leads) is drawn through `renderListView`.
+    props.renderListView?.({ schema: props.schema ?? {}, dataSource: props.dataSource, onEdit: props.onEdit, className: '', refreshKey: 0 }) ?? null,
   ViewTabBar: () => null,
   ManageViewsDialog: () => null,
 }));
@@ -235,17 +246,24 @@ afterEach(() => {
 });
 
 describe('the object list’s header folds its actions (objectui#12705)', () => {
-  it('at a 600 px header New stays labelled and Import and the toolbar action go into the one ⋯, above favorites', () => {
+  it('at a 400 px header New stays labelled and Import and the toolbar action go into the one ⋯, above favorites', () => {
+    headerWidth = 400;
     const { cluster, labelled, openMenu } = renderList(OPPORTUNITY);
     expect(cluster.getAttribute('data-folded')).toBe('true');
     expect(labelled()).toEqual(['console.objectView.new']);
     expect(within(cluster).getByTestId('object-view-new-button')).toBeTruthy();
-    expect(within(screen.getByTestId('page-header')).getByText(OPPORTUNITY.description).textContent)
-      .toBe(OPPORTUNITY.description);
     expect(openMenu()).toEqual(['console.objectView.import', 'Update Stage', 'Add to favorites']);
   });
 
+  it('at a 600 px header nothing folds: the description waits in the ⋮, so the name has the room', () => {
+    const { cluster, labelled } = renderList(OPPORTUNITY);
+    expect(cluster.getAttribute('data-folded')).toBe('false');
+    expect(labelled()).toEqual(['Update Stage', 'console.objectView.new']);
+    expect(within(screen.getByTestId('page-header')).queryByText(OPPORTUNITY.description)).toBeNull();
+  });
+
   it('Import in the ⋯ runs its handler: the import wizard opens', async () => {
+    headerWidth = 400;
     const { openMenu } = renderList(OPPORTUNITY);
     openMenu();
     fireEvent.click(screen.getByRole('menuitem', { name: 'console.objectView.import' }));
@@ -253,6 +271,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
   });
 
   it('with no New, the toolbar action authored primary stays labelled — not the first in the row', () => {
+    headerWidth = 340;
     const { labelled, openMenu } = renderList(USERS);
     expect(labelled()).toEqual(['Invite User']);
     expect(openMenu()).toEqual(['console.objectView.import', 'Create User', 'Add to favorites']);
@@ -262,7 +281,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
     headerWidth = 1280;
     const { cluster, labelled } = renderList(OPPORTUNITY);
     expect(cluster.getAttribute('data-folded')).toBe('false');
-    expect(labelled()).toEqual(['console.objectView.new', 'console.objectView.import', 'Update Stage']);
+    expect(labelled()).toEqual(['Update Stage', 'console.objectView.new']);
     expect(within(cluster).getByTestId('object-view-more-actions')).toBeTruthy();
   });
 
@@ -277,6 +296,7 @@ describe('the object list’s header folds its actions (objectui#12705)', () => 
       openIn: 'new-tab',
       locations: ['list_toolbar'],
     };
+    headerWidth = 400;
     const { cluster } = renderList({ ...OPPORTUNITY, actions: [UPDATE_STAGE, OPEN_REPORT] }, '?runAction=open_report');
     await new Promise((resolve) => setTimeout(resolve, 50));
     // The header is folded by now, and the action ran once, on arrival.
@@ -316,8 +336,8 @@ describe('a list with no declared primary keeps its actions labelled (objectstac
     expect(cluster.hasAttribute('data-folded')).toBe(false);
   });
 
-  it('CONTROL: authored `variant: primary`, the same list still folds at a 600 px header, keeping it labelled', () => {
-    headerWidth = 600;
+  it('CONTROL: authored `variant: primary`, the same list still folds at a 280 px header, keeping it labelled', () => {
+    headerWidth = 280;
     principal = { create: false };
     const { cluster, labelled, openMenu } = renderList({ ...CONTRACTS, actions: [{ ...LAUNCH, variant: 'primary' }] });
     expect(cluster.getAttribute('data-folded')).toBe('true');

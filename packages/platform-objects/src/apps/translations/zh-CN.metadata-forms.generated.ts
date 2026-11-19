@@ -989,6 +989,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "参数",
         helpText: "句子可填入的名称（例如 state）：正文抛出 { code, params: { state } }，{{ state }} 占位符即显示该值。不填：句子为纯文本"
       },
+      texts: {
+        label: "文本",
+        helpText: "钩子写入记录的句子，以其代码通过 ctx.text 请求的 snake_case 键为键（例如 follow_up_subject）。钩子得到按组织语言翻译的声明句子，无翻译时回退为声明的句子。适用于 JavaScript（L2）正文或处理器；表达式正文声明会被拒绝"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "代码请求此键时钩子写入的句子。纯文本；若该条目声明了参数，则 {{ name }} 占位符填入一个已声明的参数"
+      },
+      "texts.params": {
+        label: "参数",
+        helpText: "句子可填入的名称（例如 lead）：代码请求 ctx.text(key, { lead })，{{ lead }} 占位符即显示该值。不填：句子为纯文本"
+      },
       handler: {
         label: "处理器",
         helpText: "处理器函数名（已废弃——建议使用 body）"

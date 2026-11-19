@@ -989,6 +989,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Parâmetros",
         helpText: "Nomes que as frases podem preencher (por exemplo state): o corpo lança { code, params: { state } } e um marcador {{ state }} mostra o valor. Ausente: as frases são texto simples"
       },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que o hook escreve nos registros, indexadas pela chave snake_case que o código dele pede com ctx.text (por exemplo follow_up_subject). O hook recebe a mensagem declarada no idioma da organização, traduzida, com a mensagem declarada como alternativa. Para um corpo JavaScript (L2) ou um handler; recusado em um corpo de expressão"
+      },
+      "texts.message": {
+        label: "Mensagem",
+        helpText: "A frase que o hook escreve quando o código dele pede esta chave. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "texts.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que a frase pode preencher (por exemplo lead): o código pede ctx.text(key, { lead }) e um marcador {{ lead }} mostra o valor. Ausente: a frase é texto simples"
+      },
       handler: {
         label: "Handler",
         helpText: "Nome da função handler (obsoleto — prefira `body`)"
