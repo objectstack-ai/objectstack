@@ -2519,6 +2519,11 @@ export function publishedColumnChangesNotAppliedNotice(
  * `status`), the rule every report riding a 2xx on these doors follows
  * ({@link clientFacingFailureText}); any other failure is named as being in
  * the server log, where the `error` line carries it whole.
+ *
+ * [#32958] The text names no door: the save, publish, rollback and revert
+ * doors all raise it, so it says "this change" and its hint names only the
+ * remedies that work from each of them (a restart, or the next live write of
+ * the object, both of which run the sync again).
  */
 export function objectStorageSyncRefusedNotice(name: string, err: unknown): RuntimeAuthoringIssue {
     const reason = clientFacingFailureText(err, 'the reason is in the server log');
@@ -2528,12 +2533,12 @@ export function objectStorageSyncRefusedNotice(name: string, err: unknown): Runt
         where: `object "${name}"`,
         path: '',
         message:
-            `object '${name}' was saved and is served, but its storage was NOT created or altered: `
+            `object '${name}' is registered and served, but its storage was NOT created or altered: `
             + `the datasource refused its schema sync (${reason}). Until the sync runs, reads and writes `
-            + 'against it fail, or miss the columns this save added.',
+            + 'against it fail, or miss the columns this change added.',
         hint:
-            "Resolve the datasource's refusal, then publish the object again (which re-runs the sync), "
-            + 'or restart the server, which syncs the storage of every registered object.',
+            "Resolve the datasource's refusal, then run the storage sync again: restarting the server syncs "
+            + 'the storage of every registered object, and so does the next live write of this object.',
     };
 }
 
