@@ -28054,7 +28054,8 @@ async function selfTest() {
   // read through the `pm:blocking` cache rows (H14/H15, retired with the label);
   // the edges they prove are what H78–H80 and instruction ④ read now.
   const manyDeps = idx(Array.from({ length: 7 }, (_, i) => carded(100 + i, [], 'Blocked-by: #5')));
-  t('index: a large fan-out lists every dependent, in listing order', manyDeps.get(5).join(','), '100,101,102,103,104,105,106');
+  const targetedBy = (index, number) => (index.get(number) ?? []).join(',');
+  t('index: a large fan-out lists every dependent, in listing order', targetedBy(manyDeps, 5), '100,101,102,103,104,105,106');
   t('index: a missing listing reads as an empty index for any reader', buildBlockingIndex(undefined).get(5), undefined);
 
   // The LIVE board, 2026-08-19 (234 open cards): eight body lines, one of them
@@ -28070,11 +28071,11 @@ async function selfTest() {
     carded(2657, ['pm:blocked'], 'Blocked-by: #6234\nBlocked-by: #6245'),
   ];
   const liveIdx = idx(liveBodies);
-  t('index reverse-verify: #9832 is targeted by #9650', liveIdx.get(9832).join(','), '9650');
-  t('index reverse-verify: #9919 is targeted by #9249', liveIdx.get(9919).join(','), '9249');
+  t('index reverse-verify: #9832 is targeted by #9650', targetedBy(liveIdx, 9832), '9650');
+  t('index reverse-verify: #9919 is targeted by #9249', targetedBy(liveIdx, 9919), '9249');
   t('index reverse-verify: a waiting card is not itself a target', liveIdx.has(9650), false);
   t('index reverse-verify: the cross-repo blocker creates no local #4356 entry', liveIdx.has(4356), false);
-  t('index reverse-verify: a two-line card targets both', `${liveIdx.get(6234).join(',')}|${liveIdx.get(6245).join(',')}`, '2657|2657');
+  t('index reverse-verify: a two-line card targets both', `${targetedBy(liveIdx, 6234)}|${targetedBy(liveIdx, 6245)}`, '2657|2657');
   t('index reverse-verify: eight local targets in all, the cross-repo line excluded', liveIdx.size, 8);
 
   // -- The comment channel: the two MEASURED missing edges (#10061) -----------
@@ -28106,8 +28107,8 @@ async function selfTest() {
   // The defect, pinned: this is what the body-only index held.
   t('index union: a body-only index sees NEITHER measured target', `${bodyOnlyIdx.has(9465)}/${bodyOnlyIdx.has(9968)}`, 'false/false');
   // The fix: the same sources against the two-channel index.
-  t('index union: #9709 and #9828 both point at #9465 once comment edges are read', unionIdx.get(9465).join(','), '9709,9828');
-  t('index union: …and #9969 and #9652 both point at #9968', unionIdx.get(9968).join(','), '9969,9652');
+  t('index union: #9709 and #9828 both point at #9465 once comment edges are read', targetedBy(unionIdx, 9465), '9709,9828');
+  t('index union: …and #9969 and #9652 both point at #9968', targetedBy(unionIdx, 9968), '9969,9652');
 
   // The summary line carries the third `read X of Y` pair, and says out loud
   // what a shortfall costs: edges, never a suspended row.
@@ -29615,16 +29616,19 @@ async function selfTest() {
   b(BATTERY_REL, 'H80 cycles: a COMMENT-borne edge closes a cycle like a body one', cyc([wait(1, [2]), wait(2, [])], [[2, ['Blocked-by: #1']]]), '[{"members":[1,2],"path":[1,2,1]}]');
   b(BATTERY_REL, '⛔ H80: a cross-repo line of the same number closes nothing', cyc([wait(1, [2]), carded(2, ['pm:blocked'], 'Blocked-by: objectstack-ai/cloud#1')]), '[]');
   const long80 = Array.from({ length: 4000 }, (_, i) => wait(i + 1, [i === 3999 ? 1 : i + 2]));
-  b(BATTERY_REL, 'H80 cycles: a 4000-card ring is found without exhausting the stack', `${blockingCycles(relIdx(long80)).length}/${blockingCycles(relIdx(long80))[0].members.length}/${blockingCycles(relIdx(long80))[0].path.length}`, '1/4000/4001');
+  b(BATTERY_REL, 'H80 cycles: a 4000-card ring is found without exhausting the stack', `${blockingCycles(relIdx(long80)).length}/${blockingCycles(relIdx(long80))[0]?.members.length}/${blockingCycles(relIdx(long80))[0]?.path.length}`, '1/4000/4001');
   b(BATTERY_REL, 'H80 cycles: a missing index is no cycle', blockingCycles(undefined).length, 0);
   const rows80 = (cards) => h80BlockingCycleRows(relIdx(cards), byNo(cards));
+  // Through a wrapper, like every row text in this suite: a predicate that goes
+  // quiet must turn its cases RED, never abort the run on a `.message` of undefined.
+  const msg80 = (cards, at = 0) => String(rows80(cards)[at]?.message ?? '');
   b(BATTERY_REL, 'H80 rows: ONE row per group, on its lowest-numbered card', rows80([wait(8, [7]), wait(7, [8]), ...ring80]).map((r) => r.issue.number).join(), '1,7');
-  b(BATTERY_REL, 'H80 row: a pair is named a MUTUAL BLOCK, both cards and the path', ['MUTUAL BLOCK: #1 and #2 each name the other', '#1 → #2 → #1'].every((x) => rows80(mutual80)[0].message.includes(x)), true);
-  b(BATTERY_REL, 'H80 row: a larger group is named a CYCLE, with its size, members and path', ['BLOCKING CYCLE among 3 open cards (#1, #2, #3)', '#1 → #2 → #3 → #1'].every((x) => rows80(ring80)[0].message.includes(x)), true);
-  b(BATTERY_REL, 'H80 row: says what a block between fleet cards may be — the same file, never a preference order', ['only when they edit the same file', 'a list on the epic', 'No close can release a card in it'].every((x) => rows80(ring80)[0].message.includes(x)), true);
+  b(BATTERY_REL, 'H80 row: a pair is named a MUTUAL BLOCK, both cards and the path', ['MUTUAL BLOCK: #1 and #2 each name the other', '#1 → #2 → #1'].every((x) => msg80(mutual80).includes(x)), true);
+  b(BATTERY_REL, 'H80 row: a larger group is named a CYCLE, with its size, members and path', ['BLOCKING CYCLE among 3 open cards (#1, #2, #3)', '#1 → #2 → #3 → #1'].every((x) => msg80(ring80).includes(x)), true);
+  b(BATTERY_REL, 'H80 row: says what a block between fleet cards may be — the same file, never a preference order', ['only when they edit the same file', 'a list on the epic', 'No close can release a card in it'].every((x) => msg80(ring80).includes(x)), true);
   b(BATTERY_REL, '⛔ H80 control: no cycle, no row', rows80([wait(1, [2]), wait(2, [])]).length, 0);
   b(BATTERY_REL, 'H80 rows: a missing index and a missing listing do not crash', `${h80BlockingCycleRows(undefined, undefined).length}/${h80BlockingCycleRows(relIdx(mutual80), undefined).length}`, '0/0');
-  b(BATTERY_REL, 'H80 band: registered as `stall`, the sweep pushes it, and it is not loud', `${familyBand('H80')}/${familyRegistryCoverage().emitted.includes('H80')}/${isLoudFinding(rows80(mutual80)[0].message)}`, 'stall/true/false');
+  b(BATTERY_REL, 'H80 band: registered as `stall`, the sweep pushes it, and it is not loud', `${familyBand('H80')}/${familyRegistryCoverage().emitted.includes('H80')}/${isLoudFinding(msg80(mutual80))}`, 'stall/true/false');
 
   // H81 — a question in the decision box with no answer. One governing-record
   // reader with H73, so a card is exactly one row's.
@@ -29657,13 +29661,13 @@ async function selfTest() {
   b(BATTERY_REL, '⛔ H81: `updated_at` is NOT the clock — a card nudged an hour ago still lists', row81({ updated_at: '2026-11-19T11:00:00Z' }).includes('last touched ~1h ago'), true);
   b(BATTERY_REL, '⛔ H81: a CLOSED card, a PR row and unreadable labels are all out', [h81({ state: 'closed' }), h81({ pull_request: {} }), h81({ labels: undefined }), h81DecisionUnanswered(undefined)].join(), ',,,');
   b(BATTERY_REL, 'H81 row: the answer is the maintainer\'s alone, and the script moves nothing', ['no seat answers for him and no script moves the card', 'the decision thread the coordinator opens for it', 'never a label written from this script'].every((x) => row81().includes(x)), true);
-  b(BATTERY_REL, 'H81 governing record: the newest readable stamp governs, for H73 and H81 alike', `${governingRuledRecord('Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\nRuled: 6566731522 · letter A · 2026-11-02T11:00Z').id}/${governingRuledRecord('Ruled: 6400000001 · letter B\nRuled: 6566731522 · letter A').id}/${governingRuledRecord('no record here')}`, '6566731522/6400000001/null');
+  b(BATTERY_REL, 'H81 governing record: the newest readable stamp governs, for H73 and H81 alike', `${governingRuledRecord('Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\nRuled: 6566731522 · letter A · 2026-11-02T11:00Z')?.id}/${governingRuledRecord('Ruled: 6400000001 · letter B\nRuled: 6566731522 · letter A')?.id}/${governingRuledRecord('no record here')}`, '6566731522/6400000001/null');
   b(BATTERY_REL, 'H81 band: registered as `stall`, the sweep pushes it, and it is not loud', `${familyBand('H81')}/${familyRegistryCoverage().emitted.includes('H81')}/${isLoudFinding(row81())}`, 'stall/true/false');
 
   // The retirement, pinned from the registry side, and the rows' shared text rule.
   b(BATTERY_REL, '⛔ retired: H14 and H15 sit in no band and no sweep line pushes them', `${familyBand('H14')}/${familyBand('H15')}/${familyRegistryCoverage().emitted.includes('H14')}/${familyRegistryCoverage().emitted.includes('H15')}`, `${UNREGISTERED_FAMILY_BAND}/${UNREGISTERED_FAMILY_BAND}/false/false`);
   b(BATTERY_REL, 'registry: no code is left unregistered, and none is registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
-  b(BATTERY_REL, '⛔ text: no new row carries an angle bracket the body sanitizer could eat', [row77(noRef77, [], null, REPO_OS), row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'closed')], ['Blocked-by: #3'], REPO_OS), row78(cards78[0]), row79(dep79, [held5, dep79]), row79(heldDep79, [queued5, heldDep79]), rows80(mutual80)[0].message, rows80(ring80)[0].message, row81(), row81({ created_at: 'not-a-date' })].some((row) => row.length === 0 || /[<>]/u.test(row)), false);
+  b(BATTERY_REL, '⛔ text: no new row carries an angle bracket the body sanitizer could eat', [row77(noRef77, [], null, REPO_OS), row77(blockedCard(1, 'Blocked-by: #2'), [unmergedPr(2), target(3, 'closed')], ['Blocked-by: #3'], REPO_OS), row78(cards78[0]), row79(dep79, [held5, dep79]), row79(heldDep79, [queued5, heldDep79]), msg80(mutual80), msg80(ring80), row81(), row81({ created_at: 'not-a-date' })].some((row) => row.length === 0 || /[<>]/u.test(row)), false);
   b(BATTERY_REL, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY_REL) && SELF_TEST_BATTERIES[BATTERY_REL] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H74: an open `pm:queue` / `pm:blocked` card with no triage audit record in
@@ -30735,9 +30739,9 @@ async function selfTest() {
   // row per cycle to a card it names instead of inventing a rowless shape
   // neither renderer knows how to place.
   const relPair = [carded(7276, ['priority:p3']), carded(7300, ['priority:p1', 'pm:blocked'], 'Blocked-by: #7276')];
-  const h78Row = finding(7276, 'H78', h78BlockerBelowBlockedGrade(relPair[0], idx(relPair), new Map(relPair.map((c) => [c.number, c]))));
+  const h78Row = finding(7276, 'H78', String(h78BlockerBelowBlockedGrade(relPair[0], idx(relPair), new Map(relPair.map((c) => [c.number, c]))) ?? ''));
   const cyclePair = [carded(7276, ['pm:blocked'], 'Blocked-by: #7300'), carded(7300, ['pm:blocked'], 'Blocked-by: #7276')];
-  const h80Row = finding(7276, 'H80', h80BlockingCycleRows(idx(cyclePair), new Map(cyclePair.map((c) => [c.number, c])))[0].message);
+  const h80Row = finding(7276, 'H80', String(h80BlockingCycleRows(idx(cyclePair), new Map(cyclePair.map((c) => [c.number, c])))[0]?.message ?? ''));
   t('plain: an H78 row renders in the standard two-line shape', renderPlain([h78Row], counts).startsWith('  H78 #7276 `priority:p3` on a card that'), true);
   t('plain: …and carries the card URL on the second line', renderPlain([h78Row], counts).includes('\n     https://example.test/7276'), true);
   t('plain: an H80 row renders the same way', renderPlain([h80Row], counts).startsWith('  H80 #7276 MUTUAL BLOCK'), true);
