@@ -489,5 +489,60 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Créé le"
       }
     }
+  },
+  sys_channel_account: {
+    label: "Compte de canal",
+    pluralLabel: "Comptes de canal",
+    description: "L’installation d’une application de chat par une organisation, comme sa propre application Slack, avec le jeton de bot qui lui a été délivré.",
+    fields: {
+      channel_id: {
+        label: "Canal"
+      },
+      display_name: {
+        label: "Espace de travail"
+      },
+      external_id: {
+        label: "ID de l’espace de travail"
+      },
+      bot_token: {
+        label: "Jeton du bot"
+      },
+      status: {
+        label: "Statut",
+        options: {
+          active: "Actif",
+          revoked: "Révoqué"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Lien d’utilisateur de canal",
+    pluralLabel: "Liens d’utilisateur de canal",
+    description: "Le lien d’une personne avec son propre utilisateur dans un espace de travail de chat : proposé par correspondance d’e-mail, il livre dès que la personne le confirme.",
+    fields: {
+      account_id: {
+        label: "Compte"
+      },
+      user_id: {
+        label: "Utilisateur"
+      },
+      external_user_id: {
+        label: "ID d’utilisateur du chat"
+      },
+      external_display_name: {
+        label: "Nom d’utilisateur du chat"
+      },
+      state: {
+        label: "État",
+        options: {
+          proposed: "Proposé",
+          confirmed: "Confirmé"
+        }
+      },
+      confirmed_at: {
+        label: "Confirmé le"
+      }
+    }
   }
 };

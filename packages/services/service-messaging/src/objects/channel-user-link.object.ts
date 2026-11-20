@@ -31,35 +31,16 @@ export const ChannelUserLink = ObjectSchema.create({
     nameField: 'external_display_name', // [ADR-0079] canonical primary-title pointer
 
     fields: {
-        account_id: Field.lookup('sys_channel_account', {
-            label: 'Account',
-            required: true,
-            deleteBehavior: 'cascade',
+        account_id: Field.lookup('sys_channel_account', { label: 'Account', required: true, deleteBehavior: 'cascade' }),
+        // [ADR-0118] A person's links go with the person, as their devices do.
+        user_id: Field.lookup('sys_user', { label: 'User', required: true, deleteBehavior: 'cascade' }),
+        external_user_id: Field.text({ label: 'Chat User ID', required: true, maxLength: 64 }),
+        external_display_name: Field.text({ label: 'Chat User Name', maxLength: 255 }),
+        // Proposed by an email match; nothing is delivered until the person confirms.
+        state: Field.select([{ label: 'Proposed', value: 'proposed' }, { label: 'Confirmed', value: 'confirmed' }], {
+            label: 'State', required: true, defaultValue: 'proposed',
         }),
-        user_id: Field.lookup('sys_user', {
-            label: 'User',
-            required: true,
-            // [ADR-0118] A person's links go with the person, as their devices do.
-            deleteBehavior: 'cascade',
-        }),
-        external_user_id: Field.text({
-            label: 'Chat User ID',
-            required: true,
-            maxLength: 64,
-        }),
-        external_display_name: Field.text({
-            label: 'Chat User Name',
-            maxLength: 255,
-        }),
-        state: Field.select(['proposed', 'confirmed'], {
-            label: 'State',
-            required: true,
-            defaultValue: 'proposed',
-            description: 'Proposed by an email match; nothing is delivered until the person confirms.',
-        }),
-        confirmed_at: Field.datetime({
-            label: 'Confirmed At',
-        }),
+        confirmed_at: Field.datetime({ label: 'Confirmed At' }),
     },
 
     indexes: [

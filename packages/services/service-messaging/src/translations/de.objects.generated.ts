@@ -489,5 +489,60 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Erstellt am"
       }
     }
+  },
+  sys_channel_account: {
+    label: "Kanalkonto",
+    pluralLabel: "Kanalkonten",
+    description: "Die Installation einer Chat-App durch eine Organisation, etwa ihrer eigenen Slack-App, mit dem dafür ausgestellten Bot-Token.",
+    fields: {
+      channel_id: {
+        label: "Kanal"
+      },
+      display_name: {
+        label: "Workspace"
+      },
+      external_id: {
+        label: "Workspace-ID"
+      },
+      bot_token: {
+        label: "Bot-Token"
+      },
+      status: {
+        label: "Status",
+        options: {
+          active: "Aktiv",
+          revoked: "Widerrufen"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Kanal-Benutzerverknüpfung",
+    pluralLabel: "Kanal-Benutzerverknüpfungen",
+    description: "Die Verknüpfung einer Person mit ihrem eigenen Benutzer in einem Chat-Workspace: per E-Mail-Abgleich vorgeschlagen, zugestellt wird erst nach ihrer Bestätigung.",
+    fields: {
+      account_id: {
+        label: "Konto"
+      },
+      user_id: {
+        label: "Benutzer"
+      },
+      external_user_id: {
+        label: "Chat-Benutzer-ID"
+      },
+      external_display_name: {
+        label: "Chat-Benutzername"
+      },
+      state: {
+        label: "Zustand",
+        options: {
+          proposed: "Vorgeschlagen",
+          confirmed: "Bestätigt"
+        }
+      },
+      confirmed_at: {
+        label: "Bestätigt am"
+      }
+    }
   }
 };

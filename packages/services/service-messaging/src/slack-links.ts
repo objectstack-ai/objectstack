@@ -183,7 +183,6 @@ export class SlackLinkStore {
         const values = {
             display_name: str(answer.body.team) ?? teamId,
             external_id: teamId,
-            bot_external_id: str(answer.body.user_id) ?? null,
             [TOKEN_FIELD]: token,
             status: 'active',
         };

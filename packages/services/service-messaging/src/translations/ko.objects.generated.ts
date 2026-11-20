@@ -489,5 +489,60 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "생성 일시"
       }
     }
+  },
+  sys_channel_account: {
+    label: "채널 계정",
+    pluralLabel: "채널 계정",
+    description: "조직이 설치한 채팅 앱(예: 조직 자체의 Slack 앱)과 발급받은 봇 토큰입니다.",
+    fields: {
+      channel_id: {
+        label: "채널"
+      },
+      display_name: {
+        label: "워크스페이스"
+      },
+      external_id: {
+        label: "워크스페이스 ID"
+      },
+      bot_token: {
+        label: "봇 토큰"
+      },
+      status: {
+        label: "상태",
+        options: {
+          active: "활성",
+          revoked: "취소됨"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "채널 사용자 연결",
+    pluralLabel: "채널 사용자 연결",
+    description: "채팅 워크스페이스에 있는 본인 사용자와의 연결입니다. 이메일 일치로 제안되며 본인이 확인해야 전달이 시작됩니다.",
+    fields: {
+      account_id: {
+        label: "계정"
+      },
+      user_id: {
+        label: "사용자"
+      },
+      external_user_id: {
+        label: "채팅 사용자 ID"
+      },
+      external_display_name: {
+        label: "채팅 사용자 이름"
+      },
+      state: {
+        label: "상태",
+        options: {
+          proposed: "제안됨",
+          confirmed: "확인됨"
+        }
+      },
+      confirmed_at: {
+        label: "확인 일시"
+      }
+    }
   }
 };

@@ -33,38 +33,16 @@ export const ChannelAccount = ObjectSchema.create({
     nameField: 'display_name', // [ADR-0079] canonical primary-title pointer
 
     fields: {
-        channel_id: Field.text({
-            label: 'Channel',
-            required: true,
-            maxLength: 64,
-            description: 'The messaging channel the install serves: slack.',
-        }),
-        display_name: Field.text({
-            label: 'Workspace',
-            required: true,
-            maxLength: 255,
-            description: 'The workspace name the chat app reported.',
-        }),
-        external_id: Field.text({
-            label: 'Workspace ID',
-            required: true,
-            maxLength: 64,
-            description: 'The workspace id the chat app reported.',
-        }),
-        bot_external_id: Field.text({
-            label: 'Bot User ID',
-            maxLength: 64,
-        }),
-        bot_token: Field.secret({
-            label: 'Bot Token',
-            required: true,
-            description: 'Encrypted at rest and masked on every read. Read only by the server, to send.',
-        }),
-        status: Field.select(['active', 'revoked'], {
-            label: 'Status',
-            required: true,
-            defaultValue: 'active',
-            description: 'Revoked once the chat app refused the token; set the token again to restore it.',
+        // The messaging channel the install serves: `slack`.
+        channel_id: Field.text({ label: 'Channel', required: true, maxLength: 64 }),
+        // The workspace name and id the chat app reported for the token.
+        display_name: Field.text({ label: 'Workspace', required: true, maxLength: 255 }),
+        external_id: Field.text({ label: 'Workspace ID', required: true, maxLength: 64 }),
+        // Encrypted at rest and masked on every read; read only by the server, to send.
+        bot_token: Field.secret({ label: 'Bot Token', required: true }),
+        // Revoked once the chat app refused the token; setting the token again restores it.
+        status: Field.select([{ label: 'Active', value: 'active' }, { label: 'Revoked', value: 'revoked' }], {
+            label: 'Status', required: true, defaultValue: 'active',
         }),
     },
 

@@ -489,5 +489,60 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Создано"
       }
     }
+  },
+  sys_channel_account: {
+    label: "Учётная запись канала",
+    pluralLabel: "Учётные записи каналов",
+    description: "Установка чат-приложения организацией, например её собственного приложения Slack, с выданным ему токеном бота.",
+    fields: {
+      channel_id: {
+        label: "Канал"
+      },
+      display_name: {
+        label: "Рабочее пространство"
+      },
+      external_id: {
+        label: "ID рабочего пространства"
+      },
+      bot_token: {
+        label: "Токен бота"
+      },
+      status: {
+        label: "Статус",
+        options: {
+          active: "Активна",
+          revoked: "Отозвана"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Связь пользователя канала",
+    pluralLabel: "Связи пользователей каналов",
+    description: "Связь человека с его собственным пользователем в рабочем пространстве чата: предлагается по совпадению адреса электронной почты, доставка начинается после подтверждения.",
+    fields: {
+      account_id: {
+        label: "Учётная запись"
+      },
+      user_id: {
+        label: "Пользователь"
+      },
+      external_user_id: {
+        label: "ID пользователя чата"
+      },
+      external_display_name: {
+        label: "Имя пользователя чата"
+      },
+      state: {
+        label: "Состояние",
+        options: {
+          proposed: "Предложена",
+          confirmed: "Подтверждена"
+        }
+      },
+      confirmed_at: {
+        label: "Дата подтверждения"
+      }
+    }
   }
 };

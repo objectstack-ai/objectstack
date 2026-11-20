@@ -489,5 +489,60 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "تاريخ الإنشاء"
       }
     }
+  },
+  sys_channel_account: {
+    label: "حساب القناة",
+    pluralLabel: "حسابات القنوات",
+    description: "تثبيت مؤسسة لتطبيق دردشة، مثل تطبيق Slack الخاص بها، مع رمز البوت الصادر له.",
+    fields: {
+      channel_id: {
+        label: "القناة"
+      },
+      display_name: {
+        label: "مساحة العمل"
+      },
+      external_id: {
+        label: "معرّف مساحة العمل"
+      },
+      bot_token: {
+        label: "رمز البوت"
+      },
+      status: {
+        label: "الحالة",
+        options: {
+          active: "نشط",
+          revoked: "مُلغى"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "ربط مستخدم القناة",
+    pluralLabel: "روابط مستخدمي القنوات",
+    description: "ربط شخص بمستخدمه الخاص في مساحة عمل دردشة: يُقترح بمطابقة البريد الإلكتروني، ويبدأ التسليم بعد أن يؤكده الشخص.",
+    fields: {
+      account_id: {
+        label: "الحساب"
+      },
+      user_id: {
+        label: "المستخدم"
+      },
+      external_user_id: {
+        label: "معرّف مستخدم الدردشة"
+      },
+      external_display_name: {
+        label: "اسم مستخدم الدردشة"
+      },
+      state: {
+        label: "الحالة",
+        options: {
+          proposed: "مقترح",
+          confirmed: "مؤكد"
+        }
+      },
+      confirmed_at: {
+        label: "تاريخ التأكيد"
+      }
+    }
   }
 };

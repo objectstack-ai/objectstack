@@ -489,5 +489,60 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "作成日時"
       }
     }
+  },
+  sys_channel_account: {
+    label: "チャネルアカウント",
+    pluralLabel: "チャネルアカウント",
+    description: "組織がインストールしたチャットアプリ（組織独自の Slack アプリなど）と、発行されたボットトークン。",
+    fields: {
+      channel_id: {
+        label: "チャネル"
+      },
+      display_name: {
+        label: "ワークスペース"
+      },
+      external_id: {
+        label: "ワークスペース ID"
+      },
+      bot_token: {
+        label: "ボットトークン"
+      },
+      status: {
+        label: "ステータス",
+        options: {
+          active: "有効",
+          revoked: "取り消し済み"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "チャネルユーザーリンク",
+    pluralLabel: "チャネルユーザーリンク",
+    description: "チャットワークスペース内の本人のユーザーとのリンク。メールアドレスの一致で提案され、本人が確認すると配信が始まります。",
+    fields: {
+      account_id: {
+        label: "アカウント"
+      },
+      user_id: {
+        label: "ユーザー"
+      },
+      external_user_id: {
+        label: "チャットユーザー ID"
+      },
+      external_display_name: {
+        label: "チャットユーザー名"
+      },
+      state: {
+        label: "状態",
+        options: {
+          proposed: "提案済み",
+          confirmed: "確認済み"
+        }
+      },
+      confirmed_at: {
+        label: "確認日時"
+      }
+    }
   }
 };
