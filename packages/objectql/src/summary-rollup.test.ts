@@ -1947,6 +1947,26 @@ describe('[#34821] a multi-row insert judges a rule reading a parent field calcu
     expect(bud(p.id)).toMatchObject({ total: 90, headroom: 10, peak: 90 });
   });
 
+  it('multi-row insert preview: three lines of 40 under a budget of 100, the preview refuses the third as the write does', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const batch = [1, 2, 3].map(() => ({ bud: p.id, amount: 40, tag: 'rem', note: 'n' }));
+    const preview = await engine.validate('bud_line', batch, { mode: 'insert' });
+    expect(preview.valid).toBe(false);
+    expect(preview.results!.map((r) => r.valid)).toEqual([true, true, false]);
+    expect(preview.results![2]!.errors.map((e) => e.message).join(' | ')).toContain('line over the remaining budget');
+    expectRuleRefusal(await refusalOf(engine.insert('bud_line', batch)), 'line over the remaining budget');
+    expect(lines(p.id)).toHaveLength(0);
+  });
+
+  it('multi-row insert preview, under the line: three lines of 30 are all valid, and the write admits them', async () => {
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    const batch = [1, 2, 3].map(() => ({ bud: p.id, amount: 30, tag: 'rem', note: 'n' }));
+    const preview = await engine.validate('bud_line', batch, { mode: 'insert' });
+    expect(preview.results!.map((r) => r.valid)).toEqual([true, true, true]);
+    expect(await engine.insert('bud_line', batch)).toHaveLength(3);
+    expect(bud(p.id).total).toBe(90);
+  });
+
   it('one by one (the reference answer): a field-level parent. predicate reading the header\'s calculated field requires the note on the third line', async () => {
     const p = await engine.insert('bud', { name: 'B', budget: 100 });
     await engine.insert('bud_line', { bud: p.id, amount: 40, tag: 'x' });

@@ -62,7 +62,8 @@ import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases, summaryPatchCanMove } from './summary-batch-accumulation.js';
-import type { SummaryDependents, SummaryFoldStandDownSink } from './summary-batch-accumulation.js';
+import type { BatchSummaryAccumulator, SummaryDependents, SummaryFoldStandDownSink } from './summary-batch-accumulation.js';
+import type { RelatedRecordBinding } from './validation/rule-validator.js';
 import { SUMMARY_GROUPED_AGGREGATE_CHUNK } from './summary-aggregate.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
@@ -2523,6 +2524,37 @@ export class UpdateFacet {
  * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
  * of reads nothing.
  */
+/**
+ * [#34821] Hand a multi-row insert's accumulator what computes its parents'
+ * fields calculated from the roll-ups it moves ({@link loadSummaryFoldDependents}),
+ * for the parents a rule of the batch reads: a related row bound for a row
+ * (`relatedFor`) or the master-detail header (`master`, through `headerFor`).
+ * An insert no rule of which reads a parent reads nothing here. One door for
+ * the write (`insert()`) and its preview (`validate()`, mode insert), so the
+ * preview judges the batch the way the write does. `skip(i)` names a row the
+ * door already refused.
+ */
+export async function attachInsertSummaryDependents(
+  host: Parameters<typeof loadSummaryFoldDependents>[0],
+  accumulator: BatchSummaryAccumulator,
+  rows: readonly Record<string, unknown>[],
+  relatedFor: (row: Record<string, unknown>) => RelatedRecordBinding | undefined,
+  master: string | undefined,
+  headerFor: ((i: number) => unknown) | undefined,
+  context: Parameters<typeof loadSummaryFoldDependents>[2],
+  skip: (i: number) => boolean = () => false,
+): Promise<void> {
+  const readParents = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    if (skip(i)) continue;
+    for (const entry of Object.values(relatedFor(rows[i]!) ?? {})) if (entry?.row) readParents.add(entry.object);
+    if (master && headerFor?.(i)) readParents.add(master);
+  }
+  if (readParents.size === 0) return;
+  const folded = accumulator.foldedSummaries(rows, readParents);
+  if (folded.size > 0) accumulator.setDependents(await loadSummaryFoldDependents(host, folded, context));
+}
+
 export async function loadSummaryFoldDependents(
   host: Pick<UpdateHost, 'facade' | 'getSchema' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
   folded: Map<string, { fields: Set<string>; parentIds: Set<string> }>,
