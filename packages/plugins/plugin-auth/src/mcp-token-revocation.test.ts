@@ -48,6 +48,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
 import { revokeMcpGrant, UNKNOWN_TOKEN_DESCRIPTIONS, type OAuthGrantStore } from './mcp-token-revocation.js';
 

@@ -26,6 +26,9 @@ import {
   resolveDcrEnabled,
   isOAuthEligibleBaseUrl,
 } from './auth-manager';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 
 // Mock better-auth so plugin-registration tests can capture the config
 // without booting a real instance (same pattern as auth-manager.test.ts).

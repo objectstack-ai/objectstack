@@ -32,6 +32,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { AuthManager } from './auth-manager';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { buildJwtPluginSchema } from './auth-schema-config.js';
 import {
   INVALID_ACCESS_TOKEN_DESCRIPTION,

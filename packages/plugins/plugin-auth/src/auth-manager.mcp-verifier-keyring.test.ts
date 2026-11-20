@@ -37,6 +37,9 @@ import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
 import { retireHeldKeyrings, UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS } from './signing-key-read-cache.js';
 
