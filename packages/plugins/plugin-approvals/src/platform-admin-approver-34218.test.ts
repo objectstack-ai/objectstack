@@ -282,6 +282,14 @@ describe('platform_admin approver: one slot the platform administrators decide u
     expect(told.slice(before).flat()).toEqual([]);
   });
 
+  it('the slot reads by a label, not its address: on the stored row and on the approvals door', async () => {
+    const row = await open('label', 'host_review', PLATFORM);
+    const [stored] = await requestRows('label');
+    expect(stored.pending_approver_labels).toBe('Platform administrators');
+    expect((await svc.getRequest(row.id, as('u_root')) as any)?.pending_approver_names)
+      .toEqual({ [SLOT]: 'Platform administrators' });
+  });
+
   it('a holder of the cross-tenant grant finds it and decides it as an ordinary approver', async () => {
     const row = await open('grant', 'host_review', PLATFORM);
     expect(await inbox(as('u_root'))).toContain(row.id);

@@ -94,6 +94,7 @@ export const zhHant: TranslationData = {
         nav_settings_hub: { label: '全部設定' },
         nav_settings_localization: { label: '在地化' },
         nav_exchange_rates: { label: '匯率' },
+        nav_units_of_measure: { label: '計量單位' },
         nav_settings_company: { label: '公司' },
         nav_settings_mail: { label: '郵件投遞' },
         nav_settings_sms: { label: '簡訊投遞' },

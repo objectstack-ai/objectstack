@@ -6074,7 +6074,9 @@ describe('ApprovalService — every slot reader takes the acting addresses (#213
     await expect(svc.comment(req.id, { comment: 'hi' } as any, BYSTANDER))
       .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     await svc.comment(req.id, { comment: 'hi' } as any, HOLDER);
-    const [said] = actionsOf(engine, req.id, 'comment');
+    // The request opened on a slate no one can decide, so its timeline also
+    // carries the system's no-approver note (no actor); the holder's is the other.
+    const [said] = actionsOf(engine, req.id, 'comment').filter((a: any) => a.actor_id);
     expect([said.actor_id, said.acted_as]).toEqual(['u_holder', SLOT]);
 
     await expect(svc.reassign(req.id, { to: 'u_next' } as any, READING_BYSTANDER))

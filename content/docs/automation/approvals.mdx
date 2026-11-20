@@ -486,7 +486,11 @@ deployment declares in `OS_PLATFORM_OWNER_EMAIL`. It takes no `value` and no
 - **Nobody is told.** The slot names no person, so opening the request sends
   no notification, and the slot grants no read of the record. The request does
   not count as an empty slate, so `onEmptyApprovers` never replaces it with
-  the organization's administrators.
+  the organization's administrators. On a deployment where no one holds
+  platform-administrator standing, no one can take the slot and the request
+  waits with no warning, so give someone that standing before a package whose
+  flow uses this type goes live. The request lists the slot as *Platform
+  administrators*, in the reader's language on the approvals door.
 - **Only the deployment's own packaged flows may use it.** The approval node
   opens on this type only when the flow body it runs ships in a package the
   deployment registers in code (registry `source: 'code'`). The origin is
@@ -580,8 +584,12 @@ and an administrator can reassign it to them.
 To name the person who should decide instead, declare
 `onEmptyApprovers: 'fallback'` with `fallbackApprovers`. Only an organization
 with no administrator, or a request with no organization, still opens on the
-slate that names no one: the server logs a warning, no one is told, and only the
-admin override decides it.
+slate that names no one, and so does a request whose organization's only
+administrator is its submitter on a step that sets `excludeSubmitter`. The
+server logs a warning, and the request's timeline and a notice to its submitter
+say that no one else can approve it yet and that an organization administrator
+must add a member who can (one who holds the unstaffed position, when the slate
+names one). Only the admin override decides it, and never its submitter's own.
 
 ### The approver finds it in their queue
 

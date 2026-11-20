@@ -54,7 +54,7 @@
 
 - 小时层三读法之一,sweep 析取①–⑤ = `list_issues` + `since`。
 - 之二,解锁扫描 = 逐张 `pm:blocked` 正向读正文目标:issue 全已关、PR 全已合并才命中走双查。
-- 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
+- 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`;五项现读 `fleet-roster.mjs --health`。
 - 裸卡数例外:标签缺席无计数可读,取本轮析取①的枚举,⛔ 不另发查询。
 - 每日层(当日首 fire)= 全量对账 + 归集本就日频的职责。
 - 日频职责 = finding 集中轮;`Restart-when:` 批扫归车道巡查,决策箱回填归总监席。
@@ -218,7 +218,7 @@
 - 原令「有限数字串转数字」与之相左,应派发前送 L1 线程;栅栏点名 A′ spec 散文在范围。
 - 派发令带 L2 路由:dev 交回点名欠 L2 不自敲;席照 contract-review.md 自审或送 L2 席,⛔ 非分诊
 - 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。
-- same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
+- same-day churn 行:派发时文件面见当天合并即加一行;现读 `check-prior-rulings.mjs --paths` ②。
 - 该行原文:基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。
 - 在飞重叠每轮拦截:main 新落 PR 与在飞申报文件面求交,相交即发四句警告。
 - 另一腿:本轮删/改名标识符 grep 每个在飞 PR 的 diff,命中同发,⛔ 不因文件面不相交跳过。

@@ -6686,6 +6686,14 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
     expect(issues.filter((i) => /isoDate\(addDays\(record\.borrow_date, N\)\)/.test(i.message))).toHaveLength(1);
   });
 
+  it('a sweep\'s refusal names the rewrite under its own entrance (ruling 7023700548)', () => {
+    const issues = validateStackExpressions(stackWith('update_record', MEASURED, {
+      schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 },
+    }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('This flow has its own record trigger or time-relative sweep, which hands it a row');
+  });
+
   it('CONTROL: a datetime field in the same envelope, and the taught shift, stay clean', () => {
     for (const source of ["isoDate(timestamp(record.picked_up_at) + duration('168h'))", 'isoDate(addDays(record.borrow_date, 7))']) {
       expect(validateStackExpressions(stackWith('update_record', source)), source).toEqual([]);
@@ -6739,6 +6747,38 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
       edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
     });
     expect(validateStackExpressions(stack)).toEqual([]);
+  });
+
+  // [ruling 7023700548] A flow with its OWN record trigger stays refused when a
+  // parent also starts it (its trigger hands it the typed row on every run it
+  // starts), and the refusal names the rewrite; the same flow with no trigger
+  // of its own is not typed. The parent is record-triggered on another object
+  // whose `borrow_date` is a datetime.
+  it.each([
+    ['subflow', { flowName: 'loan_due_child' }],
+    ['map', { flowName: 'loan_due_child', collection: envelope('[record]'), itemObject: 'event' }],
+  ])('a record-triggered child a parent also starts through `%s` stays refused, naming the rewrite', (type, config) => {
+    const childWith = (start: Record<string, unknown>) => {
+      const stack = stackWith('update_record', REFUSED, start);
+      stack.objects.push({ name: 'event', fields: { borrow_date: { type: 'datetime' } } } as never);
+      stack.flows[0] = { ...stack.flows[0], name: 'loan_due_child' };
+      stack.flows.push({
+        name: 'event_parent',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'event', triggerType: 'record-after-update' } },
+          { id: 'call', type, config } as never,
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+      });
+      return validateStackExpressions(stack);
+    };
+    const issues = childWith({ objectName: 'library_loan', triggerType: 'record-after-update' });
+    expect(issues.map((i) => [i.severity, i.path])).toEqual([['error', 'flows[0].nodes[1].config.fields.due_date']]);
+    expect(issues[0].message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+    expect(issues[0].message).toContain('move them into a child flow with no trigger of its own');
+    // CONTROL: the same child with no trigger of its own is not typed.
+    expect(childWith({ objectName: 'library_loan' }).filter((i) => /addDays|no trigger of its own/.test(i.message))).toEqual([]);
   });
 
   it('CONTROL: a record-triggered flow that declares a `record` variable is not typed — zero findings', () => {

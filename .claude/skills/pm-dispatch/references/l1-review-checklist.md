@@ -2,7 +2,7 @@
 
 见 execution-duties.md 〈L1 审核〉;本文逐项展开每份 dev 报告的 L1 判据,对着它过。
 
-## PR 形态与卡片关系
+## PR 形态与卡片关系(机械项现读 `l1-face.mjs --pr N`)
 
 - PR 存在、是 draft、目标 `main`,正文首行引用卡片。
 - `Fixes #<n>` 仅当合并应当关卡;只落地了可实施的一半 ⇒ 必须 `Part of #<n>`。
@@ -12,7 +12,7 @@
 - `Part of` 收口的卡不会自动关,`pm:dispatched` 必须手工摘,动作要件见落地细则 B。
 - ACCEPT 那一刻记进落地待办,⛔ 不留给下次巡检。
 
-## 范围与 changeset
+## 范围与 changeset(机械项现读 `l1-face.mjs --pr N`)
 
 - 无 `content/docs/releases/` 改动、用户可见改动有 changeset、无卡外或超 `Scope-review:` 的文件。
 - 种类非 `none` 或带 `(narrowing)`:`Skills-docs:` 行在且属实;`follow-up owed` 立卡改 `#N`;缺 ⇒ REWORK。
@@ -33,7 +33,7 @@
 - 不在此列:合并后还会再跑的工具,如门禁、regen 步骤、客户照迁移指南跑的 codemod。
 - 移动/拆分重构净增远超纯移动:逐文件点清多出各块用途,记进 ACCEPT 评论;点不清判 REWORK。
 
-## 测试与门禁证据
+## 测试与门禁证据(机械项现读 `l1-face.mjs --pr N`)
 
 - 测试证据要有真实命令与通过输出,⛔ 不接受一句 tests pass。
 - 测量类交付先看阳性对照:对照本身失败 ⇒ 该读数记 INCONCLUSIVE,⛔ 不入账。
@@ -75,6 +75,6 @@
 - 判据是它报的证据面(搜了什么、找到什么)加 PM 自己在 `origin/main` 上的复核。
 - 验收判据本身也可被证伪:dev 用测量推翻字面判据、换上更强的不变量门禁照 ACCEPT。
 - 但推翻过程必须写在 PR 正文并附 main 语料上的实测信噪比,否则按 REWORK 要证据。
-- `+0/-0` 先疑 NUL,以 blob 定论 `git show <sha>:<path> | wc -l`,要求源侧写转义序列。
+- `+0/-0` 先疑 NUL,以 blob 定论,现读 `l1-face.mjs --pr N`;要求源侧写转义序列。
 - 以死代码或不可达为由的删除,PM 先在 `origin/main` 用带引号精确名核引用面,再 ACCEPT。
 - 卡的交付物含系统性 sweep 时,ACCEPT 评论把范围外产出成组列出并写明 sweep 判据。
