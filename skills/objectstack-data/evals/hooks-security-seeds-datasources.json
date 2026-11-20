@@ -72,6 +72,16 @@
       }
     },
     {
+      "id": 35,
+      "prompt": "In the running app I saved a draft `seed` item with `object: 'lead'` and three records, through the metadata save. The save answered 422. Our lead object is `crm_lead`, still a draft in the same package. What is wrong, and what do I save instead?",
+      "expected_output": "The seed names an object that does not exist: the save door refuses a `seed` whose `object` resolves to nothing with `422 INVALID_METADATA`, one finding at `object` saying the seed loads its records into object 'lead', which is not defined, so publishing it would load no record. The fix is the object's full name: save the seed with `object: 'crm_lead'`. The draft `crm_lead` is enough for a draft seed, so nothing has to be published first; a live (published) seed needs the object published. Does not create a second `lead` object to satisfy the save and does not retry the same body.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["422", "crm_lead", "not defined"],
+        "must_not_contain": []
+      }
+    },
+    {
       "id": 5,
       "prompt": "Finance may edit a contract's legal terms (`governing_law`, `liability_cap`) while it is a draft, not once approved, signing or active; legal still edits them.",
       "expected_output": "Row-conditioned field permission entries on the finance set — `'clm_contract.governing_law': { readable: true, editable: false, when: \"status in ['approved', 'signing', 'active']\" }`, likewise `liability_cap`; legal keeps its edit grant.",

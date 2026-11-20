@@ -1856,7 +1856,14 @@ export const CEILINGS = new Map([
   // Arithmetic in bytes: 7033 -> 6905 after the cuts (-128); the teaching nets
   // +340 -> 7245 -> ceil(7245 / 4) = 1812; headroom was 0, so the ceiling moves
   // +53, the measured remainder only. Pinned AT the measurement.
-  ['skills/objectstack-data/references/seeds.md', 1812],
+  // 1812 -> 1898: the note under the field table says a `seed` saved at runtime
+  // names an object that exists or the save answers `422 INVALID_METADATA` at
+  // `object`, and that a draft object is enough for a draft seed; the `object`
+  // row points at it in place of "never write manually". Same raise path and
+  // the same paydown as the step above (one PR, the cuts are its deletion):
+  // 7245 -> 7590 bytes (+345) -> ceil(7590 / 4) = 1898; headroom was 0, so the
+  // ceiling moves +86, the measured remainder only. Pinned AT the measurement.
+  ['skills/objectstack-data/references/seeds.md', 1898],
   // 1351 -> 1343: the body-pin values left the count (#31115, ruling B; see
   // BODY_PIN_REPIN); the file's count fell by the same 8, headroom unchanged.
   ['skills/objectstack-platform/references/bootstrap.md', 1343],

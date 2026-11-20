@@ -44,7 +44,7 @@ export const SeedData = [statusSeed, categorySeed];
 
 | Field | Default | Purpose |
 |:------|:--------|:--------|
-| `object` | derived | Auto-set from `objectDef.name` — never write manually |
+| `object` | derived | Auto-set from `objectDef.name`; hand-written only in a runtime save (below) |
 | `externalId` | `'name'` | Stable business key (or field list) every mode matches on; required in every record (below) |
 | `mode` | `'ignore'` | Import strategy (see below) |
 | `columns` | — | Per-column write policy, keyed by field (below) |
@@ -55,6 +55,12 @@ export const SeedData = [statusSeed, categorySeed];
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
 
 Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
+
+A `seed` saved at runtime names its `object` itself. One that resolves to
+nothing is refused: `422 INVALID_METADATA` at `object`, "which is not defined".
+Correct the name to the object's full name (`crm_lead`, not `lead`) or create
+the object first: a draft of it is enough for a draft seed; a live seed needs
+it published.
 
 ### Import modes
 
