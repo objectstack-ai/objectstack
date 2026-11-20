@@ -396,6 +396,18 @@ row whose new value would sort it elsewhere stays in place until the next load
   re-reads the list, "Overwrite anyway" writes over it and keeps the row in
   place.
 
+### Footer calculations
+
+A column's `summary` draws its calculation in the table's last row, under the
+column. A host that passes `residentSummaryRow` draws that row on a flat table
+even when nothing is declared, led by the record count. With
+`onColumnSummaryPick` as well (wired only for a reader who may change the view),
+clicking a cell opens one menu of the calculations its field type allows, the
+current one ticked and None last; the grid draws the pick at once and the host
+saves it as the column's `summary`. The console's list saves it on a personal
+view at once, and on a shared view as a draft that others see once it is
+published.
+
 ### Keyboard navigation
 
 `keyboardNavigation` turns the grid's data cells into one roving Tab stop, on the

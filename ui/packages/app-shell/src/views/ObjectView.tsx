@@ -11,7 +11,7 @@
 
 import type { ColumnSummary } from '@objectstack/spec/ui';
 import type { ListColumn } from '@object-ui/types';
-import { columnsWithSummary } from './columnSummaryWrite';
+import { columnsWithSummary } from './columnSummaryWrite.js';
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';

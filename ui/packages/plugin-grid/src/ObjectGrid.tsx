@@ -253,6 +253,12 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   residentSummaryRow?: boolean;
   /**
+   * [objectstack#35702] The host's own wording of the record count that leads
+   * the footer row (the list's 「42 records」, plural forms included). Absent ⇒
+   * the grid's 「Count 42」.
+   */
+  summaryRowLead?: (count: number) => React.ReactNode;
+  /**
    * [objectstack#35702] Wired only for a reader who may change the view: each
    * footer cell becomes the menu that picks the column's calculation (`null` =
    * None). The grid draws the pick at once; the host saves it on the view and
@@ -768,6 +774,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   showRowNumbers: hostShowRowNumbers,
   onColumnSummaryChange,
   residentSummaryRow,
+  summaryRowLead,
   onColumnSummaryPick,
   onResidentSummaryRowChange,
   onRowGroupsChange,
@@ -3014,9 +3021,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const drawnFields: string[] = [];
   const summaryRow: ObjectGridDataTableSchema['summaryRow'] = (hasSummary || residentRowDrawn) && !onColumnSummaryChange
     ? {
-        lead: t('grid.summary.countLead', {
-          value: (typeof resolvedTotalMatching === 'number' ? resolvedTotalMatching : data.length).toLocaleString(displayLocale),
-        }),
+        lead: summaryRowLead
+          ? summaryRowLead(typeof resolvedTotalMatching === 'number' ? resolvedTotalMatching : data.length)
+          : t('grid.summary.countLead', {
+            value: (typeof resolvedTotalMatching === 'number' ? resolvedTotalMatching : data.length).toLocaleString(displayLocale),
+          }),
         cells: residentRowDrawn
           ? Object.fromEntries(tableColumns.flatMap((col: { accessorKey: string }) => {
               if (objectFields?.[col.accessorKey]) drawnFields.push(col.accessorKey);

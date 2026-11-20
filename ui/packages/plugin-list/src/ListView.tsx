@@ -2152,6 +2152,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const showViewSwitcher = showViewSwitcherProp ?? (propSchema as any)?.showViewSwitcher ?? false;
   // i18n support for record count and other labels
   const { t } = useListViewTranslation();
+  // objectstack#35702 — the grid's footer row leads with the list's own count wording.
+  const recordCountLead = React.useCallback((count: number) => t('list.recordCount', { count }), [t]);
   const { fieldLabel: resolveFieldLabel, actionLabel: resolveActionLabel, objectLabel: resolveObjectLabel } = useListFieldLabel();
   const { translateOptions } = useSafeFieldLabel();
   // The audience's BCP-47 tag (tenant locale → UI language → `en`), used below
@@ -5145,9 +5147,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // objectstack#35702 — the resident footer row (the record count in
           // its first cell, so the list draws no count bar of its own), and,
           // for a reader who may change the view, each cell's calculation menu.
-          ...(!compact && !cappedWindow
+          // A view that hides its record count (`showRecordCount: false`)
+          // keeps the old row: drawn only under a declared calculation.
+          ...(!compact && !cappedWindow && schema.showRecordCount !== false
             ? {
                 residentSummaryRow: true,
+                summaryRowLead: recordCountLead,
                 onResidentSummaryRowChange: setGridDrawsCount,
                 ...(onColumnSummaryPick ? { onColumnSummaryPick } : {}),
               }
@@ -5720,7 +5725,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged, compact, cappedWindow, onColumnSummaryPick]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged, compact, cappedWindow, onColumnSummaryPick, recordCountLead]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
