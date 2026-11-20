@@ -1027,12 +1027,18 @@ export const BODY_TABLE_DENSITY = [
  * The width a body table's drawn column asks for: the inline width the table
  * gives its header cell (a user's resize, the declared width or the estimate
  * from what its cells draw), which does not grow when the table stretches
- * its columns to fill the row; else the drawn width.
+ * its columns to fill the row; else the width already `known` for it, else
+ * the drawn width; `undefined` while it has none.
  */
-function bodyTableColumnWidth(th: HTMLElement): number {
+function bodyTableColumnWidth(th: HTMLElement, known: number | undefined): number | undefined {
   const declared = th.style.minWidth;
   if (/^\d+(\.\d+)?(px)?$/.test(declared)) return parseFloat(declared);
-  return th.getBoundingClientRect().width;
+  // A width the table spells otherwise (a fit-content `1%`, an authored CSS
+  // length) is read off the drawn cell once, and only when it has one: a
+  // header drawn before the table has sized it asks for nothing yet.
+  if (known !== undefined) return known;
+  const drawn = th.getBoundingClientRect().width;
+  return drawn > 0 ? drawn : undefined;
 }
 
 /**
@@ -3638,6 +3644,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     }
     let resizes: ResizeObserver | null = null;
     let mounts: MutationObserver | null = null;
+    let cells: MutationObserver | null = null;
     const findBox = () => host.querySelector<HTMLElement>('[data-table-scroll-box]');
     const keys = readColumnKeys(bodyTableColumnKeysKey);
     const watch = (box: HTMLElement) => {
@@ -3649,7 +3656,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         for (const th of Array.from(box.querySelectorAll<HTMLElement>('thead th'))) {
           const key = th.getAttribute('data-column-key');
           if (key === null) besideColumns += th.getBoundingClientRect().width;
-          else bodyTableColumnWidths.current.set(key, bodyTableColumnWidth(th));
+          else {
+            const width = bodyTableColumnWidth(th, bodyTableColumnWidths.current.get(key));
+            if (width !== undefined) bodyTableColumnWidths.current.set(key, width);
+          }
         }
         // A box with no width has not been laid out: it leaves nothing out.
         setBodyTableColumnCap(box.clientWidth > 0
@@ -3658,6 +3668,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
       };
       read();
+      // The table settles its columns a render after it is handed fewer:
+      // read again when its cells change.
+      if (typeof MutationObserver !== 'undefined') {
+        cells = new MutationObserver(read);
+        cells.observe(box, { childList: true, subtree: true });
+      }
       if (typeof ResizeObserver === 'undefined') return;
       resizes = new ResizeObserver(read);
       resizes.observe(box);
@@ -3681,6 +3697,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     }
     return () => {
       mounts?.disconnect();
+      cells?.disconnect();
       resizes?.disconnect();
     };
     // Re-read once the table draws the columns that fit: what scrolls now is
