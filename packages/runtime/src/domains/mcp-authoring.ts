@@ -173,7 +173,7 @@ const RESOURCE_NOT_FOUND: ErrorCode = 'RESOURCE_NOT_FOUND';
 const SERVICE_UNAVAILABLE: ErrorCode = 'SERVICE_UNAVAILABLE';
 const INTERNAL_ERROR: ErrorCode = 'INTERNAL_ERROR';
 
-/** [#34774] The `@objectstack/spec` this process resolves (the version `initialize` and the restriction profile state). */
+/** [#34774] The `@objectstack/spec` this process resolves (the version `initialize` states). */
 const SERVER_SPEC_VERSION: string | undefined = (() => {
     try {
         const { version } = createRequire(import.meta.url)('@objectstack/spec/package.json') as { version?: unknown };

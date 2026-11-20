@@ -1801,7 +1801,7 @@ const DEFAULT_HTTP_INSTRUCTIONS =
 /**
  * [#34774] The authoring contract line (#34659 ruling D4 = A): the
  * `@objectstack/spec` this process resolves (its `package.json`, the file the
- * draft save's major check and the restriction profile route read too). Second
+ * draft save's major check reads too). Second
  * among the paragraphs a client routes on, and only where the authoring family
  * registers tools, as the drafts line: a connection with no build door is told
  * nothing about building ([#32766]). No line when the manifest cannot be read.
