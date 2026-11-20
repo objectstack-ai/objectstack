@@ -3683,7 +3683,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       mounts?.disconnect();
       resizes?.disconnect();
     };
-  }, [bodyTableDrawn, isMobile, bodyTableColumnKeysKey]);
+    // Re-read once the table draws the columns that fit: what scrolls now is
+    // the table with those columns.
+  }, [bodyTableDrawn, isMobile, bodyTableColumnKeysKey, bodyTableColumnCap]);
   // When the consumer explicitly enables `filterable`, always render the
   // filter input — they're opting in. (data-table's own auto-search is
   // suppressed via the viewSchema below to avoid a duplicate input.)

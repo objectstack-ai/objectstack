@@ -549,7 +549,10 @@ describe('RelatedList — a body table wider than its column (objectstack#29945,
     // cut at the right edge, so nothing scrolls, nothing is pinned, no shadow.
     expect(headerCells().reduce((sum, th) => sum + askedWidth(th), 0)).toBeLessThanOrEqual(detailsPx);
     expect(host()?.getAttribute('data-body-table-overflow')).toBe('true');
-    expect(shadow()).toBeNull();
+    // The table re-reads its box on a resize of its content, which jsdom
+    // never reports; a scroll event asks it the same question.
+    fireEvent.scroll(document.querySelector('[data-table-scroll-box]') as HTMLElement);
+    await waitFor(() => expect(shadow()).toBeNull());
     expect(headerCells().some((th) => /\bsticky\b/.test(th.className))).toBe(false);
     expect(enlarge()?.getAttribute('data-overflow')).toBe('true');
     // Named by its visible label, not an icon-only aria-label.
@@ -610,7 +613,8 @@ describe('bodyTableColumnsThatFit — the leading columns that fit whole (object
 });
 
 describe('RelatedList — a body table draws the list\'s dense rows (objectstack#35742)', () => {
-  const tableRoot = () => document.querySelector('[data-testid="data-table-scroll-box"]')?.closest('.flex.flex-col') as HTMLElement | null;
+  // The table's root: the box's ancestor the table lays out at full height.
+  const tableRoot = () => document.querySelector('[data-testid="data-table-scroll-box"]')?.closest('.h-full') as HTMLElement | null;
 
   it('33px data rows (a 32px cell over the row line) under a 32px header, as the list\'s compact rows', async () => {
     renderList(true);
