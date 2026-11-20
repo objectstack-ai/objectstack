@@ -42,7 +42,7 @@ import { assertFilterIsMaterializable, assertListComparandShapes, collectComposa
 // [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
 // resolvers' host, built once per engine, which carries every member it reads.
 import { securityResolversHost } from './engine-facet-hosts.js';
-import { passFixedReadLeaves } from './fixed-read-leaf-seam.js';
+import { atFixedReadLeafDoor, passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import { assertHavingTemporalComparandsInterpretable, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 import { narrowHavingNumberComparands, narrowNumberComparands } from './number-comparand-declared-type-door.js';
@@ -185,7 +185,7 @@ export class DeleteAndAggregateFacet {
     rejectUnknownEngineOptions(object, 'delete', options, ENGINE_DELETE_OPTION_KEYS);
     // [#5158] Same ordering reason as update(): the dispatch decision below
     // reads `where.id`, which an unlowered array never carries.
-    options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf);
+    options = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf));
     // [ADR-0100] Same credential-column refusal as update().
     rejectCredentialEvaluation(object, 'delete', options, options?.context, this.relatedSchemaOf);
 
@@ -1037,7 +1037,7 @@ export class DeleteAndAggregateFacet {
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
-      query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object), this.relatedSchemaOf);
+      query = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object), this.relatedSchemaOf));
       // [ADR-0100] The filter half of the credential-column guard — `where`
       // and every `aggregations[i].filter` — before the search term joins
       // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
@@ -1161,7 +1161,7 @@ export class DeleteAndAggregateFacet {
               // `null` / string element as no constraint (every row counted).
               // First among the doors below, which step around a non-node.
               assertFilterNodeShapes(aggFilter, `aggregations[${i}].filter`);
-              assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
+              atFixedReadLeafDoor(this, () => assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`));
               assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
               // [#15661] …and the declared-type door for the text operators: a
               // `$contains` over a numeric column in ONE aggregation's filter is
@@ -1304,7 +1304,7 @@ export class DeleteAndAggregateFacet {
       // string element kept every group's rows unconstrained; a condition
       // array was refused as a key naming no column ('0').
       assertFilterNodeShapes(query.having, 'having');
-      assertListComparandShapes(object, 'aggregate', query.having, 'having');
+      atFixedReadLeafDoor(this, () => assertListComparandShapes(object, 'aggregate', query.having, 'having'));
       // [#20176] The object's declaration, read once: the per-aggregation
       // `filter` reads a temporal comparand by its column's storage rule
       // (`applyInMemoryAggregation` below), and `having` by its aggregated

@@ -119,7 +119,9 @@ export function invalidFilterError(message: string): Error {
  * leaf brands (`admitFixedReadLeaves`, {@link ENGINE_FIXED_READ_LEAF_BRANDS}):
  * such a leaf arrives composed and the engine's seam passes it through. It
  * then refuses, by name, every one out of position or on the wrong verb
- * (`fixed-read-leaf-position.ts#collectFixedReadLeaves`); the recipient, the
+ * (`fixed-read-leaf-position.ts#collectFixedReadLeaves`), a refusal the verb
+ * calling this door logs once per engine
+ * (`fixed-read-leaf-seam.ts#atFixedReadLeafDoor`); the recipient, the
  * two classes and the driver's declaration are the executor boundary's
  * (`fixed-read-leaf-seam.ts`). An unbranded copy is refused as a non-list,
  * here, as before.

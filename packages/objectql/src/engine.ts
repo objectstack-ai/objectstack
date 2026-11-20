@@ -5322,6 +5322,7 @@ export class ObjectQL implements IObjectQLEngine {
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
       composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
       find: (...a) => this.find(...a),
+      facade: this, logger: this.logger,
     };
     return count.call(host, object, query, options);
   }

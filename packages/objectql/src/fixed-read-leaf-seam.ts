@@ -47,11 +47,12 @@
  *
  * ## The log
  *
- * A refusal the boundary or the entry makes is logged at `error` once per
- * evaluator (`@objectstack/core`'s `logRefusalOnce`): once per driver for a
- * declaration it lacks, once per engine for every other fault. The door's
- * refusal of a caller-written leaf is thrown at the caller, as ADR-0139's door
- * refusals are: the door holds no logger.
+ * The refusal is logged at `error` once per evaluator wherever it occurs
+ * (`@objectstack/core`'s `logRefusalOnce`): once per driver for a declaration
+ * it lacks, once per engine for every other fault. The door holds no logger,
+ * so each verb runs its door calls through {@link atFixedReadLeafDoor}, which
+ * logs a door refusal on the SAME per-engine flag the boundary's refusals use:
+ * a refusal at the door and one at the boundary log one line between them.
  *
  * ⛔ No boot refusal and no producer here: the class-② boot check and R2's
  * share-arm answer land with the producer (ADR-0155 plan step 6), and until
@@ -147,6 +148,35 @@ function flagOf(evaluator: object): { logged: boolean } {
   return flag;
 }
 
+/** What the door's half of the log reads: the engine its flag is keyed on, and the engine's logger. */
+export interface FixedReadLeafDoorHost {
+  readonly facade: object;
+  readonly logger: ReadableIdsRefusalLog | undefined;
+}
+
+/** Log `err` once for the engine `host.facade` names when it is the seam's refusal; any other error is not this log's. */
+function logSeamRefusalOnce(host: FixedReadLeafDoorHost, err: unknown): void {
+  if (isFixedReadLeafSeamRefusal(err)) logRefusalOnce(err as Error, host.logger, flagOf(host.facade), 'evaluator');
+}
+
+/**
+ * [ADR-0155 D4] Run `door`, one of a verb's door calls (`lowerWhereFilterArray`,
+ * or `assertListComparandShapes` on `having` or an aggregation's filter), and
+ * when it throws the seam's refusal for a fixed-read leaf out of position or on
+ * the wrong verb, log it at `error` on the engine's flag, the one
+ * {@link passFixedReadLeaves} logs on, then re-throw it unchanged. Any other
+ * error, an unbranded copy's `INVALID_FILTER` / 400 among them, passes through
+ * unlogged here.
+ */
+export function atFixedReadLeafDoor<T>(host: FixedReadLeafDoorHost, door: () => T): T {
+  try {
+    return door();
+  } catch (err) {
+    logSeamRefusalOnce(host, err);
+    throw err;
+  }
+}
+
 /**
  * [ADR-0155 D4] The executor seam's pass-through: judge every fixed-read leaf
  * in `node` (an operation's `where`, or the `path` clause) for an operation on
@@ -189,7 +219,7 @@ export function passFixedReadLeaves(
       }
     }
   } catch (err) {
-    if (isFixedReadLeafSeamRefusal(err)) logRefusalOnce(err as Error, host.logger, flagOf(host.facade), 'evaluator');
+    logSeamRefusalOnce(host, err);
     throw err;
   }
   if (sites.length === 0) return;

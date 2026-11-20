@@ -38,7 +38,7 @@ import { collectComposableReadableIds } from './filter-comparand-shape.js';
 // [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
 // resolvers' host, built once per engine, which carries every member it reads.
 import { securityResolversHost } from './engine-facet-hosts.js';
-import { passFixedReadLeaves } from './fixed-read-leaf-seam.js';
+import { atFixedReadLeafDoor, passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import { retiredSecretSlots, secretFieldsWritten } from './engine-secret-internal-fields.js';
 import type { PendingSecretRow, SecretHandleSlot } from './engine-secret-internal-fields.js';
 import { sealedSecretsNamedBy, secretKeysHoldingCallerValues, suppliedOverSealedSecrets } from './engine-update-sealed-secrets.js';
@@ -204,7 +204,7 @@ export class UpdateFacet {
      // [#5158] Lower before the by-id extraction below reads `where.id`: on an
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
-     options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
+     options = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf));
      // [ADR-0100] A predicate write is judged like a read: a non-system
      // caller's `where` evaluates no `secret` / `password` column.
      rejectCredentialEvaluation(object, 'update', options, options?.context, this.relatedSchemaOf);

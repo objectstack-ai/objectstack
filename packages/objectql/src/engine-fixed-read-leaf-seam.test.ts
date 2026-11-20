@@ -366,3 +366,63 @@ describe('[ADR-0155 D1] the comparand door', () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe('[ADR-0155 D4] a refusal at the door is logged on the boundary\'s flag, once per engine', () => {
+  const misplaced = () => ({ id: { $nin: SharedRecordIds.read('srid_doc', 'u1') } });
+  const errorsIn = (logger: { lines: Array<{ level: string; msg: string }> }) =>
+    logger.lines.filter((l) => l.msg.includes('fixed read of')).map((l) => l.level);
+
+  it('a misplaced leaf in a caller\'s where is refused at the door, 500, and two refusals log once at error', async () => {
+    const { engine, calls, logger } = await bootEngine();
+    for (let i = 0; i < 2; i++) {
+      expect(envelopeOf(await refusalOf(engine.find('srid_doc', { where: misplaced() as unknown as FilterCondition }, { context: ASKER as any })))).toEqual(REFUSED);
+    }
+    expect(calls).toEqual([]);
+    expect(errorsIn(logger)).toEqual(['error']);
+  });
+
+  it('a refusal at the door and one at the boundary share one log, in either order', async () => {
+    const otherRecipient = () => ({ id: { $in: SharedRecordIds.read('srid_doc', 'someone_else') } });
+    const door = (engine: ObjectQL) => engine.find('srid_doc', { where: misplaced() as unknown as FilterCondition }, { context: ASKER as any });
+    const boundary = (engine: ObjectQL) => engine.find('srid_doc', { where: otherRecipient() as unknown as FilterCondition }, { context: ASKER as any });
+    for (const order of [[door, boundary], [boundary, door]]) {
+      const { engine, logger } = await bootEngine();
+      for (const call of order) expect(envelopeOf(await refusalOf(call(engine)))).toEqual(REFUSED);
+      expect(errorsIn(logger)).toEqual(['error']);
+    }
+  });
+
+  // Every verb's door calls: the lowering of `where` (both branches), and the
+  // aggregate's `having` and per-aggregation `filter` doors.
+  const DOOR_SITES: Array<[string, (engine: ObjectQL) => Promise<unknown>]> = [
+    ['find', (e) => e.find('srid_doc', { where: misplaced() as unknown as FilterCondition }, { context: ASKER as any })],
+    ['find, array form', (e) => e.find('srid_doc', { where: [['id', '=', SharedRecordIds.read('srid_doc', 'u1')]] as unknown as FilterCondition }, { context: ASKER as any })],
+    ['findOne', (e) => e.findOne('srid_doc', { where: misplaced() as unknown as FilterCondition }, { context: ASKER as any })],
+    ['count', (e) => e.count('srid_doc', { where: misplaced() as unknown as FilterCondition }, { context: ASKER as any })],
+    ['aggregate where', (e) => e.aggregate('srid_doc', { where: misplaced() as unknown as FilterCondition, aggregations: [{ function: 'count', alias: 'n' }] }, { context: ASKER as any })],
+    ['aggregate having', (e) => e.aggregate('srid_doc', { groupBy: ['owner'], having: misplaced() as unknown as FilterCondition, aggregations: [{ function: 'count', alias: 'n' }] }, { context: ASKER as any })],
+    ['aggregate filter', (e) => e.aggregate('srid_doc', { aggregations: [{ function: 'count', alias: 'n', filter: misplaced() as unknown as FilterCondition }] }, { context: ASKER as any })],
+    ['update', (e) => e.update('srid_doc', { label: 'z' }, { where: misplaced(), multi: true, context: ASKER } as any)],
+    ['delete', (e) => e.delete('srid_doc', { where: misplaced(), multi: true, context: ASKER } as any)],
+  ];
+  for (const [site, call] of DOOR_SITES) {
+    it(`the door refusal on ${site} is logged at error once`, async () => {
+      const { engine, calls, logger } = await bootEngine();
+      for (let i = 0; i < 2; i++) expect(envelopeOf(await refusalOf(call(engine))), site).toEqual(REFUSED);
+      expect(calls).toEqual([]);
+      expect(errorsIn(logger)).toEqual(['error']);
+    });
+  }
+
+  it('an unbranded copy stays INVALID_FILTER / 400 and is not logged by this device, nor spends its flag', async () => {
+    const { engine, logger } = await bootEngine();
+    const copy = JSON.parse(JSON.stringify(SharedRecordIds.read('srid_doc', 'u1')));
+    for (let i = 0; i < 2; i++) {
+      expect(envelopeOf(await refusalOf(engine.find('srid_doc', { where: { id: { $in: copy } } }, { context: ASKER as any })))).toEqual({ code: 'INVALID_FILTER', status: 400 });
+    }
+    expect(errorsIn(logger)).toEqual([]);
+    expect(logger.lines.filter((l: { level: string }) => l.level === 'error')).toEqual([]);
+    expect(envelopeOf(await refusalOf(engine.find('srid_doc', { where: misplaced() as unknown as FilterCondition }, { context: ASKER as any })))).toEqual(REFUSED);
+    expect(errorsIn(logger)).toEqual(['error']);
+  });
+});
