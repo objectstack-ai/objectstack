@@ -676,6 +676,10 @@ describe('object comparands the AST arm cannot compare are refused by name', () 
     ['!=', new Amount(25), 'is a Amount instance'],
     ['not_contains', new Amount(25), 'is a Amount instance'],
     ['starts_with', new Amount(25), 'is a Amount instance'],
+    // Neither is a plain object from another realm: one structural test with
+    // the converter (foreign-realm-object.ts).
+    ['>', Object.create(Object.create(null) as object) as object, 'is an object of an unrecognised type, which'],
+    ['=', Object.create({ id: 'u1' }) as object, 'is a Object instance, which'],
   ] as const)('`%s` refuses %j', async (operator, comparand, words) => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(await selectedIds(['age', operator, comparand])).toEqual([]);

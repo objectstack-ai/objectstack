@@ -260,6 +260,19 @@ describe('a `$null` / `$exists` flag that is not a boolean is refused, not read 
       .toBe("[ObjectUI] The '$empty' filter operator on field 'f' takes a boolean flag (true or false)");
   });
 
+  it.each([
+    ['$null', 'a missing value', 'a present one'],
+    ['$exists', 'a present value', 'a missing one'],
+    ['$empty', 'an empty value', 'a non-empty one'],
+  ] as const)('`%s` refuses in one full sentence: the received value and both directions', (operator, whenTrue, whenFalse) => {
+    const thrown = thrownBy(() => convertFiltersToAST({ f: { [operator]: 'no' } }));
+    expect((thrown as Error).message).toBe(
+      `[ObjectUI] The '${operator}' filter operator on field 'f' takes a boolean flag (true or false); `
+      + `received "no". Write { f: { ${operator}: true } } for ${whenTrue}, or `
+      + `{ f: { ${operator}: false } } for ${whenFalse}.`,
+    );
+  });
+
   it('a flag that cannot be serialised is still refused in words, not by a second throw', () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;

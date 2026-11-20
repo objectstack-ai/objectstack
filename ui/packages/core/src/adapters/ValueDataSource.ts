@@ -34,6 +34,7 @@ import {
   textComparandRefusalReason,
 } from '../utils/text-comparand.js';
 import { toFilterNodeSafely, type FilterOperatorError } from '../utils/filter-converter.js';
+import { isForeignRealmPlainObject } from '../utils/foreign-realm-object.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -140,7 +141,8 @@ const DOLLAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(FILTER_OPERATORS
  * The operators that compare their comparand by EQUALITY, MEMBERSHIP or TEXT
  * rather than by order, in each dialect. Under these a class instance is
  * refused (see {@link classInstanceComparandRefusalReason}); under the
- * orderings and `$between` it is compared through its `valueOf`. `$icontains`
+ * orderings and `$between` it is compared through its `valueOf` when that
+ * returns a primitive, and otherwise as its text. `$icontains`
  * is not here: its own text door already refuses every non-string comparand.
  */
 const DOLLAR_BY_VALUE_OPERATORS: ReadonlySet<string> = new Set([
@@ -525,8 +527,9 @@ function nestedRelationRefusalReason(field: string, key: string): string {
  * Plain means prototype `Object.prototype` or `null`, the test the spec's
  * filter walk uses to tell filter structure from data. A class instance is
  * data even when it carries its own non-`$` keys: a moment or luxon date, or a
- * decimal object, under `>` / `<` compares through its `valueOf` in the switch
- * below and is not refused as a relation.
+ * decimal object, under `>` / `<` compares through its `valueOf` (when that
+ * returns a primitive; otherwise as its text) in the switch below and is not
+ * refused as a relation.
  * A `Date` has no own keys, so it is never one either.
  */
 function nestedRelationComparandKey(target: unknown): string | undefined {
@@ -577,12 +580,24 @@ function emptyObjectComparandRefusalReason(field: string): string {
  * column, an instant for a `datetime` one), and this matcher has no field types
  * to read a form from: the same reason {@link resolveFieldReference} refuses a
  * `{ $field, addDays }` offset. Compared as an object, it read as the text
- * `[object Object]`.
+ * `[object Object]`. The remedy is the comparand this matcher can compare.
  */
 function nowAnchorComparandRefusalReason(field: string): string {
   return `filter comparand on field '${field}' is a { $now, addDays } date anchor, which the `
     + 'in-memory matcher does not resolve: the platform shifts the current instant in the '
-    + "compared column's temporal form, and this matcher has no field types to read one from";
+    + "compared column's temporal form, and this matcher has no field types to read one from; "
+    + 'compare with a concrete Date or ISO string here';
+}
+
+/**
+ * Is `value` a `{ $now }` anchor, by the spec's own test: an object whose
+ * `$now` is `true` or a string (`isNowAnchor` in the spec's comparand walk,
+ * `nowAnchorOf` in `driver-sql`). `{ $now: 0 }` and `{ $now: false }` are not
+ * one: the platform refuses them as malformed, so they take the `$`-key
+ * sentence instead of being told the platform resolves them.
+ */
+function isNowAnchorComparand(value: Record<string, unknown>): boolean {
+  return value.$now === true || typeof value.$now === 'string';
 }
 
 /**
@@ -597,20 +612,36 @@ function operatorKeyedComparandRefusalReason(field: string, key: string): string
 }
 
 /**
- * Is `value` a plain object of ANOTHER realm (an iframe, a `vm` context)? Its
- * prototype is that realm's `Object.prototype`, whose own prototype is `null`.
- * The spec's filter walk does not read it as filter structure, and it has no
- * `valueOf` worth comparing, so in comparand position it is refused under every
- * operator, the way the spec's comparand door refuses it.
+ * A plain object of ANOTHER realm ({@link isForeignRealmPlainObject}, the one
+ * test the filter converter uses too). The spec's filter walk does not read it
+ * as filter structure, and it has no `valueOf` worth comparing, so in
+ * comparand position it is refused under every operator, the way the spec's
+ * comparand door refuses it.
  */
-function isForeignRealmPlainObject(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || isPlainObject(value)) return false;
-  const proto = Object.getPrototypeOf(value) as object | null;
-  return proto !== null && Object.getPrototypeOf(proto) === null;
-}
-
 function foreignRealmComparandRefusalReason(field: string): string {
   return `filter comparand on field '${field}' is a plain object from another realm, which is `
+    + 'neither a comparison value nor filter structure here';
+}
+
+/**
+ * Is `value` an object whose prototype chain ends one step up without this
+ * realm's `Object.prototype`, and that is not a foreign plain object:
+ * `Object.create(Object.create(null))`? It has no `toString` or `valueOf`, so
+ * an ordering would throw on it, and it is refused under every operator, in a
+ * sentence that names it as the converter does.
+ */
+function isNullRootedObject(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || isPlainObject(value)) return false;
+  try {
+    const proto = Object.getPrototypeOf(value) as object | null;
+    return proto !== null && Object.getPrototypeOf(proto) === null;
+  } catch {
+    return false;
+  }
+}
+
+function nullRootedComparandRefusalReason(field: string, value: object): string {
+  return `filter comparand on field '${field}' is ${instanceName(value)}, which is `
     + 'neither a comparison value nor filter structure here';
 }
 
@@ -630,15 +661,17 @@ function instanceName(value: object): string {
  * The refusal for a class instance (a moment or luxon date, a decimal object,
  * a `RegExp`, a `Map`) as the comparand of an equality, membership or text
  * operator. It is data, and the ordering operators compare it through its
- * `valueOf`; these operators would compare it by reference (`$eq` no row,
+ * `valueOf` when that returns a primitive, and otherwise as its text; these
+ * operators would compare it by reference (`$eq` no row,
  * `$ne` / `$nin` every row) or as its text, and the spec's comparand door
  * refuses it at every one of them. One sentence for both dialects: it names no
  * operator.
  */
 function classInstanceComparandRefusalReason(field: string, value: object): string {
   return `filter comparand on field '${field}' is ${instanceName(value)}, which the in-memory `
-    + 'matcher compares only by order (through its valueOf, under $gt / $gte / $lt / $lte / '
-    + '$between); an equality, membership or text comparison would read it by reference or as '
+    + 'matcher compares only by order (under $gt / $gte / $lt / $lte / $between, through its '
+    + 'valueOf when that returns a primitive, otherwise as its text); an equality, membership or '
+    + 'text comparison would read it by reference or as '
     + `text, so a comparison value there must be ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}`;
 }
 
@@ -655,10 +688,13 @@ function objectValueRefusal(field: string, value: unknown, byValue: boolean): st
     if (keys.length === 0) return emptyObjectComparandRefusalReason(field);
     // A `{ $field }` reference is resolved, or refused by name, further on.
     if (isFieldReferenceComparand(value)) return undefined;
-    if ('$now' in value) return nowAnchorComparandRefusalReason(field);
-    return operatorKeyedComparandRefusalReason(field, keys.find((k) => k.startsWith('$')) ?? keys[0]);
+    if (isNowAnchorComparand(value)) return nowAnchorComparandRefusalReason(field);
+    // nestedRelationComparandKey returned every non-empty plain object with no
+    // `$` key above, so a `$` key is present here.
+    return operatorKeyedComparandRefusalReason(field, keys.find((k) => k.startsWith('$')) as string);
   }
   if (isForeignRealmPlainObject(value)) return foreignRealmComparandRefusalReason(field);
+  if (isNullRootedObject(value)) return nullRootedComparandRefusalReason(field, value as object);
   if (
     byValue && value !== null && typeof value === 'object' && !Array.isArray(value)
     && !isAcceptedFilterComparand(value)
@@ -692,12 +728,14 @@ function objectValueRefusal(field: string, value: unknown, byValue: boolean): st
  * - a plain object with a `$` key that is not a `{ $field }` reference: the
  *   `{ $now, addDays }` date anchor gets {@link nowAnchorComparandRefusalReason},
  *   any other one {@link operatorKeyedComparandRefusalReason};
- * - a plain object of another realm ({@link isForeignRealmPlainObject}).
+ * - a plain object of another realm ({@link isForeignRealmPlainObject}), and an
+ *   object whose prototype is a `null`-prototype object of no realm's `Object`
+ *   ({@link isNullRootedObject}).
  *
  * And, only under an operator that compares by equality, membership or text
  * (`byValue`), a class instance ({@link classInstanceComparandRefusalReason}).
- * Under an ordering it is data compared through its `valueOf`, so it is not
- * refused there. A `Date` and a `{ $field }` reference are still compared.
+ * Under an ordering it is data compared through its `valueOf` when that returns
+ * a primitive, and otherwise as its text, so it is not refused there. A `Date` and a `{ $field }` reference are still compared.
  */
 function objectComparandRefusal(
   field: string,

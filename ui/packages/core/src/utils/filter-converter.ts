@@ -22,6 +22,7 @@ import {
 } from '@objectstack/spec/ui';
 import { isAcceptedFilterComparand, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE } from '@objectstack/spec/data';
 import { isRefusedTextComparand, textComparandRefusalReason } from './text-comparand.js';
+import { isForeignRealmPlainObject } from './foreign-realm-object.js';
 
 /**
  * FilterNode AST type definition
@@ -340,9 +341,10 @@ function falseIdentityLeaf(field: string, value: unknown[]): FilterNode {
  * one population. A plain object from ANOTHER realm (an iframe, a `vm`
  * context), whose prototype is that realm's `Object.prototype`, is therefore
  * not an operator map here either: the spec reads it as a literal comparand and
- * answers `INVALID_FILTER` / 400, so this arm refuses it as one, and the value
- * data source, which routes a non-plain condition to this converter, refuses it
- * in the same words.
+ * answers `INVALID_FILTER` / 400, so the converter refuses it with a sentence
+ * of its own (see {@link refuseForeignRealmCondition}), and the value data
+ * source, which routes a non-plain condition to this converter, refuses it in
+ * the same words.
  *
  * A plain object with no entries stays an operator map with no operators,
  * whatever else it happens to be. That boundary is deliberate:
@@ -379,8 +381,6 @@ function describeExoticComparand(value: object): string {
     name = undefined;
   }
   if (typeof name !== 'string' || name === '') return 'an object of an unrecognised type';
-  // A plain object of another realm: its constructor is that realm's `Object`.
-  if (name === 'Object') return 'a plain object from another realm';
   try {
     text = String(value);
   } catch {
@@ -468,6 +468,30 @@ function refuseTextComparand(field: string, operator: string, target: unknown): 
   throw new FilterOperatorError(
     `[ObjectUI] The ${textComparandRefusalReason(field, operator, target)}. ${ported}`,
     { operator, field },
+  );
+}
+
+/**
+ * A field whose whole condition is a plain object of ANOTHER realm (an iframe,
+ * a `vm` context): `{ age: foreignObject }` with `foreignObject` built as
+ * `{ $gte: 18 }` there ({@link isForeignRealmPlainObject}).
+ *
+ * The author wrote a valid operator map in the wrong realm, so the exotic
+ * comparand sentence is the wrong one for them: it tells them a comparison
+ * value must be a string or a number, and that the condition used to be
+ * dropped, when until objectstack#35533 it lowered. This sentence says what is
+ * read as filter structure here and names the copy that rebuilds the filter in
+ * this realm. Same envelope as the exotic refusal: `INVALID_FILTER` / 400,
+ * naming the field.
+ */
+function refuseForeignRealmCondition(field: string): never {
+  throw new FilterOperatorError(
+    `[ObjectUI] The filter on field '${field}' is a plain object from another realm (an iframe, a vm ` +
+    `context). Only a plain object of this realm (prototype Object.prototype or null) is read as an ` +
+    `operator map or a nested condition here, as the spec's filter walk reads it; '@objectstack/spec' ` +
+    `reads this one as a comparand and answers 400 INVALID_FILTER. Rebuild the filter in this realm ` +
+    `before filtering it: { ...condition } for each operator map, or structuredClone(filter).`,
+    { field },
   );
 }
 
@@ -871,6 +895,11 @@ export function convertFiltersToAST(
       // The accepted-type list is the spec's own sentence, not a second list
       // spelled out here, for the same reason the gate above is the spec's
       // predicate rather than a local `instanceof Date`.
+      //
+      // A plain object of ANOTHER realm is refused first, in its own sentence:
+      // it is a valid operator map written in the wrong realm, and the caller's
+      // fix is a copy, not a different comparand (refuseForeignRealmCondition).
+      if (isForeignRealmPlainObject(value)) refuseForeignRealmCondition(field);
       if (!isOperatorMap(value)) {
         throw new FilterOperatorError(
           `[ObjectUI] The filter on field '${field}' carries ${describeExoticComparand(value)} ` +

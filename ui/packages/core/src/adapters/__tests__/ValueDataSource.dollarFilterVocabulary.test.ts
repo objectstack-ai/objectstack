@@ -899,6 +899,22 @@ describe('a `$`-keyed object, a foreign-realm object and a class instance in com
     },
   );
 
+  it('the anchor sentence names the remedy this face can compare', async () => {
+    const { lines } = await refusalOf({ due: { $lt: ANCHOR } });
+    expect(lines[0]).toContain('; compare with a concrete Date or ISO string here');
+  });
+
+  it.each([
+    ['{ $now: 0 }', { $now: 0 }],
+    ['{ $now: false, addDays: 7 }', { $now: false, addDays: 7 }],
+  ])('%s is no anchor by the spec’s test, so it takes the `$`-key sentence', async (_label, comparand) => {
+    const { ids, lines } = await refusalOf({ due: { $lt: comparand } });
+    expect(ids).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain('date anchor');
+    expect(lines[0]).toContain("filter comparand on field 'due' is an object carrying the key '$now'");
+  });
+
   it('the resolved anchor form (`$now` holding an instant) is refused in the same words', async () => {
     const { ids, lines } = await refusalOf({ due: { $lt: { $now: '2026-01-01T00:00:00Z', addDays: 7 } } });
     expect(ids).toEqual([]);
@@ -933,8 +949,40 @@ describe('a `$`-keyed object, a foreign-realm object and a class instance in com
     const { ids, lines } = await refusalOf({ owner: runInNewContext('({ id: "u1" })') });
     expect(ids).toEqual([]);
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("The filter on field 'owner' carries a plain object from another realm");
+    expect(lines[0]).toContain("The filter on field 'owner' is a plain object from another realm");
+    expect(lines[0]).toContain('{ ...condition } for each operator map, or structuredClone(filter)');
   });
+
+  it.each([
+    // THIS realm, constructor `Object`, but its prototype's prototype is
+    // `Object.prototype`: a class-instance-like object, refused by value only.
+    ['Object.create(somePlainObject)', () => Object.create({ id: 'u1' }) as object, 'is a Object instance, which'],
+    // A prototype whose prototype is `null`, but with no `constructor`: no
+    // text, so refused under every operator, named as the converter names it.
+    [
+      'Object.create(Object.create(null))',
+      () => Object.create(Object.create(null) as object) as object,
+      'is an object of an unrecognised type, which is neither a comparison value nor filter structure here',
+    ],
+  ])('%s is not called a plain object from another realm', async (_label, make, named) => {
+    const { ids, lines } = await refusalOf({ owner: { $eq: make() } });
+    expect(ids).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`filter comparand on field 'owner' ${named}`);
+    expect(lines[0]).not.toMatch(/another realm/);
+  });
+
+  it.each(COMPARAND_OPERATORS)(
+    '`%s` refuses `Object.create(Object.create(null))` instead of throwing on it',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({
+        owner: { [operator]: placed(operator, Object.create(Object.create(null) as object)) },
+      });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("filter comparand on field 'owner' is an object of an unrecognised type");
+    },
+  );
 
   /** A class instance: data, compared through its `valueOf` under an ordering. */
   class Amount {

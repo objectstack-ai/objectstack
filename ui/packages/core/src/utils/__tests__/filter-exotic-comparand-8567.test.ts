@@ -330,9 +330,43 @@ describe('objectui#8567 — the identity and the operator path are untouched', (
       const { thrown } = refusalOf(() => convertFiltersToAST({ age: foreign }));
       expect(thrown).toBeInstanceOf(FilterOperatorError);
       expect(thrown).toMatchObject({ ...INVALID_FILTER, field: 'age' });
-      expect((thrown as Error).message)
-        .toContain("The filter on field 'age' carries a plain object from another realm in comparand position");
+      // Its own sentence, not the exotic one: the author wrote a valid
+      // operator map in the wrong realm, and the fix is a copy.
+      expect((thrown as Error).message).toBe(
+        "[ObjectUI] The filter on field 'age' is a plain object from another realm (an iframe, a vm "
+        + 'context). Only a plain object of this realm (prototype Object.prototype or null) is read as an '
+        + "operator map or a nested condition here, as the spec's filter walk reads it; '@objectstack/spec' "
+        + 'reads this one as a comparand and answers 400 INVALID_FILTER. Rebuild the filter in this realm '
+        + 'before filtering it: { ...condition } for each operator map, or structuredClone(filter).',
+      );
+      expect((thrown as Error).message).not.toMatch(/comparand position/);
+      // The copy it names lowers.
+      expect(convertFiltersToAST({ age: { ...foreign } })).toEqual(
+        convertFiltersToAST({ age: structuredClone(foreign) }),
+      );
     }
+    expect(convertFiltersToAST({ age: { ...(runInNewContext('({ $gte: 18 })') as object) } }))
+      .toEqual(['age', '>=', 18]);
+  });
+
+  it.each([
+    // THIS realm, constructor `Object`, but its prototype's prototype is
+    // `Object.prototype`: not a foreign plain object.
+    ['Object.create(somePlainObject)', () => Object.create({ $gte: 18 }) as object, 'a Object instance'],
+    // A prototype whose prototype is `null`, but with no `constructor`.
+    [
+      'Object.create(Object.create(null))',
+      () => Object.create(Object.create(null) as object) as object,
+      'an object of an unrecognised type',
+    ],
+  ])('%s is an exotic comparand, not a plain object from another realm', (_label, make, named) => {
+    const value = make();
+    expect(() => normalizeFilterComparandTypes({ age: value })).toThrow(/which no driver can compare/);
+    const { thrown } = refusalOf(() => convertFiltersToAST({ age: value }));
+    expect(thrown).toBeInstanceOf(FilterOperatorError);
+    expect(thrown).toMatchObject({ ...INVALID_FILTER, field: 'age' });
+    expect((thrown as Error).message).toContain(`The filter on field 'age' carries ${named} in comparand position`);
+    expect((thrown as Error).message).not.toMatch(/another realm/);
   });
 
   it('CONTROL: a `null`-prototype object of THIS realm is still an operator map', () => {
