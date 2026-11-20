@@ -250,10 +250,16 @@ lifecycle: {
   datetime, JSON-shaped or multi-value column, the injected `updated_at`
   included), `id` or `created_at` (they order the rows), and a column
   `valueFields` also lists (the chain value travels in clear in every
-  checkpoint). Name a text or lookup column holding the organization id. An object that names no chain column and has
-  no `tenant_id` field still parses, but it is not sealed: the sealer reports
-  it at `error`. So is an object chained by `organization_id` that its
-  deployment declares platform-global, which withholds that column. A row whose chain column is empty is
+  checkpoint). Name a text or lookup column holding the organization id. An object that names no chain column is
+  chained by `tenant_id`, and that column is held to the same rules: an object
+  with no `tenant_id` field (the platform never injects one), with a
+  `tenant_id` whose value is not text, or with `tenant_id` in `valueFields` is
+  refused at parse time, at `lifecycle.seal`. Declare a text or lookup
+  `tenant_id`, or name a chain column such as `organization_id`. An object
+  chained by `organization_id` that its deployment declares platform-global,
+  which withholds that column, still parses but is not sealed: the sealer
+  reports it at `error`, as it does any definition that reaches the registry
+  without the parse. A row whose chain column is empty is
   sealed with the rows about no organization. `os audit verify --org <id>`
   reads the same column, so it reports that organization's rows whichever
   column holds it. The chain column is fixed once the object has
