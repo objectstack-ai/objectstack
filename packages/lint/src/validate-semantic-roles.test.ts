@@ -347,6 +347,15 @@ describe('validateSemanticRoles — a group that lists its own fields', () => {
     expect(findings[0].message).toContain('"acount"');
   });
 
+  it('a listed injected system column is a field: no warning for owner_id', () => {
+    const findings = validateSemanticRoles(stack([{
+      name: 'quote',
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['owner_id', 'code'] }],
+      fields: { code: { type: 'text' } },
+    }]));
+    expect(findings.filter((f) => f.rule === FIELD_GROUP_MEMBER_UNKNOWN)).toEqual([]);
+  });
+
   it('a list that names only missing fields leaves the group empty (rule b), beside rule (e)', () => {
     const findings = validateSemanticRoles(stack([{
       name: 'quote',

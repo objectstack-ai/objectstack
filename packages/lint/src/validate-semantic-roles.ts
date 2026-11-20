@@ -143,7 +143,12 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
     // Membership as the layout resolves it: a group's own `fields` list first,
     // else the older `Field.group` (`readFieldGroupMembership`, the same
     // resolution `deriveFieldGroupLayout` places sections from).
-    const membership = readFieldGroupMembership(obj);
+    // Injected columns count as fields a list may name (they exist at render
+    // time); declared ones keep their own definitions.
+    const membership = readFieldGroupMembership({
+      fieldGroups: obj.fieldGroups,
+      fields: { ...Object.fromEntries([...injectedColumnsFor(obj)].map((n) => [n, {}])), ...fields },
+    });
     const referencedGroups = new Set<string>(
       [...membership.members].filter(([, names]) => names.length > 0).map(([key]) => key),
     );
@@ -156,7 +161,9 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       const grp = g as AnyRec;
       if (!Array.isArray(grp.fields) || typeof grp.relatedList === 'string') return;
       grp.fields.forEach((name: unknown, fi: number) => {
-        if (typeof name !== 'string' || Object.prototype.hasOwnProperty.call(fields, name)) return;
+        // `fieldNames`: declared fields AND the system columns the platform
+        // injects here — a list may place `owner_id` without redeclaring it.
+        if (typeof name !== 'string' || fieldNames.has(name)) return;
         findings.push({
           severity: 'warning',
           rule: FIELD_GROUP_MEMBER_UNKNOWN,

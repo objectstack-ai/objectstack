@@ -599,7 +599,7 @@ export interface GroupedEntries {
 
 export function groupEntries(
   view: FieldsView,
-  fieldGroups: Array<{ key?: string; label?: string }> | undefined,
+  fieldGroups: Array<{ key?: string; label?: string; fields?: readonly string[] }> | undefined,
   opts?: { includeEmptyDeclared?: boolean },
 ): GroupedEntries[] {
   const declared = Array.isArray(fieldGroups) ? fieldGroups.filter((g) => typeof g?.key === 'string') : [];
