@@ -347,9 +347,9 @@ The body runs in an isolated QuickJS VM, **not** Node:
   same wrapper: `job-body-does-not-compile`, from the three commands. A regex
   pattern the checking engine refuses is a warning: the runtime may accept it.
 
-> **A deadline stamped from an hours table is calendar hours** — nights, weekends and
-> holidays count. Name it `*_CALENDAR_HOURS` (`SLA_CALENDAR_HOURS`, or its camelCase)
-> and add elapsed milliseconds (`hours * 3_600_000`); never label it "business hours".
+> **A deadline stamped from an hours table is wall-clock hours** — nights, weekends and
+> holidays count. Name it `*_WALL_CLOCK_HOURS`, add `hours * 3_600_000` ms, never label it
+> "business hours"; an approval's `escalation.clock: 'working_time'` counts working hours.
 
 ### ⚠️ Gotcha 1 — `ctx.result` is a *partial* record on afterUpdate
 
