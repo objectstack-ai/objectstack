@@ -633,11 +633,17 @@ export class MessagingServicePlugin implements Plugin {
                 }));
             });
 
-            // Slack channel (#34730 step 2): same pattern — mounted while
-            // connector-slack's `slack` client service is resolvable. It sends
-            // a DM to a recipient's confirmed link with their organization's
-            // own install token (sys_channel_account).
+            // Slack channel (#34730 step 2): registered only on a composition
+            // whose connector-slack `slack` client service resolves at
+            // `kernel:ready` (ConnectorSlackPlugin registers it at init), then
+            // mounted per lookup like the others. Without it the channel is
+            // not known at all, so the `/automation` save doors and the
+            // preference doors (`getKnownChannels`) answer as they do with no
+            // Slack in the composition. It sends a DM to a recipient's
+            // confirmed link with their organization's own install token
+            // (sys_channel_account).
             ctx.hook('kernel:ready', async () => {
+                if (!getSlack()) return;
                 service.registerChannelProvider('slack', lazyChannelMount({
                     resolveTransport: getSlack,
                     create: () => createSlackChannel({ store: slackLinks }),

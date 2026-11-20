@@ -517,6 +517,13 @@ export interface ApprovalMessagingSurface {
    * notification's title and body alone.
    */
   registerBuiltinTemplates?(templates: readonly ApprovalBuiltinTemplate[]): void;
+  /**
+   * [#34730] The channel mounted under `id` right now
+   * (`MessagingService.getChannel`), or `undefined`. Read to ask for `slack`
+   * only while the composition mounts it. Optional — a messaging service
+   * without it is never asked for `slack`.
+   */
+  getChannel?(id: string): unknown;
 }
 
 /** [#30509] One code-declared notification template, as the messaging service takes it. */
@@ -2500,7 +2507,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
               channels: [
                 ...APPROVAL_EMAIL_CHANNELS,
                 ...(event.topic === 'approval.requested'
-                  && (this.messaging as { getChannel?(id: string): unknown }).getChannel?.('slack') ? ['slack'] : []),
+                  && this.messaging.getChannel?.('slack') ? ['slack'] : []),
               ],
             }
             : {}),
