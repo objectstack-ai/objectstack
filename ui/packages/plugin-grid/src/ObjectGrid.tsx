@@ -256,9 +256,10 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * [objectstack#35702] Wired only for a reader who may change the view: each
    * footer cell becomes the menu that picks the column's calculation (`null` =
    * None). The grid draws the pick at once; the host saves it on the view and
-   * hands it back as the column's `summary`.
+   * hands it back as the column's `summary`. `drawnFields` are the field
+   * columns drawn, in order, for a view that declares no `columns` of its own.
    */
-  onColumnSummaryPick?: (field: string, summary: ColumnSummaryType | null) => void;
+  onColumnSummaryPick?: (field: string, summary: ColumnSummaryType | null, drawnFields: readonly string[]) => void;
   /** [objectstack#35702] Whether the resident footer row is drawn (it carries the record count). */
   onResidentSummaryRowChange?: (drawn: boolean) => void;
   /**
@@ -1577,9 +1578,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     });
     // Keyed on the declared calculations' content, never the columns' identity.
   }, [declaredSummaryKey]);
+  const drawnFieldsRef = React.useRef<readonly string[]>([]);
   const pickColumnSummary = useCallback((field: string, summary: ColumnSummaryType | null) => {
     setSummaryPicks((picks) => ({ ...picks, [field]: summary }));
-    onColumnSummaryPick?.(field, summary);
+    onColumnSummaryPick?.(field, summary, drawnFieldsRef.current);
   }, [onColumnSummaryPick]);
   const { t: summaryT } = useSummaryTranslation();
   // A host's resident row is drawn with no calculation too, and under a
@@ -3009,6 +3011,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#35548 — the column summaries as the table's own last row, each
   // under its column, led by the count of the records they summarise. A host
   // that draws them itself (`onColumnSummaryChange`) gets no row here.
+  const drawnFields: string[] = [];
   const summaryRow: ObjectGridDataTableSchema['summaryRow'] = (hasSummary || residentRowDrawn) && !onColumnSummaryChange
     ? {
         lead: t('grid.summary.countLead', {
@@ -3016,6 +3019,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         }),
         cells: residentRowDrawn
           ? Object.fromEntries(tableColumns.flatMap((col: { accessorKey: string }) => {
+              if (objectFields?.[col.accessorKey]) drawnFields.push(col.accessorKey);
               const field = col.accessorKey;
               const def = objectFields?.[field] as Parameters<typeof offeredColumnSummaries>[0];
               const summary = summaries.get(field);
@@ -3035,6 +3039,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           : Object.fromEntries(Array.from(summaries, ([key, summary]) => [key, summary.label])),
       }
     : undefined;
+  drawnFieldsRef.current = drawnFields;
   // objectstack#35685 — a row a select-first save redrew, in place of the row
   // the grid read, while that read is the one held.
   const patchedRowOf = (row: any): any => {

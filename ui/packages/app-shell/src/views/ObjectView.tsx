@@ -9,6 +9,9 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
+import type { ColumnSummary } from '@objectstack/spec/ui';
+import type { ListColumn } from '@object-ui/types';
+import { columnsWithSummary } from './columnSummaryWrite';
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
@@ -821,6 +824,21 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeViewId,
         baseView,
     });
+    const handlePickPersonalViewSummary = (field: string, summary: ColumnSummary | null, drawnFields: readonly string[]) => {
+        if (!activeView) return;
+        const row = personalViews.views.find((v) => v.id === activeView.id);
+        if (!row) return;
+        const columns = columnsWithSummary(row.config.columns as ListColumn[] | string[] | undefined, field, summary, drawnFields);
+        personalViews.update(row.id, { ...row.config, columns }).catch((err) => {
+            console.error('[ObjectView] Failed to save a footer calculation:', err);
+            toast.error(t('form.saveError'), { description: err instanceof Error ? err.message : String(err) });
+        });
+    };
+    const handlePickSharedViewSummary = (field: string, summary: ColumnSummary | null, drawnFields: readonly string[]) => {
+        if (!activeView) return;
+        const columns = columnsWithSummary(activeView.columns as ListColumn[] | string[] | undefined, field, summary, drawnFields);
+        void handleViewConfigSave({ ...activeView, columns });
+    };
 
     // objectstack#29635 — creating one of the reader's own views, and Rename
     // and Delete on them. Creating is offered to any reader the server lets
@@ -1094,6 +1112,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                     : undefined,
             save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
             reset: !isEnvironmentList && listPersonalizedParts.length > 0 ? handleResetView : undefined,
+            // objectstack#35702 — the footer's calculation, saved on the open
+            // view (ruling 7045525672): a personal view at once; a shared one,
+            // by a reader who may edit it, as a draft through the view panel's
+            // save, which others see once published.
+            pickSummary: isEnvironmentList || !activeView
+                ? undefined
+                : activeIsPersonal
+                    ? (canUpdatePersonalView ? handlePickPersonalViewSummary : undefined)
+                    : isAdmin ? handlePickSharedViewSummary : undefined,
         },
     });
 

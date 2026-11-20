@@ -64,7 +64,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
-import type { GroupingConfig } from '@objectstack/spec/ui';
+import type { ColumnSummary, GroupingConfig } from '@objectstack/spec/ui';
 import { canonicalAstOperator, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
@@ -387,6 +387,15 @@ export interface ListViewProps {
   onInlineEditChange?: (next: boolean) => void;
   /** Called when the user resizes/reorders columns in the underlying grid. */
   onColumnStateChange?: (state: { order?: string[]; widths?: Record<string, number> }) => void;
+  /**
+   * objectstack#35702 — the grid's footer calculation picked by the reader
+   * (`null` = None). Wired only for a reader who may change the open view;
+   * absent ⇒ the footer draws its figures and offers no menu. The host saves
+   * the pick as the column's `summary` on the view; `drawnFields` are the
+   * field columns drawn, for a view that declares no `columns`. A HOST prop,
+   * never a schema key.
+   */
+  onColumnSummaryPick?: (field: string, summary: ColumnSummary | null, drawnFields: readonly string[]) => void;
   /**
    * Callback when a row/item is clicked (overrides NavigationConfig).
    *
@@ -2110,6 +2119,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   addedFields,
   onAddedFieldsChange,
   onColumnStateChange,
+  onColumnSummaryPick,
   onRowClick,
   showViewSwitcher: showViewSwitcherProp,
   userFilterSelections,
@@ -2264,6 +2274,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // The object definition, read from the data source below ("Fetch object
   // definition"). Declared here because the toolbar's search decision reads it.
   const [objectDef, setObjectDef] = React.useState<any>(null);
+  // objectstack#35702 — the grid draws its resident footer row, which says the record count.
+  const [gridDrawsCount, setGridDrawsCount] = React.useState(false);
   const [objectDefLoaded, setObjectDefLoaded] = React.useState(false);
 
   /**
@@ -5130,6 +5142,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // does not opt out (`inlineEditOffered`); objectstack#35684 retired
           // the mode that used to gate this as well.
           editable: inlineEditOffered,
+          // objectstack#35702 — the resident footer row (the record count in
+          // its first cell, so the list draws no count bar of its own), and,
+          // for a reader who may change the view, each cell's calculation menu.
+          ...(!compact && !cappedWindow
+            ? {
+                residentSummaryRow: true,
+                onResidentSummaryRowChange: setGridDrawsCount,
+                ...(onColumnSummaryPick ? { onColumnSummaryPick } : {}),
+              }
+            : {}),
           ...(schema.wrapHeaders != null ? { wrapHeaders: schema.wrapHeaders } : {}),
           ...(schema.resizable != null ? { resizable: schema.resizable } : {}),
           ...(schema.selection ? { selection: schema.selection } : {}),
@@ -5698,7 +5720,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged, compact, cappedWindow, onColumnSummaryPick]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -6627,6 +6649,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // table, each under its column).
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
+  // objectstack#35702 — a grid that draws its resident footer row says the
+  // count there, in its first cell; the bar keeps only the cap warning.
+  const recordCountTextShown = recordCountShown && !(currentView === 'grid' && gridDrawsCount);
   const dataLimitWarningShown =
     recordCountShown && dataLimitReached && !(paginate && serverTotal != null) && !infiniteScroll;
   // objectui#12619 — a board that pages its own lanes draws every record of the
@@ -8328,7 +8353,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown) && (
+      {listChromeShown && (recordCountTextShown || dataLimitWarningShown || boardRecordCountShown) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -8338,7 +8363,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {t('list.recordCount', { count: fetchedTotal })}
           </span>
           )}
-          {recordCountShown && (
+          {recordCountTextShown && (
           <span className="shrink-0 font-medium text-foreground/80">
             {/* Under server pagination `data` is only the current page, so the
                 honest record count is the server's grand total (#586). When the

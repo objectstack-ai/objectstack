@@ -8,6 +8,7 @@
  * passed in; the component reads the returned callback.
  */
 
+import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
@@ -169,6 +170,8 @@ export function useObjectViewListRenderer({
         rename?: (label: string) => boolean | Promise<boolean>;
         save?: () => void;
         reset?: () => void;
+        /** objectstack#35702 — save a footer calculation on the open view (wired only for a reader who may change it). */
+        pickSummary?: (field: string, summary: ColumnSummary | null, drawnFields: readonly string[]) => void;
     };
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
@@ -178,6 +181,7 @@ export function useObjectViewListRenderer({
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
+    const offersSummaryPick = !!listViewActions?.pickSummary;
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -1043,6 +1047,9 @@ export function useObjectViewListRenderer({
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
                 onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
+                onColumnSummaryPick={offersSummaryPick
+                    ? (field: string, summary: ColumnSummary | null, drawnFields: readonly string[]) => listViewActionsRef.current?.pickSummary?.(field, summary, drawnFields)
+                    : undefined}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1143,7 +1150,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }
