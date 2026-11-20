@@ -10,6 +10,7 @@ feat(approvals): an escalation deadline can count working time on an organizatio
 
 Clause-②: yes (widening)
 Metadata-protocol: added
+Skills-docs: follow-up owed — skills/objectstack-automation/references/state-machines-and-approvals.md
 
 An approval node's `escalation` gains two optional keys (ADR-0157 D5):
 
