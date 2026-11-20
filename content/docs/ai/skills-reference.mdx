@@ -52,14 +52,14 @@ ObjectStack ships **13 skills** — one per authoring domain, plus process skill
 | # | Skill | Domain | Path | What it covers |
 | :--- | :--- | :--- | :--- | :--- |
 | 1 | [Platform](#platform) | `platform` | `skills/objectstack-platform/` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, scaffolding), declaring platform capabilities (`requires:` — which service plugins boot), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
-| 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, relationships, validations, indexes, hooks, security, seeds and datasources. |
-| 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search. |
-| 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
-| 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections. |
+| 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design or change an ObjectStack data model, in a project or through MCP: objects, fields, relationships, validation rules, indexes, record hooks, permissions, seed / demo data, external datasources, and field `visibleWhen` / `requiredWhen` rules. |
+| 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Write an ObjectQL query over ObjectStack records: filter, sort, paginate, aggregate by group, expand related records, full-text search. |
+| 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Build what users see in an ObjectStack app, in a project or through MCP: list / form / kanban / calendar views, navigation, pages, dashboards, reports, charts, action buttons and package docs. |
+| 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Automate an ObjectStack app, in a project or through MCP: act when a record is created or changes, on a schedule or from a webhook; approvals, notifications, assignment rules, and screen flows / wizards that branch between steps. |
 | 6 | [AI](#ai) | `ai` | `skills/objectstack-ai/` | Design ObjectStack AI skills, tools, knowledge sources, and the open-edition MCP server surface. |
 | 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch contracts. |
-| 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
-| 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
+| 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Translate an ObjectStack app, in a project or through MCP: object and field labels, select options, view, navigation and dashboard text, automation messages; add a locale, and find and fill missing keys (`os i18n check`). |
+| 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Write a CEL expression wherever ObjectStack takes one, in a project or through MCP: formula fields, `visibleWhen` / `requiredWhen` rules, validation, sharing and visibility predicates, flow conditions, seed values, Salesforce formulas ported to CEL. |
 | 10 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
 | 11 | [Ask](#ask) | `process` | `skills/objectstack-ask/` | Answer a business question over a live ObjectStack environment through its MCP tools (list_datasets, query_dataset, list_objects, describe_object, query_records, aggregate_records): find the governed metric the question names, compute it and cite its source, or fall back to an object query and say so. |
 | 12 | [Project](#project) | `process` | `skills/objectstack-project/` | Run an ObjectStack metadata-app project: decide whether a change belongs in the app or the platform, what to write before building, what the app tests and what the platform already checks, how a change is described for customers, released and upgraded. |
@@ -85,11 +85,9 @@ Do not use for data schema design (see objectstack-data) or query patterns (see 
 
 **Domain** `data` · **Path** `skills/objectstack-data/`
 
-Design ObjectStack data schemas — objects, fields, relationships, validations, indexes, hooks, security, seeds and datasources.
+Design or change an ObjectStack data model, in a project or through MCP: objects, fields, relationships, validation rules, indexes, record hooks, permissions, seed / demo data, external datasources, and field `visibleWhen` / `requiredWhen` rules.
 
-Use when the user is creating or modifying `*.object.ts` files or `src/data/*.ts` seed modules, picking field types, modelling relationships, writing `beforeInsert`/`afterUpdate` hooks, configuring per-object access control, pointing an object at an existing external database, or authoring bootstrap / demo data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules that belong on fields.
-
-Do not use for querying data (see objectstack-query) or for plugin / kernel hooks (see objectstack-platform). CEL expressions: load objectstack-formula alongside.
+Use when modelling records or editing `*.object.ts` / `src/data/*.ts`. Not for querying records (objectstack-query), flows or approvals (objectstack-automation), or plugin hooks (objectstack-platform).
 
 **Tags:** `object`, `field`, `validation`, `index`, `relationship`, `hook`, `schema`, `permission`, `rls`, `security`, `seed`, `fixture`
 
@@ -99,11 +97,9 @@ Do not use for querying data (see objectstack-query) or for plugin / kernel hook
 
 **Domain** `query` · **Path** `skills/objectstack-query/`
 
-Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search.
+Write an ObjectQL query over ObjectStack records: filter, sort, paginate, aggregate by group, expand related records, full-text search.
 
-Use when the user is writing a query DSL expression or picking a pagination strategy.
-
-Do not use for defining objects / fields / relationships (see objectstack-data), for designing the API endpoint that exposes a query (see objectstack-api), or for a list view's filter rules / dashboard datasets (see objectstack-ui).
+Use when writing a query in app code or a hook, choosing a pagination strategy, or shaping a records query or aggregation sent over MCP. Not for adding objects or fields (objectstack-data), a list view's filter or a dashboard dataset (objectstack-ui), or designing an API endpoint (objectstack-api).
 
 **Tags:** `query`, `filter`, `sort`, `paginate`, `aggregate`, `ObjectQL`, `full-text`
 
@@ -113,11 +109,9 @@ Do not use for defining objects / fields / relationships (see objectstack-data),
 
 **Domain** `ui` · **Path** `skills/objectstack-ui/`
 
-Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`).
+Build what users see in an ObjectStack app, in a project or through MCP: list / form / kanban / calendar views, navigation, pages, dashboards, reports, charts, action buttons and package docs.
 
-Use when the user is adding `*.view.ts` / `*.page.ts` / `*.app.ts` / `*.dashboard.ts` / `*.report.ts` / `*.dataset.ts` / `*.action.ts` / `src/docs/*.md` files or designing a Studio-rendered UI surface.
-
-Do not use for: data schema (see objectstack-data), multi-step flows that BRANCH on logic between steps (those are `*.flow.ts` with `type: 'screen'` — see objectstack-automation; a stepped form over ONE object is this skill's `formViews` `type: 'wizard'`), or Studio's own admin UI (that ships with the platform). CEL expressions in visibility/conditional rules: load objectstack-formula alongside.
+Use when changing a screen, menu, chart or button, or editing `*.view.ts` / `*.page.ts` / `*.app.ts`. Not for objects and fields (objectstack-data), screen flows that branch between steps (objectstack-automation), or `@object-ui/*` React code (objectui).
 
 **Tags:** `view`, `app`, `page`, `dashboard`, `report`, `chart`, `action`, `widget`, `doc`
 
@@ -127,11 +121,9 @@ Do not use for: data schema (see objectstack-data), multi-step flows that BRANCH
 
 **Domain** `automation` · **Path** `skills/objectstack-automation/`
 
-Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections.
+Automate an ObjectStack app, in a project or through MCP: act when a record is created or changes, on a schedule or from a webhook; approvals, notifications, assignment rules, and screen flows / wizards that branch between steps.
 
-Use when the user is adding `*.flow.ts`, wiring an event-driven rule, modelling an approval chain, or building an interactive screen flow / wizard (objectstack-ui routes those here).
-
-Do not use for data lifecycle hooks at the object layer (see objectstack-data) or for kernel / plugin events (see objectstack-platform). CEL expressions in flow conditions / edge guards: load objectstack-formula alongside.
+Use when the request is "when X happens, do Y" or you are editing `*.flow.ts`. Not for validation rules or record hooks on an object (objectstack-data), or kernel / plugin events (objectstack-platform).
 
 **Tags:** `flow`, `workflow`, `trigger`, `approval`, `state-machine`, `scheduled`, `webhook`
 
@@ -169,11 +161,9 @@ Do not use for: consuming an ObjectStack API from a client (that is just standar
 
 **Domain** `i18n` · **Path** `skills/objectstack-i18n/`
 
-Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout.
+Translate an ObjectStack app, in a project or through MCP: object and field labels, select options, view, navigation and dashboard text, automation messages; add a locale, and find and fill missing keys (`os i18n check`).
 
-Use when the user is adding `*.translation.ts` files, authoring a `translation` metadata item in the Studio or through the metadata API, shipping a generated bundle from a package or plugin, wiring a new locale, or resolving missing-translation warnings.
-
-Do not use for general i18n library questions unrelated to ObjectStack bundles.
+Use when adding a language, relabelling for a locale, or editing `*.translation.ts` or a `translation` metadata item. Not for i18n libraries outside ObjectStack bundles, or `@object-ui/*` component strings (objectui).
 
 **Tags:** `i18n`, `translation`, `locale`, `l10n`, `bundle`, `coverage`
 
@@ -183,11 +173,9 @@ Do not use for general i18n library questions unrelated to ObjectStack bundles.
 
 **Domain** `expression` · **Path** `skills/objectstack-formula/`
 
-Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them.
+Write a CEL expression wherever ObjectStack takes one, in a project or through MCP: formula fields, `visibleWhen` / `requiredWhen` rules, validation, sharing and visibility predicates, flow conditions, seed values, Salesforce formulas ported to CEL.
 
-Use when the user is writing an `F`, `P`, or `cel` tagged-template literal, or asks "how do I express X as a formula / predicate".
-
-Do not use for SQL fragments (driver-native) or L2 hook bodies (those belong in objectstack-data).
+Use when asked how to express a condition or calculation, or writing an `F`, `P` or `cel` literal. Not for ObjectQL query filters (objectstack-query), SQL fragments, or hook bodies (objectstack-data).
 
 **Tags:** `cel`, `formula`, `predicate`, `condition`, `validation`, `visibility`, `seed-dynamic`
 
