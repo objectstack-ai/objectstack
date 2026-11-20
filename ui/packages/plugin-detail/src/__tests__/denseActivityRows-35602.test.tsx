@@ -178,8 +178,10 @@ describe('the record\'s creation in a fold of field changes (objectstack#35788)'
   });
 
   it('draws the 变更 chip\'s fold with a count of three, the creation outside it', () => {
-    const { container } = render(<RecordActivityTimeline items={stream()} variant="stream" titleLabel="Timeline" />);
-    fireEvent.click(container.querySelector('[data-stream-filter="changes"]') as HTMLButtonElement);
+    const { container } = render(
+      <RecordActivityTimeline items={stream()} variant="stream" titleLabel="Timeline" streamFilter="changes" />,
+    );
+    expect(container.querySelector('[data-stream-filter="changes"]')?.getAttribute('aria-pressed')).toBe('true');
     const folds = container.querySelectorAll('[data-testid="activity-fold"]');
     expect(folds.length).toBe(1);
     expect(folds[0].getAttribute('data-fold-count')).toBe('3');
