@@ -1408,6 +1408,7 @@ const ko = {
     lockedByState: "현재 상태에서는 편집할 수 없습니다",
     bodyTableRow: "{{row}}행",
     bodyTablesReadOnlyBulk: "편집하는 동안 이 항목 표는 읽기 전용입니다. 레코드와 함께 저장하려면 해당 개체에서 일괄 쓰기를 사용하도록 설정해야 합니다. 레코드 자체의 필드는 계속 편집하고 저장할 수 있습니다.",
+    discardInlineEditsMessage: "이 레코드의 필드에 저장하지 않은 변경 사항이 있습니다. 변경 사항을 버리고 레코드 전체를 편집하거나, 계속 편집하여 먼저 저장하세요.",
     writeStrippedTitle: "저장되었지만 일부 필드는 적용되지 않았습니다",
     writeWarningsTitle: "저장되었지만 경고가 있습니다",
     writeStrippedReadonly: "다음 필드는 읽기 전용이므로 적용되지 않았습니다: {{fields}}",

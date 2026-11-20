@@ -1469,6 +1469,7 @@ const ja = {
     lockedByState: "現在の状態では編集できません",
     bodyTableRow: "{{row}} 行目",
     bodyTablesReadOnlyBulk: "編集中、これらの明細テーブルは読み取り専用です。レコードと一緒に保存するには、それぞれのオブジェクトで一括書き込みを有効にする必要があります。レコード自体のフィールドは引き続き編集・保存できます。",
+    discardInlineEditsMessage: "このレコードの項目に未保存の変更があります。破棄してレコード全体を編集するか、編集を続けて先に保存してください。",
     writeStrippedTitle: "保存しました（一部の項目は反映されていません）",
     writeWarningsTitle: "保存しました（警告があります）",
     writeStrippedReadonly: "次の項目は読み取り専用のため反映されませんでした: {{fields}}",

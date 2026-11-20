@@ -1542,6 +1542,7 @@ const en = {
     lockedByState: 'Not editable in its current state',
     bodyTableRow: 'Row {{row}}',
     bodyTablesReadOnlyBulk: 'These line tables stay read-only while you edit: saving them together with the record needs bulk writes enabled on their objects. The record\'s own fields can still be edited and saved.',
+    discardInlineEditsMessage: 'You have unsaved changes to this record\'s fields. Discard them to edit the whole record, or keep editing and save them first.',
     writeStrippedTitle: 'Saved — but some fields did not take effect',
     writeWarningsTitle: 'Saved — with warnings',
     writeStrippedReadonly: 'Read-only, so it did not take effect: {{fields}}',

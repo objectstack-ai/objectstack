@@ -41,6 +41,16 @@ import {
   type BodyTableEditHandle,
   type RecordEditSession,
 } from '@object-ui/plugin-form';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@object-ui/components';
 import { useInlineEdit, type RelatedRecordActionsValue } from '@object-ui/react';
 import { canServeApiOperation } from '@objectstack/spec/data';
 import { useRegisterUnsavedEdits } from '../chrome/unsavedEdits.js';
@@ -196,13 +206,33 @@ export interface RecordEditStateControl {
   cancel: () => void;
 }
 
+/**
+ * What the header's Edit calls to ENTER the edit state (ruling B, 「全部保留」:
+ * inline edit and the edit state are two modes, one at a time). With no inline
+ * session it enters; with an inline session holding no changes it ends that
+ * session and enters; with unsaved inline changes it asks first — discard
+ * them and enter, or keep editing inline and save them through the save bar.
+ */
+export interface RecordEditStateEntry {
+  requestEnter: () => void;
+}
+
 export interface RecordEditStateControllerProps {
   /** The page is in its edit state. */
   active: boolean;
   /** Leave the edit state (after a save, or a cancel). */
   onExit: () => void;
+  /** Enter the edit state (once any inline session is out of the way). */
+  onEnter: () => void;
   /** Filled each render with the controller's Save / Cancel. */
   controlRef: React.MutableRefObject<RecordEditStateControl | null>;
+  /** Filled each render with the controller's enter request. */
+  enterRef: React.MutableRefObject<RecordEditStateEntry | null>;
+  /** The discard confirm's title, message and two buttons. */
+  discardInlineTitle: string;
+  discardInlineMessage: string;
+  discardLabel: string;
+  keepEditingLabel: string;
   /** A save started or settled — the header greys its two buttons meanwhile. */
   onSavingChange: (saving: boolean) => void;
   dataSource: any;
@@ -224,7 +254,13 @@ export interface RecordEditStateControllerProps {
 export const RecordEditStateController: React.FC<RecordEditStateControllerProps> = ({
   active,
   onExit,
+  onEnter,
   controlRef,
+  enterRef,
+  discardInlineTitle,
+  discardInlineMessage,
+  discardLabel,
+  keepEditingLabel,
   onSavingChange,
   dataSource,
   objectName,
@@ -352,9 +388,49 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
 
   controlRef.current = active ? { save, cancel } : null;
 
+  // Ruling B (「全部保留」): one mode at a time. The edit state enters the same
+  // inline session, so an inline session already open is ended first — after
+  // a confirm when it holds changes. `wasEditingRef` is cleared before the
+  // session ends, so ending it is not read as leaving the edit state.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const enterNow = () => {
+    if (inline?.editing) {
+      wasEditingRef.current = false;
+      inline.cancel();
+    }
+    onEnter();
+  };
+  enterRef.current = active
+    ? null
+    : {
+        requestEnter: () => {
+          if (inline?.editing && Object.keys(inline.draft).length > 0) setConfirmDiscard(true);
+          else enterNow();
+        },
+      };
+
   return (
     <RecordEditSessionContext.Provider value={active && bodyTablesEditable ? session : null}>
       {children}
+      <AlertDialog open={confirmDiscard} onOpenChange={(open) => { if (!open) setConfirmDiscard(false); }}>
+        <AlertDialogContent data-record-edit-discard-inline="">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{discardInlineTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{discardInlineMessage}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{keepEditingLabel}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmDiscard(false);
+                enterNow();
+              }}
+            >
+              {discardLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {active && (inline?.error || bodyTablesReadOnly) && (
         <div
           className="sticky bottom-0 z-30 mt-4 space-y-1 rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm"

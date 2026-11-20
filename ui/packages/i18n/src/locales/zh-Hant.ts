@@ -1274,6 +1274,7 @@ const zhHant = {
     lockedByState: '當前狀態下不可編輯',
     bodyTableRow: '第 {{row}} 行',
     bodyTablesReadOnlyBulk: '編輯時這些明細表保持唯讀：要和主記錄一起儲存，需要在它們的物件上開啟批次寫入。主記錄本身的欄位仍可編輯和儲存。',
+    discardInlineEditsMessage: '此記錄的欄位有未儲存的變更。捨棄這些變更以編輯整筆記錄，或繼續編輯並先儲存。',
     writeStrippedTitle: '已儲存，但部分欄位未生效',
     writeWarningsTitle: '已儲存，但有警告',
     writeStrippedReadonly: '以下欄位為只讀，未生效：{{fields}}',

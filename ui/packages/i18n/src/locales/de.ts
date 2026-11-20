@@ -1408,6 +1408,7 @@ const de = {
     lockedByState: "Im aktuellen Status nicht bearbeitbar",
     bodyTableRow: "Zeile {{row}}",
     bodyTablesReadOnlyBulk: "Diese Positionstabellen bleiben beim Bearbeiten schreibgeschützt: Um sie zusammen mit dem Datensatz zu speichern, müssen für ihre Objekte Massenschreibvorgänge aktiviert sein. Die Felder des Datensatzes selbst können weiterhin bearbeitet und gespeichert werden.",
+    discardInlineEditsMessage: "Sie haben ungespeicherte Änderungen an den Feldern dieses Datensatzes. Verwerfen Sie sie, um den ganzen Datensatz zu bearbeiten, oder bearbeiten Sie weiter und speichern Sie sie zuerst.",
     writeStrippedTitle: "Gespeichert — einige Felder wurden jedoch nicht übernommen",
     writeWarningsTitle: "Gespeichert — mit Warnungen",
     writeStrippedReadonly: "Schreibgeschützt und daher nicht übernommen: {{fields}}",

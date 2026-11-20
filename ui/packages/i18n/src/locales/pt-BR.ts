@@ -1450,6 +1450,7 @@ const pt = {
     lockedByState: "Não editável no estado atual",
     bodyTableRow: "Linha {{row}}",
     bodyTablesReadOnlyBulk: "Estas tabelas de itens ficam somente leitura durante a edição: salvá-las junto com o registro exige gravações em massa habilitadas em seus objetos. Os campos do próprio registro ainda podem ser editados e salvos.",
+    discardInlineEditsMessage: "Você tem alterações não salvas nos campos deste registro. Descarte-as para editar o registro inteiro ou continue editando e salve-as primeiro.",
     writeStrippedTitle: "Salvo, mas alguns campos não foram aplicados",
     writeWarningsTitle: "Salvo, com avisos",
     writeStrippedReadonly: "Somente leitura, portanto não foi aplicado: {{fields}}",

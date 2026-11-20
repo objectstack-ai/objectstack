@@ -38,7 +38,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
-import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, swapBodyTablesForEditors, withDetailWritesWithheld, type RecordEditStateControl } from './recordEditState.js';
+import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, swapBodyTablesForEditors, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -2358,14 +2358,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#35599 — the record page's EDIT STATE (`recordEditState.tsx`):
   // on a page that draws master-detail body tables, Edit turns the overview
   // into a form — the fields become inputs, the body tables editable lines —
-  // and one Save writes all of it in one batch. `recordEditEligibleRef` is
-  // written where the page's body tables are known (below the early returns,
-  // where no hook may run) and read by the header's Edit click.
+  // and one Save writes all of it in one batch. `recordEditEligible` is
+  // set where the page's body tables are known (below the early returns,
+  // where no hook may run, so as a state update during render) and read by
+  // the header's Edit.
   const [recordEditState, setRecordEditState] = useState(false);
   const [recordEditSaving, setRecordEditSaving] = useState(false);
   const recordEditControlRef = useRef<RecordEditStateControl | null>(null);
-  const recordEditEligibleRef = useRef(false);
+  const recordEditEnterRef = useRef<RecordEditStateEntry | null>(null);
+  const [recordEditEligible, setRecordEditEligible] = useState(false);
   const exitRecordEditState = useCallback(() => setRecordEditState(false), []);
+  const enterRecordEditState = useCallback(() => setRecordEditState(true), []);
   useEffect(() => {
     setRecordEditState(false);
   }, [objectName, pureRecordId]);
@@ -4879,7 +4882,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // the page:header renderer greys this CTA out so the classic form
         // can't be stacked on top of the draft (two competing edit sessions
         // with no reconciliation).
-        disableDuringInlineEdit: true,
+        //
+        // objectstack#35599, ruling B (「全部保留」) — on a page drawing body
+        // tables both modes stay: inline edit saves the record alone through
+        // the save bar, Edit → Save the record and its lines in one batch. So
+        // Edit stays pressable during an inline session there, and entering
+        // the edit state with unsaved inline changes asks first
+        // (`RecordEditStateController`'s discard confirm).
+        disableDuringInlineEdit: !recordEditEligible,
         // framework#3794 — an approval-LOCKED record refuses every write (the
         // server answers RECORD_LOCKED), so opening the form only to be
         // rejected on Save after filling a screen is wasted work. Disabled
@@ -4916,8 +4926,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         ...(phonePage && editOff ? { component: 'action:menu' } : {}),
         // objectstack#35599 — a page drawing body tables enters its edit state;
         // every other page opens the record form, as before.
-        onClick: () => (recordEditEligibleRef.current
-          ? setRecordEditState(true)
+        onClick: () => (recordEditEligible
+          ? (recordEditEnterRef.current ? recordEditEnterRef.current.requestEnter() : setRecordEditState(true))
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
@@ -5199,18 +5209,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // (item 5, `bodyTablesSaveTogether`). The page the layout draws is the
   // rendered page with those tables swapped; every other read of the page
   // (highlights, tabs, approvals) keeps reading `renderedPage`.
-  recordEditEligibleRef.current = bodyTableIds.size > 0;
+  // A state update during render (not an effect: no hook may run here), so
+  // the header's Edit never reads a stale verdict; React re-renders before
+  // committing, and the update is a no-op once the value agrees.
+  if (recordEditEligible !== bodyTableIds.size > 0) setRecordEditEligible(bodyTableIds.size > 0);
   const bodyTablesEditable = bodyTablesSaveTogether(objectDef, objects, bodyTableIds);
   const layoutPage = recordEditState && bodyTablesEditable
     ? swapBodyTablesForEditors(renderedPage, bodyTableIds)
     : renderedPage;
   const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(layoutPage) : null;
-  // objectstack#35599, ruling B — OPEN, built on the recommended option: a page
-  // that draws master-detail body tables edits through Edit → Save only, so it
-  // offers no per-field inline edit (no pencils, no double-click) outside its
-  // edit state; a page with none keeps inline edit. Its own term of the
-  // `canEdit` conjunction below, so a different ruling flips this one line.
-  const inlineEditOffForBodyTables = bodyTableIds.size > 0 && !recordEditState;
 
   // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
   // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
@@ -5611,7 +5618,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             && editVisible
             && !editDisabledByPredicate
             && !editLockedByState
-            && !inlineEditOffForBodyTables
           }
           locked={approvalLocked}
           approvalPending={approvalPending}
@@ -5630,6 +5636,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           active={recordEditState}
           onExit={exitRecordEditState}
           controlRef={recordEditControlRef}
+          enterRef={recordEditEnterRef}
+          onEnter={enterRecordEditState}
+          discardInlineTitle={t('form.discardTitle')}
+          discardInlineMessage={t('detail.discardInlineEditsMessage')}
+          discardLabel={t('form.discard')}
+          keepEditingLabel={t('form.keepEditing')}
           onSavingChange={setRecordEditSaving}
           dataSource={dataSource}
           objectName={objectName}

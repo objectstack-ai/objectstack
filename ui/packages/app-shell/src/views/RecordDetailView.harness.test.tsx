@@ -2852,9 +2852,11 @@ describe('RecordDetailView.objectRouteAbsence-34740', () => {
  * `POST /api/v1/batch`). A refused batch keeps every edit and places the
  * reason on the line it is about; Cancel puts everything back.
  *
- * Also pinned: ruling B (OPEN, the recommended option) — a page with body
- * tables offers no per-field inline edit outside the edit state, a page with
- * none keeps it (CONTROL); ruling A's client half — a record an approval locks
+ * Also pinned: ruling B (「全部保留」, recorded on the card) — inline edit stays
+ * on a page with body tables and saves the record alone through the save bar;
+ * the two modes run one at a time (the edit state offers no inline edit, and
+ * Edit over unsaved inline changes asks to discard them first, CONTROL: no
+ * changes, no question); ruling A's client half — a record an approval locks
  * draws no New on its master-detail body table (CONTROL: the same page
  * unlocked does); item 5 — a child without `bulk` keeps its table read-only
  * in the edit state, with a notice saying why.
@@ -2868,30 +2870,26 @@ describe('RecordDetailView.recordEditState-35599', () => {
   const RECORD_ID = 'q-1';
   const fk = { type: 'master_detail', reference: PARENT, label: 'Quote' };
 
-  const objectsWith = ({ lineEnable, children = true }: { lineEnable?: Record<string, unknown>; children?: boolean } = {}) => [
+  const objectsWith = ({ lineEnable }: { lineEnable?: Record<string, unknown> } = {}) => [
     {
       name: PARENT,
       label: 'Quote',
       pluralLabel: 'Quotes',
       fields: { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' }, summary: { type: 'text', label: 'Summary' } },
     },
-    ...(children
-      ? [
-          {
-            name: 'showcase_line',
-            label: 'Line',
-            pluralLabel: 'Lines',
-            ...(lineEnable ? { enable: lineEnable } : {}),
-            fields: { id: { type: 'text', label: 'Id' }, product: { type: 'text', label: 'Product' }, quantity: { type: 'number', label: 'Quantity' }, quote: fk },
-          },
-          {
-            name: 'showcase_task',
-            label: 'Task',
-            pluralLabel: 'Tasks',
-            fields: { id: { type: 'text', label: 'Id' }, subject: { type: 'text', label: 'Subject' }, quote: fk },
-          },
-        ]
-      : []),
+    {
+      name: 'showcase_line',
+      label: 'Line',
+      pluralLabel: 'Lines',
+      ...(lineEnable ? { enable: lineEnable } : {}),
+      fields: { id: { type: 'text', label: 'Id' }, product: { type: 'text', label: 'Product' }, quantity: { type: 'number', label: 'Quantity' }, quote: fk },
+    },
+    {
+      name: 'showcase_task',
+      label: 'Task',
+      pluralLabel: 'Tasks',
+      fields: { id: { type: 'text', label: 'Id' }, subject: { type: 'text', label: 'Subject' }, quote: fk },
+    },
     {
       name: 'showcase_note',
       label: 'Note',
@@ -3009,21 +3007,85 @@ describe('RecordDetailView.recordEditState-35599', () => {
     fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
   }
 
-  it('ruling B: a page drawing body tables offers no per-field inline edit; a page with none keeps it (CONTROL)', async () => {
-    const control = renderPage(objectsWith({ children: false }));
-    await waitFor(() => expect(pencils(control.container)).toBeGreaterThan(0), { timeout: 5000 });
-    cleanup();
+  /** The pencil of the Summary field (the inline-edit entry), on the details column. */
+  const summaryPencil = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Double-click to edit"]')) as HTMLElement[])
+      .find((b) => (b.closest('.group')?.textContent ?? '').includes('Summary')) ?? null;
+  const saveBar = () => document.querySelector('[role="region"][aria-label="Edit fields"]') as HTMLElement | null;
+  const detailInputValues = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).map((i) => i.value);
+
+  it('ruling B (「全部保留」): a page drawing body tables keeps inline edit, which saves the record alone through the save bar; the edit state offers none', async () => {
     const view = renderPage(objectsWith());
     await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
-    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
-    expect(pencils(view.container)).toBe(0);
-    // And Edit there is the edit state, not the record form.
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    // Inline edit is the field alone: the body tables stay tables, no editor.
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Inline' } });
+    const barSave = Array.from(saveBar()!.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Save')!;
+    await act(async () => { fireEvent.click(barSave); });
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0].slice(0, 3)).toEqual([PARENT, RECORD_ID, { summary: 'Inline' }]);
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+    // The edit state: Edit opens it (not the record form), and there inline edit is not offered.
+    await waitFor(() => expect(saveBar()).toBeNull(), { timeout: 5000 });
     fireEvent.click(headerButton('Edit')!);
     await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
     expect(view.onEdit).not.toHaveBeenCalled();
+    expect(pencils(view.container)).toBe(0);
+    expect(saveBar()).toBeNull();
     expect(headerButton('Save')).not.toBeNull();
     expect(headerButton('Cancel')).not.toBeNull();
     expect(headerButton('Edit')).toBeNull();
+  });
+
+  it('one mode at a time: Edit with unsaved inline changes asks first — Keep editing stays inline, Discard enters the edit state with the stored values', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Inline' } });
+    expect(headerButton('Edit')?.disabled).toBe(false);
+    fireEvent.click(headerButton('Edit')!);
+    const dialog = await waitFor(() => {
+      const el = document.querySelector('[data-record-edit-discard-inline]') as HTMLElement | null;
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(dialog.textContent).toContain('Discard changes?');
+    // Keep editing: the dialog closes, the inline draft stays, no edit state.
+    fireEvent.click(Array.from(dialog.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Keep editing')!);
+    await waitFor(() => expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    expect(detailInputValues(view.container)).toContain('Inline');
+    // Discard: the draft goes, the edit state opens over the stored record.
+    fireEvent.click(headerButton('Edit')!);
+    const again = await waitFor(() => {
+      const el = document.querySelector('[data-record-edit-discard-inline]') as HTMLElement | null;
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.click(Array.from(again.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Discard')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    expect(detailInputValues(view.container)).not.toContain('Inline');
+    expect(headerButton('Save')).not.toBeNull();
+    expect(view.dataSource.update).not.toHaveBeenCalled();
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — an inline session with no changes is simply ended: Edit enters the edit state without asking', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull();
   });
 
   it('one Save sends ONE batch carrying the record and both body tables', async () => {
