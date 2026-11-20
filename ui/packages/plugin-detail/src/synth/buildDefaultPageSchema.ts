@@ -797,6 +797,33 @@ export function buildDefaultDetails(
   });
 }
 
+/**
+ * Whether the record page draws a Details section CLOSED when it opens
+ * (objectstack#35742): an enumerated section that is `collapsible` and
+ * `defaultCollapsed`, or a `{ group }` reference whose group declares the
+ * `collapsed` collapse. A reference inherits its presentation from the group
+ * — the spec refuses `collapsible` / `defaultCollapsed` beside `group` — so
+ * it is read the way `record:details` resolves it, through
+ * {@link deriveFieldGroupDetailEntries}. A reference naming no declared group
+ * draws nothing and counts as open, which leaves the tables where they are.
+ */
+function sectionDrawnClosed(def: ObjectDefLike | undefined): (section: Record<string, any>) => boolean {
+  let groups: Map<string, Record<string, any>> | null = null;
+  return (section) => {
+    if (typeof section?.group !== 'string') {
+      return section?.collapsible === true && section?.defaultCollapsed === true;
+    }
+    if (!groups) {
+      groups = new Map();
+      for (const entry of deriveFieldGroupDetailEntries(def) ?? []) {
+        if (typeof entry.key === 'string') groups.set(entry.key, entry.section);
+      }
+    }
+    const resolved = groups.get(section.group);
+    return resolved?.collapsible === true && resolved?.defaultCollapsed === true;
+  };
+}
+
 /** Rows on the first page of a body table (objectstack#27055, Target 8). */
 export const BODY_TABLE_PAGE_SIZE = 10;
 
@@ -814,12 +841,22 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
  *    the spec refuses a group naming a side card or a hidden list, by the same
  *    `isBodyTableRelationship` the host computes `isBody` with);
- *  - every other body table goes BEFORE the field sections (objectstack#35597,
- *    the maintainer's 「关键字段下面」: under the header strip's stage bar and key
- *    fields, above the field groups), stacked in the order given — the
- *    parent's `relatedLists`, then the derived order. With no section at all
+ *  - every other body table goes AFTER the field sections the record page
+ *    draws open (objectstack#35742: the record's own fields first, then its
+ *    master-detail tables — 「主记录的字段分组 → 主从子表」; the header strip's
+ *    stage bar and key fields sit above both, objectstack#35597's
+ *    「关键字段下面」), stacked in the order given — the parent's
+ *    `relatedLists`, then the derived order. The sections drawn CLOSED that
+ *    trail the last open one (a group whose collapse is `collapsed`, an
+ *    enumerated section that is `collapsible` and `defaultCollapsed`) follow
+ *    the tables: common fields before the tables, the fields an author tucked
+ *    away after them ({@link sectionDrawnClosed}). The declared order of the
+ *    sections is never changed — a closed section between two open ones stays
+ *    between them — and when no section is drawn open the tables follow every
+ *    section, so the record's own fields always lead. With no section at all
  *    the details node leads (it draws the object's highlight fields) and the
- *    tables follow it. (objectstack#27069 drew them after the FIRST section.)
+ *    tables follow it. (objectstack#27069 drew them after the FIRST section,
+ *    objectstack#35597 before every section.)
  *
  * The details node is split around the tables: each run of consecutive
  * sections is one `record:details`. A section names its group by `group` (the
@@ -864,10 +901,18 @@ export function bodyTablePlacement(
     return index ?? Number.POSITIVE_INFINITY;
   };
 
-  if (placed.length === 0 && resolved.length <= 1) {
-    return resolved.length === 0
-      ? [buildDefaultDetails(def, sections, hideFields), ...bodies]
-      : [...bodies, buildDefaultDetails(def, sections, hideFields)];
+  // objectstack#35742 — the unplaced tables follow the last section drawn
+  // open; every section after it is drawn closed and follows the tables. No
+  // open section: the tables follow every section.
+  const closed = sectionDrawnClosed(def);
+  let lastOpen = -1;
+  resolved.forEach((section, index) => {
+    if (!closed(section)) lastOpen = index;
+  });
+  const tablesAt = lastOpen === -1 ? resolved.length : lastOpen + 1;
+
+  if (placed.length === 0 && tablesAt === resolved.length) {
+    return [buildDefaultDetails(def, sections, hideFields), ...bodies];
   }
 
   // Lay the sections and the tables out in one sequence, then fold each run
@@ -878,11 +923,12 @@ export function bodyTablePlacement(
   const flushPlacedBefore = (index: number) => {
     while (next < placed.length && placed[next].at < index) slots.push({ table: placed[next++].node });
   };
-  for (const node of unplaced) slots.push({ table: node });
-  resolved.forEach((section) => {
+  resolved.forEach((section, index) => {
     flushPlacedBefore(sectionGroupIndex(section));
+    if (index === tablesAt) for (const node of unplaced) slots.push({ table: node });
     slots.push({ section });
   });
+  if (tablesAt === resolved.length) for (const node of unplaced) slots.push({ table: node });
   while (next < placed.length) slots.push({ table: placed[next++].node });
 
   const out: any[] = [];
@@ -974,7 +1020,8 @@ function synthTabs(
       ...(rel.filter ? { filter: rel.filter } : {}),
     });
   // objectstack#27055, Target 8 — a list that is the record's own body
-  // (`isBody`, else `isPrimary`) is a table section of the Details tab; every
+  // (`isBody`, else `isPrimary`) is a table section of the Details tab, after
+  // the record's own open field sections (objectstack#35742); every
   // other list is a tab of its own (objectstack#35595). Body tables keep the
   // order the host passed (the object's `relatedLists`, then the derived
   // order — objectstack#27069), unless a field group places one
