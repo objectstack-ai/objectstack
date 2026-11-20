@@ -1,10 +1,12 @@
 ---
 '@objectstack/objectql': patch
+'@objectstack/platform-objects': patch
+'@objectstack/plugin-security': patch
 ---
 
 fix(objectql): deleting an organization also deletes its units of measure, the one exemption from the `sys_unit` delete refusal
 
-Clause-②: yes
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 An organization that had ever created a unit of measure could not be deleted: the delete was refused with 409 `DELETE_RESTRICTED` naming `sys_unit`, and the units could not be removed first, because the engine refuses every delete of a unit (405 `ERR_UNIT_DELETE_REFUSED`). Now the organization delete's own cascade removes that organization's `sys_unit` rows, retired ones included, through the engine's delete path, after the delete has been admitted, so no unit row is left naming a deleted organization. `organizationOwnedRowCounts` (the question plugin-auth's organization delete asks first) and the engine's own refusal no longer count units as records the organization still owns.
