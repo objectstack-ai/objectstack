@@ -227,8 +227,11 @@ const ROWS = (n: number) => Array.from({ length: n }, (_, i) => ({
   timestamp: new Date(Date.UTC(2026, 8, 30, 10, 59 - i)).toISOString(),
 }));
 const activityReads = (held: Held[]) => readsOf(held, 'sys_activity');
+// objectstack#35595 — the stream's count is the 动态 tab's number.
 const chipOf = (container: HTMLElement) =>
-  container.querySelector('[data-record-timeline-panel] [data-record-timeline-count]')?.textContent ?? null;
+  container.querySelector('[role="tab"][data-record-tab="timeline"] [data-record-tab-count]')?.textContent ?? null;
+const timelineTab = (container: HTMLElement) =>
+  container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLButtonElement;
 
 describe('objectstack#28737 — the 动态 count is the server\'s, and the page asks only the panel\'s rows', () => {
   it('a record with more than 200 merged entries shows the served total, and the request asks only the panel\'s rows', async () => {
@@ -244,7 +247,7 @@ describe('objectstack#28737 — the 动态 count is the server\'s, and the page 
 
     // The 动态 tab draws the whole stream: it reads the window once, and the
     // count stays the served one.
-    const openTab = view.container.querySelector('[data-record-timeline-panel-open]') as HTMLButtonElement;
+    const openTab = timelineTab(view.container);
     await act(async () => { fireEvent.click(openTab); });
     await settle(held);
     expect(activityReads(held)).toHaveLength(1);
@@ -256,8 +259,10 @@ describe('objectstack#28737 — the 动态 count is the server\'s, and the page 
     const { held, open } = await boot({ activity: { total: 0, records: [] }, comments: [], timeline: { total: 0 } });
     const view = open();
     await settle(held);
-    expect(chipOf(view.container)).toBe('0');
-    const openTab = view.container.querySelector('[data-record-timeline-panel-open]') as HTMLButtonElement;
+    // objectstack#35595 — an empty stream's tab is muted and names no number.
+    expect(chipOf(view.container)).toBeNull();
+    expect(timelineTab(view.container).hasAttribute('data-record-tab-empty')).toBe(true);
+    const openTab = timelineTab(view.container);
     await act(async () => { fireEvent.click(openTab); });
     await settle(held);
     expect(held.filter((h) => !isMeta(h)).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
@@ -345,6 +350,8 @@ describe('objectstack#30035 — the 动态 stream is read again after a save', (
     it(`${surface}: the count and the rows hold the save's activity row without a reload`, async () => {
       const { view, after } = await saveAndRead(embedded);
       expect(chipOf(view.container)).toBe('3');
+      // A drawer draws no right rail (objectstack#35596): its rows are the 动态 tab's.
+      if (embedded) await act(async () => { fireEvent.click(timelineTab(view.container)); });
       expect(view.container.textContent).toContain('changed the amount');
       // One ask of the streams the open asked, and only those: no related
       // list, verdict, projection or approval rides it.

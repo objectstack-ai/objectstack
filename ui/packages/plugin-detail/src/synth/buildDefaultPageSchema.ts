@@ -173,8 +173,9 @@ export interface BuildPageOptions {
    */
   headerActions?: any[];
   /**
-   * Related child objects. When non-empty, the synthesizer adds a
-   * "Related" tab containing one `record:related_list` per entry.
+   * Related child objects. Each entry is one `record:related_list`: a table
+   * of the 概览 tab when it is the record's body (`isBody`), otherwise a tab
+   * of its own (objectstack#35595).
    *
    * - `objectName` and `relationshipField` are required.
    * - `title` overrides the default child-object label.
@@ -905,13 +906,13 @@ export function bodyTablePlacement(
 }
 
 /**
- * Sub-builder: the `page:tabs` node. Emits the Details tab, always first,
- * then the Related tab, the Approvals tab and the Timeline tab (the one
- * stream, objectstack#27055: field changes join it under its Changes filter,
- * so there is no History tab), each of those three only when the options give
- * it content. The order is stable: Timeline sits last for every object — the
- * 动态 panel is the last panel of the record page's right column
- * (objectstack#34590, superseding objectstack#27524 Target 5's 动态-first).
+ * Sub-builder: the `page:tabs` node. Emits the 概览 tab (value `details`),
+ * always first, then one tab per ordinary related list, the Attachments tab,
+ * the Approvals tab and the Timeline tab (the one stream, objectstack#27055:
+ * field changes join it under its Changes filter, so there is no History
+ * tab), each after the first only when the options give it content
+ * (objectstack#35595). The order is stable: Timeline sits last for every
+ * object (objectstack#34590).
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into
@@ -974,7 +975,7 @@ function synthTabs(
     });
   // objectstack#27055, Target 8 — a list that is the record's own body
   // (`isBody`, else `isPrimary`) is a table section of the Details tab; every
-  // other list is a side card in the one `Related` tab. Body tables keep the
+  // other list is a tab of its own (objectstack#35595). Body tables keep the
   // order the host passed (the object's `relatedLists`, then the derived
   // order — objectstack#27069), unless a field group places one
   // (`bodyTablePlacement`).
@@ -982,41 +983,44 @@ function synthTabs(
   const isBody = (rel: (typeof related)[number]) => rel.isBody ?? rel.isPrimary === true;
   const bodies = related.filter(isBody).map((rel) => relatedNode(rel, BODY_TABLE_PAGE_SIZE));
   const sides = related.filter((rel) => !isBody(rel));
+  // objectstack#35595 — the first tab is 「概览」 (the token the tab strip
+  // localizes as `detail.recordTabOverview`); its value stays `details`, the
+  // URL token a `?tab=` link already names.
   const items: any[] = [
     {
-      label: 'Details',
+      label: 'Overview',
       value: 'details',
       children: bodyTablePlacement(def, options.sections, bodyHiddenFields, bodies),
     },
   ];
-  // objectstack#27055, Target 3 — the timeline stream is ONE tab for every
-  // object (objectstack#27524, Target 5: 动态 is a panel, for every object —
-  // no object-derived default places it). objectstack#34590 — the strip is
-  // 详情 / 关联 / （审批） / 动态: the stream comes LAST, as the laid-out page
-  // draws it last in its right column, its stack and its tab row
-  // (「「动态」在最后」, superseding objectstack#27524 Targets 5 and 8's
-  // 动态-second). Attachments close the Related tab, as they close the related
-  // panels. The stream tab's token is `Activity stream`, which the strip reads
-  // as `detail.timeline` (「动态」); a bare `Timeline` is an author's word.
+  // objectstack#35595 — EVERY ordinary related list is a tab of its own, in
+  // the order the host passed (the object's `relatedLists`, then the derived
+  // order), whether or not it has records: one table, one tab, one count. The
+  // value is `related:<object>.<field>`, the list's relationship id, so two
+  // lists over one child object stay two tabs. A tab merging several tables
+  // is an authored page's (it carries no count, `page:tabs`). Then
+  // Attachments, Approvals and the timeline stream, each its own tab
+  // (objectstack#34590 kept the stream last). The stream tab's token is
+  // `Activity stream`, which the strip reads as `detail.timeline` (「动态」); a
+  // bare `Timeline` is an author's word.
   const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
+  for (const rel of sides) {
+    items.push({
+      label: rel.title ?? rel.objectName,
+      value: `related:${rel.objectName}.${rel.relationshipField}`,
+      children: [relatedNode(rel)],
+    });
+  }
   // Attachments (objectstack#4358) — for `enable.files: true` objects; the
   // tab strip's count badge reads the `record:attachments` node.
-  const relatedChildren = [
-    ...sides.map((rel) => relatedNode(rel)),
-    ...(def?.enable?.files === true && !options.hideAttachments ? [buildDefaultAttachments()] : []),
-  ];
-  if (relatedChildren.length > 0) {
-    items.push({ label: 'Related', value: 'related', children: relatedChildren });
+  if (def?.enable?.files === true && !options.hideAttachments) {
+    items.push({ label: 'Attachments', value: 'attachments', children: [buildDefaultAttachments()] });
   }
   // Approvals tab (objectui#3461) — emitted only when the host reports the
   // record actually HAS approval requests, so approval-free records carry no
-  // dead tab. A peer of Details/Related for the same reason as Attachments
-  // below: footer placement buried the one thing a submitter opens the
-  // record to learn ("who is this waiting on"). The English label localizes
-  // in the tab strip, which reads the pack key for a well-known token
-  // (`detail.approvalsPanelTitle` → 审批 / 承認 / Aprobaciones …). That claim
-  // used to name `KNOWN_LABEL_DICT`, which shipped zh arms only and so was
-  // true for Chinese and silently false everywhere else — objectui#4645.
+  // dead tab. The English label localizes in the tab strip, which reads the
+  // pack key for a well-known token (`detail.approvalsPanelTitle` → 审批 /
+  // 承認 / Aprobaciones …) — objectui#4645.
   if (options.approvals) {
     items.push({
       label: 'Approvals',
@@ -1025,7 +1029,7 @@ function synthTabs(
       children: [componentNode('record:approvals', { ...(options.approvals.node || {}) })],
     });
   }
-  // objectstack#34590 — the 动态 tab closes the strip (see above).
+  // objectstack#34590 — the 动态 tab closes the strip.
   if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
   return componentNode('page:tabs', { items });
 }

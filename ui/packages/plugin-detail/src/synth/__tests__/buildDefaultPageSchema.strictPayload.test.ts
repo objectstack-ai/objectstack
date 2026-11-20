@@ -231,9 +231,9 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
       related: [{ objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' }],
     });
     const parsed = PageTabsProps.parse(tabs.properties) as any;
-    // objectstack#34590 — 动态 closes the strip (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
-    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Related', 'Activity stream']);
-    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
+    // objectstack#35595 — 概览, a tab per side list; 动态 closes the strip (objectstack#34590).
+    expect(parsed.items.map((i: any) => i.label)).toEqual(['Overview', 'Tasks', 'Activity stream']);
+    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related:task.lead_id', 'timeline']);
     expect(parsed.items[0].children[0].type).toBe('record:details');
     expect(parsed.items[1].children[0].properties.objectName).toBe('task');
   });
@@ -244,8 +244,8 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
     });
     const page = PageSchema.parse(body) as any;
     const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-    // objectstack#34590 — 动态 closes the strip (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
-    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
+    // objectstack#35595 — a tab per side list; 动态 closes the strip (objectstack#34590).
+    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related:task.lead_id', 'timeline']);
     expect(tabs.properties.items[1].children[0].properties.relationshipField).toBe('lead_id');
   });
 });

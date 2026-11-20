@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 20,
+      "revision": 21,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -213,7 +213,7 @@
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
         "open the record detail; edit exactly one field, annual_revenue, to a new positive number; submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>. annual_revenue is the field because showcase_account has no rule-free TEXT field the later steps can spare: `name` is the key steps[3] and steps[8] filter on, and tax_id, billing_email and churn_reason are each judged by a validation rule (account.object.ts: tax_id_format, billing_email_format, churn_reason_consistency); annual_revenue carries none (its only constraint is the field's min 0). ⛔ Not `hq`: it is a location field (Field.location), whose input takes 'latitude, longitude', and text that is not a coordinate pair clears the stored value while the save still reports success (#32139) — a defect of its own, not this clause's subject",
-        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the header of the 动态 panel, the first panel of the record page's right column (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). At 1440 px the page also draws a top-level tab row — Overview, Activity (动态) with its count, then one tab for each related panel that has records, while an empty panel's tab waits in the row's '+N' dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row, partitionRecordTabsByRecords), so on the fresh account this item creates the row reads just 'Overview / Activity N' (QA run #33784) — and its Activity tab is the same door as ?related=timeline. The panel itself shows only the newest lines, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the panel. Screenshot first, then read the change lines",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the Activity (动态) tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595). Open it from that tab, from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). The rail card shows only the newest three lines, read-only, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the card. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
         "delete via the record header's 'More actions' (⋯) menu → Delete (the menu also holds Refresh / Add to favorites / Share; detail.moreActions), or the list row's menu; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
@@ -247,7 +247,7 @@
         {
           "clause": "the record's field-change history (the record page's sys_audit_log read, shown as the timeline stream's Changes chip) reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
           "oracle": "dom",
-          "verify": "after a fresh read of the page (the right column's 动态 panel can lag the update line, QA run #28545), open the stream by the Activity tab, the 动态 panel header or ?related=timeline (steps[5]); after a screenshot confirms the Changes chip is selected on the account's timeline stream, read its change lines — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object, at 1440×900 (its option labels, the localized Customer Since date and the resolved owner). The page reads sys_audit_log only for an object whose enable.trackHistory is true (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled), and the rows reach the stream as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The chip also lists the stream's sys_activity created/updated rows, so attribute a line to the audit read before scoring it. ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts the default tabs carry neither Activity nor History), so its absence fails a working product. The spec is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
+          "verify": "after a fresh read of the page (the Overview rail's 最近动态 card can lag the update line, QA run #28545), open the stream by the Activity tab, the 最近动态 card's title or ?related=timeline (steps[5]); after a screenshot confirms the Changes chip is selected on the account's timeline stream, read its change lines — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object, at 1440×900 (its option labels, the localized Customer Since date and the resolved owner). The page reads sys_audit_log only for an object whose enable.trackHistory is true (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled), and the rows reach the stream as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The chip also lists the stream's sys_activity created/updated rows, so attribute a line to the audit read before scoring it. ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts the default tabs carry neither Activity nor History), so its absence fails a working product. The spec is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
           "evidence": "screenshot + entries"
         },
         {
@@ -403,6 +403,12 @@
           "date": "2026-11-15",
           "change": "steps[5]'s tab row re-pointed: QA run #33784 (at a557fa38) read 'Overview / Activity 2' at 1440 px with no panel tabs, because a related panel takes a row tab only once it has records and an empty one waits in the '+N' dropdown (RecordPageColumns.tsx partitionRecordTabsByRecords, ui/packages/plugin-detail/src/synth/recordTabRow.ts). Ledger row 9. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 21,
+          "date": "2026-11-20",
+          "change": "steps[5] and acceptance[4].verify re-pointed to the record page's tab rules and right rail (#35595, #35596): every related list is a tab of its own in its order, an empty one muted with no number, the width the row's only fold ('More N'), Activity last; the 动态 panel of the right column became the Overview rail's 最近动态 card (newest three, read-only), whose title opens the Activity tab. Supersedes the records-first row of #28469 (partitionRecordTabsByRecords is retired). No clause changed: the change lines are still read on the Activity tab after a reload. Read from source at the PR's head.",
+          "ref": "#35595"
         }
       ]
     },
@@ -1523,7 +1529,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1546,7 +1552,9 @@
         "re-read master + lines via GET /api/v1/data/showcase_invoice?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] and the lines by the returned invoice id; check invoice.total against the sum of line amounts",
         "add a third line via the edit form and save; re-read invoice.total; delete that line; re-read total again",
         "repeat the create with one child made deliberately invalid (product empty on a line); attempt save; capture the failure",
-        "verify no partial writes: filtered GET for the failed invoice name returns 0 rows and no orphan lines exist"
+        "verify no partial writes: filtered GET for the failed invoice name returns 0 rows and no orphan lines exist",
+        "record-page edit (#35599): open a saved invoice's record page (its Line Items draw as a body table) and press Edit: the fields become inputs, the body table becomes editable lines, and the header shows Cancel and Save in Edit's place. Change the invoice name, one line's quantity, add a line in the trailing blank row and remove another line; Save ONCE; capture the network trace of the save and re-read the invoice and its lines",
+        "on the same page, Edit again, clear one line's product and Save: capture the error and where it is drawn; re-read the invoice and lines; then press Cancel and check the page reads as stored"
       ],
       "acceptance": [
         {
@@ -1584,11 +1592,18 @@
           "oracle": "api",
           "verify": "change qty, watch amount update without save; after save the API row carries qty × unit_price",
           "evidence": "screenshot + line read"
+        },
+        {
+          "clause": "the record page's edit state saves the record's changes and every body table's line creates, updates and deletes in ONE POST /api/v1/batch, one transaction; a refused save writes nothing, keeps every edit on screen, and draws the reason on the line whose write carried the refused field; Cancel discards every edit",
+          "oracle": "network",
+          "verify": "the save sends exactly one batch call whose payload opens with the invoice update (only the changed fields) and carries the line create, update and delete; after the invalid-line save the re-read shows the invoice and lines unchanged and the line's error sits under the table naming that line; after Cancel the lines and fields read as stored",
+          "evidence": "the batch payload, the two re-reads, the error screenshot"
         }
       ],
       "negative": [
         "the invalid-child case must not partially commit: ANY surviving master or sibling row after the failed save is a FAIL — check by API read, not by the grid",
-        "a save that issues one write per row (N requests) is a FAIL of the atomicity clause even when all rows land"
+        "a save that issues one write per row (N requests) is a FAIL of the atomicity clause even when all rows land",
+        "a record-page save that sends the record update and the line writes as separate requests (or one request per line) is a FAIL of the edit-state clause even when every row lands"
       ],
       "traps": [
         "automation-input",
@@ -1596,7 +1611,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts (acceptance[4] ONLY: the stock New Invoice dialog renders the relationship-derived Line Items section, found by its heading, and its line grid). The roll-up spec dropped at revision 5 is not a pin of this item (history, revision 5). packages/qa/dogfood/test/master-detail-batch-atomic.dogfood.test.ts, at the cross-object POST /api/v1/batch the form saves through (child ops pointing at the parent by {$ref: 0}), on the showcase invoice and lines as shipped: acceptance[1] (the invoice and two catalog-product lines re-read over REST with the values sent), acceptance[5]'s persisted half (each stored amount is quantity × unit_price; a client-sent amount does not stand), acceptance[2] (total equals the sum of line amounts on the atomic create, after a line is added and after one is deleted) and acceptance[3] with negative[0] (a batch whose second line has no product is 400 VALIDATION_FAILED naming product, and neither the invoice nor its valid sibling line exists afterwards). acceptance[0]'s batch count, negative[1] and acceptance[5]'s live client recompute stay network/dom legs"
+        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts (acceptance[4] ONLY: the stock New Invoice dialog renders the relationship-derived Line Items section, found by its heading, and its line grid). The roll-up spec dropped at revision 5 is not a pin of this item (history, revision 5). packages/qa/dogfood/test/master-detail-batch-atomic.dogfood.test.ts, at the cross-object POST /api/v1/batch the form saves through (child ops pointing at the parent by {$ref: 0}), on the showcase invoice and lines as shipped: acceptance[1] (the invoice and two catalog-product lines re-read over REST with the values sent), acceptance[5]'s persisted half (each stored amount is quantity × unit_price; a client-sent amount does not stand), acceptance[2] (total equals the sum of line amounts on the atomic create, after a line is added and after one is deleted) and acceptance[3] with negative[0] (a batch whose second line has no product is 400 VALIDATION_FAILED naming product, and neither the invoice nor its valid sibling line exists afterwards). acceptance[0]'s batch count, negative[1] and acceptance[5]'s live client recompute stay network/dom legs. acceptance[6] (the record page's edit state, #35599): ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx block 'RecordDetailView.recordEditState-35599' (the real record page over a mocked adapter: one batchTransaction carrying the record update and two body tables' create, update and delete; a refused batch keeps every edit and draws the reason on its line; Cancel restores) and ui/packages/plugin-form/src/RecordBodyTableEditor.recordEditBatch-35599.test.ts (the batch and the refusal placement). Neither drives a live server: the one-transaction and nothing-lands halves are the batch route's, pinned by the dogfood battery above"
       },
       "source": [
         "#3358 §4",
@@ -1663,6 +1678,12 @@
           "date": "2026-11-15",
           "change": "steps[1] gains a driver note: 'Add line' beside the grid's trailing blank row makes it a middle all-null row that the save submits and the batch refuses (400 'Product is required', nothing written). QA run #33861, ledger row 146. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-20",
+          "change": "the record page's edit state (#35599) saves through the same batch door: steps[7] and [8], acceptance[6] and negative[2] added for it, and automated.ref names its two unit pins. The form clauses above are unchanged",
+          "ref": "#35599"
         }
       ]
     },
@@ -1671,7 +1692,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1693,7 +1714,7 @@
       },
       "steps": [
         "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~720 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the column-tier page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
-        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. At 1440 px the page also draws its top-level tab row over the columns (Overview, Activity N, then one tab per related list that has records, e.g. Contacts 26; the empty ones in its '+N' dropdown; ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; QA run #33861), so a role=tab strip there is expected: enumerate the lists from the column layout under it. The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the details column, and the non-primary children — Contacts among them — are compact cards in the related column, each naming at most 3 rows with no pager (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Only below 760 px is the page tabbed, with those cards under one 'Related' tab (?tab=related)",
+        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. The page draws the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595) over the columns, so a role=tab strip is expected: enumerate the lists from it (QA run #33861 read the earlier records-first row). The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the Overview tab's details column, and every non-primary child — Contacts among them — is a tab of its own whose face is the whole list with its pager; on Overview, the right rail's 其他相关 (Other related) group draws a card for each such list that HAS records, naming at most 3 rows with no pager (ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596) (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Below 760 px the same tab row draws over one column: the details, then the rail",
         "open Contacts' whole list: its card's header or count chip enlarges it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
         "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
         "diff page-1 and page-2 row ids for overlap",
@@ -1832,6 +1853,12 @@
           "date": "2026-11-15",
           "change": "steps[1] re-pointed: it said record page v3 draws no tab strip at the column tier, but at 1440 px QA run #33861 met both the two-column layout and the top-level tab row (Overview, Activity 0, Contacts 26, Field Zoo …), which RecordPageColumns draws over the columns. Ledger row 150. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-20",
+          "change": "steps[1] re-pointed (#35595, #35596): every related list is a tab of its own, empty or not, and the non-primary children are no longer compact cards in a related column — the Overview rail's 其他相关 group draws a 3-row card for each list with records, and the list's tab is its whole face with the pager. The shared Related tab below 760 px is gone: the same tab row draws over one column. No clause changed. Read from source at the PR's head.",
+          "ref": "#35595"
         }
       ]
     },
@@ -4040,7 +4067,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -4060,7 +4087,7 @@
       "steps": [
         "open a record; run the packaged undoable action (fixtures.requires[0]) on it; confirm the success toast shows an Undo button. An inline edit offers none by design",
         "click Undo (or press Ctrl+Z); capture the resulting update; re-read the record over the API and confirm the prior value is restored",
-        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the header of the 动态 panel, the first panel of the record page's right column (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). The panel itself shows only the newest lines, with no chips. Also read sys_audit_log for the record over the API, and confirm a revert entry was added (a forward write, not a silent rollback)",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). The rail card itself shows only the newest three lines, read-only, with no chips. Also read sys_audit_log for the record over the API, and confirm a revert entry was added (a forward write, not a silent rollback)",
         "press Ctrl+Shift+Z (redo); confirm the edited value is restored",
         "CONCURRENT-CLOBBER probe: in session A make the undoable edit; in session B change the SAME field and save; back in A, click Undo",
         "observe and FLAG whether A's undo carries an OCC guard or silently overwrites B's value"
@@ -4145,6 +4172,12 @@
           "date": "2026-10-29",
           "change": "steps[2] and acceptance[2] (clause, verify, evidence) re-pointed from the History tab to the record page v3 surface, the same shape records-forms.field-history-tracking took at its revision 10 (#27492). Record page v3 (#27055) removed the History tab at every width. The revert's oracle is now the record's sys_audit_log read over the API, with the timeline stream's Changes chip (located by width tier, recordPageTierFor) as the screenshot when the object tracks history. The clause's contract (the undo is a forward, audited write) is unchanged, and the item stays blocked(fixture)",
           "ref": "#27654"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-20",
+          "change": "steps[2] re-pointed (#35595, #35596): the stream opens from the Activity tab of the record's tab row, from the title of the Overview rail's 最近动态 card (the right column's 动态 panel is retired), or ?related=timeline. No clause changed. Read from source at the PR's head.",
+          "ref": "#35595"
         }
       ]
     },
@@ -5569,7 +5602,7 @@
       "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -5590,7 +5623,7 @@
         "boot the showcase on its own port and DB; sign in as admin; open a seeded account record",
         "edit the TRACKED select `industry` (e.g. Technology → Finance); save; read the record's sys_activity rows over the API and open the timeline",
         "edit an UNTRACKED field (e.g. website) alone; save; re-read sys_activity for the record",
-        "record the network log from page load, open the account record and select its timeline stream's Changes chip (变更). Record page v3 has no History tab at any width (#27055). The chips are on the stream's whole face, the 动态 (Activity) tab: open it from the Activity tab of the record page's tab row (Overview · Activity · the related panels, ui/packages/plugin-detail/src/RecordPageColumns.tsx), from the header of the 动态 panel, the first panel of the record page's right column at every width (below the details in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor), or by ?related=timeline (#27524). QA run #28656 read the tab row at 1440, 1000 and 700 px. Then open a seeded task's detail and read the network log again",
+        "record the network log from page load, open the account record and select its timeline stream's Changes chip (变更). Record page v3 has no History tab at any width (#27055). The chips are on the stream's whole face, the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). QA run #28656 read the tab row at 1440, 1000 and 700 px. Then open a seeded task's detail and read the network log again",
         "GET /api/v1/auth/me/permissions and compare apiOperations for showcase_account vs showcase_task"
       ],
       "acceptance": [
@@ -5609,7 +5642,7 @@
         {
           "clause": "the record page's sys_audit_log field-change history gates on OBJECT-level enable.trackHistory, both ways: the account detail (flag true) reads sys_audit_log and its timeline stream's Changes chip lists the tracked edits as old → new lines with display values; the task detail (no enable block — per-field flags alone do not summon it) makes NO sys_audit_log read",
           "oracle": "network",
-          "verify": "the network log after settle: one sys_audit_log read for the account record (at page load, at every width: the 动态 panel is on screen at open since #27524) and none for the task; screenshot the account's Changes chip showing the industry edit. Gating ruled at ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled: enable.trackHistory explicitly true, sys_audit_log registered, the viewed object not sys_audit_log itself; and the read serves only the synthesized page's stream, never an assigned page); the read's rows reach the stream through RecordFieldChangesContext as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The task half is over-determined (knownGaps): record which gate the verdict rests on. ⛔ An empty Changes chip is never an absence oracle: the chip also lists the stream's sys_activity created/updated rows (ACTIVITY_TYPE_TO_FEED_TYPE maps both to field_change). Measured on a seeded account, the chip showed a sys_activity 'Updated Account …' row beside the audit read. ⛔ Nor is a History tab: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts 'no Activity or History tab'), so looking for one fails a working product (QA run #27438)",
+          "verify": "the network log after settle: one sys_audit_log read for the account record (at page load, at every width: the Overview rail's 最近动态 card draws the stream at open, #35596; a drawer, which draws no rail, reads it when its Activity tab opens) and none for the task; screenshot the account's Changes chip showing the industry edit. Gating ruled at ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled: enable.trackHistory explicitly true, sys_audit_log registered, the viewed object not sys_audit_log itself; and the read serves only the synthesized page's stream, never an assigned page); the read's rows reach the stream through RecordFieldChangesContext as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The task half is over-determined (knownGaps): record which gate the verdict rests on. ⛔ An empty Changes chip is never an absence oracle: the chip also lists the stream's sys_activity created/updated rows (ACTIVITY_TYPE_TO_FEED_TYPE maps both to field_change). Measured on a seeded account, the chip showed a sys_activity 'Updated Account …' row beside the audit read. ⛔ Nor is a History tab: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts 'no Activity or History tab'), so looking for one fails a working product (QA run #27438)",
           "evidence": "the two network logs + the account's Changes screenshot"
         },
         {
@@ -5723,6 +5756,12 @@
           "date": "2026-11-15",
           "change": "knownGaps[1] re-pointed: QA run #33861 closed the flag half live on a scratch object (per-field flags, no enable block, synthesized page), so the gap now names that route and keeps the code read as the fallback (ledger row 137). No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-20",
+          "change": "steps[3] and acceptance[2].verify re-pointed (#35595, #35596): the tab row is Overview, one tab per related list, Attachments, Approvals, Activity; the right column's 动态 panel became the Overview rail's 最近动态 card, which draws the stream at open, so the audit read at page load stands; a drawer draws no rail and reads it when its Activity tab opens. No clause changed. Read from source at the PR's head.",
+          "ref": "#35595"
         }
       ]
     },
