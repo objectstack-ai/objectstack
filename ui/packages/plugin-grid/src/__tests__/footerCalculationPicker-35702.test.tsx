@@ -201,4 +201,18 @@ describe('the resident footer row (objectstack#35702)', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.getByTestId('summary-picker-amount')).toHaveTextContent('Sum 350');
   });
+
+  // L1 7049007771: the trigger is a flex box, which the cell's text-align does
+  // not move; a right-aligned amount's figure ends under the amounts.
+  it('justifies the cell from its column\'s alignment', async () => {
+    renderGrid({ residentSummaryRow: true, onColumnSummaryPick: vi.fn() }, [
+      { field: 'name', label: 'Name' },
+      { field: 'amount', label: 'Amount', align: 'right', summary: 'sum' },
+      { field: 'due', label: 'Due', align: 'center' },
+    ]);
+    await screen.findByTestId('data-table-summary-row');
+    expect(screen.getByTestId('summary-picker-amount')).toHaveClass('justify-end');
+    expect(screen.getByTestId('summary-picker-due')).toHaveClass('justify-center');
+    expect(screen.getByTestId('summary-picker-name')).toHaveClass('justify-start');
+  });
 });

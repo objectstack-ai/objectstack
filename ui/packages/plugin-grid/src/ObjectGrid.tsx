@@ -3061,6 +3061,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
                   current={summaryTypes.get(field)}
                   offered={offeredColumnSummaries(def)}
                   temporal={isTemporalSummaryField(def)}
+                  align={(col as { align?: 'left' | 'center' | 'right' }).align}
                   onPick={onColumnSummaryPick && def && (!pickableSummaryFields || pickableSummaryFields.has(field))
                     ? pickColumnSummary
                     : undefined}

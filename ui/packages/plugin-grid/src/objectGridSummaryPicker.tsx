@@ -36,6 +36,12 @@ export interface SummaryCellPickerProps {
   offered: ReadonlyArray<ColumnSummaryType>;
   /** The column's field is a date or time (its min / max read Earliest / Latest). */
   temporal: boolean;
+  /**
+   * The column's alignment, as its cells take it. The trigger is a flex box,
+   * which the cell's `text-align` does not move, so the figure is justified
+   * from this (a right-aligned amount's sum ends under the amounts).
+   */
+  align?: 'left' | 'center' | 'right';
   /** Wired only for a reader who may change the view. `null` = None. */
   onPick?: (field: string, summary: ColumnSummaryType | null) => void;
   t: SummaryTranslate;
@@ -50,7 +56,7 @@ function Figure({ figure }: { figure: SummaryCellFigure }) {
   );
 }
 
-export function SummaryCellPicker({ field, figure, current, offered, temporal, onPick, t }: SummaryCellPickerProps) {
+export function SummaryCellPicker({ field, figure, current, offered, temporal, align, onPick, t }: SummaryCellPickerProps) {
   if (!onPick) return figure ? <Figure figure={figure} /> : null;
   const active = current && current !== 'none' ? current : undefined;
   return (
@@ -61,7 +67,8 @@ export function SummaryCellPicker({ field, figure, current, offered, temporal, o
           data-testid={`summary-picker-${field}`}
           aria-label={figure ? figure.label : t('grid.summary.calculate')}
           className={cn(
-            'group/summary flex h-8 w-full min-w-0 items-center gap-1 rounded-sm [text-align:inherit] [justify-content:inherit]',
+            'group/summary flex h-8 w-full min-w-0 items-center gap-1 rounded-sm [text-align:inherit]',
+            align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start',
             'hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
           )}
         >
@@ -77,7 +84,7 @@ export function SummaryCellPicker({ field, figure, current, offered, temporal, o
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[10rem]" data-testid={`summary-menu-${field}`}>
+      <DropdownMenuContent align={align === 'right' ? 'end' : align === 'center' ? 'center' : 'start'} className="min-w-[10rem]" data-testid={`summary-menu-${field}`}>
         {offered.map((summary) => (
           <DropdownMenuItem
             key={summary}
