@@ -5577,7 +5577,6 @@ const en = {
   filterBuilder: {
     currency: 'Currency',
     currencyNeedsAnd: 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
-    where: 'Where',
     and: 'AND',
     or: 'OR',
     clearAll: 'Clear all',
@@ -5668,6 +5667,7 @@ const en = {
       after: 'after',
     },
     sort: {
+      advanced: 'All sort levels',
       direction: 'Direction',
       ascending: 'Ascending',
       descending: 'Descending',

@@ -35,6 +35,7 @@ import { SchemaRendererProvider } from '@object-ui/react';
 import { I18nProvider } from '@object-ui/i18n';
 import { registerAllFields } from '@object-ui/fields';
 import { ListView } from '../ListView';
+import { openAdvancedFilter } from './conditionPanels';
 
 registerAllFields();
 
@@ -107,11 +108,16 @@ function mount(conditions: Row[], language?: string) {
   return { dataSource, onFilterChange };
 }
 
-/** Open the toolbar's Filter panel once the definition has loaded. */
+/**
+ * Open the toolbar's Filter panel once the definition has loaded, and step
+ * into its advanced panel, where these rows are drawn (objectstack#35549).
+ */
 async function openFilterPanel(dataSource: { getObjectSchema: ReturnType<typeof vi.fn> }): Promise<HTMLElement> {
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   fireEvent.click(await screen.findByTestId('toolbar-filter-trigger'));
-  return screen.findByRole('dialog');
+  const dialog = await screen.findByRole('dialog');
+  await openAdvancedFilter();
+  return dialog;
 }
 
 /** The lazily loaded picker's text box inside the panel. */

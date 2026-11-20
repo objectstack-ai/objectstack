@@ -5125,7 +5125,6 @@ const ru = {
   filterBuilder: {
     currency: 'Валюта',
     currencyNeedsAnd: 'Денежная сумма сравнивается в выбранной валюте, только когда должны выполняться все условия (И).',
-    where: "Где",
     and: "И",
     or: "ИЛИ",
     clearAll: "Очистить всё",
@@ -5216,6 +5215,7 @@ const ru = {
       after: 'после',
     },
     sort: {
+      advanced: 'Все уровни сортировки',
       direction: 'Направление',
       ascending: 'По возрастанию',
       descending: 'По убыванию',

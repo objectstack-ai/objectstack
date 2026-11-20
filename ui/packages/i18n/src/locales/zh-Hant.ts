@@ -4883,7 +4883,6 @@ const zhHant = {
   filterBuilder: {
     currency: '幣種',
     currencyNeedsAnd: '只有在「全部條件都滿足（AND）」時，幣種金額才按所選幣種比較。',
-    where: '其中',
     and: '且',
     or: '或',
     clearAll: '清除全部',
@@ -4974,6 +4973,7 @@ const zhHant = {
       after: '晚於',
     },
     sort: {
+      advanced: '全部排序級別',
       direction: '方向',
       ascending: '升序',
       descending: '降序',

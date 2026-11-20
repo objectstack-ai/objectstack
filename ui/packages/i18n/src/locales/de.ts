@@ -4824,7 +4824,6 @@ const de = {
   filterBuilder: {
     currency: 'Währung',
     currencyNeedsAnd: 'Ein Währungsbetrag wird nur dann in der gewählten Währung verglichen, wenn alle Bedingungen zutreffen müssen (UND).',
-    where: "Wo",
     and: "UND",
     or: "ODER",
     clearAll: "Alle löschen",
@@ -4915,6 +4914,7 @@ const de = {
       after: 'nach',
     },
     sort: {
+      advanced: 'Alle Sortierebenen',
       direction: 'Richtung',
       ascending: 'Aufsteigend',
       descending: 'Absteigend',

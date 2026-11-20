@@ -4970,7 +4970,6 @@ const es = {
   filterBuilder: {
     currency: 'Moneda',
     currencyNeedsAnd: 'Un importe en moneda solo se compara en la moneda elegida cuando deben cumplirse todas las condiciones (Y).',
-    where: "Donde",
     and: "Y",
     or: "O",
     clearAll: "Borrar todo",
@@ -5061,6 +5060,7 @@ const es = {
       after: 'después de',
     },
     sort: {
+      advanced: 'Todos los niveles de orden',
       direction: 'Dirección',
       ascending: 'Ascendente',
       descending: 'Descendente',

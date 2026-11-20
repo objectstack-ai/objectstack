@@ -5405,7 +5405,6 @@ const ar = {
   filterBuilder: {
     currency: 'العملة',
     currencyNeedsAnd: 'لا تُقارن المبالغ بالعملة المختارة إلا عندما يجب تحقق كل الشروط (AND).',
-    where: "حيث",
     and: "و",
     or: "أو",
     clearAll: "مسح الكل",
@@ -5496,6 +5495,7 @@ const ar = {
       after: 'بعد',
     },
     sort: {
+      advanced: 'كل مستويات الفرز',
       direction: 'الاتجاه',
       ascending: 'تصاعدي',
       descending: 'تنازلي',

@@ -4826,7 +4826,6 @@ const ja = {
   filterBuilder: {
     currency: '通貨',
     currencyNeedsAnd: '通貨金額は、すべての条件を満たす必要がある場合（AND）にのみ、選択した通貨で比較されます。',
-    where: "条件",
     and: "かつ",
     or: "または",
     clearAll: "すべてクリア",
@@ -4917,6 +4916,7 @@ const ja = {
       after: 'より後',
     },
     sort: {
+      advanced: 'すべての並べ替えレベル',
       direction: '方向',
       ascending: '昇順',
       descending: '降順',

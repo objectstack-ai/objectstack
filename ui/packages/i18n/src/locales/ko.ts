@@ -4823,7 +4823,6 @@ const ko = {
   filterBuilder: {
     currency: '통화',
     currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
-    where: "조건",
     and: "그리고",
     or: "또는",
     clearAll: "모두 지우기",
@@ -4914,6 +4913,7 @@ const ko = {
       after: '이후',
     },
     sort: {
+      advanced: '모든 정렬 단계',
       direction: '방향',
       ascending: '오름차순',
       descending: '내림차순',

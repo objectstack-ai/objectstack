@@ -50,6 +50,7 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.operators.between': 'between',
   'listConditions.operators.before': 'before',
   'listConditions.operators.after': 'after',
+  'listConditions.sort.advanced': 'All sort levels',
   'listConditions.sort.direction': 'Direction',
   'listConditions.sort.ascending': 'Ascending',
   'listConditions.sort.descending': 'Descending',

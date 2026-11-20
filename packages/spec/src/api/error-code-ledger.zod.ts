@@ -1943,6 +1943,18 @@ export const ERROR_CODE_LEDGER = {
     'STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT',    // `functions` authored in the map form by one stack and the array form by another
     'STACK_COMPOSE_KEY_CONFLICT',                // a single-valued top-level key is declared with different values by two stacks
     'STACK_COMPOSE_OBJECT_CONFLICT',             // the same object name is defined by more than one stack under the default `objectConflict: 'error'`
+    // [ADR-0157 D2, D7, D8, D10] The working-calendar refusals, every one
+    // `status: 400`. The codes are this package's constants
+    // (`data/work-calendar.ts`, where the provenance scan reads them); the three
+    // error classes that carry them are `@objectstack/formula`'s
+    // (`work-calendar.ts`). The calendar service (`@objectstack/objectql`) and
+    // the working-day formula functions throw them; the thrown value is the
+    // boundary on this tree (no HTTP door answers with them yet — the approval
+    // sweep that reads them skips and retries, ADR-0157 D9). No wall-clock
+    // answer stands in for any.
+    'ERR_WORK_CALENDAR_INVALID',                 // a stored calendar or exception row the arithmetic cannot read as written (a period crossing midnight, a zone that is not IANA, an `on` row without periods); `field` names the column
+    'ERR_WORK_CALENDAR_NOT_MAINTAINED',          // the computation needs a date outside the calendar's `maintained_from`..`maintained_through` span (D8); fixed by entering that span's holidays and moving the bound
+    'ERR_WORK_CALENDAR_UNRESOLVED',              // no calendar resolves under D2: the named code is absent, the organization has no default, more than one row answers, or no organization is named outside the `single` posture (`reason`)
   ],
   '@objectstack/lint': [
     // [#20206] `packagesOf` (`object-graph.ts`) refuses a present non-array

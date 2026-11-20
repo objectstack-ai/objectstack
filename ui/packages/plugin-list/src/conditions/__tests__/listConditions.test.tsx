@@ -412,6 +412,27 @@ describe('SortPanel — the same field list with the direction on top', () => {
     expect(addSortLevel(first, 'stage', 'desc', '2')).toEqual([{ id: '1', field: 'stage', order: 'desc' }]);
   });
 
+  it('opens every sort level as its advanced step from the footer, as the filter panel does', () => {
+    render(
+      <SortPanel
+        fields={FIELDS}
+        shownFields={SHOWN}
+        value={[]}
+        onChange={() => {}}
+        renderAdvanced={() => <div data-testid="sort-builder">all levels</div>}
+      />,
+    );
+    expect(screen.queryByTestId('sort-builder')).toBeNull();
+    fireEvent.click(screen.getByTestId('sort-panel-open-advanced'));
+    expect(screen.getByTestId('sort-panel-advanced')).toContainElement(screen.getByTestId('sort-builder'));
+    expect(screen.queryByTestId('sort-panel-fields')).toBeNull();
+  });
+
+  it('CONTROL: without renderAdvanced the sort panel has no footer entry', () => {
+    render(<SortPanel fields={FIELDS} shownFields={SHOWN} value={[]} onChange={() => {}} />);
+    expect(screen.queryByTestId('sort-panel-open-advanced')).toBeNull();
+  });
+
   it('words the direction by type: time for dates, size for numbers, the alphabet for text', () => {
     const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
     expect(sortDirectionLabel('date', 'asc', t as never)).toBe('Oldest → Newest');
