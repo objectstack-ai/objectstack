@@ -3858,6 +3858,11 @@ export class TursoDriver extends SqlDriver {
       // The column-map refusal runs once, before any row, as it did when the
       // batch was handed down whole.
       this.remoteTableFor(object, 'bulkCreate');
+      // Every row's storage form is checked before the first row is written,
+      // so a row `formatInput` refuses (a boolean field written as a value that
+      // spells no boolean) refuses the batch with nothing written, as the local
+      // face's single INSERT does. Each `create` below forms its row again.
+      for (const row of data) this.toRemoteWriteForms(object, row);
       // The batch is written one row at a time through this class's own
       // `create`, so each row's record number is issued on the layer that holds
       // the schema and each row's #5495 collision re-seed is its own.
