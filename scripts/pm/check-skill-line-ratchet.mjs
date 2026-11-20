@@ -101,10 +101,10 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 79],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 10717],
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 3526],
-  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 7722],
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 7720],
   ['.claude/skills/pm-dispatch/references/true-green.md', 2068],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 2488],
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9071],
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9070],
   ['.claude/skills/pm-dispatch/references/area-lease.md', 6586], // raised 6401 → 6586 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
   ['.claude/skills/pm-dispatch/references/coordinator.md', 4265], // raised 3781 → 4265 by the ruled text (one seat per lane by default; a new `area:*` is a partition of that seat), ruling record 7030459053
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 3280],
