@@ -4513,7 +4513,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Zeitzone",
-        help: "IANA-Zeitzone, in der die Arbeitszeiten gelten, z. B. Asia/Shanghai. Beim Anlegen leer gelassen, wird die Standardzeitzone der Organisation übernommen (Einstellungen → Lokalisierung)."
+        help: "IANA-Zeitzone, in der die Arbeitszeiten gelten, z. B. Asia/Shanghai. Das Formular zum Anlegen öffnet sich mit der Zeitzone der Organisation (Einstellungen → Lokalisierung), und ein Anlegen ohne Angabe erhält dieselbe Zeitzone."
       },
       is_default: {
         label: "Standard",
@@ -4602,7 +4602,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       periods: {
         label: "Zeiträume",
-        help: "Für einen Arbeitstag die vollständigen Arbeitszeiten dieses Datums, HH:mm-HH:mm durch Kommas getrennt (09:00-12:00, 13:00-18:00); sie werden nie vom Wochentag übernommen. Für einen freien Tag leer lassen."
+        help: "Für einen Arbeitstag alle Stunden dieses Datums; sie werden nie vom Wochentag übernommen. Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
       },
       note: {
         label: "Notiz",

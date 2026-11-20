@@ -4,7 +4,8 @@ import { ObjectSchema, Field, WORK_CALENDAR_CODE_PATTERN, WORK_CALENDAR_MAINTENA
 
 /**
  * The help every weekday's period column carries, stated once so the seven
- * columns can never disagree about the format (ADR-0157 D1, D7, D10).
+ * columns and the exception's `periods` can never disagree about the format
+ * (ADR-0157 D1, D7, D10).
  */
 export const WORK_CALENDAR_PERIODS_HELP =
   'Working periods that day in the calendar\'s time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. ' +
@@ -93,7 +94,7 @@ export const SysWorkCalendar = ObjectSchema.create({
       valueDomain: 'iana_time_zone',
       trackHistory: true,
       description:
-        "IANA time zone the working periods are local to, such as Asia/Shanghai. Left out on create, it takes the organization's default time zone (Settings → Localization).",
+        "IANA time zone the working periods are local to, such as Asia/Shanghai. The create form opens with the organization's time zone (Settings → Localization), and a create that leaves it out takes the same zone.",
       group: 'Calendar',
     }),
 

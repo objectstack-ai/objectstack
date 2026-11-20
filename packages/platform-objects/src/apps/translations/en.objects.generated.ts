@@ -4513,7 +4513,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Time Zone",
-        help: "IANA time zone the working periods are local to, such as Asia/Shanghai. Left out on create, it takes the organization's default time zone (Settings → Localization)."
+        help: "IANA time zone the working periods are local to, such as Asia/Shanghai. The create form opens with the organization's time zone (Settings → Localization), and a create that leaves it out takes the same zone."
       },
       is_default: {
         label: "Default",
@@ -4602,7 +4602,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       periods: {
         label: "Periods",
-        help: "For a working day, that date's full working periods, HH:mm-HH:mm separated by commas (09:00-12:00, 13:00-18:00); they are never taken from the weekday. Leave blank for a day off."
+        help: "For a working day, all of that date's hours; they are never taken from the weekday. Working periods that day in the calendar's time zone, HH:mm-HH:mm separated by commas, such as 09:00-12:00, 13:00-18:00. A period ends later than it starts on the same day; 24:00 is the latest end. Leave blank for a day off."
       },
       note: {
         label: "Note",

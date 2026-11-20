@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { WORK_CALENDAR_PERIODS_HELP } from './sys-work-calendar.object.js';
 
 /**
  * sys_work_calendar_exception — Calendar Exception (ADR-0157 D1, D10)
@@ -16,7 +17,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * One row per calendar and date (the unique key below). The date is a calendar
  * day, never an instant (ADR-0053). The period format and its validation are
- * the calendar's ({@link import('./sys-work-calendar.object.js').WORK_CALENDAR_PERIODS_HELP}),
+ * the calendar's ({@link WORK_CALENDAR_PERIODS_HELP}, which the `periods` help reuses),
  * refused at write by the calendar service's hooks (`@objectstack/objectql`).
  * Tenancy, write grant and audit as `sys_work_calendar`. Deleting a calendar
  * deletes its exceptions.
@@ -83,7 +84,7 @@ export const SysWorkCalendarException = ObjectSchema.create({
       maxLength: 255,
       trackHistory: true,
       description:
-        "For a working day, that date's full working periods, HH:mm-HH:mm separated by commas (09:00-12:00, 13:00-18:00); they are never taken from the weekday. Leave blank for a day off.",
+        "For a working day, all of that date's hours; they are never taken from the weekday. " + WORK_CALENDAR_PERIODS_HELP,
       group: 'Exception',
     }),
 

@@ -4513,7 +4513,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Fuseau horaire",
-        help: "Fuseau horaire IANA dans lequel s’appliquent les plages de travail, par ex. Asia/Shanghai. Laissé vide à la création, il reprend le fuseau horaire par défaut de l’organisation (Paramètres → Localisation)."
+        help: "Fuseau horaire IANA dans lequel s’appliquent les plages de travail, par ex. Asia/Shanghai. Le formulaire de création s’ouvre sur le fuseau horaire de l’organisation (Paramètres → Localisation), et une création qui l’omet reçoit le même fuseau."
       },
       is_default: {
         label: "Par défaut",
@@ -4602,7 +4602,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       periods: {
         label: "Plages",
-        help: "Pour un jour travaillé, les plages de travail complètes de cette date, au format HH:mm-HH:mm séparées par des virgules (09:00-12:00, 13:00-18:00) ; elles ne sont jamais reprises du jour de la semaine. Laissez vide pour un jour chômé."
+        help: "Pour un jour travaillé, toutes les heures de cette date ; elles ne sont jamais reprises du jour de la semaine. Plages de travail ce jour-là dans le fuseau horaire du calendrier, au format HH:mm-HH:mm séparées par des virgules, par ex. 09:00-12:00, 13:00-18:00. Une plage se termine après son début, le même jour ; 24:00 est la fin la plus tardive. Laissez vide pour un jour non travaillé."
       },
       note: {
         label: "Note",

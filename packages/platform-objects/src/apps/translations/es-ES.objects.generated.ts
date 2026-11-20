@@ -4513,7 +4513,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Zona horaria",
-        help: "Zona horaria IANA en la que se aplican las franjas de trabajo, p. ej. Asia/Shanghai. Si se deja vacía al crear, toma la zona horaria predeterminada de la organización (Ajustes → Localización)."
+        help: "Zona horaria IANA en la que se aplican las franjas de trabajo, p. ej. Asia/Shanghai. El formulario de creación se abre con la zona horaria de la organización (Ajustes → Localización), y una creación que la omite recibe la misma zona."
       },
       is_default: {
         label: "Predeterminado",
@@ -4602,7 +4602,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       periods: {
         label: "Franjas",
-        help: "Para un día laborable, las franjas de trabajo completas de esa fecha, HH:mm-HH:mm separadas por comas (09:00-12:00, 13:00-18:00); nunca se toman del día de la semana. Déjalo vacío para un día libre."
+        help: "Para un día laborable, todas las horas de esa fecha; nunca se toman del día de la semana. Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
       },
       note: {
         label: "Nota",

@@ -4513,7 +4513,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "时区",
-        help: "工作时段所在的 IANA 时区，如 Asia/Shanghai。创建时留空则取组织的默认时区（设置 → 本地化）。"
+        help: "工作时段所在的 IANA 时区，如 Asia/Shanghai。新建表单会预填组织的时区（设置 → 本地化）；创建时留空也取同一时区。"
       },
       is_default: {
         label: "默认",
@@ -4602,7 +4602,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       periods: {
         label: "工作时段",
-        help: "工作日须填写当天完整的工作时段，格式为 HH:mm-HH:mm，多个时段用逗号分隔（09:00-12:00, 13:00-18:00）；不会从对应星期的时段继承。休息日留空。"
+        help: "工作日须填写当天的全部工作时间，不会从对应星期的时段继承。当天的工作时段，按日历的时区计，格式为 HH:mm-HH:mm，多个时段用逗号分隔，如 09:00-12:00, 13:00-18:00。时段须在同一天内且结束晚于开始；最晚结束为 24:00。留空表示当天休息。"
       },
       note: {
         label: "备注",

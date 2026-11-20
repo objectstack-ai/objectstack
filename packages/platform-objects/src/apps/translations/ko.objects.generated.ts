@@ -4513,7 +4513,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "시간대",
-        help: "근무 시간대의 기준이 되는 IANA 시간대(예: Asia/Shanghai). 생성할 때 비워 두면 조직의 기본 시간대(설정 → 현지화)를 사용합니다."
+        help: "근무 시간대의 기준이 되는 IANA 시간대(예: Asia/Shanghai). 생성 양식에는 조직의 시간대(설정 → 현지화)가 미리 채워지며, 비워 두고 생성해도 같은 시간대가 적용됩니다."
       },
       is_default: {
         label: "기본값",
@@ -4602,7 +4602,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       periods: {
         label: "근무 시간대",
-        help: "근무일이면 그날의 전체 근무 시간대를 HH:mm-HH:mm 형식으로 쉼표로 구분해 입력합니다(09:00-12:00, 13:00-18:00). 요일 설정을 이어받지 않습니다. 휴무일은 비워 두세요."
+        help: "근무일이면 그날의 모든 근무 시간을 입력합니다. 요일 설정을 이어받지 않습니다. 캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
       },
       note: {
         label: "메모",

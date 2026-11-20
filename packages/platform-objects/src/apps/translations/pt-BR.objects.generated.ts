@@ -4513,7 +4513,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       timezone: {
         label: "Fuso horário",
-        help: "Fuso horário IANA em que os períodos de trabalho valem, por exemplo Asia/Shanghai. Se omitido na criação, usa o fuso horário padrão da organização (Configurações → Localização)."
+        help: "Fuso horário IANA em que os períodos de trabalho valem, por exemplo Asia/Shanghai. O formulário de criação abre com o fuso horário da organização (Configurações → Localização), e uma criação que o omite recebe o mesmo fuso."
       },
       is_default: {
         label: "Padrão",
@@ -4602,7 +4602,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       periods: {
         label: "Períodos",
-        help: "Para um dia útil, os períodos de trabalho completos dessa data, HH:mm-HH:mm separados por vírgulas (09:00-12:00, 13:00-18:00); nunca são herdados do dia da semana. Deixe em branco para uma folga."
+        help: "Para um dia útil, todas as horas dessa data; nunca são herdadas do dia da semana. Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
       },
       note: {
         label: "Observação",
