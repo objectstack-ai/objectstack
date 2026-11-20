@@ -29,8 +29,3 @@ Metadata-protocol: none
 **Not moved.** A scalar, a `Date` and a `{ $field }` reference are compared as before; `$empty` keeps its boolean-flag refusal, with the converter's sentence now built by the same helper as `$null` / `$exists`; a `null`-prototype object of this realm is still an operator map.
 
 The fix for a caller: write the flag as the boolean itself (`{ owner: { $null: true } }`, `{ owner: { $exists: false } }`); compare with a scalar, a `Date` or a `{ $field }` reference; filter a relative date on a server-backed source, or compare a value source with a concrete `Date` or ISO string; and convert a class-instance comparand to its primitive (`moment.toDate()`, `decimal.toNumber()`) before filtering.
-
-**Corrections to earlier notes** (the nested-relation drill note for `@object-ui/core`):
-
-- Its FROM said an ordering operator compared a plain-object comparand with the text `[object Object]`. That holds for an object whose prototype is `Object.prototype`. A `null`-prototype object has no `toString` or `valueOf`, so under `>`, `>=`, `<`, `<=` and `not_contains` the comparison threw `TypeError: Cannot convert object to primitive value` and `find` rejected, before that change.
-- Its sentence "`=` matched no row before" leaves out one row: `=` compared by reference, so a row holding the caller's own object, stored through `create` or `update`, which copy shallowly, matched.
