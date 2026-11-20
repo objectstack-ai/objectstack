@@ -38,11 +38,21 @@ function makeFakeServer() {
     };
 }
 
+const UNKNOWN_CUBE = 'no_such_cube';
+
 function makeCtx(fakeServer: any, calls: { query: unknown[]; sql: unknown[] }) {
+    // The engine's own first refusal, stood in for: a cube it cannot find
+    // answers `CUBE_NOT_FOUND` / 404 (service-analytics `cube-visibility.ts`),
+    // judged before any strategy runs. The precedence pins below read it.
+    const refuseUnknownCube = (body: unknown) => {
+        if ((body as { cube?: unknown } | undefined)?.cube === UNKNOWN_CUBE) {
+            throw Object.assign(new Error(`Cube '${UNKNOWN_CUBE}' not found`), { status: 404, code: 'CUBE_NOT_FOUND' });
+        }
+    };
     const analytics = {
-        query: async (body: unknown) => { calls.query.push(body); return { rows: [], fields: [] }; },
+        query: async (body: unknown) => { calls.query.push(body); refuseUnknownCube(body); return { rows: [], fields: [] }; },
         getMeta: async () => [],
-        generateSql: async (body: unknown) => { calls.sql.push(body); return { sql: 'SELECT 1', params: [] }; },
+        generateSql: async (body: unknown) => { calls.sql.push(body); refuseUnknownCube(body); return { sql: 'SELECT 1', params: [] }; },
     };
     const kernel = {
         getService: (name: string) => (name === 'analytics' ? analytics : name === 'auth' ? SIGNED_IN_AUTH : undefined),
@@ -128,5 +138,45 @@ describe.each<Door>(['/analytics/query', '/analytics/sql'])('%s — an empty pro
         expect(res.statusCode ?? 200).toBe(200);
         expect(res.body.success).toBe(true);
         expect(serviceCalls(calls)).toEqual([body]);
+    });
+});
+
+describe.each<Door>(['/analytics/query', '/analytics/sql'])('%s — the empty-projection refusal answers ahead of the engine', (door) => {
+    it('an unknown cube with an empty projection gets the 400 at `measures`, not the engine\'s 404', async () => {
+        const { res, calls } = await post(door, { cube: UNKNOWN_CUBE, measures: [] });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error.httpStatus).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(res.body.error.details.fields).toEqual([
+            expect.objectContaining({ field: 'measures', code: 'min_items' }),
+        ]);
+        expect(serviceCalls(calls)).toEqual([]);
+    });
+
+    it('control: the same unknown cube with one measure reaches the engine and answers its 404', async () => {
+        const { res, calls } = await post(door, { cube: UNKNOWN_CUBE, measures: [`${UNKNOWN_CUBE}.count`] });
+
+        expect(res.statusCode).toBe(404);
+        expect(res.body.error.code).toBe('CUBE_NOT_FOUND');
+        expect(serviceCalls(calls)).toHaveLength(1);
+    });
+
+    it('`where`, `order` and `limit` do not make a selection', async () => {
+        const { res, calls } = await post(door, {
+            cube: 'orders',
+            measures: [],
+            where: { status: 'open' },
+            order: { 'orders.status': 'asc' },
+            limit: 10,
+        });
+
+        expect(res.statusCode).toBe(400);
+        expect(res.body.error.httpStatus).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_FAILED');
+        expect(res.body.error.details.fields).toEqual([
+            expect.objectContaining({ field: 'measures', code: 'min_items' }),
+        ]);
+        expect(serviceCalls(calls)).toEqual([]);
     });
 });

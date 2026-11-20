@@ -12,6 +12,7 @@ Metadata-protocol: none
 **BREAKING** for a caller of `POST /api/v1/analytics/query` or `POST /api/v1/analytics/sql` whose body has `measures: []`, no `dimensions` (absent or empty) and no `timeDimensions` entry carrying a `granularity`.
 
 - FROM: the body passed the entry check and reached the engine. `/analytics/query` ran `SELECT  FROM "<table>"` and answered `500 DATABASE_ERROR`; `/analytics/sql` echoed the same broken statement as a 200.
+  Where the engine refused such a body before choosing a strategy, it answered that refusal instead, and those answers move to the 400 too: an unknown cube or a `public: false` one (`404 CUBE_NOT_FOUND`), a cube over an object the caller may not read (`403 PERMISSION_DENIED`), and an `order` key naming no selected member (`400 INVALID_FIELD`). On a deployment the ObjectQL strategy serves, `/analytics/query` answered a 200 with one row that carries no column.
 - TO: both doors refuse that body with `400 VALIDATION_FAILED` and one `details.fields[]` entry at `measures` (code `min_items`) telling the caller to select at least one measure or dimension, and the analytics service is not called.
 
 **Not moved.** A dimension-only query, a query with one measure, and a query whose only selection is a bucketed time dimension are unchanged. A time dimension that carries only a `dateRange` is a filter and does not count as a selection.
