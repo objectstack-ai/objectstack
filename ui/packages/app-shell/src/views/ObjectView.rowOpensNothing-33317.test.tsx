@@ -285,6 +285,16 @@ async function contextMenuOf(plainText: string): Promise<{ ids: (string | null)[
 
 const OPEN_ITEMS = ['row-context-open', 'row-context-open-new-tab'];
 
+/**
+ * objectstack#35684 — the list's other way to open a row: a click on a data
+ * cell selects it (and opens nothing), and Space on the selected cell opens
+ * its record, as the row's click used to.
+ */
+function openWithSpace(text: string): void {
+  fireEvent.click(screen.getByText(text).closest('td') as HTMLElement);
+  fireEvent.keyDown(document.activeElement as HTMLElement, { key: ' ' });
+}
+
 describe('objectstack#33317 — the console object list: a row that opens nothing does not look clickable', () => {
   it('authored `navigation.mode: none`: the name cell is plain text, and the right-click menu has no Open but keeps Revoke', async () => {
     await mountList({ navigation: { mode: 'none' } });
@@ -303,6 +313,7 @@ describe('objectstack#33317 — the console object list: a row that opens nothin
     fireEvent.click(screen.getByText('scim_ab12'), { button: 1 });
     // The name cell, no longer a link of its own, hands its click to the row too.
     fireEvent.click(screen.getByText('okta-staging'), { metaKey: true });
+    openWithSpace('scim_ab12');
     expect(openSpy).not.toHaveBeenCalled();
     expect(screen.queryByTestId('left-the-list')).toBeNull();
   });
@@ -314,12 +325,17 @@ describe('objectstack#33317 — the console object list: a row that opens nothin
     expect(openSpy).not.toHaveBeenCalled();
   });
 
-  it('CONTROL — the default drawer: a ⌘, Ctrl or middle click on the row opens the record in a new tab', async () => {
+  it('CONTROL — the default drawer: a ⌘, Ctrl or middle click on the record link is the browser\'s new tab, and on a data cell opens nothing (objectstack#35684)', async () => {
     await mountList({});
+    const link = within(nameCell('okta-staging')).getByTestId('primary-field-link');
+    expect(link.getAttribute('href')).toContain('c1');
+    // `fireEvent` answers false when the default was prevented: these keep the browser's.
+    expect(fireEvent.click(link, { metaKey: true })).toBe(true);
+    expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    expect(fireEvent.click(link, { button: 1 })).toBe(true);
     fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
-    fireEvent.click(screen.getByText('scim_ab12'), { ctrlKey: true });
-    fireEvent.click(screen.getByText('scim_ab12'), { button: 1 });
-    expect(openSpy).toHaveBeenCalledTimes(3);
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(drawerRecordId()).toBeNull();
   });
 
   it('a list-only object: the name cell is plain text, and the right-click menu has no Open but keeps Revoke', async () => {
@@ -369,6 +385,7 @@ describe('objectstack#33549 — the console object list: `navigation.preventNavi
     await mountList({ navigation: PREVENTED_DRAWER });
     fireEvent.click(screen.getByText('scim_ab12'));
     fireEvent.click(screen.getByText('okta-staging'));
+    openWithSpace('scim_ab12');
     expect(drawerRecordId()).toBeNull();
     expect(screen.queryByTestId('left-the-list')).toBeNull();
     expect(openSpy).not.toHaveBeenCalled();
@@ -395,20 +412,20 @@ describe('objectstack#33549 — the console object list: `navigation.preventNavi
   it('a `page` view with `preventNavigation: true` draws no link face either', async () => {
     await mountList({ navigation: { mode: 'page', preventNavigation: true } });
     expect(looksLikeALink('okta-staging')).toBe(false);
-    fireEvent.click(screen.getByText('scim_ab12'));
+    openWithSpace('scim_ab12');
     expect(screen.queryByTestId('left-the-list')).toBeNull();
   });
 
-  it('CONTROL — the same `drawer` view with `preventNavigation: false`: a row click writes `?recordId=`, and the name cell is the record link', async () => {
+  it('CONTROL — the same `drawer` view with `preventNavigation: false`: Space on a selected cell writes `?recordId=`, and the name cell is the record link', async () => {
     await mountList({ navigation: { mode: 'drawer', preventNavigation: false } });
     expect(looksLikeALink('okta-staging')).toBe(true);
-    fireEvent.click(screen.getByText('scim_ab12'));
+    openWithSpace('scim_ab12');
     await waitFor(() => expect(drawerRecordId()).toBe('c1'));
   });
 
-  it('CONTROL — the same `drawer` view with the flag absent: a row click writes `?recordId=`', async () => {
+  it('CONTROL — the same `drawer` view with the flag absent: the record link writes `?recordId=`', async () => {
     await mountList({ navigation: { mode: 'drawer' } });
-    fireEvent.click(screen.getByText('scim_ab12'));
+    fireEvent.click(within(nameCell('okta-staging')).getByTestId('primary-field-link'));
     await waitFor(() => expect(drawerRecordId()).toBe('c1'));
   });
 });
