@@ -263,7 +263,21 @@ function hostGrid(ds: TestDataSource, opts: {
   );
 }
 
-const footerText = (field: string) => screen.queryByTestId(`summary-${field}`)?.textContent ?? null;
+/**
+ * A column's footer figure, read as 「HEADER: FIGURE」. Since objectstack#35548
+ * the figure is a cell of the table's own last row (`data-table-summary-*`),
+ * under its column; the header is read off the same column's `<th>`, so the
+ * pairing is the table's, not a label the footer spells.
+ */
+const footerText = (field: string) => {
+  const cell = screen.queryByTestId(`data-table-summary-${field}`);
+  if (!cell) return null;
+  const index = Array.from(cell.parentElement!.children).indexOf(cell);
+  const header = cell.closest('table')!.querySelectorAll('thead tr:first-child th')[index]?.textContent?.trim() ?? '';
+  // The first column's cell also holds the row's lead (「Count N」): not its figure.
+  const lead = cell.querySelector('[data-testid="data-table-summary-lead"]')?.textContent ?? '';
+  return `${header}: ${(cell.textContent ?? '').replace(lead, '')}`;
+};
 
 describe('the footer reads the whole matched set when the grid shows one page of more (objectui#12081 item 3)', () => {
   it('(a) own fetch: 300 rows over pages of 25 — the footer sums all 300, not page 1', async () => {
@@ -519,7 +533,7 @@ describe('a grid with no footer figure asks nothing (objectui#12081 item 3, rewo
       await waitFor(() => expect(screen.getByText('Line 0')).toBeInTheDocument());
       await settle();
       expect({ label, asked: ds.queryGroupHeaders.mock.calls.length }).toEqual({ label, asked: 0 });
-      expect(screen.queryByTestId('column-summary-footer')).toBeNull();
+      expect(screen.queryByTestId('data-table-summary-row')).toBeNull();
       cleanup();
     }
 

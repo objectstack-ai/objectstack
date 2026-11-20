@@ -37,12 +37,22 @@ function setup(dataSource: any) {
 beforeEach(() => vi.restoreAllMocks());
 
 /**
+ * Open the only row's ⋮ menu and choose `item`: a file row carries its
+ * Download and Delete in that menu since the dense attachments rows
+ * (objectstack#35602).
+ */
+async function chooseRowAction(user: ReturnType<typeof userEvent.setup>, item: string) {
+  await user.click(screen.getByRole('button', { name: /^More for / }));
+  await user.click(await screen.findByRole('menuitem', { name: item }));
+}
+
+/**
  * Press a row's delete and answer the confirm dialog it opens (objectui#12248:
  * the delete asks first, through `ActionConfirmDialog`). The delete-path pins
  * below are about what happens AFTER the user confirms.
  */
 async function deleteAndConfirm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Delete attachment' }));
+  await chooseRowAction(user, 'Delete attachment');
   const dialog = await screen.findByRole('alertdialog');
   await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
 }
@@ -141,7 +151,7 @@ describe('RecordAttachmentsPanel — denied vs empty list (#4269)', () => {
     );
     expect(screen.getByText("You don't have access to these attachments.")).toBeInTheDocument();
     // The empty state is reserved for a genuine 200-with-zero-rows.
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('withdraws the Upload affordance under a denied list', async () => {
@@ -190,11 +200,11 @@ describe('RecordAttachmentsPanel — denied vs empty list (#4269)', () => {
   it('a genuine 200-with-zero-rows still renders the empty state AND the Upload button', async () => {
     setup(makeDataSource({ find: vi.fn(async () => []) }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText('No attachments yet. Upload a file to get started.'),
-      ).toBeInTheDocument(),
-    );
+    // The empty state an upload-capable reader gets since the dense
+    // attachments rows (objectstack#35602): one dashed line to drop on or
+    // pick from.
+    await waitFor(() => expect(document.querySelector('[data-attachments-empty]')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'choose a file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
     expect(screen.queryByTestId('record-attachments-denied')).not.toBeInTheDocument();
   });
@@ -263,7 +273,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
       screen.getByText("We couldn't load the attachments for this record."),
     ).toBeInTheDocument();
     // The empty state is reserved for a genuine 200-with-zero-rows.
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('a 5xx renders the unavailable state', async () => {
@@ -278,7 +288,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   // A 401 is AUTHENTICATION, not authorization: the session expired, the user
@@ -303,7 +313,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
       expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument(),
     );
     expect(screen.queryByTestId('record-attachments-denied')).not.toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('withdraws the Upload affordance under an unloaded list', async () => {
@@ -386,7 +396,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
 
     await waitFor(() => expect(find).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   // The other three states must keep their own meaning — this card only
@@ -415,11 +425,11 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
   it('a genuine 200-with-zero-rows still renders the empty state AND the Upload button', async () => {
     setup(makeDataSource({ find: vi.fn(async () => []) }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText('No attachments yet. Upload a file to get started.'),
-      ).toBeInTheDocument(),
-    );
+    // The empty state an upload-capable reader gets since the dense
+    // attachments rows (objectstack#35602): one dashed line to drop on or
+    // pick from.
+    await waitFor(() => expect(document.querySelector('[data-attachments-empty]')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'choose a file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
     expect(screen.queryByTestId('record-attachments-unavailable')).not.toBeInTheDocument();
   });
@@ -429,7 +439,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
 
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
     expect(screen.queryByTestId('record-attachments-unavailable')).not.toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 });
 
@@ -600,7 +610,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const calledUrl = String(fetchSpy.mock.calls[0][0]);
@@ -629,7 +639,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -653,7 +663,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('Please sign in to download this attachment.'),
@@ -675,7 +685,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -700,7 +710,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(openSpy).toHaveBeenCalledWith(
@@ -766,7 +776,7 @@ describe('RecordAttachmentsPanel — mobile shell openFile', () => {
   async function tapDownload(rows: unknown[] = [ROW]) {
     setup(makeDataSource({ find: vi.fn(async () => rows) }));
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
   }
 
   afterEach(() => {

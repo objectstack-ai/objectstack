@@ -104,7 +104,7 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
   ⛔ 不凭记忆(floor sonnet · default opus · ceiling fable);每个给:该项 JSON、RUNNER.md、dogfood 技
   能、自己的端口/DB、结果不进仓规则(§4)。
 - **effort 按卡形状定,派发写明,⛔ 不留空。** runner 卡(Tier 1 pin 批、手工 API/CLI 与浏览器
-  组、P0 冒烟、UX 走查)一律 `high`;`xhigh` 只给修安全发现的 `os-dev` 与争议判定的对抗复核。
+  组、P0 冒烟、UX 走查)与争议判定的对抗复核 `high`;`xhigh` 只照 pm-dispatch `execution-duties.md`。
 - **按后端传档。** `Agent` 子代理显式传 `effort`(本条即传参的依据)。云卡(`create_session`)不收
   effort,卡的会话记录也不带 `effort_level`,跑在哪档读不回(实测):派发记录写「未指定」并附
   发起会话 `get_session` 读到的档位;它高于卡形状时照 pm-dispatch `dispatch-runbook.md`

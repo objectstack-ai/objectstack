@@ -31,7 +31,6 @@ import {
 } from 'lucide-react';
 import type { FeedItem, FeedItemType, RecordActivityComponentProps, RecordSubscription } from '@object-ui/types';
 import type { FeedFilterMode } from '@objectstack/spec/data';
-import { FieldChangeItem } from './FieldChangeItem';
 import { ReactionPicker } from './ReactionPicker';
 import { ThreadedReplies } from './ThreadedReplies';
 import { SubscriptionToggle } from './SubscriptionToggle';
@@ -52,6 +51,7 @@ import {
   TIMELINE_STREAM_FILTERS,
   fieldHistoryEntriesOf,
   fieldHistoryOf,
+  isFieldHistoryEntry,
   filterTimelineStream,
   isSystemStreamEntry,
   timelineStreamFilters,
@@ -182,10 +182,26 @@ export interface RecordActivityTimelineProps {
   totalCount?: number;
   /** The peek's 「查看全部 N 条 →」: open the 动态 tab. Absent: not drawn. */
   onViewAll?: () => void;
+  /**
+   * The stream's 「看审批」 on an approval entry: open the record's approvals.
+   * Absent: the entry is its one line with no link.
+   */
+  onViewApprovals?: () => void;
   className?: string;
 }
 
 /** The stream chips' copy (objectstack#27055): 全部 / 活动 / 讨论 / 变更. */
+/** A comment's icon cell: the row's 14 px icon, centred on its first line. */
+const STREAM_ICON_CELL = 'shrink-0 flex h-[30px] w-3.5 items-center justify-center text-muted-foreground';
+/** A comment's header line: who, then when, 30 px tall, wrapping between pieces. */
+const STREAM_COMMENT_HEADER = 'flex min-h-[30px] flex-wrap items-center gap-x-2 text-[13px]';
+/**
+ * A comment's actions, drawn on hover or keyboard focus within its row, and
+ * always on a touch screen, which has no hover.
+ */
+const ROW_ACTIONS_REVEAL =
+  'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100';
+
 const STREAM_FILTER_KEYS: Record<TimelineStreamFilter, { key: string; fallback: string }> = {
   all: { key: 'detail.streamAll', fallback: 'All' },
   activity: { key: 'detail.streamActivity', fallback: 'Activity' },
@@ -194,7 +210,7 @@ const STREAM_FILTER_KEYS: Record<TimelineStreamFilter, { key: string; fallback: 
 };
 
 // Total over `FeedItemType`, so a feed kind the spec adds cannot reach the
-// timeline without an icon and a colour (objectstack#4115): the six entries
+// timeline without an icon (objectstack#4115): the six entries
 // below `call` were missing for as long as the local union was a 7-member
 // hand copy of the spec's 13.
 const FEED_TYPE_ICONS: Record<FeedItemType, React.ElementType> = {
@@ -213,21 +229,68 @@ const FEED_TYPE_ICONS: Record<FeedItemType, React.ElementType> = {
   approval: BadgeCheck,
 };
 
-const FEED_TYPE_COLORS: Record<FeedItemType, string> = {
-  comment: 'bg-purple-100 text-purple-600',
-  field_change: 'bg-blue-100 text-blue-600',
-  task: 'bg-green-100 text-green-600',
-  event: 'bg-amber-100 text-amber-600',
-  system: 'bg-gray-100 text-gray-600',
-  email: 'bg-indigo-100 text-indigo-600',
-  call: 'bg-teal-100 text-teal-600',
-  note: 'bg-yellow-100 text-yellow-700',
-  file: 'bg-slate-100 text-slate-600',
-  sharing: 'bg-sky-100 text-sky-600',
-  record_create: 'bg-emerald-100 text-emerald-600',
-  record_delete: 'bg-red-100 text-red-600',
-  approval: 'bg-violet-100 text-violet-600',
-};
+/**
+ * Whether a stream entry is one person's field change, the kind
+ * {@link foldStreamChanges} folds: an audit entry or an `updated` activity
+ * row, not a milestone (`activityKind`) and not a reply.
+ */
+function isStreamFieldChange(item: FeedItem): boolean {
+  return (
+    item.type === 'field_change'
+    && (isFieldHistoryEntry(item) || item.activityType === 'updated')
+    && item.activityKind === undefined
+    && !item.parentId
+  );
+}
+
+/** The local calendar day an entry was written on (`YYYY-M-D`), or '' when unparseable. */
+function dayKeyOf(createdAt: string | undefined): string {
+  const date = createdAt ? new Date(createdAt) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+/**
+ * The stream's display grouping: consecutive field changes by one person
+ * (the same `actorId` and display name) on one day become ONE fold row, which
+ * expands to each change. Every entry stays in the stream, in order; nothing
+ * is merged in the data. A run of one is an ordinary row.
+ */
+export function foldStreamChanges(items: readonly FeedItem[]): ActivityTimelineEntry[] {
+  const entries: ActivityTimelineEntry[] = [];
+  let run: FeedItem[] = [];
+  const flush = () => {
+    if (run.length > 1) entries.push({ kind: 'fold', id: `fold:${String(run[0].id)}`, items: run });
+    else if (run.length === 1) entries.push({ kind: 'item', item: run[0] });
+    run = [];
+  };
+  for (const item of items) {
+    if (!isStreamFieldChange(item)) {
+      flush();
+      entries.push({ kind: 'item', item });
+      continue;
+    }
+    const prev = run[run.length - 1];
+    if (
+      prev
+      && ((prev.actorId ?? null) !== (item.actorId ?? null)
+        || prev.actor !== item.actor
+        || dayKeyOf(prev.createdAt) !== dayKeyOf(item.createdAt))
+    ) {
+      flush();
+    }
+    run.push(item);
+  }
+  flush();
+  return entries;
+}
+
+/** The fields a stream field change names: its own list, its changes, or its paired audit entry's. */
+function streamChangedFieldsOf(item: FeedItem): string[] {
+  if (item.changedFields && item.changedFields.length > 0) return item.changedFields;
+  const changes = fieldHistoryOf(item)?.fieldChanges ?? item.fieldChanges ?? [];
+  return changes.map((change) => change.field);
+}
 
 /**
  * The dropdown's options, given whether the record's field history is shown
@@ -378,6 +441,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onStreamFilterChange,
   totalCount,
   onViewAll,
+  onViewApprovals,
   className,
 }) => {
   const isPeek = variant === 'peek';
@@ -537,17 +601,26 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // Runs of consecutive updates by one actor, folded into one row each
   // (objectstack#25959). Folded at render from the rows the reader sees; the
   // feed itself keeps every entry.
-  // The stream draws every entry as its own line (objectstack#27055): a
-  // system entry is already one compact line, so there is nothing to fold.
+  // The stream folds a run of one person's field changes on one day into one
+  // expandable row ({@link foldStreamChanges}): display grouping only.
   const timelineEntries = React.useMemo(
-    (): ActivityTimelineEntry[] =>
-      isStream ? (rootItems.map((item) => ({ kind: 'item', item })) as ActivityTimelineEntry[]) : foldFeedItems(rootItems),
+    (): ActivityTimelineEntry[] => (isStream ? foldStreamChanges(rootItems) : foldFeedItems(rootItems)),
     [rootItems, isStream],
   );
   // Which folded rows the reader has expanded, by the fold's id.
   const [expandedFolds, setExpandedFolds] = React.useState<ReadonlySet<string>>(() => new Set());
   const toggleFold = React.useCallback((id: string) => {
     setExpandedFolds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  // Which comments the reader opened the reply input under, by the comment's id.
+  const [openReplies, setOpenReplies] = React.useState<ReadonlySet<string | number>>(() => new Set());
+  const toggleReply = React.useCallback((id: string | number) => {
+    setOpenReplies((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -661,120 +734,208 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             })
           : t('detail.activityUpdated');
   };
+  // The stream's dense row (the record page's 动态 tab): a small icon, who,
+  // what, and the time at the right, on ONE 30 px line. The what truncates
+  // (its whole text is the row's title) and the time never breaks
+  // (objectstack#34614), so a narrow drawer keeps one line per entry.
+  const streamRow = (
+    item: FeedItem,
+    Icon: React.ElementType,
+    what: React.ReactNode,
+    whatTitle: string,
+    extra?: React.ReactNode,
+    rowProps?: Record<string, string>,
+  ): React.ReactNode => {
+    const when = formatTimestamp(item.createdAt, t, displayLocale);
+    return (
+      <div
+        key={item.id}
+        className="flex min-h-[30px] items-center gap-2 text-[13px] leading-[18px]"
+        title={`${item.actor} · ${whatTitle} · ${when}`}
+        data-stream-row=""
+        {...rowProps}
+      >
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="max-w-[40%] shrink-0 truncate font-medium text-foreground" data-stream-actor="">
+          {item.actor}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{what}</span>
+        {/* Reactions a non-comment row carries stay readable, as chips that
+            cannot be toggled: only a comment can store one (objectui#11035). */}
+        {enableReactions && item.reactions && item.reactions.length > 0 && (
+          <ReactionPicker reactions={item.reactions} className="shrink-0" />
+        )}
+        {extra}
+        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums" data-stream-when="">
+          {when}
+        </span>
+      </div>
+    );
+  };
   const renderSystemLine = (item: FeedItem): React.ReactNode => {
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
     const what = systemLineText(item);
     const paired = fieldHistoryOf(item);
-    return (
-      <div key={item.id} className="flex items-start gap-2 py-0.5 text-xs text-muted-foreground" data-stream-system-row="">
-        <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center">
-          <Icon className="h-3.5 w-3.5" aria-hidden />
-        </span>
-        <p className="min-w-0 flex-1 pt-2 break-words">
-          <span className="text-foreground/80" data-stream-change="">{what}</span>
-          <span aria-hidden>{' · '}</span>
-          <span>{item.actor}</span>
-          {/* "· 3d ago" never breaks inside (objectstack#34614): the space
-              before it is the line's last break opportunity. */}
-          <span aria-hidden>{' '}</span>
-          <span className="whitespace-nowrap" data-stream-when="">
-            <span aria-hidden>{'· '}</span>
-            <span>{formatTimestamp(item.createdAt, t, displayLocale)}</span>
-          </span>
-          {paired && (
-            <span className="block text-foreground/70" data-stream-change-diff="">
-              {changesText(paired)}
-            </span>
-          )}
-        </p>
-      </div>
+    const diff = paired ? changesText(paired) : '';
+    return streamRow(
+      item,
+      Icon,
+      <>
+        <span className="text-foreground/80" data-stream-change="">{what}</span>
+        {paired && (
+          <>
+            <span aria-hidden>{' · '}</span>
+            <span data-stream-change-diff="">{diff}</span>
+          </>
+        )}
+      </>,
+      diff ? `${what} · ${diff}` : what,
+      undefined,
+      { 'data-stream-system-row': '' },
+    );
+  };
+  // An approval entry is one line; its progress lives on the approvals tab,
+  // which 「看审批」 opens (the epic's direction: no approval detail here).
+  const renderApprovalLine = (item: FeedItem): React.ReactNode => {
+    const what = (item.body ?? '').replace(/\s+/g, ' ').trim() || t('detail.activityUpdated');
+    return streamRow(
+      item,
+      FEED_TYPE_ICONS.approval,
+      what,
+      what,
+      onViewApprovals ? (
+        <button
+          type="button"
+          className="shrink-0 text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onViewApprovals}
+          data-stream-view-approval=""
+        >
+          {t('detail.viewApproval', { defaultValue: 'View approval' })}
+        </button>
+      ) : undefined,
+      { 'data-stream-approval-row': '' },
     );
   };
 
   const renderItem = (item: FeedItem): React.ReactNode => {
-    if (isStream && isSystemStreamEntry(item)) return renderSystemLine(item);
+    if (isSystemStreamEntry(item)) return renderSystemLine(item);
+    if (item.type === 'approval') return renderApprovalLine(item);
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
-    const colorClass =
-      FEED_TYPE_COLORS[item.type] || 'bg-gray-100 text-gray-600';
+    // Every entry but a comment is its one line: what it says, and a link to
+    // its source record where it has one (ADR-0052 ActivityPointer).
+    if (item.type !== 'comment') {
+      const what = (item.body ?? '').replace(/\s+/g, ' ').trim() || t('detail.activityUpdated');
+      return streamRow(
+        item,
+        Icon,
+        what,
+        what,
+        item.sourceObject && item.sourceId != null ? (
+          <a
+            href={`/objects/${item.sourceObject}/${item.sourceId}`}
+            className="shrink-0 text-xs text-primary hover:underline"
+            data-testid="activity-source-link"
+          >
+            {t('detail.viewSource')}
+          </a>
+        ) : undefined,
+      );
+    }
     // Threading (objectui#12144). The reply LIST shows only under a
-    // `replyCount` above zero, the one threading gate: the host that
-    // read the rows sets it. The reply INPUT does not wait for a
-    // first reply, so a comment with none offers it wherever the
-    // host hands over `onAddReply`.
+    // `replyCount` above zero, the one threading gate: the host that read the
+    // rows sets it. The reply INPUT does not wait for a first reply: a comment
+    // offers it wherever the host hands over `onAddReply`, behind 「回复」.
     const replies =
       (item.replyCount ?? 0) > 0 ? (repliesByParent.get(item.id) ?? NO_REPLIES) : NO_REPLIES;
     const offersReply = !!onAddReply && canTakeReply(item);
-    // Undefined on a row that cannot store a reaction: no Add
-    // reaction button, and its chips render disabled (objectui#11035).
+    const replyOpen = offersReply && openReplies.has(item.id);
+    // Undefined on a row that cannot store a reaction: no Add reaction button,
+    // and its chips render disabled (objectui#11035).
     const toggleReaction =
       enableReactions && onToggleReaction && canStoreReaction(item)
         ? (emoji: string) => onToggleReaction(item.id, emoji)
         : undefined;
-    const changeLines = fieldHistoryOf(item)?.fieldChanges ?? (item.type === 'field_change' ? item.fieldChanges : undefined);
 
+    // A comment is the row with what they wrote under it: a small icon, who
+    // and when on one 30 px line, the comment, and the row's actions (react,
+    // reply, the author's edit and delete) revealed on hover or focus.
     return (
-      <div key={item.id}>
-        <div className="flex gap-3 relative">
+      <div key={item.id} className="group" data-stream-comment-row="">
+        <div className="relative flex gap-2">
           {/* Icon */}
-          <div
-            className={cn(
-              'shrink-0 h-8 w-8 rounded-full flex items-center justify-center z-10',
-              colorClass,
-            )}
-          >
+          <div className={STREAM_ICON_CELL}>
             {item.actorAvatarUrl ? (
-              <img
-                src={item.actorAvatarUrl}
-                alt={item.actor}
-                className="h-8 w-8 rounded-full object-cover"
-              />
+              <img src={item.actorAvatarUrl} alt={item.actor} className="h-4 w-4 rounded-full object-cover" />
             ) : (
               <Icon className="h-3.5 w-3.5" />
             )}
           </div>
-          {/* Content */}
-          <div className="flex-1 min-w-0 pt-1">
+          {/* Content: 13 px on a 20 px line, so the comment is one line under the row */}
+          <div className="flex-1 min-w-0 text-[13px] leading-5">
             {/* The row wraps between its pieces and the time is one
                 unbreakable piece (objectstack#34614): in a narrow drawer the
                 time moves to the next line instead of breaking per word. */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
-              <span className="text-sm font-medium">{item.actor}</span>
+            <div className={STREAM_COMMENT_HEADER}>
+              <span className="text-[13px] font-medium">{item.actor}</span>
               {item.source && (
                 <span className="text-xs text-muted-foreground">
                   {t('detail.via', { source: item.source })}
                 </span>
               )}
-              <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
-                {formatTimestamp(item.createdAt, t, displayLocale)}
-              </span>
               {item.edited && (
                 <span className="text-xs text-muted-foreground italic">{t('detail.edited')}</span>
               )}
               {item.pinned && (
                 <span className="text-xs text-amber-600">📌 {t('detail.pinned')}</span>
               )}
+              {/* The time sits on the right like every other row; the hover
+                  actions come in just before it. */}
+              <span className="ml-auto flex items-center gap-2">
+                {(toggleReaction && (!item.reactions || item.reactions.length === 0)) || offersReply ? (
+                  <span className={cn('flex items-center gap-1', ROW_ACTIONS_REVEAL)}>
+                    {toggleReaction && (!item.reactions || item.reactions.length === 0) && (
+                      <ReactionPicker reactions={[]} onToggleReaction={toggleReaction} />
+                    )}
+                    {offersReply && (
+                      <button
+                        type="button"
+                        className="h-6 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-expanded={replyOpen}
+                        onClick={() => toggleReply(item.id)}
+                        data-feed-reply-toggle=""
+                      >
+                        {t('detail.replyToComment', { defaultValue: 'Reply' })}
+                      </button>
+                    )}
+                  </span>
+                ) : null}
+                <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
+                  {formatTimestamp(item.createdAt, t, displayLocale)}
+                </span>
+              </span>
             </div>
 
             {/* Body text, and the author's Edit and Delete on their own
                 comment (objectui#12268). The host decides whose
                 comment it is (`authoredByViewer`) and hands each
                 handler over under the caller's grant; a row that
-                offers neither renders the same paragraph as before. */}
+                offers neither renders the same paragraph as before.
+                The body is what the author wrote, so it reads in the
+                foreground colour; the muted grey belongs to the meta line
+                above it (objectstack#27520 row 14). */}
             <CommentBody
               item={item}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
-              // The body is what the author wrote, so it reads in the
-              // foreground colour, as a reply's body does; the muted grey
-              // belongs to the meta line above it (objectstack#27520 row 14).
-              bodyClassName="text-sm whitespace-pre-wrap break-words text-foreground"
+              bodyClassName="inline text-[13px] leading-5 whitespace-pre-wrap break-words text-foreground"
+              controlsClassName={cn('ml-1 inline-flex h-5 items-center gap-0.5 align-top [&_button]:h-5 [&_button]:w-5', ROW_ACTIONS_REVEAL)}
             />
 
             {/* Drill to source rich entity (ADR-0052 ActivityPointer) */}
             {item.sourceObject && item.sourceId != null && (
               <a
                 href={`/objects/${item.sourceObject}/${item.sourceId}`}
-                className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                className="ml-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                 data-testid="activity-source-link"
               >
                 {t('detail.viewSource')}
@@ -782,46 +943,22 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               </a>
             )}
 
-            {/* Field changes. An activity row paired with its audit entry
-                (objectstack#30122) shows that entry's before and after values,
-                as the stream's row does (objectstack#33996). */}
-            {changeLines && (
-              <div className="space-y-1 mt-1">
-                {changeLines.map((change, idx) => (
-                  <FieldChangeItem key={idx} change={change} />
-                ))}
-              </div>
-            )}
-
             {/* Reactions */}
             {enableReactions && item.reactions && item.reactions.length > 0 && (
-              <div className="mt-1.5">
-                <ReactionPicker
-                  reactions={item.reactions}
-                  onToggleReaction={toggleReaction}
-                />
-              </div>
-            )}
-
-            {/* Add reaction button (even if no reactions yet) */}
-            {(!item.reactions || item.reactions.length === 0) && toggleReaction && (
-              <div className="mt-1.5">
-                <ReactionPicker
-                  reactions={[]}
-                  onToggleReaction={toggleReaction}
-                />
+              <div className="mt-1">
+                <ReactionPicker reactions={item.reactions} onToggleReaction={toggleReaction} />
               </div>
             )}
           </div>
         </div>
 
         {/* Threading */}
-        {enableThreading && (replies.length > 0 || offersReply) && (
+        {enableThreading && (replies.length > 0 || replyOpen) && (
           <ThreadedReplies
             parentItem={item}
             replies={replies}
             onAddReply={onAddReply}
-            showReplyInput={offersReply}
+            showReplyInput={replyOpen}
             onEditComment={onEditComment}
             onDeleteComment={onDeleteComment}
           />
@@ -831,13 +968,16 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   };
 
   // A run of consecutive updates by one actor, as one row (objectstack#25959):
-  // who, when the latest entry was written, how many entries, and the union of
-  // the fields they changed. The toggle expands the run to its entries, each
-  // rendered exactly as an unfolded row.
+  // who, when the latest entry was written, how many entries, and the fields
+  // they changed. The chevron expands the run to its entries, each drawn as
+  // its own row.
   const renderFold = (entry: Extract<ActivityTimelineEntry, { kind: 'fold' }>): React.ReactNode => {
-    const latest = entry.items[entry.items.length - 1];
+    const latest = entry.items.reduce((a, b) => (Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a));
     const count = entry.items.length;
-    const labels = changedFieldsOf(entry.items).map(labelOfField);
+    const labels = (isStream
+      ? Array.from(new Set(entry.items.flatMap(streamChangedFieldsOf)))
+      : changedFieldsOf(entry.items)
+    ).map(labelOfField);
     const shown = labels.slice(0, FOLD_FIELDS_SHOWN);
     const rest = labels.length - shown.length;
     const named = rest > 0 ? [...shown, t('detail.foldedMoreFields', { count: rest })] : shown;
@@ -850,53 +990,31 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       ? t('detail.foldedUpdates', { fields: named.join(t('validation.formInvalidJoiner')) })
       : t('detail.activityUpdated');
     const expanded = expandedFolds.has(entry.id);
-    const Icon = FEED_TYPE_ICONS.field_change;
     return (
       <div key={entry.id} data-testid="activity-fold" data-fold-count={count}>
-        <div className="flex gap-3 relative">
-          <div
-            className={cn(
-              'shrink-0 h-8 w-8 rounded-full flex items-center justify-center z-10',
-              FEED_TYPE_COLORS.field_change,
-            )}
-          >
-            {latest.actorAvatarUrl ? (
-              <img
-                src={latest.actorAvatarUrl}
-                alt={latest.actor}
-                className="h-8 w-8 rounded-full object-cover"
-              />
-            ) : (
-              <Icon className="h-3.5 w-3.5" />
-            )}
-          </div>
-          <div className="flex-1 min-w-0 pt-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
-              <span className="text-sm font-medium">{latest.actor}</span>
-              <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
-                {formatTimestamp(latest.createdAt, t, displayLocale)}
-              </span>
-              <span className="text-xs text-muted-foreground" data-testid="activity-fold-count">
-                {t('detail.foldedUpdateCount', { count })}
-              </span>
-            </div>
-            <p className="text-sm whitespace-pre-wrap break-words text-muted-foreground">{summary}</p>
+        {streamRow(
+          latest,
+          FEED_TYPE_ICONS.field_change,
+          summary,
+          summary,
+          <>
+            <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground" data-testid="activity-fold-count">
+              {t('detail.foldedUpdateCount', { count })}
+            </span>
             <button
               type="button"
               aria-expanded={expanded}
+              aria-label={expanded ? t('detail.collapseFolded') : t('detail.expandFolded')}
               onClick={() => toggleFold(entry.id)}
-              className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <ChevronDown
-                className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')}
-                aria-hidden="true"
-              />
-              {expanded ? t('detail.collapseFolded') : t('detail.expandFolded')}
+              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded && 'rotate-180')} aria-hidden="true" />
             </button>
-          </div>
-        </div>
+          </>,
+          { 'data-stream-fold-row': '' },
+        )}
         {expanded && (
-          <div className="mt-4 space-y-4" data-testid="activity-fold-entries">
+          <div className="ml-1.5 border-l border-border pl-3" data-testid="activity-fold-entries">
             {entry.items.map((item) => renderItem(item))}
           </div>
         )}
@@ -915,6 +1033,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       disabled={isSubmitting}
       canSubmitEmpty={pendingAttachments.length > 0}
       autoFocus={isPeek}
+      compact={!isPeek}
       extraSlot={
         onUploadAttachments ? (
           <CommentAttachment
@@ -933,6 +1052,64 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       }
     />
   );
+
+  // The peek's composer: ONE line until the reader presses it (or a draft is
+  // held), then the full composer, focused. The panel and the stream draw the
+  // composer itself, one line until focused (`compact`).
+  const composerLine =
+    composerOpen || commentText || pendingAttachments.length > 0 ? (
+      composer
+    ) : (
+      <button
+        type="button"
+        className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => setComposerOpen(true)}
+        data-record-timeline-composer=""
+      >
+        <span className="truncate">{t('detail.timelineComposer', { defaultValue: 'Write a note… @ to mention' })}</span>
+      </button>
+    );
+
+  // The day header over its entries: 今天, 昨天, then the date.
+  const dayLabelOf = (createdAt: string | undefined): string => {
+    const key = dayKeyOf(createdAt);
+    if (!key || !createdAt) return '';
+    const now = new Date();
+    if (key === dayKeyOf(now.toISOString())) return t('detail.streamToday', { defaultValue: 'Today' });
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    if (key === dayKeyOf(yesterday.toISOString())) return t('detail.streamYesterday', { defaultValue: 'Yesterday' });
+    const date = new Date(createdAt);
+    return date.toLocaleDateString(displayLocale, {
+      month: 'short',
+      day: 'numeric',
+      ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
+    });
+  };
+  const firstItemOf = (entry: ActivityTimelineEntry): FeedItem => (entry.kind === 'fold' ? entry.items[0] : entry.item);
+  const renderDays = (): React.ReactNode => {
+    const days: { key: string; label: string; entries: ActivityTimelineEntry[] }[] = [];
+    for (const entry of timelineEntries) {
+      const createdAt = firstItemOf(entry).createdAt;
+      const key = dayKeyOf(createdAt);
+      const last = days[days.length - 1];
+      if (last && last.key === key) last.entries.push(entry);
+      else days.push({ key, label: dayLabelOf(createdAt), entries: [entry] });
+    }
+    return (
+      <div data-stream-list="">
+        {days.map((day, index) => (
+          <div key={`${day.key}:${index}`} data-stream-day={day.key}>
+            {day.label && (
+              <div className="pb-0.5 pt-2 text-xs font-medium text-muted-foreground" data-stream-day-label="">
+                {day.label}
+              </div>
+            )}
+            {day.entries.map((entry) => (entry.kind === 'fold' ? renderFold(entry) : renderItem(entry.item)))}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   // objectstack#27524, Target 5 — the 动态 panel's body. The panel around it
   // draws the header (「动态」 and the count); here: the composer, one line
@@ -967,18 +1144,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       <div className={className} data-record-timeline-peek="">
         {showCommentInput && (
           <div className="border-t border-border px-3 py-2">
-            {composerOpen || commentText || pendingAttachments.length > 0 ? (
-              composer
-            ) : (
-              <button
-                type="button"
-                className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => setComposerOpen(true)}
-                data-record-timeline-composer=""
-              >
-                <span className="truncate">{t('detail.timelineComposer', { defaultValue: 'Write a note… @ to mention' })}</span>
-              </button>
-            )}
+            {composerLine}
           </div>
         )}
         {filtered.length > 0 && readNotice && <div className="border-t border-border px-3">{readNotice}</div>}
@@ -1024,7 +1190,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       // pinned to the right rail it wraps this with its own border, so
       // we don't double up.
       className={cn(
-        'border-t border-border/60 pt-5',
+        'border-t border-border/60 pt-3',
         className,
       )}
       // Named with the heading's own title value, not a second string
@@ -1043,11 +1209,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       // mounts' HTML byte for byte, and both went red on that id.
       aria-label={title}
     >
-      <header className="mb-4">
+      <header className="mb-2">
         {/* Wraps: in a 320 px foot card the stream's chips go under the title
             rather than past the card's edge (objectstack#27055). */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-base font-semibold leading-none tracking-tight">
+          <h2 className="flex items-center gap-2 text-sm font-semibold leading-none tracking-tight">
             <Activity className="h-4 w-4" />
             {title}
             {/* A refused read leaves the count unknown, not zero: the rows
@@ -1084,6 +1250,28 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                 ))}
               </div>
             )}
+            {/* The filter: a quiet text button at the right of the title
+                row (「全部动态 ▾」) — the stream has its chips instead. */}
+            {showFilter && !isStream && (
+              <Select
+                value={activeFilter}
+                onValueChange={(v) => handleFilterChange(v as FeedFilterMode)}
+              >
+                <SelectTrigger
+                  aria-label={t('detail.filterActivity')}
+                  className="h-11 sm:h-7 w-auto gap-1 border-0 bg-transparent px-1.5 py-0 text-xs text-muted-foreground shadow-none hover:text-foreground"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {filterOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {showSubscription && subscription && (
               <SubscriptionToggle
                 subscription={subscription}
@@ -1093,31 +1281,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           </div>
         </div>
       </header>
-      <div className="space-y-4">
-        {/* Filter dropdown — the stream has its chips instead */}
-        {showFilter && !isStream && (
-          <div className="flex items-center gap-2">
-            <Select
-              value={activeFilter}
-              onValueChange={(v) => handleFilterChange(v as FeedFilterMode)}
-            >
-              <SelectTrigger
-                aria-label={t('detail.filterActivity')}
-                className="h-11 sm:h-8 w-auto min-w-[140px] py-1 text-sm"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {filterOptions.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
+      <div className="space-y-2">
         {/* Comment Input — rich text with @mention + bold/italic/list/code + preview */}
         {showCommentInput && composer}
 
@@ -1170,16 +1334,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             />
           )
         ) : (
-          <div className="relative">
-            {/* Timeline line */}
-            <div className="absolute left-4 top-2 bottom-2 w-px bg-border" />
-
-            <div className="space-y-4">
-              {timelineEntries.map((entry) =>
-                entry.kind === 'fold' ? renderFold(entry) : renderItem(entry.item),
-              )}
-            </div>
-          </div>
+          renderDays()
         )}
 
         {/* Load More */}

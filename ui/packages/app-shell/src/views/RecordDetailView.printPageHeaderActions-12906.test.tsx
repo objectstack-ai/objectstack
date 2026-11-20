@@ -278,13 +278,14 @@ describe('RecordDetailView — a print page draws the record’s header actions 
     expect(onDefaultPage).toEqual(onPrintPage);
   });
 
-  it('(d) CONTROL — a record page without `print` draws no print chrome; its page:header draws the actions once', async () => {
+  it('(d) CONTROL — a record page without `print` draws no print chrome; its page:header draws the actions once, in the top bar', async () => {
     await mountRecordPage([]);
     expect(document.querySelector('[data-print-page]')).toBeNull();
     expect(document.querySelector('[data-record-print-chrome]')).toBeNull();
     expect(screen.queryByTestId('record-print-button')).toBeNull();
     const toolbar = theToolbar();
-    expect(toolbar.closest('header')).not.toBeNull();
+    // objectstack#35593 — the header's group sits in the page's one top row.
+    expect(toolbar.closest('[data-record-top-bar]')).not.toBeNull();
     expect(screen.getAllByRole('button', { name: 'Submit for Sign-off' })).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
   });

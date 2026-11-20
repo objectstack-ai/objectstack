@@ -274,16 +274,19 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // Configuration; 32 until the recycle bin entry, `nav_recycle_bin`,
         // joined Configuration (#30239); 33 until objectstack#34724 retired
         // the Packaged Actions entry, `nav_packaged_actions`, the one entry
-        // `group_apps` held here, so that group collapses too.)
+        // `group_apps` held here, so that group collapses too; 31 until the
+        // Units of Measure entry, `nav_units_of_measure`, joined Configuration
+        // (#35488).)
         // `nav_settings_branding` is not among them, and not because of a
         // tenancy wall (this harness boots none): since #24766 it is
         // contributed by `@objectstack/service-settings` together with the
         // `branding` namespace, offered only where no organization wall stands,
         // and this harness composes platform-objects and the MCP bundle alone.
-        expect(allowedIds).toHaveLength(31);
+        expect(allowedIds).toHaveLength(32);
         expect(allowedIds).not.toContain('nav_packaged_actions');
         expect(allowedIds).toContain('nav_settings_access_policy');
         expect(allowedIds).toContain('nav_recycle_bin');
+        expect(allowedIds).toContain('nav_units_of_measure');
         expect(allowedIds).not.toContain('nav_settings_branding');
         // The two per-user stores are reached from the User record page, not
         // from Setup's menu (#23803).
@@ -306,8 +309,8 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        // 31: the composition the count in the test above states.
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(31);
+        // 32: the composition the count in the test above states.
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(32);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at

@@ -1863,6 +1863,23 @@ export const RecordRelatedListProps = strictObject({
 });
 
 /**
+ * How many of an object's declared `highlightFields` (ADR-0085), after the
+ * record's title field leaves the list, the DEFAULT record page draws in its
+ * header strip. The Details body leaves those fields out, so an entry past
+ * this count is drawn in the body instead.
+ *
+ * The one source both readers ask: the record page synthesizer in
+ * `@object-ui/plugin-detail` cuts the strip with it, and the
+ * `field-group-shadowed` lint in `@objectstack/lint` judges with it which
+ * field groups the strip empties on the record page. A second literal on
+ * either side is how the lint came to judge four while the page drew six.
+ *
+ * Not the bound of an authored `record:highlights` block's `fields`
+ * ({@link RecordHighlightsProps}): an authored page writes its own strip.
+ */
+export const RECORD_HIGHLIGHTS_MAX = 6;
+
+/**
  * ⚠️ The object arm is CLOSED, and closing a union arm is a different act from
  * closing a plain shape — worth reading before the next arm is touched.
  *
@@ -6957,7 +6974,7 @@ function buildObjectFormRuntimeField() {
     minLength: FieldSchema.shape.minLength.describe('Minimum character count — the native control\'s `minlength`'),
     maxLength: FieldSchema.shape.maxLength.describe('Maximum character count — the control\'s ceiling (a textarea also draws its counter)'),
     pattern: z.string().optional().describe('Regular expression the value must match, as a string — the native control\'s `pattern`, enforced by the browser at submit'),
-    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency)'),
+    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency / percent)'),
     summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
     columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
     // [#21768] The `grid` widget's eight field-level keys, camelCase since

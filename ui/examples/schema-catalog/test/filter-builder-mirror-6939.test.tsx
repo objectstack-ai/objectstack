@@ -93,37 +93,42 @@ type Reading = {
  * and not the renderer; what moved the renderer was a different card, and
  * keeping a stale "before" here would only make the next reader hunt a
  * regression that is a deliberate, ruled repair.
+ *
+ * ⛔ objectstack#35549 moved all five again, by one element: the builder's
+ * 「Where」 label span is gone (seat ruling Q3), so `elements` and the `SPAN`
+ * count drop by one, `Where` leaves `text`, and `sha256` is re-measured through
+ * this same `measure()`. Nothing else moved.
  */
 const PRE_REPAIR: Record<(typeof IDS)[number], Reading> = {
   'components-complex-filter-builder/empty-filter-builder': {
-    elements: 11,
-    tags: { DIV: 5, LABEL: 1, SPAN: 1, BUTTON: 1, svg: 1, path: 2 },
-    text: 'Build FilterWhereAdd filter',
-    sha256: '4f7116e49e263e517c7d54451327413dc9f8b8513c07f52d9c2686f2b2a381aa',
+    elements: 10,
+    tags: { DIV: 5, LABEL: 1, BUTTON: 1, svg: 1, path: 2 },
+    text: 'Build FilterAdd filter',
+    sha256: 'd4edfab29376ec040ab518140d509b5b631bcb7eb655e5b0cc074d92c68ec090',
   },
   'components-complex-filter-builder/product-search': {
-    elements: 76,
-    tags: { DIV: 20, LABEL: 1, SPAN: 10, BUTTON: 12, svg: 11, path: 19, INPUT: 3 },
-    text: 'Product Search FiltersWhereANDClear allCategoryEqualsRemove conditionPriceLess thanRemove conditionStock QuantityGreater thanRemove conditionAdd filter',
-    sha256: 'aa398c23811cc40717d632ff5feac486796e01bce738df72e3ea53e83e628d10',
+    elements: 75,
+    tags: { DIV: 20, LABEL: 1, SPAN: 9, BUTTON: 12, svg: 11, path: 19, INPUT: 3 },
+    text: 'Product Search FiltersANDClear allCategoryEqualsRemove conditionPriceLess thanRemove conditionStock QuantityGreater thanRemove conditionAdd filter',
+    sha256: '0fb598f1be494e2b3c7428d1f90ff222a041eec186a3d9819afc3f1a83265fe6',
   },
   'components-complex-filter-builder/search-interface': {
-    elements: 65,
-    tags: { DIV: 17, SPAN: 10, BUTTON: 12, svg: 9, path: 16, INPUT: 1 },
-    text: 'Advanced SearchBuild complex queries with multiple conditionsWhereANDClear allPublishedEqualsTrueRemove conditionViewsGreater thanRemove conditionAdd filterApply FiltersClear',
-    sha256: '17c0b9f574fe89cc80d8be92c53917be73c8a561461dbe7db5a3e0899d4c86ab',
+    elements: 64,
+    tags: { DIV: 17, SPAN: 9, BUTTON: 12, svg: 9, path: 16, INPUT: 1 },
+    text: 'Advanced SearchBuild complex queries with multiple conditionsANDClear allPublishedEqualsTrueRemove conditionViewsGreater thanRemove conditionAdd filterApply FiltersClear',
+    sha256: '25b998e0c6cd1559298976cab51e67b1212af06d3904b32334ab14668212649c',
   },
   'components-complex-filter-builder/user-filters': {
-    elements: 11,
-    tags: { DIV: 5, LABEL: 1, SPAN: 1, BUTTON: 1, svg: 1, path: 2 },
-    text: 'Find UsersWhereAdd filter',
-    sha256: 'bc346672868113c9a7ba6ff47057ccaa1b865707f5b99c24234e1a9e3e46e9bc',
+    elements: 10,
+    tags: { DIV: 5, LABEL: 1, BUTTON: 1, svg: 1, path: 2 },
+    text: 'Find UsersAdd filter',
+    sha256: '125701967597da14d9f36d7274c5912ebabc157cb8fcec2bc6a762efde782998',
   },
   'components-complex-filter-builder/with-conditions': {
-    elements: 57,
-    tags: { DIV: 15, LABEL: 1, SPAN: 7, BUTTON: 9, svg: 8, path: 15, INPUT: 2 },
-    text: 'User FiltersWhereANDClear allAgeGreater thanRemove conditionDepartmentEqualsRemove conditionAdd filter',
-    sha256: '685ae845f1ebc57c5054ec80da37582a3d387091f203b2c4166c4800cc110853',
+    elements: 56,
+    tags: { DIV: 15, LABEL: 1, SPAN: 6, BUTTON: 9, svg: 8, path: 15, INPUT: 2 },
+    text: 'User FiltersANDClear allAgeGreater thanRemove conditionDepartmentEqualsRemove conditionAdd filter',
+    sha256: '32484ae9b631006d910189f31096ab2d71b7f885957dba0c106816f10b3cc835',
   },
 };
 
@@ -237,8 +242,12 @@ describe('objectui#6939 — the repair moved the validator, not the renderer', (
     const m = measure(asAuthored(id));
     expect(m.text).not.toContain('failed to render');
     expect(m.text).toContain('Add filter');
-    expect(m.text).toContain('Where');
-    expect(m.elements).toBeGreaterThan(10);
+    // objectstack#35549 dropped the builder's 「Where」 label: the condition
+    // rows start the panel.
+    expect(m.text).not.toContain('Where');
+    // An empty builder draws 10 elements since its 「Where」 span went
+    // (objectstack#35549); an empty box or the error boundary draws far fewer.
+    expect(m.elements).toBeGreaterThanOrEqual(10);
     // Where the entry authors rows, the label of the column each row points at
     // must be ON SCREEN — the lookup that produces it is the `f.value === …`
     // match, so this is the reading that says `fields` arrived through the

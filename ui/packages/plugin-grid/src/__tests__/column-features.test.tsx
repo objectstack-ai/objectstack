@@ -324,10 +324,10 @@ describe('Summary footer rendering', () => {
       expect(screen.getByText('Name')).toBeInTheDocument();
     });
 
-    const footer = screen.getByTestId('column-summary-footer');
+    const footer = screen.getByTestId('data-table-summary-row');
     expect(footer).toBeInTheDocument();
-    expect(screen.getByTestId('summary-name')).toHaveTextContent('Count: 3');
-    expect(screen.getByTestId('summary-amount')).toHaveTextContent('Sum: 600');
+    expect(screen.getByTestId('data-table-summary-name')).toHaveTextContent('Count: 3');
+    expect(screen.getByTestId('data-table-summary-amount')).toHaveTextContent('Sum: 600');
   });
 
   it('does not render summary footer when no columns have summary config', async () => {
@@ -337,7 +337,7 @@ describe('Summary footer rendering', () => {
       expect(screen.getByText('Name')).toBeInTheDocument();
     });
 
-    expect(screen.queryByTestId('column-summary-footer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('data-table-summary-row')).not.toBeInTheDocument();
   });
 
   it('renders avg summary with formatted decimal', async () => {
@@ -353,9 +353,9 @@ describe('Summary footer rendering', () => {
       expect(screen.getByText('Name')).toBeInTheDocument();
     });
 
-    const footer = screen.getByTestId('column-summary-footer');
+    const footer = screen.getByTestId('data-table-summary-row');
     expect(footer).toBeInTheDocument();
-    expect(screen.getByTestId('summary-score')).toHaveTextContent('Avg: 80');
+    expect(screen.getByTestId('data-table-summary-score')).toHaveTextContent('Avg: 80');
   });
 });
 
@@ -552,9 +552,9 @@ describe('Combined column features', () => {
       expect(screen.getByText('Name')).toBeInTheDocument();
     });
 
-    const footer = screen.getByTestId('column-summary-footer');
+    const footer = screen.getByTestId('data-table-summary-row');
     expect(footer).toBeInTheDocument();
-    expect(screen.getByTestId('summary-amount')).toHaveTextContent('Sum: 600');
+    expect(screen.getByTestId('data-table-summary-amount')).toHaveTextContent('Sum: 600');
   });
 
   it('supports link + action on same column (link takes priority)', async () => {
@@ -617,10 +617,10 @@ describe('Combined column features', () => {
     expect(actionCells.length).toBeGreaterThan(0);
 
     // Summary footer
-    const footer = screen.getByTestId('column-summary-footer');
+    const footer = screen.getByTestId('data-table-summary-row');
     expect(footer).toBeInTheDocument();
-    expect(screen.getByTestId('summary-amount')).toHaveTextContent('Sum: 600');
-    expect(screen.getByTestId('summary-score')).toHaveTextContent('Avg: 80');
+    expect(screen.getByTestId('data-table-summary-amount')).toHaveTextContent('Sum: 600');
+    expect(screen.getByTestId('data-table-summary-score')).toHaveTextContent('Avg: 80');
   });
 });
 

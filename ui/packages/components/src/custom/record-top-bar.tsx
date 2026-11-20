@@ -7,16 +7,23 @@
  */
 
 /**
- * The record's top bar (objectstack#27524, Target 7): ONE 40 px bar above the
- * record header on every face — the page, the split pane, the drawer over a
- * list or a page, the maximized pane, the phone. It holds frame controls only;
- * the record header below it keeps the business actions.
+ * The record's top bar (objectstack#27524, Target 7): ONE bar at the top of the
+ * record on every face — the page, the split pane, the drawer over a list or a
+ * page, the maximized pane, the phone.
  *
- * Left: what the host hands as `leading` — the breadcrumb 「对象 › 记录名」, or
- * one level down in a pane 「← 路径」. Right, in a fixed order, each drawn only
- * when the host hands it: the counter 「3 / 21」 and ↓ ↑ (`stepper`, a list
- * context), a hairline, the panel switches (`toggles`, the right column's ⊟),
- * then the frame controls (`frame`: ⤢ / ⤡, 「收为抽屉」, ✕).
+ * Since objectstack#35593 it is the record's ONE header row, 44 px: a host
+ * hands `actionSlotRef` for the element the record header draws its button
+ * group into (hidden while empty), and puts a slot for the record's name and tags in `leading`, so the name, the
+ * tags, the buttons and the frame controls share one row. A host with no
+ * record header to draw there keeps the bar's breadcrumb.
+ *
+ * Left: what the host hands as `leading` — the breadcrumb 「对象 › 记录名」 (or
+ * 「对象 / 记录名 + 标签」 once the header holds the bar), or one level down in a
+ * pane 「← 路径」. Right, in a fixed order, each drawn only when the host hands
+ * it: the counter 「3 / 21」 and ↓ ↑ (`stepper`, a list context), a hairline,
+ * the record's button group (`actionSlotRef`), a hairline, the panel switches
+ * (`toggles`, the right column's ⊟), then the frame controls (`frame`: ⤢ / ⤡,
+ * 「收为抽屉」, ✕).
  *
  * Pure presentation: every control's handler, and whether it applies, belong to
  * the host — `NavigationOverlay` draws it as the pane's bar, the console's
@@ -73,6 +80,12 @@ export interface RecordTopBarProps {
   leadingTestId?: string;
   /** The counter and ↓ ↑, drawn only with a list context. */
   stepper?: RecordTopBarStepper;
+  /**
+   * The record's button group (objectstack#35593): handed the element the
+   * record header portals its actions into, after the step group. The element
+   * and the hairline after it are hidden while nothing is drawn there.
+   */
+  actionSlotRef?: React.Ref<HTMLSpanElement>;
   /** The panel switches (the right column's ⊟), after the step group. */
   toggles?: React.ReactNode;
   /** The frame controls — ⤢ / ⤡, 「收为抽屉」, ✕ — at the right end. */
@@ -166,7 +179,7 @@ export function useRecordStepKeys(
  * The record's top bar (objectstack#27524, Target 7). See the module doc for
  * the anatomy; `data-record-top-bar` marks it on every face.
  */
-export function RecordTopBar({ leading, leadingTestId, stepper, toggles, frame, className }: RecordTopBarProps) {
+export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, toggles, frame, className }: RecordTopBarProps) {
   const { t } = useTopBarTranslation();
   const position =
     stepper?.position && stepper.position.total > 0 && stepper.position.index >= 0 && stepper.position.index < stepper.position.total
@@ -182,7 +195,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, toggles, frame, 
   return (
     <div
       className={cn(
-        'flex min-h-11 sm:h-10 sm:min-h-0 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 text-xs text-muted-foreground',
+        'flex min-h-11 sm:h-11 sm:min-h-0 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 text-xs text-muted-foreground',
         className,
       )}
       data-record-top-bar=""
@@ -223,8 +236,24 @@ export function RecordTopBar({ leading, leadingTestId, stepper, toggles, frame, 
             >
               <ChevronUp className="h-3.5 w-3.5" />
             </RecordTopBarButton>
-            {(toggles || frame) && (
+            {(actionSlotRef || toggles || frame) && (
               <span aria-hidden="true" className="mx-1.5 h-4 w-px bg-border" data-record-top-bar-divider="" />
+            )}
+          </>
+        )}
+        {actionSlotRef && (
+          <>
+            <span
+              ref={actionSlotRef}
+              className="peer/actions flex shrink-0 items-center gap-2 text-sm text-foreground empty:hidden"
+              data-record-top-bar-actions=""
+            />
+            {(toggles || frame) && (
+              <span
+                aria-hidden="true"
+                className="mx-1.5 h-4 w-px bg-border peer-empty/actions:hidden"
+                data-record-top-bar-divider="actions"
+              />
             )}
           </>
         )}

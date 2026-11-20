@@ -230,6 +230,19 @@ export {
   type RequestAdmission,
 } from './request-execution-context.js';
 
+// The request's session-read carrier: the transport opens it per inbound
+// request, and every reader of that request's session (the inbound rate
+// limiter, the identity step above, REST's gate) reads through it, so one
+// request reads its session once. Request-scoped; never a cache.
+export {
+  openRequestSessionRead,
+  withRequestSessionRead,
+  withoutRequestSessionRead,
+  readRequestSession,
+  type RequestSessionRead,
+  type RequestSessionReadHandle,
+} from './request-session-read.js';
+
 // The ONE own-row delete door (`DELETE <route>` removes one row, only the
 // caller's own): read as the caller, check the owner column, remove as the
 // system attributed to the caller. Each object supplies its door descriptor.

@@ -118,7 +118,8 @@ const OBJECTS = [
     label: 'Task',
     pluralLabel: 'Tasks',
     managedBy: 'platform',
-    fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+    // `relatedList: true`: a side list with a tab (objectstack#35597 makes a plain master_detail FK an overview body table).
+    fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
   },
   {
     name: 'showcase_note',
@@ -282,7 +283,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(tierOf(container)).toBe('wide');
     expect(shown(container)).toBe('details right');
     expect(columnsGrid(container)).toContain('23.75rem');
-    expect(detailsGrid(container)).toContain('@lg:grid-cols-3');
+    // Container breakpoints of the dense label-left rows (objectstack#35602).
+    expect(detailsGrid(container)).toContain('@4xl:grid-cols-3');
     await expectTabRowOnly();
     // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
     expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
@@ -306,8 +308,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(tierOf(container)).toBe('two-column');
     expect(shown(container)).toBe('details right');
     expect(columnsGrid(container)).toContain('20rem');
-    expect(detailsGrid(container)).toContain('@sm:grid-cols-2');
-    expect(detailsGrid(container)).not.toContain('@lg:grid-cols-3');
+    expect(detailsGrid(container)).toContain('@xl:grid-cols-2');
+    expect(detailsGrid(container)).not.toContain('@4xl:grid-cols-3');
     // The same panels as the wide tier — no rail to open first.
     // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
     expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
@@ -334,7 +336,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
     // objectstack#27058 — on a phone the stack ends where the bottom action
     // bar starts: the header's actions are drawn there, after the body, and
-    // the header draws no action row. The split pane keeps the header's row.
+    // the header draws no action row. The split pane keeps the header's
+    // group, in the page's one top row (objectstack#35593).
     const bar = container.querySelector('[data-record-action-bar]');
     const header = container.querySelector('[data-record-page-root] header') as HTMLElement;
     if (name === 'a phone') {
@@ -343,7 +346,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
       expect(header.querySelector('[role="toolbar"]')).toBeNull();
     } else {
       expect(bar).toBeNull();
-      await waitFor(() => expect(header.querySelector('[role="toolbar"]')).toBeTruthy());
+      await waitFor(() => expect(container.querySelector('[data-record-top-bar-actions] [role="toolbar"]')).toBeTruthy());
     }
   });
 

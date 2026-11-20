@@ -12,6 +12,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   // Does this schema-driven action render for THIS row? The ONE definition
   // for every row menu, and here it governs BOTH surfaces a def can land on —
@@ -556,12 +557,14 @@ function toButtonVariant(v: RowActionDef['variant']): 'default' | 'secondary' | 
  * the way the record header's button does: `aria-describedby` on the button,
  * a focusable tooltip trigger around it.
  */
-const RowActionInlineButton: React.FC<{
+export const RowActionInlineButton: React.FC<{
   def: RowActionDef;
   row: any;
   objectFields?: unknown;
   onActionDef?: (def: RowActionDef, row: any) => void;
-}> = ({ def, row, objectFields, onActionDef }) => {
+  /** objectstack#35554 — the page bar draws its exposed actions as outline buttons. */
+  buttonVariant?: 'default' | 'secondary' | 'destructive' | 'ghost' | 'link' | 'outline';
+}> = ({ def, row, objectFields, onActionDef, buttonVariant }) => {
   const scope = usePredicateScope();
   const isVisible = React.useMemo(
     () => isCustomRowActionVisible(def, row, scope, objectFields),
@@ -577,9 +580,9 @@ const RowActionInlineButton: React.FC<{
   const ActionIcon = resolveIcon(def.icon);
   const button = (
     <Button
-      variant={toButtonVariant(def.variant)}
+      variant={buttonVariant ?? toButtonVariant(def.variant)}
       size="sm"
-      className="h-8"
+      className="h-6"
       data-testid={`row-action-inline-${def.name}`}
       disabled={isDisabled}
       aria-describedby={disabledReason?.id}
@@ -730,18 +733,6 @@ export const RowActionMenuItems: React.FC<{
           onSelect={(r) => onEdit?.(r)}
         />
       )}
-      {plan.remove && (
-        <BuiltinRowActionItem
-          name="delete"
-          predicates={deletePredicates}
-          row={row}
-          icon={<Trash2 className="mr-2 h-4 w-4" />}
-          label={t('grid.delete')}
-          objectFields={objectFields}
-          verdictPending={!!crudVerdictPending?.delete}
-          onSelect={(r) => onDelete?.(r)}
-        />
-      )}
       {plan.custom.map(def => (
         <RowActionMenuItem
           key={def.name}
@@ -760,6 +751,25 @@ export const RowActionMenuItems: React.FC<{
           {formatActionLabel(action)}
         </DropdownMenuItem>
       ))}
+      {/* objectstack#35554 — Delete is the menu's last item, set apart by a
+          separator and drawn in the danger colour, whichever menu hosts it
+          (the row's "⋮", the row's context menu, the page bar's overflow). */}
+      {plan.remove && (plan.edit || plan.custom.length > 0 || plan.legacy.length > 0) && (
+        <DropdownMenuSeparator data-testid="row-action-delete-separator" />
+      )}
+      {plan.remove && (
+        <BuiltinRowActionItem
+          name="delete"
+          predicates={deletePredicates}
+          row={row}
+          icon={<Trash2 className="mr-2 h-4 w-4" />}
+          label={t('grid.delete')}
+          objectFields={objectFields}
+          verdictPending={!!crudVerdictPending?.delete}
+          className="text-destructive focus:text-destructive"
+          onSelect={(r) => onDelete?.(r)}
+        />
+      )}
     </>
   );
 };
@@ -808,7 +818,7 @@ export const RowActionMenu: React.FC<RowActionMenuProps> = (props) => {
               // pointer, where no hover will ever lift it. The tone
               // is a text colour, never an opacity, so the resting glyph keeps
               // the muted-foreground contrast every other secondary icon has.
-              className="h-8 w-8 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 text-muted-foreground transition-colors group-hover/row:text-foreground group-focus-within/row:text-foreground group-data-[state=selected]/row:text-foreground data-[state=open]:text-foreground focus-visible:text-foreground pointer-coarse:text-foreground"
+              className="h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 text-muted-foreground transition-colors group-hover/row:text-foreground group-focus-within/row:text-foreground group-data-[state=selected]/row:text-foreground data-[state=open]:text-foreground focus-visible:text-foreground pointer-coarse:text-foreground"
               data-testid="row-action-trigger"
             >
               <MoreVertical className="h-4 w-4" />

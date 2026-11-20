@@ -42,6 +42,7 @@ import { wrapDeclarativeHook } from './hook-wrappers.js';
 import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
 import { announceSummaryHoles } from './summary-hole-announce.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
+import { WORK_CALENDAR_OBJECT, WorkCalendarService, installWorkCalendarHooks } from './work-calendar-service.js';
 import { readRecycleBinRetentionEnv, type RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import {
@@ -66,6 +67,7 @@ import {
 } from './action-activation.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
+import { WORK_CALENDAR_SERVICE } from '@objectstack/spec/contracts';
 import {
   collectManifestPicklistNames,
   collectManifestPicklistReferences,
@@ -605,6 +607,8 @@ export class ObjectQLPlugin implements Plugin {
   private metadataUnsubscribes: Array<() => void> = [];
   /** ADR-0057 lifecycle enforcement (Reaper/Rotator/Archiver). */
   private lifecycleService: LifecycleService | undefined;
+  /** [ADR-0157] The working-calendar service, registered as {@link WORK_CALENDAR_SERVICE}. */
+  private workCalendarService: WorkCalendarService | undefined;
   private lifecycleOptions: ObjectQLPluginOptions['lifecycle'];
   /** [#30237] The host's recycle-bin retention seam, handed to the engine in `init()`. */
   private recycleBinRetention: ObjectQLPluginOptions['recycleBinRetention'];
@@ -1194,6 +1198,18 @@ export class ObjectQLPlugin implements Plugin {
       ...this.lifecycleOptions,
     });
     ctx.registerService('lifecycle', this.lifecycleService);
+
+    // [ADR-0157 D1, D2] The working-calendar service, beside the engine's
+    // other reader of organization reference data (the exchange-rate read of
+    // the home projection): registered from the engine plugin so every kernel
+    // that has data can count working time, and resolved by the formula
+    // functions and the approval sweep through `ctx.getService`. A kernel
+    // without `sys_work_calendar` registered holds no calendar, and refuses.
+    this.workCalendarService = new WorkCalendarService({
+      getEngine: () => this.ql as never,
+      hasCalendarObject: () => Boolean(this.ql?.registry?.getObject?.(WORK_CALENDAR_OBJECT)),
+    });
+    ctx.registerService(WORK_CALENDAR_SERVICE, this.workCalendarService);
   }
 
   start = async (ctx: PluginContext) => {
@@ -1575,7 +1591,7 @@ export class ObjectQLPlugin implements Plugin {
         // UTC; a read that FAILS is the write's failure, not an unset setting.
         const isUnregisteredSetting = (e: any) => e?.code === 'SETTINGS_UNKNOWN_NAMESPACE' || e?.code === 'SETTINGS_UNKNOWN_KEY';
         const settingText = (resolved: { value?: unknown } | undefined) => (typeof resolved?.value === 'string' ? resolved.value : undefined);
-        this.ql.setHomeLocalizationResolver(async (organizationId) => {
+        const readLocalization = async (organizationId: string | undefined) => {
             let settings: {
                 get?: (ns: string, key: string, c?: Record<string, unknown>) => Promise<{ value?: unknown } | undefined>;
                 getMany?: (ns: string, keys: string[], c?: Record<string, unknown>) => Promise<Record<string, { value?: unknown } | undefined>>;
@@ -1606,7 +1622,17 @@ export class ObjectQLPlugin implements Plugin {
                 }
             };
             return { currency: await one('currency'), timezone: await one('timezone') };
-        });
+        };
+        this.ql.setHomeLocalizationResolver(readLocalization);
+        // [ADR-0157 D7, D10] The calendar objects' write door, and the drop of
+        // the calendar cache on every calendar or exception write. A create
+        // that leaves `timezone` out takes the organization's
+        // `localization.timezone` from the same read.
+        if (this.workCalendarService) {
+            installWorkCalendarHooks(this.ql as never, this.workCalendarService, {
+                timezoneOf: async (organizationId) => (await readLocalization(organizationId))?.timezone,
+            }, ctx.logger);
+        }
     }
 
     // Initialize drivers (calls driver.connect() which sets up persistence)

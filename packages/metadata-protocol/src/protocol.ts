@@ -9077,9 +9077,9 @@ export class ObjectStackProtocolImplementation implements
      * Answered as the schema gate answers, with the envelope of
      * {@link unknownDatasourceSaveRefusal}: `422 INVALID_METADATA`, one finding
      * per missing member at `externalId` (`externalId.N` for a composite
-     * member), naming the field and the object. The boot loader
-     * never refuses; it warns once for a keyed dataset whose every record
-     * keys empty ({@link SeedLoaderService}).
+     * member), naming the field and the object. The boot loader refuses
+     * each keyed record that leaves a key field blank, one error per
+     * record, and loads the rest ({@link SeedLoaderService}).
      */
     private seedExternalIdSaveRefusal(
         singularType: string,

@@ -100,6 +100,9 @@ describe('validateRelatedListRefs', () => {
     expect(finding.message).toContain("'rlo_task.lead_id' is a side card");
     // Controls: the same group naming a body table, and the side card once marked primary.
     expect(rules(stack('rlo_line'))).toEqual([]);
+    // #35597: a master_detail with no relatedList is a body table without inlineEdit too.
+    const plainLine = { ...line, name: 'rlo_step', fields: { lead_id: { type: 'master_detail', label: 'Lead', reference: 'rlo_lead' } } };
+    expect(rules(stack('rlo_step', plainLine))).toEqual([]);
     const primaryTask = { ...task, fields: { lead_id: { ...task.fields.lead_id, relatedList: 'primary' } } };
     expect(rules(stack('rlo_task', primaryTask))).toEqual([]);
     // A hidden list is not a body table either.

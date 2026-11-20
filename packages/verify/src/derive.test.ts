@@ -49,6 +49,21 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
     expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
   });
 
+  // One reader with verify's driver factory (`isManagedDatasource`): a mode
+  // spelled only inside `config` or `external` gets the real driver at boot, so
+  // derive must withhold its objects too, or verify's rows reach that database.
+  it.each([
+    ['config', { driver: 'postgres', config: { host: 'wh.internal', schemaMode: 'external' } }],
+    ['external', { driver: 'postgres', config: { host: 'wh.internal' }, external: { schemaMode: 'validate-only' } }],
+  ])('withholds an object whose datasource spells schemaMode only inside `%s`', (_where, ds) => {
+    const c = deriveCrudCases({
+      datasources: [{ name: 'wh', ...ds }],
+      objects: [{ name: 'wh_order', datasource: 'wh', fields: { amount: { type: 'number' } } }],
+    }).find((x) => x.object === 'wh_order');
+    expect(c?.blocked).toContain('external datasource "wh" (read-only): not exercised');
+    expect(c?.body).toBeUndefined();
+  });
+
   it('a required relation to an external object is blocked too, so nothing is written for it', () => {
     const config = external({ allowWrites: true }, { remoteName: 'orders', writable: true });
     config.objects.push({
@@ -58,6 +73,35 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
     expect(deriveCrudCases(config).find((x) => x.object === 'wh_note')?.blocked).toContain(
       'required relational target "wh_order"',
     );
+  });
+
+  it('a managed object requiring a withheld target says it was withheld on purpose, and why', () => {
+    const config = external({ allowWrites: false }, { remoteName: 'orders' });
+    config.objects.push(
+      { name: 'wh_note', fields: { order: { type: 'lookup', reference: 'wh_order', required: true } } } as any,
+      { name: 'wh_reply', fields: { note: { type: 'lookup', reference: 'wh_note', required: true } } } as any,
+    );
+    const cases = deriveCrudCases(config);
+    const note = cases.find((x) => x.object === 'wh_note')?.blocked;
+    expect(note).toBe(
+      'required relational target "wh_order" is withheld on purpose — external datasource "wh" (read-only): ' +
+        'not exercised — verify writes only to its ephemeral store',
+    );
+    expect(note).not.toContain('not synthesizable');
+    // Transitively too: the dependent of a dependent is not called unsynthesizable.
+    const reply = cases.find((x) => x.object === 'wh_reply')?.blocked;
+    expect(reply).toContain('required relational target "wh_note" is withheld on purpose');
+    expect(reply).not.toContain('not synthesizable');
+  });
+
+  it('a required target blocked for a field shape keeps the generic sentence', () => {
+    const cases = deriveCrudCases({
+      objects: [
+        { name: 'p', fields: { blob: { type: 'composite', required: true } } },
+        { name: 'c', fields: { parent: { type: 'lookup', reference: 'p', required: true } } },
+      ],
+    });
+    expect(cases.find((x) => x.object === 'c')?.blocked).toBe('required relational target "p" is not synthesizable');
   });
 
   it('leaves managed objects unaffected, including one on a declared managed datasource', () => {
@@ -71,6 +115,40 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
     const cases = deriveCrudCases(config);
     expect(cases.find((x) => x.object === 'task')?.blocked).toBeFalsy();
     expect(cases.find((x) => x.object === 'side_task')?.blocked).toBeFalsy();
+  });
+
+  // A managed SQL or memory datasource runs on verify's stand-in, so its
+  // objects are exercised (`verify.managed-datasource-stand-in.test.ts`). One
+  // whose engine has no stand-in keeps its real driver, so verify withholds
+  // its own writes from its objects; the app's seed, hooks and flows still
+  // reach that real store, and the reason says so.
+  it('exercises an object on a managed SQL datasource, and withholds one on an engine with no stand-in', () => {
+    const config = {
+      datasources: [
+        { name: 'pg', driver: 'postgres', schemaMode: 'managed' },
+        { name: 'docs', driver: 'mongodb' },
+        { name: 'plug', driver: 'acme-plugin-driver', schemaMode: 'managed' },
+      ],
+      objects: [
+        { name: 'pg_task', datasource: 'pg', fields: { title: { type: 'text' } } },
+        { name: 'doc_task', datasource: 'docs', fields: { title: { type: 'text' } } },
+        { name: 'plug_task', datasource: 'plug', fields: { title: { type: 'text' } } },
+        { name: 'doc_note', fields: { doc: { type: 'lookup', reference: 'doc_task', required: true } } },
+      ],
+    };
+    const cases = deriveCrudCases(config);
+    expect(cases.find((x) => x.object === 'pg_task')?.blocked).toBeFalsy();
+    expect(cases.find((x) => x.object === 'doc_task')?.blocked).toBe(
+      'managed datasource "docs" (driver "mongodb"): not exercised — verify has no ephemeral stand-in for ' +
+        "this engine, so it withholds its own writes; the app's seed, hooks and flows still write to the " +
+        'real database',
+    );
+    expect(cases.find((x) => x.object === 'plug_task')?.blocked).toContain(
+      'managed datasource "plug" (driver "acme-plugin-driver"): not exercised',
+    );
+    expect(cases.find((x) => x.object === 'doc_note')?.blocked).toContain(
+      'required relational target "doc_task" is withheld on purpose — managed datasource "docs"',
+    );
   });
 });
 
