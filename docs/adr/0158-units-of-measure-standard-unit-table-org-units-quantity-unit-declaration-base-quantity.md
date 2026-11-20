@@ -347,7 +347,7 @@ The values are illustrations: which codes U1 holds, and the dimension vocabulary
   to its own variant, and the rule reaches the published JSON Schema as a `oneOf`. `currencyConfig` cannot take this
   form because its discriminator has a default. A key of another mode is refused, with guidance naming the mode it
   belongs to. Inside the config, `mode`, `defaultUnit`, `unitCode`, `code`, `uom`, `field`, `codeField` and
-  `dimension` are answered with the spelling this record uses.
+  `dimension` are answered with the spelling this record uses, each in the variant that holds its target key.
 - **Which type carries which mode**: `fixed` and `record` on a `number`, `code` on a `text`. Every other type is
   refused, including `currency`, `formula` and `summary` (U8: no reader). A bare `unit`, `uom`, `unitCode` or
   `dimension` key on a field is refused, with guidance naming `unitConfig`.
@@ -367,9 +367,9 @@ The values are illustrations: which codes U1 holds, and the dimension vocabulary
   `defaultUnit`, `unitCode`, `code` and `uom` to `unit`; `field` and `codeField` to `unitField`; `dimension` to
   `unitDimension`. On the field itself, prose guidance for a bare `unit`, `uom`, `unitCode` or `dimension` key, the
   form the guidance for a bare `currency` key takes.
-- **Read on `type: 'number'` only** (U4). On `formula` and `summary` the declaration is refused until a reader exists
+- **Read on `type: 'number'` only** (U4; *amended 2026-11-20*: `code` on a `text` joins it, Open item 8). On `formula` and `summary` the declaration is refused until a reader exists
   (U8). So a roll-up of a `fixed`-unit quantity shows a bare number; the gap is declared here, not discovered later.
-- **The object door.** `unitField` names a `text` field of the same object. That field carries no marker, because U1
+- **The object door** (as settled; *amended 2026-11-20*: the shipped door is the bullet after **Cross-refusals**). `unitField` names a `text` field of the same object. That field carries no marker, because U1
   is not a value domain (ruled); the pointer is the declaration. Two quantities that share one unit field must not
   declare different `unitDimension` values, the check `packages/spec/src/data/object.zod.ts#refuseDishonestHomeAmount`
   makes for amounts that share a rate field. A field that holds a unit code with no quantity pointing at it is left
@@ -556,11 +556,11 @@ amended with each answer, the way ADR-0144's open items were.
    seat). [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) sets their codes and envelope.
    *Note (2026-11-20):* settled on the membership card
    ([#35489](https://github.com/objectstack-ai/objectstack/issues/35489)), with one code per remedy, as
-   `ERR_HOME_CURRENCY_UNSET` sits beside `ERR_CURRENCY_CODE_REQUIRED`. Each is registered in the ADR-0112 ledger under
-   `@objectstack/objectql`:
+   `ERR_HOME_CURRENCY_UNSET` stands beside `ERR_EXCHANGE_RATE_MISSING`. Each is registered in the ADR-0112 ledger
+   under `@objectstack/objectql`:
    - `ERR_UNIT_CODE_REQUIRED`: a quantity beside a blank code;
-   - `ERR_UNIT_CODE_UNKNOWN`: a code that is neither a U1 code nor one of the organization's units; when only the case
-     differs, the exact-uppercase spelling is named;
+   - `ERR_UNIT_CODE_UNKNOWN`: a code that is neither a U1 code nor one of the organization's units; when it differs
+     from one only in case or surrounding spaces, that exact spelling is named, and `C62` or `EA` is pointed to `H87`;
    - `ERR_UNIT_CODE_RETIRED`: L1's "a new save with that code is refused";
    - `ERR_UNIT_DIMENSION_MISMATCH`: a member of a dimension other than the declared `unitDimension`;
    - these four answer 400. `ERR_UNIT_DELETE_REFUSED` answers 405, the status the data door already answers for the
@@ -591,10 +591,11 @@ amended with each answer, the way ADR-0144's open items were.
    *Note (2026-11-20), first half:* settled on the membership card
    ([#35489](https://github.com/objectstack-ai/objectstack/issues/35489)). A number field that declares `unitConfig`
    needs no `scale`, and may keep one. ADR-0144's precedent is that a currency's decimal places are the currency's,
-   not a field setting (ruling `5805782503`, `field-currency-scale-refused.test.ts`), and it never required a scale. A
-   unit's own decimal places are U6, which R1 does not ship
-   ([#35498](https://github.com/objectstack-ai/objectstack/issues/35498)), so a required scale would serve nothing in
-   R1. A declared `scale` stays what L4 names it: the ceiling. The display half stays with R1's display card.
+   not a field setting (ruling `5805782503`, `field-currency-scale-refused.test.ts`), and it never required a scale.
+   No reader of a unit's own decimal places (U6) has shipped yet: the display card
+   ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490)) and the decimal-places setting card
+   ([#35498](https://github.com/objectstack-ai/objectstack/issues/35498)) add them, so nothing reads a required scale
+   today. A declared `scale` stays what L4 names it: the ceiling. The display half stays with R1's display card.
 7. **The release of each declaration.** U7 lists readers; U8 binds each key to its reader's release
    ([Releases](#releases)).
 8. **A unit code with no quantity beside it: a ruling is owed.** U4 puts the unit declaration on the `number` field,
@@ -616,9 +617,9 @@ amended with each answer, the way ADR-0144's open items were.
    `unitMode` mirror `currencyConfig` / `currencyMode`), and the word "code" from U4 ("the row stores the code") and
    `sys_unit.code`. It is refused beside a `valueDomain`, which would make one column hold two vocabularies. It is
    also refused on a field that a quantity's `unitField` names (L3: "the pointer is the declaration"). U5 judges it
-   whenever it is written (Open item 9 point 6); the picker
-   ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490)) and the backfill
-   ([#35492](https://github.com/objectstack-ai/objectstack/issues/35492)) reach it. The backfill door reaches a
+   whenever it is written (Open item 9 point 6); the backfill
+   ([#35492](https://github.com/objectstack-ai/objectstack/issues/35492)) reaches it, and the picker card
+   ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490)) is to. The backfill door reaches a
    standalone `unitMode: 'code'` field the same way it reaches a `unitField`. The field has no quantity beside it, so
    its blank is owed nothing and is never written, with or without a `""` entry
    ([#35492](https://github.com/objectstack-ai/objectstack/issues/35492)).
@@ -671,8 +672,9 @@ amended with each answer, the way ADR-0144's open items were.
        (`packages/metadata-protocol/src/protocol-write-face.ts#detectDestructiveObjectChanges`). The detector reads no
        row.
      - No finding is raised in R1 for a `unitField` re-pointed onto a field that already was a unit code field or onto
-       a field new in the same save (the sibling of `currency_field_repointed`), or for a narrowed `unitDimension`
-       ([#35885](https://github.com/objectstack-ai/objectstack/issues/35885)).
+       a field new in the same save (the sibling of `currency_field_repointed`), or for a narrowed `unitDimension`.
+       The re-point onto a field new in the same save, the one that leaves stored rows beside a blank unit, is carried
+       by [#35885](https://github.com/objectstack-ai/objectstack/issues/35885).
 
    The organization's units are read once per organization per write. The read uses an explicit `organization_id`
    predicate under a minimal system context that keeps only the caller's transaction and trace id. It is never made
@@ -718,9 +720,11 @@ amended with each answer, the way ADR-0144's open items were.
     *Note (2026-11-20):* the engine refuses a delete of a `sys_unit` row in every context, a system writer and an
     automation run included, by id and batched. The refusal is 405 `ERR_UNIT_DELETE_REFUSED`, raised before any
     middleware or hook. `organization_admin` names `sys_unit` explicitly with no delete bit, as `sys_audit_log` is
-    named ([#35489](https://github.com/objectstack-ai/objectstack/issues/35489)). The one exemption, ruled by the
-    maintainer (option B), is the organization delete's own cascade, which removes its units
-    ([#35812](https://github.com/objectstack-ai/objectstack/issues/35812)).
+    named ([#35489](https://github.com/objectstack-ai/objectstack/issues/35489)). The maintainer ruled one exemption
+    (option B, [#35812](https://github.com/objectstack-ai/objectstack/issues/35812) `7035627429`): the organization
+    delete's own cascade removes its units. It is not built in R1. Until
+    [#35812](https://github.com/objectstack-ai/objectstack/issues/35812) lands, the refusal holds for that cascade
+    too, so an organization that holds a unit cannot be deleted.
 12. **R1's backfill and its raw aggregates.** The backfill mirrors `os migrate record-currency-codes` loosely. That
     door writes one code, the operator's, into the rows whose code is blank
     (`packages/objectql/src/record-currency-backfill.ts#backfillRecordCurrencyCodes`); the unit door rewrites free
@@ -736,10 +740,11 @@ amended with each answer, the way ADR-0144's open items were.
     a unit code field in place. They work from the operator's mapping of stored text, exactly as written, to a unit
     code. Nothing is derived and nothing is folded: `kg`, `KG` and `kg ` are three keys. The run names the unit code
     field (the `text` field a quantity's `unitField` names, or a `unitMode: 'code'` field), never the quantity.
-    - **Targets.** Each mapping target is judged by U5 before any row is read. With no organization named, an
-      organization's own code is judged in each organization the run would write it in, after the read-only preview
-      and before any write. A target that is no member, a retired unit, or a unit of another dimension than the
-      field's `unitDimension` refuses the run `INVALID_FIELD`.
+    - **Targets.** Each mapping target is judged by U5 before any row is written: a standard code, and any code under
+      a named organization, before any row is read. With no organization named, an organization's own code is judged
+      in each organization the run would write it in, after the read-only preview and before any write. A target that
+      is no member, a retired unit, or a unit of another dimension than the field's `unitDimension` refuses the run
+      `INVALID_FIELD`.
     - **Rows left as stored.** A row holding a unit code is never rewritten, so a second run writes nothing. A unit
       code here is a code of U1 or any `sys_unit` row of the row's organization, a retired one included (L1 keeps a
       resting row's code), or a code of another dimension. Neither is free text, and rewriting either from a mapping
