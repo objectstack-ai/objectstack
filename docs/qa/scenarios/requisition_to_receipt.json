@@ -806,7 +806,7 @@
       },
       {
         "id": "laptops_received",
-        "ask": {"zh": "到目前为止一共收到了多少台笔记本电脑?", "en": "How many laptops have been received so far?"},
+        "ask": {"zh": "按收货记录算,到目前为止一共收到了多少台笔记本电脑?", "en": "How many laptops have been received so far, by the goods receipts?"},
         "object": "goods_receipt",
         "truth": {
           "kind": "sum",
