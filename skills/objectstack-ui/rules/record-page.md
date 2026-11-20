@@ -16,15 +16,15 @@ one tab per panel with its count) enlarges a panel at `?related=object.field`.
 
 **2 · Relationship flags shape the related column.** On the CHILD object's
 reference field: `relatedList: 'primary'` draws the child as a full-width body
-table in the details after the first field section (the default for a
-`master_detail` with `inlineEdit`); `true` / absent is a panel in the right
+table in the details above the field sections (the default for a
+`master_detail`); `true` (a `lookup`'s default) is a panel in the right
 column; `false` leaves the child off the page. `relatedListTitle` /
 `relatedListColumns` (child field names) replace the derived title / columns;
 `relatedListFilter` (Query-DSL, `{ status: { $ne: 'done' } }`) is AND-composed
 with the parent condition, and the panel's count honours it. Rows follow the
 child's default list view `sort` (`isDefault`, else the first declared); the
 parent's `relatedLists` orders tables and panels alike. "Put the tasks first on
-the lead page" is `relatedList: 'primary'` on `task.lead` — no page file.
+the lead page" is `relatedLists: ['task']` on `lead` — no page file.
 
 **3 · A slotted page overrides one slot.** `kind: 'slotted'` replaces only the
 slots it names — `header`, `actions`, `alerts`, `highlights`, `details`,
@@ -59,7 +59,7 @@ import { Field, ObjectSchema } from '@objectstack/spec/data';
 export const Task = ObjectSchema.create({
   name: 'task', sharingModel: 'controlled_by_parent',
   fields: {
-    lead: Field.masterDetail('lead', { relatedList: 'primary', relatedListFilter: { status: { $ne: 'done' } } }),
+    lead: Field.masterDetail('lead', { relatedListFilter: { status: { $ne: 'done' } } }), // a body table
   },
 });
 ```
