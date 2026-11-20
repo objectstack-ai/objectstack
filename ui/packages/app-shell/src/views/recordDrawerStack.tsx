@@ -73,7 +73,6 @@ import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-
 import { useFilterScope } from '@object-ui/react';
 import {
   RECORD_DETAIL_TAB_PARAM,
-  RECORD_DRAWER_PARAM,
   RECORD_RELATED_ENLARGE_PARAM,
   RECORD_RELATED_ENLARGE_PUSHED_STATE,
   RECORD_TRAIL_PARAM,
