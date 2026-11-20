@@ -425,18 +425,18 @@ async function walkUnitCodes(
         // Any code is left as stored, a retired unit or another dimension included: see the header.
         if (units.verdict(org, value) !== undefined) {
           bump('skippedMember');
-          tallyValue(values, value, 'member');
+          tallyValue(values, value, 'member', mapping);
           continue;
         }
         if (!has(value)) {
           bump('unmatched');
-          tallyValue(values, value, 'unmatched');
+          tallyValue(values, value, 'unmatched', mapping);
           continue;
         }
       }
       const code = mapping[value]!;
       bump('mapped');
-      tallyValue(values, value, 'mapped', code);
+      tallyValue(values, value, 'mapped', mapping);
       if (!targetsByOrganization.has(org)) targetsByOrganization.set(org, new Set());
       targetsByOrganization.get(org)!.add(code);
       if (report.sampleRecordIds.length < MAX_SAMPLE_IDS) report.sampleRecordIds.push(String(id));
@@ -460,11 +460,14 @@ async function walkUnitCodes(
   return { report, targetsByOrganization };
 }
 
-function tallyValue(values: Map<string, UnitCodeBackfillValue>, value: string, disposition: UnitCodeBackfillValue['disposition'], code?: string): void {
+function tallyValue(values: Map<string, UnitCodeBackfillValue>, value: string, disposition: UnitCodeBackfillValue['disposition'], mapping: UnitCodeMapping): void {
   const key = `${disposition}\u0000${value}`;
   const hit = values.get(key);
-  if (hit) hit.rows++;
-  else values.set(key, { value, rows: 1, disposition, ...(code !== undefined ? { code } : {}) });
+  if (hit) { hit.rows++; return; }
+  const entry: UnitCodeBackfillValue = { value, rows: 1, disposition };
+  // The unit code the mapping writes (never an error code), read here from the mapping itself.
+  if (disposition === 'mapped') entry.code = mapping[value];
+  values.set(key, entry);
 }
 
 /** Human-readable report body, shared by the CLI's dry-run and apply output. */
