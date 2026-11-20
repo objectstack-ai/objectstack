@@ -144,7 +144,10 @@ measured budget with its class (ruling record 6181973363), is its lane's card, f
 never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
 layer at least as close to the code (ruling record 6120820653).
 A new pin for a component that already has a shared harness file goes into that file as a
-top-level `describe`, not a new file (ruling record 6583487846).
+top-level `describe`, not a new file (ruling record 6583487846). The merge queue's speed budget is
+`scripts/ci/queue-budget.json`, read weekly; an over week files one speed-up card; a PR that changes CI or adds a gate
+reports the affected job's before/after median as advisory, never a gate
+([why](docs/agents/build-and-test.md#the-merge-queue-speed-budget)).
 
 ### Running the dev server
 
