@@ -844,6 +844,10 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     }
                 }
                 if (!blank) continue;
+                // Split by organization only when the read was: a publishing
+                // organization rides the context, but an object with no tenant
+                // column is read unscoped all the same (`landedReadContext`).
+                const splitByOrganization = blankIn !== null && organizationColumnOf(engine, childObject) !== null;
                 // [#15064] The plain run fills `count` and `sum` only; a `min`,
                 // `max` or `avg` roll-up is recomputed only when it is named.
                 const fillsByDefault = ops.function === 'count' || ops.function === 'sum';
@@ -858,7 +862,7 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                     code: 'rollup_never_computed',
                     message:
                         `Roll-up "${p.name}.${fieldName}" is empty on all ${blank.length} sampled parent row(s)` +
-                        `${blankIn !== null ? ' of one organization' : ''} that have ` +
+                        `${splitByOrganization ? ' of one organization' : ''} that have ` +
                         `"${childObject}" children — the field is configured, but its stored value was never computed for them. A ` +
                         'roll-up is written when a parent is inserted, when a child write names the parent, by `os migrate ' +
                         'summary-nulls`, and by the install door that adds it; one declared after its children landed reaches none ' +
@@ -918,7 +922,11 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
     // republish leaves the value where it is, and the repair is the stored
     // rows (correct, clear or delete them), plus declaring `upsert` where
     // that alone would make the replay reach the column (`cause: 'mode'`), or
-    // the stored rows alone (`cause: 'stored'`).
+    // the stored rows alone (`cause: 'stored'`). When some seeds of the object
+    // write the column back and some do not (`cause: 'mixed'`), the loader does
+    // not say which seed landed which row: a stored correction may be written
+    // over by a writing seed's replay, so the value is corrected in every seed
+    // as well as on the rows the other seeds leave as they are.
     //
     // Why this is not `ObjectQL.inspectDanglingReferences`: that audit reads
     // the first rows of the whole object (no row filter, so it cannot read the
@@ -1001,20 +1009,35 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
             }
             const distinct = [...new Set(missing)];
             if (distinct.length === 0) continue;
-            const ignoring = seeds.filter((s) => !WRITING_SEED_MODES.has(seedModeOf(s.body)));
-            // Declaring `upsert` on the seeds that do not write reaches the
-            // column only when every seed carries it and none keeps it for create.
-            const cause: 'seed' | 'mode' | 'stored' = rewritten
+            // The seeds whose replay writes this column back onto a row it finds
+            // again, and the rest. The loader does not say which seed landed
+            // which row, so when some seeds write the column back and some do
+            // not (`mixed`), a stored correction alone may be written over by
+            // the next publish, and the seed's own value must be corrected too.
+            const rewriters = seeds.filter((s) => seedRewritesOnMatch(s.body, field));
+            const others = seeds.filter((s) => !seedRewritesOnMatch(s.body, field));
+            // Declaring `upsert` on a seed that does not write reaches the
+            // column only when the seed carries it and does not keep it for create.
+            const upsertReaches = others.every((s) => seedRewritesOnMatch({ ...s.body, mode: 'upsert' }, field));
+            const cause: 'seed' | 'mixed' | 'mode' | 'stored' = rewritten
                 ? 'seed'
-                : !writing && seeds.every((s) => seedRewritesOnMatch({ ...s.body, mode: 'upsert' }, field))
+                : rewriters.length > 0
+                ? 'mixed'
+                : upsertReaches
                 ? 'mode'
                 : 'stored';
             // The values quoted are the landed rows' own column; nothing of
             // the target is read beyond its `id`.
             const shown = distinct.slice(0, 5).map((v) => `"${v}"`).join(', ');
             const column = `"${objectName}.${field}"`;
+            const names = (list: ReadonlyArray<{ name: string }>) => list.map((s) => `"${s.name}"`).join(', ');
             const storedRepair =
                 `correct or clear ${column} on those stored rows, or delete them and republish the corrected seed so it creates them again`;
+            // [N3] A row found again under `ignore`, or a column the seed does
+            // not write, is not judged on the next receipt: say so, so an
+            // unchanged republish is not read as the repair.
+            const nextReceipt =
+                ' Until one of these is done, the next receipt carries no finding for those rows: a republish that changes nothing reads clean.';
             issues.push({
                 layer: 'runtime',
                 severity: 'warning',
@@ -1028,13 +1051,21 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                 fix: cause === 'seed'
                     ? `Point ${column} on those rows at real "${target}" records in the seed (by a value the loader resolves), ` +
                       'or clear it there, then republish the seed: its mode writes the column back onto the rows it finds again.'
+                    : cause === 'mixed'
+                    ? `A republish of a corrected seed reaches only some of those rows, and which ones cannot be told: seed(s) ${names(rewriters)} ` +
+                      `write ${column} back onto every row they find again, so a correction of a stored row alone is written ` +
+                      `over by their next replay, while ${seedNotRewritingWhy(others, field)}, so their rows keep the value. ` +
+                      `Point ${column} at real "${target}" records in every seed of the object (by a value the loader resolves), ` +
+                      `then, for the rows the other seed(s) leave as they are, ${storedRepair}` +
+                      (upsertReaches ? `, or declare \`mode: 'upsert'\` on seed(s) ${names(others)}` : '') +
+                      ', and republish.' + nextReceipt
                     : cause === 'mode'
                     ? `Republishing the seed as it is does not change those rows: under \`mode: 'ignore'\` (the default) ` +
-                      `seed(s) ${ignoring.map((s) => `"${s.name}"`).join(', ')} leave a row they find again as it is. ` +
+                      `seed(s) ${names(others)} leave a row they find again as it is. ` +
                       `Either ${storedRepair}, or declare \`mode: 'upsert'\` on those seed(s), point ${column} at real ` +
-                      `"${target}" records there, and republish.`
+                      `"${target}" records there, and republish.` + nextReceipt
                     : `Republishing the seed does not change ${column} on those rows: ${seedNotRewritingWhy(seeds, field)}, ` +
-                      `so a replay leaves the column on a row it finds again as it is. Instead, ${storedRepair}.`,
+                      `so a replay leaves the column on a row it finds again as it is. Instead, ${storedRepair}.` + nextReceipt,
                 userMessage: say('seed_reference_unresolved', {
                     object: labelIn(objectBody, objectName),
                     field: labelIn(def, field),

@@ -462,13 +462,14 @@ const CASES: readonly ProbeCase[] = [
         ['sample records whose reference names no record', 'crm_deal_seed', 'mode'],
         ['sample records whose reference names no record, under a seed that writes it back', 'crm_deal_seed_upsert', 'seed'],
         ['sample records whose reference names no record, kept for create', 'crm_deal_seed_kept', 'stored'],
+        ['sample records whose reference names no record, under one seed that writes it back and one that does not', 'crm_deal_seed crm_deal_seed_upsert', 'mixed'],
     ] as const).map(([title, seed, cause]): ProbeCase => ({
         title,
         code: 'seed_reference_unresolved', // adr0112-ok: D6c build-probe diagnostics code
         run: probe({
             engine: engineOver({ crm_deal: [{ id: 'd1', name: 'Big deal', acct_ref: 'Acme Corp' }], crm_acct: [{ id: 'a1' }] }),
             seedLanded: [{ object: 'crm_deal', inserted: { ids: ['d1'] }, matched: { ids: [] } }],
-            published: [{ type: 'seed', name: seed }],
+            published: seed.split(' ').map((name) => ({ type: 'seed', name })),
         }),
         params: (tag) => ({ object: DEALS, field: said(ACCT_REF, tag, 'acct_ref'), target: ACCOUNTS, count: '1', cause }),
         hidden: ['crm_deal', 'acct_ref', 'crm_acct', 'Acme Corp'],

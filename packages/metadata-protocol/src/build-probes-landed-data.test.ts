@@ -442,6 +442,16 @@ describe('rollup_never_computed: the message says "of one organization" only on 
         expect(report.issues[0]!.message).toContain('all 1 sampled parent row(s) that have "deal" children');
         expect(report.issues[0]!.message).not.toContain('organization');
     });
+
+    it('a publishing organization over a child object with no tenant column is still one unscoped pass', async () => {
+        const report = await run({
+            engine: engineOver({ deal: [{ id: 'd1', acct_ref: 'a1', amount: 5 }], acct: [{ id: 'a1' }] }),
+            organizationId: 'o1',
+            published: [{ type: 'object', name: 'acct' }],
+        });
+        expect(codes(report)[0]).toEqual(['rollup_never_computed', 'warning', 'deal_count']);
+        expect(report.issues[0]!.message).not.toContain('organization');
+    });
 });
 
 describe('seed_reference_unresolved is judged per object, and names the repair a republish reaches', () => {
@@ -476,6 +486,7 @@ describe('seed_reference_unresolved is judged per object, and names the repair a
         expect(first.fix).toContain("Republishing the seed as it is does not change those rows: under `mode: 'ignore'`");
         expect(first.fix).toContain('correct or clear "deal.acct_ref" on those stored rows, or delete them');
         expect(first.fix).toContain("declare `mode: 'upsert'` on those seed(s)");
+        expect(first.fix).toContain('the next receipt carries no finding for those rows');
         expect(first.userMessage).toBe(sentence('mode'));
         // A republish under `ignore` matched the row and left it: not the seed's to judge.
         expect((await run({ engine: dangling, getItem, seedLanded: landedOn('deal', [], ['d1']), published: seeds('deals_ignore') })).issues)
@@ -502,8 +513,16 @@ describe('seed_reference_unresolved is judged per object, and names the repair a
         expect(issue.message).toContain('seed(s) "deals_ignore", "deals_upsert" landed');
         expect(issue.message).not.toContain('a_matched_by_ignore');
         expect(issue.artifact).toEqual({ type: 'seed', name: 'deals_ignore' });
-        expect(issue.fix).toContain('seed(s) "deals_ignore" leave a row they find again as it is');
-        expect(issue.userMessage).toBe(sentence('mode'));
+        // Both seeds carry D1: a stored correction alone is written over by `deals_upsert`'s next replay,
+        // so the repair names the writing seed too, and claims no republish leaves every row alone.
+        expect(issue.fix).toContain('seed(s) "deals_upsert" write "deal.acct_ref" back onto every row they find again');
+        expect(issue.fix).toContain("seed(s) \"deals_ignore\" use `mode: 'ignore'` (the default)");
+        expect(issue.fix).toContain('in every seed of the object');
+        expect(issue.fix).toContain("or declare `mode: 'upsert'` on seed(s) \"deals_ignore\"");
+        expect(issue.fix).not.toContain('does not change those rows');
+        expect(issue.fix).toContain('the next receipt carries no finding for those rows');
+        expect(issue.userMessage).toBe(sentence('mixed'));
+        expect(issue.userMessage).not.toContain('does not change');
     });
 
     it('two writing seeds of one object: their matched rows are judged together, in one finding', async () => {
@@ -537,6 +556,7 @@ describe('seed_reference_unresolved is judged per object, and names the repair a
                     : 'have a record that does not carry "acct_ref"',
             );
             expect(issue.fix).not.toContain("declare `mode: 'upsert'`");
+            expect(issue.fix).toContain('the next receipt carries no finding for those rows');
             expect(issue.userMessage).toBe(sentence('stored'));
         }
     });

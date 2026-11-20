@@ -49,7 +49,7 @@
  * | `probes_unavailable` | `count` | no name: one finding covers every dashboard of the publish |
  * | `widget_empty_result` | `dashboard`, `widget`, `dataset` | all three by label |
  * | `rollup_never_computed` | `object`, `field`, `child`, `cause` (`fills` · `named`) | the parent object, the roll-up field and the child object by label |
- * | `seed_reference_unresolved` | `object`, `field`, `target`, `count`, `cause` (`seed` · `mode` · `stored`) | the seeded object, its reference field and the target object by label |
+ * | `seed_reference_unresolved` | `object`, `field`, `target`, `count`, `cause` (`seed` · `mixed` · `mode` · `stored`) | the seeded object, its reference field and the target object by label |
  * | `flow_connector_action_unresolved` | `flow`, `step`, `connector`, `cause` (`refused` · `no-action` · `degraded`) | flow and step by label; the connector by its name (the step names it so) |
  *
  * A label is the published body's own (`label`, a widget's `title`), read
@@ -1001,13 +1001,20 @@ const ROLLUP_NEVER_COMPUTED: UserTextEntry = {
  * republish actually reaches: `seed` — the sample data writes the field back onto the records it finds again,
  * so it is fixed there; `mode` — the sample data leaves the records it finds as they are (the default), so the
  * stored records are fixed, or the sample data is set to update them; `stored` — the sample data never writes
- * that field onto a record it finds again, so only the stored records can be fixed.
+ * that field onto a record it finds again, so only the stored records can be fixed; `mixed` — some of the sample
+ * data writes the field back onto the records it finds again and some does not, and which record came from which
+ * cannot be told, so it is fixed in the sample data AND on the stored records (or the records are deleted and the
+ * corrected sample data published again).
  */
 const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   en: (p) =>
     `Some sample "${p.object}" records (${p.count} value(s) in "${p.field}") point to "${p.target}" records that ` +
     `do not exist, so on those records "${p.field}" leads nowhere. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `Publishing again writes some of these sample values back onto records that already exist and leaves others as they are. ` +
+        `Fix or clear "${p.field}" in the sample data, and also fix or clear it on those records, or delete them and publish ` +
+        `the corrected sample data again.`
+      : p.cause === 'mode'
       ? `Publishing again does not change records that already exist. Fix or clear "${p.field}" on those records, ` +
         `or delete them and publish the corrected sample data again, or set the sample data to update the records ` +
         `it finds (upsert) and fix "${p.field}" there.`
@@ -1017,7 +1024,10 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
       : `Fix or clear "${p.field}" in the sample data, then publish again.`),
   'zh-Hans': (p) =>
     `部分“${p.object}”示例记录（“${p.field}”中有 ${p.count} 个值）指向不存在的“${p.target}”记录，因此这些记录上的“${p.field}”指向空处。` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `重新发布会把部分示例值写回已存在的记录，其余记录则保持不变。请在示例数据中修正或清空“${p.field}”，同时在这些记录上修正或清空它，` +
+        `或删除这些记录后重新发布修正后的示例数据。`
+      : p.cause === 'mode'
       ? `重新发布不会更改已存在的记录。请在这些记录上修正或清空“${p.field}”，或删除它们后重新发布修正后的示例数据；` +
         `也可以把示例数据设为更新它找到的记录（upsert），并在其中修正“${p.field}”。`
       : p.cause === 'stored'
@@ -1025,7 +1035,10 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
       : `请在示例数据中修正或清空“${p.field}”，然后重新发布。`),
   'zh-Hant': (p) =>
     `部分「${p.object}」示例記錄（「${p.field}」中有 ${p.count} 個值）指向不存在的「${p.target}」記錄，因此這些記錄上的「${p.field}」指向空處。` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `重新發布會把部分示例值寫回已存在的記錄，其餘記錄則保持不變。請在示例資料中修正或清空「${p.field}」，同時在這些記錄上修正或清空它，` +
+        `或刪除這些記錄後重新發布修正後的示例資料。`
+      : p.cause === 'mode'
       ? `重新發布不會變更已存在的記錄。請在這些記錄上修正或清空「${p.field}」，或刪除它們後重新發布修正後的示例資料；` +
         `也可以把示例資料設為更新它找到的記錄（upsert），並在其中修正「${p.field}」。`
       : p.cause === 'stored'
@@ -1034,7 +1047,11 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   es: (p) =>
     `Algunos registros de ejemplo de "${p.object}" (${p.count} valor(es) en "${p.field}") apuntan a registros de ` +
     `"${p.target}" que no existen, así que en esos registros "${p.field}" no lleva a ninguna parte. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `Volver a publicar escribe algunos de estos valores de ejemplo en registros que ya existen y deja otros como están. ` +
+        `Corrija o vacíe "${p.field}" en los datos de ejemplo y, además, corríjalo o vacíelo en esos registros, o elimínelos ` +
+        `y vuelva a publicar los datos de ejemplo corregidos.`
+      : p.cause === 'mode'
       ? `Volver a publicar no cambia los registros que ya existen. Corrija o vacíe "${p.field}" en esos registros, ` +
         `o elimínelos y vuelva a publicar los datos de ejemplo corregidos, o configure los datos de ejemplo para ` +
         `actualizar los registros que encuentran (upsert) y corrija "${p.field}" en ellos.`
@@ -1045,7 +1062,10 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   ar: (p) =>
     `بعض سجلات "${p.object}" التجريبية (${p.count} قيمة في "${p.field}") تشير إلى سجلات "${p.target}" غير موجودة، ` +
     `لذلك لا يؤدي "${p.field}" في هذه السجلات إلى أي مكان. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `إعادة النشر تكتب بعض هذه القيم التجريبية فوق سجلات موجودة بالفعل وتترك غيرها كما هي. صحّح "${p.field}" في البيانات ` +
+        `التجريبية أو أفرغه، وصحّحه أيضًا في تلك السجلات أو أفرغه، أو احذفها ثم أعد نشر البيانات التجريبية المصحّحة.`
+      : p.cause === 'mode'
       ? `إعادة النشر لا تغيّر السجلات الموجودة بالفعل. صحّح "${p.field}" في تلك السجلات أو أفرغه، أو احذفها ثم أعد نشر ` +
         `البيانات التجريبية المصحّحة، أو اضبط البيانات التجريبية لتحديث السجلات التي تجدها (upsert) وصحّح "${p.field}" فيها.`
       : p.cause === 'stored'
@@ -1055,7 +1075,11 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   fr: (p) =>
     `Certains enregistrements d’exemple « ${p.object} » (${p.count} valeur(s) dans « ${p.field} ») pointent vers ` +
     `des enregistrements « ${p.target} » inexistants : sur ces enregistrements, « ${p.field} » ne mène nulle part. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `Publier à nouveau réécrit certaines de ces valeurs d’exemple sur des enregistrements qui existent déjà et laisse les ` +
+        `autres tels quels. Corrigez ou videz « ${p.field} » dans les données d’exemple, et corrigez-le ou videz-le aussi sur ` +
+        `ces enregistrements, ou supprimez-les et publiez à nouveau les données d’exemple corrigées.`
+      : p.cause === 'mode'
       ? `Publier à nouveau ne modifie pas les enregistrements qui existent déjà. Corrigez ou videz « ${p.field} » sur ` +
         `ces enregistrements, ou supprimez-les et publiez à nouveau les données d’exemple corrigées, ou réglez les ` +
         `données d’exemple pour qu’elles mettent à jour les enregistrements qu’elles retrouvent (upsert) et corrigez-y « ${p.field} ».`
@@ -1066,7 +1090,11 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   'pt-BR': (p) =>
     `Alguns registros de exemplo de "${p.object}" (${p.count} valor(es) em "${p.field}") apontam para registros de ` +
     `"${p.target}" que não existem, então nesses registros "${p.field}" não leva a lugar nenhum. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `Publicar novamente grava alguns desses valores de exemplo em registros que já existem e deixa outros como estão. ` +
+        `Corrija ou limpe "${p.field}" nos dados de exemplo e também corrija-o ou limpe-o nesses registros, ou exclua-os e ` +
+        `publique novamente os dados de exemplo corrigidos.`
+      : p.cause === 'mode'
       ? `Publicar novamente não altera registros que já existem. Corrija ou limpe "${p.field}" nesses registros, ` +
         `ou exclua-os e publique novamente os dados de exemplo corrigidos, ou configure os dados de exemplo para ` +
         `atualizar os registros que encontram (upsert) e corrija "${p.field}" neles.`
@@ -1077,7 +1105,11 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   ru: (p) =>
     `Некоторые примеры записей «${p.object}» (значений в поле «${p.field}»: ${p.count}) ссылаются на ` +
     `несуществующие записи «${p.target}», поэтому в этих записях «${p.field}» никуда не ведёт. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `Повторная публикация записывает часть этих значений из примеров данных в уже существующие записи, а остальные ` +
+        `оставляет как есть. Исправьте или очистите «${p.field}» в примерах данных, а также исправьте или очистите его в этих ` +
+        `записях, либо удалите их и снова опубликуйте исправленные примеры данных.`
+      : p.cause === 'mode'
       ? `Повторная публикация не меняет уже существующие записи. Исправьте или очистите «${p.field}» в этих записях, ` +
         `либо удалите их и снова опубликуйте исправленные примеры данных, либо настройте примеры данных на ` +
         `обновление найденных записей (upsert) и исправьте «${p.field}» в них.`
@@ -1088,7 +1120,11 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   de: (p) =>
     `Einige Beispieldatensätze von „${p.object}“ (${p.count} Wert(e) in „${p.field}“) verweisen auf „${p.target}“-` +
     `Datensätze, die nicht existieren, sodass „${p.field}“ bei diesen Datensätzen ins Leere führt. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `Erneutes Veröffentlichen schreibt einige dieser Beispielwerte in bereits vorhandene Datensätze zurück und lässt andere ` +
+        `unverändert. Korrigieren oder leeren Sie „${p.field}“ in den Beispieldaten und zusätzlich in diesen Datensätzen, oder ` +
+        `löschen Sie sie und veröffentlichen Sie die korrigierten Beispieldaten erneut.`
+      : p.cause === 'mode'
       ? `Erneutes Veröffentlichen ändert bereits vorhandene Datensätze nicht. Korrigieren oder leeren Sie „${p.field}“ ` +
         `in diesen Datensätzen, oder löschen Sie sie und veröffentlichen Sie die korrigierten Beispieldaten erneut, ` +
         `oder stellen Sie die Beispieldaten so ein, dass sie gefundene Datensätze aktualisieren (upsert), und ` +
@@ -1101,7 +1137,11 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   ja: (p) =>
     `「${p.object}」のサンプルレコードの一部（「${p.field}」の値 ${p.count} 件）が存在しない「${p.target}」レコードを参照しているため、` +
     `それらのレコードの「${p.field}」はどこにもつながりません。` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `もう一度公開すると、これらのサンプル値の一部は既に存在するレコードに書き戻され、残りはそのままになります。` +
+        `サンプルデータの「${p.field}」を修正するか空にし、さらにそれらのレコードの「${p.field}」も修正するか空にするか、` +
+        `レコードを削除して修正したサンプルデータをもう一度公開してください。`
+      : p.cause === 'mode'
       ? `もう一度公開しても、既に存在するレコードは変わりません。それらのレコードの「${p.field}」を修正するか空にするか、` +
         `レコードを削除して修正したサンプルデータをもう一度公開するか、サンプルデータを見つかったレコードを更新する設定（upsert）にして` +
         `そこで「${p.field}」を修正してください。`
@@ -1112,7 +1152,11 @@ const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   ko: (p) =>
     `일부 "${p.object}" 샘플 레코드("${p.field}"의 값 ${p.count}개)가 존재하지 않는 "${p.target}" 레코드를 가리키므로 ` +
     `해당 레코드의 "${p.field}"는 아무 곳으로도 연결되지 않습니다. ` +
-    (p.cause === 'mode'
+    (p.cause === 'mixed'
+      ? `다시 게시하면 이 샘플 값 중 일부는 이미 있는 레코드에 다시 기록되고 나머지는 그대로 남습니다. ` +
+        `샘플 데이터에서 "${p.field}"를 수정하거나 비우고, 해당 레코드에서도 수정하거나 비우거나, ` +
+        `레코드를 삭제한 후 수정한 샘플 데이터를 다시 게시하세요.`
+      : p.cause === 'mode'
       ? `다시 게시해도 이미 있는 레코드는 바뀌지 않습니다. 해당 레코드에서 "${p.field}"를 수정하거나 비우거나, ` +
         `레코드를 삭제한 후 수정한 샘플 데이터를 다시 게시하거나, 샘플 데이터가 찾은 레코드를 업데이트하도록(upsert) ` +
         `설정하고 거기서 "${p.field}"를 수정하세요.`
