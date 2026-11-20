@@ -127,13 +127,16 @@ a self-referential FK surfaces a "children" list.
 > follows (the record page, Studio, and the field-group refusal at
 > `defineStack` and the publish door). On the record page such a table sits in
 > the overview's details column under the header strip and above the field
-> sections, in the parent's `relatedLists` order, is drawn even when empty,
-> and its totals line is the server's (a parent `summary` roll-up when one
-> sums that column over the same rows, otherwise an aggregate over all the
-> child rows by the list's own condition), never a sum of the rows on show.
-> §3's "Only `inlineEdit` children are inlined" is the WRITE side (the
-> parent's create/edit form) and is unchanged: a master-detail child that does
-> not set `inlineEdit` is a body table on the record page and stays out of the
+> sections, in the parent's `relatedLists` order (a field group whose
+> `relatedList` names it still places it among the field sections instead,
+> and with no field section at all the details node leads and the tables
+> follow it), is drawn even when empty, and its totals line is the server's
+> (a parent `summary` roll-up when one sums that column over the same rows,
+> otherwise an aggregate over all the child rows by the list's own
+> condition), never a sum of the rows on show. "Only `inlineEdit` children
+> are inlined" (Decision → Derivation rules) is the WRITE side (the parent's
+> create/edit form) and is unchanged: a master-detail child that does not set
+> `inlineEdit` is a body table on the record page and stays out of the
 > parent's form.
 
 The derivation is a pure function — `deriveRelatedLists(objectDef, objects)` in
