@@ -4283,6 +4283,12 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       '`dataSource.object`, else `properties.objectName`; its grouped header numbers come from its ' +
       '`aggregations` (`grid-aggregation-field-type-refused`), not from the column summaries.',
     AGGREGATE_PAIR_ROWS,
+    'The yes / no counts of a boolean column, `count_true` and `count_false`, lower to `SUM(field)` ' +
+      '(booleans aggregate as numbers, so the sum is the number of true cells) and `COUNT(field)`. The ' +
+      'door accepts that sum over a number too, where it is a total rather than a count, so these two ' +
+      'members are judged by the spec\'s member × field-type table (`COLUMN_SUMMARY_FIELD_TYPES`) and ' +
+      'refused, under this id, over anything but a `boolean` or `toggle` field. A null cell is neither ' +
+      'true nor false: it is counted by `count_empty`.',
     'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
       'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. ' +
       'A `formula` field stores no value, whatever its `returnType`, so a total over it has to be ' +

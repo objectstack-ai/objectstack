@@ -691,6 +691,10 @@ const ar = {
       none: "لا شيء",
       menuPercentEmpty: "نسبة الفارغ",
       menuPercentFilled: "نسبة المعبأ",
+      countTrue: "نعم",
+      countFalse: "لا",
+      menuCountTrue: "عدد «نعم»",
+      menuCountFalse: "عدد «لا»",
     },
     toolbar: {
       densityMode: "الكثافة",

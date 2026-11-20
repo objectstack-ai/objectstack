@@ -883,6 +883,10 @@ const en = {
       none: 'None',
       menuPercentEmpty: 'Percent empty',
       menuPercentFilled: 'Percent filled',
+      countTrue: 'Yes',
+      countFalse: 'No',
+      menuCountTrue: 'Count of Yes',
+      menuCountFalse: 'Count of No',
     },
     toolbar: {
       densityMode: 'Density',

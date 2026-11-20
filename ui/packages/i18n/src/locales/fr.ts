@@ -649,6 +649,10 @@ const fr = {
       none: "Aucun",
       menuPercentEmpty: "Pourcentage vide",
       menuPercentFilled: "Pourcentage rempli",
+      countTrue: "Oui",
+      countFalse: "Non",
+      menuCountTrue: "Nombre de Oui",
+      menuCountFalse: "Nombre de Non",
     },
     toolbar: {
       densityMode: "Densité",

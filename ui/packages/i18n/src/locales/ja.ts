@@ -637,6 +637,10 @@ const ja = {
       none: "なし",
       menuPercentEmpty: "空の割合",
       menuPercentFilled: "入力済みの割合",
+      countTrue: "はい",
+      countFalse: "いいえ",
+      menuCountTrue: "「はい」の件数",
+      menuCountFalse: "「いいえ」の件数",
     },
     toolbar: {
       densityMode: "密度",

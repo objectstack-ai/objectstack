@@ -654,6 +654,10 @@ const es = {
       none: "Ninguno",
       menuPercentEmpty: "Porcentaje vacío",
       menuPercentFilled: "Porcentaje con valor",
+      countTrue: "Sí",
+      countFalse: "No",
+      menuCountTrue: "Número de Sí",
+      menuCountFalse: "Número de No",
     },
     toolbar: {
       densityMode: "Densidad",

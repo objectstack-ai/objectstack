@@ -664,6 +664,10 @@ const ru = {
       none: "Нет",
       menuPercentEmpty: "Доля пустых",
       menuPercentFilled: "Доля заполненных",
+      countTrue: "Да",
+      countFalse: "Нет",
+      menuCountTrue: "Количество «Да»",
+      menuCountFalse: "Количество «Нет»",
     },
     toolbar: {
       densityMode: "Плотность",
