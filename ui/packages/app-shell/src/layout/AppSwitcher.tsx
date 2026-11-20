@@ -96,6 +96,9 @@ export function AppSwitcher({
   const { apps: metadataApps } = useMetadata();
   // objectstack#35881 — on a phone the pill opens the app list as a bottom
   // sheet rather than a dropdown. Read before any return (rules of hooks).
+  // The sheet holds the list alone: 「Back to home」 and 「All apps」 would open
+  // that same list (a phone's `/home` is it), 「Settings」 is the Setup row in
+  // it, and 「Edit / Open APP in Studio」 stays a desktop entry.
   const phone = usePhoneViewport();
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const { t } = useObjectTranslation();

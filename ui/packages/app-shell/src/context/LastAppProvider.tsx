@@ -2,8 +2,9 @@
  * LastAppProvider
  *
  * The app this person last had open (objectstack#35881): where a phone lands
- * after sign-in when the product declares no landing of its own and the
- * person is served more than one app. Stored per person, so it follows them to
+ * after sign-in. On a phone it comes first, ahead of the app the product
+ * declares as default, which applies only when there is no record yet (ruling
+ * 7045309332, 「上次用的优先」). Stored per person, so it follows them to
  * another device: one `sys_user_preference` row, `ui.app.last`, holding the
  * app's `name`, through the same adapter channel and the same one shared read
  * the favorites and the recent items use (objectui#12187). The browser keeps a
@@ -11,7 +12,8 @@
  * adapter.
  *
  * Written whenever an app is open, at any width: it is the person's last app,
- * not their last phone app. Read only by the phone's landing (`HomePage`).
+ * not their last phone app. Read only by the phone's landing:
+ * `RootLandingRedirect` in the console app, through `resolvePhoneLandingPath`.
  *
  * @module
  */
