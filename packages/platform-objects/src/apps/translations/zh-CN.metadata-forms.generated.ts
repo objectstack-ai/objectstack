@@ -102,7 +102,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "相关列表",
-        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝，不对应任何指向本对象的关系的名称也会被拒绝。记录页目前还不会绘制这种位置。"
+        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝，不对应任何指向本对象的关系的名称也会被拒绝。父记录的新建和编辑表单也会内嵌这张表，在记录页点「编辑」时主记录和这些行一起保存。"
       },
       "fieldGroups.collapse": {
         label: "折叠",

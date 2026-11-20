@@ -21,7 +21,9 @@ export const entry: SemanticMigration = {
   surface:
     'objects[].fields.<fk> (data.FieldSchema.relatedList) left absent on a master_detail field, and '
     + 'objects[].fields.<fk>.inlineEdit on a lookup or master_detail field, where the parent declares no '
-    + 'fieldGroups[].relatedList naming that child (by its object name or object.field)',
+    + 'fieldGroups[].relatedList naming that child (by its object name or object.field); and a lookup or '
+    + 'master_detail FK declaring relatedList \'primary\' that such a parent field group DOES name, which '
+    + 'the parent\'s create and edit forms now inline (inlineEdit or not; its record page is unchanged)',
   replacement:
     'Nothing to replace for the new default: the child list is a tab of the parent\'s record page, with its '
     + 'count, as every other related list is. To keep it a table in the record\'s overview, at a chosen place '
@@ -61,6 +63,8 @@ export const entry: SemanticMigration = {
     + 'child, second in fieldGroups: the overview draws the child\'s table in the second group\'s place, the '
     + 'tab is still there, the create and edit forms inline the table, and the record page\'s Edit saves the '
     + 'record fields and the rows in one save. A child whose FK sets inlineEdit and that no group names is not '
-    + 'inlined in the parent\'s forms. A child whose FK declares relatedList \'primary\' is drawn as '
-    + 'before. `os validate` reports no new issue.',
+    + 'inlined in the parent\'s forms. A child whose FK declares relatedList \'primary\' is drawn on the '
+    + 'record page as before: a body table with no tab of its own, whether or not a group positions it. Where '
+    + 'a parent field group names such a child, the parent\'s create and edit forms inline it (inlineEdit or '
+    + 'not); where none does, they do not, inlineEdit or not. `os validate` reports no new issue.',
 };

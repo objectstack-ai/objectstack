@@ -102,7 +102,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Related List",
-        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet."
+        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The parent's create and edit forms inline the table too, and the record page's Edit saves the record and its rows together."
       },
       "fieldGroups.collapse": {
         label: "Collapse",

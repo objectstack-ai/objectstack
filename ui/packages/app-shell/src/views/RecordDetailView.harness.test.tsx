@@ -2121,6 +2121,17 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
       expect(detailsText(container)).not.toContain('Tasks');
     });
 
+    it("CONTROL — relatedList: 'primary' is a body table with no tab, as before, whether or not a group positions it", async () => {
+      for (const placeTask of [false, true]) {
+        cleanup();
+        RelatedCountStore._reset();
+        const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: 'primary' }, { placeTask }));
+        await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+        expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_note.quote']);
+        await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      }
+    });
+
     it('relatedList: true keeps it a tab', async () => {
       const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: true }));
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });

@@ -37,9 +37,23 @@ describe('deriveRelatedLists', () => {
       fields: { project: { type: 'master_detail', reference: 'project' } },
     };
     const placing = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task' }] };
-    expect(deriveRelatedLists(placing, [placing, task])[0]).toMatchObject({ isPrimary: true, isPlaceable: true });
+    expect(deriveRelatedLists(placing, [placing, task])[0]).toMatchObject({ isPrimary: true, isPlaceable: true, keepsTab: true });
     const byField = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task.project' }] };
-    expect(deriveRelatedLists(byField, [byField, task])[0]).toMatchObject({ isPrimary: true });
+    expect(deriveRelatedLists(byField, [byField, task])[0]).toMatchObject({ isPrimary: true, keepsTab: true });
+  });
+
+  it("a 'primary' FK is a body table with or without a group, and keeps no tab (objectstack#35889 item 4)", () => {
+    const task = {
+      name: 'task',
+      label: 'Task',
+      fields: { project: { type: 'master_detail', reference: 'project', relatedList: 'primary' } },
+    };
+    const placing = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task' }] };
+    for (const parent of [project, placing]) {
+      const [list] = deriveRelatedLists(parent, [parent, task]);
+      expect(list).toMatchObject({ isPrimary: true, isPlaceable: true });
+      expect(list.keepsTab).toBeUndefined();
+    }
   });
 
   it('derives a related list from a lookup child', () => {

@@ -139,6 +139,14 @@ export interface DerivedRelatedList {
    */
   isPlaceable: boolean;
   /**
+   * Present (true) on a body table that a parent field group MAKES one: a
+   * `master_detail` FK declaring no `relatedList` that a group names. Such a
+   * table keeps its tab on the record page too (objectstack#35889 item 4). A
+   * `'primary'` table is a body table without a group and keeps no tab, as
+   * before, whether or not a group positions it.
+   */
+  keepsTab?: true;
+  /**
    * Default row order, INHERITED from the child object's default list view
    * `sort` (objectui#5795; ruled on objectstack#11345, maintainer 2026-08-23:
    * direction 1 — inherit the child list view's sort, NO new spec key).
@@ -367,6 +375,7 @@ export function deriveRelatedLists(
 
   const canRead = options?.canRead;
   const listLabel = options?.listLabel;
+
   for (const child of objects) {
     if (!child?.name) continue;
     // An object the data API does not expose (`enable.apiEnabled: false`)
@@ -404,6 +413,9 @@ export function deriveRelatedLists(
       const hidden = fieldDef.relatedList === false || apiDisabled;
       if (hidden && !options?.includeHidden) continue;
 
+      const isBody = isBodyTableRelationship(fieldDef, {
+        placedByGroup: fieldGroupsPlaceRelationship(objectDef.fieldGroups, child.name, fieldName),
+      });
       const entry: Working = {
         childObject: child.name,
         childLabel,
@@ -411,10 +423,11 @@ export function deriveRelatedLists(
         isOwned: type === 'master_detail',
         // objectstack#35889 — a plain master-detail child is a body table
         // only where one of the parent's field groups names it.
-        isPrimary: isBodyTableRelationship(fieldDef, {
-          placedByGroup: fieldGroupsPlaceRelationship(objectDef.fieldGroups, child.name, fieldName),
-        }),
+        isPrimary: isBody,
         isPlaceable: isGroupPlaceableRelationship(fieldDef),
+        // Item 4: a table the group MAKES a body table keeps its tab; a
+        // `'primary'` one keeps none, as before.
+        ...(isBody && fieldDef.relatedList !== 'primary' ? { keepsTab: true as const } : {}),
         ...(inheritedSort ? { sort: inheritedSort } : {}),
         ...(hidden ? { isHidden: true as const } : {}),
         _fkLabel: (typeof fieldDef.label === 'string' && fieldDef.label) || fieldName,
