@@ -529,10 +529,11 @@ function formatSummaryLabel(
     // on the type, and a formula's own type has none, so an undeclared width
     // takes the platform's percent width rather than `formatPercent`'s own
     // parameter default. Every column that reaches this arm is a percent, so
-    // the face below changes the type of the formula alone.
-    const percentFace = { ...column, type: 'percent' };
-    const decimals = resolveFieldScale(percentFace);
-    formatted = formatPercent(value, percentCellScale(percentFace), decimals, displayLocale);
+    // the type below changes for the formula alone. Its storage is read off
+    // the column as is: `percentCellScale` reads the declared `max`, and the
+    // formula declares it as a percent field does.
+    const decimals = resolveFieldScale({ ...column, type: 'percent' });
+    formatted = formatPercent(value, percentCellScale(column), decimals, displayLocale);
   } else if (colType === 'number') {
     // objectstack#19628, ruled A′ and carried to this footer by objectui#9843:
     // a `number` column's width is `resolveFieldScale`'s answer too, and for a
