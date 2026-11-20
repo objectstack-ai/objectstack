@@ -749,6 +749,7 @@
     "RelatedListEntryInput (type)",
     "RelatedListEntryObject (interface)",
     "RelatedListEntryObjectSchema (const)",
+    "RelatedListEntryParsed (type)",
     "RelatedListEntrySchema (const)",
     "RelatedListRelationshipFields (interface)",
     "RenderAutonumberInput (interface)",

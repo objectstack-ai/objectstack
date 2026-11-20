@@ -1350,7 +1350,10 @@ export const RelatedListEntrySchema = lazySchema(() => z.union([
   z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }),
   RelatedListEntryObjectSchema,
 ]));
-export type RelatedListEntry = z.infer<typeof RelatedListEntrySchema>;
+/** One `relatedLists` entry as an author writes it. */
+export type RelatedListEntry = z.input<typeof RelatedListEntrySchema>;
+/** One `relatedLists` entry after parse. */
+export type RelatedListEntryParsed = z.infer<typeof RelatedListEntrySchema>;
 
 /**
  * Object Field Group Schema — MVP (data-layer protocol)

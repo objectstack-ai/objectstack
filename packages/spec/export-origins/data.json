@@ -737,6 +737,7 @@
     "RelatedListEntryInput": "src/data/related-list-entry.ts#RelatedListEntryInput (type)",
     "RelatedListEntryObject": "src/data/related-list-entry.ts#RelatedListEntryObject (interface)",
     "RelatedListEntryObjectSchema": "src/data/object.zod.ts#RelatedListEntryObjectSchema (const)",
+    "RelatedListEntryParsed": "src/data/object.zod.ts#RelatedListEntryParsed (type)",
     "RelatedListEntrySchema": "src/data/object.zod.ts#RelatedListEntrySchema (const)",
     "RelatedListRelationshipFields": "src/data/related-list-body-table.ts#RelatedListRelationshipFields (interface)",
     "RenderAutonumberInput": "src/data/autonumber-format.ts#RenderAutonumberInput (interface)",
