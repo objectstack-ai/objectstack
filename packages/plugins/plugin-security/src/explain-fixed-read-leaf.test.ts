@@ -15,7 +15,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SharingService } from '@objectstack/plugin-sharing';
-import { SharedRecordIds } from '@objectstack/spec/data';
+import { ReadableIds, SharedRecordIds } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
@@ -182,6 +182,40 @@ describe('[ADR-0155 Q2] the explainer resolves the share-grant leaf at the recor
     }
     expect(errors.filter((m) => m.includes('fixed read of'))).toHaveLength(1);
   });
+
+  // A leaf is admitted by its role, as the engine's seam and the analytics
+  // compiler admit it, never by the key it sits under: these sit under `id`
+  // as $in's comparand and name the explained object, but not in its where.
+  const MISPLACED: Array<[string, string, (object: string, userId: string) => unknown]> = [
+    [
+      'inside a relation condition (a self-relation)', 'rowFilter.$or[1].manager.id.$in',
+      (object, userId) => ({ $or: [{ owner_id: userId }, { manager: { id: { $in: SharedRecordIds.read(object, userId) } } }] }),
+    ],
+    [
+      'inside a composed ReadableIds scope', 'rowFilter.$or[1].id.$in.scope.id.$in',
+      (object, userId) => ({
+        $or: [
+          { owner_id: userId },
+          { id: { $in: ReadableIds.compose(ReadableIds.of(object), { id: { $in: SharedRecordIds.read(object, userId) } }) } },
+        ],
+      }),
+    ],
+  ];
+  for (const [where, at, readFilter] of MISPLACED) {
+    it(`a leaf ${where} is refused in D4's envelope, logged once, never resolved or published`, async () => {
+      const { explain, sharing, errors, engine } = await makeStack();
+      (sharing as any).buildReadFilter = async (object: string, context: any) => readFilter(object, context.userId);
+      for (let i = 0; i < 2; i++) {
+        const err = await explain('read', { recordId: SHARED }).then(() => null, (e: any) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INTERNAL_ERROR', status: 500 });
+        expect(err?.message).toContain(`[plugin-security explain] the sharing read filter of '${OBJECT}': ${at} holds a SharedRecordIds leaf`);
+        expect(err?.message).not.toContain(U_READER);
+      }
+      expect(errors.filter((m) => m.includes('fixed read of'))).toHaveLength(1);
+      // Refused before the leaf's own read: nothing resolved it at the record.
+      expect(shareReads(engine).filter((r) => (r.where as any)?.recipient_id !== undefined)).toEqual([]);
+    });
+  }
 
   it('the share read failing is the read filter failing: the record is not visible, and no filter is published', async () => {
     const { explain, engine } = await makeStack();

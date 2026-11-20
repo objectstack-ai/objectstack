@@ -93,61 +93,86 @@ function refusal(at: string, leaf: unknown, object: string, why: string, log: Re
 /**
  * Every leaf `filter` carries where the record pass resolves one, `{ id: { $in: leaf } }`
  * on `object`, in its read form; any other leaf is refused.
+ *
+ * The walk reads roles, as the engine's seam and the analytics compiler do: a
+ * NODE's keys are combinators (`$and`, `$or`, `$not`) and fields; a field's
+ * plain-object value is an OPERATOR MAP, whose keys are operators; and only an
+ * operator map's `$in` holds a leaf. Everything else is walked as a value, where
+ * any leaf is misplaced: a list member, a bare field value, a relation
+ * condition's inner `{ id: { $in: leaf } }` (a field's value read as a map, so
+ * its `id` is an operator there), a leaf in a composed `ReadableIds` scope (the
+ * ids of another read, which the judged record's id does not answer), or a
+ * node of its own. Cycles are cut on the current path.
  */
 function resolvableLeavesOf(filter: unknown, object: string, log: ReadableIdsRefusalLog | undefined): Set<FixedReadLeaf> {
   const leaves = new Set<FixedReadLeaf>();
   const onPath = new Set<object>();
-  const visit = (value: unknown, at: string, inIdMembership: boolean): void => {
-    if (isFixedReadLeaf(value)) {
-      if (!inIdMembership || value.object !== object) {
-        throw refusal(
-          at, value, object,
-          ', where the record pass resolves none: a fixed-read leaf sits only as the $in comparand of id on the ' +
-            'object it names (ADR-0155 D1). Place it as { id: { $in: leaf } }.',
-          log,
-        );
-      }
-      if (value.accessLevels !== undefined) {
-        throw refusal(
-          at, value, object,
-          ' in its WRITE form, which only a predicate update carries (ADR-0155 ③ ruled A). A read filter carries ' +
-            'SharedRecordIds.read(object, recipient).',
-          log,
-        );
-      }
-      leaves.add(value);
-      return;
-    }
-    if (isComposedReadableIds(value)) {
-      visit(value.scope, `${at}.scope`, false);
-      return;
-    }
-    if (!isPlainContainer(value) || onPath.has(value)) return;
+  const misplaced = (at: string, leaf: unknown): Error =>
+    refusal(
+      at, leaf, object,
+      ', where the record pass resolves none: a fixed-read leaf sits only as the $in comparand of id on the ' +
+        'object it names (ADR-0155 D1). Place it as { id: { $in: leaf } }.',
+      log,
+    );
+  const descend = (value: object, walk: () => void): void => {
+    if (onPath.has(value)) return;
     onPath.add(value);
     try {
-      if (Array.isArray(value)) {
-        value.forEach((item, i) => visit(item, `${at}[${i}]`, false));
-        return;
-      }
-      for (const key of Object.keys(value)) {
-        const item = value[key];
-        // `{ id: { $in: leaf } }`: the one position a leaf resolves in.
-        if (key === 'id' && isPlainContainer(item) && !Array.isArray(item)) {
-          onPath.add(item);
-          try {
-            for (const op of Object.keys(item)) visit(item[op], `${at}.id.${op}`, op === '$in');
-          } finally {
-            onPath.delete(item);
-          }
-          continue;
-        }
-        visit(item, `${at}.${key}`, false);
-      }
+      walk();
     } finally {
       onPath.delete(value);
     }
   };
-  visit(filter, 'rowFilter', false);
+  const visitValue = (value: unknown, at: string): void => {
+    if (isFixedReadLeaf(value)) throw misplaced(at, value);
+    if (isComposedReadableIds(value)) {
+      visitValue(value.scope, `${at}.scope`);
+      return;
+    }
+    if (!isPlainContainer(value)) return;
+    descend(value, () => {
+      if (Array.isArray(value)) value.forEach((item, i) => visitValue(item, `${at}[${i}]`));
+      else for (const key of Object.keys(value)) visitValue(value[key], `${at}.${key}`);
+    });
+  };
+  const visitOperatorMap = (map: Record<string, unknown>, at: string, field: string): void =>
+    descend(map, () => {
+      for (const op of Object.keys(map)) {
+        const comparand = map[op];
+        if (op !== '$in' || !isFixedReadLeaf(comparand)) {
+          visitValue(comparand, `${at}.${op}`);
+          continue;
+        }
+        if (field !== 'id' || comparand.object !== object) throw misplaced(`${at}.${op}`, comparand);
+        if (comparand.accessLevels !== undefined) {
+          throw refusal(
+            `${at}.${op}`, comparand, object,
+            ' in its WRITE form, which only a predicate update carries (ADR-0155 ③ ruled A). A read filter carries ' +
+              'SharedRecordIds.read(object, recipient).',
+            log,
+          );
+        }
+        leaves.add(comparand);
+      }
+    });
+  const visitNode = (node: unknown, at: string): void => {
+    if (isFixedReadLeaf(node) || !isPlainContainer(node) || Array.isArray(node)) {
+      visitValue(node, at);
+      return;
+    }
+    descend(node, () => {
+      for (const key of Object.keys(node)) {
+        const value = node[key];
+        const here = `${at}.${key}`;
+        if ((key === '$and' || key === '$or') && Array.isArray(value)) value.forEach((arm, i) => visitNode(arm, `${here}[${i}]`));
+        else if (key === '$not') visitNode(value, here);
+        else if (!key.startsWith('$') && !isFixedReadLeaf(value) && isPlainContainer(value) && !Array.isArray(value)) {
+          visitOperatorMap(value, here, key);
+        } else visitValue(value, here);
+      }
+    });
+  };
+  visitNode(filter, 'rowFilter');
   return leaves;
 }
 

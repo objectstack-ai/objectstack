@@ -463,4 +463,25 @@ describe('[ADR-0155 plan step 5, the array-form in / nin decision] D4\'s envelop
       expect(engine.judgeFilter('srid_doc', where)).toMatchObject({ ok: false, ...REFUSED });
     });
   }
+
+  // The type door's refusals: the shape door passes a list and a scalar
+  // operator, so these answered INVALID_FILTER / 400, printing the leaf's head,
+  // while the object spelling `{ id: { $in: [leaf] } }` answered 500.
+  const typeDoor: Array<[string, (leaf: unknown) => unknown]> = [
+    ['the leaf as an array-form in list member', (leaf) => ['id', 'in', [leaf]]],
+    ['the leaf as an array-form != comparand', (leaf) => ['id', '!=', leaf]],
+  ];
+  for (const [what, condition] of typeDoor) {
+    it(`${what} is refused INTERNAL_ERROR / 500, naming no recipient, as its object spelling is`, async () => {
+      const { engine, calls } = await bootEngine();
+      const where = [condition(SharedRecordIds.read('srid_doc', 'u-secret'))] as unknown as FilterCondition;
+      const err = await refusalOf(engine.find('srid_doc', { where }, { context: ASKER as any }));
+      expect(envelopeOf(err)).toEqual(REFUSED);
+      expect(err?.message).toContain("holds a SharedRecordIds leaf, a fixed read of 'sys_record_share'");
+      expect(err?.message).not.toContain('u-secret');
+      expect(calls).toEqual([]);
+      const objectSpelling = { id: { $in: [SharedRecordIds.read('srid_doc', 'u-secret')] } } as unknown as FilterCondition;
+      expect(envelopeOf(await refusalOf(engine.find('srid_doc', { where: objectSpelling }, { context: ASKER as any })))).toEqual(REFUSED);
+    });
+  }
 });
