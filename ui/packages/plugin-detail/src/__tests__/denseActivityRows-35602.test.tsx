@@ -20,7 +20,12 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, fireEvent, screen } from '@testing-library/react';
 import type { FeedItem } from '@object-ui/types';
 import { RecordActivityTimeline, foldStreamChanges } from '../RecordActivityTimeline';
-import { mergeTimelineStream } from '../recordTimelineStream';
+import {
+  auditEntriesToFeedItems,
+  filterTimelineStream,
+  mergeTimelineStream,
+  type AuditEntryLike,
+} from '../recordTimelineStream';
 
 afterEach(cleanup);
 
@@ -136,5 +141,52 @@ describe('dense activity rows (objectstack#35602)', () => {
     fireEvent.focus(textarea);
     expect(box.getAttribute('data-composer-collapsed')).toBe('false');
     expect(screen.getAllByRole('textbox').length).toBeGreaterThan(0);
+  });
+});
+
+describe('the record\'s creation in a fold of field changes (objectstack#35788)', () => {
+  // One person creates a record and edits it three times on the same day: the
+  // ledger writes four audit entries (the creation's carries the values the
+  // record was created with) and the activity stream four rows.
+  const audit: AuditEntryLike[] = [
+    { id: 'u3', action: 'update', user_id: 'u1', user_name: 'Ada Lovelace', created_at: today(4), changes: [{ field: 'owner_id', label: 'Owner', from: 'Ada Lovelace', to: 'Grace Hopper' }] },
+    { id: 'u2', action: 'update', user_id: 'u1', user_name: 'Ada Lovelace', created_at: today(3), changes: [{ field: 'status', label: 'Lifecycle', from: 'Prospect', to: 'Active' }] },
+    { id: 'u1', action: 'update', user_id: 'u1', user_name: 'Ada Lovelace', created_at: today(2), changes: [{ field: 'signed_on', label: 'Customer Since', from: '2026-07-26', to: '2026-08-04' }] },
+    { id: 'c0', action: 'create', user_id: 'u1', user_name: 'Ada Lovelace', created_at: today(1), changes: [{ field: 'name', label: 'Account Name', from: null, to: 'Acme' }] },
+  ];
+  const activity = (id: string, activityType: 'created' | 'updated', createdAt: string): FeedItem =>
+    ({ ...edit(id, 'u1', createdAt), activityType, body: activityType === 'created' ? 'Created Account' : 'updated' }) as FeedItem;
+  const stream = () =>
+    mergeTimelineStream(
+      [
+        activity('a3', 'updated', today(4)),
+        activity('a2', 'updated', today(3)),
+        activity('a1', 'updated', today(2)),
+        activity('a0', 'created', today(1)),
+      ],
+      auditEntriesToFeedItems(audit, { unknownUser: 'Unknown user' }),
+    );
+  const shape = (entries: ReturnType<typeof foldStreamChanges>) =>
+    entries.map((e) => (e.kind === 'fold' ? `fold:${e.items.length}` : `item:${String(e.item.id)}`));
+
+  it('the 变更 chip folds the three edits and shows the creation once, on its own', () => {
+    expect(shape(foldStreamChanges(filterTimelineStream(stream(), 'changes')))).toEqual(['fold:3', 'item:audit:c0']);
+  });
+
+  it('全部 folds the same three edits beside its one 「Created」 row', () => {
+    expect(shape(foldStreamChanges(filterTimelineStream(stream(), 'all')))).toEqual(['fold:3', 'item:a0']);
+  });
+
+  it('draws the 变更 chip\'s fold with a count of three, the creation outside it', () => {
+    const { container } = render(<RecordActivityTimeline items={stream()} variant="stream" titleLabel="Timeline" />);
+    fireEvent.click(container.querySelector('[data-stream-filter="changes"]') as HTMLButtonElement);
+    const folds = container.querySelectorAll('[data-testid="activity-fold"]');
+    expect(folds.length).toBe(1);
+    expect(folds[0].getAttribute('data-fold-count')).toBe('3');
+    expect(folds[0].textContent).not.toContain('Account Name');
+    const creation = Array.from(container.querySelectorAll('[data-stream-row]')).filter((row) =>
+      row.textContent?.includes('Account Name'),
+    );
+    expect(creation.length).toBe(1);
   });
 });

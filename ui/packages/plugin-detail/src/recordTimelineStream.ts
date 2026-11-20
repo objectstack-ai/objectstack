@@ -112,8 +112,11 @@ const displayOf = (value: unknown): string | undefined =>
 
 /**
  * Audit entries as `field_change` feed items. Only an entry that changed a
- * field becomes one: the record's creation is the activity stream's own
- * `created` row, so it is not said twice.
+ * field becomes one. The record's creation is the activity stream's own
+ * `created` row, so it is not said twice: its audit entry (the values the
+ * record was created with) pairs onto that row ({@link mergeTimelineStream}),
+ * and where it stands alone (the 变更 chip, or no activity row to pair with)
+ * it is one row of its own, never one more edit ({@link isRecordCreationEntry}).
  */
 export function auditEntriesToFeedItems(
   entries: readonly AuditEntryLike[] | null | undefined,
@@ -319,6 +322,20 @@ export function isSystemStreamEntry(item: FeedItem): boolean {
  */
 export function isFieldHistoryEntry(item: FeedItem): boolean {
   return item.type === 'field_change' && item.source === 'sys_audit_log';
+}
+
+/**
+ * Whether an item is the audit entry of the record's creation: a
+ * field-history entry written by the ledger's `create` action, the one the
+ * spec pairs with the `created` activity row. It is the record's creation,
+ * said once: never one more edit folded into a run of field changes
+ * (objectstack#35788).
+ */
+export function isRecordCreationEntry(item: FeedItem): boolean {
+  return (
+    isFieldHistoryEntry(item)
+    && foldedActivityTypeOf((item as FeedItem & AuditFeedFacts).auditAction) === RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES.create
+  );
 }
 
 /**
