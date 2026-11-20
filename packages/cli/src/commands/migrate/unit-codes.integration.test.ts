@@ -17,8 +17,9 @@
  * before any row is written; a full mapping converts the mapped rows, the
  * organization's own unit included, and leaves members and blanks as stored;
  * a re-run reads nothing to rewrite and writes nothing (idempotent); `--org`
- * leaves another organization's rows as stored; a standalone `unitMode: 'code'`
- * field is reached too.
+ * leaves another organization's rows as stored; a row resting on a retired
+ * unit keeps its code (L1); a standalone `unitMode: 'code'` field is reached
+ * too.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -129,6 +130,14 @@ describe('backfillUnitCodes on SQL (ObjectQL + SqlDriver, better-sqlite3)', () =
     expect({ code: err?.code, status: err?.status, field: err?.field }).toEqual({ code: 'INVALID_FIELD', status: 400, field: 'uom' });
     expect(err?.message).toContain('Refused before the walk read or wrote any row.');
     expect((await table('uom')).m1).toBe('kg');
+  });
+
+  it('a row resting on a retired unit holds a unit code: left as stored, never unmatched (L1)', async () => {
+    await knex('uc_material').insert({ id: 'm7', organization_id: 'org_a', uom: 'SACK_50', weight: 2, base_uom: null });
+    const report = await run({ mapping: FULL, apply: true });
+    expect(report).toMatchObject({ mapped: 5, written: 5, unmatched: 0, skippedMember: 2, failures: [] });
+    expect(report.values.find((v) => v.value === 'SACK_50')).toEqual({ value: 'SACK_50', rows: 1, disposition: 'member' });
+    expect((await table('uom')).m7).toBe('SACK_50');
   });
 
   it('a standalone unitMode code field is reached too', async () => {

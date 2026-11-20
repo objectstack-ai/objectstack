@@ -162,6 +162,19 @@ describe('backfillUnitCodes — free text stored before the field was a unit cod
     expect(formatUnitCodeBackfillReport(again)).toContain('✓ Every uom_material.uom value is a unit code — nothing to convert.');
   });
 
+  it('a row resting on a retired unit, or on a code of another dimension, holds a unit code: left as stored, never unmatched (L1)', async () => {
+    stored('r1', { uom: 'SACK_50', weight: 9 }); // a unit org_a retired: L1 keeps the resting row's code
+    stored('r2', { uom: 'MTR', weight: 3 });     // a standard code of the length dimension
+    const report = await run({ mapping: MAPPING, apply: true });
+    expect(report).toMatchObject({ mapped: 4, written: 4, unmatched: 0, skippedMember: 4, failures: [] });
+    expect(report.values.filter((v) => ['SACK_50', 'MTR'].includes(v.value))).toEqual([
+      { value: 'MTR', rows: 1, disposition: 'member' },
+      { value: 'SACK_50', rows: 1, disposition: 'member' },
+    ]);
+    expect([uom('r1'), uom('r2')]).toEqual(['SACK_50', 'MTR']);
+    expect(d.writes.map((w) => w.id)).not.toContain('r1');
+  });
+
   it.each([
     ['kgm', 'is not a unit code in organization org_a'],
     ['TAEL_1', 'is not a unit code in organization org_a'], // another organization's unit

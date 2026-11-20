@@ -35,13 +35,18 @@
  *   unscoped or all-organizations run judges an organization code in each
  *   organization it would write it in, after the read-only count and before
  *   any write. A non-member target refuses the whole run.
- * - A row holding a member code (U1, or a non-retired unit of the row's
- *   organization) is never touched; a blank code with no quantity value beside
- *   it is left alone. Each is counted.
+ * - A row holding a unit code is never touched: a code of U1, or any unit of
+ *   the row's organization (the settlement's membership, "U1, or that
+ *   organization's `sys_unit` rows"), a retired one included, since L1 keeps a
+ *   resting row's code and its quantity is in that unit. A code of another
+ *   dimension than `unitDimension` is a code too. Neither is free text, and the
+ *   write check answers both at the row's next quantity edit; rewriting them
+ *   from a mapping would change what the stored quantity means. A blank code
+ *   with no quantity value beside it is left alone. Each is counted.
  * - Every distinct stored value is listed with its row count, so the operator
  *   sees each spelling before writing.
  * - An apply run counts first, read-only, and refuses before any write while a
- *   non-blank, non-member value has no mapping entry, naming each one. So one
+ *   non-blank value that is no unit code has no mapping entry, naming each one. So one
  *   apply run converts the whole field or nothing, and a re-run writes nothing.
  *
  * Writes go through `engine.update`, one per row, as the currency backfill's
@@ -417,8 +422,8 @@ async function walkUnitCodes(
         value = '';
       } else {
         value = typeof stored === 'string' ? stored : String(stored);
-        const verdict = units.verdict(org, value);
-        if (verdict !== undefined && verdict !== 'retired') {
+        // Any code is left as stored, a retired unit or another dimension included: see the header.
+        if (units.verdict(org, value) !== undefined) {
           bump('skippedMember');
           tallyValue(values, value, 'member');
           continue;
