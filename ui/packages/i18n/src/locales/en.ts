@@ -2401,10 +2401,12 @@ const en = {
       launcherLabel: 'App launcher',
       menuLabel: 'App navigation',
       menuEmpty: 'This app has no navigation entries you can open.',
-      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      // objectstack#35882 — the phone's bottom bar: Home, Notifications, Approvals, search.
       phoneBarLabel: 'App menu bar',
-      searchMenu: 'Search menu',
-      phoneBarHint: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
+      phoneHome: 'Home',
+      phoneNotifications: 'Notifications',
+      phoneApprovals: 'Approvals',
+      phoneSearch: 'Search',
       // objectui#12427 — the ⋯ menu a sidebar entry shows on hover (`SidebarItemMenu`).
       itemMenu: 'More actions for {{name}}',
       openInNewTab: 'Open in new tab',
@@ -4122,6 +4124,13 @@ const en = {
   layout: {
     appSwitcher: {
       switchApplication: 'Switch Application',
+      currentApp: 'Current app',
+      otherApps: 'Other apps',
+      yourApps: 'Your apps',
+      searchApps: 'Search apps…',
+      noAppsMatch: 'No apps match',
+      chooseApp: 'Choose an app',
+      backToAppHome: 'Back to the app menu',
       appsAvailable: '{{count}} apps available',
       allApps: 'All apps',
       editAppInStudio: 'Edit {{app}} in Studio',

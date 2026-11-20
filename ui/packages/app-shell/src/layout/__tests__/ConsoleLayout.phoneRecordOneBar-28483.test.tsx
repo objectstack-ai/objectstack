@@ -31,8 +31,14 @@ vi.mock('../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false }),
 }));
 vi.mock('../UnifiedSidebar', () => ({
-  UnifiedSidebar: ({ phoneNavBar }: { phoneNavBar?: boolean }) => (
-    <nav aria-label="App menu" data-testid="sidebar-stub" data-phone-nav-bar={phoneNavBar ? 'on' : 'off'} />
+  UnifiedSidebar: () => <nav aria-label="App menu" data-testid="sidebar-stub" />,
+}));
+// The bar's own face is `PhoneAppNavBar.fixedTabs-35882`'s; here only where
+// the layout mounts it, with the real route rule (`isPhoneTabRoute`).
+vi.mock('../PhoneAppNavBar', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  PhoneAppNavBar: ({ basePath }: { basePath: string }) => (
+    <nav data-testid="phone-app-nav-bar-stub" data-base-path={basePath} />
   ),
 }));
 vi.mock('../AppHeader', () => ({
@@ -47,7 +53,7 @@ vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: ()
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
-import { ConsoleLayout, hidesPhoneNavBar, isRecordPagePath } from '../ConsoleLayout';
+import { ConsoleLayout, isRecordPagePath } from '../ConsoleLayout';
 import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
@@ -162,50 +168,59 @@ describe('isRecordPagePath (objectstack#28483)', () => {
 });
 
 /**
- * objectstack#34594 — the phone's bottom menu bar: the layout asks the sidebar
- * for it on every app route below 768 px except a record page and a record
- * form (create or edit), whose bottom edge is the record's actions or the
- * form's submit buttons; and while it is drawn the inset keeps its height
- * free at the bottom. The bar itself is `UnifiedSidebar.phoneNavBar-34594`'s.
+ * objectstack#35882 — the phone's bottom bar (Home, Notifications, Approvals,
+ * search) is mounted on the three pages it opens, the app's home, the inbox
+ * list and the approvals inbox, and on no page below them: a list, a view, a
+ * dashboard, a page, a record and a record form have the page to themselves.
+ * While it is drawn the inset keeps its height free at the bottom. It replaces
+ * objectstack#34594's bar of menu entries, which every app route but a record
+ * and its forms drew.
  */
-describe('the phone bottom menu bar is drawn off the record and form routes (objectstack#34594)', () => {
-  const barState = () => screen.getByTestId('sidebar-stub').getAttribute('data-phone-nav-bar');
+describe('the phone bottom bar is drawn on its three pages only (objectstack#35882)', () => {
+  const bar = () => screen.queryByTestId('phone-app-nav-bar-stub');
   const insetKeepsBarFree = () =>
-    screen.getByTestId('console-route').parentElement!.className.includes('!pb-[calc(3rem+env(safe-area-inset-bottom))]');
+    screen.getByTestId('console-route').parentElement!.className.includes('!pb-[calc(3.5rem+env(safe-area-inset-bottom))]');
 
-  it('at 375 px a list, a view, a dashboard, a page and the app root ask for the bar, and the inset keeps it free', () => {
-    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/crm_lead/view/all', '/apps/crm/dashboard/sales', '/apps/crm/page/home']) {
+  it('at 375 px the app root, the inbox list and the approvals inbox draw it, and the inset keeps it free', () => {
+    for (const path of ['/apps/crm', '/apps/crm/sys_inbox_message', '/apps/crm/system/approvals']) {
       mountAt(path, 375);
-      expect(barState(), path).toBe('on');
+      expect(bar(), path).not.toBeNull();
       expect(insetKeepsBarFree(), path).toBe(true);
       cleanup();
     }
   });
 
-  it('at 375 px a record page, a named record page, the edit form and the create form draw no bar', () => {
-    for (const path of [RECORD, `${RECORD}/page/print_sheet`, `${RECORD}/edit`, '/apps/crm/crm_lead/new']) {
+  it('Home goes to this app\'s home', () => {
+    mountAt('/apps/crm', 375);
+    expect(bar()).toHaveAttribute('data-base-path', '/apps/crm');
+  });
+
+  it('at 375 px a list, a view, a dashboard, a page, a record page and both record forms draw none', () => {
+    for (const path of [
+      '/apps/crm/crm_lead',
+      '/apps/crm/crm_lead/view/all',
+      '/apps/crm/dashboard/sales',
+      '/apps/crm/page/home',
+      RECORD,
+      `${RECORD}/page/print_sheet`,
+      `${RECORD}/edit`,
+      '/apps/crm/crm_lead/new',
+    ]) {
       mountAt(path, 375);
-      expect(barState(), path).toBe('off');
+      expect(bar(), path).toBeNull();
       expect(insetKeepsBarFree(), path).toBe(false);
       cleanup();
     }
   });
 
-  it('CONTROL — at 768 px and 1440 px no route asks for the bar', () => {
+  it('CONTROL — at 768 px and 1440 px no route draws it, the app root included', () => {
     for (const width of [768, 1440]) {
-      mountAt('/apps/crm/crm_lead', width);
-      expect(barState(), `${width} px`).toBe('off');
-      expect(insetKeepsBarFree(), `${width} px`).toBe(false);
-      cleanup();
-    }
-  });
-
-  it('hidesPhoneNavBar names the record page and the two record forms, and nothing else', () => {
-    for (const path of [RECORD, `${RECORD}/`, `${RECORD}/page/print_sheet`, `${RECORD}/edit`, '/apps/crm/crm_lead/new']) {
-      expect(hidesPhoneNavBar(path), path).toBe(true);
-    }
-    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/crm_lead/view/all', '/apps/crm/metadata/object/new', '/apps/crm/dashboard/sales']) {
-      expect(hidesPhoneNavBar(path), path).toBe(false);
+      for (const path of ['/apps/crm', '/apps/crm/crm_lead']) {
+        mountAt(path, width);
+        expect(bar(), `${width} px ${path}`).toBeNull();
+        expect(insetKeepsBarFree(), `${width} px ${path}`).toBe(false);
+        cleanup();
+      }
     }
   });
 });
