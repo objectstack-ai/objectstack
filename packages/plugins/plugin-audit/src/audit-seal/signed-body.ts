@@ -289,11 +289,17 @@ function columnSet(value: unknown): SealedColumnSet {
  * body the sink was handed, whose RFC 8785 form is the bytes the row's
  * `signature` covers.
  *
- * It validates and normalizes; it never verifies the signature. A rewritten
- * row reads back into a body that fails verification, or, re-signed by
- * whoever holds the signing key, into one that only the off-host trust anchor
- * catches. So a sink verifies the row's `signature` over the rebuilt body,
- * under a key it trusts itself, before it treats the row as delivered.
+ * It validates and normalizes; it never verifies the signature. A row whose
+ * signed columns were rewritten reads back into a body that fails
+ * verification (a rewrite of `id`, `chain_key` or `leaf_hashes` reads back
+ * into the same body, and a malformed one is refused with a
+ * `SignedBodyError`). A row rewritten and re-signed under a key planted on
+ * the host fails under a key the sink trusts itself. A row rewritten and
+ * re-signed by whoever holds the genuine signing key verifies; only the
+ * copies already off the host catch it, because a later checkpoint's signed
+ * `previous_digest` no longer matches. So a sink verifies the row's
+ * `signature` over the rebuilt body, under a key it trusts itself, before it
+ * treats the row as delivered.
  *
  * A sink assembles the entry it re-delivers itself: `kind` is `'checkpoint'`
  * (the table it read), `keyId` is `body.signing_key_id`, and `signature` is
@@ -400,11 +406,16 @@ export function checkpointLeafHashesFromRow(row: Readonly<Record<string, unknown
  * body the sink was handed, whose RFC 8785 form is the bytes the row's
  * `signature` covers.
  *
- * It validates and normalizes; it never verifies the signature. A rewritten
- * row reads back into a body that fails verification, or, re-signed by
- * whoever holds the signing key, into one that only the off-host trust anchor
- * catches. So a sink verifies the row's `signature` over the rebuilt body,
- * under a key it trusts itself, before it treats the row as delivered.
+ * It validates and normalizes; it never verifies the signature. A row whose
+ * signed columns were rewritten reads back into a body that fails
+ * verification (a rewrite of `id` or `chain_key` reads back into the same
+ * body, and a malformed one is refused with a `SignedBodyError`). A row
+ * rewritten and re-signed under a key planted on the host fails under a key
+ * the sink trusts itself. A row rewritten and re-signed by whoever holds the
+ * genuine signing key verifies; no later record carries an amendment's
+ * digest, so only checks against the copies already off the host can catch
+ * it. So a sink verifies the row's `signature` over the rebuilt body, under
+ * a key it trusts itself, before it treats the row as delivered.
  *
  * A sink assembles the entry it re-delivers itself: `kind` is `'amendment'`
  * (the table it read), `keyId` is `body.signing_key_id`, and `signature` is
