@@ -52,6 +52,7 @@ import {
   TIMELINE_STREAM_FILTERS,
   fieldHistoryEntriesOf,
   fieldHistoryOf,
+  isFieldHistoryEntry,
   filterTimelineStream,
   isSystemStreamEntry,
   timelineStreamFilters,
@@ -182,10 +183,20 @@ export interface RecordActivityTimelineProps {
   totalCount?: number;
   /** The peek's 「查看全部 N 条 →」: open the 动态 tab. Absent: not drawn. */
   onViewAll?: () => void;
+  /**
+   * The stream's 「看审批」 on an approval entry: open the record's approvals.
+   * Absent: the entry is its one line with no link.
+   */
+  onViewApprovals?: () => void;
   className?: string;
 }
 
 /** The stream chips' copy (objectstack#27055): 全部 / 活动 / 讨论 / 变更. */
+/** The stream comment's icon cell: the stream row's 14 px icon, centred on its first line. */
+const STREAM_ICON_CELL = 'shrink-0 flex h-[30px] w-3.5 items-center justify-center text-muted-foreground';
+/** The stream comment's header line: who, then when, 30 px tall, wrapping between pieces. */
+const STREAM_COMMENT_HEADER = 'flex min-h-[30px] flex-wrap items-center gap-x-2 text-[13px]';
+
 const STREAM_FILTER_KEYS: Record<TimelineStreamFilter, { key: string; fallback: string }> = {
   all: { key: 'detail.streamAll', fallback: 'All' },
   activity: { key: 'detail.streamActivity', fallback: 'Activity' },
@@ -228,6 +239,69 @@ const FEED_TYPE_COLORS: Record<FeedItemType, string> = {
   record_delete: 'bg-red-100 text-red-600',
   approval: 'bg-violet-100 text-violet-600',
 };
+
+/**
+ * Whether a stream entry is one person's field change, the kind
+ * {@link foldStreamChanges} folds: an audit entry or an `updated` activity
+ * row, not a milestone (`activityKind`) and not a reply.
+ */
+function isStreamFieldChange(item: FeedItem): boolean {
+  return (
+    item.type === 'field_change'
+    && (isFieldHistoryEntry(item) || item.activityType === 'updated')
+    && item.activityKind === undefined
+    && !item.parentId
+  );
+}
+
+/** The local calendar day an entry was written on (`YYYY-M-D`), or '' when unparseable. */
+function dayKeyOf(createdAt: string | undefined): string {
+  const date = createdAt ? new Date(createdAt) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+/**
+ * The stream's display grouping: consecutive field changes by one person
+ * (the same `actorId` and display name) on one day become ONE fold row, which
+ * expands to each change. Every entry stays in the stream, in order; nothing
+ * is merged in the data. A run of one is an ordinary row.
+ */
+export function foldStreamChanges(items: readonly FeedItem[]): ActivityTimelineEntry[] {
+  const entries: ActivityTimelineEntry[] = [];
+  let run: FeedItem[] = [];
+  const flush = () => {
+    if (run.length > 1) entries.push({ kind: 'fold', id: `fold:${String(run[0].id)}`, items: run });
+    else if (run.length === 1) entries.push({ kind: 'item', item: run[0] });
+    run = [];
+  };
+  for (const item of items) {
+    if (!isStreamFieldChange(item)) {
+      flush();
+      entries.push({ kind: 'item', item });
+      continue;
+    }
+    const prev = run[run.length - 1];
+    if (
+      prev
+      && ((prev.actorId ?? null) !== (item.actorId ?? null)
+        || prev.actor !== item.actor
+        || dayKeyOf(prev.createdAt) !== dayKeyOf(item.createdAt))
+    ) {
+      flush();
+    }
+    run.push(item);
+  }
+  flush();
+  return entries;
+}
+
+/** The fields a stream field change names: its own list, its changes, or its paired audit entry's. */
+function streamChangedFieldsOf(item: FeedItem): string[] {
+  if (item.changedFields && item.changedFields.length > 0) return item.changedFields;
+  const changes = fieldHistoryOf(item)?.fieldChanges ?? item.fieldChanges ?? [];
+  return changes.map((change) => change.field);
+}
 
 /**
  * The dropdown's options, given whether the record's field history is shown
@@ -378,6 +452,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onStreamFilterChange,
   totalCount,
   onViewAll,
+  onViewApprovals,
   className,
 }) => {
   const isPeek = variant === 'peek';
@@ -537,11 +612,10 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // Runs of consecutive updates by one actor, folded into one row each
   // (objectstack#25959). Folded at render from the rows the reader sees; the
   // feed itself keeps every entry.
-  // The stream draws every entry as its own line (objectstack#27055): a
-  // system entry is already one compact line, so there is nothing to fold.
+  // The stream folds a run of one person's field changes on one day into one
+  // expandable row ({@link foldStreamChanges}): display grouping only.
   const timelineEntries = React.useMemo(
-    (): ActivityTimelineEntry[] =>
-      isStream ? (rootItems.map((item) => ({ kind: 'item', item })) as ActivityTimelineEntry[]) : foldFeedItems(rootItems),
+    (): ActivityTimelineEntry[] => (isStream ? foldStreamChanges(rootItems) : foldFeedItems(rootItems)),
     [rootItems, isStream],
   );
   // Which folded rows the reader has expanded, by the fold's id.
@@ -661,39 +735,108 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             })
           : t('detail.activityUpdated');
   };
+  // The stream's dense row (the record page's 动态 tab): a small icon, who,
+  // what, and the time at the right, on ONE 30 px line. The what truncates
+  // (its whole text is the row's title) and the time never breaks
+  // (objectstack#34614), so a narrow drawer keeps one line per entry.
+  const streamRow = (
+    item: FeedItem,
+    Icon: React.ElementType,
+    what: React.ReactNode,
+    whatTitle: string,
+    extra?: React.ReactNode,
+    rowProps?: Record<string, string>,
+  ): React.ReactNode => {
+    const when = formatTimestamp(item.createdAt, t, displayLocale);
+    return (
+      <div
+        key={item.id}
+        className="flex min-h-[30px] items-center gap-2 text-[13px] leading-[18px]"
+        title={`${item.actor} · ${whatTitle} · ${when}`}
+        data-stream-row=""
+        {...rowProps}
+      >
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="max-w-[40%] shrink-0 truncate font-medium text-foreground" data-stream-actor="">
+          {item.actor}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{what}</span>
+        {extra}
+        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums" data-stream-when="">
+          {when}
+        </span>
+      </div>
+    );
+  };
   const renderSystemLine = (item: FeedItem): React.ReactNode => {
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
     const what = systemLineText(item);
     const paired = fieldHistoryOf(item);
-    return (
-      <div key={item.id} className="flex items-start gap-2 py-0.5 text-xs text-muted-foreground" data-stream-system-row="">
-        <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center">
-          <Icon className="h-3.5 w-3.5" aria-hidden />
-        </span>
-        <p className="min-w-0 flex-1 pt-2 break-words">
-          <span className="text-foreground/80" data-stream-change="">{what}</span>
-          <span aria-hidden>{' · '}</span>
-          <span>{item.actor}</span>
-          {/* "· 3d ago" never breaks inside (objectstack#34614): the space
-              before it is the line's last break opportunity. */}
-          <span aria-hidden>{' '}</span>
-          <span className="whitespace-nowrap" data-stream-when="">
-            <span aria-hidden>{'· '}</span>
-            <span>{formatTimestamp(item.createdAt, t, displayLocale)}</span>
-          </span>
-          {paired && (
-            <span className="block text-foreground/70" data-stream-change-diff="">
-              {changesText(paired)}
-            </span>
-          )}
-        </p>
-      </div>
+    const diff = paired ? changesText(paired) : '';
+    return streamRow(
+      item,
+      Icon,
+      <>
+        <span className="text-foreground/80" data-stream-change="">{what}</span>
+        {paired && (
+          <>
+            <span aria-hidden>{' · '}</span>
+            <span data-stream-change-diff="">{diff}</span>
+          </>
+        )}
+      </>,
+      diff ? `${what} · ${diff}` : what,
+      undefined,
+      { 'data-stream-system-row': '' },
+    );
+  };
+  // An approval entry is one line; its progress lives on the approvals tab,
+  // which 「看审批」 opens (the epic's direction: no approval detail here).
+  const renderApprovalLine = (item: FeedItem): React.ReactNode => {
+    const what = (item.body ?? '').replace(/\s+/g, ' ').trim() || t('detail.activityUpdated');
+    return streamRow(
+      item,
+      FEED_TYPE_ICONS.approval,
+      what,
+      what,
+      onViewApprovals ? (
+        <button
+          type="button"
+          className="shrink-0 text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onViewApprovals}
+          data-stream-view-approval=""
+        >
+          {t('detail.viewApproval', { defaultValue: 'View approval' })}
+        </button>
+      ) : undefined,
+      { 'data-stream-approval-row': '' },
     );
   };
 
   const renderItem = (item: FeedItem): React.ReactNode => {
     if (isStream && isSystemStreamEntry(item)) return renderSystemLine(item);
+    if (isStream && item.type === 'approval') return renderApprovalLine(item);
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
+    // Every stream entry but a comment is its one line: what it says, and a
+    // link to its source record where it has one (ADR-0052 ActivityPointer).
+    if (isStream && item.type !== 'comment') {
+      const what = (item.body ?? '').replace(/\s+/g, ' ').trim() || t('detail.activityUpdated');
+      return streamRow(
+        item,
+        Icon,
+        what,
+        what,
+        item.sourceObject && item.sourceId != null ? (
+          <a
+            href={`/objects/${item.sourceObject}/${item.sourceId}`}
+            className="shrink-0 text-xs text-primary hover:underline"
+            data-testid="activity-source-link"
+          >
+            {t('detail.viewSource')}
+          </a>
+        ) : undefined,
+      );
+    }
     const colorClass =
       FEED_TYPE_COLORS[item.type] || 'bg-gray-100 text-gray-600';
     // Threading (objectui#12144). The reply LIST shows only under a
@@ -712,12 +855,14 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         : undefined;
     const changeLines = fieldHistoryOf(item)?.fieldChanges ?? (item.type === 'field_change' ? item.fieldChanges : undefined);
 
+    // A stream comment is the stream's row with the comment under it: a
+    // small icon, who and when on one line, then what they wrote.
     return (
-      <div key={item.id}>
-        <div className="flex gap-3 relative">
+      <div key={item.id} data-stream-comment-row={isStream ? '' : undefined}>
+        <div className={isStream ? 'flex gap-2 relative' : 'flex gap-3 relative'}>
           {/* Icon */}
           <div
-            className={cn(
+            className={isStream ? STREAM_ICON_CELL : cn(
               'shrink-0 h-8 w-8 rounded-full flex items-center justify-center z-10',
               colorClass,
             )}
@@ -726,18 +871,18 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               <img
                 src={item.actorAvatarUrl}
                 alt={item.actor}
-                className="h-8 w-8 rounded-full object-cover"
+                className={isStream ? 'h-4 w-4 rounded-full object-cover' : 'h-8 w-8 rounded-full object-cover'}
               />
             ) : (
               <Icon className="h-3.5 w-3.5" />
             )}
           </div>
           {/* Content */}
-          <div className="flex-1 min-w-0 pt-1">
+          <div className={isStream ? 'flex-1 min-w-0' : 'flex-1 min-w-0 pt-1'}>
             {/* The row wraps between its pieces and the time is one
                 unbreakable piece (objectstack#34614): in a narrow drawer the
                 time moves to the next line instead of breaking per word. */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
+            <div className={isStream ? STREAM_COMMENT_HEADER : 'flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5'}>
               <span className="text-sm font-medium">{item.actor}</span>
               {item.source && (
                 <span className="text-xs text-muted-foreground">
@@ -767,7 +912,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               // The body is what the author wrote, so it reads in the
               // foreground colour, as a reply's body does; the muted grey
               // belongs to the meta line above it (objectstack#27520 row 14).
-              bodyClassName="text-sm whitespace-pre-wrap break-words text-foreground"
+              bodyClassName={cn(isStream ? 'text-[13px] leading-5' : 'text-sm', 'whitespace-pre-wrap break-words text-foreground')}
             />
 
             {/* Drill to source rich entity (ADR-0052 ActivityPointer) */}
@@ -835,9 +980,13 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // the fields they changed. The toggle expands the run to its entries, each
   // rendered exactly as an unfolded row.
   const renderFold = (entry: Extract<ActivityTimelineEntry, { kind: 'fold' }>): React.ReactNode => {
-    const latest = entry.items[entry.items.length - 1];
+    // The stream is newest first, so its run's latest entry is its first.
+    const latest = isStream ? entry.items[0] : entry.items[entry.items.length - 1];
     const count = entry.items.length;
-    const labels = changedFieldsOf(entry.items).map(labelOfField);
+    const labels = (isStream
+      ? Array.from(new Set(entry.items.flatMap(streamChangedFieldsOf)))
+      : changedFieldsOf(entry.items)
+    ).map(labelOfField);
     const shown = labels.slice(0, FOLD_FIELDS_SHOWN);
     const rest = labels.length - shown.length;
     const named = rest > 0 ? [...shown, t('detail.foldedMoreFields', { count: rest })] : shown;
@@ -851,6 +1000,38 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       : t('detail.activityUpdated');
     const expanded = expandedFolds.has(entry.id);
     const Icon = FEED_TYPE_ICONS.field_change;
+    if (isStream) {
+      return (
+        <div key={entry.id} data-testid="activity-fold" data-fold-count={count}>
+          {streamRow(
+            latest,
+            Icon,
+            summary,
+            summary,
+            <>
+              <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground" data-testid="activity-fold-count">
+                {t('detail.foldedUpdateCount', { count })}
+              </span>
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-label={expanded ? t('detail.collapseFolded') : t('detail.expandFolded')}
+                onClick={() => toggleFold(entry.id)}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expanded && 'rotate-180')} aria-hidden="true" />
+              </button>
+            </>,
+            { 'data-stream-fold-row': '' },
+          )}
+          {expanded && (
+            <div className="ml-1.5 border-l border-border pl-3" data-testid="activity-fold-entries">
+              {entry.items.map((item) => renderItem(item))}
+            </div>
+          )}
+        </div>
+      );
+    }
     return (
       <div key={entry.id} data-testid="activity-fold" data-fold-count={count}>
         <div className="flex gap-3 relative">
@@ -914,7 +1095,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       placeholder={t('detail.leaveCommentPlaceholder')}
       disabled={isSubmitting}
       canSubmitEmpty={pendingAttachments.length > 0}
-      autoFocus={isPeek}
+      autoFocus={isStream}
       extraSlot={
         onUploadAttachments ? (
           <CommentAttachment
@@ -933,6 +1114,63 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       }
     />
   );
+
+  // The peek's and the stream's composer: ONE line until the reader presses it
+  // (or a draft is held), then the full composer, focused.
+  const composerLine =
+    composerOpen || commentText || pendingAttachments.length > 0 ? (
+      composer
+    ) : (
+      <button
+        type="button"
+        className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => setComposerOpen(true)}
+        data-record-timeline-composer=""
+      >
+        <span className="truncate">{t('detail.timelineComposer', { defaultValue: 'Write a note… @ to mention' })}</span>
+      </button>
+    );
+
+  // The stream's day header over its entries: 今天, 昨天, then the date.
+  const dayLabelOf = (createdAt: string | undefined): string => {
+    const key = dayKeyOf(createdAt);
+    if (!key || !createdAt) return '';
+    const now = new Date();
+    if (key === dayKeyOf(now.toISOString())) return t('detail.streamToday', { defaultValue: 'Today' });
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    if (key === dayKeyOf(yesterday.toISOString())) return t('detail.streamYesterday', { defaultValue: 'Yesterday' });
+    const date = new Date(createdAt);
+    return date.toLocaleDateString(displayLocale, {
+      month: 'short',
+      day: 'numeric',
+      ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
+    });
+  };
+  const firstItemOf = (entry: ActivityTimelineEntry): FeedItem => (entry.kind === 'fold' ? entry.items[0] : entry.item);
+  const renderStreamDays = (): React.ReactNode => {
+    const days: { key: string; label: string; entries: ActivityTimelineEntry[] }[] = [];
+    for (const entry of timelineEntries) {
+      const createdAt = firstItemOf(entry).createdAt;
+      const key = dayKeyOf(createdAt);
+      const last = days[days.length - 1];
+      if (last && last.key === key) last.entries.push(entry);
+      else days.push({ key, label: dayLabelOf(createdAt), entries: [entry] });
+    }
+    return (
+      <div data-stream-list="">
+        {days.map((day, index) => (
+          <div key={`${day.key}:${index}`} data-stream-day={day.key}>
+            {day.label && (
+              <div className="pb-0.5 pt-2 text-xs font-medium text-muted-foreground" data-stream-day-label="">
+                {day.label}
+              </div>
+            )}
+            {day.entries.map((entry) => (entry.kind === 'fold' ? renderFold(entry) : renderItem(entry.item)))}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   // objectstack#27524, Target 5 — the 动态 panel's body. The panel around it
   // draws the header (「动态」 and the count); here: the composer, one line
@@ -967,18 +1205,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       <div className={className} data-record-timeline-peek="">
         {showCommentInput && (
           <div className="border-t border-border px-3 py-2">
-            {composerOpen || commentText || pendingAttachments.length > 0 ? (
-              composer
-            ) : (
-              <button
-                type="button"
-                className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => setComposerOpen(true)}
-                data-record-timeline-composer=""
-              >
-                <span className="truncate">{t('detail.timelineComposer', { defaultValue: 'Write a note… @ to mention' })}</span>
-              </button>
-            )}
+            {composerLine}
           </div>
         )}
         {filtered.length > 0 && readNotice && <div className="border-t border-border px-3">{readNotice}</div>}
@@ -1024,7 +1251,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       // pinned to the right rail it wraps this with its own border, so
       // we don't double up.
       className={cn(
-        'border-t border-border/60 pt-5',
+        isStream ? 'border-t border-border/60 pt-3' : 'border-t border-border/60 pt-5',
         className,
       )}
       // Named with the heading's own title value, not a second string
@@ -1043,7 +1270,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       // mounts' HTML byte for byte, and both went red on that id.
       aria-label={title}
     >
-      <header className="mb-4">
+      <header className={isStream ? 'mb-2' : 'mb-4'}>
         {/* Wraps: in a 320 px foot card the stream's chips go under the title
             rather than past the card's edge (objectstack#27055). */}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1093,7 +1320,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           </div>
         </div>
       </header>
-      <div className="space-y-4">
+      <div className={isStream ? 'space-y-2' : 'space-y-4'}>
         {/* Filter dropdown — the stream has its chips instead */}
         {showFilter && !isStream && (
           <div className="flex items-center gap-2">
@@ -1119,7 +1346,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         )}
 
         {/* Comment Input — rich text with @mention + bold/italic/list/code + preview */}
-        {showCommentInput && composer}
+        {showCommentInput && (isStream ? composerLine : composer)}
 
         {/* A refusal with rows on screen (objectui#11195): the comments
             were readable and the activity was not, or the other way round.
@@ -1169,6 +1396,8 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               className="py-6"
             />
           )
+        ) : isStream ? (
+          renderStreamDays()
         ) : (
           <div className="relative">
             {/* Timeline line */}
