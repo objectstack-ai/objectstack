@@ -280,14 +280,15 @@ describe('ListView.concurrencyTokenProjection-12292', () => {
   afterEach(() => cleanup());
 
   describe('ListView — an inline-editable grid\'s rows carry their concurrency token (objectui#12292)', () => {
-    it('asks for `updated_at` when the grid opens in inline-edit mode, though no column shows it', async () => {
-      const { lastSelect } = await mount({ inlineEdit: true });
+    it('asks for `updated_at` when the grid is editable in place, though no column shows it', async () => {
+      // objectstack#35684 — a view that declares nothing is editable.
+      const { lastSelect } = await mount({});
       await waitFor(() => expect(lastSelect()).toContain('updated_at'));
       expect(lastSelect()).toEqual(expect.arrayContaining(['id', 'title', 'estimate_hours']));
     });
 
-    it('does not ask for it while the grid is not in inline-edit mode', async () => {
-      const { dataSource, lastSelect } = await mount({});
+    it('does not ask for it when the view turns in-place editing off', async () => {
+      const { dataSource, lastSelect } = await mount({ userActions: { editInline: false } });
       await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
       expect(dataSource.find.mock.calls.length).toBeGreaterThan(0);
       for (const call of dataSource.find.mock.calls) {
@@ -2037,6 +2038,8 @@ describe('ListView.draftOnlyColumn-34807', () => {
       viewType: 'grid',
       columns: ['title', 'priority'],
       compactToolbar: false,
+      // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+      userActions: { editInline: false },
       ...schemaExtra,
     } as unknown as ListViewSchema;
     render(
@@ -2343,8 +2346,8 @@ describe('ListView.switcherChrome-7547', () => {
 /**
  * objectui#12621 — the list toolbar's Display menu closes once a layout is
  * chosen, and on Escape, returning focus to the Display trigger. The panel's
- * toggles keep it open: the control below flips Edit inline and density and
- * finds the panel still drawn. The panel is a menu whose rows open a second
+ * own settings keep it open: the control below clears the row colour and
+ * picks a row height, and finds the panel still drawn. The panel is a menu whose rows open a second
  * level; the Layout level lists every layout as a radio, at any count.
  */
 describe('ListView.displayMenuClose-12621', () => {
@@ -2449,17 +2452,16 @@ describe('ListView.displayMenuClose-12621', () => {
     it('Escape closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      fireEvent.keyDown(within(content).getByTestId('options-row-more'), { key: 'Escape' });
+      fireEvent.keyDown(within(content).getByTestId('options-row-row-height'), { key: 'Escape' });
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('control: toggling Edit inline and choosing a row height keep the menu open', async () => {
-      mount(TWO);
+    it('control: clearing the row colour and choosing a row height keep the menu open', async () => {
+      // objectstack#35684 took the last switch (Edit inline) off the menu.
+      mount({ ...TWO, userActions: { rowColor: true }, rowColor: { field: 'stage', colors: {} } } as ListViewSchema);
       const { trigger, content } = await openDisplay();
-      fireEvent.click(within(content).getByTestId('options-row-more'));
-      const toggle = await within(content).findByTestId('toolbar-inline-edit-toggle');
-      fireEvent.click(toggle);
-      await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+      fireEvent.click(within(content).getByTestId('options-row-color'));
+      fireEvent.click(await within(content).findByTestId('options-color-clear'));
       fireEvent.click(within(content).getByTestId('options-back'));
       fireEvent.click(await within(content).findByTestId('options-row-row-height'));
       fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
@@ -2680,7 +2682,8 @@ describe('ListView.nameFieldSelect-13116', () => {
     render(
       <SchemaRendererProvider dataSource={dataSource}>
         <ListView
-          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns } as any}
+          // Read-only: an editable list also asks for `updated_at` (concurrencyTokenProjection-12292 above).
+          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns, userActions: { editInline: false } } as any}
           dataSource={dataSource}
         />
       </SchemaRendererProvider>,

@@ -37,12 +37,31 @@ export { stateMachineNextValues } from '@object-ui/core';
  * that, a `composite` cell degraded to a plain text editor, a
  * value-corruption path.
  */
+const COMPUTED_FIELD_TYPES = new Set<string>(['formula', 'summary', 'rollup', 'autonumber', 'auto_number']);
 const NON_EDITABLE_FIELD_TYPES = new Set<string>([
   // computed / system-generated
-  'formula', 'summary', 'rollup', 'autonumber', 'auto_number',
+  ...COMPUTED_FIELD_TYPES,
   // binary / attachment
   'file', 'image', 'avatar', 'video', 'audio', 'signature',
 ]);
+
+/**
+ * Why a field is not edited in place (objectstack#35684), or `null` when it
+ * is: `readonly` (declared so), `computed` (an expression, a formula, a
+ * summary, an auto number) or `notInline` (a file, or a type the fields
+ * package keeps out of a cell). The reasons {@link isFieldInlineEditable}
+ * answers `false` for, told apart so a cell can say which.
+ */
+export function fieldInlineReadOnlyKind(
+  fieldDef: { type?: unknown; readonly?: unknown } | null | undefined,
+): 'readonly' | 'computed' | 'notInline' | null {
+  if (!fieldDef) return null;
+  if (fieldDef.readonly === true) return 'readonly';
+  if (isExpressionComputedField(fieldDef)) return 'computed';
+  if (typeof fieldDef.type !== 'string') return null;
+  if (COMPUTED_FIELD_TYPES.has(fieldDef.type)) return 'computed';
+  return NON_EDITABLE_FIELD_TYPES.has(fieldDef.type) || isInlineExcludedFieldType(fieldDef.type) ? 'notInline' : null;
+}
 
 /**
  * Whether a field may be edited in place in the grid. False for explicitly
@@ -59,9 +78,5 @@ const NON_EDITABLE_FIELD_TYPES = new Set<string>([
 export function isFieldInlineEditable(
   fieldDef: { type?: unknown; readonly?: unknown } | null | undefined,
 ): boolean {
-  if (!fieldDef) return true;
-  if (fieldDef.readonly === true) return false;
-  if (isExpressionComputedField(fieldDef)) return false;
-  if (typeof fieldDef.type !== 'string') return true;
-  return !NON_EDITABLE_FIELD_TYPES.has(fieldDef.type) && !isInlineExcludedFieldType(fieldDef.type);
+  return fieldInlineReadOnlyKind(fieldDef) === null;
 }
