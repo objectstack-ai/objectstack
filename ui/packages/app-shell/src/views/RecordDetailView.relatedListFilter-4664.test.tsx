@@ -67,6 +67,8 @@ import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
 import { RelatedCountStore } from '@object-ui/components';
+// The list's tab face draws its rows in the object grid (objectstack#35595).
+import '@object-ui/plugin-grid';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -108,6 +110,8 @@ const PARENT = 'task_version';
 const CHILD = 'check_item';
 const RECORD_ID = 'tv-1';
 const OTHER_ID = 'tv-2';
+/** The list's tab id (objectstack#35595): `object.field`. */
+const LIST_TAB = `${CHILD}.${PARENT}`;
 
 /** The FK's declared scope — the soft-delete shape the card's provenance names. */
 const DECLARED_FILTER = { status: { $ne: 'archived' } } as const;
@@ -259,7 +263,9 @@ function renderPage(objects: any[], dataSource: any) {
     getItemsByType: () => [],
   } as any;
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}`]}>
+    // objectstack#35595 — the list is a tab of the record page; the page opens
+    // on it (`?related=`), the face that draws its rows.
+    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}?related=${LIST_TAB}`]}>
       <MetadataCtx.Provider value={metadata}>
         <RecordDetailView
           dataSource={dataSource}
@@ -276,10 +282,10 @@ function renderPage(objects: any[], dataSource: any) {
 
 /**
  * The child object is queried TWICE on this page and the two reads are the two
- * halves of this card: the ROW query (windowed, `$top` = the related panel's
- * rows, no `$count`) and the panel's COUNT probe (`$top: 1`, `$count: true`),
- * asked up front by the record page's right column (objectstack#27056,
- * objectstack#27524: the panel count is what the tab badge was).
+ * halves of this card: the ROW query (windowed, `$top` = the list's rows, no
+ * `$count`) and the tab's COUNT probe (`$top: 1`, `$count: true`), asked up
+ * front by the record page's tab row (objectstack#27056, objectstack#35595:
+ * every list is a tab, and its number is the badge).
  * Telling them apart explicitly is what keeps a half from passing because it
  * read the other one's query.
  */
@@ -303,14 +309,14 @@ async function renderAndCollect(relatedListFilter?: unknown) {
   };
 }
 
-/** The digits the related panel's header counts, or `null`. */
+/** The digits the list's tab counts, or `null` (objectstack#35595). */
 async function relatedPanelCount(): Promise<string | null> {
-  const card = await waitFor(() => {
-    const el = document.querySelector('[data-related-card]');
+  const tab = await waitFor(() => {
+    const el = document.querySelector(`[role="tab"][data-record-tab="${LIST_TAB}"]`);
     expect(el).not.toBeNull();
     return el as HTMLElement;
   });
-  return card.querySelector('[data-related-card-count]')?.textContent?.trim() ?? null;
+  return tab.querySelector('[data-record-tab-count]')?.textContent?.trim() ?? null;
 }
 
 beforeEach(() => {

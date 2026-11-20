@@ -115,7 +115,10 @@ async function mountLeadPage() {
   const objects = [LEAD, TASK];
   const findOne = vi.fn(async () => ({ id: 'L1', name: 'Ada', company: 'Acme', city: 'Paris' }));
   const dataSource = {
-    find: vi.fn(async () => ({ data: [] })),
+    // The lead has one task, so the right rail draws its card (objectstack#35596).
+    find: vi.fn(async (object: string) =>
+      object === 'task' ? { data: [{ id: 't1', subject: 'Call back' }], total: 1 } : { data: [] },
+    ),
     findOne,
     create: vi.fn(async () => ({})),
     update: vi.fn(async () => ({})),
@@ -170,11 +173,13 @@ afterEach(() => {
 });
 
 describe('objectui#12625 — the record page names its regions, header actions and section headers', () => {
-  it('the right column and its panels are named by their labels', async () => {
+  it('the right column and its cards are named by their labels; the 动态 tab by its label', async () => {
     await mountLeadPage();
     const right = screen.getByRole('complementary', { name: 'Right column' });
     expect(right).toBeInTheDocument();
-    expect(within(right).getByRole('region', { name: 'Activity' })).toBeInTheDocument();
+    // objectstack#35595 / #35596 — the stream is the Activity tab; the rail's
+    // cards are regions named by their titles.
+    expect(screen.getByRole('tab', { name: /^Activity/ })).toBeInTheDocument();
     expect(await within(right).findByRole('region', { name: 'Task' })).toBeInTheDocument();
   });
 

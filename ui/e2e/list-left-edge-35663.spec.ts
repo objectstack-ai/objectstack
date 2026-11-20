@@ -49,6 +49,15 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * the switcher's and footer's contents are short literals. Fonts are
  * Chromium's fallbacks: the assertions are edges and widths of boxes, not of
  * glyphs.
+ *
+ * ## The chart view's view bar (objectstack#35729)
+ *
+ * A chart view draws its own copy of the view bar (`chartPage` in
+ * `objectViewListRenderer.tsx`), which kept `sm:px-4` after #35663 and so put
+ * the view icon at 22. Its class is read out of that file at run time and a
+ * second bar with that class, holding the same switcher, sits under the list's
+ * view bar: at 1280 its icon starts on the list's 16 and its right padding is
+ * the list bar's; at 375 it is no closer than 12 to the left edge.
  */
 
 const REPO_ROOT = uiRoot();
@@ -76,6 +85,11 @@ const SWITCHER_CLASS = pick(
   /data-testid="list-view-switcher"[\s\S]*?className=\{cn\(\s*(?:\/\/[^\n]*\n\s*)*'([^']+)'/,
   'the switcher trigger class',
 );
+const CHART_BAR_CLASS = pick(
+  'packages/app-shell/src/views/objectViewListRenderer.tsx',
+  /const chartPage = [\s\S]*?hasPhoneTitle && \(\s*<div className="([^"]+)"/,
+  'the chart view bar class',
+);
 const FOOTER_CLASS = pick(
   'packages/plugin-list/src/ListView.tsx',
   /className="([^"]+)"\s*data-testid="record-count-bar"/,
@@ -100,6 +114,7 @@ interface Case {
   sidebar: number;
   columns: string[];
   switcherClass: string;
+  chartBarClass: string;
   footerClass: string;
 }
 
@@ -178,6 +193,8 @@ createRoot(document.getElementById('root')).render(
                   h('button', { id: 'switcher', className: c.switcherClass }, box16('view-icon'), h('span', { className: 'truncate' }, 'All contacts')))),
               h('div', { id: 'cluster', className: Row.TOOLBAR_CLUSTER },
                 ...['Filter', 'Sort', 'Options'].map((l) => h('button', { key: l, className: 'bar-button inline-flex items-center ' + Row.TOOLBAR_TEXT_TRIGGER }, l)))),
+            h('div', { id: 'chartbar', className: c.chartBarClass },
+              h('button', { id: 'chart-switcher', className: c.switcherClass }, box16('chart-view-icon'), h('span', { className: 'truncate' }, 'Pipeline chart'))),
             h('div', { className: 'flex min-h-0 flex-1 flex-col' },
               h(ObjectGrid, {
                 dataSource,
@@ -277,12 +294,12 @@ async function styleUntilStable(page: Page, compiled: Set<string>): Promise<void
 }
 
 /** Mount the case, style it, and wait until the table's geometry holds still. */
-async function mount(page: Page, c: Omit<Case, 'switcherClass' | 'footerClass'>): Promise<void> {
+async function mount(page: Page, c: Omit<Case, 'switcherClass' | 'chartBarClass' | 'footerClass'>): Promise<void> {
   await page.setViewportSize({ width: c.viewport, height: 800 });
   await page.setContent('<!doctype html><html><head><style>html,body{margin:0}</style></head><body><div id="root"></div></body></html>');
   await page.evaluate((value) => {
     (window as unknown as { __case: Case }).__case = value;
-  }, { ...c, switcherClass: SWITCHER_CLASS, footerClass: FOOTER_CLASS });
+  }, { ...c, switcherClass: SWITCHER_CLASS, chartBarClass: CHART_BAR_CLASS, footerClass: FOOTER_CLASS });
   await page.addScriptTag({ content: bundle, type: 'module' });
   // Below 768 the grid draws cards, not a table.
   await page.locator('tbody [role="checkbox"], [data-testid="grid-mobile-card"]').first().waitFor({ state: 'attached', timeout: 30_000 });
@@ -309,6 +326,8 @@ interface Reading {
   left: {
     pageIcon: number;
     viewIcon: number;
+    /** The chart view's view bar (objectstack#35729). */
+    chartViewIcon: number;
     headerCheckbox: number;
     rowCheckboxes: number[];
     footerText: number;
@@ -317,6 +336,8 @@ interface Reading {
   };
   /** Right edges, from the main area's right (distance in): the page bar's button box, the view bar's last label. */
   right: { pageAction: number; viewCluster: number; footer: number; scrollBox: number };
+  /** The right padding of the list's view bar and of the chart view's (objectstack#35729). */
+  barPaddingRight: { list: number; chart: number };
   /** The selection column's header cell: width and drawn left, from the main area. */
   selection: { width: number; left: number };
   rowNumbers: number;
@@ -363,6 +384,7 @@ async function readEdges(page: Page): Promise<Reading> {
       left: {
         pageIcon: x(document.getElementById('page-icon')),
         viewIcon: x(document.getElementById('view-icon')),
+        chartViewIcon: x(document.getElementById('chart-view-icon')),
         headerCheckbox: x(document.querySelector('thead [role="checkbox"]')),
         rowCheckboxes: rowBoxes.map((b) => x(b)),
         footerText: x(document.getElementById('footer-text')),
@@ -375,6 +397,10 @@ async function readEdges(page: Page): Promise<Reading> {
         viewCluster: Math.round((main.right - textOf([...document.querySelectorAll('.bar-button')].pop()!).right) * 10) / 10,
         footer: Math.round((main.right - r(document.getElementById('footer-text')!.parentElement).right) * 10) / 10,
         scrollBox: inRight(box),
+      },
+      barPaddingRight: {
+        list: parseFloat(getComputedStyle(document.getElementById('viewbar')!).paddingRight),
+        chart: parseFloat(getComputedStyle(document.getElementById('chartbar')!).paddingRight),
       },
       selection: { width: Math.round(r(lead).width * 10) / 10, left: x(lead) },
       rowNumbers: document.querySelectorAll('[data-slot="row-number"]').length,
@@ -428,6 +454,7 @@ function expectOnEdge(r: Reading, edge: number, slack = 1): void {
   const named: Array<[string, number]> = [
     ['page-bar icon', r.left.pageIcon],
     ['view-bar icon', r.left.viewIcon],
+    ['chart view-bar icon', r.left.chartViewIcon],
     ['select-all box', r.left.headerCheckbox],
     ...r.left.rowCheckboxes.map((v, i): [string, number] => [`row ${i + 1} checkbox`, v]),
     ['footer count', r.left.footerText],
@@ -462,6 +489,10 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       // on one line, 16 in, as the footer's padding does.
       expect(Math.abs(r.right.pageAction - r.right.viewCluster), `page action ${r.right.pageAction} vs view cluster ${r.right.viewCluster}`).toBeLessThanOrEqual(1);
       expect(Math.abs(r.right.pageAction - EDGE)).toBeLessThanOrEqual(1);
+      // The chart view's view bar is the list's (objectstack#35729): its icon
+      // is on the list's view icon (also in `expectOnEdge`), its right end the list bar's.
+      expect(Math.abs(r.left.chartViewIcon - r.left.viewIcon), `chart view icon ${r.left.chartViewIcon} vs list view icon ${r.left.viewIcon}`).toBeLessThanOrEqual(1);
+      expect(r.barPaddingRight.chart, 'the chart view bar ends where the list view bar does').toBe(r.barPaddingRight.list);
     });
   }
 
@@ -494,13 +525,16 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       return {
         pageIcon: x(document.getElementById('page-icon')),
         viewIcon: x(document.getElementById('view-icon')),
+        chartViewIcon: x(document.getElementById('chart-view-icon')),
         cardContent: cards.map((c) => x(c.firstElementChild)),
         footerText: x(document.getElementById('footer-text')),
       };
     });
     report(testInfo, 'phone', r);
     expect(r.cardContent.length).toBe(12);
-    for (const at of [r.pageIcon, r.viewIcon, ...r.cardContent, r.footerText]) {
+    // Below `sm` the chart view's view bar keeps the list bar's `px-2` (objectstack#35729).
+    expect(Math.abs(r.chartViewIcon - r.viewIcon), `chart view icon ${r.chartViewIcon} vs list view icon ${r.viewIcon}`).toBeLessThanOrEqual(1);
+    for (const at of [r.pageIcon, r.viewIcon, r.chartViewIcon, ...r.cardContent, r.footerText]) {
       expect(at).toBeGreaterThanOrEqual(12);
     }
   });

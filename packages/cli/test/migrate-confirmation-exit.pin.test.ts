@@ -310,6 +310,7 @@ const ROSTER: Record<string, Member> = {
   'security-catalog-overlays': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'stored-expressions': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'summary-nulls': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  'unit-codes': { argv: ['--apply', '--object', 'material', '--field', 'uom'], confirm: '--yes', writes: BOOT },
   'value-shapes': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
 };
 

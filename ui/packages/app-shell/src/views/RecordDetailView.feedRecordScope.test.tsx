@@ -216,7 +216,8 @@ function makeMetadata(pages: any[]) {
  */
 function tree(dataSource: any, recordId: string, pages: any[] = []) {
   return (
-    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${recordId}?tab=timeline`]}>
+    // objectstack#35595 — the whole stream, composer included, is the 动态 tab's face; the 概览 rail shows a read-only peek.
+    <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${recordId}?related=timeline`]}>
       <MetadataCtx.Provider value={makeMetadata(pages)}>
         <RecordDetailView
           dataSource={dataSource}

@@ -194,6 +194,7 @@ export {
   validateReadonlyFlowWrites,
   FLOW_UPDATE_READONLY_FIELD,
   FLOW_UPDATE_READONLY_WHEN_FIELD,
+  FLOW_UPDATE_SUMMARY_FIELD,
 } from './validate-readonly-flow-writes.js';
 export type {
   ReadonlyFlowWriteFinding,

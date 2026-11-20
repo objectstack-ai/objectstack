@@ -166,3 +166,69 @@ describe('ApprovalDecisionPanel — the step line draws the served route (object
     expect(line.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
+
+describe('ApprovalDecisionPanel — a decided request draws its own step and its decision (objectstack#35730)', () => {
+  const EN = (builtInLocales as unknown as { en: { approvalsInbox: Record<string, string> } }).en.approvalsInbox;
+  /** A decided first step, or a decided one-step flow: the route is the request's own step alone. */
+  const decided = (status: string, steps: Route['steps'] = [{ id: 'finance_only', label: FINANCE, state: 'current' }]) =>
+    requestRow({
+      status,
+      flow_route: { steps: steps.map((s, i) => (i === steps.length - 1 && status === 'approved' ? { ...s, state: 'done' } : s)), ahead: 'decided' },
+    });
+
+  it.each([
+    ['approved', EN.statusApproved],
+    ['rejected', EN.statusRejected],
+    ['returned', EN.statusReturned],
+    ['recalled', EN.statusRecalled],
+    ['cancelled', EN.statusCancelled],
+  ])('a single-step request decided %s draws its one step, marked with the decision', (status, word) => {
+    const card = within(mount(decided(status))).getByTestId('approval-decision-progress');
+    const rows = within(within(card).getByLabelText(STEP_LINE_NAME)).getAllByRole('listitem');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveAttribute('data-decision', status);
+    expect(rows[0]).toHaveTextContent(FINANCE);
+    expect(word).toBeTruthy();
+    expect(within(rows[0]).getByText(word)).toBeTruthy();
+    // Decided, so never drawn as the step in progress: no amber marker, no number.
+    expect(rows[0].innerHTML).not.toContain('bg-amber-500');
+    expect(rows[0]).not.toHaveTextContent('1');
+  });
+
+  it('a request rejected at its second step draws the passed step done and its own step rejected', () => {
+    const panel = mount(decided('rejected', [
+      { id: 'manager_review', label: MANAGER, state: 'done' },
+      { id: 'finance_only', label: FINANCE, state: 'current' },
+    ]));
+    const rows = within(within(panel).getByLabelText(STEP_LINE_NAME)).getAllByRole('listitem');
+    expect(rows.map((r) => r.getAttribute('data-decision'))).toEqual([null, 'rejected']);
+    expect(within(rows[1]).getByText(FINANCE).className).not.toContain('font-medium');
+  });
+
+  it('a decision word wraps with the column: no width pinning at phone width', () => {
+    const panel = mount(decided('returned'));
+    const word = within(panel).getByText(EN.statusReturned);
+    expect(word.className.split(/\s+/)).not.toContain('shrink-0');
+    expect(word.className.split(/\s+/)).not.toContain('whitespace-nowrap');
+    expect(word.className.split(/\s+/)).toContain('break-words');
+  });
+
+  it('a pending request with one step still draws no line', () => {
+    const panel = mount(requestRow({
+      decision_progress: { behavior: 'quorum', got: 0, need: 2 },
+      flow_route: { steps: [{ id: 'finance_only', label: FINANCE, state: 'current' }], ahead: 'end' },
+    }));
+    expect(within(panel).getByTestId('approval-decision-progress')).toBeTruthy();
+    expect(within(panel).queryByLabelText(STEP_LINE_NAME)).toBeNull();
+  });
+
+  it('a progress card with nothing to show is not drawn', () => {
+    const pendingAlone = mount(requestRow({
+      flow_route: { steps: [{ id: 'finance_only', label: FINANCE, state: 'current' }], ahead: 'end' },
+    }));
+    expect(within(pendingAlone).queryByTestId('approval-decision-progress')).toBeNull();
+    cleanup();
+    const decidedNoRoute = mount(requestRow({ status: 'rejected', flow_route: undefined }));
+    expect(within(decidedNoRoute).queryByTestId('approval-decision-progress')).toBeNull();
+  });
+});

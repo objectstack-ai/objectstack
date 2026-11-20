@@ -19,7 +19,7 @@ import { ApiBillingRefusedError } from '../../src/runner/driver.js';
 import type { TurnProcessRun } from '../../src/runner/drivers/process.js';
 import { ARM_TOOLS, armArgs, prepareArmWorkdir } from '../../src/skill-evals/arms.js';
 import { hashCase, loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from '../../src/skill-evals/cases.js';
-import { main, parseSkillEvalArgs, regradeRound, ROUND_RECORD_SCHEMA } from '../../src/skill-evals/cli.js';
+import { main, parseSkillEvalArgs, regradeRound, ROUND_RECORD_SCHEMA, turnsLine } from '../../src/skill-evals/cli.js';
 import { gradeAnswer } from '../../src/skill-evals/grade.js';
 import { executeRound, judgeTurn, planRound, preflight, rateLimitStop, regradeRecord, regradeRecords, type SkillEvalRunRecord } from '../../src/skill-evals/run.js';
 import { runSelfTest, SELF_TEST_BATTERIES, SELF_TEST_BATTERY_FLOOR, selfTestReached } from '../../src/skill-evals/self-test.js';
@@ -534,6 +534,35 @@ describe('trigger cases: graded on whether the with-skill turn loaded the bundle
     const round = JSON.parse(readFileSync(join(dir, 'round.json'), 'utf8')) as { regraded: { added: string[] }; summary: { triggers: { cases: Array<{ key: string; tally: { pass: number; fail: number } }> } } };
     expect(round.regraded.added).toEqual([]);
     expect(round.summary.triggers.cases.map((t) => [t.key, t.tally.pass, t.tally.fail])).toEqual([['beta-skill/triggers#1', 0, 1], ['beta-skill/triggers#2', 1, 0]]);
+  }, REGRADE_COMMAND_TEST_TIMEOUT_MS);
+
+  it('--triggers-only: the trigger cases alone, on the with-skill arm; summarised and regraded as the trigger table, its behaviour cases never `added`', async () => {
+    const root = writeCatalog();
+    writeFileSync(join(root, 'beta-skill', 'evals', 'triggers.json'), JSON.stringify({ evals: [{ id: 1, prompt: 'load me', should_trigger: true }, { id: 2, prompt: 'leave me', should_trigger: false }] }));
+    const cat = loadSkillEvalCatalog(root);
+    const cases = selectBundles(cat, undefined, true);
+    expect(cases.map((c) => c.key)).toEqual(['beta-skill/triggers#1', 'beta-skill/triggers#2']);
+    expect(() => selectBundles(cat, ['alpha-skill'], true)).toThrow(/`alpha-skill`, a bundle with no trigger case/);
+    expect(turnsLine(0, cases.length, 1)).toBe('2 trigger case(s) × the with-skill arm, × 1');
+    const dir = mkdtempSync(join(scratch, 'round-'));
+    const exec = await executeRound(planRound(cases, 1), {
+      bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: dir, maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
+      runTurn: async () => exited(stream({ skills: ['beta-skill'], answer: 'x' })),
+    });
+    expect(exec.records.map((r) => r.arm)).toEqual(['with-skill', 'with-skill']);
+    const summary = summariseRound(cases, exec.records, []);
+    const md = renderSummaryMarkdown(summary, { title: 'T', lines: [] });
+    expect([md.includes('## Per bundle'), md.includes('## Per case'), md.includes('## Trigger cases')]).toEqual([false, false, true]);
+    writeFileSync(join(dir, 'round.json'), JSON.stringify({ schema: ROUND_RECORD_SCHEMA, round: 'r', runner: { repo: 'x', sha: 'y' }, startedAt: 't', finishedAt: 't', wallMs: 1, skills: { source: 'workspace skills/', bundles: ['beta-skill'], allBundles: false }, driver: { driver: 'claude-code-cli', version: 'v', authMethod: 'oauth_token', apiBilled: false, servedModels: [], maxTurns: 5, caseTimeoutMs: 1, concurrency: 1, maxUtilization: 0.9 }, scope: { cases: 2, arms: ['with-skill'], repeats: 1, plannedTurns: 2, ranTurns: 2, notRunTurns: 0, triggersOnly: true }, summary }));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(regradeRound(dir, cat, 'workspace skills/')).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const round = JSON.parse(readFileSync(join(dir, 'round.json'), 'utf8')) as { regraded: { added: string[] }; summary: { cases: unknown[]; triggers: { cases: unknown[] } } };
+    expect([round.regraded.added, round.summary.cases.length, round.summary.triggers.cases.length]).toEqual([[], 0, 2]);
+    expect(readFileSync(join(dir, 'summary.md'), 'utf8')).toMatch(/^# Skill evals · beta-skill × trigger cases × the with-skill arm × 1 rep\n[\s\S]*## Trigger cases/);
   }, REGRADE_COMMAND_TEST_TIMEOUT_MS);
 });
 

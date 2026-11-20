@@ -37,6 +37,9 @@ const FIELDS: Readonly<Record<string, FormulaSourceField>> = {
   rollup: { type: 'summary' },
   weighted: { type: 'formula', returnType: 'currency', currencyConfig: USD },
   count_formula: { type: 'formula', returnType: 'number' },
+  account: { type: 'lookup' },
+  // A formula that declares no `returnType`: its unit cannot be read.
+  subtotal: { type: 'formula' },
   broken: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'US' } },
   // `fixed` with no code: the spec refuses it rather than filling in CNY (#27157).
   fixed_no_code: { type: 'currency', currencyConfig: { currencyMode: 'fixed' } },
@@ -113,32 +116,16 @@ describe('CONTROL — a numeric formula stays `number`', () => {
     expect(inferFormulaReturn('record.count_formula + 1', FIELDS)).toEqual({ returnType: 'number' });
   });
 
-  it('nothing it cannot prove is money: each answer is exactly the plain inference', () => {
+  it('nothing it cannot prove is money: a numeric expression over declared non-money units, or one that is not numeric, gets exactly the plain inference', () => {
     for (const source of [
       'record.quantity * 2',
-      // Two amounts multiplied, or a quantity divided by one, is not an amount.
-      'record.amount * record.tax',
-      'record.quantity / record.amount',
-      // A ratio of two amounts is a plain number.
+      // A ratio of two amounts in one currency is proven a plain number, and
+      // cel-js types it `dyn`: the plain inference answers `{}`.
       'record.amount / record.tax',
-      // An amount plus a quantity adds two units.
-      'record.amount + record.quantity',
-      // Two currencies — fixed USD with fixed EUR, fixed USD with dynamic — are not one amount.
-      'record.amount + record.fee_eur',
-      'record.amount + record.budget',
-      'record.flag ? record.amount : record.fee_eur',
-      // A source whose currency does not parse names no currency.
-      'record.broken * 2',
-      // Nor does a fixed source with no code: it is never read as CNY (#27157).
-      'record.fixed_no_code * 2',
-      // A roll-up's unit is its child field's, not readable here.
-      'record.rollup * 2',
-      'record.amount % 3',
       'record.amount > 100',
       'upper(record.name)',
       'today()',
       'record.amount + record.name',
-      'record.unknown_field * 2',
       'size(record.name)',
     ]) {
       expect(inferFormulaReturn(source, FIELDS), source).toEqual(plainStamp(source));
@@ -146,10 +133,20 @@ describe('CONTROL — a numeric formula stays `number`', () => {
     }
   });
 
-  it('without the host\'s fields it never claims money — the plain inference, unchanged', () => {
-    expect(inferFormulaReturn('record.amount * 0.1')).toEqual({ returnType: 'number' });
-    expect(inferFormulaReturn('record.amount * 0.1').returnType).toBe(inferExpressionType('record.amount * 0.1'));
+  it('CONTROL — a `count` roll-up is a plain number: no amount is read', () => {
+    const withCount = { ...FIELDS, line_count: { type: 'summary', summaryOperations: { object: 'line', function: 'count' } } };
+    expect(inferFormulaReturn('record.line_count * 2', withCount)).toEqual({ returnType: 'number' });
+  });
+  it('without the host\'s fields it never claims money, nor proves a plain number: no read has a declared unit', () => {
+    // #35631 — every read names a field the (empty) map does not declare, so
+    // the numeric path is unproven; the CEL type alone would say `number`.
+    expect(inferExpressionType('record.amount * 0.1')).toBe('number');
+    expect(inferFormulaReturn('record.amount * 0.1')).toEqual({});
     expect(inferFormulaReturn('record.budget - record.spent')).toEqual({});
+    // A constant needs no field: the unit proof succeeds.
+    expect(inferFormulaReturn('2 * 3')).toEqual({ returnType: 'number' });
+    // A non-numeric result is not on the numeric path.
+    expect(inferFormulaReturn('record.amount > 100')).toEqual({ returnType: 'boolean' });
   });
 
   it('an empty, missing or non-string source declares nothing', () => {
@@ -167,6 +164,61 @@ describe('CONTROL — a numeric formula stays `number`', () => {
 
   it('an expression that does not type-check is never money', () => {
     expect(inferFormulaReturn('record.amount *', FIELDS)).toEqual({});
+  });
+});
+
+describe('#35631 — an amount the proof cannot follow is unproven, never `number`', () => {
+  // A `number` answer is read by a stamp as "proved not money", so it may
+  // withdraw a declared `currency`; each shape below reads an amount (or a
+  // roll-up that may sum one) and fails the proof, so it answers `{}`.
+  const UNPROVEN_OVER_MONEY = [
+    // Shapes that answered `number` before #35631 — each pinned as `{}` now.
+    'record.amount * 1.0 + record.fee_eur * 1.0', // two currencies meeting
+    '100 / record.amount', // anything divided by an amount
+    'record.rollup * 0.9', // a roll-up operand
+    'record.amount % 3', // a remainder of an amount
+    'record.broken * 2', // a source whose currency does not parse
+    'record.fixed_no_code * 2', // a fixed source with no code (#27157)
+    'double(record.amount) * double(record.tax)', // an amount times an amount
+    // Shapes that already answered `{}` (the CEL type is `dyn`): unchanged.
+    'record.amount * record.tax',
+    'record.quantity / record.amount',
+    'record.amount + record.quantity',
+    'record.amount + record.fee_eur',
+    'record.amount + record.budget',
+    'record.flag ? record.amount : record.fee_eur',
+    'max(record.amount, record.quantity)',
+    'sqrt(record.amount)', // a function the proof does not name
+    'record.weighted * record.weighted',
+    // Reads whose unit cannot be read — each answered `number` before.
+    'record.account.balance * 0.9', // a hop through a reference
+    'record.subtotal * 0.2', // a formula that declares no returnType
+    "record['amount'] * 0.1", // the indexed spelling of an amount
+    'record.?amount * 0.1', // the optional spelling
+    "record[?'amount'] * 0.1", // the optional indexed spelling
+    'record.unknown_field * 2', // a name the map does not declare
+    // One shape per leg of the unit check.
+    '100 / record.weighted', // a formula declared `currency`
+    '100 / amount', // a bare identifier naming an amount
+  ];
+
+  it('each answers `{}`', () => {
+    for (const source of UNPROVEN_OVER_MONEY) {
+      expect(inferFormulaReturn(source, FIELDS), source).toEqual({});
+    }
+  });
+
+  it('CONTROL — proven money still stamps `currency` with its config, and quantities still stamp `number`', () => {
+    expect(inferFormulaReturn('record.amount * 0.1', FIELDS))
+      .toEqual({ returnType: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } });
+    expect(inferFormulaReturn('record.quantity * 2', FIELDS)).toEqual({ returnType: 'number' });
+  });
+
+  it('CONTROL — every spelling of a quantity read, and a formula declared `number`, still answers `number`', () => {
+    for (const source of ["record['quantity'] * 2", 'record.count_formula * 2', 'quantity * 2', 'record.probability * 2']) {
+      expect(inferFormulaReturn(source, FIELDS), source).toEqual(plainStamp(source));
+    }
+    expect(inferFormulaReturn("record['quantity'] * 2", FIELDS)).toEqual({ returnType: 'number' });
   });
 });
 

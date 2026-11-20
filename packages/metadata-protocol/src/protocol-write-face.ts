@@ -190,6 +190,10 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
         }
     }
 
+    const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
+    const prevUnitCodeFields = unitCodeFieldsOf(prevFields);
+    const declaredUnitCodeFields = newlyDeclaredUnitCodeFieldsOf(prevFields, nextFields, prevUnitCodeFields, isStored);
+
     // Field type changes — narrowing or incompatible conversions.
     const TYPE_COMPATIBILITY: Record<string, Set<string>> = {
         text: new Set(['textarea', 'markdown', 'html', 'code']),
@@ -236,7 +240,6 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
         // table holds any is not this gate's to judge, and a finding over an
         // empty table costs one `force`. Judged by what the STORED side holds,
         // so a previously unstored field (a formula) raises nothing.
-        const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
         if (
             nextField?.type === 'currency'
             && nextField.currencyConfig?.currencyMode === 'record'
@@ -304,8 +307,150 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
             }
             issues.push({ code: 'currency_field_repointed', field: fname, message });
         }
+        // [ADR-0158 Open item 9 point 7] A stored quantity switched to
+        // `unitMode: 'record'`: every stored row is now read in the unit its
+        // `unitField` holds, and a quantity edited beside a blank there is
+        // refused until the row holds a unit code — the twin of
+        // `currency_mode_to_record`, raised whatever the code field's history
+        // (already a unit code field, new in this save, or unstored before it).
+        // ONE rule keeps each debt reported once: when this save also raises
+        // `unit_code_field_declared` on that same `unitField` (a stored text
+        // field it newly makes a code field, below), that finding names this
+        // quantity among its declarers, the blanks beside it and the `""`
+        // entry, so this one is not raised. Lifted by the same `force`,
+        // reading no row.
+        const unitField = recordUnitFieldOf(nextField);
+        if (
+            isStored(prevField)
+            && unitField !== undefined
+            && unitModeOf(prevField) !== 'record'
+            && !declaredUnitCodeFields.has(unitField)
+        ) {
+            const unitText = prevUnitCodeFields.has(unitField)
+                ? `every row already stored is read in the unit '${unitField}' holds, a unit code field already, and a quantity `
+                    + `edited beside a blank '${unitField}' is refused until the row holds a unit code`
+                : `'${unitField}' held no stored unit before this save (it is new, or was not stored), so every row already `
+                    + `stored holds its quantity beside a blank '${unitField}', and editing the quantity there is refused until `
+                    + 'the row holds a unit code';
+            issues.push({
+                code: 'unit_mode_to_record',
+                field: fname,
+                message: `Field '${fname}' switched to unitMode 'record' — ${unitText}; once saved, write those blanks from a "" `
+                    + 'entry in the mapping of ' + unitCodeBackfillRemedy(objectName, unitField),
+            });
+        }
+    }
+
+    // [ADR-0158 Open item 9 point 7] A stored field this save makes a unit code
+    // field, keyed on the CODE field as the write check is (U5 judges every
+    // field `unitCodeSources` names, in `@objectstack/objectql`): whichever
+    // declaration made it one — a quantity, new or stored, whose `unitField`
+    // names it, a `unitField` re-pointed at it, or its own `unitMode: 'code'`
+    // marker (Open item 8). Its stored text predates the declaration, and from
+    // this save on every write of it must hold a unit code. A field that was a
+    // unit code field before the save raises nothing, however it is declared
+    // now, since nothing changes for its rows; a brand-new or unstored field
+    // holds no text (a stored quantity switched to `record` over one raises
+    // `unit_mode_to_record` above instead). Where a quantity names the field,
+    // the message also names the blanks beside it and the `""` entry, which is
+    // why `unit_mode_to_record` stands aside for this field. The sibling of
+    // `currency_mode_to_record`, on the same face, lifted by the same `force`,
+    // reading no row.
+    for (const [codeField, declared] of declaredUnitCodeFields) {
+        const how = [
+            ...(declared.quantities.length > 0
+                ? [`the unitField of ${declared.quantities.map((q) => `'${q}'`).join(', ')}`]
+                : []),
+            ...(declared.marked ? ["its own unitMode 'code'"] : []),
+        ].join(' and ');
+        issues.push({
+            code: 'unit_code_field_declared',
+            field: codeField,
+            message: `Field '${codeField}' is now a unit code field (${how}) — rows already stored keep the text they were written `
+                + 'with, which is no unit code until converted, and every later write of the field must hold a unit code'
+                + (declared.quantities.length > 0
+                    ? '; a quantity edited beside a value there that is free text or blank is refused until the row holds one; '
+                        + 'once saved, convert the stored text, and write the blanks beside a quantity from a "" entry in the mapping, with '
+                    : '; once saved, convert the stored text with ')
+                + unitCodeBackfillRemedy(objectName, codeField),
+        });
     }
     return issues;
+}
+
+/** A field's `unitConfig.unitMode`, as written. */
+function unitModeOf(field: any): unknown {
+    return field?.unitConfig?.unitMode;
+}
+
+/** A `record`-mode quantity's `unitField` pointer, exactly as written; else undefined. */
+function recordUnitFieldOf(field: any): string | undefined {
+    const config = field?.unitConfig;
+    return field?.type === 'number' && config?.unitMode === 'record' && typeof config.unitField === 'string' && config.unitField !== ''
+        ? config.unitField
+        : undefined;
+}
+
+/**
+ * [ADR-0158 U4] The unit code fields a field map declares, each with what
+ * declares it: the `record`-mode quantities whose `unitField` names it, and
+ * whether it carries its own `unitMode: 'code'` marker (Open item 8). The same
+ * reading as `@objectstack/objectql`'s `unitCodeSources`, which the write check
+ * judges by; kept here because this package sits below the engine, as
+ * `recordCurrencyPointerOf` mirrors `recordCurrencyFieldOf`.
+ */
+function unitCodeFieldsOf(fields: Record<string, any>): Map<string, { quantities: string[]; marked: boolean }> {
+    const out = new Map<string, { quantities: string[]; marked: boolean }>();
+    const entry = (name: string) => {
+        let hit = out.get(name);
+        if (!hit) out.set(name, (hit = { quantities: [], marked: false }));
+        return hit;
+    };
+    for (const [name, field] of Object.entries(fields)) {
+        if (field === null || typeof field !== 'object') continue;
+        const pointer = recordUnitFieldOf(field);
+        if (pointer !== undefined) entry(pointer).quantities.push(name);
+        else if (field.type === 'text' && unitModeOf(field) === 'code') entry(name).marked = true;
+    }
+    return out;
+}
+
+/**
+ * [ADR-0158 Open item 9 point 7] The stored fields a save newly makes unit code
+ * fields, each with what declares it: a code field after the save that was
+ * none before, is stored on the previous definition, and is still declared.
+ * One predicate, read by both unit findings, so `unit_code_field_declared` and
+ * the `unit_mode_to_record` it stands in for cannot disagree on a field.
+ */
+function newlyDeclaredUnitCodeFieldsOf(
+    prevFields: Record<string, any>,
+    nextFields: Record<string, any>,
+    prevUnitCodeFields: Map<string, { quantities: string[]; marked: boolean }>,
+    isStored: (field: any) => boolean,
+): Map<string, { quantities: string[]; marked: boolean }> {
+    const out = new Map<string, { quantities: string[]; marked: boolean }>();
+    for (const [codeField, declared] of unitCodeFieldsOf(nextFields)) {
+        if (prevUnitCodeFields.has(codeField)) continue;
+        const prevField = prevFields[codeField];
+        if (!prevField || !isStored(prevField) || !(codeField in nextFields)) continue;
+        out.set(codeField, declared);
+    }
+    return out;
+}
+
+/**
+ * [ADR-0158 Open item 9 point 7] The run that converts a unit code field's
+ * stored free text into codes: the CLI command, then the tenant-admin REST
+ * door beside it, as `recordCurrencyCodeBackfillRemedy` names the currency
+ * one. The engine's refusal of a resting value names the same run
+ * (`@objectstack/objectql`, `unitCodeBackfillRemedy`).
+ */
+function unitCodeBackfillRemedy(objectName: string, fieldName: string): string {
+    return `\`os migrate unit-codes --object ${objectName} --field ${fieldName} --map-file <mapping file>\``
+        + ' (a dry run listing each stored value with its row count; add --apply to write), or, with no shell, as an '
+        + `organization admin with \`POST /api/v1/meta/_migrate-unit-codes\` and the body \`{ "object": "${objectName}", "field": `
+        + `"${fieldName}", "mapping": { "<stored text>": "<unit code>" } }\``
+        + ' (a preview of your current organization\'s rows; add "apply": true to write).';
 }
 
 /**

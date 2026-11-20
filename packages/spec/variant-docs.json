@@ -54,6 +54,12 @@
       ]
     },
     {
+      "key": "unitMode:code|fixed|record",
+      "label": "field unit of measure (unitConfig)",
+      "exempt": "generated-reference-only",
+      "reason": "Tenant-authored (ADR-0158 U4: `fixed` and `record` on a number, the `code` marker on a text, Open item 8), so this is the weaker class and the gap is stated plainly: when this entry was added no hand-written page named `unitConfig` (measured: the only hits under content/docs were the generated references/data/field.mdx, references/data/object.mdx and references/system/migration.mdx). The generated content/docs/references/data/field.mdx is the reference until the authoring guide is written; that teaching is the skills-docs follow-up the #35489 PR names, and when content/docs/data-modeling/fields.mdx teaches all three modes this entry becomes governed."
+    },
+    {
       "key": "type:conditional|cross_field|format|json_schema|script|state_machine",
       "label": "validation rule",
       "docs": [

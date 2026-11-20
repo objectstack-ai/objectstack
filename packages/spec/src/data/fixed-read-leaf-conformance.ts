@@ -58,10 +58,11 @@
  * {@link FixedReadLeafCaseSet.seam} holds, as data, what ADR-0155 D1 and D4
  * say the engine's executor seam admits and refuses: the leaf's position, its
  * verbs and its recipient. Nothing in this package runs them against an
- * engine; the seam's card (ADR-0155 plan step 2) does. One question D1 leaves
- * to that card is deliberately not a case: whether the write form may appear
- * on a read verb, as it does in the prior-row read a predicate update makes
- * with its own `where` (`packages/objectql/src/engine-update.ts`).
+ * engine; `@objectstack/objectql` runs them against its seam
+ * (`fixed-read-leaf-seam.ts`). The write form on a read verb is refused like
+ * any misplaced leaf (ADR-0155 ③ ruled A); the prior-row read a predicate
+ * update makes with its own `where` is that update's, and the seam judges it
+ * once, as the update.
  *
  * # What belongs here
  *
@@ -75,7 +76,7 @@
  */
 
 import type { FilterCondition } from './filter.zod';
-import type { FixedReadLeafBrand } from './fixed-read-leaf';
+import type { FixedReadLeafBrand, FixedReadLeafName } from './fixed-read-leaf';
 import { ReadableIds } from './readable-ids';
 import { SHARED_RECORD_IDS_BRAND, SharedRecordIds } from './shared-record-ids';
 
@@ -157,8 +158,8 @@ export interface FixedReadLeafSeamCase extends FixedReadLeafCaseBase {
 
 /** One leaf's cases. */
 export interface FixedReadLeafCaseSet {
-  /** The leaf the set is for, by its factory's name. ADR-0147's leaf widens this. */
-  readonly leaf: 'SharedRecordIds';
+  /** The leaf the set is for, by its factory's name (`FIXED_READ_LEAF_NAMES`). */
+  readonly leaf: FixedReadLeafName;
   /** Its brand: what a door caller names, and what an evaluator recognises. */
   readonly brand: FixedReadLeafBrand;
   /** The tenant field every fixture table declares. */
@@ -440,6 +441,43 @@ const SHARED_RECORD_IDS_SEAM: readonly FixedReadLeafSeamCase[] = Object.freeze([
     note: 'ADR-0111 D3: a share widens edit, never delete, so no producer writes the leaf on delete.',
   },
   { name: 'the read form on delete', operation: 'delete', object: DOC, clause: 'where', filter: () => ({ id: { $in: read('u1') } }), context: ASKER, verdict: 'refuses' },
+  // The write form on a read verb (ADR-0155 ③ ruled A): refused like any misplaced leaf.
+  { name: 'the write form in a find\'s where', operation: 'find', object: DOC, clause: 'where', filter: () => ({ id: { $in: write('u1') } }), context: ASKER, verdict: 'refuses' },
+  { name: 'the write form in a findOne\'s where', operation: 'findOne', object: DOC, clause: 'where', filter: () => ({ id: { $in: write('u1') } }), context: ASKER, verdict: 'refuses' },
+  { name: 'the write form in a count\'s where', operation: 'count', object: DOC, clause: 'where', filter: () => ({ id: { $in: write('u1') } }), context: ASKER, verdict: 'refuses' },
+  { name: 'the write form in an aggregate\'s where', operation: 'aggregate', object: DOC, clause: 'where', filter: () => ({ id: { $in: write('u1') } }), context: ASKER, verdict: 'refuses' },
+  {
+    name: 'the write form inside a composed ReadableIds scope',
+    operation: 'find', object: NOTE, clause: 'where',
+    filter: () => ({ record_id: { $in: ReadableIds.compose(ReadableIds.of(DOC), { id: { $in: write('u1') } }) } }),
+    context: ASKER, verdict: 'refuses',
+    note: 'ADR-0155 D1: a composed scope is the where of a read of its parent, so it holds the read form only.',
+  },
+  // The leaf outside the $in comparand (ADR-0155 D1): refused at every other position.
+  { name: 'as an implicit-equality value', operation: 'find', object: DOC, clause: 'where', filter: () => ({ id: read('u1') }), context: ASKER, verdict: 'refuses' },
+  { name: 'as the comparand of $eq', operation: 'find', object: DOC, clause: 'where', filter: () => ({ id: { $eq: read('u1') } }), context: ASKER, verdict: 'refuses' },
+  {
+    name: 'as the comparand of $nin',
+    operation: 'find', object: DOC, clause: 'where',
+    filter: () => ({ id: { $nin: read('u1') } }),
+    context: ASKER, verdict: 'refuses',
+    note: 'ADR-0155 D1: the negation is $not over the $in, which needs the blank-id guard; $nin is not a position.',
+  },
+  { name: 'as a member of a $in list', operation: 'find', object: DOC, clause: 'where', filter: () => ({ id: { $in: [read('u1')] } }), context: ASKER, verdict: 'refuses' },
+  {
+    name: 'as a filter node of its own',
+    operation: 'find', object: DOC, clause: 'where',
+    filter: () => ({ $and: [{ label: 'keep' }, read('u1') as unknown as FilterCondition] }),
+    context: ASKER, verdict: 'refuses',
+    note: 'Its enumerable inputs would read as an equality filter on fields named object and recipient.',
+  },
+  {
+    name: 'inside a nested-relation condition',
+    operation: 'find', object: NOTE, clause: 'where',
+    filter: () => ({ record_id: { id: { $in: read('u1') } } } as unknown as FilterCondition),
+    context: ASKER, verdict: 'refuses',
+    note: 'ADR-0155 D1: legal in the object\'s own where or a composed scope, and a nested-relation condition is neither.',
+  },
   // Recipient (ADR-0155 D4): the context's user, its delegator, a system context; any other is refused.
   {
     name: 'the recipient is the reading context\'s delegator',

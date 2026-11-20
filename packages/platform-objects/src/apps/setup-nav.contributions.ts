@@ -139,6 +139,13 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `requiredPermissions`: the object grant decides (every member reads,
       // organization admins write), and Setup itself already needs `setup.access`.
       { id: 'nav_units_of_measure', type: 'object', label: 'Units of Measure', objectName: 'sys_unit', viewName: 'all_units', icon: 'ruler' },
+      // [ADR-0157 D1, D3] Working calendars and their holidays, beside the
+      // other organization reference data Localization governs. The exceptions
+      // get their own entry because their list page is the import door for a
+      // year of holidays; the calendar list's `needs_maintenance` view is the
+      // D8 notice. Access as Exchange Rates: the object grant decides.
+      { id: 'nav_work_calendars', type: 'object', label: 'Working Calendars', objectName: 'sys_work_calendar', viewName: 'all_calendars', icon: 'calendar-clock' },
+      { id: 'nav_work_calendar_exceptions', type: 'object', label: 'Calendar Exceptions', objectName: 'sys_work_calendar_exception', viewName: 'all_exceptions', icon: 'calendar-x' },
       { id: 'nav_settings_company', type: 'url', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
       // `nav_settings_branding` is contributed by `@objectstack/service-settings`
       // with the `branding` namespace, which is offered only where no

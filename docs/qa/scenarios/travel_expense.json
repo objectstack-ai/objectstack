@@ -873,14 +873,14 @@
     "questions": [
       {
         "id": "paid_reimbursement",
-        "ask": {"zh": "已付款的报销单一共报销了多少钱?", "en": "How much has been reimbursed on paid claims in total?"},
+        "ask": {"zh": "已付款报销单的报销金额合计是多少?", "en": "How much is the claimed amount for everything already paid?"},
         "object": "expense_claim",
         "truth": {"kind": "sum", "field": "total_amount", "filter": [{"field": "status", "op": "eq", "value": "paid"}]},
         "personas": ["employee", "dept_manager"]
       },
       {
         "id": "claims_by_status",
-        "ask": {"zh": "各个状态的报销单各有多少张?", "en": "How many claims are in each status?"},
+        "ask": {"zh": "各个状态的报销单数分别是多少?", "en": "What is the number of claims in each status?"},
         "object": "expense_claim",
         "truth": {"kind": "count", "groupBy": "status"},
         "personas": ["dept_manager"]
@@ -903,7 +903,7 @@
       },
       {
         "id": "claimed_last_month",
-        "ask": {"zh": "上个月的报销单合计金额是多少?", "en": "What do last month's claims add up to?"},
+        "ask": {"zh": "上个月的报销金额合计是多少?", "en": "What do expense claims from last month add up to?"},
         "object": "expense_claim",
         "truth": {
           "kind": "sum",

@@ -35,6 +35,10 @@
 import type { DroppedFieldsEvent, EngineUpdateOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { collectComposableReadableIds } from './filter-comparand-shape.js';
+// [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
+// resolvers' host, built once per engine, which carries every member it reads.
+import { securityResolversHost } from './engine-facet-hosts.js';
+import { atFixedReadLeafDoor, passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import { retiredSecretSlots, secretFieldsWritten } from './engine-secret-internal-fields.js';
 import type { PendingSecretRow, SecretHandleSlot } from './engine-secret-internal-fields.js';
 import { sealedSecretsNamedBy, secretKeysHoldingCallerValues, suppliedOverSealedSecrets } from './engine-update-sealed-secrets.js';
@@ -51,6 +55,7 @@ import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertUnitCodes, organizationUnitRowsOf, readOrganizationUnits, touchesUnitCodes } from './validation/unit-code-membership.js';
 import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts, settleBulkHomeAmounts } from './home-amount-projection.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { stripSearchCompanion } from './search-companion.js';
@@ -200,7 +205,7 @@ export class UpdateFacet {
      // [#5158] Lower before the by-id extraction below reads `where.id`: on an
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
-     options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
+     options = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf));
      // [ADR-0100] A predicate write is judged like a read: a non-system
      // caller's `where` evaluates no `secret` / `password` column.
      rejectCredentialEvaluation(object, 'update', options, options?.context, this.relatedSchemaOf);
@@ -519,6 +524,11 @@ export class UpdateFacet {
        // wrote — here, at the executor's entry, because the prior-row reads
        // below reach the driver before `updateMany` does.
        collectComposableReadableIds(object, 'update', opCtx.ast?.where, 'where');
+       // [ADR-0155 D4, ③ ruled A] The fixed-read leaves on the same AST, at the
+       // same point: the write form passes through in a predicate update's
+       // where, judged once, as the update, for its prior-row read and its
+       // write alike; every other leaf is refused before either runs.
+       passFixedReadLeaves(securityResolversHost.of(this.facade), object, 'update', opCtx.ast?.where, opCtx.context);
        // [#20082] The write's ONE permission resolution, shared by its option
        // gates and the formula fields on its response — asked at most once, and
        // only by the first of them that needs the map.
@@ -1646,6 +1656,18 @@ export class UpdateFacet {
                    object, currencyFields, followCodes ? followCodes(currencyImage) : currencyImage,
                    'update', currencyPayload, hookContext.input.id, updateMsgCtx, parentCodeFieldServingOf(this._registry),
                  );
+                 // [ADR-0158 U5, Open item 9] …and on the same image, each unit
+                 // code the payload writes, or rests beside a quantity it writes,
+                 // is a member of the row's organization; no written quantity
+                 // stands beside a blank code. Free unless the payload touches one.
+                 if (touchesUnitCodes(currencyFields, currencyPayload)) {
+                   const unitOrganization = ObjectQL.homeAmountOrganizationOf(currencyImage, opCtx.context);
+                   const organizationUnits = await readOrganizationUnits(
+                     currencyFields, [{ image: currencyImage, touched: currencyPayload, organizationId: unitOrganization }], 'update',
+                     organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+                   );
+                   assertUnitCodes(object, currencyFields, currencyImage, 'update', currencyPayload, hookContext.input.id, unitOrganization, organizationUnits);
+                 }
                }
                // [ADR-0144 D2, amended] …and a record a child row follows the
                // currency of keeps its code field: a change of it is refused
@@ -2065,6 +2087,24 @@ export class UpdateFacet {
                        );
                        for (const { row, image } of images) {
                            assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id, updateMsgCtx, parentCodeFieldServingOf(this._registry));
+                       }
+                   }
+                   // [ADR-0158 U5, Open item 9] The predicate-path twin of the unit
+                   // check: every matched row with the payload over it, one
+                   // organization-unit read per organization for the whole set.
+                   if (touchesUnitCodes(currencyFields, currencyPayload)) {
+                       const unitImages = ((await readPriorRows()) ?? [])
+                         .filter((row) => row != null && typeof row === 'object')
+                         .map((row) => {
+                           const image = { ...row, ...currencyPayload };
+                           return { row, image, touched: currencyPayload, organizationId: ObjectQL.homeAmountOrganizationOf(image, opCtx.context) };
+                         });
+                       const organizationUnits = await readOrganizationUnits(
+                         currencyFields, unitImages, 'update',
+                         organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+                       );
+                       for (const { row, image, organizationId } of unitImages) {
+                           assertUnitCodes(object, currencyFields, image, 'update', currencyPayload, row?.id, organizationId, organizationUnits);
                        }
                    }
                    // [ADR-0144 D2, amended] The predicate-path twin of the

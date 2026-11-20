@@ -57,15 +57,87 @@ export const EmptySectionsLineContext = React.createContext(false);
  * `record:details` node per run of sections — and every part used to draw it,
  * so the page read as if two locks applied. The laid-out page
  * (`RecordPageColumns`) sets `false` around every details part after the
- * first, which keeps the band above the body table. Default `true`: an
- * authored page's details body, a standalone `DetailView` and the drawer keep
- * their band. Whether the band reads locked or editable is untouched — that is
+ * first, which keeps the band above the body table. Default `true`: a
+ * standalone `DetailView` and the drawer keep their band, and an authored
+ * page's details bodies draw one between them ({@link ApprovalBandOnceScope}). Whether the band reads locked or editable is untouched — that is
  * `resolveApprovalLock`'s rule (a `lockRecord: false` node is never locked).
  *
  * Module-internal, the way `EmptySectionsLineContext` is: neither a
  * `DetailView` prop nor a `DetailViewSchema` key, and not in the barrel.
  */
 export const ApprovalBandContext = React.createContext(true);
+
+/**
+ * One approval band per page drawn as written (objectstack#35483,
+ * objectstack#35484). A page the host draws through one `SchemaRenderer` — an
+ * authored page, or a synthesized page whose strip cannot be laid out — cannot
+ * set {@link ApprovalBandContext} per details node, so each `record:details`
+ * body drew its own band. Under {@link ApprovalBandOnceScope} every body that
+ * reaches the band's place marks it, and only the FIRST mark in document order
+ * draws the band: a first node that draws no body leaves no mark, and a
+ * `lockRecord: false` first node draws its own (editable) band, the page's one.
+ * The band keeps its recall lever and its tally. Outside a scope every body
+ * draws its band as before.
+ */
+export interface ApprovalBandOnce {
+  /** Mark a body's band place; returns the unmark. `onChange` re-renders the body when the first mark moves. */
+  register: (mark: Element, onChange: () => void) => () => void;
+  /** The first mark in document order, or `null`. */
+  first: () => Element | null;
+}
+
+export function createApprovalBandOnce(): ApprovalBandOnce {
+  const marks = new Map<Element, () => void>();
+  const notify = () => {
+    for (const onChange of Array.from(marks.values())) onChange();
+  };
+  return {
+    register(mark, onChange) {
+      marks.set(mark, onChange);
+      notify();
+      return () => {
+        marks.delete(mark);
+        notify();
+      };
+    },
+    first() {
+      let first: Element | null = null;
+      for (const mark of marks.keys()) {
+        if (!mark.isConnected) continue;
+        if (!first || first.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_PRECEDING) first = mark;
+      }
+      return first;
+    },
+  };
+}
+
+export const ApprovalBandOnceContext = React.createContext<ApprovalBandOnce | null>(null);
+
+/** The page scope under which one approval band is drawn (see {@link ApprovalBandOnce}). */
+export function ApprovalBandOnceScope({ children }: { children?: React.ReactNode }): React.ReactElement {
+  const [once] = React.useState(createApprovalBandOnce);
+  return React.createElement(ApprovalBandOnceContext.Provider, { value: once }, children);
+}
+
+/**
+ * A details body's part in the page's one band: `draws` is whether this body
+ * draws it, `mark` the hidden element it renders where the band would be.
+ * Outside a scope it draws, with no mark.
+ */
+export function useApprovalBandOnce(): { draws: boolean; mark: React.ReactNode } {
+  const once = React.useContext(ApprovalBandOnceContext);
+  const [mark, setMark] = React.useState<HTMLElement | null>(null);
+  const [, rerender] = React.useReducer((n: number) => n + 1, 0);
+  React.useLayoutEffect(() => {
+    if (!once || !mark) return undefined;
+    return once.register(mark, rerender);
+  }, [once, mark]);
+  if (!once) return { draws: true, mark: null };
+  return {
+    draws: mark !== null && once.first() === mark,
+    mark: React.createElement('span', { ref: setMark, hidden: true, 'data-approval-band-mark': '' }),
+  };
+}
 
 /**
  * The most columns a frameless detail section may take on the page being

@@ -18,7 +18,8 @@ import { join } from 'node:path';
 
 import { ApiBillingRefusedError } from '../runner/driver.js';
 import { armArgs, placeCaseFiles, prepareArmWorkdir } from './arms.js';
-import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, type SkillEvalCase } from './cases.js';
+import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from './cases.js';
+import { parseSkillEvalArgs } from './cli.js';
 import { type Grader, gradeAnswer } from './grade.js';
 import { judgeTurn, planRound, preflight, regradeRecords, type SkillEvalRunRecord } from './run.js';
 import { summariseRound } from './summary.js';
@@ -55,10 +56,12 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'round: a trigger case runs on the with-skill arm only': 1,
   'arms: a case\'s files land in the turn\'s project on both arms': 1,
   'summary: trigger cases are tallied apart from the behaviour pass rates': 1,
+  'select: --triggers-only keeps the trigger cases on the with-skill arm and drops the behaviour cases': 1,
+  'flags: --triggers-only beside --regrade or --self-test, or on a bundle with no trigger case → REFUSED': 1,
 });
 
 /** The roster's own size, pinned: a deleted row takes its floor with it otherwise. */
-export const SELF_TEST_BATTERY_FLOOR = 30;
+export const SELF_TEST_BATTERY_FLOOR = 32;
 
 let selfTestReachedVerdict = false;
 /** Whether the last {@link runSelfTest} reached its verdict line. */
@@ -121,6 +124,13 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
   const judge = (c: SkillEvalCase, arm: 'with-skill' | 'no-skill', stdout: string): SkillEvalRunRecord =>
     judgeTurn(c, arm, 1, exited(stdout), { bundles: ['demo-skill', 'other-skill', 'quiet-skill'], unlisted: ['quiet-skill'] }, 'fixture', grade);
 
+  // Two bundles: `demo-skill` with a behaviour case and a trigger case of each kind; `other-skill` with a behaviour case only.
+  const selectCatalog = { root: 'fixture', bundles: ['demo-skill', 'other-skill'], unlistedBundles: [], refusals: [], cases: [
+    fixtureCase(),
+    fixtureCase({ id: 2, key: 'demo-skill/demo#2', shouldTrigger: true, mustContain: [] }),
+    fixtureCase({ id: 3, key: 'demo-skill/demo#3', shouldTrigger: false, mustContain: [] }),
+    fixtureCase({ bundle: 'other-skill', key: 'other-skill/demo#1' }),
+  ] };
   type Row = { label: keyof typeof SELF_TEST_BATTERIES | string; run: () => true | string };
   const rows: Row[] = [
     {
@@ -388,6 +398,34 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
         return s.cases.length === 1 && s.totals.withSkill.pass === 1 && s.totals.withSkill.fail === 0 && t?.missedLoads.join() === pos.key && t.falseLoads.join() === neg.key && s.triggers.cases.length === 2
           ? true
           : `behaviour cases ${s.cases.length} (with-skill ${s.totals.withSkill.pass}/${s.totals.withSkill.fail}); missed [${t?.missedLoads.join() ?? ''}], false [${t?.falseLoads.join() ?? ''}]`;
+      },
+    },
+    {
+      label: 'select: --triggers-only keeps the trigger cases on the with-skill arm and drops the behaviour cases',
+      run: () => {
+        const all = selectBundles(selectCatalog, ['demo-skill']).map((c) => String(c.id)).join();
+        const jobs = planRound(selectBundles(selectCatalog, ['demo-skill'], true), 1).map((j) => `${String(j.case.id)}:${j.arm}`).join();
+        return all === '1,2,3' && jobs === '2:with-skill,3:with-skill' ? true : `without the flag [${all}], expected 1,2,3; with it [${jobs}], expected 2:with-skill,3:with-skill`;
+      },
+    },
+    {
+      label: 'flags: --triggers-only beside --regrade or --self-test, or on a bundle with no trigger case → REFUSED',
+      run: () => {
+        const refusal = (f: () => unknown, why: RegExp) => {
+          try {
+            f();
+          } catch (e) {
+            return why.test(e instanceof Error ? e.message : String(e));
+          }
+          return false;
+        };
+        const kept = parseSkillEvalArgs(['--triggers-only', '--skills-from', '18.5.0', '--dry-run']).triggersOnly;
+        const r = [
+          refusal(() => parseSkillEvalArgs(['--triggers-only', '--regrade', 'DIR']), /--triggers-only cannot narrow --regrade/),
+          refusal(() => parseSkillEvalArgs(['--self-test', '--triggers-only']), /--triggers-only cannot narrow --self-test/),
+          refusal(() => selectBundles(selectCatalog, ['other-skill'], true), /`other-skill`, a bundle with no trigger case/),
+        ];
+        return kept && r.every(Boolean) ? true : `accepted beside --skills-from: ${kept}; refused (--regrade, --self-test, no trigger case): ${r.join(', ')}`;
       },
     },
   ];

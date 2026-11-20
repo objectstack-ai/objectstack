@@ -16,17 +16,19 @@
  * one rule wherever it is drawn (the page, the split pane, the overlay drawer,
  * the maximized pane, a phone):
  *
- *  - 760 px and up: details | the right column (320 px) — the related
- *    panels, then the 动态 panel last (objectstack#34590);
+ *  - 760 px and up: details | the right rail (320 px) — the 概览 tab's
+ *    summary of the other tabs (objectstack#35596: 审批, 附件, 最近动态, then
+ *    the related lists with records);
  *  - 1120 px and up: the same, wide — the details field grid takes three
- *    columns, the right column 380 px, the 动态 panel five entries;
- *  - below 760 px: ONE column — the details sections, then the right
- *    column's panels in their order.
+ *    columns, the right rail 380 px;
+ *  - below 760 px: ONE column — the details sections, then the rail.
  *
- * (Container widths — see the two constants for how they are derived.) There
- * is no tabbed tier: the strip's blocks are always laid out
- * (objectstack#27524 retired it with the three-column tier and the related
- * rail), and the 动态 stream is a panel, never a column.
+ * (Container widths — see the two constants for how they are derived.) Above
+ * the columns sit the header, the record's tab row — 概览, one tab per related
+ * list, 附件, 审批, 动态 (objectstack#35595) — and, on 概览 only, the strip
+ * (`record:path`, `record:highlights`) across the whole width. Every other
+ * tab draws its block in full in place of the columns; the 动态 stream is a
+ * tab, never a column.
  *
  * ## Why the layout is derived, never authored
  *
@@ -36,11 +38,11 @@
  * author — or an AI — could write and the spec could not judge, and a Studio
  * seed carrying it would be refused at save. The layout is therefore read off
  * the synthesized page itself, by the stable semantic `value` every tab item
- * carries (`buildDefaultTabs`, objectui#2257): `details` is the details
- * column, `timeline` (the one stream, objectstack#27055) is the right
- * column's 动态 panel, and `related`, `approvals` and `attachments` are its
- * panels before it (objectstack#34590: 动态 is drawn last, and the strip
- * lists it last too). The synthesized page has one region (`main`); a page with
+ * carries (`buildDefaultTabs`, objectui#2257): `details` is the 概览 tab
+ * (its path and highlights are the strip, the rest the details column),
+ * `timeline` (the one stream, objectstack#27055) is the 动态 tab, and each
+ * `related:object.field`, `approvals` and `attachments` is a tab of its own
+ * (objectstack#35595; 动态 last, objectstack#34590). The synthesized page has one region (`main`); a page with
  * any other region is not the synthesized page (objectstack#27055 removed the
  * opt-in rail and the `rightRail` slot that used to add an `aside`).
  *
@@ -168,11 +170,17 @@ export function recordPageColumnOfTab(value: unknown): RecordPageColumn | null {
 export interface DefaultPageColumns {
   /**
    * The record header: every node the page places before its tab strip
-   * (`page:header`, the actions / alerts slots, highlights, the stage path).
-   * The same nodes an authored strip draws above it — one header for every
-   * tier.
+   * (`page:header`, the actions / alerts slots) but the strip below. The same
+   * nodes an authored strip draws above it — one header for every tier.
    */
   header: any[];
+  /**
+   * The highlight strip and the stage path the page places before its tab
+   * strip (`record:highlights`, `record:path`), in their order. objectstack#35595:
+   * they are the 概览 tab's, drawn at its top across the whole width, and on no
+   * other tab.
+   */
+  strip: any[];
   /** The Details tab's body. */
   details: any[];
   /**
@@ -190,6 +198,11 @@ const asNode = (value: unknown): PageNode | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as PageNode) : null;
 
 const nodeList = (value: unknown): any[] => (Array.isArray(value) ? value.filter((n) => n != null) : []);
+
+/** The node types the 概览 tab draws at its top (objectstack#35595). */
+const STRIP_NODE_TYPES: ReadonlySet<string> = new Set(['record:highlights', 'record:path']);
+
+const isStripNode = (node: unknown): boolean => STRIP_NODE_TYPES.has(asNode(node)?.type);
 
 /**
  * Partition a synthesized default record page (`buildDefaultPageSchema`'s
@@ -235,8 +248,10 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     else relatedLists.push(...children);
   }
 
+  const before = components.slice(0, tabIndex);
   return {
-    header: components.slice(0, tabIndex),
+    header: before.filter((node) => !isStripNode(node)),
+    strip: before.filter(isStripNode),
     details,
     timeline: [...components.slice(tabIndex + 1), ...timelineTabs],
     related: [...relatedLists, ...relatedPanels],

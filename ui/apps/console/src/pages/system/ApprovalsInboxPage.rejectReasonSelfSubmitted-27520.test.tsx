@@ -3,11 +3,11 @@
 /**
  * objectstack#27520 row 12 — deciding from the queue.
  *
- * - **Reject takes an optional reason.** The row's Reject confirmation, and the
- *   bulk one, offer a comment box; what the approver types reaches the reject
- *   call as `comment`, the field the approvals REST door already accepts and
- *   records on the request's timeline. Left empty, the call carries no
- *   `comment` at all, as before.
+ * - **Reject takes a reason.** The row's Reject confirmation, and the bulk one,
+ *   offer a comment box; what the approver types reaches the reject call as
+ *   `comment`, the field the approvals REST door requires and records on the
+ *   request's timeline. While the box is empty or blank, Reject stays disabled
+ *   and no call is made (objectstack#35719).
  * - **A request the viewer submitted says so.** The row reads the server's own
  *   `viewer.is_submitter` (attached by the approvals list read) and marks the
  *   requester "You submitted this". Who may decide is unchanged: the marker
@@ -142,12 +142,12 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('Reject from the queue takes an optional reason (objectstack#27520 row 12)', () => {
+describe('Reject from the queue takes a reason (objectstack#27520 row 12, objectstack#35719)', () => {
   it('the row confirmation sends what the approver typed as the comment', async () => {
     renderInbox();
     fireEvent.click(within(await rowFor('Someone Else Invoice')).getByRole('button', { name: 'Reject' }));
     const dialog = await screen.findByRole('alertdialog');
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment (optional)' }), {
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), {
       target: { value: '  Missing the signed PO.  ' },
     });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Reject' }));
@@ -155,21 +155,28 @@ describe('Reject from the queue takes an optional reason (objectstack#27520 row 
     expect(approvalsApiStub.reject).toHaveBeenCalledWith('req_other', { actor_id: 'u_1', comment: 'Missing the signed PO.' });
   });
 
-  it('left empty, the reject carries no comment, and a reopened dialog starts empty', async () => {
+  it('Reject stays disabled while the reason is empty or blank, and a reopened dialog starts empty', async () => {
     renderInbox();
     const row = await rowFor('Someone Else Invoice');
     fireEvent.click(within(row).getByRole('button', { name: 'Reject' }));
     let dialog = await screen.findByRole('alertdialog');
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment (optional)' }), { target: { value: 'draft' } });
+    const confirm = within(dialog).getByRole('button', { name: 'Reject' });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: '   ' } });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: 'draft' } });
+    expect(confirm).toBeEnabled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
 
-    fireEvent.click(within(await rowFor('Someone Else Invoice')).getByRole('button', { name: 'Reject' }));
+    // The r key opens the same confirmation, empty again.
+    fireEvent.keyDown(window, { key: 'j' });
+    fireEvent.keyDown(window, { key: 'r' });
     dialog = await screen.findByRole('alertdialog');
-    expect(within(dialog).getByRole('textbox', { name: 'Comment (optional)' })).toHaveValue('');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Reject' }));
-    await waitFor(() => expect(approvalsApiStub.reject).toHaveBeenCalledTimes(1));
-    expect(approvalsApiStub.reject).toHaveBeenCalledWith('req_other', { actor_id: 'u_1' });
+    expect(within(dialog).getByRole('textbox', { name: 'Comment' })).toHaveValue('');
+    expect(within(dialog).getByRole('button', { name: 'Reject' })).toBeDisabled();
+    expect(approvalsApiStub.reject).not.toHaveBeenCalled();
   });
 
   it('the bulk confirmation sends the same reason on every selected request', async () => {
@@ -179,7 +186,10 @@ describe('Reject from the queue takes an optional reason (objectstack#27520 row 
     }
     fireEvent.click(screen.getByRole('button', { name: 'Reject {{count}}' }));
     const dialog = await screen.findByRole('alertdialog');
-    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment (optional)' }), {
+    expect(within(dialog).getByRole('button', { name: 'Reject {{count}}' })).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), { target: { value: ' ' } });
+    expect(within(dialog).getByRole('button', { name: 'Reject {{count}}' })).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Comment' }), {
       target: { value: 'Budget frozen this quarter.' },
     });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Reject {{count}}' }));

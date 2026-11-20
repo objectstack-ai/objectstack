@@ -1433,7 +1433,7 @@ export const FieldStillShownBySchema = lazySchema(() => z.object({
 export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
   code: z.string().describe(
     'What the save loses: `field_removed`, `field_type_change`, `field_required_no_default`, '
-    + '`currency_mode_to_record` or `currency_field_repointed`.',
+    + '`currency_mode_to_record`, `currency_field_repointed`, `unit_code_field_declared` or `unit_mode_to_record`.',
   ),
   field: z.string().optional().describe('The field the finding is about.'),
   message: z.string().describe(

@@ -109,6 +109,110 @@ function restoreAfterBlock() {
   });
 }
 
+// ── ListView.dataBlockNoReread-35536 ────────────────────────────────────────────
+
+/**
+ * objectstack#35536 — the read is armed by what the query reads, not by the
+ * identity of the view's `data` block. A host that hands the same view over
+ * again (a late view answer re-serving the active view) gives `ListView` a
+ * fresh `{ provider: 'object' }` block of equal content; nothing the read sends
+ * changed, so no second read. The CONTROLS: a sort or a filter change reads
+ * again with what changed, and rows handed in whole (`provider: 'value'`)
+ * still replace the shown rows when the host hands in new ones. A control
+ * asserts at least one more read carrying the change, never an exact count.
+ */
+describe('ListView.dataBlockNoReread-35536', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'task_35536';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Task',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      name: { name: 'name', type: 'text', label: 'Name' },
+      stage: { name: 'stage', type: 'text', label: 'Stage' },
+    },
+  };
+  // ONE columns array, so a re-render moves only the key a case names.
+  const COLUMNS = ['name', 'stage'];
+  const schemaWith = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: COLUMNS,
+      data: { provider: 'object', object: OBJECT },
+      ...extra,
+    }) as unknown as ListViewSchema;
+
+  function mount(schema: ListViewSchema) {
+    const ds = {
+      find: vi.fn(async () => ({ data: [{ id: 't1', name: 'Ada', stage: 'a' }], total: 1 })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => DEFINITION),
+    };
+    const onRowsChange = vi.fn();
+    const tree = (s: ListViewSchema) => (
+      <SchemaRendererProvider dataSource={ds as any}>
+        <ListView schema={s} dataSource={ds as any} onRowsChange={onRowsChange} />
+      </SchemaRendererProvider>
+    );
+    const utils = render(tree(schema));
+    return {
+      ds,
+      onRowsChange,
+      rerender: async (s: ListViewSchema) => {
+        utils.rerender(tree(s));
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      },
+    };
+  }
+
+  const reads = (ds: { find: ReturnType<typeof vi.fn> }) => ds.find.mock.calls.filter(([object]) => object === OBJECT);
+  const settled = async (ds: { find: ReturnType<typeof vi.fn> }) => {
+    await waitFor(() => expect(reads(ds)).toHaveLength(1));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  };
+
+  it('a new data block of equal content re-reads nothing', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith());
+    await host.rerender(schemaWith());
+    expect(reads(host.ds)).toHaveLength(1);
+  });
+
+  it('CONTROL: a sort change reads again, with the sort', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith({ sort: [{ field: 'name', order: 'desc' }] }));
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(reads(host.ds).at(-1)![1].$orderby).toEqual([{ field: 'name', order: 'desc' }]);
+  });
+
+  it('CONTROL: a filter change reads again, with the filter', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith({ filter: [['stage', '=', 'b']] }));
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(JSON.stringify(reads(host.ds).at(-1)![1].$filter)).toContain('"b"');
+  });
+
+  it('CONTROL: rows handed in whole are replaced when the host hands in new ones, with no read', async () => {
+    const valueSchema = (items: Array<{ id: string; name: string }>) =>
+      schemaWith({ data: { provider: 'value', items } });
+    const host = mount(valueSchema([{ id: 'v1', name: 'Ada' }]));
+    await waitFor(() => expect(host.onRowsChange.mock.calls.at(-1)?.[0]?.map((r: { id: string }) => r.id)).toEqual(['v1']));
+    await host.rerender(valueSchema([{ id: 'v2', name: 'Grace' }]));
+    await waitFor(() => expect(host.onRowsChange.mock.calls.at(-1)?.[0]?.map((r: { id: string }) => r.id)).toEqual(['v2']));
+    expect(reads(host.ds)).toHaveLength(0);
+  });
+});
+
 // ── ListView.hostDrawnConditions-35727 ──────────────────────────────────────────
 
 /**
@@ -280,14 +384,15 @@ describe('ListView.concurrencyTokenProjection-12292', () => {
   afterEach(() => cleanup());
 
   describe('ListView — an inline-editable grid\'s rows carry their concurrency token (objectui#12292)', () => {
-    it('asks for `updated_at` when the grid opens in inline-edit mode, though no column shows it', async () => {
-      const { lastSelect } = await mount({ inlineEdit: true });
+    it('asks for `updated_at` when the grid is editable in place, though no column shows it', async () => {
+      // objectstack#35684 — a view that declares nothing is editable.
+      const { lastSelect } = await mount({});
       await waitFor(() => expect(lastSelect()).toContain('updated_at'));
       expect(lastSelect()).toEqual(expect.arrayContaining(['id', 'title', 'estimate_hours']));
     });
 
-    it('does not ask for it while the grid is not in inline-edit mode', async () => {
-      const { dataSource, lastSelect } = await mount({});
+    it('does not ask for it when the view turns in-place editing off', async () => {
+      const { dataSource, lastSelect } = await mount({ userActions: { editInline: false } });
       await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
       expect(dataSource.find.mock.calls.length).toBeGreaterThan(0);
       for (const call of dataSource.find.mock.calls) {
@@ -2037,6 +2142,8 @@ describe('ListView.draftOnlyColumn-34807', () => {
       viewType: 'grid',
       columns: ['title', 'priority'],
       compactToolbar: false,
+      // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+      userActions: { editInline: false },
       ...schemaExtra,
     } as unknown as ListViewSchema;
     render(
@@ -2343,8 +2450,8 @@ describe('ListView.switcherChrome-7547', () => {
 /**
  * objectui#12621 — the list toolbar's Display menu closes once a layout is
  * chosen, and on Escape, returning focus to the Display trigger. The panel's
- * toggles keep it open: the control below flips Edit inline and density and
- * finds the panel still drawn. The panel is a menu whose rows open a second
+ * own settings keep it open: the control below clears the row colour and
+ * picks a row height, and finds the panel still drawn. The panel is a menu whose rows open a second
  * level; the Layout level lists every layout as a radio, at any count.
  */
 describe('ListView.displayMenuClose-12621', () => {
@@ -2449,17 +2556,16 @@ describe('ListView.displayMenuClose-12621', () => {
     it('Escape closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      fireEvent.keyDown(within(content).getByTestId('options-row-more'), { key: 'Escape' });
+      fireEvent.keyDown(within(content).getByTestId('options-row-row-height'), { key: 'Escape' });
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('control: toggling Edit inline and choosing a row height keep the menu open', async () => {
-      mount(TWO);
+    it('control: clearing the row colour and choosing a row height keep the menu open', async () => {
+      // objectstack#35684 took the last switch (Edit inline) off the menu.
+      mount({ ...TWO, userActions: { rowColor: true }, rowColor: { field: 'stage', colors: {} } } as ListViewSchema);
       const { trigger, content } = await openDisplay();
-      fireEvent.click(within(content).getByTestId('options-row-more'));
-      const toggle = await within(content).findByTestId('toolbar-inline-edit-toggle');
-      fireEvent.click(toggle);
-      await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+      fireEvent.click(within(content).getByTestId('options-row-color'));
+      fireEvent.click(await within(content).findByTestId('options-color-clear'));
       fireEvent.click(within(content).getByTestId('options-back'));
       fireEvent.click(await within(content).findByTestId('options-row-row-height'));
       fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
@@ -2680,7 +2786,8 @@ describe('ListView.nameFieldSelect-13116', () => {
     render(
       <SchemaRendererProvider dataSource={dataSource}>
         <ListView
-          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns } as any}
+          // Read-only: an editable list also asks for `updated_at` (concurrencyTokenProjection-12292 above).
+          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns, userActions: { editInline: false } } as any}
           dataSource={dataSource}
         />
       </SchemaRendererProvider>,

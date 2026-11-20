@@ -704,7 +704,9 @@ export const SysApprovalRequest = ObjectSchema.create({
       // `validateActionParams`), which counts a blank or whitespace-only
       // string as missing: the action door, MCP `run_action` and the console's
       // param dialog all refuse a reject without one, before the target route
-      // is called. The target route itself does not judge the reason.
+      // is called. The target route judges it again: `ApprovalService.decide()`
+      // refuses a reject without a non-blank string reason, so a caller that
+      // skips this action is held to the same rule.
       params: [
         { name: 'comment', label: 'Comment', type: 'textarea', required: true },
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },

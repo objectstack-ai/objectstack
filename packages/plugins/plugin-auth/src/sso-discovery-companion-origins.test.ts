@@ -29,6 +29,8 @@ import {
   trustingBodyNamedOrigins,
 } from './sso-discovery-companion-origins';
 import { runRegisterSsoProviderFromForm } from './register-sso-provider';
+import { createSsoDiscoveryEgressGuard, SSO_DISCOVERY_EGRESS_SOURCE } from './sso-discovery-egress';
+import { stubbedSsoDiscoveryEgress } from './sso-discovery-egress.testkit';
 import dnsPromises from 'node:dns/promises';
 import { syncBuiltinESMExports } from 'node:module';
 // better-auth's first module load is paid at module load, not inside the first
@@ -145,6 +147,9 @@ async function makeRp(trustedOrigins: string[] = [BASE]): Promise<Rp> {
     trustedOrigins,
     plugins: { sso: true },
     logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    // The identity provider answers over the stubbed fetch; the connect-time
+    // rule itself is pinned with the real guard (`sso-discovery-connect-time.test.ts`).
+    ssoDiscoveryEgress: await stubbedSsoDiscoveryEgress(),
   } as unknown as ConstructorParameters<typeof AuthManager>[0]);
   vi.spyOn(manager as any, 'isPlatformAdminUserId').mockResolvedValue(true);
   const ctx = await ((await manager.getAuthInstance()) as any).$context;
@@ -609,7 +614,7 @@ describe('an origin a register or update body names is trusted for that provider
   });
 });
 
-// ── SSO discovery reads only hosts that resolve to public addresses ─────────
+// ── SSO discovery connects only to addresses that are public ────────────────
 
 /** An address no non-public range holds. */
 const PUBLIC_ADDRESS = '93.184.215.14';
@@ -620,7 +625,7 @@ const RESOLVED_DISCOVERY = `${RESOLVED_ISSUER}/.well-known/openid-configuration`
 const DISCOVERY_ORIGIN = 'https://discovery.resolved-corp.example';
 const DISCOVERY_HOST = new URL(DISCOVERY_ORIGIN).hostname;
 
-describe('SSO discovery reads only hosts that resolve to public addresses', () => {
+describe('SSO discovery connects only to addresses that are public: a registration\'s discovery host is judged before the vendor runs', () => {
   let undo: Array<() => void> = [];
   afterEach(() => {
     for (const step of undo.reverse()) step();
@@ -754,7 +759,7 @@ describe('SSO discovery reads only hosts that resolve to public addresses', () =
   });
 });
 
-describe('the host a registration\'s discovery reads is the one host resolved', () => {
+describe('the host a registration\'s discovery reads is the one host judged', () => {
   /** A resolver answering a private address for every name, recording each name asked. */
   function privateResolver() {
     const asked: string[] = [];
@@ -764,6 +769,11 @@ describe('the host a registration\'s discovery reads is the one host resolved', 
     };
     return { asked, resolve };
   }
+  /** The judgement the connection applies, over `resolve`. */
+  function judgeWith(resolve: (hostname: string) => Promise<ReadonlyArray<{ address: string }>>) {
+    const guard = createSsoDiscoveryEgressGuard({ resolve });
+    return async (url: string) => (await guard).judgeUrl(url, { source: SSO_DISCOVERY_EGRESS_SOURCE });
+  }
   const configured = (url: string) => url.startsWith(BASE);
   const oidc = (extra: Record<string, unknown> = {}) => ({ clientId: 'client-id', clientSecret: 'client-secret', ...extra });
 
@@ -772,7 +782,7 @@ describe('the host a registration\'s discovery reads is the one host resolved', 
     const refusal = await refuseSsoDiscoveryHostNotPublic({
       body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc() },
       isConfiguredTrusted: configured,
-      resolve: r.resolve,
+      judge: judgeWith(r.resolve),
     });
     expect(refusal).toMatchObject({ status: 'BAD_REQUEST', code: 'VALIDATION_FAILED', field: 'issuer' });
     expect(r.asked).toEqual([RESOLVED_HOST]);
@@ -783,7 +793,7 @@ describe('the host a registration\'s discovery reads is the one host resolved', 
     const refusal = await refuseSsoDiscoveryHostNotPublic({
       body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc({ discoveryEndpoint: `${DISCOVERY_ORIGIN}/.well-known/openid-configuration` }) },
       isConfiguredTrusted: configured,
-      resolve: r.resolve,
+      judge: judgeWith(r.resolve),
     });
     expect(refusal).toMatchObject({ code: 'VALIDATION_FAILED', field: 'oidcConfig.discoveryEndpoint' });
     expect(r.asked).toEqual([DISCOVERY_HOST]);
@@ -797,18 +807,18 @@ describe('the host a registration\'s discovery reads is the one host resolved', 
       undefined,
     ]) {
       const r = privateResolver();
-      expect(await refuseSsoDiscoveryHostNotPublic({ body, isConfiguredTrusted: configured, resolve: r.resolve }), JSON.stringify(body)).toBeUndefined();
+      expect(await refuseSsoDiscoveryHostNotPublic({ body, isConfiguredTrusted: configured, judge: judgeWith(r.resolve) }), JSON.stringify(body)).toBeUndefined();
       expect(r.asked, JSON.stringify(body)).toEqual([]);
     }
   });
 
-  it('a discovery URL the deployment trusts, an address literal and a non-public name are not resolved here', async () => {
+  it('a discovery URL the deployment trusts, and a host the vendor\'s own check refuses (a non-public literal or name), are not judged here', async () => {
     for (const issuer of [RESOLVED_ISSUER, 'https://10.0.0.5', 'https://[fd00::1]', 'http://localhost:9000', 'https://metadata.google.internal']) {
       const r = privateResolver();
       const refusal = await refuseSsoDiscoveryHostNotPublic({
         body: { issuer, oidcConfig: oidc() },
         isConfiguredTrusted: (url) => url.startsWith(RESOLVED_ISSUER),
-        resolve: r.resolve,
+        judge: judgeWith(r.resolve),
       });
       expect(refusal, issuer).toBeUndefined();
       expect(r.asked, issuer).toEqual([]);
@@ -819,18 +829,30 @@ describe('the host a registration\'s discovery reads is the one host resolved', 
     const refusal = await refuseSsoDiscoveryHostNotPublic({
       body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc() },
       isConfiguredTrusted: configured,
-      resolve: async (hostname) => {
+      judge: judgeWith(async (hostname) => {
         throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
-      },
+      }),
     });
     expect(refusal).toBeUndefined();
+  });
+
+  it('an address literal the vendor\'s own check admits is judged by the platform\'s address classes: the Azure host-platform endpoint is refused', async () => {
+    const r = privateResolver();
+    const refusal = await refuseSsoDiscoveryHostNotPublic({
+      body: { issuer: 'https://168.63.129.16', oidcConfig: oidc() },
+      isConfiguredTrusted: configured,
+      judge: judgeWith(r.resolve),
+    });
+    expect(refusal).toMatchObject({ code: 'VALIDATION_FAILED', field: 'issuer' });
+    expect(refusal?.message).not.toContain('metadata');
+    expect(r.asked).toEqual([]);
   });
 
   it('a name whose every address is public is not refused', async () => {
     const refusal = await refuseSsoDiscoveryHostNotPublic({
       body: { issuer: RESOLVED_ISSUER, oidcConfig: oidc() },
       isConfiguredTrusted: configured,
-      resolve: async () => [{ address: PUBLIC_ADDRESS }, { address: '2606:2800:21f:cb07:6820:80da:af6b:8b2c' }],
+      judge: judgeWith(async () => [{ address: PUBLIC_ADDRESS }, { address: '2606:2800:21f:cb07:6820:80da:af6b:8b2c' }]),
     });
     expect(refusal).toBeUndefined();
   });

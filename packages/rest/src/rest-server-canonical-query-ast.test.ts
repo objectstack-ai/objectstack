@@ -247,6 +247,9 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     // [#30237] The recycle-bin doors: no slot (the listing's read is built
     // inside `@objectstack/objectql`'s `listRecycleBin`).
     'recycle-bin-routes.ts': 0,
+    // [ADR-0158 U7 R1] The unit code backfill door, the record-currency one's
+    // twin: no slot (the walk's queries are built inside `backfillUnitCodes`).
+    'meta-unit-code-backfill-route.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
