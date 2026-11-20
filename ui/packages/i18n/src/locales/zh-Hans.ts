@@ -1333,6 +1333,7 @@ const zh = {
     pathStageChangeConflict: '其他人已修改此记录，现已显示最新版本。如仍需移动，请再次点击该阶段。',
     pathStageChangeDenied: '你没有更改此记录阶段的权限。',
     pathStageChangeFailed: '无法更改阶段。',
+    inlineEditRecordChanged: '编辑期间，此记录已在别处被修改。你未保存的修改会保留，保存时以你的修改为准，写到最新版本上。',
     linkCopied: '链接已复制到剪贴板',
     commentFailed: '评论未发布，内容没有保存，请重试。',
     reactionFailed: '表情回应未保存，请重试。',

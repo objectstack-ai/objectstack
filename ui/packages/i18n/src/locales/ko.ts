@@ -1467,6 +1467,7 @@ const ko = {
     pathStageChangeConflict: '다른 사용자가 이 레코드를 변경하여 최신 버전을 표시합니다. 이동이 여전히 필요하면 단계를 다시 누르세요.',
     pathStageChangeDenied: '이 레코드의 단계를 변경할 권한이 없습니다.',
     pathStageChangeFailed: '단계를 변경할 수 없습니다.',
+    inlineEditRecordChanged: "편집하는 동안 이 레코드가 다른 곳에서 변경되었습니다. 저장하지 않은 변경 사항은 유지되며, 저장하면 최신 버전에 덮어씁니다.",
     linkCopied: "링크가 클립보드에 복사됨",
     commentFailed: "댓글이 게시되지 않았습니다. 아무것도 저장되지 않았습니다. 다시 시도해 주세요.",
     reactionFailed: "반응이 저장되지 않았습니다. 다시 시도해 주세요.",

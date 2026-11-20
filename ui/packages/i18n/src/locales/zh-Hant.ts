@@ -1333,6 +1333,7 @@ const zhHant = {
     pathStageChangeConflict: '其他人已修改此記錄，現已顯示最新版本。如仍需移動，請再次點選該階段。',
     pathStageChangeDenied: '你沒有更改此記錄階段的權限。',
     pathStageChangeFailed: '無法更改階段。',
+    inlineEditRecordChanged: '編輯期間，此記錄已在別處被修改。你未儲存的修改會保留，儲存時以你的修改為準，寫到最新版本上。',
     linkCopied: '連結已複製到剪貼簿',
     commentFailed: '評論未釋出，內容沒有儲存，請重試。',
     reactionFailed: '表情回應未儲存，請重試。',

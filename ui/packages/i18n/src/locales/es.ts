@@ -1512,6 +1512,7 @@ const es = {
     pathStageChangeConflict: 'Otra persona ha modificado este registro y ahora se muestra la versión más reciente. Vuelve a pulsar la etapa si el cambio sigue siendo válido.',
     pathStageChangeDenied: 'No tienes permiso para cambiar la etapa de este registro.',
     pathStageChangeFailed: 'No se ha podido cambiar la etapa.',
+    inlineEditRecordChanged: "Este registro se modificó en otro lugar mientras lo editaba. Sus cambios sin guardar se conservan, y Guardar los escribe sobre la versión más reciente.",
     linkCopied: "Enlace copiado al portapapeles",
     commentFailed: "Tu comentario no se ha publicado. No se ha guardado nada; inténtalo de nuevo.",
     reactionFailed: "Tu reacción no se ha guardado. Inténtalo de nuevo.",

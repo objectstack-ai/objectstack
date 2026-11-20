@@ -1607,6 +1607,7 @@ const en = {
     pathStageChangeConflict: 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
     pathStageChangeDenied: "You don't have permission to change this record's stage.",
     pathStageChangeFailed: 'The stage could not be changed.',
+    inlineEditRecordChanged: 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
     linkCopied: 'Link copied to clipboard',
     commentFailed: 'Your comment was not posted. Nothing was saved — please try again.',
     reactionFailed: 'Your reaction was not saved. Please try again.',

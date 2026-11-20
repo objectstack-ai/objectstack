@@ -1548,6 +1548,7 @@ const ja = {
     pathStageChangeConflict: '他のユーザーがこのレコードを変更したため、最新の内容を表示しています。移動が必要な場合は、もう一度ステージを押してください。',
     pathStageChangeDenied: 'このレコードのステージを変更する権限がありません。',
     pathStageChangeFailed: 'ステージを変更できませんでした。',
+    inlineEditRecordChanged: "編集中にこのレコードが別の場所で変更されました。未保存の変更はそのまま残り、保存すると最新版に上書きされます。",
     linkCopied: "リンクをクリップボードにコピーしました",
     commentFailed: "コメントを投稿できませんでした。何も保存されていません。もう一度お試しください。",
     reactionFailed: "リアクションが保存されませんでした。もう一度お試しください。",
