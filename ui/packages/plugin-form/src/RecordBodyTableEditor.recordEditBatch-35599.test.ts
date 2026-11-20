@@ -79,6 +79,49 @@ describe('buildRecordEditBatch — one batch for the record and all its body tab
   });
 });
 
+describe('buildRecordEditBatch — a new line that kept the defaults it started on (objectstack#35816)', () => {
+  const tasks = {
+    id: 'meeting_task.meeting',
+    childObject: 'meeting_task',
+    relationshipField: 'meeting',
+    childSchema: {
+      fields: {
+        id: { type: 'text' },
+        name: { type: 'text' },
+        status: { type: 'select', defaultValue: 'pending' },
+        meeting: { type: 'master_detail' },
+      },
+    },
+    newRowValues: { status: 'pending' },
+    original: [],
+    rows: [
+      { name: null, status: 'pending' }, // added, left as it came: no op
+      { name: 'Book the room', status: 'pending' }, // typed a name: created with the default
+      { name: null, status: 'done' }, // changed the default: that is input
+    ],
+  };
+
+  it('is skipped like a blank line; a line with input is created, its default included, traced to its position', () => {
+    const { ops, owners } = buildRecordEditBatch('meeting', 'm1', {}, [tasks]);
+    expect(ops.map((o) => [o.object, o.action])).toEqual([
+      ['meeting', 'update'],
+      ['meeting_task', 'create'],
+      ['meeting_task', 'create'],
+    ]);
+    expect(ops[1].data).toMatchObject({ name: 'Book the room', status: 'pending', meeting: 'm1' });
+    expect(ops[2].data).toMatchObject({ status: 'done', meeting: 'm1' });
+    expect(owners.slice(1)).toEqual([
+      { kind: 'row', table: 'meeting_task.meeting', row: 1 },
+      { kind: 'row', table: 'meeting_task.meeting', row: 2 },
+    ]);
+  });
+
+  it('CONTROL: without the start values the same untouched line is input and is created', () => {
+    const { ops } = buildRecordEditBatch('meeting', 'm1', {}, [{ ...tasks, newRowValues: undefined }]);
+    expect(ops.filter((o) => o.action === 'create')).toHaveLength(3);
+  });
+});
+
 describe('attributeRecordEditRefusal — a refused batch is placed where it belongs', () => {
   const { ops, owners } = buildRecordEditBatch('order', 'o1', { name: 'Renamed' }, [lines, notes]);
   const refused = (fields: Array<{ field: string; message: string }>) =>

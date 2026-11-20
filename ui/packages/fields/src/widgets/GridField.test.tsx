@@ -780,3 +780,40 @@ describe('GridField — a boolean column read as a boolean by the cell rules (ob
     expect(screen.queryByTestId('line-items-invalid-1-reason')).toBeNull();
   });
 });
+
+describe('GridField — a new line starts on its defaults and waits to read red (objectstack#35816)', () => {
+  const taskColumns = {
+    columns: [
+      { name: 'name', label: 'Name', type: 'text' as const, required: true },
+      { name: 'status', label: 'Status', type: 'text' as const, required: true },
+    ],
+  } as any;
+
+  it('Add and the entry line both start a line on the host\'s values', () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <GridField value={[]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
+    expect(onChange).toHaveBeenLastCalledWith([{ name: null, status: 'pending' }]);
+    const entryName = container.querySelector('[data-cell="0-0"]') as HTMLInputElement;
+    fireEvent.change(entryName, { target: { value: 'Book the room' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ name: 'Book the room', status: 'pending' }]);
+  });
+
+  it('a new line\'s empty required cell is not flagged until the host says so; a stored line is', () => {
+    const rows = [{ id: 't1', name: null, status: 'open' }, { name: null, status: 'pending' }];
+    const { rerender } = render(
+      <GridField value={rows} onChange={() => {}} field={taskColumns} newRowRequiredShown={false} />,
+    );
+    expect(screen.getByTestId('line-items-invalid-0-name')).toBeTruthy();
+    expect(screen.queryByTestId('line-items-invalid-1-name')).toBeNull();
+    rerender(<GridField value={rows} onChange={() => {}} field={taskColumns} newRowRequiredShown />);
+    expect(screen.getByTestId('line-items-invalid-1-name').getAttribute('title')).toBe('Name is required');
+  });
+
+  it('CONTROL: without the host\'s word a new line is flagged at once, as before', () => {
+    render(<GridField value={[{ name: null, status: 'pending' }]} onChange={() => {}} field={taskColumns} />);
+    expect(screen.getByTestId('line-items-invalid-0-name')).toBeTruthy();
+  });
+});

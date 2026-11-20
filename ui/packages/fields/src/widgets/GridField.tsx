@@ -684,6 +684,20 @@ type GridFieldProps = FieldWidgetComponentProps<Row[]> & {
    *  so the master-detail host that holds the header and the child schema
    *  hands it over. A column it does not name is in the tenant currency. */
   columnCurrencies?: ColumnCurrencies;
+  /** The values a new line starts with (objectstack#35816): the child
+   *  object's static field defaults, by field name. A grid column carries no
+   *  default (the spec's inline column refuses `defaultValue`), so the host
+   *  that holds the child schema hands them over. Every new line takes them:
+   *  the trailing entry line, "Add", and a line typed into the entry line. A
+   *  line already in the value keeps what it holds. Absent: a new line starts
+   *  blank, as before. */
+  newRowValues?: Row;
+  /** When the host sets it, an empty required cell on a NEW line (one with
+   *  no id) is flagged only while it is `true` (objectstack#35816): a line
+   *  the user just added does not read red before the host has tried to save
+   *  it, and does once a save was refused. A stored line is flagged as
+   *  before. Absent: every line is flagged at once, as before. */
+  newRowRequiredShown?: boolean;
 };
 
 /**
@@ -749,6 +763,11 @@ function RetiredGridFieldKeys({ message, keys }: { message: string; keys: readon
   );
 }
 
+/** A line the server already stores carries its id (`id`, `_id` or `recordId`). */
+function rowHasId(row: Row): boolean {
+  return [row.id, row._id, row.recordId].some((v) => v != null && v !== '');
+}
+
 /**
  * The `grid` field widget. A field whose metadata carries one of the retired
  * snake_case keys is refused by name ({@link RetiredGridFieldKeys}); any other
@@ -776,6 +795,8 @@ function GridFieldBody({
   onAdd,
   lookupAutofill,
   columnCurrencies,
+  newRowValues,
+  newRowRequiredShown,
   ...props
 }: GridFieldProps) {
   // The field-level keys, read as `GridFieldMetadata` declares them and as
@@ -931,8 +952,10 @@ function GridFieldBody({
   const blankRow = useCallback((): Row => {
     const blank: Row = {};
     for (const c of columns) blank[c.name] = null;
-    return blank;
-  }, [columns]);
+    // objectstack#35816 — a new line starts on the defaults the host knows,
+    // so a required column with a default is filled, not flagged empty.
+    return newRowValues ? { ...blank, ...newRowValues } : blank;
+  }, [columns, newRowValues]);
 
   /**
    * Merge a field patch into a row. `rowIdx === rows.length` targets the
@@ -1523,8 +1546,13 @@ function GridFieldBody({
                       // grid failed while empty (objectui#3318) — see
                       // `hostFailedEmpty`.
                       const required = cellRules(c, row).required;
+                      // objectstack#35816 — a new line waits for the host's
+                      // word before it reads red; a stored line does not.
+                      const newRowWaits =
+                        newRowRequiredShown === false && !isGhost && !rowHasId(row);
                       const invalid =
                         (!isGhost || hostFailedEmpty) &&
+                        !newRowWaits &&
                         !isList &&
                         required &&
                         !c.computed &&

@@ -74,6 +74,10 @@ export interface BatchDetailInput {
   /** When supplied, child write payloads are sanitized against it (drops
    *  computed / read-only / unknown fields). Omit to persist rows as-is. */
   childSchema?: ChildSchema;
+  /** The values a new line started on (`LineItemsField`'s `newRowValues`).
+   *  A new line that still holds only these is no input, and is skipped like
+   *  a blank one ({@link isBlankRow}). */
+  newRowValues?: Record<string, unknown>;
 }
 
 /** Edit-mode detail input: current rows + the loaded snapshot to diff against. */
@@ -98,12 +102,27 @@ const ID_KEYS = new Set(['id', '_id', 'recordId']);
  * drop the always-present trailing "ghost" line (and any row the user cleared)
  * so it never persists as an empty child record.
  */
-export function isBlankRow(row: Record<string, any>, relationshipField?: string): boolean {
+export function isBlankRow(
+  row: Record<string, any>,
+  relationshipField?: string,
+  newRowValues?: Record<string, unknown>,
+): boolean {
   if (!row) return true;
   return Object.entries(row).every(([k, v]) => {
     if (k === relationshipField || ID_KEYS.has(k)) return true;
-    return v === null || v === undefined || v === '';
+    if (v === null || v === undefined || v === '') return true;
+    // objectstack#35816 — a value the line started on is the default, not
+    // input: a line the user added and left as it came is still blank.
+    return newRowValues !== undefined
+      && Object.prototype.hasOwnProperty.call(newRowValues, k)
+      && sameValue(v, newRowValues[k]);
   });
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**
@@ -147,7 +166,7 @@ export function buildMasterDetailEditBatch(
     const withFk = (d.rows || []).map((r) => ({ ...r, [d.relationshipField]: parentId }));
     const { toCreate, toUpdate, toDelete } = diffRows(d.original || [], withFk);
     for (const row of toCreate) {
-      if (isBlankRow(row, d.relationshipField)) continue; // skip the ghost/empty line
+      if (isBlankRow(row, d.relationshipField, d.newRowValues)) continue; // skip the ghost/empty line
       // Strip any client-only id so the server generates one.
       const { id: _omit, _id: _omit2, recordId: _omit3, ...clean } = row as any;
       ops.push({ object: d.childObject, action: 'create', data: toWritable(clean, d.childSchema) });
