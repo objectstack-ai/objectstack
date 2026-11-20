@@ -376,8 +376,7 @@ describe("ApprovalEscalation.clock 'working_time' counts the hours on a working 
 
   it("an explicit 'wall_clock' is the default clock: Friday 17:00 + 4 is due Friday 21:00 with a calendar present", async () => {
     const { svc } = workingTimeServiceAt(FRIDAY_1700);
-    const base = input('wc_explicit', 4);
-    const req = await openPending(svc, { ...base, config: { ...base.config, escalation: { ...base.config.escalation, clock: 'wall_clock' as const } } });
+    const req = await openPending(svc, workingTimeInput('wc_explicit', 4, { clock: 'wall_clock' }));
     const row = await svc.getRequest(req.id, SYS);
     expect(row?.sla_due_at).toBe('2026-01-16T21:00:00.000Z');
     expect(row?.sla_due_refusal).toBeUndefined();
