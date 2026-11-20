@@ -658,11 +658,17 @@ export type {
 // `relatedList` must match an inbound lookup / master_detail relationship.
 // `error`, the verdict `defineStack` gives, and on the runtime publish door,
 // which runs no `defineStack`. [#27478] A field group's `relatedList` must
-// name body tables only (`related-list-group-not-body`).
+// name body tables only (`related-list-group-not-body`). [#35897 · #35899] A
+// `relatedLists` object entry's columns must be child fields
+// (`related-list-column-unknown`, error); a built-in tab entry that draws
+// nothing warns (`related-list-attachments-off`, `related-list-stream-part`).
 export {
   validateRelatedListRefs,
   RELATED_LIST_REF_UNKNOWN,
   RELATED_LIST_GROUP_NOT_BODY,
+  RELATED_LIST_COLUMN_UNKNOWN,
+  RELATED_LIST_ATTACHMENTS_OFF,
+  RELATED_LIST_STREAM_PART,
 } from './validate-related-list-refs.js';
 export type {
   RelatedListRefFinding,

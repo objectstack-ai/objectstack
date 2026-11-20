@@ -479,6 +479,7 @@ export * from './record-currency-path';
 // is not. Read by `defineStack`, `@objectstack/lint` and the objectui record page
 // and Studio, so the four cannot drift.
 export * from './related-list-body-table';
+export * from './related-list-entry';
 
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).

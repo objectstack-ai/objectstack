@@ -41,14 +41,12 @@ describe('relatedLists — the declared business order (objectstack#27069)', () 
     ]);
   });
 
-  it('listed relationships come first in the declared order; the rest keep the derived order', () => {
+  it('listed relationships come first in the declared order; of the rest only the body tables stay, in the derived order (objectstack#35897)', () => {
     expect(order({ ...lead, relatedLists: ['task', 'campaign_member'] })).toEqual([
       'task.lead_id',
       'campaign_member.lead_id',
       'note.lead',
       'attachment.lead',
-      'event.who_id',
-      'event.related_to',
     ]);
   });
 
@@ -70,7 +68,6 @@ describe('relatedLists — the declared business order (objectstack#27069)', () 
       'task.lead_id',
       'note.lead',
       'attachment.lead',
-      'campaign_member.lead_id',
     ]);
   });
 
@@ -143,5 +140,69 @@ describe("relatedList: 'primary' as body placement (objectstack#27069)", () => {
   it('a lookup FK with inlineEdit is not primary by default (owned children only)', () => {
     const line = { name: 'quote_line_item', label: 'Line', fields: { quote: { type: 'lookup', reference: 'quote', inlineEdit: true } } };
     expect(deriveRelatedLists(quote, [quote, line])[0].isPrimary).toBe(false);
+  });
+});
+
+/**
+ * objectstack#35897 — a DECLARED `relatedLists` is the tab list: a side list
+ * no entry names is not derived (the authoring surface keeps it flagged);
+ * a body table stays, being the field groups' to place. objectstack#35899 —
+ * the object form's `label` / `columns` win over the FK's keys.
+ */
+describe('relatedLists — which lists show, and an entry\'s title and columns (objectstack#35897, objectstack#35899)', () => {
+  it('undeclared or empty: every list, as before (control)', () => {
+    const all = order(lead);
+    expect(all).toHaveLength(6);
+    expect(order({ ...lead, relatedLists: [] })).toEqual(all);
+  });
+
+  it('the built-in tab names name no child list, even one that points here', () => {
+    const sysActivity = { name: 'sys_activity', label: 'Activity', fields: { lead_id: { type: 'lookup', reference: 'lead' } } };
+    const lists = deriveRelatedLists({ ...lead, relatedLists: ['sys_activity', 'task'] }, [...registry, sysActivity])
+      .map((r) => `${r.childObject}.${r.referenceField}`);
+    expect(lists).toEqual(['task.lead_id', 'note.lead', 'attachment.lead']);
+  });
+
+  it('the authoring surface keeps an unlisted side list, flagged isUnlisted', () => {
+    const lists = deriveRelatedLists({ ...lead, relatedLists: ['task'] }, registry, { includeHidden: true });
+    expect(lists.filter((r) => r.isUnlisted).map((r) => `${r.childObject}.${r.referenceField}`)).toEqual([
+      'event.who_id',
+      'event.related_to',
+      'campaign_member.lead_id',
+    ]);
+    expect(lists.find((r) => r.childObject === 'task')?.isUnlisted).toBeUndefined();
+  });
+
+  it("the object form's label and columns win over the FK's; the bare form keeps the FK's (control)", () => {
+    const quoteLine = {
+      name: 'quote_line',
+      label: 'Quote Line',
+      fields: {
+        lead: {
+          type: 'lookup',
+          reference: 'lead',
+          relatedListTitle: 'FK title',
+          relatedListColumns: ['product', 'quantity', 'unit_price', 'amount'],
+        },
+      },
+    };
+    const reg = [...registry, quoteLine];
+    const [entry] = deriveRelatedLists({ ...lead, relatedLists: [{ list: 'quote_line', label: 'Line items', columns: ['product', 'amount'] }] }, reg);
+    expect(entry).toMatchObject({ childObject: 'quote_line', title: 'Line items', columns: ['product', 'amount'] });
+    const [bare] = deriveRelatedLists({ ...lead, relatedLists: ['quote_line'] }, reg);
+    expect(bare).toMatchObject({ childObject: 'quote_line', title: 'FK title', columns: ['product', 'quantity', 'unit_price', 'amount'] });
+    const [labelOnly] = deriveRelatedLists({ ...lead, relatedLists: [{ list: 'quote_line', label: 'Line items' }] }, reg);
+    expect(labelOnly.columns).toEqual(['product', 'quantity', 'unit_price', 'amount']);
+  });
+
+  it("an object entry's label names every list it names first; a later entry for the same list changes nothing", () => {
+    const lists = deriveRelatedLists(
+      { ...lead, relatedLists: [{ list: 'event.related_to', label: 'Regarding' }, { list: 'event', label: 'Events' }] },
+      registry,
+    );
+    expect(lists.slice(0, 2).map((r) => [r.referenceField, r.title])).toEqual([
+      ['related_to', 'Regarding'],
+      ['who_id', 'Events'],
+    ]);
   });
 });

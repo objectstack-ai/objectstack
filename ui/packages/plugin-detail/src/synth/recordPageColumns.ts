@@ -233,8 +233,10 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
 
   const details: any[] = [];
   const timelineTabs: any[] = [];
-  const relatedLists: any[] = [];
-  const relatedPanels: any[] = [];
+  // The related column keeps the tab order (objectstack#35897: an object's
+  // declared `relatedLists` may place attachments or approvals among its lists;
+  // undeclared, the tabs already run lists, then attachments, then approvals).
+  const related: any[] = [];
   for (const rawItem of items) {
     const item = asNode(rawItem);
     if (!item) return null;
@@ -244,8 +246,7 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     const children = nodeList(item.children);
     if (column === 'details') details.push(...children);
     else if (column === 'timeline') timelineTabs.push(...children);
-    else if (item.value === 'approvals' || item.value === 'attachments') relatedPanels.push(...children);
-    else relatedLists.push(...children);
+    else related.push(...children);
   }
 
   const before = components.slice(0, tabIndex);
@@ -254,7 +255,7 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     strip: before.filter(isStripNode),
     details,
     timeline: [...components.slice(tabIndex + 1), ...timelineTabs],
-    related: [...relatedLists, ...relatedPanels],
+    related,
   };
 }
 

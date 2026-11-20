@@ -247,3 +247,71 @@ describe('defineStack — a field group relatedList names body tables only', () 
     expect(refusal?.issues?.[0]).toContain('matches no inbound relationship');
   });
 });
+
+/**
+ * [#35897 · #35899] A declared `relatedLists` is the record page's tab list,
+ * and an entry may be the object form `{ list, label?, columns? }`. The three
+ * built-in tab names (`sys_attachment`, `sys_approval_request`,
+ * `sys_activity`) name the page's own tabs: bare only, and never judged as a
+ * child. Each refusal row's control differs from it by one key or one entry.
+ */
+describe('ObjectSchema.relatedLists — entries with a title and columns, and the built-in tabs', () => {
+  it('accepts bare names, object entries and the built-in tab names, mixed (control)', () => {
+    const parsed = ObjectSchema.safeParse(lead({
+      relatedLists: [
+        { list: 'rlo_line', label: 'Line items', columns: ['product', 'amount'] },
+        'rlo_task',
+        { list: 'rlo_event.related_to' },
+        'sys_attachment',
+        'sys_approval_request',
+        'sys_activity',
+      ],
+    }));
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.relatedLists?.[0]).toEqual({ list: 'rlo_line', label: 'Line items', columns: ['product', 'amount'] });
+  });
+
+  it.each(['sys_attachment', 'sys_approval_request', 'sys_activity'])(
+    "refuses the object form of the built-in tab '%s', prescribing the bare name",
+    (builtin) => {
+      const parsed = ObjectSchema.safeParse(lead({ relatedLists: [{ list: builtin, columns: ['name'] }] }));
+      expect(parsed.success).toBe(false);
+      const messages = JSON.stringify(parsed.error!.issues);
+      expect(messages).toContain('built-in record-page tabs');
+      expect(ObjectSchema.safeParse(lead({ relatedLists: [builtin] })).success).toBe(true);
+    },
+  );
+
+  it.each([
+    ['an unknown key', { list: 'rlo_task', filter: { done: false } }],
+    ['the wrong word for the title', { list: 'rlo_task', title: 'Tasks' }],
+    ['column objects', { list: 'rlo_task', columns: [{ field: 'name' }] }],
+    ['an empty column list', { list: 'rlo_task', columns: [] }],
+    ['an empty label', { list: 'rlo_task', label: '' }],
+    ['no list', { label: 'Tasks' }],
+    ['a non-snake list', { list: 'Task' }],
+  ])('refuses %s in an object entry', (_label, entry) => {
+    expect(ObjectSchema.safeParse(lead({ relatedLists: [entry] })).success).toBe(false);
+  });
+
+  it('suggests label for title', () => {
+    const parsed = ObjectSchema.safeParse(lead({ relatedLists: [{ list: 'rlo_task', title: 'Tasks' }] }));
+    expect(JSON.stringify(parsed.error!.issues)).toContain('`title` → `label`');
+  });
+});
+
+describe('defineStack — relatedLists object entries and built-in tab names', () => {
+  it('leaves the built-in tab names unjudged, and judges an object entry by its list (control)', () => {
+    expect(() => defineStack(stackOf(lead({
+      relatedLists: ['sys_attachment', { list: 'rlo_task', label: 'Tasks' }, 'sys_approval_request', 'sys_activity'],
+    })))).not.toThrow();
+  });
+
+  it("refuses an object entry whose list matches no inbound relationship, at the entry's index", () => {
+    const refusal = refusalOf(() => defineStack(stackOf(lead({ relatedLists: ['sys_activity', { list: 'rlo_note', columns: ['title'] }] }))));
+    expect(refusal?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(typeof refusal?.status).toBe('number');
+    expect(refusal?.issues).toHaveLength(1);
+    expect(refusal?.issues?.[0]).toContain("Object 'rlo_lead' relatedLists[1] 'rlo_note' matches no inbound relationship");
+  });
+});
