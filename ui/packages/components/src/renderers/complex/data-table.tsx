@@ -1514,6 +1514,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // arrow keys, so it turns the roving-cell navigation on.
   const cellSelection = useGridCellSelection();
   const selectFirst = cellSelection !== null;
+  // objectstack#35685 — the per-cell save needs a per-row save to call. A
+  // select-first table wired with `onBatchSave` alone keeps the staged save
+  // bar, so an edit is never held where nothing can send it.
+  const autosaves = selectFirst && typeof schema.onRowSave === 'function';
   const keyboardNavigation = keyboardNavigationProp || selectFirst;
 
   // 'single' caps the selection at one row (replace-on-select) and drops the
@@ -2830,9 +2834,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const active = editingCellRef.current;
     const snap = editRevertRef.current;
     editRevertRef.current = null;
-    if (revert && active && selectFirst) {
+    if (revert && active && autosaves && !runningSavesRef.current.has(active.rowKey)) {
       // objectstack#35685 — Esc goes back to the stored value, a kept
-      // (refused) edit of this cell included.
+      // (refused) edit of this cell included. While the row's save is on the
+      // wire it only takes back this edit (below), as Esc on the selected cell
+      // leaves a sent value alone.
       discardCellChange(active.rowKey, active.columnKey);
     } else if (revert && active && snap) {
       const { rowKey, columnKey } = active;
@@ -3116,7 +3122,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   /** Ask for a record's autosave; it runs once the render holding the commit lands. */
   const requestAutosave = (rowKey: PendingRowKey) => {
-    if (!selectFirst) return;
+    if (!autosaves) return;
     autosaveDueRef.current.add(rowKey);
     setAutosaveTick((tick) => tick + 1);
   };
@@ -3185,7 +3191,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   };
 
   useEffect(() => {
-    if (!selectFirst || autosaveDueRef.current.size === 0) return;
+    if (!autosaves || autosaveDueRef.current.size === 0) return;
     const due = Array.from(autosaveDueRef.current);
     autosaveDueRef.current.clear();
     for (const rowKey of due) void autosaveRow(rowKey, pendingChanges.get(rowKey));
@@ -3554,7 +3560,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     if (e.key === 'Escape') {
       const rowKey = pendingRowKeyOf(row);
       if (cellNotice) setCellNotice(null);
-      else if (pendingChanges.get(rowKey)?.changes && col.accessorKey in pendingChanges.get(rowKey)!.changes && !runningSavesRef.current.has(rowKey)) {
+      else if (autosaves && pendingChanges.get(rowKey)?.changes && col.accessorKey in pendingChanges.get(rowKey)!.changes && !runningSavesRef.current.has(rowKey)) {
         // objectstack#35685 — a kept (refused) edit: Esc drops it.
         e.preventDefault();
         discardCellChange(rowKey, col.accessorKey);
@@ -3876,10 +3882,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     (Array.isArray(schema.rowActionDefs) && schema.rowActionDefs.length > 0 && schema.onRowActionDef)
   );
   const rowActionsColumnIsEditOnly = editable && !!(schema.onRowSave || schema.onBatchSave) && !rowMenuDeclared;
-  // objectstack#35685 — the select-first model saves each cell as it is
-  // committed, so it never draws the edit-only column: a list ends on its last
-  // data column (objectstack#35554).
-  const drawRowActionsColumn = rowActions && !(selectFirst && rowActionsColumnIsEditOnly);
+  // objectstack#35685 — a table that saves each cell as it is committed never
+  // draws the edit-only column: a list ends on its last data column
+  // (objectstack#35554). A select-first table that stages (no `onRowSave`)
+  // shows it only while a row has pending changes, as objectstack#35684 did.
+  const drawRowActionsColumn = rowActions
+    && !(autosaves && rowActionsColumnIsEditOnly)
+    && !(selectFirst && !autosaves && rowActionsColumnIsEditOnly && !hasPendingChanges);
 
   /**
    * objectstack#28434 — the items ONE row's context menu opens with, or `null`
@@ -4005,7 +4014,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           
           <div className="flex flex-wrap items-center gap-2">
             {/* objectstack#35685 — the select-first model saves each cell, so it draws no save bar. */}
-            {hasPendingChanges && !selectFirst && (
+            {hasPendingChanges && !autosaves && (
               <>
                 <div className="text-sm text-muted-foreground">
                   {t('table.modified', { count: pendingChanges.size })}
@@ -4053,7 +4062,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           {/* The last save's refusal, on a line of its own and said whole —
               one line per reason (objectstack-ai/objectstack#27520). The
               cells it names are marked in the table below. */}
-          {hasPendingChanges && !selectFirst && saveError && (
+          {hasPendingChanges && !autosaves && saveError && (
             <div
               role="alert"
               data-testid="table-save-refusal"
@@ -4496,8 +4505,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
                         !selectFirst && schema.onRowClick && "cursor-pointer",
                         // objectstack#35685 — the select-first model marks the cell, never the row.
-                        !selectFirst && rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
-                        !selectFirst && rowErrored && "bg-destructive/10 dark:bg-destructive/15 ring-1 ring-inset ring-destructive/40",
+                        !autosaves && rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
+                        !autosaves && rowErrored && "bg-destructive/10 dark:bg-destructive/15 ring-1 ring-inset ring-destructive/40",
                         rowClassName && rowClassName(row, rowIndex)
                       )}
                       style={rowStyle ? rowStyle(row, rowIndex) : undefined}
@@ -4736,7 +4745,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // A ring that moves no layout (outline, not border).
                               isSelectedCell && "outline-2 -outline-offset-2 outline-primary",
                               selectFirst && !isFrozen && "relative",
-                              !selectFirst && hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
+                              !autosaves && hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
                               isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
@@ -5142,7 +5151,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       {drawRowActionsColumn && (
                         <TableCell className={cn("text-right", cellClassName)}>
                           <div className="flex items-center justify-end gap-1">
-                            {rowHasChanges && !selectFirst && (schema.onRowSave || schema.onBatchSave) ? (
+                            {rowHasChanges && !autosaves && (schema.onRowSave || schema.onBatchSave) ? (
                               <>
                                 <Button
                                   variant="ghost"

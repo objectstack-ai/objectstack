@@ -2563,10 +2563,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     changes: Record<string, any>,
     row: any,
     err: { currentVersion?: string; currentRecord?: Record<string, unknown> | null },
+    beforeReload?: () => void,
   ): Promise<{ outcome: 'saved'; result: unknown } | { outcome: 'reloaded' }> => {
     const choice = await askRowConflict(buildRowConflict(changes, err));
     if (choice === 'cancel') throw err;
     if (choice === 'reload') {
+      // objectstack#35685 — a writer holding this record as its own write lets
+      // go first, so the reload below reaches the list that holds the rows.
+      beforeReload?.();
       notifyDataChanged({ objectName: resource, recordId: String(id) });
       return { outcome: 'reloaded' };
     }
@@ -2616,18 +2620,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
     // objectstack#35685 — the select-first grid draws this write's answer
     // itself (below), so the list holding it lets the write's bus change go by
-    // instead of reading every row again. Held only for the write; a 409 lets
-    // go first, so its "reload latest" reaches the list.
+    // instead of reading every row again. Held until the write settles, the
+    // 409's "keep mine" write included; only "reload latest" lets go first,
+    // so that reload reaches the list.
     const releaseOwnWrite = hostCellSelection ? ownWrites.hold(objectName, String(id)) : () => {};
     try {
       let answer: unknown;
       try {
         answer = await writeRowGuarded(dataSource, objectName, id, changes, row);
       } catch (err) {
-        releaseOwnWrite();
         if (!isConcurrentUpdateError(err)) throw err;
         // A reload re-reads through the bus; there is nothing of ours to show.
-        const resolved = await resolveRowConflict(dataSource, objectName, id, changes, row, err);
+        const resolved = await resolveRowConflict(dataSource, objectName, id, changes, row, err, releaseOwnWrite);
         if (resolved.outcome === 'reloaded') return;
         answer = resolved.result;
       }

@@ -271,3 +271,42 @@ describe('data-table autosave — control: without the provider the save bar sta
     expect(screen.getByText(/row modified/)).toBeInTheDocument();
   });
 });
+
+describe('data-table autosave — a select-first table with no row save keeps the save bar', () => {
+  // Under the provider the per-cell save needs `onRowSave` to call; a table
+  // wired with `onBatchSave` alone stages as before, so an edit is never held
+  // where nothing can send it.
+  it('a commit stages, the bar and the row buttons show, and Save All sends it', async () => {
+    const onBatchSave = vi.fn(async (_changes: unknown[]) => {});
+    const t = renderTable(undefined as unknown as Save, { onBatchSave });
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await act(async () => {});
+    expect(onBatchSave).not.toHaveBeenCalled();
+    expect(screen.getByText(/row modified/)).toBeInTheDocument();
+    expect(t.container.querySelector('[data-slot="cell-save-state"]')).toBeNull();
+    fireEvent.click(screen.getByText(/Save All/));
+    await waitFor(() => expect(onBatchSave).toHaveBeenCalledTimes(1));
+    expect((onBatchSave.mock.calls[0][0] as Array<{ changes: unknown }>)[0].changes).toEqual({ name: 'Alpha 2' });
+  });
+});
+
+describe('data-table autosave — Esc in the editor while the row is saving', () => {
+  it('takes back only that edit and leaves the sent value alone', async () => {
+    const { onRowSave, calls } = deferredSave();
+    const t = renderTable(onRowSave);
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    // Reopen the cell whose value is on the wire, type, then Esc.
+    fireEvent.click(t.cell(0, 0));
+    fireEvent.change(t.catcher()!, { target: { value: 'X' } });
+    fireEvent.change(t.editor()!, { target: { value: 'Xyz' } });
+    fireEvent.keyDown(t.editor()!, { key: 'Escape' });
+    await act(async () => {});
+    expect(t.cell(0, 0).textContent).toContain('Alpha 2');
+    expect(t.editor()).toBeNull();
+    // The typed-over text was never sent: the one save is the first commit.
+    await act(async () => { calls[0].resolve(); });
+    expect(onRowSave).toHaveBeenCalledTimes(1);
+    expect(onRowSave.mock.calls[0][1]).toEqual({ name: 'Alpha 2' });
+  });
+});

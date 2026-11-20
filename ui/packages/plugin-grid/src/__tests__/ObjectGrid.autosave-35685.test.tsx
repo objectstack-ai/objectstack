@@ -17,7 +17,9 @@
  *      the write is announced on the data-invalidation bus.
  *   2. The `If-Match` of the next save on the row is the version that
  *      answer carried.
- *   3. Control: without `cellSelection` the save bar's row save still
+ *   3. A 409 the user keeps as theirs ("Overwrite anyway") re-reads nothing
+ *      either; "Reload latest" does read again.
+ *   4. Control: without `cellSelection` the save bar's row save still
  *      re-reads the grid.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
@@ -155,6 +157,51 @@ describe('ObjectGrid autosave — one update, this row only (objectstack#35685)'
     await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
     expect(ds.update.mock.calls[1][2]).toEqual({ amount: 11 });
     expect(ds.update.mock.calls[1][3]).toEqual({ ifMatch: '2026-11-20T11:00:01.000Z' });
+  });
+});
+
+describe('ObjectGrid autosave — a 409 kept as mine re-reads nothing either (objectstack#35685)', () => {
+  /** The first write meets a newer version; the "Overwrite anyway" write lands and is announced. */
+  function conflictOnce(ds: any) {
+    const land = ds.update.getMockImplementation();
+    let refused = false;
+    ds.update.mockImplementation(async (object: string, id: string, changes: Record<string, any>, opts?: any) => {
+      if (!refused) {
+        refused = true;
+        throw Object.assign(new Error('Record changed since you read it'), {
+          code: 'CONCURRENT_UPDATE',
+          currentVersion: '2026-11-20T10:30:00.000Z',
+          currentRecord: { ...ds.store[id], name: 'someone else' },
+        });
+      }
+      return land(object, id, changes, opts);
+    });
+  }
+
+  it('Overwrite anyway writes with the current version and reads no row again', async () => {
+    const ds = makeDataSource();
+    conflictOnce(ds);
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    const reads = ds.find.mock.calls.length;
+    await editSelectFirst(container, dataCell(container, 0, 'alpha'), 'mine');
+    fireEvent.click(await screen.findByRole('button', { name: /Overwrite anyway/ }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    expect(ds.update.mock.calls[1][3]).toEqual({ ifMatch: '2026-11-20T10:30:00.000Z' });
+    await screen.findByText('MINE');
+    expect(ds.find.mock.calls.length).toBe(reads);
+  });
+
+  it('control: Reload latest lets go of the record, so the grid reads again', async () => {
+    const ds = makeDataSource();
+    conflictOnce(ds);
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    const reads = ds.find.mock.calls.length;
+    await editSelectFirst(container, dataCell(container, 0, 'alpha'), 'mine');
+    fireEvent.click(await screen.findByRole('button', { name: /Reload latest/ }));
+    await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(reads));
+    expect(ds.update).toHaveBeenCalledTimes(1);
   });
 });
 
