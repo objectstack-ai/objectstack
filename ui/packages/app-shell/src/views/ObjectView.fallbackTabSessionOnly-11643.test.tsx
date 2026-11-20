@@ -128,6 +128,9 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
 }));
 
 import { toast } from 'sonner';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { answerObjectViewRead } from './__tests__/objectViewRoute';
@@ -344,9 +347,9 @@ describe('objectui#11643 — the console-made tab of a view-less object keeps it
     expect(listSchema.label).toBe(FALLBACK_TAB_LABEL);
 
     // Every control that used to reach the toolbar's view write, through both
-    // the schema's and the list's own spelling of it. `onInlineEditChange` no longer reaches
-    // it at all (objectui#5144, ruling E: the toggle is session-only); it stays
-    // here because it must still write nothing.
+    // the schema's and the list's own spelling of it. (`onInlineEditChange`
+    // is no longer handed to the list at all: objectstack#35684 retired the
+    // toggle it reported.)
     act(() => {
       listSchema.onDensityChange('comfortable');
       listSchema.onSortChange(SORT);
@@ -354,7 +357,6 @@ describe('objectui#11643 — the console-made tab of a view-less object keeps it
       listSchema.onColumnStateChange({ widths: { title: 240 } });
       listProps.onSortChange(SORT);
       listProps.onHiddenFieldsChange(['status']);
-      listProps.onInlineEditChange(true);
       listProps.onColumnStateChange({ order: ['status', 'title'] });
     });
     // Past the 300 ms debounce and any round trip it would have started.

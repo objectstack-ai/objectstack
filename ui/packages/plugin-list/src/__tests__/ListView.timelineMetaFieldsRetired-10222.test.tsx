@@ -113,6 +113,8 @@ async function paramsFor(schemaExtra: Record<string, unknown>) {
     viewType: 'timeline',
     columns: ['name'],
     timeline: TIMELINE,
+    // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+    userActions: { editInline: false },
     ...schemaExtra,
   } as unknown as React.ComponentProps<typeof ListView>['schema'];
   render(

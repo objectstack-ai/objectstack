@@ -5475,7 +5475,9 @@ export default class Serve extends Command {
       // only from the app's own `plugins[]`, a cloud-only tier from a cloud
       // runtime. The loop below stays quiet for those (they are known
       // vocabulary, not typos), and the sharing layer then fails closed to
-      // owner-only without a word. Say it once at start-up, in the sentence
+      // owner-only; the runtime logs that once, at the first fallback, which
+      // may be long after boot. So say it here too, once at start-up and
+      // before any request, in the sentence
       // `os validate` and `os verify` print for the same token, and only when
       // nothing in `plugins[]` provides it. A warning, never a refusal: the
       // boot is unchanged.

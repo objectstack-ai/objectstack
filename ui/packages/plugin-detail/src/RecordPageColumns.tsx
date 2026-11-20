@@ -19,8 +19,7 @@ import {
 import { useDetailTranslation } from './useDetailTranslation';
 import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListEnlargedContext } from './relatedListCompact';
 import { ApprovalBandContext, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
-import { RelatedDefaultChangedHint, RelatedFootLine } from './RelatedCardStack';
-import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab } from './RecordTabRow';
+import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab, type RecordTabArrangeEdit } from './RecordTabRow';
 import {
   RECORD_SUMMARY_APPROVALS,
   RECORD_SUMMARY_ATTACHMENTS,
@@ -64,10 +63,11 @@ export interface RecordPageColumnsProps {
    */
   rail?: boolean;
   /**
-   * The reader's arrangement of the related panels (objectstack#27055,
+   * The reader's arrangement of the related lists (objectstack#27055,
    * Targets 7 and 10) — order, hidden — from the host's workspace preference
-   * store, and the setter that keeps a new one. Absent: the reader's choices
-   * hold for this view only.
+   * store, and the setter that keeps a new one; a related tab's menu writes
+   * it (objectstack#35783). Absent: the reader's choices hold for this view
+   * only.
    */
   relatedArrangement?: RelatedArrangement;
   onRelatedArrangementChange?: (next: RelatedArrangement) => void;
@@ -249,6 +249,58 @@ function drawDetailsNodes(nodes: any[]): React.ReactNode {
   });
 }
 
+const LINE_BUTTON =
+  'rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/** 「默认顺序已更新 · 恢复默认」 — the reader's order was laid over an older default (rule 5). */
+const RelatedDefaultChangedHint: React.FC<{ onRestore: () => void }> = ({ onRestore }) => {
+  const { t } = useDetailTranslation();
+  return (
+    <p className="text-xs text-muted-foreground" data-related-default-changed="">
+      {t('detail.relatedDefaultChanged', { defaultValue: 'Default order updated' })}
+      {' · '}
+      <button type="button" className={LINE_BUTTON} onClick={onRestore}>
+        {t('detail.relatedRestoreDefault', { defaultValue: 'Restore default' })}
+      </button>
+    </p>
+  );
+};
+
+/**
+ * The rail's foot line (objectstack#27055 rule 6, objectstack#27241):
+ * 「已隐藏 N 张 · 显示」 and, while the arrangement is not the default one,
+ * 「恢复默认顺序」 (the default order, every list shown). Draws nothing for a
+ * default arrangement. 「更多」 holds the same reset (objectstack#35783).
+ */
+const RelatedFootLine: React.FC<{
+  hiddenCount: number;
+  onShowHidden: () => void;
+  rearranged: boolean;
+  onRestoreDefault: () => void;
+}> = ({ hiddenCount, onShowHidden, rearranged, onRestoreDefault }) => {
+  const { t } = useDetailTranslation();
+  if (hiddenCount === 0 && !rearranged) return null;
+  return (
+    <p className="text-xs text-muted-foreground" data-related-foot-line="">
+      {hiddenCount > 0 && (
+        <span data-related-hidden-line="">
+          {t('detail.relatedHiddenCount', { count: hiddenCount, defaultValue: '{{count}} hidden' })}
+          {' · '}
+          <button type="button" className={LINE_BUTTON} onClick={onShowHidden}>
+            {t('detail.relatedShowHidden', { defaultValue: 'Show' })}
+          </button>
+        </span>
+      )}
+      {hiddenCount > 0 && rearranged && ' · '}
+      {rearranged && (
+        <button type="button" className={LINE_BUTTON} onClick={onRestoreDefault} data-related-restore-default-order="">
+          {t('detail.relatedRestoreDefaultOrder', { defaultValue: 'Restore default order' })}
+        </button>
+      )}
+    </p>
+  );
+};
+
 /**
  * A column stacks its blocks 16 px apart. A related list folded into its
  * stack's empty line stays MOUNTED with its content `hidden`
@@ -425,8 +477,14 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     label: relatedNodeTitle(panelNodes.get(id)),
     count: countOf(id),
   });
+  // objectstack#35783 — a shown list's tab is the reader's to move one place
+  // either way among the lists, or to hide; the other tabs stay where they are.
+  const arrangedTab = (id: RelatedCardId, index: number): RecordTab => ({
+    ...panelTab(id),
+    arrange: { before: index > 0, after: index < resolved.order.length - 1 },
+  });
   const tabs: RecordTab[] = [{ id: RECORD_TAB_OVERVIEW, label: t('detail.recordTabOverview', { defaultValue: 'Overview' }) }];
-  tabs.push(...resolved.order.map(panelTab));
+  tabs.push(...resolved.order.map(arrangedTab));
   if (openBodyTable) tabs.push(openBodyTable);
   if (attachmentsNode) tabs.push({ id: RECORD_SUMMARY_ATTACHMENTS, label: attachmentsTitle, count: attachmentCount });
   if (approvalsNode) tabs.push({ id: RECORD_SUMMARY_APPROVALS, label: approvalsTitle, dot: approvalPending });
@@ -438,9 +496,29 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     if (id === RECORD_TAB_OVERVIEW) onCloseEnlargedRelated?.();
     else onEnlargeRelated?.(id);
   };
+  const editArrangement = (edit: RelatedArrangementEdit) =>
+    onArrangementChange(editRelatedArrangement(defaultOrder, arrangement, edit, now));
+  const arrangeTab = (id: string, edit: RecordTabArrangeEdit) => {
+    if (edit === 'hide') {
+      editArrangement({ kind: 'hide', id });
+      // The open list hidden: its face goes with its tab, back to 概览.
+      if (id === activeTab) onCloseEnlargedRelated?.();
+    } else {
+      editArrangement({ kind: edit === 'move-before' ? 'move-up' : 'move-down', id });
+    }
+  };
   const tabRow =
     onEnlargeRelated && tabs.length + hiddenTabs.length > 1 ? (
-      <RecordTabRow tabs={tabs} hiddenTabs={hiddenTabs} activeId={activeTab} onSelect={selectTab} />
+      <RecordTabRow
+        tabs={tabs}
+        hiddenTabs={hiddenTabs}
+        activeId={activeTab}
+        onSelect={selectTab}
+        onArrange={arrangeTab}
+        onResetArrangement={
+          resolved.rearranged ? () => editArrangement({ kind: 'restore-default-arrangement' }) : undefined
+        }
+      />
     ) : null;
 
   // The provenance line closes the details column in every tier
@@ -451,8 +529,6 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       {footer}
     </div>
   );
-  const editArrangement = (edit: RelatedArrangementEdit) =>
-    onArrangementChange(editRelatedArrangement(defaultOrder, arrangement, edit, now));
   // objectstack#35596 — a rail with nothing to show takes no column: once
   // every card is KNOWN to be absent (no approval waiting, no files, a
   // counted stream with no entries, every list counted with no records — a

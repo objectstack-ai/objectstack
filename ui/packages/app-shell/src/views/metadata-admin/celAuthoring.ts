@@ -26,6 +26,7 @@
  *   2. {@link introspectCelScope}  — the valid field + scope identifiers (autocomplete).
  *   3. {@link testRunCelPredicate} — dry-run a predicate against a sample record.
  *   4. {@link inferCelValueType}   — the value type a formula computes (objectui#1582 follow-up).
+ *   5. {@link inferFormulaReturnDeclaration} — whether that value is provably money, and in which currency.
  *
  * Progressive enhancement (mirrors `preview/capabilityLint.ts`): the engine is
  * loaded LAZILY via dynamic `import()` — it carries the CEL parser (cel-js), so
@@ -223,6 +224,10 @@ interface FormulaModule {
     input: unknown,
     schema?: unknown,
   ) => 'number' | 'text' | 'boolean' | 'date' | 'unknown';
+  inferFormulaReturn?: (
+    input: unknown,
+    fields?: Readonly<Record<string, unknown>>,
+  ) => { returnType?: unknown; currencyConfig?: unknown };
   ExpressionEngine?: {
     evaluate: (
       expr: { dialect: string; source: string },
@@ -746,6 +751,48 @@ export async function inferCelValueType(
       scope: hint.scope ?? 'record',
     });
     return CEL_VALUE_TYPES.includes(res as CelValueType) ? (res as CelValueType) : 'unknown';
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A formula field's declared result as the engine's `inferFormulaReturn`
+ * answers it: `returnType: 'currency'` (with the source amounts' currency in
+ * `currencyConfig`, absent for the tenant default) when the result is provably
+ * money, otherwise the plain inferred type, absent when none is proven.
+ */
+export interface FormulaReturnVerdict {
+  returnType?: string;
+  currencyConfig?: Record<string, unknown>;
+}
+
+/**
+ * Ask the engine's `inferFormulaReturn` whether `source` computes money, over
+ * the host object's declared field map (name → field definition, passed
+ * unchanged). The CEL type alone never says so — `record.amount * 0.1` types
+ * a plain `double` — so this is the one verdict that can PROVE a `currency`
+ * result, or withdraw one.
+ *
+ * Returns `null` — "no verdict", never "not money" — for empty input, or when
+ * the engine (or its `inferFormulaReturn` export) is unavailable or throws.
+ */
+export async function inferFormulaReturnDeclaration(
+  source: string,
+  fields: Readonly<Record<string, unknown>>,
+): Promise<FormulaReturnVerdict | null> {
+  if (!source || !source.trim()) return null;
+  try {
+    const mod = await loadFormula();
+    if (!mod?.inferFormulaReturn) return null;
+    const res = mod.inferFormulaReturn(source, fields);
+    if (!res || typeof res !== 'object') return null;
+    const verdict: FormulaReturnVerdict = {};
+    if (typeof res.returnType === 'string') verdict.returnType = res.returnType;
+    if (res.currencyConfig && typeof res.currencyConfig === 'object') {
+      verdict.currencyConfig = { ...(res.currencyConfig as Record<string, unknown>) };
+    }
+    return verdict;
   } catch {
     return null;
   }

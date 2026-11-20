@@ -7297,6 +7297,104 @@
           "ref": "#35597"
         }
       ]
+    },
+    {
+      "id": "records-forms.related-tab-arrangement",
+      "title": "A reader moves a related list's tab left or right and hides it from the tab's own menu, and 「更多」's 「恢复默认顺序」 brings the default back — kept per reader and object, in a drawer too; 概览, 附件, 审批 and 动态 never move",
+      "since": "v18.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "a showcase_account record whose synthesized page has at least three side related lists (the Northwind account: contacts, opportunities, invoices and the rest the showcase derives); the zh-CN console (语言 中文) so the menu reads 左移 / 右移 / 隐藏"
+        ]
+      },
+      "steps": [
+        "open the Northwind account's full record page at 1440×900 and read the tab row's order",
+        "open the second related list's tab, click it again to open its menu, choose 左移; then open the menu again and choose 右移",
+        "open another related list's tab, open its menu and choose 隐藏; open 「更多」 and read its hidden lists",
+        "reload the page and read the tab row and 「更多」",
+        "open 「更多」 and choose 恢复默认顺序; read the tab row",
+        "open the 概览, 附件, 审批 (while a request exists) and 动态 tabs in turn and click each again",
+        "open the same account in the record drawer, hide one list there from its tab's menu, then choose 恢复默认顺序 from the drawer's 「更多」"
+      ],
+      "acceptance": [
+        {
+          "clause": "左移 and 右移 move the open list's tab one place among the related lists, and the menu's way out at either end is disabled",
+          "oracle": "dom",
+          "verify": "after 左移 the tab stands one place earlier in the row's role=tab order, after 右移 back; on the first list's tab 左移 is aria-disabled, on the last 右移",
+          "evidence": "the tab row read before and after each move"
+        },
+        {
+          "clause": "隐藏 takes the open list off the row into 「更多」's hidden lists and returns the page to 概览",
+          "oracle": "dom",
+          "verify": "the hidden list has no role=tab on the row; 「更多」 lists it under 已隐藏 (data-record-tab-hidden); 概览 is aria-selected",
+          "evidence": "the 「更多」 screenshot"
+        },
+        {
+          "clause": "the arrangement is the reader's, kept per object across a reload, the same store the related cards used (#27055)",
+          "oracle": "dom",
+          "verify": "after the reload the moved order and the hidden list stand as they were left",
+          "evidence": "the tab row after the reload"
+        },
+        {
+          "clause": "「更多」's 恢复默认顺序 restores the default order and shows every hidden list; in the default arrangement the entry is absent",
+          "oracle": "dom",
+          "verify": "after 恢复默认顺序 the row reads the order of steps[0] with no list hidden, and 「更多」 (if drawn at all) holds no 恢复默认顺序",
+          "evidence": "the tab row after the reset"
+        },
+        {
+          "clause": "概览, 附件, 审批 and 动态 are fixed: open, a second click opens no menu",
+          "oracle": "dom",
+          "verify": "none of the four tabs carries aria-haspopup, and no [data-record-tab-arrange-menu] opens",
+          "evidence": "one screenshot per tab"
+        },
+        {
+          "clause": "the drawer, which has no rail, moves, hides and resets the same way from its tab row",
+          "oracle": "dom",
+          "verify": "the drawer's 「更多」 holds 恢复默认顺序 after the hide, and choosing it shows the list again",
+          "evidence": "the drawer screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha",
+          "oracle": "test",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx and ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts from ui/ with vitest, and ui/e2e/record-tabs-rail-35595.spec.ts with Playwright (Chromium); each reports ≥1 test and 0 failed",
+          "evidence": "the vitest and Playwright summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a menu on 概览, 附件, 审批 or 动态 is a FAIL: those tabs never move or hide",
+        "an arrangement that is gone after a reload is a FAIL: it is kept per reader and object",
+        "a drawer with a hidden list and no way to show it again is a FAIL"
+      ],
+      "traps": [
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx (move, hide, reset, the drawer, the fixed tabs), ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts (the merge rules), ui/e2e/record-tabs-rail-35595.spec.ts (move, hide and reset with real pointer events in Chromium); no live spec drives the stored preference across a reload"
+      },
+      "source": [
+        "ui/packages/plugin-detail/src/RecordTabRow.tsx#RecordTabRow",
+        "ui/packages/plugin-detail/src/RecordPageColumns.tsx#RecordPageColumns",
+        "ui/packages/plugin-detail/src/synth/relatedArrangement.ts#editRelatedArrangement",
+        "#35783"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-20",
+          "change": "initial — reader arrangement moved from the related cards to the tabs (#35783, after #35595 retired the cards), read from source on the PR branch; no live run made",
+          "ref": "#35783"
+        }
+      ]
     }
   ]
 }
