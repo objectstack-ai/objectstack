@@ -36,7 +36,7 @@
 
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, GridFieldMetadata } from '@object-ui/types';
-import { resolveAffordance } from '@object-ui/core';
+import { resolveAffordance, type SchemaLike } from '@object-ui/core';
 import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import { cn } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
@@ -292,7 +292,7 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
 
   if (!session) return null;
 
-  const lineSource = { objectSchema: childSchema, objectName, perms };
+  const lineSource = { objectSchema: childSchema as SchemaLike | null, objectName, perms };
   const heading = title || (childSchema as any)?.pluralLabel || (childSchema as any)?.label || objectName;
   const labelOf = (field?: string) =>
     (field && (derived?.columns.find((c) => c.name === field)?.label || (childSchema?.fields as any)?.[field]?.label)) || field;
