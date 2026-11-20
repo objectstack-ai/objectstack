@@ -703,6 +703,19 @@ export interface ListViewProps {
    * notification. A HOST prop, never a schema key.
    */
   onPageChange?: (page: number) => void;
+  /**
+   * Fields whose conditions in `schema.filter` the HOST draws itself as its
+   * own tags (objectstack#35727) — the data page's 「Filtered by」 row for the
+   * conditions its address carries. The list still filters on them; its
+   * condition row draws no locked chip for them, so each condition shows
+   * once, and 「Reset」 (which never clears the view's filter) is not offered
+   * for them.
+   *
+   * A HOST prop, never a schema key: which surface draws a condition is the
+   * page's layout, not anything an author writes. Absent ⇒ every condition of
+   * the view's filter is a locked chip, exactly as before.
+   */
+  hostDrawnConditionFields?: ReadonlyArray<string>;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -2133,6 +2146,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   recordOpen,
   page,
   onPageChange,
+  hostDrawnConditionFields,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
   // The switcher can be enabled either by the host component (prop) or by
@@ -7868,7 +7882,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           {/* objectstack#35549 / #35550: sort chips, the view's own
               conditions as locked chips, the reader's filter chips, then
               「Add filter」 and 「Reset」. It draws nothing while there is
-              nothing to show, so the slot stays empty and takes no height. */}
+              nothing to show, so the slot stays empty and takes no height.
+              objectstack#35727: a condition the host draws as its own tag is
+              no locked chip here, and 「Reset」 is drawn only while the
+              reader has something of their own to reset. */}
           <ConditionChipRow
             sort={currentSort}
             sortFields={sortFields}
@@ -7877,10 +7894,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             filterFields={filterFields}
             onFiltersChange={applyPanelFilters}
             viewFilter={authoredFilter}
+            hostDrawnFields={hostDrawnConditionFields}
+            dataSource={dataSource}
             shownFields={shownFieldNames}
             renderAdvanced={advancedFilterBuilder}
-            onReset={handleResetConditions}
-            resetDisabled={!conditionsDifferFromView}
+            onReset={conditionsDifferFromView ? handleResetConditions : undefined}
           />
         </div>
       )}
