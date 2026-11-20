@@ -31,6 +31,8 @@ import { RestServer } from './rest-server';
 import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 const ORG = DEFAULT_ORGANIZATION_ID;
+/** A calendar code (a record's `code` column), never an error code. */
+const CN_STANDARD = 'cn_standard';
 /** An organization with no `localization.timezone`. */
 const ZONELESS_ORG = 'org_zoneless';
 
@@ -151,10 +153,10 @@ describe('sys_work_calendar through the create door (ADR-0157 D1, D7)', () => {
   });
 
   it('a create that leaves timezone out stores the organization zone', async () => {
-    const { status, json } = await post(ctx, 'sys_work_calendar', calendar('cn_standard'));
+    const { status, json } = await post(ctx, 'sys_work_calendar', calendar(CN_STANDARD));
     expect(status).toBe(201);
     const stored: any = await ctx.engine.findOne('sys_work_calendar', { where: { id: json.id }, context: { isSystem: true, tenantId: ORG } as any });
-    expect(stored).toMatchObject({ code: 'cn_standard', timezone: 'Asia/Shanghai', organization_id: ORG });
+    expect(stored).toMatchObject({ code: CN_STANDARD, timezone: 'Asia/Shanghai', organization_id: ORG });
   });
 
   it('CONTROL: with no organization zone to take, the blank is refused as required', async () => {
