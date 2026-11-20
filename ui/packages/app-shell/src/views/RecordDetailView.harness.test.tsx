@@ -3049,6 +3049,9 @@ describe('RecordDetailView.recordEditState-35599', () => {
     await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
     fireEvent.change(summaryInput(view.container)!, { target: { value: 'Inline' } });
     expect(headerButton('Edit')?.disabled).toBe(false);
+    // The question is the page's own dialog, never the browser's.
+    const nativeConfirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', nativeConfirm);
     fireEvent.click(headerButton('Edit')!);
     const dialog = await waitFor(() => {
       const el = document.querySelector('[data-record-edit-discard-inline]') as HTMLElement | null;
@@ -3056,6 +3059,7 @@ describe('RecordDetailView.recordEditState-35599', () => {
       return el!;
     });
     expect(dialog.textContent).toContain('Discard changes?');
+    expect(nativeConfirm).not.toHaveBeenCalled();
     // Keep editing: the dialog closes, the inline draft stays, no edit state.
     fireEvent.click(Array.from(dialog.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Keep editing')!);
     await waitFor(() => expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull(), { timeout: 5000 });
@@ -3073,6 +3077,7 @@ describe('RecordDetailView.recordEditState-35599', () => {
     await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
     expect(detailInputValues(view.container)).not.toContain('Inline');
     expect(headerButton('Save')).not.toBeNull();
+    expect(nativeConfirm).not.toHaveBeenCalled();
     expect(view.dataSource.update).not.toHaveBeenCalled();
     expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
   });

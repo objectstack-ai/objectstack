@@ -5638,10 +5638,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           controlRef={recordEditControlRef}
           enterRef={recordEditEnterRef}
           onEnter={enterRecordEditState}
-          discardInlineTitle={t('form.discardTitle')}
-          discardInlineMessage={t('detail.discardInlineEditsMessage')}
-          discardLabel={t('form.discard')}
-          keepEditingLabel={t('form.keepEditing')}
+          discardInlineTitle={t('form.discardTitle', { defaultValue: 'Discard changes?' })}
+          discardInlineMessage={t('detail.discardInlineEditsMessage', {
+            defaultValue: 'You have unsaved changes to this record\'s fields. Discard them to edit the whole record, or keep editing and save them first.',
+          })}
+          discardLabel={t('form.discard', { defaultValue: 'Discard' })}
+          keepEditingLabel={t('form.keepEditing', { defaultValue: 'Keep editing' })}
           onSavingChange={setRecordEditSaving}
           dataSource={dataSource}
           objectName={objectName}
