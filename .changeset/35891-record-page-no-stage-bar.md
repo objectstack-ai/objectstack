@@ -2,7 +2,7 @@
 '@object-ui/plugin-detail': minor
 '@object-ui/components': minor
 '@object-ui/i18n': patch
-'@objectstack/lint': patch
+'@objectstack/lint': minor
 ---
 
 feat(plugin-detail): the default record page draws no stage bar and no key-field strip; the stage moves from the header's status tag
