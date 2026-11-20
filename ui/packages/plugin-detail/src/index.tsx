@@ -227,6 +227,10 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
+// objectstack#35599 — the record page's edit state draws its body tables as
+// the host's editor through this slot.
+export { RecordBodyTableEditorSlotContext } from './relatedListCompact';
+export type { RecordBodyTableEditorSlot } from './relatedListCompact';
 // objectstack#27056 — for the app-shell record drawer's prefetch: it warms
 // the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn } from './useRelatedCounts';

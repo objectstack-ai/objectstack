@@ -15,29 +15,29 @@
  *
  * Pieces, each consumed by `RecordDetailView`:
  *
- *   - {@link swapBodyTablesForEditors} — in the edit state each body-table
- *     `record:related_list` node of the page is drawn as a
- *     `record:body_table_editor` node instead, which is `@object-ui/plugin-form`'s
- *     `RecordBodyTableEditor`. A host-written node: the type is registered in
- *     `record-body-table-editor-renderer.tsx`, out of the public contract, and
- *     no page author writes it.
  *   - {@link RecordEditStateController} — mounted under the page's
  *     `InlineEditProvider`; enters the session, owns Save / Cancel (the header's
  *     two buttons call it), places a refused save's reasons on the field or line
  *     they are about, and registers the unsaved edits with the shell's
- *     leave guard.
+ *     leave guard. While the state is open it draws each body table as
+ *     `@object-ui/plugin-form`'s `RecordBodyTableEditor`, through
+ *     `@object-ui/plugin-detail`'s `RecordBodyTableEditorSlotContext`: the page
+ *     keeps its `record:related_list` nodes, and each one whose relationship
+ *     is a body table renders the editor in its place. The editor is a host
+ *     element, never a registered node type a page could carry.
  *   - {@link bodyTablesSaveTogether} — whether the batch path can carry the
  *     tables at all (the card's item 5, see there).
  *   - {@link withDetailWritesWithheld} — ruling A's client half: a locked
  *     record's master-detail children draw no New / Edit / Delete.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { runBatchTransaction } from '@object-ui/core';
 import {
   RecordEditSessionContext,
   attributeRecordEditRefusal,
   buildRecordEditBatch,
+  RecordBodyTableEditor,
   type BodyTableEditHandle,
   type RecordEditSession,
 } from '@object-ui/plugin-form';
@@ -52,64 +52,9 @@ import {
   AlertDialogTitle,
 } from '@object-ui/components';
 import { useInlineEdit, type RelatedRecordActionsValue } from '@object-ui/react';
+import { RecordBodyTableEditorSlotContext, type RecordBodyTableEditorSlot } from '@object-ui/plugin-detail';
 import { canServeApiOperation } from '@objectstack/spec/data';
 import { useRegisterUnsavedEdits } from '../chrome/unsavedEdits.js';
-// Registers `record:body_table_editor` (the node `swapBodyTablesForEditors` draws).
-import './record-body-table-editor-renderer.js';
-
-/** The node type a body table is drawn as in the edit state. */
-export const BODY_TABLE_EDITOR_TYPE = 'record:body_table_editor';
-
-type PageNode = Record<string, any>;
-
-const isNode = (v: unknown): v is PageNode => !!v && typeof v === 'object' && !Array.isArray(v);
-
-/**
- * The page with each body table (`record:related_list` whose `child.fk` id is
- * in `bodyTableIds`) replaced by an editor node, everything else as it was.
- * Pure; hands the page back untouched when there is nothing to swap.
- */
-export function swapBodyTablesForEditors<T>(page: T, bodyTableIds: ReadonlySet<string>): T {
-  if (bodyTableIds.size === 0) return page;
-  const walk = (value: unknown): unknown => {
-    if (Array.isArray(value)) {
-      let changed = false;
-      const next = value.map((item) => {
-        const w = walk(item);
-        if (w !== item) changed = true;
-        return w;
-      });
-      return changed ? next : value;
-    }
-    if (!isNode(value)) return value;
-    if (value.type === 'record:related_list') {
-      const props = { ...value, ...(isNode(value.properties) ? value.properties : {}) };
-      const id = `${props.objectName}.${props.relationshipField}`;
-      if (typeof props.objectName === 'string' && typeof props.relationshipField === 'string' && bodyTableIds.has(id)) {
-        const title = typeof props.title === 'string' ? props.title : undefined;
-        return {
-          type: BODY_TABLE_EDITOR_TYPE,
-          ...(value.id !== undefined ? { id: value.id } : {}),
-          properties: {
-            objectName: props.objectName,
-            relationshipField: props.relationshipField,
-            ...(title ? { title } : {}),
-          },
-        };
-      }
-      return value;
-    }
-    let changed = false;
-    const out: PageNode = {};
-    for (const [k, v] of Object.entries(value)) {
-      const w = walk(v);
-      if (w !== v) changed = true;
-      out[k] = w;
-    }
-    return changed ? out : value;
-  };
-  return walk(page) as T;
-}
 
 /**
  * Can ONE batch carry this record's body tables (the card's item 5)?
@@ -220,6 +165,8 @@ export interface RecordEditStateControllerProps {
   recordId: string | number | null | undefined;
   /** Re-read the record after a save. */
   refresh: () => void | Promise<void>;
+  /** The page's body tables, by relationship id (`CHILD_OBJECT.FK_FIELD`). */
+  bodyTableIds: ReadonlySet<string>;
   /** The body tables are edited (one batch can carry them) — see {@link bodyTablesSaveTogether}. */
   bodyTablesEditable: boolean;
   /** The page draws body tables that stay read-only (the batch cannot carry them). */
@@ -246,6 +193,7 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
   objectName,
   recordId,
   refresh,
+  bodyTableIds,
   bodyTablesEditable,
   bodyTablesReadOnly,
   readOnlyNotice,
@@ -275,6 +223,23 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
     },
   }));
   const session: RecordEditSession = { register: api.register, reportDirty: api.reportDirty, saving };
+
+  // The body tables drawn as editors while the state is open (and one batch
+  // can carry them). Keyed on the ids' content, not the set's identity: the
+  // page computes the set afresh each render, and every related list on the
+  // page reads this value.
+  const editedTablesKey = active && bodyTablesEditable ? [...bodyTableIds].sort().join('\n') : '';
+  const editorSlot = useMemo<RecordBodyTableEditorSlot | null>(
+    () => (editedTablesKey
+      ? {
+          ids: new Set(editedTablesKey.split('\n')),
+          render: ({ objectName: child, relationshipField, title }) => (
+            <RecordBodyTableEditor objectName={child} relationshipField={relationshipField} title={title} />
+          ),
+        }
+      : null),
+    [editedTablesKey],
+  );
 
   // Enter the record-level session once the edit state opens (the provider's
   // `canEdit` admits it on the render that set `active`), and leave the edit
@@ -391,7 +356,9 @@ export const RecordEditStateController: React.FC<RecordEditStateControllerProps>
 
   return (
     <RecordEditSessionContext.Provider value={active && bodyTablesEditable ? session : null}>
-      {children}
+      <RecordBodyTableEditorSlotContext.Provider value={editorSlot}>
+        {children}
+      </RecordBodyTableEditorSlotContext.Provider>
       <AlertDialog open={confirmDiscard} onOpenChange={(open) => { if (!open) setConfirmDiscard(false); }}>
         <AlertDialogContent data-record-edit-discard-inline="">
           <AlertDialogHeader>

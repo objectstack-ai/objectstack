@@ -7,54 +7,17 @@
  */
 
 /**
- * The record page edit state's pure pieces (objectstack#35599): the body-table
- * swap, the item-5 decision (can one batch carry the tables), and ruling A's
- * client half (a locked record's detail children draw no write actions).
+ * The record page edit state's pure pieces (objectstack#35599): the item-5
+ * decision (can one batch carry the tables), and ruling A's client half (a
+ * locked record's detail children draw no write actions).
  */
 
 import { describe, it, expect } from 'vitest';
 import {
-  BODY_TABLE_EDITOR_TYPE,
   bodyTablesSaveTogether,
   isMasterDetailChild,
-  swapBodyTablesForEditors,
   withDetailWritesWithheld,
 } from './recordEditState';
-
-const page = {
-  type: 'record:page',
-  regions: [
-    {
-      name: 'main',
-      components: [
-        { type: 'record:details', properties: { columns: 2 } },
-        { type: 'record:related_list', id: 'lines', properties: { objectName: 'order_line', relationshipField: 'order', title: 'Lines' } },
-        { type: 'record:related_list', properties: { objectName: 'order_note', relationshipField: 'order' } },
-      ],
-    },
-  ],
-};
-
-describe('swapBodyTablesForEditors', () => {
-  it('replaces only the named body tables with editor nodes, keeping id and title', () => {
-    const out = swapBodyTablesForEditors(page, new Set(['order_line.order']));
-    const comps = out.regions[0].components;
-    expect(comps[1]).toEqual({
-      type: BODY_TABLE_EDITOR_TYPE,
-      id: 'lines',
-      properties: { objectName: 'order_line', relationshipField: 'order', title: 'Lines' },
-    });
-    expect(comps[0]).toBe(page.regions[0].components[0]);
-    expect(comps[2]).toBe(page.regions[0].components[2]);
-    // Pure: the input page is untouched.
-    expect(page.regions[0].components[1].type).toBe('record:related_list');
-  });
-
-  it('hands the same page back when nothing matches', () => {
-    expect(swapBodyTablesForEditors(page, new Set())).toBe(page);
-    expect(swapBodyTablesForEditors(page, new Set(['other.fk']))).toBe(page);
-  });
-});
 
 describe('bodyTablesSaveTogether — item 5: the batch is a bulk surface', () => {
   const ids = new Set(['order_line.order']);

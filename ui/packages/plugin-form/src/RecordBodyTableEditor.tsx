@@ -12,8 +12,8 @@
  * saved together with the record's own fields in ONE batch by the page host.
  *
  * The record page draws its body tables as `record:related_list` nodes. In its
- * edit state the host swaps each one for this editor and owns the save: the
- * editor holds its rows, and hands the host a snapshot (rows, the rows as
+ * edit state the host draws this editor in each one's place and owns the
+ * save: the editor holds its rows, and hands the host a snapshot (rows, the rows as
  * loaded, the child schema) through {@link RecordEditSessionContext}. The host
  * folds the record's field draft and every table's snapshot into one
  * `POST /api/v1/batch` with {@link buildRecordEditBatch} — the same

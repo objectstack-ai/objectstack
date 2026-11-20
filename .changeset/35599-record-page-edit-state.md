@@ -2,7 +2,7 @@
 '@objectstack/plugin-approvals': patch
 '@object-ui/plugin-form': patch
 '@object-ui/i18n': patch
-'@object-ui/cli': patch
+'@object-ui/plugin-detail': patch
 ---
 
 feat: edit a record and its line tables together, and lock a record's lines while an approval locks the record
@@ -16,6 +16,6 @@ Metadata-protocol: none
 
 **`@object-ui/i18n`** adds `detail.bodyTableRow`, `detail.bodyTablesReadOnlyBulk` and `detail.discardInlineEditsMessage` to every built-in pack.
 
-**`@object-ui/cli`**'s known schema types (regenerated) include `record:body_table_editor`, so a page carrying it draws no "Unknown schema type" warning.
+**`@object-ui/plugin-detail`** exports `RecordBodyTableEditorSlotContext`: while a host provides it, a `record:related_list` whose relationship id (`CHILD_OBJECT.FK_FIELD`) is in the slot's set draws the host's element in its place instead of the read-only list. The record page's edit state draws its body-table editors through it; no new node type is registered.
 
 In the console, Edit on a record page that draws master-detail body tables now opens the page's edit state: the fields become inputs, the body tables editable lines, and one Save writes all of it in one batch. Per-field inline edit stays on every record page, those included, and saves the record alone through its save bar. One mode runs at a time: the edit state offers no per-field inline edit, and pressing Edit while inline changes are unsaved first asks whether to discard them.

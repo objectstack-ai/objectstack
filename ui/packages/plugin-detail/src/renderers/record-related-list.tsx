@@ -41,7 +41,7 @@ import {
 } from '@object-ui/core';
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
-import { RecordBodyTablesContext, RelatedListCompactContext, RelatedListTotalReportContext } from '../relatedListCompact';
+import { RecordBodyTableEditorSlotContext, RecordBodyTablesContext, RelatedListCompactContext, RelatedListTotalReportContext } from '../relatedListCompact';
 import { relatedCardId } from '../synth/relatedArrangement';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
@@ -918,8 +918,31 @@ const NoParentRecord: React.FC<{
  * "declared but not reached" shape in miniature.
  */
 export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps> = elementDataSourceBlock((props) => (
-  <RecordRelatedListBound {...props} />
+  <RecordRelatedListOrEditor {...props} />
 ));
+
+/**
+ * objectstack#35599 — a record page in its edit state draws each body table it
+ * edits as the host's editor (`RecordBodyTableEditorSlotContext`), in this
+ * block's place and before either binding: the editor reads the page's record
+ * and its lines itself. Every other list, and every list outside an open edit
+ * state, is the bound block below.
+ */
+const RecordRelatedListOrEditor: React.FC<RecordRelatedListRendererProps> = (props) => {
+  const slot = React.useContext(RecordBodyTableEditorSlotContext);
+  const objectName = props.schema?.objectName;
+  const relationshipField = props.schema?.relationshipField;
+  if (
+    slot
+    && typeof objectName === 'string'
+    && typeof relationshipField === 'string'
+    && slot.ids.has(`${objectName}.${relationshipField}`)
+  ) {
+    const title = props.schema?.title;
+    return <>{slot.render({ objectName, relationshipField, title: typeof title === 'string' ? title : undefined })}</>;
+  }
+  return <RecordRelatedListBound {...props} />;
+};
 
 /** The block bound to its parent record and its child rows — see above. */
 const RecordRelatedListBound: React.FC<RecordRelatedListRendererProps> = (props) => {

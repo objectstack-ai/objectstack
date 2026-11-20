@@ -38,7 +38,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
-import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, swapBodyTablesForEditors, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
+import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -5184,6 +5184,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // included). `null` for an authored
   // page and for a page whose strip the partition cannot read, which is drawn
   // as written, tabs and all.
+  const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(renderedPage) : null;
   // The child objects' field definitions this view already holds, for the
   // related counts asked up front (objectstack#27056): the relationship's
   // arity is read off them instead of a schema read first.
@@ -5206,18 +5207,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#35599 — the edit state's two inputs read off the body tables:
   // Edit enters it on a page that draws one (and is otherwise the record form),
   // and each table is drawn as an editor only when one batch can carry it
-  // (item 5, `bodyTablesSaveTogether`). The page the layout draws is the
-  // rendered page with those tables swapped; every other read of the page
-  // (highlights, tabs, approvals) keeps reading `renderedPage`.
+  // (item 5, `bodyTablesSaveTogether`). The page itself is not rewritten: the
+  // edit state's controller draws the editors in the body tables' places
+  // (`RecordBodyTableEditorSlotContext`).
   // A state update during render (not an effect: no hook may run here), so
   // the header's Edit never reads a stale verdict; React re-renders before
   // committing, and the update is a no-op once the value agrees.
   if (recordEditEligible !== bodyTableIds.size > 0) setRecordEditEligible(bodyTableIds.size > 0);
   const bodyTablesEditable = bodyTablesSaveTogether(objectDef, objects, bodyTableIds);
-  const layoutPage = recordEditState && bodyTablesEditable
-    ? swapBodyTablesForEditors(renderedPage, bodyTableIds)
-    : renderedPage;
-  const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(layoutPage) : null;
 
   // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
   // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
@@ -5649,6 +5646,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           objectName={objectName}
           recordId={pureRecordId}
           refresh={notifyRecordChanged}
+          bodyTableIds={bodyTableIds}
           bodyTablesEditable={bodyTablesEditable}
           bodyTablesReadOnly={bodyTableIds.size > 0 && !bodyTablesEditable}
           readOnlyNotice={t('detail.bodyTablesReadOnlyBulk')}
@@ -5867,7 +5865,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                       {/* A page drawn as its strip is drawn as written: the
                           reader's arrangement belongs to the right column and
                           the tab row (objectstack#27524). */}
-                      <SchemaRenderer schema={withPageTabsUrlSync(layoutPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
