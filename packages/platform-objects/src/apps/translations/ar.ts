@@ -95,6 +95,8 @@ export const ar: TranslationData = {
         nav_settings_localization: { label: 'الترجمة والإعدادات المحلية' },
         nav_exchange_rates: { label: 'أسعار الصرف' },
         nav_units_of_measure: { label: 'وحدات القياس' },
+        nav_work_calendars: { label: 'تقويمات العمل' },
+        nav_work_calendar_exceptions: { label: 'استثناءات التقويم' },
         nav_settings_company: { label: 'الشركة' },
         nav_settings_mail: { label: 'إرسال البريد' },
         nav_settings_sms: { label: 'إرسال الرسائل النصية' },

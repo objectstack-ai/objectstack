@@ -313,6 +313,7 @@ describe('the calendar objects\' write door (ADR-0157 D2, D7, D10)', () => {
   });
 
   it('refuses an off row with periods and an on row without them (D10)', async () => {
+    await insertCalendar({ id: 'cal_cn' }); // the calendar the rows name, so the CONTROL lands
     const insertException = (row: Row) => engine.insert(WORK_CALENDAR_EXCEPTION_OBJECT, row, { context: { isSystem: true } });
     const off = await refusal(insertException({ id: 'x1', calendar: 'cal_cn', date: '2026-10-01', kind: 'off', periods: '09:00-12:00' }));
     expect(resolveThrownHttpError(off)).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
