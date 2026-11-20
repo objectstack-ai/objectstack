@@ -1944,9 +1944,9 @@ export interface PageHeaderActionsProps {
    * live, in place of an `actions` list. Only the boolean `true` opts in.
    */
   placedActions?: unknown;
-  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to 3. */
+  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default: 1 in a record page's one-row header (`defaultMaxVisible`), 3 on any other header. */
   maxVisible?: unknown;
-  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to 1. */
+  /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`, the host's Edit included), 1 on any other header. */
   mobileMaxVisible?: unknown;
   /** Drawn in place of the action row when no action survives the gates. */
   emptySlot?: React.ReactNode;
@@ -2572,8 +2572,10 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     //   4. a host button (the record page's Edit) is not one of the page's
     //      actions: it takes no slot and never folds (objectui#12617).
     // `maxVisible` / `mobileMaxVisible` are overridable on the page:header
-    // schema and default to 3 / 1. This keeps the header from drowning in 4–5
-    // buttons on every record page.
+    // schema. Unset, `maxVisible` is 1 in a record page's one-row header and 3
+    // on any other header; `mobileMaxVisible` is 2 in a phone's record bottom
+    // bar (the host's Edit included) and 1 on any other header. This keeps the
+    // header from drowning in 4–5 buttons on every record page.
     //
     // `readMax` enforces the SPEC's value domain rather than a laxer renderer
     // tolerance (objectui#5006). Measured on `ComponentPropsMap['page:header']`
@@ -3628,7 +3630,7 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
     { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer — the contract rejects 0 and fractional values. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
-    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
+    { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer; when unset it is 2 in a record page\'s bottom action bar on a phone (counting the host\'s Edit) and 1 on any other header. The desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });
 

@@ -3544,7 +3544,7 @@
         {
           "name": "mobileMaxVisible",
           "type": "number",
-          "description": "The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1; the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged."
+          "description": "The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer; when unset it is 2 in a record page's bottom action bar on a phone (counting the host's Edit) and 1 on any other header. The desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged."
         }
       ]
     },
