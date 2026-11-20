@@ -171,7 +171,8 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
     fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
     await waitFor(() => expect(reported()).toEqual(['density']));
 
-    fireEvent.click(within(content).getByTestId('options-row-height-medium'));
+    // The view's `medium` is the menu's Comfortable.
+    fireEvent.click(within(content).getByTestId('options-row-height-comfortable'));
     await waitFor(() => expect(reported()).toEqual([]));
   });
 
