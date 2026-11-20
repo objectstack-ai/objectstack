@@ -66,11 +66,7 @@ import { storagePermissionSets } from './permission-sets.js';
  */
 const enSource: TranslationData = { objects: enObjects };
 
-/**
- * The translations of the permission set this service declares
- * (`permissions`) are hand-authored beside the generated objects
- * (`permission-sets.ts` says why), outside `withSourceFallback`'s inputs.
- */
+/** The hand-authored `permissions` group sits outside `withSourceFallback`'s inputs. */
 const withSets = (locale: string, data: TranslationData): TranslationData => ({
   ...data,
   permissions: storagePermissionSets[locale],

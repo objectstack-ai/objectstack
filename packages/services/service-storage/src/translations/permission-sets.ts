@@ -1,18 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Translations of the permission set this service declares,
- * `storage_attachment_member` (`../attachment-member-grant.ts`) — the
- * `permissions.<name>.label` / `.description` group `translatePermissionSet`
- * overlays on the served set (`GET /meta/permission`, Setup's permission-set
- * lists). The i18n service deep-merges this group beside plugin-security's, so
- * each package translates exactly the sets it declares.
- *
- * HAND-AUTHORED, not generated: this package's extract runs objects-only. The
- * English source is the set's own `label` and `description`; `en` needs no
- * entry. When either changes, re-translate every locale here in the same
- * change: nothing marks a translation stale. A label keeps the English label's
- * shape (`permission-sets.test.ts`).
+ * The `permissions.<name>` translations of the one permission set this service
+ * declares, `storage_attachment_member` (`../attachment-member-grant.ts`),
+ * overlaid on the served set by `translatePermissionSet`. HAND-AUTHORED (the
+ * extract runs objects-only): when the set's label or description changes,
+ * re-translate every locale here in the same change; nothing marks one stale.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
@@ -23,7 +16,6 @@ const entry = (label: string, description: string): PermissionSetTranslations =>
   storage_attachment_member: { label, description },
 });
 
-/** Keyed by locale; `index.ts` places each beside that locale's generated objects. */
 export const storagePermissionSets: Readonly<Record<string, PermissionSetTranslations>> = {
   'zh-CN': entry(
     '附件：读取与添加（所有成员）',
