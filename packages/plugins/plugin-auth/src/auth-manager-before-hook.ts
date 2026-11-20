@@ -246,12 +246,14 @@ export async function globalBeforeHook(
   // Ahead of every branch below that may answer early: a vendor endpoint
   // that reads an identity provider (`/sso/register`, `/sign-in/sso`,
   // `/sso/callback/*`) runs in the SSO discovery scope the request routing
-  // opened, which judges every read until the origins of the provider
-  // configuration this request reads are named here, and then only reads of
-  // those (`sso-discovery-egress.ts`). Naming them trusts nothing: a read of
-  // a named origin is sent through the outbound-request guard, unless the
-  // deployment's configured trusted origins list it. Outside that scope this
-  // does nothing.
+  // opened, which judges only reads at origins the request's provider
+  // configuration names (`sso-discovery-egress.ts`). Here the scope takes the
+  // deployment's configured trust from this request's context and, on a
+  // registration, the origins its body has the server read; a stored
+  // provider's are named as the vendor reads its row. This reads nothing.
+  // Naming an origin trusts nothing: a read of it is sent through the
+  // outbound-request guard, unless the deployment's configured trusted
+  // origins list it. Outside that scope this does nothing.
   await declareSsoDiscoveryReadsOf(ctx);
 
   // ── An auth request is judged and executed as one account ────────

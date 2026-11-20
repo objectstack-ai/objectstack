@@ -230,9 +230,10 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // the scope whose reads the outbound-request guard sends. Opened HERE, with
   // `run(...)` around the whole request, for the reason the SCIM scope below
   // is: the vendor's endpoint handler is resumed from a continuation that a
-  // scope entered inside a hook never reaches. The global before-hook names
-  // the origins the request's provider configuration reads; until it has,
-  // every read is judged, and after, only reads of those.
+  // scope entered inside a hook never reaches. Only reads at origins the
+  // request's provider configuration names are judged (the global before-hook
+  // names a registration's, the observed adapter a stored provider's as the
+  // vendor reads it); every other read is sent as it was.
   const runHandler = isSsoDiscoveryEgressPath(this.betterAuthEndpointPath(request))
     ? (): Promise<Response> => this.runSsoDiscoveryEgress(runVendorHandler)
     : runVendorHandler;

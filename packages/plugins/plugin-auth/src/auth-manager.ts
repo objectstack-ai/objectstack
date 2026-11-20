@@ -4372,15 +4372,24 @@ export class AuthManager {
   /**
    * Run a vendor endpoint that reads an identity provider (`/sso/register`,
    * `/sign-in/sso`, `/sso/callback/*`) inside the SSO discovery scope
-   * (`sso-discovery-egress.ts`). The scope judges every read until the global
-   * before-hook names the origins the request's provider configuration reads,
-   * and then only reads of those.
+   * (`sso-discovery-egress.ts`). The scope judges only reads at origins the
+   * request's provider configuration names: the global before-hook names a
+   * registration's, and the auth context's observed adapter
+   * (`ssoProviderReadsObserverPlugin`, mounted with `sso`) names a stored
+   * provider's as the vendor reads its row. Every other read the request
+   * makes is sent as it was. A context whose adapter is not observed refuses
+   * the request: its provider reads could not be judged.
    */
   private async runSsoDiscoveryEgress(run: () => Promise<Response>): Promise<Response> {
-    const [{ runInSsoDiscoveryEgressScope }, guard] = await Promise.all([
+    const [{ runInSsoDiscoveryEgressScope, observesSsoProviderReads }, guard, auth] = await Promise.all([
       import('./sso-discovery-egress.js'),
       this.ssoDiscoveryEgressGuard(),
+      this.getOrCreateAuth(),
     ]);
+    const context = (await auth.$context) as { adapter?: unknown } | undefined;
+    if (!observesSsoProviderReads(context?.adapter)) {
+      throw new Error('SSO discovery cannot be judged: the auth context\'s adapter does not observe its provider reads.');
+    }
     return (await runInSsoDiscoveryEgressScope(guard, run)).value;
   }
 
@@ -4569,9 +4578,10 @@ export class AuthManager {
    * own origin check never sees them (`sso-discovery-companion-origins.ts`).
    *
    * That read connects only to addresses that are public at connect time: it
-   * runs in its own SSO discovery scope, which sends every read the
-   * configured trust does not list through the outbound-request guard
-   * (`sso-discovery-egress.ts`). On a registration, a refusal of the
+   * runs in its own SSO discovery scope, which names the origins the body's
+   * and the stored provider configuration read, and sends a read at one of
+   * them the configured trust does not list through the outbound-request
+   * guard (`sso-discovery-egress.ts`). On a registration, a refusal of the
    * discovery host the body names is answered on the member that names it,
    * as the before-hook's earlier judgement of that host answers.
    */
@@ -4598,10 +4608,12 @@ export class AuthManager {
       (url) => context.isTrustedOrigin(url),
       await this.ssoDiscoveryTrustedOrigins(ctx.body),
     );
-    const [{ runInSsoDiscoveryEgressScope, registerDiscoveryRefusalFor }, guard] = await Promise.all([
-      import('./sso-discovery-egress.js'),
-      this.ssoDiscoveryEgressGuard(),
-    ]);
+    const [{ runInSsoDiscoveryEgressScope, registerDiscoveryRefusalFor, oidcConfigReadUrls }, { computeDiscoveryUrl }, guard] =
+      await Promise.all([
+        import('./sso-discovery-egress.js'),
+        import('@better-auth/sso'),
+        this.ssoDiscoveryEgressGuard(),
+      ]);
     const { value: verdict, refused } = await runInSsoDiscoveryEgressScope(
       guard,
       () =>
@@ -4613,7 +4625,13 @@ export class AuthManager {
           isTrustedOrigin: (url) => context.isTrustedOrigin(url),
           isTrustedLogoutOrigin,
         }),
-      { targets: 'every', isConfiguredTrusted: (url) => context.isTrustedOrigin(url) === true },
+      {
+        reads: [
+          ...oidcConfigReadUrls(issuer, ctx.body.oidcConfig, computeDiscoveryUrl),
+          ...oidcConfigReadUrls(issuer, stored?.oidcConfig, computeDiscoveryUrl),
+        ],
+        isConfiguredTrusted: (url) => context.isTrustedOrigin(url) === true,
+      },
     );
     const hostRefusal =
       refused && !refused.unresolved && path === '/sso/register'

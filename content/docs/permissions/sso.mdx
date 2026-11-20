@@ -189,7 +189,10 @@ connects only to an address it judged. An address that is private, loopback,
 link-local, a cloud metadata or host-platform address (`168.63.129.16`
 included) or in any other non-public range is refused and nothing is sent to
 it, whatever an earlier lookup of the same name answered; so is a host whose
-name does not resolve when the read connects.
+name does not resolve when the read connects. Only reads at the origins the
+provider's configuration names are judged: every other request the server
+makes while answering (a datastore or a rate-limit store reached over HTTP)
+is sent as before.
 
 A registration also judges its discovery host before reading it, by the same
 rule: the host of the `discoveryEndpoint` the registration names, else the

@@ -33,15 +33,33 @@
  * through `betterFetch`, which reads `globalThis.fetch` when it is called, and
  * through a bare `fetch` for the key set. So the reads are routed here by a
  * wrapper over the global fetch that does nothing outside an SSO discovery
- * scope: a scope is opened around the vendor endpoints that read
+ * scope. A scope is opened around the vendor endpoints that read
  * ({@link SSO_DISCOVERY_EGRESS_ENDPOINTS}) and around this package's own
- * sign-out read, and inside it only a read of an origin the scope names is
- * judged; every other request (a database driver over HTTP, a host's own
- * call) passes through untouched. The vendor endpoints' scope names the
- * origins of the provider configuration the request reads, declared by the
- * global before-hook ({@link declareSsoDiscoveryReadsOf}); until it has, the
- * scope judges every read, so a request whose origins were never declared is
- * judged whole rather than not at all.
+ * sign-out read, and inside it only a read at an origin the request's
+ * provider configuration names is judged. A scope starts naming none, so
+ * every other request the scope sees (a datastore reached over HTTP, a host's
+ * own call), before or after the origins are named, passes through untouched.
+ *
+ * The origins are named where the configuration is read, before anything can
+ * read from them:
+ *
+ * - a registration's, from its body, by the global before-hook
+ *   ({@link declareSsoDiscoveryReadsOf}): the issuer, every `oidcConfig`
+ *   endpoint, the discovery document and the issuer's companion origins;
+ * - a stored provider's, as the vendor reads its row: the auth context's
+ *   adapter is observed ({@link observingSsoProviderReads}), and every
+ *   `ssoProvider` row it answers inside a scope names its issuer, discovery
+ *   document and token, key-set, userinfo and authorization endpoints
+ *   ({@link oidcConfigReadUrls}) before the vendor holds it. That is every
+ *   provider the vendor's sign-in and callback can read from (plugin-auth
+ *   configures no `defaultSSO`), and it costs no read of its own. An
+ *   endpoint a sign-in's own discovery finds at another origin is read only
+ *   when the configured trust lists that origin (the vendor's check), which
+ *   is the one way out;
+ * - the sign-out read's, by the caller that opens its scope.
+ *
+ * The before-hook also hands the scope the deployment's configured
+ * trusted-origin predicate, read from the request's own context.
  *
  * A refused read rejects with the vendor's own `DiscoveryError`
  * (`discovery_private_host`, or `discovery_unexpected_error` for a name that
@@ -81,13 +99,6 @@ export function isSsoDiscoveryEgressPath(endpointPath: string | undefined): bool
   if (endpointPath === '/sso/register' || endpointPath === '/sign-in/sso' || endpointPath === '/sso/callback') return true;
   return endpointPath.startsWith('/sso/callback/');
 }
-
-/** The before-hook paths ({@link isSsoDiscoveryEgressPath}'s, as the endpoint declares them) whose reads are a stored provider's. */
-export const SSO_SIGN_IN_READ_HOOK_PATHS: ReadonlySet<string> = new Set([
-  '/sign-in/sso',
-  '/sso/callback/:providerId',
-  '/sso/callback',
-]);
 
 /**
  * The guard SSO discovery sends through: the platform's outbound-request
@@ -140,20 +151,41 @@ type DiscoveryErrorClass = new (
 interface SsoDiscoveryEgressScope {
   readonly guard: EgressGuard;
   readonly DiscoveryError: DiscoveryErrorClass;
-  /** The origins whose reads are judged; `every` judges every read the configured trust does not list. */
-  targets: Set<string> | 'every';
-  /** Whether `targets` was named; an undeclared scope judges every read. */
-  declared: boolean;
+  /** The origins the request's provider configuration names: only a read at one of them is judged. */
+  readonly targets: Set<string>;
   /** The deployment's configured trusted-origin predicate: a read of an origin it trusts is sent as before. */
   isConfiguredTrusted?: (url: string) => boolean;
   /** The first read the guard refused. */
   refused?: SsoDiscoveryConnectRefusal;
 }
 
-const scopeStore = new AsyncLocalStorage<SsoDiscoveryEgressScope>();
+/**
+ * Process-wide keys, so that every copy of this module in a process (a dual
+ * build, a module registry that was reset) shares one scope store and one
+ * wrapper over the global fetch: a copy finds the wrapper another installed
+ * and the scope another opened, and never wraps the global fetch again.
+ */
+const SCOPE_STORE_KEY = Symbol.for('objectstack.plugin-auth.sso-discovery-egress.scope-store');
+const FETCH_WRAPPER_MARK = Symbol.for('objectstack.plugin-auth.sso-discovery-egress.fetch-wrapper');
+const OBSERVED_ADAPTER_MARK = Symbol.for('objectstack.plugin-auth.sso-discovery-egress.observed-adapter');
 
-/** The wrapper this module last installed over the global fetch. */
-let installedFetch: typeof globalThis.fetch | undefined;
+const scopeStore: AsyncLocalStorage<SsoDiscoveryEgressScope> = (() => {
+  const shared = globalThis as unknown as Record<symbol, AsyncLocalStorage<SsoDiscoveryEgressScope> | undefined>;
+  return (shared[SCOPE_STORE_KEY] ??= new AsyncLocalStorage<SsoDiscoveryEgressScope>());
+})();
+
+/** Add each http(s) URL's origin to `targets`; anything else names nothing. */
+function nameOrigins(targets: Set<string>, urls: Iterable<unknown>): void {
+  for (const candidate of urls) {
+    if (typeof candidate !== 'string' || candidate.length === 0) continue;
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === 'https:' || url.protocol === 'http:') targets.add(url.origin);
+    } catch {
+      /* not a URL: nothing reads it */
+    }
+  }
+}
 
 function readUrl(input: unknown): URL | undefined {
   try {
@@ -168,7 +200,7 @@ function readUrl(input: unknown): URL | undefined {
 
 function judges(scope: SsoDiscoveryEgressScope, url: URL): boolean {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
-  if (scope.targets !== 'every' && !scope.targets.has(url.origin)) return false;
+  if (!scope.targets.has(url.origin)) return false;
   return !(scope.isConfiguredTrusted?.(url.href) === true);
 }
 
@@ -220,17 +252,19 @@ async function sendThroughGuard(scope: SsoDiscoveryEgressScope, url: URL, input:
 }
 
 /**
- * Put the wrapper over the global fetch, unless it is the one there. A fetch
- * someone set after the last install (a test's stub, another wrapper) becomes
- * the one this wrapper hands every other request to. Throws when the global
- * fetch cannot be replaced: the reads could not be judged.
+ * Put the wrapper over the global fetch, unless the global fetch is a wrapper
+ * already (this copy's or another's: the mark is process-wide). A fetch
+ * someone set after the last install (a test's stub, another wrapper) is
+ * wrapped once, and becomes the one this wrapper hands every other request
+ * to. The wrapper carries the own properties of the fetch it wraps. Throws
+ * when the global fetch cannot be replaced: the reads could not be judged.
  */
 function installFetchWrapper(): void {
   const current = globalThis.fetch;
   if (typeof current !== 'function') {
     throw new Error('SSO discovery cannot be judged: this runtime has no global fetch to route its reads through.');
   }
-  if (current === installedFetch) return;
+  if ((current as unknown as Record<symbol, unknown>)[FETCH_WRAPPER_MARK] === true) return;
   const underlying = current;
   const wrapper = function ssoDiscoveryEgressFetch(...args: Parameters<typeof globalThis.fetch>): Promise<Response> {
     const scope = scopeStore.getStore();
@@ -238,36 +272,44 @@ function installFetchWrapper(): void {
     if (!scope || !url || !judges(scope, url)) return Reflect.apply(underlying, globalThis, args) as Promise<Response>;
     return sendThroughGuard(scope, url, args[0], args[1]);
   } as typeof globalThis.fetch;
+  for (const key of Reflect.ownKeys(underlying)) {
+    if (key === 'length' || key === 'name' || key === 'prototype') continue;
+    const descriptor = Object.getOwnPropertyDescriptor(underlying, key);
+    try {
+      if (descriptor) Object.defineProperty(wrapper, key, descriptor);
+    } catch {
+      /* a property this function cannot take: the wrapper sends the same requests without it */
+    }
+  }
+  Object.defineProperty(wrapper, FETCH_WRAPPER_MARK, { value: true });
   globalThis.fetch = wrapper;
   if (globalThis.fetch !== wrapper) {
     throw new Error('SSO discovery cannot be judged: the global fetch could not be replaced to route its reads through the outbound-request guard.');
   }
-  installedFetch = wrapper;
 }
 
 /**
- * Run `run` inside an SSO discovery scope sending through `guard`. With
- * `targets: 'every'` every read the configured trust does not list is judged
- * (this package's own reads, whose scope holds nothing else); with no
- * `targets` the scope judges every read until {@link declareSsoDiscoveryReads}
- * names the origins (the vendor endpoints, whose request may send other
- * requests too), and then only reads of those. Answers `run`'s value and the
- * first refused read.
+ * Run `run` inside an SSO discovery scope sending through `guard`. Only a read
+ * at an origin the scope names is judged: `reads` names the URLs a caller
+ * knows it will read (this package's sign-out read); a vendor endpoint's scope
+ * starts naming none, and its origins are named as its provider configuration
+ * is read ({@link declareSsoDiscoveryReadsOf}, {@link observingSsoProviderReads}).
+ * Answers `run`'s value and the first refused read.
  */
 export async function runInSsoDiscoveryEgressScope<T>(
   guard: EgressGuard,
   run: () => Promise<T>,
-  options: { targets?: 'every'; isConfiguredTrusted?: (url: string) => boolean } = {},
+  options: { reads?: Iterable<unknown>; isConfiguredTrusted?: (url: string) => boolean } = {},
 ): Promise<{ value: T; refused?: SsoDiscoveryConnectRefusal }> {
   const { DiscoveryError } = (await import('@better-auth/sso')) as unknown as { DiscoveryError: DiscoveryErrorClass };
   installFetchWrapper();
   const scope: SsoDiscoveryEgressScope = {
     guard,
     DiscoveryError,
-    targets: 'every',
-    declared: options.targets === 'every',
+    targets: new Set<string>(),
     ...(options.isConfiguredTrusted ? { isConfiguredTrusted: options.isConfiguredTrusted } : {}),
   };
+  nameOrigins(scope.targets, options.reads ?? []);
   const value = await scopeStore.run(scope, run);
   return { value, ...(scope.refused ? { refused: scope.refused } : {}) };
 }
@@ -278,37 +320,18 @@ export function inSsoDiscoveryEgressScope(): boolean {
 }
 
 /**
- * Name, for the request's SSO discovery scope, the URLs whose origins its
- * reads go to, and the deployment's configured trusted-origin predicate.
- * `every` judges every read the configured trust does not list (a request
- * whose provider configuration could not be read). No-op outside a scope.
+ * Name, for the request's SSO discovery scope, URLs its provider configuration
+ * reads (their origins), and, when given, the deployment's configured
+ * trusted-origin predicate. No-op outside a scope.
  */
 export function declareSsoDiscoveryReads(
-  urls: Iterable<unknown> | 'every',
-  isConfiguredTrusted: (url: string) => boolean,
+  urls: Iterable<unknown>,
+  isConfiguredTrusted?: (url: string) => boolean,
 ): void {
   const scope = scopeStore.getStore();
   if (!scope) return;
-  scope.isConfiguredTrusted = isConfiguredTrusted;
-  if (urls === 'every') {
-    scope.targets = 'every';
-    scope.declared = true;
-    return;
-  }
-  if (!scope.declared) {
-    scope.targets = new Set<string>();
-    scope.declared = true;
-  }
-  if (scope.targets === 'every') return;
-  for (const candidate of urls) {
-    if (typeof candidate !== 'string' || candidate.length === 0) continue;
-    try {
-      const url = new URL(candidate);
-      if (url.protocol === 'https:' || url.protocol === 'http:') scope.targets.add(url.origin);
-    } catch {
-      /* not a URL: nothing reads it */
-    }
-  }
+  if (isConfiguredTrusted) scope.isConfiguredTrusted = isConfiguredTrusted;
+  nameOrigins(scope.targets, urls);
 }
 
 /** The first read the request's SSO discovery scope refused, if any. */
@@ -359,7 +382,7 @@ export function oidcConfigReadUrls(
   return urls;
 }
 
-/** The guard a judgement outside any scope uses: the default one, built once. */
+/** The guard a judgement outside any scope uses: the default one, built once (again only after a build failed). */
 let defaultGuard: Promise<EgressGuard> | undefined;
 
 /**
@@ -372,10 +395,13 @@ let defaultGuard: Promise<EgressGuard> | undefined;
 export const judgeSsoDiscoveryUrl: SsoDiscoveryJudge = async (url) => {
   let guard = scopeStore.getStore()?.guard;
   if (!guard) {
-    defaultGuard ??= createSsoDiscoveryEgressGuard();
-    defaultGuard.catch(() => {
-      defaultGuard = undefined;
-    });
+    if (!defaultGuard) {
+      const building = createSsoDiscoveryEgressGuard();
+      defaultGuard = building;
+      building.catch(() => {
+        if (defaultGuard === building) defaultGuard = undefined;
+      });
+    }
     guard = await defaultGuard;
   }
   return guard.judgeUrl(url, { source: SSO_DISCOVERY_EGRESS_SOURCE });
@@ -388,47 +414,100 @@ function configuredTrustOf(ctx: any): (url: string) => boolean {
 }
 
 /**
- * Global before-hook half: name, for the request's SSO discovery scope, the
- * origins its reads go to. A registration's are the ones its body names (the
- * issuer, every `oidcConfig` endpoint, the discovery document) and its
- * issuer's companion origins; a sign-in's or callback's are those of the
- * stored provider configuration it reads (every stored provider when the
- * request names none). When the stored providers cannot be read, every read
- * the configured trust does not list is judged. No-op outside a scope.
+ * Global before-hook half: hand the request's SSO discovery scope the
+ * deployment's configured trusted-origin predicate (the request's own
+ * context, before any body-named origin joins it), and, for a registration,
+ * name the origins its body has the server read: the issuer, every
+ * `oidcConfig` endpoint, the discovery document, and the issuer's companion
+ * origins. It reads nothing: a stored provider's origins are named as the
+ * vendor reads its row ({@link observingSsoProviderReads}). No-op outside a
+ * scope.
  */
 export async function declareSsoDiscoveryReadsOf(ctx: any): Promise<void> {
   if (!inSsoDiscoveryEgressScope()) return;
-  const path = ctx?.path;
   const isConfiguredTrusted = configuredTrustOf(ctx);
-  const { computeDiscoveryUrl } = await import('@better-auth/sso');
-  if (path === SSO_REGISTER_PATH) {
-    const body = ctx?.body as { issuer?: unknown; oidcConfig?: unknown } | undefined;
-    declareSsoDiscoveryReads(
-      [...oidcConfigReadUrls(body?.issuer, body?.oidcConfig, computeDiscoveryUrl), ...ssoDiscoveryCompanionOrigins(body?.issuer)],
-      isConfiguredTrusted,
-    );
+  if (ctx?.path !== SSO_REGISTER_PATH) {
+    declareSsoDiscoveryReads([], isConfiguredTrusted);
     return;
   }
-  if (!SSO_SIGN_IN_READ_HOOK_PATHS.has(path)) return;
-  try {
-    const adapter = ctx.context.adapter as {
-      findMany: (query: { model: string; where?: Array<{ field: string; value: unknown }> }) => Promise<unknown[]>;
-    };
-    const providerId = typeof ctx?.params?.providerId === 'string' && ctx.params.providerId
-      ? ctx.params.providerId
-      : typeof ctx?.body?.providerId === 'string' && ctx.body.providerId ? ctx.body.providerId : undefined;
-    let rows = providerId
-      ? await adapter.findMany({ model: 'ssoProvider', where: [{ field: 'providerId', value: providerId }] })
-      : [];
-    if (rows.length === 0) rows = await adapter.findMany({ model: 'ssoProvider' });
-    const urls: string[] = [];
-    for (const row of rows as Array<{ issuer?: unknown; oidcConfig?: unknown }>) {
-      urls.push(...oidcConfigReadUrls(row?.issuer, row?.oidcConfig, computeDiscoveryUrl));
-    }
-    declareSsoDiscoveryReads(urls, isConfiguredTrusted);
-  } catch {
-    declareSsoDiscoveryReads('every', isConfiguredTrusted);
+  const { computeDiscoveryUrl } = await import('@better-auth/sso');
+  const body = ctx?.body as { issuer?: unknown; oidcConfig?: unknown } | undefined;
+  declareSsoDiscoveryReads(
+    [...oidcConfigReadUrls(body?.issuer, body?.oidcConfig, computeDiscoveryUrl), ...ssoDiscoveryCompanionOrigins(body?.issuer)],
+    isConfiguredTrusted,
+  );
+}
+
+/** The vendor's provider model (`@better-auth/sso` 1.7.12 reads it as `ssoProvider`), and the object it is stored in. */
+function isSsoProviderModel(model: unknown): boolean {
+  return model === 'ssoProvider' || model === 'sys_sso_provider';
+}
+
+/** Name the origins every provider row in `answer` (one row, a list, or none) has the server read. */
+async function nameProviderRowOrigins(answer: unknown): Promise<void> {
+  const scope = scopeStore.getStore();
+  if (!scope) return;
+  const rows = Array.isArray(answer) ? answer : answer ? [answer] : [];
+  if (rows.length === 0) return;
+  const { computeDiscoveryUrl } = await import('@better-auth/sso');
+  for (const row of rows as Array<Record<string, unknown> | null | undefined>) {
+    if (!row || typeof row !== 'object') continue;
+    nameOrigins(scope.targets, oidcConfigReadUrls(row.issuer, row.oidcConfig ?? row.oidc_config, computeDiscoveryUrl));
   }
+}
+
+/**
+ * The auth context's adapter, observed: every `ssoProvider` row its `findOne`
+ * or `findMany` answers inside an SSO discovery scope names, before the caller
+ * holds it, the origins that provider's configuration has the server read.
+ * The vendor's sign-in and callback read their provider through this adapter,
+ * so its reads are judged from the row they came from, and no read of its own
+ * is added. Outside a scope, and for every other model and method, the adapter
+ * answers as it did. A view over `adapter` (nothing is written onto it, which
+ * may itself be a view); an adapter observed already is answered as it is.
+ */
+export function observingSsoProviderReads<A extends object>(adapter: A): A {
+  if (observesSsoProviderReads(adapter)) return adapter;
+  const observe = (method: 'findOne' | 'findMany') => async (...args: unknown[]): Promise<unknown> => {
+    const answer: unknown = await Reflect.apply((adapter as Record<string, (...a: unknown[]) => unknown>)[method]!, adapter, args);
+    if (scopeStore.getStore() && isSsoProviderModel((args[0] as { model?: unknown } | undefined)?.model)) {
+      await nameProviderRowOrigins(answer);
+    }
+    return answer;
+  };
+  const findOne = observe('findOne');
+  const findMany = observe('findMany');
+  return new Proxy(adapter, {
+    get(target, prop, receiver) {
+      if (prop === OBSERVED_ADAPTER_MARK) return true;
+      if (prop === 'findOne' && typeof (target as Record<string, unknown>).findOne === 'function') return findOne;
+      if (prop === 'findMany' && typeof (target as Record<string, unknown>).findMany === 'function') return findMany;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
+/** Whether `adapter` answers its provider reads through {@link observingSsoProviderReads} (any copy of this module's). */
+export function observesSsoProviderReads(adapter: unknown): boolean {
+  if (!adapter || typeof adapter !== 'object') return false;
+  const target = adapter as Record<string | symbol, unknown>;
+  return target[OBSERVED_ADAPTER_MARK] === true && typeof target.findOne === 'function' && typeof target.findMany === 'function';
+}
+
+/**
+ * The better-auth plugin that hands the auth context the observed adapter
+ * ({@link observingSsoProviderReads}): mounted with the `sso` plugin. Its
+ * `init` runs before the session store and the endpoints read the adapter.
+ */
+export function ssoProviderReadsObserverPlugin() {
+  return {
+    id: 'objectstack-sso-provider-reads-observer',
+    init(ctx: { adapter?: unknown }) {
+      const adapter = ctx?.adapter;
+      if (!adapter || typeof adapter !== 'object') return undefined;
+      return { context: { adapter: observingSsoProviderReads(adapter) } };
+    },
+  };
 }
 
 /**

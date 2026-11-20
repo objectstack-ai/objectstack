@@ -23,9 +23,14 @@
  *  - CONTROL: a host whose address is public when the read connects registers,
  *    its document read over the guard's own connection;
  *  - CONTROL: an origin the deployment's configured trusted origins list is
- *    read as it always was.
+ *    read as it always was;
+ *  - CONTROL: a request's other reads over the global fetch (a datastore, a
+ *    rate-limit counter store, both on internal addresses) are sent as they
+ *    were, before and after the request's provider configuration is read.
  *
- * Then the scope itself: what the wrapper over the global fetch judges.
+ * Then the scope itself: what the wrapper over the global fetch judges, the
+ * adapter observation that names a stored provider's origins, and a second
+ * copy of the module in the same process.
  */
 
 import { createServer, type Server } from 'node:http';
@@ -39,6 +44,8 @@ import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import {
   createSsoDiscoveryEgressGuard,
   declareSsoDiscoveryReads,
+  observesSsoProviderReads,
+  observingSsoProviderReads,
   runInSsoDiscoveryEgressScope,
 } from './sso-discovery-egress';
 // better-auth's first module load is paid at module load, not inside the first
@@ -97,6 +104,9 @@ const FLIP_HOST = 'idp.flip-corp.example';
 /** The identity provider whose name answers the stand-in public host. */
 const stableIssuer = () => `http://idp.stable-corp.example:${port}`;
 const STABLE_HOST = 'idp.stable-corp.example';
+/** A datastore and a rate-limit counter store reached over the global fetch, on the deployment's network. */
+const DATASTORE_HOST = 'db.internal.example';
+const COUNTER_HOST = 'counters.internal.example';
 
 function discoveryDocument(issuer: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -152,14 +162,22 @@ function guardResolution(hostname: string, answers: readonly string[]): { resolv
  * The platform's ordinary transport, as the global fetch: a request to the
  * identity provider resolves its name again when it connects (`connectAddress`),
  * is recorded with that address, and is answered as the identity provider
- * answers. Every other request goes to the fetch underneath.
+ * answers. A request to the datastore or the counter store is recorded on
+ * `timeline` and answered. Every other request goes to the fetch underneath.
  */
-function ordinaryTransport(connectAddress: string): { connected: Array<{ url: string; address: string }> } {
+function ordinaryTransport(
+  connectAddress: string,
+  timeline: string[] = [],
+): { connected: Array<{ url: string; address: string }> } {
   const connected: Array<{ url: string; address: string }> = [];
   const underlying = globalThis.fetch;
   const transport = (async (input: unknown, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
     const url = new URL(href);
+    if (url.hostname === DATASTORE_HOST || url.hostname === COUNTER_HOST) {
+      timeline.push(`sent ${url.hostname}${url.pathname}`);
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (url.hostname !== FLIP_HOST) return underlying(input as never, init);
     connected.push({ url: url.href, address: connectAddress });
     const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -183,9 +201,30 @@ interface Rp {
   ctx: any;
 }
 
-async function makeRp(guard: EgressGuard, trustedOrigins: string[] = [BASE]): Promise<Rp> {
+/**
+ * Every engine verb of `engine` first makes a request to the datastore over
+ * the global fetch, as a datastore driver reached over HTTP does.
+ */
+function overHttp(engine: ReturnType<typeof createMemoryEngine>): void {
+  const verbs = ['insert', 'findOne', 'find', 'count', 'update', 'delete'] as const;
+  const target = engine as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  for (const verb of verbs) {
+    const original = target[verb]!;
+    target[verb] = async (...args: unknown[]) => {
+      await fetch(`http://${DATASTORE_HOST}:8080/v2/${verb}/${String(args[0])}`, { method: 'POST', body: '{}' });
+      return original.apply(engine, args);
+    };
+  }
+}
+
+async function makeRp(
+  guard: EgressGuard,
+  trustedOrigins: string[] = [BASE],
+  options: { overHttp?: boolean } = {},
+): Promise<Rp> {
   const engine = createMemoryEngine();
   (engine as any).resolveSecretField = async () => CLIENT_SECRET;
+  if (options.overHttp) overHttp(engine);
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: BASE,
@@ -194,6 +233,19 @@ async function makeRp(guard: EgressGuard, trustedOrigins: string[] = [BASE]): Pr
     plugins: { sso: true },
     logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
     ssoDiscoveryEgress: guard,
+    // A rate-limit counter store reached over the global fetch: consumed
+    // ahead of every endpoint, before the global before-hook runs.
+    ...(options.overHttp
+      ? {
+          rateLimit: { enabled: true, window: 60, max: 100_000 },
+          rateLimitStorage: {
+            consume: async () => {
+              await fetch(`http://${COUNTER_HOST}:6380/consume`, { method: 'POST', body: '{}' });
+              return { allowed: true };
+            },
+          },
+        }
+      : {}),
   } as unknown as ConstructorParameters<typeof AuthManager>[0]);
   vi.spyOn(manager as any, 'isPlatformAdminUserId').mockResolvedValue(true);
   const ctx = await ((await manager.getAuthInstance()) as any).$context;
@@ -412,6 +464,103 @@ describe('SSO discovery connects only to addresses that are public at connect ti
     expect(names.asked).toEqual([]);
     expect(refusals).toEqual([]);
   });
+
+  it('CONTROL: a registration\'s datastore and counter-store reads over the global fetch, on internal addresses, are sent as they were, before and after its discovery read', async () => {
+    const timeline: string[] = [];
+    const transport = ordinaryTransport('10.0.0.5', timeline);
+    const asked: string[] = [];
+    const realPolicy = (await realGuard(async () => [{ address: '10.0.0.5' }])).guard.policy;
+    const guard = createEgressGuard({
+      // The stand-in public host is 127.0.0.1, where the receiver serves the
+      // identity provider; the real policy judges every other address.
+      policy: {
+        canConnect: (target, ctx) =>
+          target.address === '127.0.0.1' ? { allow: true } : realPolicy.canConnect(target, ctx),
+      },
+      resolve: async (name) => {
+        asked.push(name);
+        timeline.push(`judged ${name}`);
+        if (name === STABLE_HOST) return [{ address: '127.0.0.1' }];
+        return [{ address: '10.0.0.5' }];
+      },
+    });
+    const rp = await makeRp(guard, [BASE], { overHttp: true });
+    timeline.length = 0;
+    const res = await post(rp, '/sso/register', registration('stable-oidc', stableIssuer()));
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(storedRows(rp)).toHaveLength(1);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(new Set(asked)).toEqual(new Set([STABLE_HOST]));
+    const firstJudged = timeline.findIndex((entry) => entry.startsWith('judged '));
+    const lastJudged = timeline.length - 1 - [...timeline].reverse().findIndex((entry) => entry.startsWith('judged '));
+    // Before the global before-hook (the counter store), between the
+    // before-hook and the discovery read (the session), and after it (the
+    // provider's row): every one sent as it was, none judged.
+    expect(timeline.slice(0, firstJudged)).toContain(`sent ${COUNTER_HOST}/consume`);
+    expect(timeline.slice(0, lastJudged).some((entry) => entry.startsWith(`sent ${DATASTORE_HOST}/`))).toBe(true);
+    expect(timeline.slice(lastJudged + 1)).toContain(`sent ${DATASTORE_HOST}/v2/insert/sys_sso_provider`);
+    expect(received).toEqual([`${STABLE_HOST}:${port} /.well-known/openid-configuration`]);
+    expect(transport.connected).toEqual([]);
+  });
+
+  it('CONTROL: a sign-in\'s datastore and counter-store reads over the global fetch, on internal addresses, are sent as they were, while its token read is refused', async () => {
+    const timeline: string[] = [];
+    const transport = ordinaryTransport('10.0.0.5', timeline);
+    const names = guardResolution(FLIP_HOST, ['10.0.0.5']);
+    const { guard, refusals } = await realGuard(async (name) => {
+      timeline.push(`judged ${name}`);
+      return names.resolve(name);
+    });
+    const rp = await makeRp(guard, [BASE], { overHttp: true });
+    const issuer = flipIssuer();
+    await rp.ctx.adapter.create({
+      model: 'ssoProvider',
+      data: {
+        providerId: 'flip-oidc',
+        issuer,
+        domain: 'acme.com',
+        oidcConfig: JSON.stringify({
+          issuer,
+          clientId: 'client-id',
+          clientSecret: CLIENT_SECRET,
+          authorizationEndpoint: `${issuer}/authorize`,
+          tokenEndpoint: `${issuer}/token`,
+          jwksEndpoint: `${issuer}/jwks`,
+          pkce: true,
+          scopes: ['openid', 'email', 'profile'],
+          mapping: { id: 'sub', email: 'email', name: 'name' },
+        }),
+      },
+    });
+    timeline.length = 0;
+    const start = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-in/sso`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ email: 'someone@acme.com', callbackURL: `${BASE}/after`, errorCallbackURL: FAILED }),
+      }),
+    );
+    const started: any = await start.clone().json();
+    expect(start.status, JSON.stringify(started)).toBe(200);
+    expect(timeline).toContain(`sent ${COUNTER_HOST}/consume`);
+    expect(timeline.some((entry) => entry.startsWith(`sent ${DATASTORE_HOST}/v2/find`) && entry.endsWith('/sys_sso_provider'))).toBe(true);
+    expect(timeline.filter((entry) => entry.startsWith('judged '))).toEqual([]);
+    timeline.length = 0;
+    const state = new URL(started.url).searchParams.get('state')!;
+    const cookie = (start.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
+    const callback = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sso/callback/flip-oidc?code=idp-code&state=${encodeURIComponent(state)}`, { headers: { cookie } }),
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get('location') ?? '').toContain('error=invalid_provider');
+    const judged = timeline.findIndex((entry) => entry.startsWith('judged '));
+    expect(timeline.slice(judged).filter((entry) => entry.startsWith('judged '))).toEqual([`judged ${FLIP_HOST}`]);
+    expect(timeline.slice(0, judged)).toContain(`sent ${COUNTER_HOST}/consume`);
+    expect(timeline.slice(0, judged).some((entry) => entry.startsWith(`sent ${DATASTORE_HOST}/v2/find`))).toBe(true);
+    expect(refusals).toEqual([expect.objectContaining({ hostname: FLIP_HOST, denyClass: 'private' })]);
+    expect(transport.connected).toEqual([]);
+    expect(received).toEqual([]);
+  });
 });
 
 describe('the SSO discovery scope judges only the reads it names', () => {
@@ -442,7 +591,7 @@ describe('the SSO discovery scope judges only the reads it names', () => {
     return sent;
   }
 
-  it('until the request names its origins, every read is judged; then only reads of those, and never one the configured trust lists', async () => {
+  it('CONTROL: a read at an origin no provider configuration names is sent as it was, before and after the origins are named; a named one is judged, unless the configured trust lists it', async () => {
     const ordinary = ordinaryFetch();
     const { guard, sent } = recordingGuard();
     await runInSsoDiscoveryEgressScope(guard, async () => {
@@ -455,16 +604,93 @@ describe('the SSO discovery scope judges only the reads it names', () => {
       await fetch('https://trusted.acme.example/.well-known/openid-configuration');
       return undefined;
     });
-    expect(sent).toEqual(['https://db.internal.example/v2/pipeline', 'https://idp.acme.example/token']);
-    expect(ordinary).toEqual(['https://db.internal.example/v2/pipeline', 'https://trusted.acme.example/.well-known/openid-configuration']);
+    expect(sent).toEqual(['https://idp.acme.example/token']);
+    expect(ordinary).toEqual([
+      'https://db.internal.example/v2/pipeline',
+      'https://db.internal.example/v2/pipeline',
+      'https://trusted.acme.example/.well-known/openid-configuration',
+    ]);
   });
 
-  it('outside a scope, the global fetch is the fetch it was', async () => {
+  it('a provider row the observed adapter answers inside the scope names its origins before the caller holds it; another model\'s row names none', async () => {
     const ordinary = ordinaryFetch();
     const { guard, sent } = recordingGuard();
-    await runInSsoDiscoveryEgressScope(guard, async () => undefined, { targets: 'every' });
+    const tables: Record<string, Array<Record<string, unknown>>> = {
+      ssoProvider: [
+        {
+          providerId: 'acme-oidc',
+          issuer: 'https://idp.acme.example',
+          oidcConfig: JSON.stringify({ tokenEndpoint: 'https://tokens.acme.example/token', jwksEndpoint: 'https://keys.acme.example/jwks' }),
+        },
+      ],
+      account: [{ providerId: 'acme-oidc', issuer: 'https://elsewhere.example' }],
+    };
+    const plain = {
+      findOne: async ({ model }: { model: string }) => tables[model]?.[0] ?? null,
+      findMany: async ({ model }: { model: string }) => tables[model] ?? [],
+    };
+    const plainFindOne = plain.findOne;
+    const adapter = observingSsoProviderReads(plain);
+    expect(observesSsoProviderReads(adapter)).toBe(true);
+    expect(observingSsoProviderReads(adapter)).toBe(adapter);
+    expect(plain.findOne).toBe(plainFindOne);
+    expect(observesSsoProviderReads(plain)).toBe(false);
+    expect(observesSsoProviderReads({})).toBe(false);
+    await runInSsoDiscoveryEgressScope(guard, async () => {
+      expect(await adapter.findOne({ model: 'account' })).toEqual(tables.account![0]);
+      await fetch('https://elsewhere.example/');
+      expect(await adapter.findMany({ model: 'ssoProvider' })).toEqual(tables.ssoProvider);
+      await fetch('https://tokens.acme.example/token', { method: 'POST', body: 'grant_type=authorization_code' });
+      await fetch('https://keys.acme.example/jwks');
+      await fetch('https://idp.acme.example/.well-known/openid-configuration');
+      await fetch('https://db.internal.example/v2/pipeline');
+      return undefined;
+    });
+    expect(sent).toEqual([
+      'https://tokens.acme.example/token',
+      'https://keys.acme.example/jwks',
+      'https://idp.acme.example/.well-known/openid-configuration',
+    ]);
+    expect(ordinary).toEqual(['https://elsewhere.example/', 'https://db.internal.example/v2/pipeline']);
+  });
+
+  it('outside a scope, the global fetch is the fetch it was, keeping its own properties', async () => {
+    const ordinary = ordinaryFetch();
+    (globalThis.fetch as unknown as Record<string, unknown>).runtimeTag = 'kept';
+    const { guard, sent } = recordingGuard();
+    await runInSsoDiscoveryEgressScope(guard, async () => undefined, {
+      reads: ['https://idp.acme.example/.well-known/openid-configuration'],
+    });
     await fetch('https://idp.acme.example/.well-known/openid-configuration');
     expect(sent).toEqual([]);
     expect(ordinary).toEqual(['https://idp.acme.example/.well-known/openid-configuration']);
+    expect((globalThis.fetch as unknown as Record<string, unknown>).runtimeTag).toBe('kept');
+  });
+
+  // Last in this file: it resets the module registry.
+  it('a second copy of the module finds the wrapper and the scope the first installed: the global fetch is wrapped once, and either copy\'s scope is judged', async () => {
+    const ordinary = ordinaryFetch();
+    const { guard, sent } = recordingGuard();
+    await runInSsoDiscoveryEgressScope(guard, async () => undefined);
+    const wrapped = globalThis.fetch;
+    vi.resetModules();
+    const second = await import('./sso-discovery-egress');
+    expect(second.runInSsoDiscoveryEgressScope).not.toBe(runInSsoDiscoveryEgressScope);
+    const token = 'https://idp.acme.example/token';
+    const document = 'https://idp.acme.example/.well-known/openid-configuration';
+    for (let round = 0; round < 3; round++) {
+      await second.runInSsoDiscoveryEgressScope(guard, async () => {
+        await fetch(token);
+        return undefined;
+      }, { reads: [token] });
+      await runInSsoDiscoveryEgressScope(guard, async () => {
+        second.declareSsoDiscoveryReads([document]);
+        await fetch(document);
+        return undefined;
+      });
+    }
+    expect(globalThis.fetch).toBe(wrapped);
+    expect(sent).toEqual([token, document, token, document, token, document]);
+    expect(ordinary).toEqual([]);
   });
 });
