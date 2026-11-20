@@ -81,6 +81,9 @@ vi.mock('../previews/useObjectFields', () => ({
 import { FlowNodeInspector } from './FlowNodeInspector';
 import { fieldsForNodeType, FLOW_NODE_CONFIG_TYPES } from './flow-node-config';
 import type { MetadataSelection } from '../preview-registry';
+// The inspector's CEL authoring reaches `@objectstack/lint` by a dynamic import;
+// paying its first load here, at collection, keeps it out of a clocked case.
+import '@objectstack/lint';
 // The runtime's own answer for an omitted `escalation` key. Imported so the
 // #6620 rows below compare the RENDERED control against the installed contract
 // instead of against a literal this file would then own a second copy of.
