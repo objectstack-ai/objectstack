@@ -416,6 +416,9 @@ import './views/record-approvals-renderer.js';
 // `record:approval_decision` — an approval request page's decision panel, the
 // third record block `@objectstack/spec` 18 declares (objectui#12342).
 import './views/record-approval-decision-renderer.js';
+// `record:body_table_editor` — the record page's edit state draws each
+// master-detail body table as this host-written node.
+import './views/record-body-table-editor-renderer.js';
 // A2's record card as the details grid's face for a `referenceVia` pointer
 // pair, registered under `@object-ui/fields`' `RECORD_POINTER_CARD_TYPE`
 // (objectui#12045).

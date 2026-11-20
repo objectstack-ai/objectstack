@@ -18,8 +18,9 @@
  *   - {@link swapBodyTablesForEditors} — in the edit state each body-table
  *     `record:related_list` node of the page is drawn as a
  *     `record:body_table_editor` node instead, which is `@object-ui/plugin-form`'s
- *     `RecordBodyTableEditor`. A host-written node: the type is registered here,
- *     out of the public contract, and no page author writes it.
+ *     `RecordBodyTableEditor`. A host-written node: the type is registered in
+ *     `record-body-table-editor-renderer.tsx`, out of the public contract, and
+ *     no page author writes it.
  *   - {@link RecordEditStateController} — mounted under the page's
  *     `InlineEditProvider`; enters the session, owns Save / Cancel (the header's
  *     two buttons call it), places a refused save's reasons on the field or line
@@ -32,9 +33,8 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ComponentRegistry, runBatchTransaction } from '@object-ui/core';
+import { runBatchTransaction } from '@object-ui/core';
 import {
-  RecordBodyTableEditor,
   RecordEditSessionContext,
   attributeRecordEditRefusal,
   buildRecordEditBatch,
@@ -54,31 +54,11 @@ import {
 import { useInlineEdit, type RelatedRecordActionsValue } from '@object-ui/react';
 import { canServeApiOperation } from '@objectstack/spec/data';
 import { useRegisterUnsavedEdits } from '../chrome/unsavedEdits.js';
+// Registers `record:body_table_editor` (the node `swapBodyTablesForEditors` draws).
+import './record-body-table-editor-renderer.js';
 
 /** The node type a body table is drawn as in the edit state. */
 export const BODY_TABLE_EDITOR_TYPE = 'record:body_table_editor';
-
-const BodyTableEditorNode: React.FC<{ schema: any }> = ({ schema }) => (
-  <RecordBodyTableEditor
-    objectName={schema?.objectName}
-    relationshipField={schema?.relationshipField}
-    title={typeof schema?.title === 'string' ? schema.title : undefined}
-  />
-);
-
-// Namespaced, so it is outside the public component manifest
-// (`getPublicConfigs` takes no namespaced key): a host-written node only.
-ComponentRegistry.register('body_table_editor', BodyTableEditorNode, {
-  namespace: 'record',
-  skipFallback: true,
-  label: 'Body table editor',
-  category: 'record',
-  inputs: [
-    { name: 'objectName', type: 'string', description: 'The body table\'s child object.' },
-    { name: 'relationshipField', type: 'string', description: 'The child\'s master-detail field back to the record.' },
-    { name: 'title', type: 'string', description: 'The table heading, as read mode drew it.' },
-  ],
-});
 
 type PageNode = Record<string, any>;
 
