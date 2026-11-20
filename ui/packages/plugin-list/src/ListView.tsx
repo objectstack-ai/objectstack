@@ -6105,17 +6105,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * rows, and staying there would show a slice of an ordering the user has not
    * seen the start of. `onSortChange` fires so a host persists this the same
    * way it persists a builder edit — a header sort is not a lesser sort.
+   *
+   * objectstack#35876 — the header menu hands back the ONE column the reader
+   * picked. With no sort or a single level, that column replaces the sort.
+   * With two levels or more it becomes the first level and every other level
+   * keeps its place after it; a column already in the sort moves up and takes
+   * the picked direction. No level is dropped.
    */
   const handleHeaderSort = React.useCallback((next: Array<{ field: string; order: 'asc' | 'desc' }>) => {
-    const items: SortItem[] = next.map((s) => ({
+    const picked: SortItem[] = next.map((s) => ({
       id: crypto.randomUUID(),
       field: s.field,
       order: s.order,
     }));
+    const items: SortItem[] = picked.length === 1 && currentSort.length >= 2
+      ? [picked[0], ...currentSort.filter((s) => s.field !== picked[0].field)]
+      : picked;
     setCurrentSort(items);
     setServerPage(1);
     emitSortChange(items);
-  }, [emitSortChange]);
+  }, [emitSortChange, currentSort]);
 
   /**
    * "Reset to the view's default sort" (objectui#4243) — the way back the
@@ -6129,8 +6138,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * the same `onSortChange` notification, so a host persists a reset exactly
    * as it persists a header click or a builder edit.
    *
-   * The header click's own semantics are untouched by this: it still replaces
-   * the whole array. The ruling adds a way back; it does not change the click.
+   * The header menu's own semantics are untouched by this (see
+   * `handleHeaderSort`). The ruling adds a way back; it does not change it.
    *
    * objectstack#28948 — under `onRestoreViewDefaults` the host is told it was
    * a reset instead, and clears the user's stored sort rather than storing the
@@ -7827,6 +7836,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             dataSource={dataSource}
             shownFields={shownFieldNames}
             renderAdvanced={advancedFilterBuilder}
+            renderSortLevels={() => sortPanelBody}
             onReset={conditionsDifferFromView ? handleResetConditions : undefined}
           />
         </div>
@@ -8202,7 +8212,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#35684 — the list page's grid selects a cell on a
               // click and edits on double-click, Enter or typing, on the
               // grid's host channel (a React prop, never a node key).
-              ? { cellSelection: true }
+              // objectstack#35876 — and its column header opens the column
+              // menu instead of sorting on a click.
+              ? { cellSelection: true, headerMenu: true }
               : {})}
             {...(ROW_OPENS_RECORD_VIEW_TYPES.has(viewComponentSchema.type) && rowOpensRecord !== undefined
               // objectstack#33317, objectstack#33548 — whether the host's row

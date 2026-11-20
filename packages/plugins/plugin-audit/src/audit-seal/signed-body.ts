@@ -283,6 +283,31 @@ function columnSet(value: unknown): SealedColumnSet {
  * A checkpoint's signed body, validated and in canonical form. Accepts a body
  * or a stored row (whose JSON columns are text); anything outside the body —
  * `id`, `chain_key`, `signature` — is ignored here.
+ *
+ * Exported from the package entry for a checkpoint sink off the host (D11):
+ * read from an unaltered stored `sys_audit_checkpoint` row, it answers the
+ * body the sink was handed, whose RFC 8785 form is the bytes the row's
+ * `signature` covers.
+ *
+ * It validates and normalizes; it never verifies the signature. A row whose
+ * signed columns were rewritten reads back into a body that fails
+ * verification (a rewrite of `id`, `chain_key` or `leaf_hashes` reads back
+ * into the same body, and a malformed one is refused with a
+ * `SignedBodyError`). A row rewritten and re-signed under a key planted on
+ * the host fails under a key the sink trusts itself. A row rewritten and
+ * re-signed by whoever holds the genuine signing key verifies; only the
+ * copies already off the host catch it, because a later checkpoint's signed
+ * `previous_digest` no longer matches. So a sink verifies the row's
+ * `signature` over the rebuilt body, under a key it trusts itself, before it
+ * treats the row as delivered.
+ *
+ * A sink assembles the entry it re-delivers itself: `kind` is `'checkpoint'`
+ * (the table it read), `keyId` is `body.signing_key_id`, and `signature` is
+ * the row's `signature` column. The signed bytes are the body's RFC 8785
+ * (JCS) serialization, which the sink computes with its own serializer: this
+ * package does not export one.
+ *
+ * @public
  */
 export function checkpointBodyFromRow(row: Readonly<Record<string, unknown>>): CheckpointSignedBody {
   const rowIds = json(row, 'row_ids');
@@ -373,7 +398,33 @@ export function checkpointLeafHashesFromRow(row: Readonly<Record<string, unknown
 
 // ── amendment ────────────────────────────────────────────────────────────────
 
-/** An amendment's signed body, validated and in canonical form, from a body or a stored row. */
+/**
+ * An amendment's signed body, validated and in canonical form, from a body or a stored row.
+ *
+ * Exported from the package entry for a checkpoint sink off the host (D11):
+ * read from an unaltered stored `sys_audit_amendment` row, it answers the
+ * body the sink was handed, whose RFC 8785 form is the bytes the row's
+ * `signature` covers.
+ *
+ * It validates and normalizes; it never verifies the signature. A row whose
+ * signed columns were rewritten reads back into a body that fails
+ * verification (a rewrite of `id` or `chain_key` reads back into the same
+ * body, and a malformed one is refused with a `SignedBodyError`). A row
+ * rewritten and re-signed under a key planted on the host fails under a key
+ * the sink trusts itself. A row rewritten and re-signed by whoever holds the
+ * genuine signing key verifies; no later record carries an amendment's
+ * digest, so only checks against the copies already off the host can catch
+ * it. So a sink verifies the row's `signature` over the rebuilt body, under
+ * a key it trusts itself, before it treats the row as delivered.
+ *
+ * A sink assembles the entry it re-delivers itself: `kind` is `'amendment'`
+ * (the table it read), `keyId` is `body.signing_key_id`, and `signature` is
+ * the row's `signature` column. The signed bytes are the body's RFC 8785
+ * (JCS) serialization, which the sink computes with its own serializer: this
+ * package does not export one.
+ *
+ * @public
+ */
 export function amendmentBodyFromRow(row: Readonly<Record<string, unknown>>): AmendmentSignedBody {
   const common = {
     sealed_object: text(row, 'sealed_object'),

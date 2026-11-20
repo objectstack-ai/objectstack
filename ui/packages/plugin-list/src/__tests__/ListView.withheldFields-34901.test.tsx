@@ -165,7 +165,7 @@ describe('ListView over a field a disabled package withholds (objectstack#34901)
     fireEvent.click(await screen.findByTestId('sort-panel-open-advanced'));
     const rows = await screen.findAllByTestId('sort-builder-row');
     expect(rows).toHaveLength(2);
-    fireEvent.click(within(rows[1]).getByRole('button'));
+    fireEvent.click(within(rows[1]).getByRole('button', { name: /remove sort/i }));
     await waitFor(() => expect(onSortChange).toHaveBeenCalled());
     expect(onSortChange.mock.calls.at(-1)![0].map((s: any) => [s.field, s.order])).toEqual([[WITHHELD, 'asc']]);
 
