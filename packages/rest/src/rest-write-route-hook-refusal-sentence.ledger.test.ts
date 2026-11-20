@@ -118,6 +118,12 @@ const RECORD_CURRENCY_FIELDS = {
     organization_id: { type: 'text' },
 };
 
+/** [ADR-0158 U7 R1] A quantity and its unit code column, for the unit code backfill door's row. */
+const UNIT_CODE_FIELDS = {
+    mz_uom: { type: 'text' },
+    mz_weight: { type: 'number', unitConfig: { unitMode: 'record', unitField: 'mz_uom', unitDimension: 'mass' } },
+};
+
 /** Reads the harness answers; every other protocol method rejects with the refusal. */
 const READS: Record<string, Fn> = {
     getDiscovery: async () => ({ version: 'v0', routes: {} }),
@@ -173,10 +179,14 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
     const engine = {
         transaction: async (fn: Fn) => fn({}),
         getConfigs: () => ({ [OBJECT]: { name: OBJECT, fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } } }),
-        find: async (object: string) => (object === 'sys_user' ? [{ id: 'u2', banned: false }] : [{ id: 'r1', mz_amount: 5, organization_id: 'org_mz' }]),
+        find: async (object: string) => (object === 'sys_user'
+            ? [{ id: 'u2', banned: false }]
+            : [{ id: 'r1', mz_amount: 5, organization_id: 'org_mz', mz_uom: 'kg', mz_weight: 5 }]),
         // [#30675] The backfill reads the object's declaration: one record-mode
         // amount, and the `r1` row above holds it beside a blank code.
-        getObject: (name: string) => (name === OBJECT ? { name, fields: RECORD_CURRENCY_FIELDS } : undefined),
+        // [ADR-0158 U7 R1] And one quantity, whose unit the `r1` row stores as
+        // the free text `kg`, for the unit code backfill door.
+        getObject: (name: string) => (name === OBJECT ? { name, fields: { ...RECORD_CURRENCY_FIELDS, ...UNIT_CODE_FIELDS } } : undefined),
         count: async () => 0,
         update: async () => { calls.push('engine.update'); throw error(); },
         // [#30237] The recycle bin's doors call the engine's own verbs.
@@ -334,6 +344,12 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/meta/_migrate-record-currency-codes': {
         called: 'engine.update',
         body: { object: OBJECT, field: 'mz_amount', code: 'USD', apply: true },
+        answer: (res) => res.body?.data?.failures?.[0]?.error,
+    },
+    // [ADR-0158 U7 R1] Its twin, the same way: the hook refuses the row's unit code write.
+    'POST /api/v1/meta/_migrate-unit-codes': {
+        called: 'engine.update',
+        body: { object: OBJECT, field: 'mz_uom', mapping: { kg: 'KGM' }, apply: true },
         answer: (res) => res.body?.data?.failures?.[0]?.error,
     },
     'PUT /api/v1/meta/:type/:name': { called: 'protocol.saveMetaItem', body: { name: 'name_1', label: 'X' } },

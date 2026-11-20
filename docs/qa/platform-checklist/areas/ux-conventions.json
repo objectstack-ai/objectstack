@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -27,7 +27,7 @@
           "FIXED, regression row, expected PASS (objectui#11817): Setup → Users → Invite User toasts the copy of the delivery outcome the server answers (#27843): on a deployment that does not deliver mail the declared outcomeMessages.link_only, 'Invitation created for EMAIL. Mail is not configured on this server, so no email went out. Use Copy Invite Link on the invitation to share it.' (QA run #29890 read it verbatim), and 'Invitation sent to EMAIL' (outcomeMessages.sent) only where mail is delivered (packages/platform-objects/src/identity/invite-outcome-messages.ts#INVITE_USER_OUTCOME_MESSAGES on packages/platform-objects/src/identity/sys-user.object.ts#invite_user, whose successMessage `Invitation sent to {{ result.email }}` is the fallback for an answer without an outcome), interpolating the invitee from the action result — while the sys_invitation and sys_email rows are written (QA run #23163 at objectui 1fb1ced36243; pin ObjectView.inviteFeedback-11817.test.tsx)",
           "FIXED, regression rows, expected PASS (QA run #23953 at objectui daeb77fc84dd): Studio Publish gives a success confirmation (objectui#11807); the task grid's row save toasts '1 row saved' (objectui#12303 fixed for this row; since #35685 it is the save each committed cell makes, with no Save All); the approval decision's Approve toasted the framework-declared successMessage, read in the approvals drawer that route no longer has (variants[6]) `Approved \"{{ result.request.record_title }}\"` (packages/plugins/plugin-approvals/src/sys-approval-request.object.ts), e.g. Approved \"EXP-2001\" (#23157, closed). Studio's 'Discard draft' toast and its confirm now name the item by its LABEL — QA run #24570 at objectui 4016370a read 'Draft discarded: QA Widget' — a regression row, expected PASS (objectstack-ai/objectui#12690, closed by objectui PR #12830, 0f42aaf8, in the console pin 4016370a and on objectui main; ResourceEditPage.tsx falls back to type/name only for an item with no label)",
           "FIXED, regression row, expected PASS (objectui#11816): leaving an inline editor with no value change no longer reads '1 row modified · Save All (1)' (QA run #23163 at objectui 1fb1ced36243; pin data-table-noop-edit-11816.test.tsx) — negative[1]",
-          "Undo is scored only where a surface offers it, and on stock ONE surface does: the import. An import run as a job (the wizard's 'runs as an undoable job' option) is listed in the import history with 'Undo import', which deletes the records it created and restores the records it updated to their previous values; QA run #25817 at 6679644a read it working in both create and update modes. Elsewhere no stock surface offers Undo: only an action declaring `undoable` pushes an Undo op (inline and form edits push none), and the showcase declares no undoable action (records-forms.record-edit-undo, blocked(fixture)). So acceptance[5] is scored on the import variant. Undo's absence elsewhere is recorded in the evidence and is never a FAIL of this item: which writes should offer Undo is a product decision, not this item's oracle"
+          "Undo is scored only where a surface offers it, and on stock TWO surfaces do: the import, and since #35685 a list cell save (the save toast's Undo button, or Ctrl+Z / Cmd+Z on the cell, sends a new If-Match update of the prior value and toasts 'Change undone'; the grid's own stack, not the shared one). An import run as a job (the wizard's 'runs as an undoable job' option) is listed in the import history with 'Undo import', which deletes the records it created and restores the records it updated to their previous values; QA run #25817 at 6679644a read it working in both create and update modes. Elsewhere no stock surface offers Undo: only an action declaring `undoable` pushes an Undo op onto the shared stack (form edits push none, and a list cell save's Undo is its grid's own), and the showcase declares no undoable action (records-forms.record-edit-undo, blocked(fixture)). So acceptance[5] is scored on the import variant, and may be read on variants[1]'s cell save too. Undo's absence elsewhere is recorded in the evidence and is never a FAIL of this item: which writes should offer Undo is a product decision, not this item's oracle"
         ]
       },
       "variants": [
@@ -195,6 +195,12 @@
           "date": "2026-11-20",
           "change": "variants[1] and knownGaps[1] follow #35685: a list cell saves the moment it is committed, with a saving and a saved mark on the cell and the '1 row saved' toast, and there is no Save row or Save All to press. The clauses are unchanged. Read at base 2ad42b5d",
           "ref": "#35864"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-20",
+          "change": "knownGaps[3] follows #35685: a list cell save now offers Undo (the save toast's button and Ctrl+Z / Cmd+Z on a cell, a new If-Match update of the prior value), so the stock surfaces with an Undo are the import and the list cell save, and 'inline edits push none' is narrowed to the shared stack. The clauses are unchanged. Read at the PR's head",
+          "ref": "#35898"
         }
       ]
     },

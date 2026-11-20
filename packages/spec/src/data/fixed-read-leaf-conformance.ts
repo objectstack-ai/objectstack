@@ -224,7 +224,8 @@ const DOC_ROWS: readonly FixedReadLeafRow[] = frozenRows([
  * - `g6` is a group's grant whose id happens to be `u1` (`recipient_type`
  *   fixed to `'user'`);
  * - `g7` grants `d7`, a doc in `org_a`, on a row stamped `org_b`: it counts,
- *   because the inner read carries no tenant scope (① ruled A);
+ *   because the inner read carries no tenant scope (① ruled A), directly and
+ *   through the note `n5` in the nested position;
  * - `g8` grants `d8`, a doc in `org_b`: under a tenant read in `org_a` the
  *   OUTER wall drops it, as it does today;
  * - `g9` and `g10` carry a NULL and an empty `record_id` (the blank-id guard).
@@ -244,12 +245,17 @@ const GRANT_ROWS: readonly FixedReadLeafRow[] = frozenRows([
   { id: 'g10', object_name: DOC, recipient_type: 'user', recipient_id: 'u1', record_id: '', access_level: LEVEL_EDIT, organization_id: 'org_a' },
 ]);
 
-/** Four notes, the nested position's rows. `n4` names no doc. */
+/**
+ * Five notes, the nested position's rows. `n4` names no doc; `n5` names `d7`,
+ * whose only grant is stamped in another organization, so the nested position
+ * crosses an organization too.
+ */
 const NOTE_ROWS: readonly FixedReadLeafRow[] = frozenRows([
   { id: 'n1', record_id: 'd1', organization_id: 'org_a' },
   { id: 'n2', record_id: 'd3', organization_id: 'org_a' },
   { id: 'n3', record_id: 'd4', organization_id: 'org_a' },
   { id: 'n4', record_id: null, organization_id: 'org_a' },
+  { id: 'n5', record_id: 'd7', organization_id: 'org_a' },
 ]);
 
 const read = (recipient: string) => SharedRecordIds.read(DOC, recipient);
@@ -381,10 +387,23 @@ const SHARED_RECORD_IDS_CASES: readonly FixedReadLeafMatchesCase[] = Object.free
     object: NOTE,
     where: () => ({ record_id: { $in: ReadableIds.compose(ReadableIds.of(DOC), readScope('u1')) } }),
     holdsLeaf: true,
-    expected: ['n1', 'n2'],
+    expected: ['n1', 'n2', 'n5'],
     note: 'ADR-0155 D4: the scope the engine composes for a ReadableIds leaf is the parent\'s read filter, which '
-      + 'carries this leaf for a sharing-scoped parent. n1\'s doc is shared, n2\'s is owned, n3\'s is neither '
-      + 'and n4 names none. A driver that evaluates the inner leaf as no restriction returns n3 too.',
+      + 'carries this leaf for a sharing-scoped parent. n1\'s and n5\'s docs are shared, n2\'s is owned, n3\'s is '
+      + 'neither and n4 names none. A driver that evaluates the inner leaf as no restriction returns n3 too.',
+  },
+  {
+    name: 'nested, under a tenant: the inner read stays unwalled inside the parent\'s walled subquery',
+    verdict: 'matches',
+    object: NOTE,
+    where: () => ({ record_id: { $in: ReadableIds.compose(ReadableIds.of(DOC), readScope('u1')) } }),
+    options: { tenantId: 'org_a' },
+    requiresUnwalledInnerRead: true,
+    holdsLeaf: true,
+    expected: ['n1', 'n2', 'n5'],
+    note: 'ADR-0155 ① ruled A, in the nested position: the composed scope\'s subquery takes the outer read\'s '
+      + 'tenant wall on the doc (ADR-0139 D3), and the leaf inside it takes none, so n5 counts through d7, whose '
+      + 'only grant is stamped org_b. An inner read walled with the driver\'s tenant scope drops n5.',
   },
 ]);
 
