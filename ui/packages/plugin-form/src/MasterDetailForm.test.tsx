@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
+import { MePermissionsProvider } from '@object-ui/permissions';
 import { MasterDetailForm } from './MasterDetailForm';
 
 // Capture toast calls so we can assert the form is never a silent no-op.
@@ -343,5 +344,139 @@ describe('MasterDetailForm — showSubmit gate (Studio screen preview)', () => {
     );
     const cancelBtn = await waitFor(() => screen.getByTestId('md-form-cancel'));
     expect(cancelBtn).toHaveTextContent('取消');
+  });
+});
+
+describe('MasterDetailForm — a new line starts on the child\'s defaults and waits to read red (objectstack#35940)', () => {
+  const USER_ID = 'user-42';
+  // `name` is required with no default; `note` is required with one;
+  // `applicant` defaults to the acting user, which only a known session can seed.
+  const lineSchema = {
+    name: 'po_line',
+    fields: {
+      name: { type: 'text', label: 'Name', required: true },
+      note: { type: 'text', label: 'Note', required: true, defaultValue: 'Pending' },
+      applicant: { type: 'user', label: 'Applicant', defaultValue: 'current_user' },
+      po: { type: 'master_detail', label: 'PO', reference: 'po' },
+    },
+  };
+  const ME_PERMISSIONS = {
+    authenticated: true,
+    userId: USER_ID,
+    tenantId: 't1',
+    roles: ['user'],
+    permissionSets: [],
+    objects: { '*': { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true } },
+    fields: {},
+  };
+  const columns = [
+    { name: 'name', label: 'Name', type: 'text', required: true },
+    { name: 'note', label: 'Note', type: 'text', required: true },
+  ];
+  const lineDataSource = (overrides: any = {}) =>
+    makeDataSource({
+      getObjectSchema: vi.fn(async (name: string) => (name === 'po_line' ? lineSchema : parentSchema)),
+      ...overrides,
+    });
+  const schemaWith = (detail: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) =>
+    ({
+      objectName: 'po',
+      mode: 'create',
+      fields: ['ref'],
+      details: [{ childObject: 'po_line', relationshipField: 'po', columns, ...detail }],
+      ...extra,
+    }) as any;
+  const cell = (container: HTMLElement, row: number, col: number) =>
+    container.querySelector(`[data-cell="${row}-${col}"]`) as HTMLInputElement | null;
+  /** Add a line once the child schema (and so its defaults) has answered. */
+  const addSeededLine = async (container: HTMLElement) => {
+    await waitFor(() => expect(cell(container, 0, 1)?.value).toBe('Pending')); // the entry line
+    fireEvent.click(screen.getByTestId('line-items-add'));
+    await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(2));
+  };
+  const createOps = (batch: ReturnType<typeof vi.fn>) =>
+    (batch.mock.calls[0][0] as Array<{ object: string; action: string; data?: Record<string, unknown> }>).filter(
+      (op) => op.object === 'po_line' && op.action === 'create',
+    );
+
+  it('an added line shows the defaults and no red cell; once a save is tried its empty required cell reads red', async () => {
+    const batchTransaction = vi.fn().mockRejectedValue(new Error('Name is required'));
+    const { container } = render(<MasterDetailForm schema={schemaWith()} dataSource={lineDataSource({ batchTransaction })} />);
+    await addSeededLine(container);
+    expect(cell(container, 0, 1)!.value).toBe('Pending');
+    // An edit to another cell: the line is the user's input, its Name still empty.
+    fireEvent.change(cell(container, 0, 1)!, { target: { value: 'Later' } });
+    expect(container.querySelector('[data-testid^="line-items-invalid-"]')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+    await waitFor(() => expect(screen.getByTestId('line-items-invalid-0-name')).toBeInTheDocument());
+    // The cell with a default is filled, so it is never flagged.
+    expect(screen.queryByTestId('line-items-invalid-0-note')).toBeNull();
+  });
+
+  it('CONTROL: a stored line\'s empty required cell is flagged at once, as before', async () => {
+    const ds = lineDataSource({
+      find: vi.fn().mockResolvedValue({ data: [{ id: 'l1', po: 'p1', name: null, note: 'x' }] }),
+      findOne: vi.fn().mockResolvedValue({ id: 'p1', ref: 'PO-1' }),
+    });
+    render(<MasterDetailForm schema={schemaWith({}, { mode: 'edit', recordId: 'p1' })} dataSource={ds} />);
+    await waitFor(() => expect(screen.getByTestId('line-items-invalid-0-name')).toBeInTheDocument());
+  });
+
+  it('the line is written with its defaults, the acting user included (the context a create form seeds with)', async () => {
+    const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }, { id: 'l1' }] });
+    const { container } = render(
+      <MePermissionsProvider initialPermissions={ME_PERMISSIONS as any}>
+        <MasterDetailForm schema={schemaWith()} dataSource={lineDataSource({ batchTransaction })} />
+      </MePermissionsProvider>,
+    );
+    await addSeededLine(container);
+    fireEvent.change(cell(container, 0, 0)!, { target: { value: 'Bolts' } });
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+    await waitFor(() => expect(batchTransaction).toHaveBeenCalledTimes(1));
+    expect(createOps(batchTransaction)).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Bolts', note: 'Pending', applicant: USER_ID }) }),
+    ]);
+  });
+
+  it('form mode: Add opens the row editor on the defaults', async () => {
+    const ds = lineDataSource();
+    render(<MasterDetailForm schema={schemaWith({ inlineMode: 'form', formFields: ['name', 'note'] })} dataSource={ds} />);
+    // The defaults come from the child schema: let its read answer first.
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('po_line'));
+    await act(async () => {});
+    fireEvent.click(screen.getByTestId('line-items-add'));
+    const editor = await waitFor(() => screen.getByTestId('md-row-form'));
+    await waitFor(() =>
+      expect((editor.querySelector('input[name="note"]') as HTMLInputElement | null)?.value).toBe('Pending'),
+    );
+  });
+
+  it('a line Add started and the row editor then applied is input, and is written', async () => {
+    const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }, { id: 'l1' }] });
+    const { container } = render(
+      <MasterDetailForm
+        schema={schemaWith({ formFields: ['name', 'note', 'applicant'] })}
+        dataSource={lineDataSource({ batchTransaction })}
+      />,
+    );
+    await addSeededLine(container);
+    fireEvent.click(screen.getByTestId('line-items-expand-0'));
+    const editor = await waitFor(() => screen.getByTestId('md-row-form'));
+    const name = await waitFor(() => {
+      const el = editor.querySelector('input[name="name"]') as HTMLInputElement | null;
+      if (!el) throw new Error('row editor not ready');
+      return el;
+    });
+    // Typed in the editor, not in the grid: only Apply carries it to the line,
+    // and a line still marked untouched would be skipped whatever it holds.
+    fireEvent.change(name, { target: { value: 'Washers' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Apply' }));
+    await waitFor(() => expect(screen.queryByTestId('md-row-form')).toBeNull());
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+    await waitFor(() => expect(batchTransaction).toHaveBeenCalledTimes(1));
+    expect(createOps(batchTransaction)).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Washers', note: 'Pending' }) }),
+    ]);
   });
 });
