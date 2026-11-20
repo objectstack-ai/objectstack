@@ -101,6 +101,7 @@ import MigrateStoredExpressions from '../commands/migrate/stored-expressions.js'
 import MigrateStoredReferences from '../commands/migrate/stored-references/index.js';
 import MigrateStoredReferencesBind from '../commands/migrate/stored-references/bind.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
+import MigrateUnitCodes from '../commands/migrate/unit-codes.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
 import PluginInstall from '../commands/plugin/install.js';
@@ -409,6 +410,17 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateSummaryNulls),
     noWrite: [{ label: 'migrate summary-nulls', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate summary-nulls --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/unit-codes.ts': {
+    run: invoke(MigrateUnitCodes),
+    // The fixture's app declares no unit code field, so the backfill refuses
+    // `status` (INVALID_FIELD) after the boot and writes nothing. The boot is
+    // what these cases are about.
+    noWrite: [{ label: 'migrate unit-codes', argv: ['--object', 'osf_lead', '--field', 'status', '--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate unit-codes --apply',
+      argv: ['--apply', '--yes', '--object', 'osf_lead', '--field', 'status', '--database-url', '@DB@', '--json'],
+    }],
   },
   'commands/migrate/unmapped-columns.ts': {
     run: invoke(MigrateUnmappedColumns),

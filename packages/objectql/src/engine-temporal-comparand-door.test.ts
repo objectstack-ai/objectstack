@@ -197,6 +197,9 @@ describe('[#8690] the temporal-comparand door at the engine collection point', (
       expect(err!.message).toContain('created_date');
       expect(err!.message).toContain(comparand);
       expect(err!.message).toMatch(/NOT applied/);
+      // The junk class's consequence, the phrase the misread and year classes
+      // are pinned NOT to carry: compared as text, every row, none or the wrong ones.
+      expect(err!.message).toContain('compared as text: it may select every row, none or the wrong ones');
       // And no driver read happened — the refusal precedes the driver.
       expect(reads).toHaveLength(0);
     }
@@ -446,8 +449,8 @@ describe('[#20549] the comparand door refuses what the write door refuses — a 
         expect(err!.message).toContain(`'${field}'`);
         expect(err!.message).toMatch(/NOT applied/);
         // Not junk: the rule READ it, as the wrong value, so the refusal does
-        // not claim it would have compared false for every row.
-        expect(err!.message, `${field} ${value}`).not.toContain('compare false for EVERY row');
+        // not claim the junk class's "compared as text: it may select every row, none or the wrong ones".
+        expect(err!.message, `${field} ${value}`).not.toContain('compared as text: it may select every row, none or the wrong ones');
       }
     }
     expect(reads, 'every refusal precedes the driver').toHaveLength(0);
