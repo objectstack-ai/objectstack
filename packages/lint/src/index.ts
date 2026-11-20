@@ -194,6 +194,7 @@ export {
   validateReadonlyFlowWrites,
   FLOW_UPDATE_READONLY_FIELD,
   FLOW_UPDATE_READONLY_WHEN_FIELD,
+  FLOW_UPDATE_SUMMARY_FIELD,
 } from './validate-readonly-flow-writes.js';
 export type {
   ReadonlyFlowWriteFinding,
@@ -275,6 +276,7 @@ export {
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,
   FIELD_GROUP_SHADOWED,
+  FIELD_GROUP_MEMBER_UNKNOWN,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
   SEMANTIC_ROLE_FIELD_UNPROVISIONED,
 } from './validate-semantic-roles.js';

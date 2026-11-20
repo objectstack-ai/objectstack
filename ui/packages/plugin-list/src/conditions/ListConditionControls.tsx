@@ -57,7 +57,6 @@ import {
   removeCondition,
   seedValueFor,
   sortWording,
-  toggleSortOrder,
   upsertCondition,
   type ConditionField,
   type ViewConditionChip,
@@ -474,6 +473,12 @@ export interface ConditionChipRowProps {
   shownFields?: ReadonlyArray<string>;
   renderAdvanced: () => React.ReactNode;
   /**
+   * Every sort level in one panel, drawn by the host (the Sort panel's
+   * 「all sort levels」 step): a sort chip opens it (objectstack#35876). The
+   * chip itself never changes the sort.
+   */
+  renderSortLevels: () => React.ReactNode;
+  /**
    * Back to the view as saved. Drawn only when passed: the host passes it
    * only while the reader has something of their own to reset.
    */
@@ -498,6 +503,7 @@ export function ConditionChipRow({
   dataSource,
   shownFields,
   renderAdvanced,
+  renderSortLevels,
   onReset,
   trailing,
   className,
@@ -580,27 +586,43 @@ export function ConditionChipRow({
             data-order={item.order}
             data-priority={index + 1}
           >
-            <button
-              type="button"
-              className="inline-flex min-w-0 items-center gap-1"
-              onClick={() => onSortChange(toggleSortOrder(sort, item.id))}
-              onKeyDown={(event) => {
-                if (!event.altKey) return;
-                if (event.key === 'ArrowLeft' && index > 0) {
-                  event.preventDefault();
-                  moveSort(index, index - 1);
-                } else if (event.key === 'ArrowRight' && index < sort.length - 1) {
-                  event.preventDefault();
-                  moveSort(index, index + 1);
-                }
-              }}
-              aria-label={t('listConditions.chips.toggleSort', { label: `${label} ${direction}` })}
-              title={direction}
-              data-testid={`sort-chip-toggle-${item.field}`}
-            >
-              <Arrow className="h-3 w-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{label}</span>
-            </button>
+            {(() => {
+              const chipKey = `sort:${item.id}`;
+              const chipButton = (
+                <button
+                  type="button"
+                  className="inline-flex min-w-0 items-center gap-1"
+                  onKeyDown={(event) => {
+                    if (!event.altKey) return;
+                    if (event.key === 'ArrowLeft' && index > 0) {
+                      event.preventDefault();
+                      moveSort(index, index - 1);
+                    } else if (event.key === 'ArrowRight' && index < sort.length - 1) {
+                      event.preventDefault();
+                      moveSort(index, index + 1);
+                    }
+                  }}
+                  aria-label={`${label} ${direction}`}
+                  title={direction}
+                  data-testid={`sort-chip-open-${item.field}`}
+                >
+                  <Arrow className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+              // objectstack#35876 — the chip opens every sort level in one
+              // panel; it does not flip the direction.
+              return (
+                <Popover open={openChip === chipKey} onOpenChange={(open) => setOpenChip(open ? chipKey : null)}>
+                  <PopoverTrigger asChild>{chipButton}</PopoverTrigger>
+                  <PopoverContent align="start" className={POPOVER_CLASS} data-testid={`condition-popover-${chipKey}`}>
+                    <div className="w-[calc(100vw-2rem)] max-w-[600px] p-3 sm:w-[600px] sm:p-4" data-testid="sort-chip-panel">
+                      {renderSortLevels()}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              );
+            })()}
             <button
               type="button"
               className="ml-0.5 rounded-full text-muted-foreground hover:text-foreground"

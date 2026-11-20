@@ -8,6 +8,7 @@
  * passed in; the component reads the returned callback.
  */
 
+import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
@@ -28,7 +29,6 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import type { DataSource } from '@object-ui/types';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
-import type { isSetupAppSegment } from '../console/setupApp.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
 import { substituteFilterTokens } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
@@ -40,7 +40,7 @@ import {
     kanbanViewOptions,
     isSameOptionsValue,
 } from './objectViewOptions.js';
-import { keepInlineEditModeForTheSession, useViewTabsFit } from './objectViewChrome.js';
+import { useViewTabsFit } from './objectViewChrome.js';
 import { ListRecordCountContext } from './objectViewTitleSwitcher.js';
 import { OpenAsPageLink } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
@@ -74,7 +74,6 @@ export function withAddedListColumns(
 
 export function useObjectViewListRenderer({
     objectName,
-    inSetup,
     t,
     viewEmptyState,
     localizeActionTexts,
@@ -111,7 +110,6 @@ export function useObjectViewListRenderer({
     listViewActions,
 }: {
     objectName: string | undefined;
-    inSetup: ReturnType<typeof isSetupAppSegment>;
     t: ReturnType<typeof useObjectTranslation>['t'];
     viewEmptyState: ReturnType<typeof useObjectLabel>['viewEmptyState'];
     localizeActionTexts: ReturnType<typeof useActionTextLocalizer>;
@@ -172,6 +170,13 @@ export function useObjectViewListRenderer({
         rename?: (label: string) => boolean | Promise<boolean>;
         save?: () => void;
         reset?: () => void;
+        /**
+         * objectstack#35702 — save a footer calculation on the open view (wired
+         * only for a reader who may change it); resolves whether it was saved.
+         */
+        pickSummary?: (field: string, summary: ColumnSummary | null) => boolean | Promise<boolean>;
+        /** objectstack#35702 — the columns the view declares: the only ones a pick may change. */
+        summaryPickFields?: readonly string[];
     };
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
@@ -181,6 +186,9 @@ export function useObjectViewListRenderer({
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
+    const offersSummaryPick = !!listViewActions?.pickSummary;
+    // Keyed on content, never the array's identity (a fresh one every render).
+    const summaryPickKey = (listViewActions?.summaryPickFields ?? []).join('\n');
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -366,11 +374,17 @@ export function useObjectViewListRenderer({
             const chartConfig = viewDef.chart || {};
             // The way back to the other views is the view switcher
             // (objectstack#27594), which heads the chart in a bar of the
-            // list's view bar's height (objectstack#27058, objectstack#35548).
+            // list's view bar's height (objectstack#27058, objectstack#35548)
+            // and the list's view bar's padding (`TOOLBAR_ROW` in
+            // plugin-list's `listToolbarRow.ts`, objectstack#35729): from `sm`
+            // up 10px on the left puts the switcher's 6px-padded icon on the
+            // list page's 16px line (objectstack#35663), so switching between
+            // the list and the chart does not move it; below `sm` both bars
+            // keep `px-2`.
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
                     {hasPhoneTitle && (
-                        <div className="border-b px-2 py-1.5 sm:h-10 sm:px-4 sm:py-0 flex items-center min-w-0 bg-background">
+                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center min-w-0 bg-background">
                             <ViewBarLead store={leadStore} />
                         </div>
                     )}
@@ -1040,6 +1054,10 @@ export function useObjectViewListRenderer({
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
                 onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
+                onColumnSummaryPick={offersSummaryPick
+                    ? (field: string, summary: ColumnSummary | null) => listViewActionsRef.current?.pickSummary?.(field, summary) ?? false
+                    : undefined}
+                columnSummaryPickFields={offersSummaryPick ? summaryPickKey.split('\n').filter(Boolean) : undefined}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1101,8 +1119,6 @@ export function useObjectViewListRenderer({
                 // the door that stores a change to them (see `persistAddedFields`).
                 addedFields={listColumns.addedFields}
                 onAddedFieldsChange={addedFieldsStored ? persistAddedFields : undefined}
-                // objectui#5144 (ruling E): session-only, writes nothing.
-                onInlineEditChange={keepInlineEditModeForTheSession}
                 onColumnStateChange={persistListColumnState}
                 userFilterSelections={initialUfSelections}
                 onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
@@ -1142,7 +1158,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

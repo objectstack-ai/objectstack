@@ -1236,6 +1236,33 @@ describe('#34257 — a password the door sets starts the password-age clock and 
   });
 });
 
+describe('a credential change ends access issued before it — the one-step door', () => {
+  quietConsole();
+
+  it('a session opened before the door writes the password is ended, and the session the door opens stands', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('raced@example.com');
+    await signUp(manager, engine, 'raced@example.com');
+    const internal = (await manager.getAuthContext()).internalAdapter;
+    const original = internal.updatePassword.bind(internal);
+    let opened: string | undefined;
+    vi.spyOn(internal, 'updatePassword').mockImplementation(async (...args: unknown[]) => {
+      if (opened === undefined) {
+        const res = await post(manager, '/sign-in/email', { email: 'raced@example.com', password: PASSWORD });
+        opened = res.status === 200 ? cookieFrom(res) : '';
+      }
+      return (original as (...a: unknown[]) => Promise<unknown>)(...args);
+    });
+
+    const res = await door(manager, { invitationId: invitation.id, proof, name: 'R', password: NEW_PASSWORD });
+    await expectAccepted(res);
+
+    expect(opened, 'a sign-in ran before the password write').toBeTruthy();
+    expect(await sessionUser(manager, opened!)).toBeNull();
+    expect(await sessionUser(manager, cookieFrom(res))).toMatchObject({ email: 'raced@example.com' });
+  });
+});
+
 // #35107 — a host that calls the organization plugin's `sendInvitationEmail`
 // from its own code (no better-auth endpoint around the call) gets the same
 // mail: the proof is minted through the manager's own auth context.

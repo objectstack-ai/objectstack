@@ -1,0 +1,8 @@
+{
+  "file": "packages/drivers/driver-sql/src/sql-driver-internal-helpers.ts",
+  "adrs": [
+    "ADR-0139",
+    "ADR-0155"
+  ],
+  "invariant": "ADR-0155 D2, ① ruled A: `fixedReadLeafSubquery` builds the fixed inner read of a `SharedRecordIds` leaf with NO `applyTenantScope` — today's read of `sys_record_share` carries no tenant scope, so the subquery carries none (the outer statement's wall stands, applied to the outer builder), and `scripts/check-tenant-chokepoint.mjs` records the absence as its one EXEMPT entry. Its neighbour `readableIdsSubquery` IS walled (ADR-0139 D3): the two subqueries differ on purpose, and adding the wall to the first narrows the shared set ADR-0155 D-0 keeps equal to today's list. On Oracle the blank-id guard is `IS NOT NULL` alone, because `<> ''` is `<> NULL` there and would empty the set."
+}

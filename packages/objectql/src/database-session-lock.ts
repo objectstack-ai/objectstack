@@ -45,16 +45,64 @@ interface LockKnex {
   raw(sql: string, bindings?: readonly unknown[]): { connection(connection: unknown): Promise<unknown> };
 }
 
-/** A held database session lock. `release()` is idempotent and never throws. */
+/**
+ * A held database session lock. `release()` is idempotent, never throws, and
+ * never waits on a stalled session past {@link DATABASE_SESSION_LOCK_ANSWER_MS}
+ * for its unlock, nor past it again for its close.
+ */
 export interface DatabaseSessionLock {
   release(): Promise<void>;
   /**
    * Whether the lock still stands: its session answers a probe on the very
    * connection it was taken on. A session that ended — a dropped connection,
    * a terminated backend — took the lock with it, so a probe that fails reads
-   * `false`, never throws. Always `false` after `release()`.
+   * `false`, never throws. A probe the session does not answer within
+   * {@link DATABASE_SESSION_LOCK_ANSWER_MS} reads `false` too, and from then on
+   * the session is never probed again. Always `false` after `release()`.
    */
   isHeld(): Promise<boolean>;
+}
+
+/**
+ * How long a HELD lock's session gets to answer each step of a holder's check
+ * and finish — the liveness probe ({@link DatabaseSessionLock.isHeld}), the
+ * unlock statement, and the close of the raw connection — before it is read as
+ * stalled.
+ *
+ * A connection stalled half-open — no reply and no reset — never FAILS a
+ * statement: it never answers at all, and a holder that waits on it waits for
+ * good (a sealer pass checking its lock, an `os migrate audit-* --apply` run's
+ * finish, a migrator's release). A session that has not answered in this long
+ * is one no holder can count on, so it is read as gone: the probe answers
+ * `false` (the lock is lost), the release stops waiting for its unlock and
+ * closes the connection, and the close stops waiting too — the database ends
+ * the session, and the lock with it, once the connection finally dies. A live
+ * session answers each of the three in milliseconds.
+ *
+ * Every holder is bounded alike, the schema-migration lock's release included;
+ * no statement either lock runs changes, and a live session waits exactly as
+ * long as before.
+ */
+export const DATABASE_SESSION_LOCK_ANSWER_MS = 10_000;
+
+/** What {@link withinAnswerTime} answers for a step the session did not answer in time. */
+const STALLED = Symbol('stalled');
+
+/**
+ * `step`'s own outcome, or {@link STALLED} once
+ * {@link DATABASE_SESSION_LOCK_ANSWER_MS} pass without it settling. Its timer
+ * is cleared as soon as either settles, so it never outlives the step.
+ */
+async function withinAnswerTime<T>(step: Promise<T>): Promise<T | typeof STALLED> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stalled = new Promise<typeof STALLED>((resolve) => {
+    timer = setTimeout(() => resolve(STALLED), DATABASE_SESSION_LOCK_ANSWER_MS);
+  });
+  try {
+    return await Promise.race([step, stalled]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -177,7 +225,8 @@ async function openLockSession(driver: unknown, name: string): Promise<LockSessi
   const run = async (sql: string, bindings: readonly unknown[]): Promise<Record<string, unknown> | undefined> =>
     lockRow(await knex.raw(sql, bindings).connection(connection));
   const close = async (): Promise<void> => {
-    try { await knex.client.destroyRawConnection(connection); } catch { /* closing releases the lock anyway */ }
+    // Bounded: closing a stalled connection waits on the same silent transport (see DATABASE_SESSION_LOCK_ANSWER_MS).
+    try { await withinAnswerTime(knex.client.destroyRawConnection(connection)); } catch { /* closing releases the lock anyway */ }
   };
   return {
     pg,
@@ -215,21 +264,25 @@ async function openLockSession(driver: unknown, name: string): Promise<LockSessi
     },
     held(marker) {
       let held = true;
+      // The session left a probe unanswered past the bound: the lock reads lost, and no statement waits on it again.
+      let stalled = false;
       const lock: DatabaseSessionLock = {
         release: async () => {
           if (!held) return;
           held = false;
-          try {
-            if (pg) await run('select pg_advisory_unlock(?::bigint)', [pgKey]);
-            else await run('select RELEASE_LOCK(?)', [name]);
-          } catch { /* closing the session below releases it */ }
+          if (!stalled) {
+            try {
+              // An unlock that does not answer in time is given up on: the close below ends the session, and the lock with it.
+              await withinAnswerTime(pg ? run('select pg_advisory_unlock(?::bigint)', [pgKey]) : run('select RELEASE_LOCK(?)', [name]));
+            } catch { /* closing the session below releases it */ }
+          }
           await close();
         },
         isHeld: async () => {
-          if (!held) return false;
+          if (!held || stalled) return false;
           try {
-            await run('select 1 as held', []);
-            return true;
+            if ((await withinAnswerTime(run('select 1 as held', []))) === STALLED) stalled = true;
+            return !stalled;
           } catch {
             return false;
           }

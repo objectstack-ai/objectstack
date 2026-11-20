@@ -27,6 +27,9 @@ import { RelatedCountStore } from '../hooks/related-count-store';
 // Registers the renderers at module scope, NOT inside a `beforeAll` — there the
 // cold transform is billed to `hookTimeout` (objectui#3010/#3021).
 import '../renderers';
+// `react-page` reaches this dynamically; load it during collection, not in a
+// clocked case (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const RECORD_OBJECT = 'zz13010_env';
 const PARENT_ID = 'ENV-13010';
@@ -94,8 +97,11 @@ describe('page:tabs probes from the named record, not the loaded row (objectui#1
     expect(probed(ds)).toEqual([OPEN_CHILD]);
 
     rerender(tree(ds, { id: PARENT_ID, plan: 'pro' }, overview));
-    expect((await findByLabelText('5 items')).textContent).toBe('5');
-    expect(probed(ds)).toEqual([GATED_CHILD, OPEN_CHILD].sort());
+    await waitFor(() => expect(probed(ds)).toEqual([GATED_CHILD, OPEN_CHILD].sort()));
+    // Both shown now: the tab merges two tables and carries no number
+    // (objectstack#35595, one table, one count).
+    await waitFor(() => expect(document.querySelector('[aria-label="2 items"]')).toBeNull());
+    expect(document.querySelector('[aria-label="5 items"]')).toBeNull();
   });
 
   it('a tab whose item-level visibleWhen decides it waits for the record body', async () => {

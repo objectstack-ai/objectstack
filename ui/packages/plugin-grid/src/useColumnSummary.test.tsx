@@ -148,3 +148,46 @@ describe('useColumnSummary formatting stays with the numeric family', () => {
     expect(result.current.summaries.get('amount')?.label).toMatch(/\$|US\$/);
   });
 });
+
+/**
+ * A `formula` column's footer reads its declared `returnType` when the spec
+ * reads that return type AS a field type (`percent`, `currency`), so the total
+ * reads in the unit of the cells above it. Every other formula keeps the plain
+ * arm (CONTROL: `number`).
+ */
+describe('useColumnSummary reads a formula by its declared returnType (objectstack#35734)', () => {
+  const RATES = [{ rate: 0.25 }, { rate: 0.5 }];
+  const sumOf = (meta: Record<string, any>) =>
+    renderHook(() => useColumnSummary([{ field: 'rate', summary: 'sum' }] as any[], RATES, meta), {
+      wrapper: wrapper('USD'),
+    }).result.current.summaries.get('rate')?.label;
+
+  it('a percent-returning formula totals as a percentage, as a percent field does', () => {
+    const formula = sumOf({ rate: { type: 'formula', returnType: 'percent' } });
+    expect(formula).toBe('Sum: 75%');
+    expect(formula).toBe(sumOf({ rate: { type: 'percent' } }));
+  });
+
+  it('a percent-returning formula keeps its declared width and storage', () => {
+    expect(sumOf({ rate: { type: 'formula', returnType: 'percent', scale: 1 } })).toBe('Sum: 75.0%');
+    // `max` above 1 declares percentage points: 0.75 is under one percent.
+    expect(sumOf({ rate: { type: 'formula', returnType: 'percent', max: 100 } })).toBe(
+      sumOf({ rate: { type: 'percent', max: 100 } }),
+    );
+  });
+
+  it('a currency-returning formula totals as money in its declared currency', () => {
+    const { result } = renderHook(
+      () => useColumnSummary([{ field: 'net', summary: 'sum' }] as any[], [{ net: 1000 }, { net: 234 }], {
+        net: { type: 'formula', returnType: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } },
+      }),
+      { wrapper: wrapper('CNY') },
+    );
+    expect(result.current.summaries.get('net')?.label).toBe('Sum: $1,234.00');
+  });
+
+  it('CONTROL: a number-returning formula totals as it did, a plain number', () => {
+    expect(sumOf({ rate: { type: 'formula', returnType: 'number' } })).toBe('Sum: 0.75');
+    expect(sumOf({ rate: { type: 'formula', returnType: 'number' } })).toBe(sumOf({ rate: { type: 'formula' } }));
+  });
+});

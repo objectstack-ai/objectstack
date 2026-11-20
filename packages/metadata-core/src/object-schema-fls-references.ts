@@ -85,9 +85,11 @@
  *   well as whole, so a dotted path through a denied lookup (`owner.city`
  *   with `owner` denied) is a reference to it.
  * - A `fieldGroups[].key` is a group name, not a field reference — the
- *   readable fields join a group through their own `group: <key>` — so a group
- *   keyed like a denied field is served; dropping it would regroup fields the
- *   caller IS entitled to. A `listViews` key, by contrast, is the view's whole
+ *   readable fields join a group through the group's own `fields` list or
+ *   their own `group: <key>` — so a group keyed like a denied field is served;
+ *   dropping it would regroup fields the caller IS entitled to. The `fields`
+ *   list is a name list: a denied name is filtered out of it, and the readable
+ *   names keep their place and order. A `listViews` key, by contrast, is the view's whole
  *   identity and nothing else points at it, so a view keyed like a denied field
  *   is dropped.
  *
@@ -623,6 +625,10 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     deleteBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
     relatedListTitle: keep, lookupPageSize: keep, allowCreate: keep, returnType: keep,
     language: keep, step: keep, currencyConfig: keep, dimensions: keep, trackHistory: keep,
+    // The unit of this quantity, or this field's unit-code marker (ADR-0158
+    // U4): kept as `currencyConfig` is, whose `currencyField` names a sibling
+    // the way `unitConfig.unitField` does.
+    unitConfig: keep,
     group: keep, widget: keep, hidden: keep, internal: keep, readonly: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
@@ -815,6 +821,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
         // [#27069] A child relationship (child object, or `object.field`), as a
         // `relatedLists` entry is: no field of this object.
         relatedList: keep,
+        // [#35900] The group's own member list: field names of this object, so
+        // a denied one is filtered out and the readable rest keep their order.
+        fields: names,
     })),
     tenancy: block({ enabled: keep, tenantField: pointer }),
     lifecycle: block({

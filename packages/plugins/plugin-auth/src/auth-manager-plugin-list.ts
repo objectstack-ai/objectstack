@@ -786,6 +786,11 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   //
   // Toggle with `OS_SSO_ENABLED` (mirrors `OS_OIDC_PROVIDER_ENABLED`).
   if (enabled.sso) {
+    // SSO discovery connects only to addresses that are public at connect
+    // time: the adapter the vendor reads its providers through names their
+    // origins for the request's scope (`sso-discovery-egress.ts`).
+    const { ssoProviderReadsObserverPlugin } = await import('./sso-discovery-egress.js');
+    plugins.push(ssoProviderReadsObserverPlugin() as any);
     await this.addOptionalPlugin(plugins, 'sso', async () => {
     const { sso } = await import('@better-auth/sso');
     // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the

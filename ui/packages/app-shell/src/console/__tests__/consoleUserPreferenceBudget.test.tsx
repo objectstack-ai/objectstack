@@ -26,6 +26,9 @@
  * in the same read. The budget stays ONE read, asking for the three keys and
  * both prefixes.
  *
+ * objectstack#35881 adds a fourth key, the person's last app (`ui.app.last`):
+ * the budget stays ONE read, now asking for four keys and both prefixes.
+ *
  * ## The tree
  *
  * The real `ConsoleShell` providers and the real `ConnectedShell`: its
@@ -91,6 +94,7 @@ import { ConsoleShell, ConnectedShell } from '../ConsoleShell';
 import { useFavorites } from '../../context/FavoritesProvider';
 import { useRecentItems } from '../../context/RecentItemsProvider';
 import { useFlowPaletteRecents } from '../../context/FlowPaletteRecentsProvider';
+import { useLastApp } from '../../context/LastAppProvider';
 import { useObjectListPreferences, type ObjectListPreference } from '../../context/ListPreferencesProvider';
 import { useRecordPagePreferences } from '@object-ui/react';
 import { createPreferenceFramework, preferenceRowId as rowId, type PreferenceFramework } from './preferenceFramework';
@@ -98,7 +102,9 @@ import { createPreferenceFramework, preferenceRowId as rowId, type PreferenceFra
 const FAVORITES_KEY = 'ui.favorites';
 const RECENT_KEY = 'ui.recent';
 const FLOW_KEY = 'ui.flow.palette.recents';
-const BRIDGE_KEYS = [FAVORITES_KEY, RECENT_KEY, FLOW_KEY];
+/** objectstack#35881 — the person's last app, a fourth key in the same read. */
+const LAST_APP_KEY = 'ui.app.last';
+const BRIDGE_KEYS = [FAVORITES_KEY, RECENT_KEY, FLOW_KEY, LAST_APP_KEY];
 /** objectui#12418 — the list-state family, and one object's row of it. */
 const LIST_PREFIX = 'ui.list.';
 const LIST_KEY = 'ui.list.account';
@@ -113,6 +119,7 @@ const STORE: Record<string, Record<string, unknown>> = {
     [FAVORITES_KEY]: [{ id: 'object:contact', label: 'Contact', href: '/contact', type: 'object' }],
     [RECENT_KEY]: [{ id: 'object:lead', type: 'object', name: 'lead', href: '/lead', visitedAt: '2026-10-01T00:00:00.000Z' }],
     [FLOW_KEY]: ['flow_step_alpha'],
+    [LAST_APP_KEY]: ['sales'],
     [LIST_KEY]: { viewOrder: ['account.mine', 'account.all'] },
     [RECORD_KEY]: { showEmptyFields: true },
   },
@@ -120,6 +127,7 @@ const STORE: Record<string, Record<string, unknown>> = {
     [FAVORITES_KEY]: [{ id: 'object:invoice', label: 'Invoice', href: '/invoice', type: 'object' }],
     [RECENT_KEY]: [{ id: 'object:quote', type: 'object', name: 'quote', href: '/quote', visitedAt: '2026-10-02T00:00:00.000Z' }],
     [FLOW_KEY]: ['flow_step_omega'],
+    [LAST_APP_KEY]: ['service'],
     [LIST_KEY]: { viewOrder: ['account.all', 'account.closed'] },
     [RECORD_KEY]: { showEmptyFields: false },
   },
@@ -135,6 +143,8 @@ interface Seen {
   favorites: string[];
   recent: string[];
   flow: string[];
+  /** The person's last app (objectstack#35881). */
+  lastApp: string | null;
   /** The `account` list state's tab order (objectui#12418). */
   listOrder: string[];
   /** The `account` record page's "show empty fields" choice (objectstack#25883). */
@@ -146,13 +156,14 @@ interface Seen {
  * — the same shape `MetadataProvider.requestBudget.test.tsx` uses. Not props,
  * because writing through a prop is what the react-compiler rule refuses.
  */
-const EMPTY_SEEN: Seen = { favorites: [], recent: [], flow: [], listOrder: [], recordShowEmpty: undefined };
+const EMPTY_SEEN: Seen = { favorites: [], recent: [], flow: [], lastApp: null, listOrder: [], recordShowEmpty: undefined };
 const latest: { current: Seen } = { current: EMPTY_SEEN };
 const actions: {
   current: {
     addFavorite?: ReturnType<typeof useFavorites>['addFavorite'];
     addRecentItem?: ReturnType<typeof useRecentItems>['addRecentItem'];
     recordRecent?: ReturnType<typeof useFlowPaletteRecents>['recordRecent'];
+    rememberApp?: ReturnType<typeof useLastApp>['rememberApp'];
     patchListView?: ReturnType<typeof useObjectListPreferences>['patchView'];
     updateRecordPage?: NonNullable<ReturnType<typeof useRecordPagePreferences>>['update'];
   };
@@ -162,6 +173,7 @@ function Consumers() {
   const { favorites, addFavorite } = useFavorites();
   const { recentItems, addRecentItem } = useRecentItems();
   const { recents, recordRecent } = useFlowPaletteRecents();
+  const { lastApp, rememberApp } = useLastApp();
   const list = useObjectListPreferences('account');
   const listPreference: ObjectListPreference = list.preference;
   const listOrderKey = JSON.stringify(listPreference.viewOrder ?? []);
@@ -174,11 +186,12 @@ function Consumers() {
       favorites: favorites.map((f) => f.id),
       recent: recentItems.map((r) => r.id),
       flow: [...recents],
+      lastApp,
       listOrder: JSON.parse(listOrderKey),
       recordShowEmpty,
     };
-    actions.current = { addFavorite, addRecentItem, recordRecent, patchListView, updateRecordPage };
-  }, [favorites, recentItems, recents, listOrderKey, recordShowEmpty, addFavorite, addRecentItem, recordRecent, patchListView, updateRecordPage]);
+    actions.current = { addFavorite, addRecentItem, recordRecent, rememberApp, patchListView, updateRecordPage };
+  }, [favorites, recentItems, recents, lastApp, listOrderKey, recordShowEmpty, addFavorite, addRecentItem, recordRecent, rememberApp, patchListView, updateRecordPage]);
   return <main data-testid="content">content</main>;
 }
 
@@ -204,11 +217,11 @@ async function settle(ms = 150) {
 }
 
 const U1_SEEN: Seen = {
-  favorites: ['object:contact'], recent: ['object:lead'], flow: ['flow_step_alpha'],
+  favorites: ['object:contact'], recent: ['object:lead'], flow: ['flow_step_alpha'], lastApp: 'sales',
   listOrder: ['account.mine', 'account.all'], recordShowEmpty: true,
 };
 const U2_SEEN: Seen = {
-  favorites: ['object:invoice'], recent: ['object:quote'], flow: ['flow_step_omega'],
+  favorites: ['object:invoice'], recent: ['object:quote'], flow: ['flow_step_omega'], lastApp: 'service',
   listOrder: ['account.all', 'account.closed'], recordShowEmpty: false,
 };
 
@@ -226,7 +239,7 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('one boot puts one sys_user_preference read on the wire, asking for the three keys and both family prefixes', async () => {
+  it('one boot puts one sys_user_preference read on the wire, asking for the four keys and both family prefixes', async () => {
     boot();
     await waitFor(() => expect(wire().gets.length).toBeGreaterThan(0));
     await settle();
@@ -257,15 +270,16 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
       actions.current.addFavorite?.({ id: 'object:account', label: 'Account', href: '/account', type: 'object' });
       actions.current.addRecentItem?.({ id: 'object:deal', type: 'object', name: 'deal', href: '/deal' });
       actions.current.recordRecent?.('flow_step_beta');
+      actions.current.rememberApp?.('service');
       actions.current.patchListView?.('account.all', { sort: [{ field: 'name', order: 'desc' }] });
       actions.current.updateRecordPage?.('account', { showEmptyFields: false });
     });
 
     // Each provider debounces its write (500 ms; the record page writes on the
-    // click); all five land, once each.
-    await waitFor(() => expect(wire().writes).toHaveLength(5), { timeout: 3000 });
+    // click); all six land, once each.
+    await waitFor(() => expect(wire().writes).toHaveLength(6), { timeout: 3000 });
     await settle();
-    expect(wire().writes).toHaveLength(5);
+    expect(wire().writes).toHaveLength(6);
 
     const byId = new Map(wire().writes.map((w) => [w.id, w]));
     // An update of the row its own load found — no insert, no other row.
@@ -276,6 +290,7 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
     );
     expect((byId.get(rowId('u1', RECENT_KEY))?.value as { id: string }[])[0].id).toBe('object:deal');
     expect(byId.get(rowId('u1', FLOW_KEY))?.value).toEqual(['flow_step_beta', 'flow_step_alpha']);
+    expect(byId.get(rowId('u1', LAST_APP_KEY))?.value).toEqual(['service']);
     // The object's row carries what it held and the new sort.
     expect(byId.get(rowId('u1', LIST_KEY))?.value).toEqual({
       viewOrder: ['account.mine', 'account.all'],
@@ -300,7 +315,7 @@ describe('console sys_user_preference request budget (objectui#12187)', () => {
 
     const afterSwitch = wire().gets.slice(before);
     const forU2 = afterSwitch.filter((g) => g.user === 'u2');
-    // One read for the new user, asking for all three keys and both prefixes.
+    // One read for the new user, asking for all four keys and both prefixes.
     expect(forU2).toHaveLength(1);
     expect([...forU2[0].keys].sort()).toEqual([...BRIDGE_KEYS].sort());
     expect([...forU2[0].prefixes].sort()).toEqual(BOTH_PREFIXES);

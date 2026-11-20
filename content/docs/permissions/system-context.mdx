@@ -125,6 +125,7 @@ bugs — it is the protection or the side effect that silently does not happen.
 | 18c | **Credential-column filter / sort refusal not applied** — a `where`, `orderBy`, per-aggregation `filter` or `expand` entry naming a `password` / `secret` column is evaluated | objectql | Get: the server's own match on a stored credential value, a lookup that never returns it. Every other caller, administrators included, is refused `400 INVALID_FIELD` for anything but a has-a-value check (ADR-0100). Lose: nothing a wire caller reaches — `isSystem` is never set on an inbound request | `rejectCredentialEvaluation` |
 | 18d | **Stored-metadata type read gate not applied** — a read of `sys_metadata` / `sys_metadata_history` is not narrowed by the capability its row's type requires | objectql | Get: every row of the family on `find` / `findOne` / `count` / `aggregate` — the metadata loader, the `/meta` doors' own store reads, boot (a read with no execution context is not narrowed either). Lose: the narrowing that serves a stored row of a capability-gated type (`datasource`, `external_catalog`) only to holders of the capability the `/meta` type gate names for it | `storedMetadataTypeReadFilter` |
 | 18e | **`internal: true` evaluate refusal not applied on the engine's read path** — a filter, sort, group key, aggregation operand, per-aggregation `filter`, nested-relation condition or `expand` entry naming a field declared `internal: true` is evaluated | objectql | Get: the server's own match on a flagged column (the API-key, share-link, SCIM-credential and approval-token lookups, the better-auth adapter), which still never returns the value. Every other caller of `find` / `findOne` / `count` / `aggregate`, administrators included, is refused `400 INVALID_FIELD`; the data door asks the same judgement for every caller, a system context included. Lose: nothing a wire caller reaches — `isSystem` is never set on an inbound request | `rejectInternalFieldEvaluation` |
+| 18f | **Fixed-read leaf recipient check not applied** — a `SharedRecordIds` leaf (ADR-0155) that names another principal is handed on to the driver | objectql | Get: server code may hand the engine a share-table read for any recipient. Nothing on main writes the leaf yet; the sharing plugin starts at ADR-0155's last step. Every other caller's leaf must name its own user or its delegator, or the operation is refused `500 INTERNAL_ERROR` before any driver is asked (ADR-0155 D4). The position, verb, class and driver-declaration checks apply to every caller, a system context included. Lose: nothing a wire caller reaches — no request can spell the leaf, and `isSystem` is never set on an inbound request | `passFixedReadLeaves` |
 
 ### 2. Write pipeline and data integrity
 
@@ -182,7 +183,7 @@ One of the largest consumers of the flag;
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Symbol |
 |:--|:---|:---|:---|:---|
-| 41 | **Approval record lock released** — a locked record is writable | plugin-approvals | Get: engine self-writes (the status mirror) pass. Lose: the lock that stops edits while an approval is live. Note there is deliberately **no admin exemption** here — only `isSystem` | `bindApprovalLockHook` |
+| 41 | **Approval record lock released** — a locked record, and its master-detail rows, are writable | plugin-approvals | Get: engine self-writes (the status mirror) pass, and so do system writes to a locked master's detail rows. Lose: the lock that stops edits to the record and its detail rows while an approval is live. Note there is deliberately **no admin exemption** here — only `isSystem` | `bindApprovalLockHook`, `bindDetailRowLockHook` |
 | 42 | Delegation write guard bypassed | plugin-approvals | Get: service / seed / import may write delegation rows naming another delegator | `bindDelegationWriteGuard` |
 | 43 | Approval actor / submitter / pending-approver checks bypassed (9 sites) | plugin-approvals | Get: approve, reject, recall, reassign without being a pending approver or the submitter, and a decision or comment that attaches files the actor did not upload (every other caller attaches only files it uploaded, in the request's organization) | `isOverrideActor`, `resolveActor`, `sendBack`, `resubmit`, `reassign`, `remind`, `requestInfo`, `comment`, `assertAttachmentsUploadedByCaller` |
 | 44 | Attachment access hooks return early (insert + update + delete, the referenced-file check on insert + update, and the read AST) | service-storage | Lose: attachment visibility scoping | `installAttachmentAccessHooks`, `installAttachmentFileReferenceGate`, `installAttachmentReadVisibility` |
@@ -204,6 +205,7 @@ One of the largest consumers of the flag;
 | 49 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `actionPermissionError` |
 | 50 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability (the permission-set clone door's save included) — and, because REST's save door and the stored-version read doors ask one save verdict, an app's full stored version on `/layers`, `?layers=true` and `/diff`, whatever its entry gates withhold | `handleMetadataRequest`, `registerMetaCollectionRoutes`, `registerMetaItemWriteRoutes`, `registerMetaItemHistoryRoutes`, `metaSaveVerdict`, `handlePermissionSetCloneWrite` |
 | 50b | `setup.write` bypassed on the record-currency code backfill door | rest | Get: `POST /meta/_migrate-record-currency-codes` without the capability. The door still fills only the caller's current organization's rows: a system context with no organization is refused like any other caller | `registerMetaRecordCurrencyBackfillRoute` |
+| 50c | `setup.write` bypassed on the unit code backfill door | rest | Get: `POST /meta/_migrate-unit-codes` without the capability, as the record-currency code backfill door is. The door still converts only the caller's current organization's rows: a system context with no organization is refused like any other caller | `registerMetaUnitCodeBackfillRoute` |
 | 51 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `metaWriteCapabilityVerdict` |
 | 52 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `handleActionsRequest`, `dispatchActionRequest`, `resumeActionRunRequest`, `handleAIRequest`, `handleAutomationRequest`, `handleMetadataRequest`, `handleSecurityRequest`, `handlePackagesRequest`, `handleAnalyticsRequest`, `handleI18nRequest`, `registerExternalDatasourceRoutes`, `refusePackageRequest` |
 | 53 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `handleMcpRequest` |
@@ -561,6 +563,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/objectql/src/engine-update.ts#update` | 4 | 19, 20 |
 | `packages/objectql/src/engine-validate.ts#validate` | 1 | 21b |
 | `packages/objectql/src/engine.ts#isSystem` | 1 | 64 |
+| `packages/objectql/src/fixed-read-leaf-seam.ts#passFixedReadLeaves` | 1 | 18f |
 | `packages/objectql/src/internal-field-evaluation-guard.ts#rejectInternalFieldEvaluation` | 1 | 18e |
 | `packages/objectql/src/recycle-bin/list.ts#assertCallerManagesRecycleBin` | 1 | 29f |
 | `packages/objectql/src/recycle-bin/purge.ts#recycleBinWallDenies` | 1 | 29d |
@@ -579,6 +582,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/plugins/plugin-approvals/src/approval-service.ts#sendBack` | 1 | 43 |
 | `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindApprovalLockHook` | 1 | 41 |
 | `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindDelegationWriteGuard` | 1 | 42 |
+| `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindDetailRowLockHook` | 1 | 41 |
 | `packages/plugins/plugin-approvals/src/payload-predicate-guard.ts#bindSnapshotPredicateGuard` | 1 | 17 |
 | `packages/plugins/plugin-approvals/src/payload-redaction-middleware.ts#bindSnapshotRedactionMiddleware` | 1 | 17 |
 | `packages/plugins/plugin-approvals/src/reader-locale-labels-middleware.ts#bindReaderLocaleLabelsMiddleware` | 1 | 17 |
@@ -650,6 +654,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/rest/src/meta-item-history-routes.ts#registerMetaItemHistoryRoutes` | 2 | 50 |
 | `packages/rest/src/meta-item-write-routes.ts#registerMetaItemWriteRoutes` | 1 | 50 |
 | `packages/rest/src/meta-record-currency-backfill-route.ts#registerMetaRecordCurrencyBackfillRoute` | 1 | 50b |
+| `packages/rest/src/meta-unit-code-backfill-route.ts#registerMetaUnitCodeBackfillRoute` | 1 | 50c |
 | `packages/rest/src/package-routes.ts#refusePackageRequest` | 2 | 52, 54 |
 | `packages/rest/src/rest-server.ts#enforceAuth` | 1 | 18 |
 | `packages/rest/src/rest-server.ts#mayReadAuthoringTrail` | 1 | 8b |

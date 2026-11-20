@@ -432,6 +432,8 @@ describe('POST {basePath}/batch — a package-scoped refusal names its candidate
     candidates: CANDIDATES,
   };
   const REFUSAL = { ...BASE, message: packageScopedRefusalMessage(BASE) };
+  /** [#35726] The refusal names the one op it is for. */
+  const FAILED = { failedOperation: { index: 0, object: 'account' } };
 
   /** A refusal of the class's shape, carrying `candidates` as given. */
   const shaped = (candidates: unknown): Error => Object.assign(new Error(REFUSAL.message), {
@@ -456,19 +458,19 @@ describe('POST {basePath}/batch — a package-scoped refusal names its candidate
   it('the class, thrown by a create op: 409 RESOURCE_CONFLICT with details.candidates', async () => {
     const res = await refuse(new PackageScopedNameRefusedError(REFUSAL));
     expect(res.statusCode).toBe(409);
-    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES } });
+    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES }, ...FAILED });
   });
 
   it('the class, thrown by an update op: the same answer', async () => {
     const res = await refuse(new PackageScopedNameRefusedError(REFUSAL), 'update');
     expect(res.statusCode).toBe(409);
-    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES } });
+    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES }, ...FAILED });
   });
 
   it('a plain error of the class\'s shape: the same answer', async () => {
     const res = await refuse(shaped(CANDIDATES));
     expect(res.statusCode).toBe(409);
-    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES } });
+    expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', details: { candidates: CANDIDATES }, ...FAILED });
   });
 
   it('a holder of each of the four kinds is answered as it was thrown', async () => {
@@ -493,13 +495,13 @@ describe('POST {basePath}/batch — a package-scoped refusal names its candidate
     it(`a list holding ${name}: 409 RESOURCE_CONFLICT with no details`, async () => {
       const res = await refuse(shaped(candidates));
       expect(res.statusCode).toBe(409);
-      expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT' });
+      expect(res.body).toEqual({ error: REFUSAL.message, code: 'RESOURCE_CONFLICT', ...FAILED });
     });
   }
 
   it('CONTROL: a RESOURCE_CONFLICT thrown with no refusal carries no details', async () => {
     const res = await refuse(Object.assign(new Error('The record is in conflict.'), { code: 'RESOURCE_CONFLICT', status: 409 }));
     expect(res.statusCode).toBe(409);
-    expect(res.body).toEqual({ error: 'The record is in conflict.', code: 'RESOURCE_CONFLICT' });
+    expect(res.body).toEqual({ error: 'The record is in conflict.', code: 'RESOURCE_CONFLICT', ...FAILED });
   });
 });

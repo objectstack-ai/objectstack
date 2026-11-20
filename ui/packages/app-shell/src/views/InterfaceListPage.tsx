@@ -618,17 +618,16 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
         group: userActions.group !== false,
         hideFields: userActions.hideFields !== false,
         rowColor: userActions.rowColor === true,
+        // Inline record editing is a page-authored property, on by default
+        // (the v18 protocol default, objectstack#22605): a page opts out with
+        // `editInline: false`. A cell edits in place with the dedicated field
+        // widgets, same as the object views, and only where `ListView`'s
+        // permission gate admits the principal (the object editable in place,
+        // and the `update` grant). Written as the canonical key since the list
+        // has no edit mode for a legacy `inlineEdit` to start (objectstack#35684).
+        editInline: userActions.editInline !== false,
       },
       allowExport: false,
-      // Inline record editing is a page-authored property read from
-      // `userActions.editInline`, on by default (the v18 protocol default,
-      // objectstack#22605): a page opts out with `editInline: false`. This page
-      // wires no inline-edit toggle, so the value is the grid's edit mode
-      // itself. When on, a cell edits in place with the dedicated field
-      // widgets, same as the object views, and only where `ListView`'s
-      // permission gate admits the principal (the object editable in place, and
-      // the `update` grant).
-      inlineEdit: userActions.editInline !== false,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectDefName, viewDefJson, cfg, orgAttribution]);

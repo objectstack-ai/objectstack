@@ -297,7 +297,7 @@ describe('an object that declares enable.approvalsVisibleToReaders, with the hos
     // Accepted: `FORBIDDEN:` is the code this service's refusals carry, the
     // prefix the REST layer parses into a 403.
     await expect(rig.svc.decide(requestA, { decision: 'approve', actorId: READER }, ctx)).rejects.toThrow(/^FORBIDDEN:/);
-    await expect(rig.svc.decide(requestA, { decision: 'reject', actorId: READER }, ctx)).rejects.toThrow(/^FORBIDDEN:/);
+    await expect(rig.svc.decide(requestA, { decision: 'reject', comment: 'Over budget.', actorId: READER }, ctx)).rejects.toThrow(/^FORBIDDEN:/);
     await expect(rig.svc.reassign(requestA, { actorId: READER, to: READER }, ctx)).rejects.toThrow(/^FORBIDDEN:/);
     await expect(rig.svc.comment(requestA, { actorId: READER, comment: 'hi' }, ctx)).rejects.toThrow(/^FORBIDDEN:/);
     await expect(rig.svc.recall(requestA, { actorId: READER }, ctx)).rejects.toThrow(/^FORBIDDEN:/);

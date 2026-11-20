@@ -305,7 +305,7 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
   const { userId: currentUserId } = perms;
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   const [objectSchema, setObjectSchema] = useState<any>(null);
   // Upload-in-flight gate (objectui#10166): a `file`/`image` value is only its
   // fileId once the presigned upload settles, so a save during that window
@@ -402,7 +402,7 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
         // Declared static defaults are this form's opening values (#4047) —
         // see `schemaDefaults` for the create-only boundary and for why
         // runtime defaults are left to the server.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);

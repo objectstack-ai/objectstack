@@ -28,7 +28,7 @@ const result = ApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +372 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +377 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
@@ -186,6 +186,11 @@ const result = ApiErrorSchema.parse(data);
 * `ERR_SUMMARY_RECOMPUTE`
 * `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`
 * `ERR_TRANSACTION_UNSUPPORTED`
+* `ERR_UNIT_CODE_REQUIRED`
+* `ERR_UNIT_CODE_RETIRED`
+* `ERR_UNIT_CODE_UNKNOWN`
+* `ERR_UNIT_DELETE_REFUSED`
+* `ERR_UNIT_DIMENSION_MISMATCH`
 * `ERR_WORK_CALENDAR_INVALID`
 * `ERR_WORK_CALENDAR_NOT_MAINTAINED`
 * `ERR_WORK_CALENDAR_UNRESOLVED`

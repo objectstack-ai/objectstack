@@ -123,6 +123,10 @@ import {
   toFieldNameLoose,
   toFieldNameOrEmpty,
   indexOfField,
+  readGroups,
+  groupMembership,
+  currentGroupLayout,
+  writeGroupLayout,
   type FieldsView,
   type FieldEntry,
 } from '../previews/object-fields-io.js';
@@ -146,7 +150,12 @@ import {
 } from '../previews/external-object.js';
 import { CelPredicateField } from '../CelPredicateField.js';
 import { useRequiredVisibleWhenFormulaReads, useRequiredVisibleWhenReferenceReads } from './requiredVisibleWhenReference.js';
-import type { CelLintIssue, CelValueType } from '../celAuthoring.js';
+import {
+  inferFormulaReturnDeclaration,
+  type CelLintIssue,
+  type CelValueType,
+  type FormulaReturnVerdict,
+} from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import { FilterConditionField } from './FilterConditionField.js';
 import type { FilterCondition } from './datasetFilterCondition.js';
@@ -734,6 +743,15 @@ const FIELD_RULE_ROOTS = ['record', 'previous', 'parent'];
  */
 const FORMULA_ROOTS = ['record'];
 
+/** Do two flat records (a `currencyConfig`) hold the same keys and values? Absent equals absent only. */
+function sameFlatRecord(a: unknown, b: unknown): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  const ak = Object.keys(a as object);
+  const bk = Object.keys(b as object);
+  return ak.length === bk.length && ak.every((k) => (a as Record<string, unknown>)[k] === (b as Record<string, unknown>)[k]);
+}
+
 /** Read a `*When` predicate for editing: a bare string or an Expression envelope's `source`. */
 function readPredicate(v: unknown): string {
   if (typeof v === 'string') return v;
@@ -904,6 +922,13 @@ export function ObjectFieldInspector({
     typed?: boolean;
     inferred?: CelValueType | null;
   }>({ field: '', source: '' });
+  // objectstack#35631 — the money verdict (`inferFormulaReturn`) is read from
+  // the lazily loaded engine, so it lands after the render that settled the
+  // two editor verdicts; the stamp it completes is the LATEST render's, whose
+  // draft is the one a write must build on.
+  const stampFormulaTypeRef = React.useRef<
+    ((settled: typeof formulaVerdictRef.current, declared: FormulaReturnVerdict | null) => void) | null
+  >(null);
 
   /* ─── Who owns the API name (objectui#7615) ──────────────────────────────
    *
@@ -1060,6 +1085,29 @@ export function ObjectFieldInspector({
     onPatch({ fields: writeFields(next) });
   };
 
+  /**
+   * Move this field to another group (or out of every group). Where no list
+   * is involved — the field is listed nowhere and the target lists nothing —
+   * the older `group` key is all there is to write, as before. Otherwise the
+   * move goes through `writeGroupLayout`, which keeps a group's `fields` list
+   * and the field's own `group` from contradicting each other
+   * (objectstack#35900): the field joins the end of the target group.
+   */
+  const moveToGroup = (target: string | null) => {
+    const groups = readGroups(fieldGroups);
+    const listsIt = groups.some((g) => Array.isArray(g.fields) && g.fields.includes(entry.name));
+    const targetLists = target !== null && groups.some((g) => g.key === target && Array.isArray(g.fields));
+    if (!listsIt && !targetLists) {
+      patchDef({ group: target ?? undefined });
+      return;
+    }
+    const layout = currentGroupLayout(view, groups);
+    for (const [key, names] of layout) layout.set(key, names.filter((n) => n !== entry.name));
+    layout.set(target, [...(layout.get(target) ?? []), entry.name]);
+    const patch = writeGroupLayout(view, groups, layout);
+    if (patch.fields !== undefined || patch.fieldGroups !== undefined) onPatch(patch);
+  };
+
   const patchDef = (patch: Record<string, unknown>) => {
     const nextEntries = [...view.entries];
     nextEntries[idx] = { ...entry, def: { ...def, ...patch } };
@@ -1098,17 +1146,53 @@ export function ObjectFieldInspector({
     const now = { ...(same ? was : { field: entry.name, source }), ...verdict };
     formulaVerdictRef.current = now;
     if (!formulaEdited.current || now.errors === undefined || !now.typed || now.errors > 0) return;
+    // objectstack#35631 — the third verdict, money, comes from the engine's
+    // `inferFormulaReturn` over this object's declared fields. A newer verdict
+    // recorded meanwhile supersedes this one, and settles in its own turn.
+    void inferFormulaReturnDeclaration(source, siblingDefs).then((declared) => {
+      if (formulaVerdictRef.current !== now) return;
+      stampFormulaTypeRef.current?.(now, declared);
+    });
+  };
+
+  /** objectstack#35631 — writes the settled verdicts as the formula's declared result (`returnType` + `currencyConfig`). */
+  const stampFormulaType = (settled: typeof formulaVerdictRef.current, declared: FormulaReturnVerdict | null) => {
+    // The draft moved to another field or another source since: that one settles itself.
+    // (`settled.field` is the verdict record's field NAME, not a column identity.)
+    const sameField = settled.field === entry.name;
+    if (!sameField) return;
+    if (settled.source !== readPredicate(def.expression ?? def.formula)) return;
     // Spec: `returnType` carries only a PROVEN concrete type —
     // an ambiguous (`unknown`) or unavailable verdict clears it.
-    const next = now.inferred && now.inferred !== 'unknown' ? now.inferred : undefined;
-    // objectstack#35047 — `percent` and `currency` are DECLARED: no CEL type
-    // proves a quotient is a percentage or a number is money, so a declared
-    // one survives every verdict that proves no OTHER type — `number`, and an
-    // unproven one alike (a field-over-field quotient types `dyn`). A verdict
-    // that proves text, boolean or date still stamps.
-    if ((def.returnType === 'percent' || def.returnType === 'currency') && (next === undefined || next === 'number')) return;
-    if (def.returnType !== next) patchDef({ returnType: next });
+    const proven = settled.inferred && settled.inferred !== 'unknown' ? settled.inferred : undefined;
+    // objectstack#35047 — `percent` is DECLARED: no type proves a quotient is
+    // a percentage, so a declared one survives every verdict that proves no
+    // OTHER type — `number`, and an unproven one alike (a field-over-field
+    // quotient types `dyn`). A verdict that proves text, boolean or date still
+    // stamps.
+    if (def.returnType === 'percent' && (proven === undefined || proven === 'number')) return;
+    let next: string | undefined = proven;
+    if (declared?.returnType === 'currency') {
+      // Provably money: the engine names the result and its currency.
+      next = 'currency';
+    } else if (def.returnType === 'currency' && (proven === undefined || proven === 'number')) {
+      // Only the money verdict's own `number` withdraws a declared `currency`
+      // (the edit stopped computing money). Unproven — a field-over-field
+      // quotient, two currencies meeting — or no engine verdict keeps it.
+      if (declared?.returnType !== 'number') return;
+      next = 'number';
+    }
+    // The declaration is the PAIR (`inferFormulaReturn`): a `currency` result
+    // carries the proven currency, absent for the tenant default, and any
+    // other result carries none, so a withdrawn one loses its stale config.
+    const nextConfig = next === 'currency' ? declared?.currencyConfig : undefined;
+    if (def.returnType === next && sameFlatRecord(def.currencyConfig, nextConfig)) return;
+    const nextDef: Record<string, unknown> = { ...def, returnType: next };
+    if (nextConfig) nextDef.currencyConfig = nextConfig;
+    else delete nextDef.currencyConfig;
+    writeDef(nextDef);
   };
+  stampFormulaTypeRef.current = stampFormulaType;
 
   /**
    * objectui#10202 — "use picklist". Naming a list sets `picklist` and removes
@@ -2037,14 +2121,14 @@ export function ObjectFieldInspector({
           <DisplayPatchLock>
             <InspectorSelectField
               label={tr('designer.field.group')}
-              value={typeof def.group === 'string' ? (def.group as string) : ''}
+              value={groupMembership(view, fieldGroups).groupOf.get(entry.name) ?? ''}
               options={[
                 { value: '', label: tr('designer.field.noGroup') },
                 ...fieldGroups
                   .filter((g) => typeof g.key === 'string')
                   .map((g) => ({ value: g.key as string, label: String(g.label ?? g.key) })),
               ]}
-              onCommit={(v) => patchDef({ group: v || undefined })}
+              onCommit={(v) => moveToGroup(v || null)}
               disabled={locked}
             />
           </DisplayPatchLock>

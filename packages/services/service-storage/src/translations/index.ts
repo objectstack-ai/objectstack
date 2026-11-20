@@ -35,6 +35,7 @@ import { ptBRGeneratedSourceHashes } from './pt-BR.source-hashes.generated.js';
 import { ruGeneratedSourceHashes } from './ru.source-hashes.generated.js';
 import { deGeneratedSourceHashes } from './de.source-hashes.generated.js';
 import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
+import { storagePermissionSets } from './permission-sets.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -65,16 +66,22 @@ import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
  */
 const enSource: TranslationData = { objects: enObjects };
 
+/** The hand-authored `permissions` group sits outside `withSourceFallback`'s inputs. */
+const withSets = (locale: string, data: TranslationData): TranslationData => ({
+  ...data,
+  permissions: storagePermissionSets[locale],
+});
+
 export const StorageTranslations: TranslationBundle = {
   en: enSource,
-  'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
-  'ja-JP': withSourceFallback({ objects: jaJPObjects }, enSource, undefined, jaJPGeneratedSourceHashes),
-  'es-ES': withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
-  'zh-Hant': withSourceFallback({ objects: zhHantObjects }, enSource, undefined, zhHantGeneratedSourceHashes),
-  'ar': withSourceFallback({ objects: arObjects }, enSource, undefined, arGeneratedSourceHashes),
-  'fr': withSourceFallback({ objects: frObjects }, enSource, undefined, frGeneratedSourceHashes),
-  'pt-BR': withSourceFallback({ objects: ptBRObjects }, enSource, undefined, ptBRGeneratedSourceHashes),
-  'ru': withSourceFallback({ objects: ruObjects }, enSource, undefined, ruGeneratedSourceHashes),
-  'de': withSourceFallback({ objects: deObjects }, enSource, undefined, deGeneratedSourceHashes),
-  'ko': withSourceFallback({ objects: koObjects }, enSource, undefined, koGeneratedSourceHashes),
+  'zh-CN': withSets('zh-CN', withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes)),
+  'ja-JP': withSets('ja-JP', withSourceFallback({ objects: jaJPObjects }, enSource, undefined, jaJPGeneratedSourceHashes)),
+  'es-ES': withSets('es-ES', withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes)),
+  'zh-Hant': withSets('zh-Hant', withSourceFallback({ objects: zhHantObjects }, enSource, undefined, zhHantGeneratedSourceHashes)),
+  'ar': withSets('ar', withSourceFallback({ objects: arObjects }, enSource, undefined, arGeneratedSourceHashes)),
+  'fr': withSets('fr', withSourceFallback({ objects: frObjects }, enSource, undefined, frGeneratedSourceHashes)),
+  'pt-BR': withSets('pt-BR', withSourceFallback({ objects: ptBRObjects }, enSource, undefined, ptBRGeneratedSourceHashes)),
+  'ru': withSets('ru', withSourceFallback({ objects: ruObjects }, enSource, undefined, ruGeneratedSourceHashes)),
+  'de': withSets('de', withSourceFallback({ objects: deObjects }, enSource, undefined, deGeneratedSourceHashes)),
+  'ko': withSets('ko', withSourceFallback({ objects: koObjects }, enSource, undefined, koGeneratedSourceHashes)),
 };

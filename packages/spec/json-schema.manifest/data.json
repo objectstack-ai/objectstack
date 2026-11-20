@@ -188,6 +188,7 @@
     "data/TursoConfig",
     "data/TursoTransportMode",
     "data/UniqueScope",
+    "data/UnitConfig",
     "data/ValidationAdvisoryEvent",
     "data/ValidationRule"
   ]

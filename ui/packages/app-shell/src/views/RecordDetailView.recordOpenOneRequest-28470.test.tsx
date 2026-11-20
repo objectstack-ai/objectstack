@@ -88,8 +88,6 @@ const ACTIVITY = { id: 'ac1', type: 'created', object_name: OBJECT, record_id: '
 const ATTACHMENT = { id: 'f1', parent_object: OBJECT, parent_id: 'c1', file_id: 'file-1', file_name: 'contract.pdf', created_at: '2026-10-02T10:00:00.000Z' };
 
 interface Answers {
-  /** Answer the related rows' owner as a bare id even when the request expands it. */
-  ignoreExpand?: boolean;
   activity?: unknown;
 }
 
@@ -113,7 +111,7 @@ function pageAnswer(id: string, body: any, answers: Answers) {
           id: `t${i}`,
           name: `Task ${i}`,
           contact: id,
-          owner: !answers.ignoreExpand && r.expand?.includes('owner') ? { id: 'u9', name: 'Una Owner' } : 'u9',
+          owner: r.expand?.includes('owner') ? { id: 'u9', name: 'Una Owner' } : 'u9',
         })),
       })),
       ...(body.fieldAccess ? { fieldAccess: { object: OBJECT, recordId: id, readable: ['name', 'account'], editable: ['name'], writable: true } } : {}),
@@ -178,7 +176,6 @@ const STREAMS = ['sys_comment', 'sys_comment_reaction', 'sys_activity', 'sys_att
 const streamReads = (held: Held[]) => STREAMS.flatMap((o) => readsOf(held, o).map(() => o));
 const mentionReads = (held: Held[]) => readsOf(held, 'sys_user').filter((h) => /[?&]\$?top=50\b/.test(h.path));
 const nameProbes = (held: Held[]) => held.filter((h) => h.method === 'GET' && /[?&]\$?top=1\b/.test(h.path));
-const probedObject = (h: Held) => /\/api\/v1\/data\/([^/?]+)\?/.exec(h.path)![1];
 
 beforeEach(() => {
   cleanup();
@@ -248,14 +245,20 @@ describe('objectstack#28470 — one record open is one request', () => {
     await settle(held);
     expect(mentionReads(held)).toEqual([]);
 
-    const standIn = view.container.querySelector('[data-record-timeline-composer]') as HTMLElement | null;
-    expect(standIn, 'the 动态 panel draws its one-line composer').not.toBeNull();
-    await act(async () => { fireEvent.click(standIn!); });
+    // objectstack#35595 / #35596 — the 概览 rail's 动态 card is read-only; the
+    // composer is the 动态 tab's.
+    expect(view.container.querySelector('[data-record-summary-card="timeline"] textarea')).toBeNull();
+    const tab = view.container.querySelector('[role="tab"][data-record-tab="timeline"]') as HTMLElement;
+    await act(async () => { fireEvent.click(tab); });
+    await settle(held);
+    expect(mentionReads(held)).toEqual([]);
+    const editor = view.container.querySelector('[data-related-enlarged="timeline"] textarea') as HTMLTextAreaElement | null;
+    expect(editor, 'the 动态 tab draws the composer').not.toBeNull();
+    await act(async () => { fireEvent.focus(editor!); });
     await settle(held);
     expect(mentionReads(held)).toHaveLength(1);
 
-    const editor = view.container.querySelector('[data-record-timeline-peek] textarea') as HTMLTextAreaElement;
-    await act(async () => { fireEvent.blur(editor); fireEvent.focus(editor); });
+    await act(async () => { fireEvent.blur(editor!); fireEvent.focus(editor!); });
     await settle(held);
     expect(mentionReads(held)).toHaveLength(1);
   });
@@ -280,11 +283,7 @@ describe('objectstack#28470 — one record open is one request', () => {
     expect([...new Set(streamReads(held))].sort()).toEqual(['sys_activity', 'sys_attachment', 'sys_comment']);
   });
 
-  it('ablation — rows answered with bare ids pay one name read per referenced object, never the parent\'s', async () => {
-    const { held, open } = await boot({ ignoreExpand: true });
-    open();
-    await settle(held);
-    expect(held.filter(isPage)).toHaveLength(1);
-    expect(nameProbes(held).map(probedObject)).toEqual(['sys_user']);
-  });
+  // objectstack#35596 retired the bare-id ablation: the 概览 rail draws a
+  // related row's name and key value only, never its lookups, so no surface
+  // on the page's open resolves a related row's owner to probe for.
 });

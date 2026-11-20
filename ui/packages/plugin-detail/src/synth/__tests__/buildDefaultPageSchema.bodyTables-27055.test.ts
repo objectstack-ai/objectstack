@@ -13,10 +13,13 @@
  *
  * A related list that is the record's own body (`isBody`, else
  * `relatedList: 'primary'`) is a table section of the Details tab, placed
- * BEFORE the field sections (objectstack#35597, 「关键字段下面」: under the header
- * strip, above the field groups; objectstack#27069 placed it after the FIRST
- * section); several stack in the order given; the sections follow. Every other list is a side card in the one
- * `Related` tab. A field group whose `relatedList` names a body table's
+ * AFTER the field sections the page draws open (objectstack#35742: the
+ * record's own fields first, then its master-detail tables; objectstack#35597
+ * placed it before every section, objectstack#27069 after the FIRST one);
+ * several stack in the order given. The sections drawn closed that trail the
+ * last open one follow the tables. Every other
+ * list is a tab of its own (objectstack#35595, which retired the one `Related`
+ * tab). A field group whose `relatedList` names a body table's
  * relationship places that table at the group's position instead
  * (objectstack#27069, objectstack#27241).
  */
@@ -51,17 +54,17 @@ const shape = (nodes: any[]) =>
       : `${n.type === 'record:related_list' ? 'table' : n.type}(${n.properties.objectName})`,
   );
 
-describe('body tables sit in the Details tab before the field sections (objectstack#27055, objectstack#35597)', () => {
-  it('splits the details around the body tables; side lists stay in Related', () => {
+describe('body tables sit in the Details tab after the field sections (objectstack#27055, objectstack#35742)', () => {
+  it('splits the details around the body tables; each side list takes a tab of its own (objectstack#35595)', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [LINES, TASKS, SCHEDULE] });
-    // 动态 is last for every object (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
-    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
+    // 动态 is last for every object (objectstack#34590).
+    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related:task.quote', 'timeline']);
     expect(shape(items(tabs)[0].children)).toEqual([
+      'details(Basic,Terms,Notes)',
       'table(quote_line_item)',
       'table(quote_schedule)',
-      'details(Basic,Terms,Notes)',
     ]);
-    expect(tabOf(tabs, 'related').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
+    expect(tabOf(tabs, 'related:task.quote').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
   });
 
   it('a body table opens on a first page of ten rows unless its list names a limit', () => {
@@ -77,13 +80,13 @@ describe('body tables sit in the Details tab before the field sections (objectst
     expect(shape(items(asBody)[0].children)).toContain('table(task)');
     const asSide = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [{ ...primary, isBody: false }] });
     expect(shape(items(asSide)[0].children)).not.toContain('table(task)');
-    // Related is second now that 动态 closes the strip (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
-    expect(items(asSide)[1].value).toBe('related');
+    // A side list is a tab of its own, second after 概览 (objectstack#35595).
+    expect(items(asSide)[1].value).toBe('related:task.quote');
   });
 
-  it('with one section the tables lead it', () => {
+  it('with one section the tables follow it', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS.slice(0, 1), related: [LINES] });
-    expect(shape(items(tabs)[0].children)).toEqual(['table(quote_line_item)', 'details(Basic)']);
+    expect(shape(items(tabs)[0].children)).toEqual(['details(Basic)', 'table(quote_line_item)']);
   });
 
   it('with no section the details node (the highlight fields) leads and the tables follow it', () => {
@@ -91,9 +94,12 @@ describe('body tables sit in the Details tab before the field sections (objectst
     expect(shape(items(tabs)[0].children)).toEqual(['details()', 'table(quote_line_item)', 'table(quote_schedule)']);
   });
 
-  it('emits no per-list tab any more — the strip is Details / Related / Timeline (objectstack#34590)', () => {
+  it('a body table takes no tab of its own: only the side lists do (objectstack#35595)', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [{ ...TASKS, isPrimary: true }, LINES] });
     expect(items(tabs).some((i: any) => String(i.value).startsWith('related:'))).toBe(false);
+    // CONTROL: the same list as a side list is a tab.
+    const side = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [TASKS, LINES] });
+    expect(items(side).map((i: any) => i.value)).toEqual(['details', 'related:task.quote', 'timeline']);
   });
 });
 
@@ -106,7 +112,7 @@ describe('the page knows its body tables', () => {
 
   it('the laid-out page draws them in the details column, side lists as the right column\'s panels', () => {
     const columns = buildDefaultPageColumns(page)!;
-    expect(shape(columns.details)).toEqual(['table(quote_line_item)', 'details(Basic,Terms,Notes)']);
+    expect(shape(columns.details)).toEqual(['details(Basic,Terms,Notes)', 'table(quote_line_item)']);
     expect(columns.related.map((n: any) => n.properties.objectName)).toEqual(['task']);
   });
 });
@@ -124,12 +130,12 @@ describe('a field group places a body table at its position (objectstack#27069, 
   });
   const detailsOf = (def: any, related: any[]) => shape(items(buildDefaultTabs(def, { related }))[0].children);
 
-  it('the table named by a group (child object name) sits at that group; the others keep "before the sections"', () => {
+  it('the table named by a group (child object name) sits at that group; the others keep "after the sections"', () => {
     expect(detailsOf(placed('quote_line_item'), [LINES, SCHEDULE])).toEqual([
-      'table(quote_schedule)',
       'details(basic,terms)',
       'table(quote_line_item)',
       'details(notes)',
+      'table(quote_schedule)',
     ]);
   });
 
@@ -140,8 +146,8 @@ describe('a field group places a body table at its position (objectstack#27069, 
       'details(notes)',
     ]);
     expect(detailsOf(placed('quote_line_item.other_fk'), [LINES])).toEqual([
-      'table(quote_line_item)',
       'details(basic,terms,notes)',
+      'table(quote_line_item)',
     ]);
   });
 
@@ -163,8 +169,8 @@ describe('a field group places a body table at its position (objectstack#27069, 
     // The spec refuses this group (`isBodyTableRelationship`, ruling B on
     // objectstack#27055); the renderer never second-guesses body-ness either.
     const tabs = buildDefaultTabs(placed('task'), { related: [LINES, TASKS] });
-    expect(shape(items(tabs)[0].children)).toEqual(['table(quote_line_item)', 'details(basic,terms,notes)']);
-    expect(tabOf(tabs, 'related').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
+    expect(shape(items(tabs)[0].children)).toEqual(['details(basic,terms,notes)', 'table(quote_line_item)']);
+    expect(tabOf(tabs, 'related:task.quote').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
   });
 
   it('the host-passed sections place the same way (the `{ group }` sections RecordDetailView passes)', () => {
@@ -177,5 +183,140 @@ describe('a field group places a body table at its position (objectstack#27069, 
       'table(quote_line_item)',
       'details(notes)',
     ]);
+  });
+});
+
+describe("the record's own fields lead the Overview, its master-detail tables follow (objectstack#35742)", () => {
+  // A meeting: no stage field, no key fields, one master-detail child.
+  const meetingDef = {
+    name: 'meeting',
+    fields: {
+      subject: { type: 'text', label: 'Subject', group: 'basic' },
+      owner: { type: 'text', label: 'Owner', group: 'basic' },
+      meeting_date: { type: 'date', label: 'Date', group: 'basic' },
+      location: { type: 'text', label: 'Location', group: 'basic' },
+    },
+    fieldGroups: [{ key: 'basic', label: 'Basic' }],
+  };
+  const TODOS = { objectName: 'meeting_todo', relationshipField: 'meeting', title: 'To-dos', isBody: true };
+  const columnsOf = (def: any, options: any) => buildDefaultPageColumns(buildDefaultPageSchema(def, options))!;
+  const stripShape = (nodes: any[]) => nodes.map((n) => n.type);
+
+  it('an object with no stage bar and no key fields draws its field groups first, the body table under them', () => {
+    const columns = columnsOf(meetingDef, { related: [TODOS] });
+    expect(stripShape(columns.strip)).toEqual([]);
+    expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
+  });
+
+  it('with a key-fields strip the order is strip, then the field groups, then the body table', () => {
+    const columns = columnsOf({ ...meetingDef, highlightFields: ['owner', 'meeting_date'] }, { related: [TODOS] });
+    expect(stripShape(columns.strip)).toEqual(['record:highlights']);
+    expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
+  });
+
+  it('with a stage bar and key fields the order is the strip (key fields, stage), the field groups, the body table', () => {
+    const staged = {
+      ...meetingDef,
+      highlightFields: ['owner'],
+      fields: {
+        ...meetingDef.fields,
+        status: {
+          type: 'select',
+          label: 'Status',
+          group: 'basic',
+          options: [{ value: 'planned', label: 'Planned' }, { value: 'held', label: 'Held' }],
+        },
+      },
+    };
+    const columns = columnsOf(staged, { statusField: 'status', related: [TODOS] });
+    expect(stripShape(columns.strip)).toEqual(['record:highlights', 'record:path']);
+    expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
+  });
+
+  describe('a section drawn closed that trails the open ones follows the tables (common fields first)', () => {
+    const grouped = (collapses: Record<string, 'collapsed' | 'expanded'>) => ({
+      name: 'quote',
+      fields: {
+        name: { type: 'text', label: 'Name', group: 'basic' },
+        terms: { type: 'textarea', label: 'Terms', group: 'terms' },
+        notes: { type: 'textarea', label: 'Notes', group: 'notes' },
+      },
+      fieldGroups: ['basic', 'terms', 'notes'].map((key) =>
+        collapses[key] ? { key, label: key, collapse: collapses[key] } : { key, label: key }),
+    });
+
+    it('a trailing `collapsed` group (the `{ group }` reference form) follows the tables', () => {
+      expect(shape(items(buildDefaultTabs(grouped({ notes: 'collapsed' }), { related: [LINES] }))[0].children)).toEqual([
+        'details(basic,terms)',
+        'table(quote_line_item)',
+        'details(notes)',
+      ]);
+    });
+
+    it('a closed group between two open ones keeps its declared place before the tables', () => {
+      expect(shape(items(buildDefaultTabs(grouped({ terms: 'collapsed' }), { related: [LINES] }))[0].children)).toEqual([
+        'details(basic,terms,notes)',
+        'table(quote_line_item)',
+      ]);
+    });
+
+    it('an `expanded` group (collapsible, open when the page opens) is a common one: it stays before the tables', () => {
+      expect(shape(items(buildDefaultTabs(grouped({ notes: 'expanded' }), { related: [LINES] }))[0].children)).toEqual([
+        'details(basic,terms,notes)',
+        'table(quote_line_item)',
+      ]);
+    });
+
+    it('with every section closed the tables follow them all: the record still leads', () => {
+      const allClosed = grouped({ basic: 'collapsed', terms: 'collapsed', notes: 'collapsed' });
+      expect(shape(items(buildDefaultTabs(allClosed, { related: [LINES] }))[0].children)).toEqual([
+        'details(basic,terms,notes)',
+        'table(quote_line_item)',
+      ]);
+    });
+
+    it('the enumerated form the host passes: `collapsible` + `defaultCollapsed` trails, an open "More details" leads', () => {
+      const closedMore = [
+        { label: 'Basic', fields: ['name'] },
+        { label: 'More details', collapsible: true, defaultCollapsed: true, fields: ['terms', 'notes'] },
+      ];
+      expect(shape(items(buildDefaultTabs(quoteDef, { sections: closedMore, related: [LINES] }))[0].children)).toEqual([
+        'details(Basic)',
+        'table(quote_line_item)',
+        'details(More details)',
+      ]);
+      // The host's "More details" (`deriveRecordDetailSections`) opens
+      // expanded, so it is drawn open and stays before the tables.
+      const openMore = [closedMore[0], { ...closedMore[1], defaultCollapsed: false }];
+      expect(shape(items(buildDefaultTabs(quoteDef, { sections: openMore, related: [LINES] }))[0].children)).toEqual([
+        'details(Basic,More details)',
+        'table(quote_line_item)',
+      ]);
+    });
+
+    it('a group-placed table keeps its group position ahead of the trailing closed group', () => {
+      const def = {
+        ...grouped({ notes: 'collapsed' }),
+        fieldGroups: [
+          { key: 'basic', label: 'basic' },
+          { key: 'lines', label: 'Lines', relatedList: 'quote_line_item' },
+          { key: 'terms', label: 'terms' },
+          { key: 'notes', label: 'notes', collapse: 'collapsed' as const },
+        ],
+      };
+      expect(shape(items(buildDefaultTabs(def, { related: [LINES, SCHEDULE] }))[0].children)).toEqual([
+        'details(basic)',
+        'table(quote_line_item)',
+        'details(terms)',
+        'table(quote_schedule)',
+        'details(notes)',
+      ]);
+    });
+  });
+
+  it('CONTROL: an object with no body table draws one details node, and a side list never joins the Overview', () => {
+    const columns = columnsOf(meetingDef, { related: [{ ...TODOS, isBody: false }] });
+    expect(shape(columns.details)).toEqual(['details(basic)']);
+    expect(columns.related.map((n: any) => n.properties.objectName)).toEqual(['meeting_todo']);
   });
 });

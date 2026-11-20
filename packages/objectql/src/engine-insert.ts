@@ -52,6 +52,7 @@ import type { AssignmentQueueService } from './assignment-rules.js';
 import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs } from './validation/record-currency-code.js';
+import { assertUnitCodes, organizationUnitRowsOf, readOrganizationUnits } from './validation/unit-code-membership.js';
 import { planHomeAmounts, projectHomeAmounts } from './home-amount-projection.js';
 import { stripSearchCompanion } from './search-companion.js';
 import type { EvalPermissions } from '@objectstack/formula';
@@ -1298,6 +1299,20 @@ export class InsertFacet {
           rows.filter((_, i) => rowErrors[i] === undefined) as Array<Record<string, unknown>>,
           homeServing.parentRows,
         );
+        // [ADR-0158 U5] The organization units the rows' unit codes name: ONE
+        // read per organization for the whole batch, before the validation
+        // loop judges each row against it (`assertUnitCodes`). Free (nothing
+        // is read) for an object with no unit code field, or rows naming only
+        // standard codes.
+        const unitOrganizationOf = (row: Record<string, unknown>) =>
+          ObjectQL.homeAmountOrganizationOf(row, opCtx.context, derivedOrganizationId);
+        const organizationUnits = await readOrganizationUnits(
+          (schemaForValidation as { fields?: unknown } | undefined)?.fields,
+          (rows.filter((r, i) => rowErrors[i] === undefined && r !== null && typeof r === 'object') as Array<Record<string, unknown>>)
+            .map((image) => ({ image, organizationId: unitOrganizationOf(image) })),
+          'insert',
+          organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+        );
         if (homeAmountPlan.length > 0) {
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
@@ -1387,6 +1402,12 @@ export class InsertFacet {
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.
             assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i] && typeof rows[i] === 'object' ? followCodes(rows[i]) : rows[i], 'insert', undefined, undefined, msgCtx, parentCodeFieldServingOf(this._registry));
+            // [ADR-0158 U5, Open item 9] Each unit code the row stores is a
+            // standard code or one of its organization's non-retired units, of
+            // the declared dimension, and no quantity stands beside a blank one.
+            if (rows[i] && typeof rows[i] === 'object') {
+              assertUnitCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i], 'insert', undefined, undefined, unitOrganizationOf(rows[i]), organizationUnits);
+            }
             // [#29029] A write that is not a system write has its references
             // checked BEFORE the record's validation rules: a reference the
             // caller cannot read answers `reference_not_found`, whatever a rule

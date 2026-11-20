@@ -170,6 +170,36 @@
         "must_contain": ["Sales Amount", "Sales Analysis", "?"],
         "must_not_contain": ["query_dataset", "aggregate_records", "sales_amount"]
       }
+    },
+    {
+      "id": 18,
+      "prompt": "The user asked: \"What is our retention?\" `list_datasets({ terms: ['retention'] })` answered one dataset, `subscriptions` (label Subscriptions), with `matches: []`; its measures are `logo_retention`, labelled Logo Retention and described as \"Share of customers at the start of the period still subscribed at its end\", and `net_revenue_retention`, labelled Net Revenue Retention and described as \"Recurring revenue kept from existing customers, expansion included\". The answer also carried `candidates: [{ term: 'retention', dataset: 'subscriptions', member: 'measures.logo_retention' }, { term: 'retention', dataset: 'subscriptions', member: 'measures.net_revenue_retention' }]`. You asked which one they meant, listing both, and computed nothing. The user now replies: \"Net Revenue Retention.\" What do you do next, and how do you write the answer?",
+      "expected_output": "The user picked one of the two options by its label, so that measure is now used, by its exact name as `list_datasets` listed it: the next step is `query_dataset` with `datasetName: 'subscriptions'` and a `selection` whose `measures` is `['net_revenue_retention']`. Calling `list_datasets` again with the label as the term before that is also right: the label equals that one measure. It does not ask again, does not compute Logo Retention as well, and does not fall back to the object tools: the fallback is for a user who picks none of the options. Writes the answer in the user's language, cites the source from the tool's answer (its `sourceLine`, or built from `provenance`, as in \"Metric: Net Revenue Retention (dataset: Subscriptions)\") rather than from memory, uses the measure's `description` to say what the number includes.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["query_dataset", "Net Revenue Retention", "Subscriptions"],
+        "must_not_contain": ["aggregate_records", "非指标口径", "do you mean", "Do you mean"]
+      }
+    },
+    {
+      "id": 19,
+      "prompt": "The user asked: \"What is our retention?\" `list_datasets({ terms: ['retention'] })` answered one dataset, `subscriptions` (label Subscriptions), with `matches: []`; its only measures are `logo_retention`, labelled Logo Retention, and `net_revenue_retention`, labelled Net Revenue Retention. The answer also carried `candidates: [{ term: 'retention', dataset: 'subscriptions', member: 'measures.logo_retention' }, { term: 'retention', dataset: 'subscriptions', member: 'measures.net_revenue_retention' }]`. You asked which one they meant, listing both, and computed nothing. The user now replies: \"No, I mean ARR.\" What is your next tool call, and with what arguments?",
+      "expected_output": "The reply picks neither option and names another word, so neither option is used and the question starts again at step 1 with that word: the next tool call is `list_datasets` with `terms: ['ARR']`, the word as the user wrote it (not spelled out as annual recurring revenue, and not sent together with `retention`). It is a new lookup because the first answer was matched against `retention` only and lists no measure by that name. Nothing else is called before it: no object tool, and no `query_dataset` on either retention measure. Declining the options leads to the object-query fallback only when the reply brings no other word; here that fallback can follow only from this lookup, if `ARR` has no match and no candidates. It does not ask about retention again.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["list_datasets", "ARR"],
+        "must_not_contain": ["list_objects(", "describe_object(", "aggregate_records(", "非指标口径"]
+      }
+    },
+    {
+      "id": 20,
+      "prompt": "用户问:「各仓库的营收是多少?」 You called `list_datasets({ terms: ['营收', '仓库'] })`. The answer lists one dataset, `sales_analysis` (label 销售分析, `object: 'sales_order'`), with `matches: [{ term: '营收', member: 'measures.revenue', matchedOn: 'label' }]`; its dimensions are `industry`, labelled 行业, and `close_quarter`, labelled 成交季度. 「仓库」 matched nothing in any dataset, and the answer has no `candidates`. `list_objects` shows `sales_order`. The answer's `nextStep` has `decision: 'one_measure'`, `terms: ['营收']` and this `note`: \"营收\" equals one measure: 营收 (dataset: 销售分析), queried as datasetName \"sales_analysis\", measure \"revenue\". Answer with query_dataset using that measure, and cite the answer's sourceLine as its source. \"仓库\" equals no measure and has no possible reading. For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them. What do you do next, and how do you write the answer?",
+      "expected_output": "营收 matches exactly one measure, so the governed metric answers it: `query_dataset` with `datasetName: 'sales_analysis'` and a `selection` whose `measures` is `['revenue']`, with no dimension, because 仓库 is no member of the dataset and the figure is not grouped by 行业 or 成交季度 in its place. 仓库 matched nothing and has no candidates, so the user is not asked about it, no listed dimension is offered as a reading of it, and it does not stop the matched measure: as the `note` says, the breakdown by warehouse comes from the object tools. Calls `describe_object({ objectName: 'sales_order' })` and reads the fields, then `aggregate_records` once for the sum grouped by the warehouse field, instead of paging `query_records`. The reply carries no question back. It is written in Chinese and keeps the two sources apart: the total cites the governed metric's source from the tool's answer (its `sourceLine`), and the figures per warehouse come under one line saying they are not from a governed metric (非指标口径), naming the object and fields they were computed from. Because `sales_order` is the `object` of the listed dataset 销售分析, it adds one line naming that dataset and its measure (营收), so the user can ask for the governed figure.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["query_dataset", "describe_object", "aggregate_records", "非指标口径"],
+        "must_not_contain": ["您是指", "你是指", "您指的是", "你指的是", "do you mean", "Do you mean"]
+      }
     }
   ]
 }

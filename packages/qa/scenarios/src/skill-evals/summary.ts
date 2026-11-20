@@ -185,27 +185,32 @@ const cell = (s: string, forGitHub: boolean) => {
   return '`' + (forGitHub ? t.replace(/</g, '(lt)').replace(/>/g, '(gt)') : t) + '`';
 };
 
-/** The round's summary as Markdown: the per-bundle table, then every case's scores on both arms. */
+/**
+ * The round's summary as Markdown: the per-bundle table and every case's scores on both arms, then the trigger
+ * section. A round of trigger cases alone (`--triggers-only`) renders the trigger section only.
+ */
 export function renderSummaryMarkdown(s: RoundSummary, head: { title: string; lines: string[]; stopped?: RoundStop }, opts: { forGitHub?: boolean } = {}): string {
   const code = (t: string) => cell(t, opts.forGitHub === true);
   const out: string[] = [`# ${head.title}`, '', ...head.lines.map((l) => `- ${l}`)];
   if (head.stopped) out.push(`- **Stopped** after ${head.stopped.afterRuns} turns: ${head.stopped.reason}`);
-  out.push(
-    '',
-    '## Per bundle',
-    '',
-    '| bundle | cases | with-skill pass | no-skill pass | with-skill failing cases | no-skill ≥ with-skill | out of the denominator (with / no) |',
-    '|:--|--:|--:|--:|--:|--:|:--|',
-  );
-  for (const b of s.bundles) {
-    out.push(`| ${b.bundle} | ${b.cases} | ${pct(b.withSkill)} | ${pct(b.noSkill)} | ${b.withSkillFailures.length} | ${b.noSkillAtLeastWithSkill.length} | ${outOf(b.withSkill)} / ${outOf(b.noSkill)} |`);
-  }
-  out.push(`| **all** | ${s.cases.length} | ${pct(s.totals.withSkill)} | ${pct(s.totals.noSkill)} | ${s.bundles.reduce((n, b) => n + b.withSkillFailures.length, 0)} | ${s.bundles.reduce((n, b) => n + b.noSkillAtLeastWithSkill.length, 0)} | ${outOf(s.totals.withSkill)} / ${outOf(s.totals.noSkill)} |`);
-  out.push('', '## Per case', '', '| case | with-skill | no-skill | with-skill missed | with-skill carried forbidden |', '|:--|--:|--:|:--|:--|');
-  for (const c of s.cases) {
-    out.push(`| ${c.key} | ${pct(c.withSkill)} | ${pct(c.noSkill)} | ${c.withSkillMissing.map(code).join(' ')} | ${c.withSkillForbidden.map(code).join(' ')} |`);
-  }
   const tr = s.triggers;
+  if (s.cases.length || !tr.cases.length) {
+    out.push(
+      '',
+      '## Per bundle',
+      '',
+      '| bundle | cases | with-skill pass | no-skill pass | with-skill failing cases | no-skill ≥ with-skill | out of the denominator (with / no) |',
+      '|:--|--:|--:|--:|--:|--:|:--|',
+    );
+    for (const b of s.bundles) {
+      out.push(`| ${b.bundle} | ${b.cases} | ${pct(b.withSkill)} | ${pct(b.noSkill)} | ${b.withSkillFailures.length} | ${b.noSkillAtLeastWithSkill.length} | ${outOf(b.withSkill)} / ${outOf(b.noSkill)} |`);
+    }
+    out.push(`| **all** | ${s.cases.length} | ${pct(s.totals.withSkill)} | ${pct(s.totals.noSkill)} | ${s.bundles.reduce((n, b) => n + b.withSkillFailures.length, 0)} | ${s.bundles.reduce((n, b) => n + b.noSkillAtLeastWithSkill.length, 0)} | ${outOf(s.totals.withSkill)} / ${outOf(s.totals.noSkill)} |`);
+    out.push('', '## Per case', '', '| case | with-skill | no-skill | with-skill missed | with-skill carried forbidden |', '|:--|--:|--:|:--|:--|');
+    for (const c of s.cases) {
+      out.push(`| ${c.key} | ${pct(c.withSkill)} | ${pct(c.noSkill)} | ${c.withSkillMissing.map(code).join(' ')} | ${c.withSkillForbidden.map(code).join(' ')} |`);
+    }
+  }
   if (tr.cases.length) {
     out.push(
       '',

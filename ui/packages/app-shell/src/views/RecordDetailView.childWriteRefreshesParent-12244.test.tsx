@@ -47,7 +47,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup, act, within } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MetadataCtx, notifyDataChanged, useMutationInvalidationBridge } from '@object-ui/react';
@@ -259,8 +259,17 @@ async function settledPage(objects: readonly unknown[] = OBJECTS) {
   renderPage(backend.ds, objects);
   await waitFor(() => expect(parentReads(backend.ds)).toBe(1));
   await screen.findByText('Seat licence');
-  await waitFor(() => expect(figureShown(backend.rollup())).toBe(true));
+  // objectstack#35595 — the key fields (the rollup among them) are the 概览
+  // tab's: the list's tab, open here, draws none.
+  expect(figureShown(backend.rollup())).toBe(false);
   return backend;
+}
+
+/** Back to 概览, where the highlight strip draws the parent's rollup. */
+async function toOverview() {
+  await act(async () => {
+    fireEvent.click(document.querySelector('[role="tab"][data-record-tab="overview"]') as HTMLElement);
+  });
 }
 
 beforeEach(() => {
@@ -305,11 +314,14 @@ describe('RecordDetailView — a child write in a related list refreshes the par
     await waitFor(() => expect(ds.delete).toHaveBeenCalledWith(CHILD, 'l-1'));
     expect(rollup()).toBe(3000);
     await waitFor(() => expect(parentReads(ds)).toBe(2));
-    await waitFor(() => expect(figureShown(3000)).toBe(true));
-    expect(figureShown(9000)).toBe(false);
     // In place: the same header node, the list's face still the open one.
     expect(document.querySelector(HEADER)).toBe(headerBefore);
     expect(document.querySelector(`[data-related-enlarged="${CHILD}.${PARENT}"]`)).not.toBeNull();
+    // 概览 draws the re-read row: the recomputed total, with no read of its own.
+    await toOverview();
+    await waitFor(() => expect(figureShown(3000)).toBe(true));
+    expect(figureShown(9000)).toBe(false);
+    expect(parentReads(ds)).toBe(2);
   });
 
   it('a child update through the dataSource (the form overlay\'s save) re-reads the parent', async () => {
@@ -322,8 +334,9 @@ describe('RecordDetailView — a child write in a related list refreshes the par
 
     expect(rollup()).toBe(12000);
     await waitFor(() => expect(parentReads(ds)).toBe(2));
-    await waitFor(() => expect(figureShown(12000)).toBe(true));
     expect(document.querySelector(HEADER)).toBe(headerBefore);
+    await toOverview();
+    await waitFor(() => expect(figureShown(12000)).toBe(true));
   });
 
   it('a child row action that bypasses the dataSource (an object-wide child change) re-reads the parent', async () => {

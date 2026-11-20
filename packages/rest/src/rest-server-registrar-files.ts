@@ -82,6 +82,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // backfill door. New, not a moved slice, and a `/meta` group — see
     // {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-record-currency-backfill-route.ts',
+    // [ADR-0158 U7 R1] `registerMetaUnitCodeBackfillRoute`' body, its unit code twin. New,
+    // and a `/meta` group — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-unit-code-backfill-route.ts',
     // [#30237] `registerRecycleBinEndpoints`' body, the recycle bin's doors under
     // `{data}/:object/recycle-bin`. New, not a moved slice.
     'recycle-bin-routes.ts',
@@ -137,6 +140,8 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // New, not a moved slice; like the state-machine read it registers on the route
     // manager itself, by value from a host literal built inside the inner method.
     'meta-record-currency-backfill-route.ts',
+    // [ADR-0158 U7 R1] Its unit code twin, `POST {metaPath}/_migrate-unit-codes`, registered the same way.
+    'meta-unit-code-backfill-route.ts',
 ];
 
 /**

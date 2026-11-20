@@ -26,7 +26,14 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectKernel, resolveAuthzContext, assembleExecutionContext, type Plugin, type PluginContext } from '@objectstack/core';
+import {
+  ObjectKernel,
+  resolveAuthzContext,
+  assembleExecutionContext,
+  markFlowWriteReferenceCheck,
+  type Plugin,
+  type PluginContext,
+} from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
@@ -42,6 +49,21 @@ const CAROL = 'usr_units_carol';
 const OWEN = 'usr_units_owen';
 
 const SYS = { isSystem: true, tenantId: ORG } as const;
+/**
+ * A `runAs: 'system'` automation run with no triggering user, built by the
+ * constructor the automation runtime builds it with
+ * (`resolveRunDataContext`, `@objectstack/service-automation`): elevated,
+ * acting as `svc:flow:<name>`, in the trigger's organization.
+ */
+const AUTOMATION = markFlowWriteReferenceCheck({
+  isSystem: true,
+  actor: 'svc:flow:units_cleanup',
+  tenantId: ORG,
+  positions: [],
+  permissions: [],
+});
+/** An application object whose quantities declare their unit (ADR-0158 U4, U5). */
+const MATERIAL = 'units_material';
 
 type Row = Record<string, any>;
 type Ctx = Record<string, unknown>;
@@ -73,7 +95,22 @@ function objectsPlugin(): Plugin {
         version: '1.0.0',
         type: 'plugin',
         name: 'Unit of measure grants fixture',
-        objects: [SysUser, SysMember, SysOrganization, SysUnit],
+        objects: [
+          SysUser,
+          SysMember,
+          SysOrganization,
+          SysUnit,
+          {
+            name: MATERIAL,
+            label: 'Material',
+            fields: {
+              title: { type: 'text', label: 'Title' },
+              uom: { type: 'text', label: 'Unit' },
+              weight: { type: 'number', label: 'Weight', unitConfig: { unitMode: 'record', unitField: 'uom', unitDimension: 'mass' } },
+              base_uom: { type: 'text', label: 'Base unit', unitConfig: { unitMode: 'code' } },
+            },
+          },
+        ],
       });
     },
   };
@@ -254,5 +291,151 @@ describe('sys_unit on a real stack: member read, administrator write, and the ru
       expect(await stored({ code: 'SACK_50' })).toHaveLength(1);
       expect((await storedById(id))).toMatchObject({ label: 'Sack', dimension: 'mass', ratio: 50, retired: true });
     });
+  });
+
+  describe('an administrator edits every unit of the organization, not only their own', () => {
+    it("the owner relabels the administrator's unit: the explicit `sys_unit` line keeps the edit the wildcard gave", async () => {
+      await update(as.owen, seeded, { label: 'Jin (500 g)' });
+      expect(await storedById(seeded)).toMatchObject({ code: 'JIN1', label: 'Jin (500 g)' });
+      await update(as.carol, seeded, { label: 'Jin' });
+    });
+  });
+
+  // [Requirement 1 on #35489 (7030061316), carried from #35581's review
+  // (7016814814)] Retiring is the delete: the engine refuses a delete of a
+  // unit for every caller it serves, before any middleware or hook, by id and
+  // batched, and nothing is removed.
+  describe('the engine refuses to delete a unit in every context: user, system and automation', () => {
+    const callers: Array<[string, () => Ctx]> = [
+      ['an organization administrator', () => as.carol],
+      ['an organization owner', () => as.owen],
+      ['a member', () => as.alice],
+      ['a system writer ({ isSystem: true })', () => SYS],
+      ['a system automation run (svc:flow, runAs system)', () => AUTOMATION],
+    ];
+    for (const [who, ctx] of callers) {
+      it(`${who}: refused by id and batched, 405 ERR_UNIT_DELETE_REFUSED, every unit still stored`, async () => {
+        const before = (await stored({})).length;
+        expect(before).toBeGreaterThan(0);
+        expect(await refusal(() => ql.delete(OBJ, { where: { id: seeded }, context: ctx() } as never))).toEqual({
+          status: 405,
+          code: 'ERR_UNIT_DELETE_REFUSED',
+        });
+        expect(await refusal(() => ql.delete(OBJ, { where: { dimension: 'mass' }, multi: true, context: ctx() } as never))).toEqual({
+          status: 405,
+          code: 'ERR_UNIT_DELETE_REFUSED',
+        });
+        expect((await stored({})).length).toBe(before);
+        expect(await storedById(seeded)).toMatchObject({ code: 'JIN1', retired: false });
+      });
+    }
+
+    it("the administrator's effective permissions offer no delete on units, and keep create and edit", async () => {
+      const security = kernel.getService<{
+        getEffectiveObjectPermissions(ctx: Ctx): Promise<Record<string, Record<string, unknown>>>;
+      }>('security');
+      for (const key of ['carol', 'owen'] as const) {
+        const map = await security.getEffectiveObjectPermissions(as[key]);
+        expect(map[OBJ], key).toMatchObject({ allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false });
+        // `modifyAllRecords` would grant the delete on its own.
+        expect(map[OBJ]?.modifyAllRecords, key).not.toBe(true);
+      }
+    });
+  });
+
+  // [ADR-0158 U5; Open item 9] The write check on a real stack: the
+  // organization's own `sys_unit` rows, read elevated in the row's
+  // organization, are members; a retired one is not.
+  describe('a quantity names a member unit, or the write is refused', () => {
+    const write = (ctx: Ctx, data: Row) => ql.insert(MATERIAL, data, { context: ctx } as never) as Promise<Row>;
+    const materials = async (where: Row) => (await ql.find(MATERIAL, { where, context: SYS } as never)) as Row[];
+
+    it('stores a standard code and an organization unit, written by an administrator and by a system writer', async () => {
+      await write(as.carol, { title: 'std', uom: 'KGM', weight: 2, base_uom: 'H87' });
+      await write(SYS, { title: 'org', uom: 'JIN1', weight: 3, base_uom: 'JIN1' });
+      expect((await materials({ title: { $in: ['std', 'org'] } })).map((r) => r.uom).sort()).toEqual(['JIN1', 'KGM']);
+    });
+
+    it('refuses a retired unit (Requirement 2), a mis-cased code, a code of another dimension and a quantity with no code: 400, nothing stored', async () => {
+      const crate = String((await insert(as.carol, { code: 'CRATE_9', label: 'Crate', dimension: 'mass', ratio: 9 })).id);
+      await write(as.carol, { title: 'before-retire', uom: 'CRATE_9', weight: 1 });
+      await update(as.carol, crate, { retired: true });
+      for (const [title, row, code] of [
+        ['retired', { uom: 'CRATE_9', weight: 1 }, 'ERR_UNIT_CODE_RETIRED'],
+        ['lower', { uom: 'kgm', weight: 1 }, 'ERR_UNIT_CODE_UNKNOWN'],
+        ['length', { uom: 'MTR', weight: 1 }, 'ERR_UNIT_DIMENSION_MISMATCH'],
+        ['blank', { weight: 1 }, 'ERR_UNIT_CODE_REQUIRED'],
+        ['piece', { base_uom: 'EA' }, 'ERR_UNIT_CODE_UNKNOWN'],
+      ] as const) {
+        expect(await refusal(() => write(as.carol, { title, ...row })), title).toEqual({ status: 400, code });
+        expect(await materials({ title }), title).toEqual([]);
+      }
+      // Open item 9 case 2: the row resting on the retired unit refuses a quantity edit, and takes one once moved.
+      const [resting] = await materials({ title: 'before-retire' });
+      expect(await refusal(() => ql.update(MATERIAL, { weight: 2 }, { where: { id: resting!.id }, context: as.carol } as never))).toEqual({
+        status: 400,
+        code: 'ERR_UNIT_CODE_RETIRED',
+      });
+      await ql.update(MATERIAL, { title: 'renamed-resting' }, { where: { id: resting!.id }, context: as.carol } as never);
+      await ql.update(MATERIAL, { uom: 'JIN1', weight: 2 }, { where: { id: resting!.id }, context: as.carol } as never);
+      expect((await materials({ id: resting!.id }))[0]).toMatchObject({ title: 'renamed-resting', uom: 'JIN1', weight: 2 });
+    });
+  });
+
+  // [ruling 7035627429, option B] Deleting an organization deletes its units:
+  // the one exemption from the delete refusal above, carried by the engine's
+  // own cascade, which names the organization explicitly, so a system writer
+  // acting in another organization removes every unit of the deleted one.
+  describe("an organization's delete removes its units, and only its delete does", () => {
+    const GONE = 'org_units_gone';
+    const KEPT = 'org_units_kept';
+    const inOrg = (organizationId: string) => ({ isSystem: true, tenantId: organizationId }) as const;
+    const unitsOf = async (organizationId: string) =>
+      (await ql.find(OBJ, { where: { organization_id: organizationId }, context: inOrg(organizationId) } as never)) as Row[];
+    const organizations = async (ids: string[]) =>
+      ((await ql.find('sys_organization', { where: { id: { $in: ids } }, context: { isSystem: true } } as never)) as Row[]).map((r) => r.id);
+
+    beforeAll(async () => {
+      for (const [id, slug] of [[GONE, 'units-gone'], [KEPT, 'units-kept']]) {
+        await ql.insert('sys_organization', { id, name: slug, slug }, { context: { isSystem: true } } as never);
+        await ql.insert(OBJ, { code: 'BALE_1', label: 'Bale', dimension: 'mass', ratio: 200 }, { context: inOrg(id) } as never);
+        const retired = (await ql.insert(OBJ, { code: 'DRUM_1', label: 'Drum', dimension: 'volume', ratio: 0.2 }, { context: inOrg(id) } as never)) as Row;
+        await ql.update(OBJ, { retired: true }, { where: { id: retired.id }, context: inOrg(id) } as never);
+      }
+      await ql.insert(MATERIAL, { title: 'owned', uom: 'BALE_1', weight: 1 }, { context: inOrg(KEPT) } as never);
+    });
+
+    it('an organization holding units, one retired, and no other record deletes, and no unit of it is left', async () => {
+      const others = (await stored({})).filter((r) => r.organization_id !== GONE).map((r) => r.id).sort();
+      expect((await unitsOf(GONE)).map((r) => [r.code, r.retired])).toEqual([['BALE_1', false], ['DRUM_1', true]]);
+
+      await expect(ql.delete('sys_organization', { where: { id: GONE }, context: SYS } as never)).resolves.toBe(true);
+
+      expect(await organizations([GONE])).toEqual([]);
+      expect(await unitsOf(GONE)).toEqual([]);
+      expect((await stored({})).map((r) => r.id).sort()).toEqual(others);
+    });
+
+    it('an organization holding units and another record is refused 409 DELETE_RESTRICTED, and keeps every unit', async () => {
+      const err = await refusal(() => ql.delete('sys_organization', { where: { id: KEPT }, context: SYS } as never));
+      expect(err).toEqual({ status: 409, code: 'DELETE_RESTRICTED' });
+      expect(await organizations([KEPT])).toEqual([KEPT]);
+      expect((await unitsOf(KEPT)).map((r) => [r.code, r.retired])).toEqual([['BALE_1', false], ['DRUM_1', true]]);
+    });
+
+    for (const [who, ctx] of [['a system writer', () => inOrg(KEPT)], ['a system automation run', () => ({ ...AUTOMATION, tenantId: KEPT })]] as const) {
+      it(`${who} still deletes no unit of that organization directly: 405 ERR_UNIT_DELETE_REFUSED, by id and batched`, async () => {
+        const [unit] = await unitsOf(KEPT);
+        expect(await refusal(() => ql.delete(OBJ, { where: { id: unit!.id }, context: ctx() } as never))).toEqual({
+          status: 405,
+          code: 'ERR_UNIT_DELETE_REFUSED',
+        });
+        expect(await refusal(() => ql.delete(OBJ, { where: { code: 'BALE_1' }, multi: true, context: ctx() } as never))).toEqual({
+          status: 405,
+          code: 'ERR_UNIT_DELETE_REFUSED',
+        });
+        expect(await unitsOf(KEPT)).toHaveLength(2);
+      });
+    }
   });
 });

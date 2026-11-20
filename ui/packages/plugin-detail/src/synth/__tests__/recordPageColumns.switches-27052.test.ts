@@ -43,9 +43,10 @@ const tabValues = (def: any) => buildDefaultTabs(def, { related: RELATED }).prop
 
 describe('动态 is a panel for every object (objectstack#27524, Target 5)', () => {
   it('the strip places Timeline last for a worked object and a container alike (objectstack#34590)', () => {
-    // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
-    expect(tabValues(worked)).toEqual(['details', 'related', 'timeline']);
-    expect(tabValues(container)).toEqual(['details', 'related', 'timeline']);
+    // A tab per side list (objectstack#35595); 动态 last (objectstack#34590).
+    // The worked object has files on: its 附件 tab follows the lists.
+    expect(tabValues(worked)).toEqual(['details', 'related:task.parent_id', 'attachments', 'timeline']);
+    expect(tabValues(container)).toEqual(['details', 'related:task.parent_id', 'timeline']);
   });
 
   it('the object-derived default and the column switches are gone from the module', () => {

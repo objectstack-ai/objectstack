@@ -348,8 +348,10 @@ function pad2(n: number): string {
  * read back unchanged, and it reads `07/15/2026 10:00` through `Date.parse`
  * in the host's zone and rolls `2026-02-30T10:00:00Z` over to March 2, both of
  * which the verdict refuses. A `{placeholder}` is filter vocabulary, which the
- * verdict steps around rather than judges, so it is refused here, as the write
- * door refuses it.
+ * verdict does not refuse whole: it steps around a date macro and an unknown or
+ * record-context token, and judges only a period key and a context token as
+ * written. So every placeholder is refused here first, by
+ * `classifyFilterToken`, as the write door refuses it.
  *
  * This replaced a private pattern with no fractional part, which refused the
  * `10:00:00.250` that `/export` writes for a `time` with milliseconds, so such

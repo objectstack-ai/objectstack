@@ -57,13 +57,16 @@ import type {
   ToolRegistry,
 } from './types.js';
 
-/** [#34766] The paragraph the open server's default text adds where authoring tools register. */
-const AUTHORING_DRAFTS_PARAGRAPH_START = 'This connection also lists authoring tools';
+/**
+ * [#34766] The paragraphs the open server's default text adds where authoring
+ * tools register: the drafts line, and [#34774] the authoring contract line.
+ */
+const AUTHORING_PARAGRAPH_STARTS = ['This connection also lists authoring tools', 'Authoring contract: @objectstack/spec '];
 
-/** The text with that one paragraph taken out (the paragraphs are joined by a blank line). */
+/** The text with those paragraphs taken out (the paragraphs are joined by a blank line). */
 function withoutDraftsParagraph(text: unknown): unknown {
   if (typeof text !== 'string') return text;
-  return text.split('\n\n').filter((part) => !part.startsWith(AUTHORING_DRAFTS_PARAGRAPH_START)).join('\n\n');
+  return text.split('\n\n').filter((part) => !AUTHORING_PARAGRAPH_STARTS.some((start) => part.startsWith(start))).join('\n\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -698,8 +701,8 @@ describe('[#31022] per-request instructions on the authoring injection — answe
   it('a metadata:write request whose injection carries no instructions gets the default, plus the drafts line its tools earn', async () => {
     const defaultText = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] });
     const subject = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry });
-    // [#34766] The one paragraph a request that registers authoring tools adds.
-    expect(subject).toContain(AUTHORING_DRAFTS_PARAGRAPH_START);
+    // [#34766] [#34774] The two paragraphs a request that registers authoring tools adds.
+    for (const start of AUTHORING_PARAGRAPH_STARTS) expect(subject).toContain(start);
     expect(withoutDraftsParagraph(subject)).toBe(defaultText);
   });
 
@@ -845,5 +848,43 @@ describe('[#32766] data-only instructions on the authoring injection — the com
       }),
     ).toBe(DATA_ONLY_TEXT);
     expect(await instructionsAtInitialize(configured, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], registry })).toBe(CONFIGURED);
+  });
+});
+
+/**
+ * [#34774] A closed authoring tool input (`additionalProperties: false`, as on
+ * every open draft-door tool) is ENFORCED at dispatch, not only advertised:
+ * `z.fromJSONSchema` yields a strict object the SDK validates before the
+ * handler runs. So declaring a new optional key refuses nothing accepted before.
+ */
+describe('[#34774] a closed authoring tool input refuses an undeclared key before the registry is called', () => {
+  /** `save_metadata_draft`'s parameters before `clientSpecVersion` (`@objectstack/runtime`'s door). */
+  const S = { type: 'string', minLength: 1 };
+  const SAVE_BEFORE: AIToolDefinition = {
+    name: 'save_metadata_draft',
+    description: 'Save one metadata item as a DRAFT in a package.',
+    parameters: {
+      type: 'object',
+      properties: { type: S, name: S, item: { type: 'object' }, package: S, ifMatch: S },
+      required: ['type', 'name', 'item'],
+      additionalProperties: false,
+    },
+  };
+  const SAVE = { type: 'flow', name: 'lead_intake', item: { name: 'lead_intake' }, package: 'com.acme.crm' };
+
+  it('the undeclared key is refused and the registry is never touched; the same call without it reaches the registry', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const registry = makeAuthoringRegistry([SAVE_BEFORE]);
+    const o = { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry };
+
+    const refusedCall = await callTool(runtime, makeBridge(), 'save_metadata_draft', { ...SAVE, clientSpecVersion: '17.0.0' }, o);
+    expect(refused(refusedCall.json)).toBe(true);
+    expect(JSON.stringify(refusalOf(refusedCall.json))).toContain('clientSpecVersion');
+    expect(registry.calls).toHaveLength(0);
+
+    // Control: the declared keys alone pass the same gate and reach the registry, whole.
+    const accepted = await callTool(runtime, makeBridge(), 'save_metadata_draft', SAVE, o);
+    expect(refused(accepted.json)).toBe(false);
+    expect(registry.calls.map((c) => c.toolCall.input)).toEqual([SAVE]);
   });
 });

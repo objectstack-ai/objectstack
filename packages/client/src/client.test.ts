@@ -768,6 +768,15 @@ describe('Approvals namespace (ADR-0019)', () => {
         const [url, opts] = fetchMock.mock.calls[0];
         expect(url).toContain('/api/v1/approvals/requests/req-1/reject');
         expect(opts.method).toBe('POST');
+        expect(JSON.parse(opts.body).comment).toBe('Missing fields');
+        // A reject carries its reason: the decision and its `comment` are required.
+        const typeOnly = () => {
+            // @ts-expect-error — no decision, so no reason
+            void client.approvals.reject('req-1');
+            // @ts-expect-error — a decision without its reason
+            void client.approvals.reject('req-1', { actorId: 'user-1' });
+        };
+        void typeOnly;
     });
 
     it('should list the action audit trail', async () => {

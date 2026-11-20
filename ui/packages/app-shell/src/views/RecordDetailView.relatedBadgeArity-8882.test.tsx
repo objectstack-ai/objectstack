@@ -82,6 +82,8 @@ vi.mock('./MetadataInspector', () => ({
 }));
 
 import { RecordDetailView } from './RecordDetailView';
+// The list's tab face draws its rows in the object grid (objectstack#35595).
+import '@object-ui/plugin-grid';
 
 const PARENT = 'task_version';
 const CHILD = 'check_item';
@@ -257,6 +259,13 @@ function makeDataSource(rows: Record<string, any>[], objects: any[]) {
   } as any;
 }
 
+/** The child list's tab id: `object.field`, the field that references the parent. */
+function listTabOf(objects: any[]): string {
+  const child = objects.find((o) => o.name === CHILD);
+  const field = Object.keys(child.fields).find((name) => child.fields[name].reference === PARENT);
+  return `${CHILD}.${field}`;
+}
+
 function renderPage(objects: any[], dataSource: any) {
   const metadata = {
     objects,
@@ -270,7 +279,9 @@ function renderPage(objects: any[], dataSource: any) {
     getItemsByType: () => [],
   } as any;
   return render(
-    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}`]}>
+    // objectstack#35595 — the list is a tab of the record page (`object.field`);
+    // the page opens on it (`?related=`), the face that draws its rows.
+    <MemoryRouter initialEntries={[`/app/demo/${PARENT}/${RECORD_ID}?related=${listTabOf(objects)}`]}>
       <MetadataCtx.Provider value={metadata}>
         <RecordDetailView
           dataSource={dataSource}
@@ -287,9 +298,9 @@ function renderPage(objects: any[], dataSource: any) {
 
 /**
  * The child object is queried TWICE and the two reads are the two halves of
- * this card: the ROW query (windowed, `$top` = the panel's rows, no `$count`)
- * and the panel's COUNT probe (`$top: 1`, `$count: true`), asked up front by
- * the right column (objectstack#27056).
+ * this card: the ROW query (windowed, `$top` = the list's rows, no `$count`)
+ * and the tab's COUNT probe (`$top: 1`, `$count: true`), asked up front by the
+ * record page's tab row (objectstack#27056, objectstack#35595).
  */
 const isRowQuery = (p: any) => !p?.$count && typeof p?.$top === 'number';
 const isBadgeProbe = (p: any) => p?.$count === true;
@@ -321,10 +332,10 @@ async function renderAndCollect(child: any, rows: Record<string, any>[]) {
   };
 }
 
-/** The digits the related panel's header counts, or `null`. */
+/** The digits the list's tab counts, or `null` (objectstack#35595). */
 async function relatedPanelCount(): Promise<string | null> {
-  const card = await screen.findByRole('region', { name: 'Check Item' });
-  return card.querySelector('[data-related-card-count]')?.textContent?.trim() ?? null;
+  const tab = await screen.findByRole('tab', { name: /Check Item/ });
+  return tab.querySelector('[data-record-tab-count]')?.textContent?.trim() ?? null;
 }
 
 /** How many child rows the related list actually drew. */
