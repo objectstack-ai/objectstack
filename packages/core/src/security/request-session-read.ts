@@ -26,12 +26,17 @@
  *
  * ## The scope — one request, never longer
  *
- * The transport opens a scope per inbound request ({@link withRequestSessionRead},
- * `@objectstack/plugin-hono-server` around its whole middleware chain and the
- * route), and every reader above reads through it ({@link readRequestSession}).
- * `resolveRequestExecutionContext` joins the scope its request opened, and opens
- * one of its own for its own call on a transport that opened none
- * ({@link joinRequestSessionRead}), so its two reads share one on any transport.
+ * Every reader above reads through the scope open where it runs
+ * ({@link readRequestSession}). The transport opens the scopes: the Hono
+ * adapter (`@objectstack/plugin-hono-server`) opens one around its middleware
+ * chain ({@link openRequestSessionRead}, the limiter's read) and runs a route
+ * it registered inside that same scope when nothing that could change the
+ * read's ambient state sat between the two (see the residuals below), or
+ * inside a fresh one ({@link withRequestSessionRead}) otherwise.
+ * `resolveRequestExecutionContext` joins the scope open where it runs, and
+ * opens one of its own for its own call where none is
+ * ({@link joinRequestSessionRead}), so its two reads share one on any route
+ * of any transport.
  *
  * It is an `AsyncLocalStorage` store, not a field on the request, because the
  * readers never see one request object: the transport hands its middleware and
@@ -39,12 +44,13 @@
  * readers receive only the request's `Headers`. The same choice as the
  * request-grants memo (`request-grants-memo.ts`), and with the same guarantees:
  * two requests interleaving across their awaits each see only their own scope,
- * a request the transport serves in process inside another opens its own, and
- * the scope is CLOSED when the request settles, so a continuation that outlives
- * it reads afresh and stores nothing. ⛔ This is not a cache and must not
- * become one: nothing read here survives the request. A host whose async
- * context does not propagate (WebContainer's `node:async_hooks`) finds no
- * scope, and every read is fresh, as before this module existed.
+ * a request the transport serves in process inside another starts outside
+ * every scope ({@link withoutRequestSessionRead}), and a scope is CLOSED when
+ * the request settles, so a continuation that outlives it reads afresh and
+ * stores nothing. ⛔ This is not a cache and must not become one: nothing read
+ * here survives the request. A host whose async context does not propagate
+ * (WebContainer's `node:async_hooks`) finds no scope, and every read is fresh,
+ * as before this module existed.
  *
  * ## What a stored read answers for — it is served only when a fresh read would agree
  *
@@ -86,12 +92,21 @@
  *    that reader's read always got.
  *  - The key is the headers, not ambient state another module keeps for the
  *    read. plugin-auth's objectstack mounts under the auth base path carry the
- *    request's address to the session reads made inside them, and
- *    `customSession` judges the organization's IP list on such a read
- *    (ADR-0069 D5). Those reads call the session API themselves and never read
- *    through this carrier. No reader that does runs inside that mount: the
- *    `/auth/me/*` endpoints win their match only by being registered ahead of
- *    plugin-auth's mount, its middleware included.
+ *    request's address to the session reads made inside them
+ *    (`runAtMountDoor`, a middleware scoped to that path), and `customSession`
+ *    judges the organization's IP list on such a read (ADR-0069 D5); a read
+ *    made outside that door is not judged by the list. So a read must never
+ *    cross from outside such a door to a reader inside it, and the scopes are
+ *    laid out so none can: the middleware chain's scope reaches only a route
+ *    the transport registered itself, and only when every middleware between
+ *    the chain and that route is one the whole server runs (`use('*')`) — a
+ *    middleware scoped to a path, the auth mount's door among them, gives the
+ *    route a fresh scope, so its reader reads for itself, inside the door. A
+ *    raw route mounted on the transport's app (plugin-auth's mounts, the
+ *    `/auth/me/*` endpoints) runs outside every scope, and its
+ *    `resolveRequestExecutionContext` shares only its own two reads. A
+ *    whole-server middleware that changed a session read's ambient state
+ *    would defeat this; none does.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -123,23 +138,60 @@ interface RequestSessionReadScope {
 
 const scopeStorage = new AsyncLocalStorage<RequestSessionReadScope>();
 
+/** Where no scope is open: every read is fresh, and `joinRequestSessionRead` opens its own. */
+const OUTSIDE: RequestSessionReadScope = { open: false, entries: new WeakMap() };
+
 /**
- * Run `fn` — one inbound request, as the transport serves it — inside a fresh
- * scope, and close the scope when it settles. A scope opened inside another
- * (a request served in process from inside a request) is its own.
+ * A scope the transport holds across more than one stretch of a request (the
+ * Hono adapter's middleware chain, then the route it hands that scope to).
+ */
+export interface RequestSessionReadHandle {
+  /** Run `fn` inside this scope; once it is closed, outside every scope. */
+  run<T>(fn: () => Promise<T>): Promise<T>;
+  /** Close the scope: what it holds is dropped, and nothing more is stored or served. */
+  close(): void;
+}
+
+/**
+ * Open a fresh scope for one inbound request and hand it to the transport,
+ * which runs each stretch of the request that may share reads inside it and
+ * closes it when the request settles.
+ */
+export function openRequestSessionRead(): RequestSessionReadHandle {
+  const scope: RequestSessionReadScope = { open: true, entries: new WeakMap() };
+  return {
+    run: (fn) => scopeStorage.run(scope.open ? scope : OUTSIDE, fn),
+    close: () => {
+      scope.open = false;
+      scope.entries = new WeakMap();
+    },
+  };
+}
+
+/**
+ * Run `fn` inside a fresh scope, and close the scope when it settles. A scope
+ * opened inside another is its own.
  */
 export async function withRequestSessionRead<T>(fn: () => Promise<T>): Promise<T> {
-  const scope: RequestSessionReadScope = { open: true, entries: new WeakMap() };
+  const handle = openRequestSessionRead();
   try {
-    return await scopeStorage.run(scope, fn);
+    return await handle.run(fn);
   } finally {
-    scope.open = false;
-    scope.entries = new WeakMap();
+    handle.close();
   }
 }
 
 /**
- * Run `fn` inside the scope the request opened, or, when none is open, inside a
+ * Run `fn` outside every scope: what it reads is its own. The transport starts
+ * each request here, so a request it serves in process from inside another
+ * never reaches the outer request's reads.
+ */
+export function withoutRequestSessionRead<T>(fn: () => Promise<T>): Promise<T> {
+  return scopeStorage.run(OUTSIDE, fn);
+}
+
+/**
+ * Run `fn` inside the scope open where it runs, or, when none is open, inside a
  * scope of its own for the length of `fn`.
  */
 export function joinRequestSessionRead<T>(fn: () => Promise<T>): Promise<T> {

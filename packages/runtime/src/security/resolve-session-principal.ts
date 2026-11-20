@@ -17,12 +17,15 @@
  * with.
  *
  * The read goes through the request's session-read carrier (`@objectstack/core`
- * `readRequestSession`), which the transport opens per request. The limiter
- * reads in the transport's middleware seam, before the route; the route's own
- * identity step then reads the same request through the same carrier, and is
- * answered by the limiter's read unless a write has landed on `ql` since. One
- * request, one session read. A read that throws is not stored, so the route
- * still reads for itself after a limiter read that failed.
+ * `readRequestSession`). The limiter reads in the transport's middleware seam,
+ * before the route, in a scope the transport hands to the route it serves past
+ * whole-server middleware only; that route's identity step then reads the same
+ * request through the same carrier, and is answered by the limiter's read
+ * unless a write has landed on `ql` since. One request, one session read. A
+ * route behind a middleware scoped to its path (plugin-auth's door under the
+ * auth base path) and a raw-app route read for themselves. A read that throws
+ * is not stored, so the route still reads for itself after a limiter read that
+ * failed.
  */
 
 import { readRequestSession, type RequestSessionRead } from '@objectstack/core';

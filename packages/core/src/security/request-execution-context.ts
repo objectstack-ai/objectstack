@@ -255,8 +255,8 @@ export function resolveRequestExecutionContext(
   input: RequestExecutionContextInput,
 ): Promise<ExecutionContext | undefined> {
   // The session arm and the gate read through the request's session-read
-  // carrier: the scope the transport opened for this request, or one opened
-  // here for this call alone (`request-session-read.ts`).
+  // carrier: the scope open where this runs (the one the transport ran this
+  // route in), or one opened here for this call alone (`request-session-read.ts`).
   return joinRequestSessionRead(() => resolveInScope(input));
 }
 
@@ -288,8 +288,9 @@ async function resolveInScope(input: RequestExecutionContextInput): Promise<Exec
       const api = await sessionApi();
       if (typeof api?.getSession !== 'function') return undefined;
       // Through the request's session-read carrier: a read the inbound rate
-      // limiter made of this same request answers, unless a write has landed
-      // since it was read.
+      // limiter made of this same request answers, where the transport handed
+      // this route the limiter's scope, unless a write has landed since it was
+      // read.
       return await readRequestSession(api, headers, ql);
     } catch {
       return undefined;

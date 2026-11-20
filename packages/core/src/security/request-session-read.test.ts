@@ -13,7 +13,9 @@
  *  2. ISOLATION. Outside a scope every read is fresh; other headers or another
  *     API object are another read; two interleaved scopes never share; a
  *     continuation that outlives its scope reads afresh; `joinRequestSessionRead`
- *     joins an open scope and opens its own otherwise.
+ *     joins an open scope and opens its own otherwise; a handle the transport
+ *     holds shares across the stretches it runs and nothing once closed;
+ *     `withoutRequestSessionRead` leaves an open scope behind.
  *  3. FRESHNESS. A write that lands, a write still in flight and a non-write
  *     epoch bump between the two readers, an expired session, a read that
  *     threw, and an engine the carrier cannot watch (no engine, or no write
@@ -23,7 +25,13 @@
 import { describe, it, expect } from 'vitest';
 
 import { withRequestGrantsMemo } from './request-grants-memo.js';
-import { joinRequestSessionRead, readRequestSession, withRequestSessionRead } from './request-session-read.js';
+import {
+  joinRequestSessionRead,
+  openRequestSessionRead,
+  readRequestSession,
+  withRequestSessionRead,
+  withoutRequestSessionRead,
+} from './request-session-read.js';
 
 type Middleware = (ctx: { operation: string }, next: () => Promise<void>) => Promise<void>;
 
@@ -176,6 +184,40 @@ describe('request-session-read — isolation', () => {
       await readRequestSession(api, bearer('a'), engine);
     });
     expect(api.calls).toBe(2);
+  });
+
+  it('a handle shares across the stretches it runs, and serves and stores nothing once closed', async () => {
+    const engine = await watchedEngine();
+    const api = makeApi();
+    const handle = openRequestSessionRead();
+    // The transport's middleware chain, then the route it hands the scope to.
+    await handle.run(() => readRequestSession(api, bearer('a'), engine));
+    await handle.run(() => readRequestSession(api, bearer('a'), engine));
+    expect(api.calls).toBe(1);
+    handle.close();
+    await handle.run(async () => {
+      await readRequestSession(api, bearer('a'), engine);
+      await readRequestSession(api, bearer('a'), engine);
+    });
+    expect(api.calls).toBe(3);
+  });
+
+  it('withoutRequestSessionRead leaves the open scope behind: its reads are its own', async () => {
+    const engine = await watchedEngine();
+    const api = makeApi();
+    await withRequestSessionRead(async () => {
+      await readRequestSession(api, bearer('a'), engine);
+      await withoutRequestSessionRead(async () => {
+        await readRequestSession(api, bearer('a'), engine);
+        // `joinRequestSessionRead` finds no scope there and opens its own.
+        await joinRequestSessionRead(async () => {
+          await readRequestSession(api, bearer('a'), engine);
+          await readRequestSession(api, bearer('a'), engine);
+        });
+      });
+      await readRequestSession(api, bearer('a'), engine);
+    });
+    expect(api.calls).toBe(3);
   });
 });
 

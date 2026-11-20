@@ -21,9 +21,11 @@
  *    any route runs.
  *
  * The last two now read through the request's session-read carrier
- * (`@objectstack/core` `request-session-read.ts`), which the transport opens
- * per request: a read one of them made is served to the next, within the same
- * request, while no write has landed since it was read. Each read was one
+ * (`@objectstack/core` `request-session-read.ts`): the transport runs its
+ * middleware chain in a scope and hands that scope to the route it serves
+ * past whole-server middleware only, so a read one of them made is served to
+ * the next, within the same request, while no write has landed since it was
+ * read. Each read was one
  * `sys_session` lookup by token and one `sys_user` lookup by id, one remote
  * round trip each on a hosted database.
  *
@@ -40,7 +42,9 @@
  *     - concurrent requests with different tokens each get their own answer;
  *     - the limiter still keys by the principal and still refuses over budget;
  *     - a read that throws keeps its outage answer, and is never served;
- *     - a revocation landing between the limiter's read and the route's is seen.
+ *     - a revocation landing between the limiter's read and the route's is seen;
+ *     - a raw mount behind plugin-auth's door reads for itself, never answered
+ *       by the limiter's read made in front of it (ADR-0069 D5).
  *
  * Counted: every statement the SQL driver issues inside the request's own
  * async context (knex's `query` event), as the statements golden counts them,
@@ -77,6 +81,8 @@ const BURST = { email: 'burst@pin.test', password: 'burst-pin-password-session-o
 const ROUTE = '/packages';
 /** The REST data door, on the pin app's own object. */
 const REST_ROUTE = '/data/pin_note';
+/** A plugin-auth raw mount behind its door under the auth base path that resolves its caller in process. */
+const AUTH_MOUNT_ROUTE = '/auth/client-address';
 /** The better-auth session read's token lookup — one per session read. */
 const SESSION_TOKEN_LOOKUP = /^select \* from `sys_session` where `token` = \? limit \?$/;
 /** The better-auth session read's own user lookup — one per session read. */
@@ -421,6 +427,19 @@ describe('limiter armed: the limiter\'s read is the request\'s read (real kernel
         } finally {
             l.failReads = 0;
         }
+    });
+
+    it('CONTROL — a raw mount behind the auth door reads for itself: the limiter\'s read never answers there', async () => {
+        // `GET /auth/client-address` resolves its caller in process
+        // (`resolveRequestExecutionContext`) behind plugin-auth's door under the
+        // auth base path, where the organization's IP list is judged on the
+        // read (ADR-0069 D5). The limiter's read is made in front of that door
+        // and judged without it, so it must not be the answer there: the route
+        // reads for itself.
+        const r = await warm(l, AUTH_MOUNT_ROUTE, l.ownerToken);
+        expect(r.status, JSON.stringify(r.body)).not.toBe(429);
+        expect(r.status, JSON.stringify(r.body)).toBeLessThan(500);
+        expect(r.getSession).toBe(2);
     });
 
     it('CONTROL — a revocation landing between the limiter\'s read and the route\'s is seen: 401', async () => {

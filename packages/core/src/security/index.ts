@@ -235,9 +235,12 @@ export {
 // limiter, the identity step above, REST's gate) reads through it, so one
 // request reads its session once. Request-scoped; never a cache.
 export {
+  openRequestSessionRead,
   withRequestSessionRead,
+  withoutRequestSessionRead,
   readRequestSession,
   type RequestSessionRead,
+  type RequestSessionReadHandle,
 } from './request-session-read.js';
 
 // The ONE own-row delete door (`DELETE <route>` removes one row, only the
