@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn, RelatedCountStore, useRelatedCountVersion } from '@object-ui/components';
-import { composeParentScopeFilter, mergeFilterNodes, type FieldContainerLike } from '@object-ui/core';
+import { columnIdentity, composeParentScopeFilter, mergeFilterNodes, type FieldContainerLike } from '@object-ui/core';
 import { formatCurrency } from '@object-ui/fields';
 import { resolveFieldCurrency, useDisplayLocale, useLocalization, withFollowedParent } from '@object-ui/i18n';
 import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
@@ -383,15 +383,8 @@ function readOnlyStreamNode(node: any): any {
 
 // ── 其他相关 ────────────────────────────────────────────────────────────────
 
-const columnKey = (col: unknown): string | undefined => {
-  if (typeof col === 'string') return col;
-  if (col && typeof col === 'object') {
-    const c = col as PageNode;
-    const key = c.field ?? c.accessorKey ?? c.name;
-    return typeof key === 'string' ? key : undefined;
-  }
-  return undefined;
-};
+// A list column's field: the one shared reader, canonical-first (objectui#3104).
+const columnKey = (col: unknown): string | undefined => columnIdentity(col);
 
 const fieldMap = (fields: FieldContainerLike | undefined): Record<string, any> => {
   if (!fields) return {};

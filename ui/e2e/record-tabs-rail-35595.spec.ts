@@ -12,7 +12,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * GEOMETRY and INTERACTION pin for objectstack#35595 (the record page's tab
  * row) and objectstack#35596 (the 概览 tab's right rail), zh-CN.
  *
- *   - The tab row folds by WIDTH only: in a 900 px window the tail goes
+ *   - The tab row folds by WIDTH only: a row sized from its own measured
+ *     tabs to hold the first eight draws exactly those and folds the tail
  *     into 「更多 N ▾」, whose items keep their counts; CONTROL, the same page
  *     at the 1184 px a 1440 window leaves draws every tab.
  *   - On 概览 the stage path and the key fields are at the top across the
@@ -48,12 +49,19 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *     the page around them.
  *   - The data source is a literal: eight related lists (two of them empty),
  *     two attachments, one approval waiting on a named approver.
- *   - The record page's width is set by a frame, not by the shell: 644 px
- *     (a 900 px window with the sidebar open) for the fold, 1184 px (a 1440
- *     window with the sidebar open) for its CONTROL, and 1024 px (a 1280 ×
- *     800 window with the sidebar open) for the 概览 placement and the rail.
- *   - Fonts are Chromium's fallbacks. The assertions are which tabs are drawn,
- *     edges and sizes, not pixels of glyphs.
+ *   - The record page's width is set by a frame, not by the shell: for the
+ *     fold, a width computed from what the row measures its own tabs at
+ *     (below); 1184 px (a 1440 window with the sidebar open) for its
+ *     CONTROL; and 1024 px (a 1280 × 800 window with the sidebar open) for
+ *     the 概览 placement and the rail.
+ *   - Fonts are whatever the machine has, and the fold does not depend on
+ *     them. A CJK label is about 13 px a glyph where a CJK font is installed
+ *     and about 8 px where none is (measured: 概览 26 px against 16 px), so
+ *     on a runner without one the whole row is ~580 px and fits a page any
+ *     fixed width could fold elsewhere. The fold case therefore sizes the
+ *     row from the row's own measurer: room for the first eight tabs and
+ *     「更多」, and half a tab short of the ninth. The assertions are which
+ *     tabs are drawn, edges and sizes, not pixels of glyphs.
  */
 
 const REPO_ROOT = uiRoot();
@@ -75,8 +83,12 @@ const COUNT_STORE = source('packages/components/src/hooks/related-count-store.ts
 const PAGE_1280 = 1024;
 /** A 1440 window with the sidebar open (the list specs' full page). */
 const PAGE_1440 = 1184;
-/** The card's fold case: a 900 px window with the 256 px sidebar open. */
+/** The fold case's first draw (a 900 px window with the 256 px sidebar open): it is measured, then resized. */
 const PAGE_900 = 644;
+/** The space between two tabs (`RecordTabRow`'s `gap-4`). */
+const TAB_GAP = 16;
+/** How many tabs the fold case sizes its row to hold. */
+const FOLD_KEEPS = 8;
 
 interface Case {
   name: string;
@@ -349,6 +361,14 @@ interface RowReading {
   /** Tabs whose box spills past the row's right edge. */
   spill: string[];
   rowWidth: number;
+  /** Each drawn tab's width, in order. */
+  widths: number[];
+  /** What the row measures each tab of the page at, in order (its off-screen measurer), to 0.1 px. */
+  measured: number[];
+  /** What the row measures its 「更多 N ▾」 trigger at, to 0.1 px. */
+  moreMeasured: number;
+  /** The row's width, unrounded. */
+  rowExact: number;
 }
 
 const readRow = (page: Page): Promise<RowReading> =>
@@ -363,6 +383,13 @@ const readRow = (page: Page): Promise<RowReading> =>
         .filter((el) => el.getBoundingClientRect().right > rr.right + 0.5)
         .map((el) => el.getAttribute('data-record-tab') ?? 'more'),
       rowWidth: Math.round(rr.width),
+      widths: tabs.map((el) => Math.round(el.getBoundingClientRect().width)),
+      measured: [...document.querySelectorAll<HTMLElement>('[data-record-tab-measure]')].map(
+        (el) => Math.round(el.getBoundingClientRect().width * 10) / 10,
+      ),
+      moreMeasured:
+        Math.round((document.querySelector<HTMLElement>('[data-record-tab-measure-more]')?.getBoundingClientRect().width ?? 0) * 10) / 10,
+      rowExact: rr.width,
     };
   });
 
@@ -403,16 +430,33 @@ test.describe('the record page\'s tabs and 概览 rail, zh-CN (objectstack#35595
     bundle = await bundlePage();
   });
 
-  test('a 900 px window folds the row\'s tail into 「更多 N ▾」, whose items keep their counts', async ({ page }, testInfo) => {
-    test.setTimeout(120_000);
-    await mount(page, { name: 'fold900', viewport: 1280, frame: PAGE_900 });
+  test('a row with room for eight tabs draws those eight and folds the tail into 「更多 N ▾」, whose items keep their counts', async ({ page }, testInfo) => {
+    test.setTimeout(180_000);
+    // Draw once to read what the row measures each tab at, in this machine's
+    // fonts, and what the page around the row takes.
+    await mount(page, { name: 'foldMeasure', viewport: 1280, frame: PAGE_900 });
+    const first = await readRow(page);
+    report(testInfo, 'foldMeasure', first);
+    expect(first.measured).toHaveLength(ALL_TABS.length);
+    const sum = (widths: number[]) => widths.reduce((a, b) => a + b, 0) + TAB_GAP * Math.max(0, widths.length - 1);
+    // The row the page draws: the first eight with their gaps, a gap, 「更多」 —
+    // and half of the ninth tab (with its gap) to spare, so it fits no ninth.
+    const kept = sum(first.measured.slice(0, FOLD_KEEPS));
+    const ninth = first.measured[FOLD_KEEPS] + TAB_GAP;
+    const row = kept + TAB_GAP + first.moreMeasured + ninth / 2;
+    const frame = Math.round(PAGE_900 - first.rowExact + row);
+    // The precondition that makes this a fold and not a no-op: every tab does not fit the row.
+    expect(sum(first.measured), 'the tabs fit the row, so nothing can fold').toBeGreaterThan(row);
+    await mount(page, { name: 'fold', viewport: 1280, frame });
     const r = await readRow(page);
-    report(testInfo, 'fold900', r);
-    expect(r.more, 'no 「更多」 in a 900 px window').toMatch(/^更多 \d+$/);
+    report(testInfo, 'fold', { frame, row, ...r });
+    expect(Math.abs(r.rowExact - row), 'the row is not the width it was sized to').toBeLessThan(1);
+    expect(r.more, 'no 「更多」 on a row narrower than its tabs').toMatch(/^更多 \d+$/);
     const folded = Number(r.more!.replace('更多 ', ''));
-    expect(r.shown.length + folded).toBe(ALL_TABS.length);
-    // Width alone decides: the row keeps the FRONT of the order, empty lists included.
-    expect(r.shown).toEqual(ALL_TABS.slice(0, r.shown.length));
+    // Width alone decides: the row keeps the FRONT of the order, empty lists
+    // included — exactly the eight it has room for, no fewer and no more.
+    expect(r.shown).toEqual(ALL_TABS.slice(0, FOLD_KEEPS));
+    expect(folded).toBe(ALL_TABS.length - FOLD_KEEPS);
     expect(r.spill, 'a tab spills past the row').toEqual([]);
     await page.locator('[data-record-tab-more]').click();
     const items = page.getByRole('menuitem');
@@ -424,7 +468,7 @@ test.describe('the record page\'s tabs and 概览 rail, zh-CN (objectstack#35595
         dot: !!el.querySelector('[data-record-tab-dot]'),
       })),
     );
-    report(testInfo, 'fold900-menu', menu);
+    report(testInfo, 'fold-menu', menu);
     expect(menu.map((m) => m.id)).toEqual(ALL_TABS.slice(r.shown.length));
     // The folded lists keep their numbers; 审批 its dot; 动态 its size.
     const byId = Object.fromEntries(menu.map((m) => [m.id, m]));
