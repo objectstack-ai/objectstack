@@ -1495,3 +1495,159 @@ describe('[#34766] the public draft publish verdict judges the stored draft', ()
         expect((await protocol.draftPublishJudgement({ type: 'flow', name: 'deal_followup', packageId: PKG })).refusals).toEqual([]);
     });
 });
+
+/**
+ * [#35256] The publish's build probe `flow_connector_action_unresolved` reads no
+ * landed data, only the flow body and the automation engine's connector
+ * lookups, so the draft verdict asks it too: one ADVISORY per connector step no
+ * connector can dispatch, in the gate-issue shape the draft read and the MCP
+ * draft tools read. Pinned: the advisory's rule, path, words and locale; a
+ * resolving step is silent; the publish is not refused by it; the publish
+ * gate's own answer (`assertRuntimeAuthoringRules`) does not carry it; and the
+ * landed probe reports the same words for the same body (one judgement).
+ */
+describe('[#35256] a flow draft whose connector step cannot dispatch reads the probe\'s advisory', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    const RULE = 'flow_connector_action_unresolved';
+    const syncFlow = {
+        name: 'order_sync',
+        label: '订单同步',
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'push', type: 'connector_action', label: '推送订单', connectorConfig: { connectorId: 'erp', actionId: 'push_order', input: {} } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'push' },
+            { id: 'e2', source: 'push', target: 'end' },
+        ],
+    };
+
+    /** An engine that knows `known` (connector.action) and asks for the flow's package. */
+    function automationKnowing(known: readonly string[], over: Record<string, unknown> = {}) {
+        const asked: Array<[string, string | null]> = [];
+        const automation = {
+            resolveConnectorInstanceFor: (id: string, pkg: string | null) => {
+                asked.push([id, pkg]);
+                return { status: 'instance' as const, packageId: pkg };
+            },
+            resolveConnectorAction: (id: string, action: string) => (known.includes(`${id}.${action}`) ? async () => ({}) : undefined),
+            getConnectorDegradedReason: () => undefined,
+            ...over,
+        };
+        return { automation, asked };
+    }
+
+    function protocolWith(automation: unknown) {
+        const { engine } = makeStubEngine();
+        const services = new Map<string, unknown>(automation === undefined ? [] : [['automation', automation]]);
+        return new ObjectStackProtocolImplementation(engine, () => services as Map<string, any>);
+    }
+
+    it('an unknown connector action: one warning advisory with the rule and the step\'s path, and no refusal', async () => {
+        const { automation, asked } = automationKnowing([]);
+        const protocol = protocolWith(automation);
+        await stageDraft(protocol, 'flow', syncFlow);
+
+        const judgement = await protocol.draftPublishJudgement({ type: 'flow', name: 'order_sync', packageId: PKG });
+        expect(judgement.refusals).toEqual([]);
+        const found = judgement.advisories.filter((a) => a.rule === RULE);
+        expect(found).toHaveLength(1);
+        expect(found[0]).toMatchObject({ path: 'flows[0].nodes[1].connectorConfig', severity: 'warning', where: 'flow "order_sync" · node "push"' });
+        expect(found[0]!.message).toContain('no connector on this environment serves "erp.push_order"');
+        expect(found[0]!.hint).toContain('install the package or plugin that provides "erp"');
+        // Asked for the draft's own package, as the executor will ask.
+        expect(asked).toEqual([['erp', PKG]]);
+
+        // Studio's draft read: a warning on the step's node, the draft still valid, in the read's language.
+        const diagnostics = await draftRead(protocol, 'flow', 'order_sync', ['zh-CN']);
+        expect(diagnostics.valid).toBe(true);
+        const warning = (diagnostics.warnings ?? []).find((w) => w.path === 'nodes.1.connectorConfig');
+        expect(warning, JSON.stringify(diagnostics)).toBeDefined();
+        expect(warning!.message).toContain('自动化“订单同步”中的步骤“推送订单”调用了连接器“erp”');
+    });
+
+    it('a known connector and action: no advisory, and the lookups were asked', async () => {
+        const { automation, asked } = automationKnowing(['erp.push_order']);
+        const protocol = protocolWith(automation);
+        await stageDraft(protocol, 'flow', syncFlow);
+
+        const judgement = await protocol.draftPublishJudgement({ type: 'flow', name: 'order_sync', packageId: PKG });
+        expect(judgement.advisories.filter((a) => a.rule === RULE)).toEqual([]);
+        expect(asked).toEqual([['erp', PKG]]);
+    });
+
+    it('the cause stays readable: a degraded connector and a refused name each say why', async () => {
+        const degraded = protocolWith(automationKnowing([], { getConnectorDegradedReason: () => 'its upstream answered 503.' }).automation);
+        await stageDraft(degraded, 'flow', syncFlow);
+        const [down] = (await degraded.draftPublishJudgement({ type: 'flow', name: 'order_sync', packageId: PKG })).advisories
+            .filter((a) => a.rule === RULE);
+        expect(down!.message).toContain('connector "erp" is degraded — its upstream answered 503');
+        expect(down!.hint).toContain('Resolve what keeps connector "erp" degraded');
+
+        const refused = protocolWith(automationKnowing([], {
+            resolveConnectorInstanceFor: () => ({ status: 'refused', refusal: { message: 'two connectors named "erp" are in reach' } }),
+        }).automation);
+        await stageDraft(refused, 'flow', syncFlow);
+        const [two] = (await refused.draftPublishJudgement({ type: 'flow', name: 'order_sync', packageId: PKG })).advisories
+            .filter((a) => a.rule === RULE);
+        expect(two!.message).toContain('two connectors named "erp" are in reach');
+        expect(two!.hint).toContain('name one connector from this flow\'s package');
+    });
+
+    it('no automation service, or one without the lookup, judges nothing', async () => {
+        for (const automation of [undefined, {}]) {
+            const protocol = protocolWith(automation);
+            await stageDraft(protocol, 'flow', syncFlow);
+            const judgement = await protocol.draftPublishJudgement({ type: 'flow', name: 'order_sync', packageId: PKG });
+            expect(judgement.advisories.filter((a) => a.rule === RULE)).toEqual([]);
+        }
+    });
+
+    it('the publish is not refused by it, and the publish gate\'s own answer does not carry it', async () => {
+        const { automation } = automationKnowing([]);
+        const protocol = protocolWith(automation);
+        await stageDraft(protocol, 'flow', syncFlow);
+
+        const gate = await (protocol as any).assertRuntimeAuthoringRules({
+            type: 'flow', name: 'order_sync', state: 'active', body: syncFlow, packageId: PKG,
+        });
+        expect(gate.filter((a: { rule: string }) => a.rule === RULE)).toEqual([]);
+
+        const published: any = await protocol.publishMetaItem({ type: 'flow', name: 'order_sync', packageId: PKG } as any);
+        expect(published.success).toBe(true);
+        expect((published.advisories ?? []).filter((a: { rule: string }) => a.rule === RULE)).toEqual([]);
+    });
+
+    it('one judgement: the advisory says what the landed probe reports for the same body', async () => {
+        const { automation } = automationKnowing([]);
+        const protocol = protocolWith(automation);
+        await stageDraft(protocol, 'flow', syncFlow);
+        const [advisory] = (await protocol.draftPublishJudgement({
+            type: 'flow', name: 'order_sync', packageId: PKG, userTextLocales: ['zh-CN'],
+        })).advisories.filter((a) => a.rule === RULE);
+
+        const { runBuildProbes } = await import('./build-probes.js');
+        const report = await runBuildProbes({
+            engine: { find: async () => [] },
+            getItem: async () => syncFlow,
+            published: [{ type: 'flow', name: 'order_sync' }],
+            organizationId: null,
+            automation,
+            packageId: PKG,
+            userTextLocales: ['zh-CN'],
+        });
+        const probe = report.issues.find((i) => i.code === RULE); // adr0112-ok: D6c build-probe diagnostics code
+        expect(probe, JSON.stringify(report.issues)).toBeDefined();
+        expect([advisory!.message, advisory!.hint, advisory!.userMessage]).toEqual([probe!.message, probe!.fix, probe!.userMessage]);
+    });
+});
