@@ -1118,10 +1118,14 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   /**
    * ADR-0093 D9 — default active-org on session create. When enabled
    * (default), a `session.create.before` hook stamps `activeOrganizationId`
-   * from the caller's `sys_member` row (owner-preferred) whenever the draft
-   * lacks one. A host-supplied `session.create.before` (see
-   * {@link databaseHooks}) chains FIRST and keeps precedence. Set `false`
-   * to restore the raw better-auth behaviour (sessions start org-less).
+   * from the caller's `sys_member` row (owner-preferred, else the oldest)
+   * whenever the draft lacks one and the host named no
+   * `activeOrganizationCandidates`. A host-supplied `session.create.before`
+   * (see {@link databaseHooks}) chains FIRST and keeps precedence: an
+   * organization it set, or a candidate list it returned, is its choice and
+   * the default stays out. Set `false` to restore the raw better-auth
+   * behaviour (sessions start org-less unless the host chooses; a host's
+   * candidate list is honoured either way).
    * @default true
    */
   autoActiveOrganization?: boolean;
@@ -1169,6 +1173,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * security, sharing, the ADR-0092 identity write guard — early-returns on
    * `isSystem` by design. A middleware that gates on `isSystem` therefore sees
    * nothing; one that does not, runs.
+   *
+   * **Session creation's organization, with fallbacks (#35829).** A host's
+   * `session.create.before` chooses the new session's organization and wins
+   * over the framework's default (see {@link autoActiveOrganization}); the
+   * framework then refuses the sign-in when that organization's own allowed
+   * IP ranges do not admit the request (`SESSION_SCOPING_REFUSAL`). To accept
+   * a fallback instead, the hook returns an ordered
+   * `activeOrganizationCandidates` list beside `data` (the package export
+   * `SessionCreateBeforeResult`): the session is scoped to the first of
+   * `data.activeOrganizationId`, then the list, that the scoping admits, and
+   * none admitted is refused as before. No list keeps the single choice.
+   * `data` stays required (a list-only hook returns `data: session`), and the
+   * host lists only organizations the user is a member of: membership is not
+   * judged here.
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
 

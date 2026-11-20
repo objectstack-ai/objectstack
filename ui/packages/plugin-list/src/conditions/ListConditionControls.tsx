@@ -476,6 +476,12 @@ export interface ConditionChipRowProps {
   shownFields?: ReadonlyArray<string>;
   renderAdvanced: () => React.ReactNode;
   /**
+   * Every sort level in one panel, drawn by the host (the Sort panel's
+   * 「all sort levels」 step): a sort chip opens it (objectstack#35876). The
+   * chip itself never changes the sort.
+   */
+  renderSortLevels: () => React.ReactNode;
+  /**
    * Back to the view as saved. Drawn only when passed: the host passes it
    * only while the reader has something of their own to reset.
    */
@@ -524,6 +530,7 @@ export function ConditionChipRow({
   dataSource,
   shownFields,
   renderAdvanced,
+  renderSortLevels,
   onReset,
   trailing,
   renderSortPanel,
@@ -584,7 +591,8 @@ export function ConditionChipRow({
     >
       {/* objectstack#35878 — the sort, at any number of levels, is ONE chip:
           「Sorted by X」, 「+N」 for the levels after the first. With no sort
-          it is the dashed 「Sort」 button. Either opens the sort panel. */}
+          it is the dashed 「Sort」 button, which opens the sort panel; the
+          chip opens every level at once (objectstack#35876). */}
       {renderSortPanel && (
         <Popover open={openChip === 'sort'} onOpenChange={(open) => setOpenChip(open ? 'sort' : null)}>
           <PopoverTrigger asChild>
@@ -615,7 +623,15 @@ export function ConditionChipRow({
             )}
           </PopoverTrigger>
           <PopoverContent align="start" className={POPOVER_CLASS} data-testid="condition-popover-sort">
-            {renderSortPanel(() => setOpenChip(null))}
+            {sort.length > 0 ? (
+              // objectstack#35876 — a sort in force opens every level in one
+              // panel; the chip never flips a direction itself.
+              <div className="w-[calc(100vw-2rem)] max-w-[600px] p-3 sm:w-[600px] sm:p-4" data-testid="sort-chip-panel">
+                {renderSortLevels()}
+              </div>
+            ) : (
+              renderSortPanel(() => setOpenChip(null))
+            )}
           </PopoverContent>
         </Popover>
       )}

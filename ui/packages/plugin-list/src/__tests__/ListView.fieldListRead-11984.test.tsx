@@ -195,8 +195,11 @@ function fieldListLabels(scope: HTMLElement): string[] {
 
 /** Step from the field list into its advanced panel (today's builder) and read its first field picker. */
 async function advancedFieldOptions(content: HTMLElement, kind: 'filter' | 'sort'): Promise<string[]> {
-  fireEvent.click(within(content).getByTestId(`${kind}-panel-open-advanced`));
-  const advanced = await within(content).findByTestId(`${kind}-panel-advanced`);
+  // A sort in force: the row's one sort chip opens every level, the builder,
+  // at once (objectstack#35878 on objectstack#35876).
+  const direct = kind === 'sort' ? within(content).queryByTestId('sort-chip-panel') : null;
+  if (!direct) fireEvent.click(within(content).getByTestId(`${kind}-panel-open-advanced`));
+  const advanced = direct ?? (await within(content).findByTestId(`${kind}-panel-advanced`));
   return comboboxOptions(within(advanced).getAllByRole('combobox')[0]);
 }
 
@@ -387,7 +390,8 @@ const POSITIONS: Position[] = [
   },
   {
     name: 'the Sort picker (objectui#11943)',
-    schemaExtra: { sort: [{ field: 'title', order: 'asc' }] },
+    // No sort in force: the dashed 「Sort」 opens the field list
+    // (objectstack#35878); with one, the chip opens the levels (next case).
     read: () => inPopover(toolbarButton(/^sort/i), fieldListLabels),
   },
   {

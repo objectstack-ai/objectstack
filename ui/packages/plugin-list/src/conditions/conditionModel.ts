@@ -133,10 +133,6 @@ export function moveSortItem(items: readonly SortItem[], from: number, to: numbe
   return next;
 }
 
-export function toggleSortOrder(items: readonly SortItem[], id: string): SortItem[] {
-  return items.map((item) => (item.id === id ? { ...item, order: item.order === 'desc' ? 'asc' : 'desc' } : item));
-}
-
 /**
  * Add a sort level on `field`, or — when the field already sorts the list —
  * set that level's direction. A field never sorts twice.

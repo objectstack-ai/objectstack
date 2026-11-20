@@ -16,7 +16,7 @@
  * `ListView` hands the controls and what it does with what they hand back.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import type { DataSource, ListViewSchema } from '@object-ui/types';
@@ -97,4 +97,28 @@ describe('ListView condition row and panels (objectstack#35549, objectstack#3555
     expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
   });
 
+  it('Reset clears the reader\'s filter and keeps the sort the view saved', async () => {
+    const onFilterChange = vi.fn();
+    const onSortChange = vi.fn();
+    const ds = mount(
+      { sort: [{ field: 'name', order: 'asc' }] },
+      {
+        onFilterChange,
+        onSortChange,
+        initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'name', operator: 'contains', value: 'a' }] },
+      },
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
+    // The view's sort is the one chip (objectstack#35878); the filter is the reader's own.
+    expect(await within(slot()).findByTestId('condition-sort')).toHaveTextContent('Sorted by Name');
+    const reset = await within(slot()).findByTestId('condition-reset');
+    expect(reset).toBeEnabled();
+    await act(async () => fireEvent.click(reset));
+    expect(onFilterChange.mock.calls.at(-1)![0].conditions).toEqual([]);
+    for (const [next] of onSortChange.mock.calls) {
+      expect(next.map((s: { field: string; order: string }) => [s.field, s.order])).toEqual([['name', 'asc']]);
+    }
+    expect(within(slot()).getByTestId('condition-sort')).toHaveTextContent('Sorted by Name');
+    await waitFor(() => expect(within(slot()).queryByTestId('filter-chip-name')).toBeNull());
+  });
 });

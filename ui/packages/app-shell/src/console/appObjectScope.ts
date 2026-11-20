@@ -715,11 +715,26 @@ export function readAppObjectScope(
   if (candidate && readObjectScope && route && route.recordId !== undefined && route.objectName) {
     // objectui#13046 — a record route: the app list, then the page list, then
     // either the objects the record's declared page binds, by name, or the
-    // whole registry. Nothing is read while the page list is out: a route that
-    // turns out to have no declared page asks exactly what it asked before.
+    // whole registry.
     if (!app) return { candidate, scope: null, ready: false, ...NOT_READ };
     const pagesRead = readPages?.();
-    if (!pagesRead?.settled) return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
+    if (!pagesRead?.settled) {
+      // objectstack#35455 — in an app that names a package, the package list
+      // starts beside the page list instead of one round trip after it: both
+      // arms that read it (a declared page's objects, and a synthesized page
+      // the bundle can say the related objects of) ask it first, so it is the
+      // same request, earlier. Only the whole-registry arm reads no package
+      // list, and that arm is taken exactly when the bundle answers no
+      // related objects (`readObjectsReferencing` a miss: no bundle, a draft
+      // preview, an object outside the app's navigation). A bundle that is
+      // already a miss starts nothing here. One still on the wire does: should
+      // it then answer a miss with no declared page either, that package list
+      // is one read the registry arm does not use.
+      if (packageId && readObjectsReferencing && readObjectsReferencing(route.objectName).state !== 'miss') {
+        readObjectScope({ packageId });
+      }
+      return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
+    }
     const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined);
     if (!page) {
       // objectstack#29552 — the synthesized page: its related lists are

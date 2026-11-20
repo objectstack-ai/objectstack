@@ -71,7 +71,6 @@ export const LIST_CONDITION_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'listConditions.chips.reset': 'Reset',
   'listConditions.chips.resetHint': 'Back to the view as saved',
   'listConditions.chips.remove': 'Remove {{label}}',
-  'listConditions.chips.toggleSort': 'Reverse {{label}}',
   'listConditions.chips.dragSort': 'Drag to change the sort priority',
   'listConditions.chips.viewOwn': 'Part of this view; it cannot be removed here',
   'listConditions.chips.viewFilter': 'View filter',

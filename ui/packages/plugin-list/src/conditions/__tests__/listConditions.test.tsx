@@ -457,6 +457,7 @@ describe('ConditionChipRow — the row under the view bar', () => {
         filterFields={FIELDS}
         onFiltersChange={() => {}}
         renderAdvanced={() => <div data-testid="advanced-builder" />}
+        renderSortLevels={() => <div data-testid="sort-levels-builder" />}
         {...props}
       />
     );
@@ -625,6 +626,7 @@ describe('ConditionChipRow — the resident row of the two-row toolbar (objectst
         filterFields={FIELDS}
         onFiltersChange={() => {}}
         renderAdvanced={() => <div data-testid="advanced-builder" />}
+        renderSortLevels={() => <div data-testid="sort-levels-builder" />}
         renderSortPanel={sortPanel}
         {...props}
       />
@@ -646,20 +648,29 @@ describe('ConditionChipRow — the resident row of the two-row toolbar (objectst
     expect(screen.queryByTestId('condition-reset')).toBeNull();
   });
 
-  it('a sort of any number of levels is ONE chip, 「Sorted by X」 with 「+N」, and it opens the sort panel', () => {
+  it('a sort of any number of levels is ONE chip, 「Sorted by X」 with 「+N」, before the filter chips; it opens every level and changes no sort (objectstack#35876)', () => {
     const sort: SortItem[] = [
       { id: 's1', field: 'amount', order: 'desc' },
       { id: 's2', field: 'name', order: 'asc' },
       { id: 's3', field: 'stage', order: 'asc' },
     ];
-    render(<TwoRow sort={sort} />);
+    const onSortChange = vi.fn();
+    render(<TwoRow sort={sort} filters={stageFilter} onSortChange={onSortChange} />);
     const chips = screen.getAllByTestId('condition-sort');
     expect(chips).toHaveLength(1);
     expect(chips[0]).toHaveTextContent('Sorted by Amount');
     expect(screen.getByTestId('sort-chip-more')).toHaveTextContent('+2');
+    expect(chips[0].compareDocumentPosition(screen.getByTestId('filter-chip-stage')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(chips[0]);
-    expect(screen.getByTestId('sort-panel-stand-in')).toBeInTheDocument();
-    // The panel's close closes the popover.
+    expect(within(screen.getByTestId('sort-chip-panel')).getByTestId('sort-levels-builder')).toBeInTheDocument();
+    expect(screen.queryByTestId('sort-panel-stand-in')).toBeNull();
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it('with no sort the dashed 「Sort」 opens the sort panel, whose close closes it', () => {
+    render(<TwoRow />);
+    fireEvent.click(screen.getByTestId('condition-sort'));
+    expect(screen.queryByTestId('sort-chip-panel')).toBeNull();
     fireEvent.click(screen.getByTestId('sort-panel-stand-in'));
     expect(screen.queryByTestId('sort-panel-stand-in')).toBeNull();
   });

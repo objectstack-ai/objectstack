@@ -26,6 +26,9 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
@@ -33,7 +36,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@object-ui/components';
-import { ChevronDown, Check, Eye, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
+import { ChevronDown, ChevronsUpDown, Check, Eye, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment, appRouteSegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
@@ -45,6 +48,8 @@ import { SETUP_APP_NAME, SETUP_APP_PACKAGE_ID } from '../console/ConsoleShell.js
 import { GO_HOME_SHORTCUT, shortcutKeycaps } from '../chrome/advertisedShortcuts.js';
 import { isSingleAppSwitcherHidden } from '../runtime-config.js';
 import { AppMark } from './AppMark.js';
+import { PhoneAppList } from './PhoneAppList.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 /**
  * The Setup app in an app list: by its package id first, then by its name —
@@ -73,10 +78,29 @@ export interface AppSwitcherProps {
    * posture, passed in for the same reason as the path.
    */
   studioPosture?: 'edit' | 'view';
+  /**
+   * On a phone, draw the app's name beside its glyph (objectstack#35881): the
+   * app's home and the two inbox pages, where the pill is the bar's title.
+   * Elsewhere on a phone the pill is the glyph alone, as before.
+   */
+  showNameOnPhone?: boolean;
 }
 
-export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, studioPosture = 'edit' }: AppSwitcherProps) {
+export function AppSwitcher({
+  activeAppName,
+  onAppChange,
+  designInStudioPath,
+  studioPosture = 'edit',
+  showNameOnPhone = false,
+}: AppSwitcherProps) {
   const { apps: metadataApps } = useMetadata();
+  // objectstack#35881 — on a phone the pill opens the app list as a bottom
+  // sheet rather than a dropdown. Read before any return (rules of hooks).
+  // The sheet holds the list alone: 「Back to home」 and 「All apps」 would open
+  // that same list (a phone's `/home` is it), 「Settings」 is the Setup row in
+  // it, and 「Edit / Open APP in Studio」 stays a desktop entry.
+  const phone = usePhoneViewport();
+  const [sheetOpen, setSheetOpen] = React.useState(false);
   const { t } = useObjectTranslation();
   const { appLabel } = useServedAppLabel();
   // objectui#7256 — 「All apps」 goes to the DECLARED home, like every other
@@ -131,6 +155,51 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
   // to switch between. Read off the viewer's own list: a viewer whose list
   // carries no Setup app (the server withholds it without `setup.access`) is
   // offered no row.
+  if (phone) {
+    const switchLabel = t('layout.appSwitcher.switchApplication', { defaultValue: 'Switch Application' });
+    return (
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <button
+          type="button"
+          data-testid="app-switcher-trigger"
+          title={appLabelText}
+          aria-haspopup="dialog"
+          aria-expanded={sheetOpen}
+          onClick={() => setSheetOpen(true)}
+          className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-1.5 text-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring max-w-[60vw]"
+        >
+          <AppMark app={activeApp} size={showNameOnPhone ? 'md' : 'sm'} />
+          {showNameOnPhone ? (
+            <>
+              <span data-testid="app-switcher-phone-name" className="truncate whitespace-nowrap text-[17px] font-semibold">
+                {appLabelText}
+              </span>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            </>
+          ) : null}
+        </button>
+        <SheetContent
+          side="bottom"
+          data-testid="app-switcher-sheet"
+          aria-describedby={undefined}
+          className="flex max-h-[85vh] flex-col gap-0 rounded-t-2xl p-0"
+        >
+          <div className="flex h-14 shrink-0 items-center justify-center px-14">
+            <SheetTitle className="text-base font-semibold">{switchLabel}</SheetTitle>
+          </div>
+          <PhoneAppList
+            variant="sheet"
+            activeAppName={activeAppName}
+            onPick={(app) => {
+              setSheetOpen(false);
+              if (app.name !== activeApp.name) onAppChange(appAddressSegment(apps, app) ?? app.name);
+            }}
+          />
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
   const setupApp = findSetupApp(activeApps);
   const switchApps = setupApp ? activeApps.filter((app) => app !== setupApp) : activeApps;
   const setupPath = setupApp ? `/apps/${appRouteSegment(setupApp) ?? setupApp.name}` : null;

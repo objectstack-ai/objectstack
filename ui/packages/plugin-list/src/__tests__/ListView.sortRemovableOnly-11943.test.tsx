@@ -214,7 +214,7 @@ describe('a field the Sort picker keeps only for the current sort is removable o
 
       // Removing its row ends the exception: the field leaves the list.
       const firstRow = within(sortPanel()).getByText('Sort by').parentElement as HTMLElement;
-      fireEvent.click(within(firstRow).getByRole('button'));
+      fireEvent.click(within(firstRow).getByRole('button', { name: /remove sort/i }));
       await waitFor(() => expect(sortRowTriggers()).toHaveLength(1));
       expect(sortRowTriggers()[0]).toHaveTextContent('Title');
       expect((await optionsOf(sortRowTriggers()[0])).map((o) => o.label)).toEqual(['Title', 'Priority']);

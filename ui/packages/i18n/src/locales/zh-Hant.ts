@@ -2046,10 +2046,12 @@ const zhHant = {
       launcherLabel: '應用啟動臺',
       menuLabel: '應用導航',
       menuEmpty: '此應用沒有你可以開啟的導航項。',
-      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      // objectstack#35882 — the phone's bottom bar: Home, Notifications, Approvals, search.
       phoneBarLabel: '應用選單欄',
-      searchMenu: '搜尋選單',
-      phoneBarHint: '點星標把選單項固定到底部欄，底部欄顯示前 4 個。',
+      phoneHome: '首頁',
+      phoneNotifications: '通知',
+      phoneApprovals: '審批',
+      phoneSearch: '搜尋',
       itemMenu: '{{name}} 的更多操作',
       openInNewTab: '在新標籤頁開啟',
       copyLink: '複製連結',
@@ -3519,6 +3521,13 @@ const zhHant = {
   layout: {
     appSwitcher: {
       switchApplication: '切換應用',
+      currentApp: '當前應用',
+      otherApps: '其他應用',
+      yourApps: '你的應用',
+      searchApps: '搜尋應用…',
+      noAppsMatch: '沒有匹配的應用',
+      chooseApp: '選擇應用',
+      backToAppHome: '返回應用選單',
       appsAvailable: '共 {{count}} 個可用應用',
       allApps: '所有應用',
       editAppInStudio: '在 Studio 中編輯 {{app}}',
@@ -5054,6 +5063,7 @@ const zhHant = {
     newestFirst: '最新 → 最早',
     addSort: '新增排序',
     removeSort: '刪除排序',
+    reorder: '拖動以調整先後',
   },
   collaboration: {
     commentCount: '{{count}} 條評論',

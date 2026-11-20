@@ -327,9 +327,10 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
   });
 
   // objectstack#35878: a sort of any number of levels is ONE chip, 「Sorted by
-  // X」 with 「+N」, before the filter chips; it opens the sort panel, where the
-  // levels are ordered (the per-level chips and their drag are gone).
-  test('sort: Sort → Descending → Amount is three clicks; one chip with +N comes before the filter chips; a header click shows on it; Reset restores', async ({ page }) => {
+  // X」 with 「+N」, before the filter chips. With no sort the dashed 「Sort」
+  // opens the sort panel; with one, the chip opens every level in one panel
+  // (objectstack#35876), where a level is added and a handle reorders.
+  test('sort: Sort → Descending → Amount is three clicks; one chip with +N comes before the filter chips; its panel adds a level and a handle reorders; a header menu pick shows on it; Reset restores', async ({ page }) => {
     test.setTimeout(120_000);
     await mount(page);
     await expect.poll(() => count(page)).toBe('12');
@@ -340,12 +341,20 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     const sortChip = page.getByTestId('condition-sort');
     await expect(sortChip).toHaveAttribute('data-levels', '1');
     await expect(sortChip).toHaveText('Sorted by Amount');
-    // a second level: still one chip, now carrying +1
+    // a second level, from the chip's panel of every level: still one chip, now carrying +1
     await click(page, 'condition-sort');
-    await click(page, 'sort-panel-fields-item-stage');
-    expect(await sortNow(page)).toEqual(['amount:desc', 'stage:asc']);
+    const panel = page.getByTestId('sort-chip-panel');
+    await panel.getByRole('button', { name: 'Add sort' }).click();
+    await expect.poll(async () => (await sortNow(page)).length).toBe(2);
+    const levels = await sortNow(page);
+    expect(levels[0]).toBe('amount:desc');
     await expect(sortChip).toHaveAttribute('data-levels', '2');
     await expect(page.getByTestId('sort-chip-more')).toHaveText('+1');
+    // a real drag of the second level's handle onto the first row puts it first
+    await expect(panel.getByTestId('sort-builder-handle')).toHaveCount(2);
+    await panel.getByTestId('sort-builder-handle').nth(1).dragTo(panel.getByTestId('sort-builder-row').first());
+    await expect.poll(() => sortNow(page)).toEqual([levels[1], levels[0]]);
+    await page.keyboard.press('Escape');
     // a filter chip joins after the sort chip
     await click(page, 'condition-add-filter');
     await click(page, 'filter-panel-fields-item-stage');
@@ -371,10 +380,16 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     await expect.poll(() => count(page)).toBe('12');
     expect(Math.round(await slotHeight(page))).toBe(ROW_HEIGHT);
     await expect(sortChip).toHaveAttribute('data-levels', '0');
-    // a click on a column header sorts, and the row shows it on the one chip
+    // a click on a column header opens its menu and sorts nothing
+    // (objectstack#35876); the entry chosen there sorts, and the row shows it
+    // on the one chip
     await page.getByRole('columnheader', { name: /Amount/ }).click();
+    const columnMenu = page.getByTestId('column-context-menu');
+    await expect(columnMenu).toBeVisible();
+    expect(await sortNow(page)).toEqual([]);
+    await columnMenu.getByRole('menuitem', { name: 'Sort descending' }).click();
     await style(page);
     await expect(sortChip).toHaveText(/^Sorted by Amount/);
-    expect((await sortNow(page))[0]).toMatch(/^amount:/);
+    expect(await sortNow(page)).toEqual(['amount:desc']);
   });
 });

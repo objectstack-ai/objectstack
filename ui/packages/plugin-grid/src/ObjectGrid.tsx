@@ -59,9 +59,10 @@ import {
   toast,
   cn,
   GridCellSelectionProvider,
+  GridHeaderMenuProvider,
   type GridCellSelection,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -94,6 +95,7 @@ import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInli
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
 import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
 import { type RowPatch, mergeSavedRow } from './objectGridRowPatch';
+import { type CellSaveUndo, createCellUndoStack, isCellUndoKey, undoKeyCellOf } from './objectGridCellUndo';
 import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary, type ObjectGridRowGroup } from './objectGridProps';
 import { FooterSummaryReport } from './objectGridFooterSummaryReport';
 import { useObjectGridDiagnostics } from './objectGridDiagnostics';
@@ -352,6 +354,16 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * key reaches it.
    */
   cellSelection?: boolean;
+  /**
+   * [objectstack#35876] The column header opens the column menu (sort
+   * ascending, sort descending, hide) instead of sorting on a click, as the
+   * HOST that owns the page asks for it (the list page does). Absent ⇒ a
+   * header click sorts, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  headerMenu?: boolean;
   /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
@@ -714,6 +726,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   recordLinkAdornment,
   rowOpensRecord,
   cellSelection: hostCellSelection,
+  headerMenu: hostHeaderMenu,
   onBulkDelete,
   onRowSelect,
   onRowClick,
@@ -791,6 +804,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // saved from (`RowPatch.base`); the next load's rows replace them.
   const [rowPatches, setRowPatches] = useState<ReadonlyMap<string, RowPatch>>(new Map());
   const patchedRowsCacheRef = React.useRef(new WeakMap<any[], { patches: ReadonlyMap<string, RowPatch>; rows: any[] }>());
+  // objectstack#35685 — the select-first saves Undo can still take back
+  // (`./objectGridCellUndo`), and what an undo reads when it runs, which may
+  // be well after the render that offered it: the patches over the rows.
+  const cellUndoRef = React.useRef(createCellUndoStack());
+  const rowPatchesRef = React.useRef(rowPatches);
+  useEffect(() => { rowPatchesRef.current = rowPatches; }, [rowPatches]);
   const [showExport, setShowExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1312,7 +1331,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     groupingProjectionKey, predicateProjectionKey, schemaFilter, schemaFilterRefusal, schemaSort,
     schemaPagination, schemaPageSize, serverPage, setServerPage, headerSort, querySearchTerm,
     searchFieldsKey, serverGroupedFetch, groupingNeedsHeaderQuery, fetchWindow, setGroupRowQuery,
-    ownWrites,
+    // Only a grid that draws its own writes skips them. A grid without cell
+    // selection re-reads on every write, the host list's included: a related
+    // list in that list's record drawer shows the outer grid's write too.
+    ownWrites: hostCellSelection ? ownWrites : null,
   });
 
   // --- NavigationConfig support ---
@@ -1531,6 +1553,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     setTotalMatching, t, translateOptions, groupedPage, setGroupedPage, groupedPageSize, refreshKey,
     serverPageSize, groupRowQuery, groupingKeyReadable, groupingRefusesNothing,
     unmaskedGroupingFields, serverGroupedFetch, invalidationNonce,
+  });
+  // objectstack#35685 — the rows the grid read, as an undo finds its record
+  // among them when it runs: the page's rows, and a server-grouped group's.
+  const loadedRowsRef = React.useRef<{ data: any[]; pages: Record<string, { rows?: any[] } | undefined> }>({ data, pages: {} });
+  useEffect(() => {
+    loadedRowsRef.current = { data, pages: (groupRows.pages ?? {}) as Record<string, { rows?: any[] } | undefined> };
   });
 
   // The fan-out query, the resolved match total and the column summaries, in
@@ -2530,16 +2558,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     else writtenVersionsRef.current.delete(id);
   };
 
-  /** One row's guarded write. Rejects with whatever the data source threw. */
+  /**
+   * One row's guarded write. Rejects with whatever the data source threw.
+   * `guard` is the version to send in place of the one the row implies (an
+   * undo's: the version this grid's own write answered).
+   */
   const writeRowGuarded = async (
     ds: DataSource,
     resource: string,
     id: string,
     changes: Record<string, any>,
     row: any,
+    guard?: string,
   ): Promise<unknown> => {
     const readVersion = rowVersionOf(row);
-    const ifMatch = rowVersionToSend(writtenVersionsRef.current.get(id), readVersion);
+    const ifMatch = guard ?? rowVersionToSend(writtenVersionsRef.current.get(id), readVersion);
     const result = await ds.update(resource, id, changes, ifMatch ? { ifMatch } : undefined);
     rememberRowWrite(id, readVersion, result);
     return result;
@@ -2600,6 +2633,110 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return refusals.length > 0 ? inlineRuleRefusalError(refusals) : null;
   };
 
+  /**
+   * objectstack#35685 — one select-first write of `changes` on `row`, drawn
+   * in place: the list holding the grid lets the write's own bus change go by
+   * (held until the write settles, the 409's "keep mine" write included; only
+   * "reload latest" lets go first, so that reload reaches the list), and the
+   * row alone is redrawn from the write's answer, so no other row is read
+   * again and a sorted or grouped row keeps its place until the next load.
+   * `shown` is what the row draws for the written fields when it is not
+   * `changes` itself (an undo draws a relation as the row read it, and sends
+   * its id), and `guard` the `If-Match` to send in place of the one the row
+   * implies. Resolves the write's answer, or `reloaded` when nothing was
+   * written. Rejects as the write does.
+   */
+  const writeRowInPlace = async (
+    id: string,
+    changes: Record<string, any>,
+    row: any,
+    shown: Record<string, any> = changes,
+    guard?: string,
+  ): Promise<{ outcome: 'saved'; result: unknown } | { outcome: 'reloaded' }> => {
+    const releaseOwnWrite = ownWrites.hold(objectName!, id);
+    try {
+      let answer: unknown;
+      try {
+        answer = await writeRowGuarded(dataSource!, objectName!, id, changes, row, guard);
+      } catch (err) {
+        if (!isConcurrentUpdateError(err)) throw err;
+        const resolved = await resolveRowConflict(dataSource!, objectName!, id, changes, row, err, releaseOwnWrite);
+        if (resolved.outcome === 'reloaded') return resolved;
+        answer = resolved.result;
+      }
+      setRowPatches((prev) => {
+        const next = new Map(prev);
+        const held = prev.get(id);
+        next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
+        return next;
+      });
+      return { outcome: 'saved', result: answer };
+    } finally {
+      releaseOwnWrite();
+    }
+  };
+
+  /**
+   * objectstack#35685 — the row an undo of record `id` is drawn over: the row
+   * the grid draws for it now (a later save's patch over the row it read, or
+   * the row a later load brought). `fallback` is the row the save left, for a
+   * record no longer among the rows in hand.
+   */
+  const currentRowOf = (id: string, fallback: any): any => {
+    const { data: rows, pages } = loadedRowsRef.current;
+    const isRecord = (r: any) => {
+      const rid = resolveRecordId(r);
+      return rid !== undefined && rid !== null && String(rid) === id;
+    };
+    const loaded = rows.find(isRecord)
+      ?? Object.values(pages).flatMap((page) => page?.rows ?? []).find(isRecord);
+    const patch = rowPatchesRef.current.get(id);
+    if (loaded === undefined) return patch?.row ?? fallback;
+    return patch && patch.base === loaded ? patch.row : loaded;
+  };
+
+  /**
+   * objectstack#35685 — take back one landed cell save: a new guarded update
+   * writing what the record held before it, drawn in place like the save
+   * (one more write, so one more audit entry). Its `If-Match` is the version
+   * this grid's own newest write of the record answered, never a version a
+   * later load read: a change someone else made since then answers 409 and
+   * opens the conflict dialog instead of being overwritten. An entry already
+   * taken back, by its toast or by Ctrl+Z, does nothing, and one of another
+   * object (the grid was pointed elsewhere) is dropped unsent. A refusal is
+   * said on a toast; a 409 the user cancels writes nothing and says nothing
+   * more. Either way the entry is spent.
+   */
+  const undoCellSave = async (entry: CellSaveUndo, fallbackRow: any): Promise<void> => {
+    if (!dataSource || !objectName || !cellUndoRef.current.take(entry)) return;
+    if (entry.objectName !== objectName) return;
+    const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id: entry.id });
+    try {
+      const guard = writtenVersionsRef.current.get(entry.id)?.version ?? entry.version;
+      const written = await writeRowInPlace(entry.id, entry.restore, currentRowOf(entry.id, fallbackRow), entry.shown, guard);
+      if (written.outcome === 'saved') toastRecordSave(toast, t('actions.undone'), claim.take(undefined));
+    } catch (err) {
+      if (isConcurrentUpdateError(err)) return;
+      console.error('Failed to undo the cell save:', err);
+      toast.error(t('table.saveFailed'), { description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      claim.release();
+    }
+  };
+
+  /** Ctrl+Z (Cmd+Z) on one of this grid's cells: the newest save goes back. */
+  const handleUndoKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!hostCellSelection || e.defaultPrevented || !isCellUndoKey(e)) return;
+    if (!undoKeyCellOf(e.target, e.currentTarget)) return;
+    const entry = cellUndoRef.current.peek();
+    if (!entry) return;
+    // This grid's key: the console's own Ctrl+Z (its shared undo stack) and
+    // the browser's are not reached.
+    e.preventDefault();
+    e.stopPropagation();
+    void undoCellSave(entry, undefined);
+  };
+
   const defaultRowSave = async (
     _rowIndex: number,
     changes: Record<string, any>,
@@ -2618,45 +2755,51 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // warnings and its hook's notice) rides the save toast below, so the
     // write is one toast.
     const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
-    // objectstack#35685 — the select-first grid draws this write's answer
-    // itself (below), so the list holding it lets the write's bus change go by
-    // instead of reading every row again. Held until the write settles, the
-    // 409's "keep mine" write included; only "reload latest" lets go first,
-    // so that reload reaches the list.
-    const releaseOwnWrite = hostCellSelection ? ownWrites.hold(objectName, String(id)) : () => {};
     try {
-      let answer: unknown;
+      if (hostCellSelection) {
+        // objectstack#35685 — the select-first model: the row redraws in
+        // place, and the save can be taken back. What Undo restores is read
+        // off the row before the write (relations as their stored ids); a
+        // written field the row does not carry offers no Undo at all.
+        const key = String(id);
+        const restore = captureUpdateUndoData(Object.keys(changes), row, objectSchema?.fields);
+        const written = await writeRowInPlace(key, changes, row);
+        // A reload re-reads through the bus; there is nothing of ours to show.
+        if (written.outcome === 'reloaded') return;
+        const feedback = claim.take(undefined);
+        if (!restore) {
+          toastRecordSave(toast, t('table.saved', { count: 1 }), feedback);
+          return;
+        }
+        const entry: CellSaveUndo = {
+          objectName,
+          id: key,
+          version: rowVersionOf(written.result),
+          restore,
+          shown: Object.fromEntries(Object.keys(changes).map((field) => [field, row[field]])),
+        };
+        cellUndoRef.current.push(entry);
+        const savedRow = mergeSavedRow(row, changes, written.result);
+        toastRecordSave(toast, t('table.saved', { count: 1 }), feedback, {
+          label: t('actions.undo'),
+          onClick: () => { void undoCellSave(entry, savedRow); },
+        });
+        return;
+      }
       try {
-        answer = await writeRowGuarded(dataSource, objectName, id, changes, row);
+        await writeRowGuarded(dataSource, objectName, id, changes, row);
       } catch (err) {
         if (!isConcurrentUpdateError(err)) throw err;
         // A reload re-reads through the bus; there is nothing of ours to show.
-        const resolved = await resolveRowConflict(dataSource, objectName, id, changes, row, err, releaseOwnWrite);
-        if (resolved.outcome === 'reloaded') return;
-        answer = resolved.result;
+        if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)).outcome === 'reloaded') return;
       }
-      if (hostCellSelection) {
-        // objectstack#35685 — the select-first model redraws this row alone,
-        // from the write's answer: no other row is read again, so the table
-        // does not move, and a sorted or grouped row keeps its place until
-        // the next load.
-        const key = String(id);
-        setRowPatches((prev) => {
-          const next = new Map(prev);
-          const held = prev.get(key);
-          next.set(key, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, changes, answer) });
-          return next;
-        });
-      } else {
-        // Refresh so the grid shows the persisted values.
-        setRefreshKey(k => k + 1);
-      }
+      // Refresh so the grid shows the persisted values.
+      setRefreshKey(k => k + 1);
       // objectui#12303 — the write is said, through the console's shared toast
       // (the one the form, kanban and view surfaces raise). Only here, once the
       // row landed: a refusal rejects above, and the table flags the row.
       toastRecordSave(toast, t('table.saved', { count: 1 }), claim.take(undefined));
     } finally {
-      releaseOwnWrite();
       claim.release();
     }
   };
@@ -4345,7 +4488,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   );
 
   return (
-    <div ref={setRootRef} className="relative h-full flex flex-col">
+    <div ref={setRootRef} className="relative h-full flex flex-col" data-object-grid-root="" onKeyDown={handleUndoKeyDown}>
       {/* Re-fetch indicator while existing rows remain visible (filter/sort
           change). The initial-load skeleton above handles the empty case. */}
       <RefreshIndicator active={loading && data.length > 0} ariaLabel={t('grid.refreshing')} />
@@ -4360,7 +4503,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {gridDescription}
       {groupingDraftOnlyNote}
       {gridToolbar}
-      <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>
+      <GridHeaderMenuProvider value={hostHeaderMenu === true}>
+        <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>
+      </GridHeaderMenuProvider>
       {isGrouped && onRowGroupsChange && (
         <RowGroupsReport groups={shownRowGroups} onChange={onRowGroupsChange} />
       )}

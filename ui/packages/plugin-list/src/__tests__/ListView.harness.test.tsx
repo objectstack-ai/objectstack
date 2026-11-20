@@ -2187,8 +2187,11 @@ describe('ListView.draftOnlyColumn-34807', () => {
       // advanced step is the builder, whose first picker reads the same list.
       // Both are read, so a field either offers is caught.
       const listed = Array.from(content.querySelectorAll('[role="option"][data-field]')).map(text);
-      fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
-      const advanced = await within(content).findByTestId(/^(filter|sort)-panel-advanced$/);
+      // A sort in force: the one sort chip opens every level at once
+      // (objectstack#35878 on objectstack#35876), no field list before it.
+      const direct = within(content).queryByTestId('sort-chip-panel');
+      if (!direct) fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
+      const advanced = direct ?? (await within(content).findByTestId(/^(filter|sort)-panel-advanced$/));
       return [...listed, ...(await comboboxOptions(within(advanced).getAllByRole('combobox')[0]))];
     } finally {
       fireEvent.click(trigger);
