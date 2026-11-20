@@ -4377,8 +4377,10 @@ export class AuthManager {
    * registration's, and the auth context's observed adapter
    * (`ssoProviderReadsObserverPlugin`, mounted with `sso`) names a stored
    * provider's as the vendor reads its row. Every other read the request
-   * makes is sent as it was. A context whose adapter is not observed refuses
-   * the request: its provider reads could not be judged.
+   * makes is sent as it was. A context whose adapter is not observed (a view
+   * that does not hand its reads on through the observed one) is answered
+   * `503 SERVICE_UNAVAILABLE` before the endpoint runs, so nothing is read or
+   * sent: its provider reads could not be judged.
    */
   private async runSsoDiscoveryEgress(run: () => Promise<Response>): Promise<Response> {
     const [{ runInSsoDiscoveryEgressScope, observesSsoProviderReads }, guard, auth] = await Promise.all([
@@ -4388,7 +4390,19 @@ export class AuthManager {
     ]);
     const context = (await auth.$context) as { adapter?: unknown } | undefined;
     if (!observesSsoProviderReads(context?.adapter)) {
-      throw new Error('SSO discovery cannot be judged: the auth context\'s adapter does not observe its provider reads.');
+      this.audienceLogError(
+        '[AuthManager] SSO request refused: the auth context\'s adapter does not hand its provider reads on through the SSO discovery observer, so the reads they name could not be judged.',
+      );
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'SSO is unavailable: this server cannot judge its reads of an identity provider. Nothing was read or sent.',
+          },
+        }),
+        { status: 503, headers: { 'content-type': 'application/json' } },
+      );
     }
     return (await runInSsoDiscoveryEgressScope(guard, run)).value;
   }

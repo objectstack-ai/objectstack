@@ -28,6 +28,10 @@
  *    rate-limit counter store, both on internal addresses) are sent as they
  *    were, before and after the request's provider configuration is read.
  *
+ * A request whose auth context adapter is not the observed view is refused
+ * before its endpoint runs (CONTROL: a view that hands its reads on through
+ * the observed one keeps it).
+ *
  * Then the scope itself: what the wrapper over the global fetch judges, the
  * adapter observation that names a stored provider's origins, and a second
  * copy of the module in the same process.
@@ -557,6 +561,99 @@ describe('SSO discovery connects only to addresses that are public at connect ti
     expect(timeline.slice(judged).filter((entry) => entry.startsWith('judged '))).toEqual([`judged ${FLIP_HOST}`]);
     expect(timeline.slice(0, judged)).toContain(`sent ${COUNTER_HOST}/consume`);
     expect(timeline.slice(0, judged).some((entry) => entry.startsWith(`sent ${DATASTORE_HOST}/v2/find`))).toBe(true);
+    expect(refusals).toEqual([expect.objectContaining({ hostname: FLIP_HOST, denyClass: 'private' })]);
+    expect(transport.connected).toEqual([]);
+    expect(received).toEqual([]);
+  });
+});
+
+describe('a request whose auth context adapter is not the observed view is refused, and nothing is read or sent', () => {
+  /** The flip identity provider's row, stored with its endpoints named. */
+  async function storeFlipProvider(rp: Rp): Promise<void> {
+    const issuer = flipIssuer();
+    await rp.ctx.adapter.create({
+      model: 'ssoProvider',
+      data: {
+        providerId: 'flip-oidc',
+        issuer,
+        domain: 'acme.com',
+        oidcConfig: JSON.stringify({
+          issuer,
+          clientId: 'client-id',
+          clientSecret: CLIENT_SECRET,
+          authorizationEndpoint: `${issuer}/authorize`,
+          tokenEndpoint: `${issuer}/token`,
+          jwksEndpoint: `${issuer}/jwks`,
+          pkce: true,
+          scopes: ['openid', 'email', 'profile'],
+          mapping: { id: 'sub', email: 'email', name: 'name' },
+        }),
+      },
+    });
+  }
+
+  function signIn(rp: Rp): Promise<Response> {
+    return rp.manager.handleRequest(
+      new Request(`${AUTH}/sign-in/sso`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ providerId: 'flip-oidc', callbackURL: `${BASE}/after`, errorCallbackURL: FAILED }),
+      }),
+    );
+  }
+
+  const doors: ReadonlyArray<readonly [path: string, send: (rp: Rp) => Promise<Response>]> = [
+    ['/sso/register', (rp) => post(rp, '/sso/register', registration('flip-register', flipIssuer()))],
+    ['/sign-in/sso', signIn],
+    ['/sso/callback/:providerId', (rp) => rp.manager.handleRequest(new Request(`${AUTH}/sso/callback/flip-oidc?code=idp-code&state=any-state`))],
+  ];
+
+  it.each(doors)(
+    '%s is answered 503 SERVICE_UNAVAILABLE before its endpoint runs, when a later plugin rebuilt the context adapter as a plain object',
+    async (_path, send) => {
+      const timeline: string[] = [];
+      const transport = ordinaryTransport('10.0.0.5', timeline);
+      const names = guardResolution(FLIP_HOST, [PUBLIC_ADDRESS, '10.0.0.5']);
+      const { guard, refusals } = await realGuard(async (name) => {
+        timeline.push(`judged ${name}`);
+        return names.resolve(name);
+      });
+      const rp = await makeRp(guard, [BASE], { overHttp: true });
+      await storeFlipProvider(rp);
+      // A view that does not hand its reads on through the observed adapter:
+      // the observer's mark does not survive a plain-object rebuild.
+      rp.ctx.adapter = { ...rp.ctx.adapter };
+      timeline.length = 0;
+      const res = await send(rp);
+      expect(res.status, await res.clone().text()).toBe(503);
+      expect(await res.json()).toMatchObject({ success: false, error: { code: 'SERVICE_UNAVAILABLE' } });
+      // The endpoint never ran: no rate-limit consume, no datastore read, no
+      // judgement, no connection, and no provider written.
+      expect(timeline).toEqual([]);
+      expect(transport.connected).toEqual([]);
+      expect(received).toEqual([]);
+      expect(refusals).toEqual([]);
+      expect(storedRows(rp).map((row) => row.providerId ?? row.provider_id)).toEqual(['flip-oidc']);
+    },
+  );
+
+  it('CONTROL: a later view that hands its reads on through the observed adapter keeps it: the sign-in runs, and its callback\'s token read is judged and refused', async () => {
+    const transport = ordinaryTransport('10.0.0.5');
+    const names = guardResolution(FLIP_HOST, ['10.0.0.5']);
+    const { guard, refusals } = await realGuard(names.resolve);
+    const rp = await makeRp(guard);
+    await storeFlipProvider(rp);
+    rp.ctx.adapter = new Proxy(rp.ctx.adapter, {});
+    const start = await signIn(rp);
+    const started: any = await start.clone().json();
+    expect(start.status, JSON.stringify(started)).toBe(200);
+    const state = new URL(started.url).searchParams.get('state')!;
+    const cookie = (start.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
+    const callback = await rp.manager.handleRequest(
+      new Request(`${AUTH}/sso/callback/flip-oidc?code=idp-code&state=${encodeURIComponent(state)}`, { headers: { cookie } }),
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get('location') ?? '').toContain('error=invalid_provider');
     expect(refusals).toEqual([expect.objectContaining({ hostname: FLIP_HOST, denyClass: 'private' })]);
     expect(transport.connected).toEqual([]);
     expect(received).toEqual([]);

@@ -61,6 +61,11 @@
  * The before-hook also hands the scope the deployment's configured
  * trusted-origin predicate, read from the request's own context.
  *
+ * Upgrade note for `@better-auth/sso`: the observer keys on the vendor's
+ * provider model and member names (`ssoProvider` / `sys_sso_provider`,
+ * `issuer`, `oidcConfig` and its endpoint members), so a bump re-checks
+ * every provider read site the vendor's sign-in and callback make.
+ *
  * A refused read rejects with the vendor's own `DiscoveryError`
  * (`discovery_private_host`, or `discovery_unexpected_error` for a name that
  * did not resolve), so every vendor path answers it as its own refusal of a
