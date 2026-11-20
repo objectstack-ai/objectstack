@@ -3165,6 +3165,17 @@ export const FieldSchema = lazySchema(() => {
             + 'a quantity: declare `unitMode: \'fixed\'` with `unit` (one standard unit) or `unitMode: \'record\'` '
             + 'with `unitField` (each record\'s code in a sibling `text` field).',
       });
+    } else if (mode === 'code' && field.valueDomain !== undefined) {
+      // A unit code is not a member of any value domain (ADR-0158 U1 keeps
+      // the vocabulary at three), so the two declarations would refuse every
+      // value between them.
+      ctx.addIssue({
+        code: 'custom',
+        path: ['unitConfig'],
+        message: `\`unitConfig: { unitMode: 'code' }\` declares that this field holds a unit code, and it also declares `
+          + `\`valueDomain: '${String(field.valueDomain)}'\`, whose values are not unit codes: no value could satisfy both. `
+          + 'Delete one of the two.',
+      });
     }
   }
   // [#11339] `referenceVia` declares the id half of a polymorphic pointer

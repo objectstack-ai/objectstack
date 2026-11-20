@@ -2121,6 +2121,115 @@ function refuseDishonestRecordCurrencyField(
   }
 }
 
+/**
+ * [ADR-0158 U4, L3; Open item 8, ruled A] A `record`-mode quantity's
+ * `unitConfig.unitField` names the field THIS object declares that holds each
+ * row's unit code: a `text` field. The quantity stays a bare number (ADR-0104
+ * D1); the code field is the only place its unit lives, so a pointer into
+ * nothing or into a non-text field would parse and give the quantity a unit
+ * no write ever checks.
+ *
+ * `UnitConfigSchema` (field.zod.ts) sees one config at a time and refuses the
+ * half it can see; what the pointer names is judged here, beside
+ * {@link refuseDishonestRecordCurrencyField}, for the same reason: only the
+ * object holds the field map. One located issue per offending field at
+ * `['fields', <field>, 'unitConfig', <key>]`:
+ *
+ *  - a two-segment pointer: following a parent's unit through `master_detail`
+ *    is reserved, not admitted (L3: "a child cannot follow its parent's unit
+ *    yet");
+ *  - the name is not a declared field (or is the quantity itself);
+ *  - the field is not a `text` field;
+ *  - the field declares `unitConfig` itself. L3: "That field carries no
+ *    marker … the pointer is the declaration". Open item 8's marker
+ *    (`unitMode: 'code'`) is for a code field no quantity points at, so one
+ *    field never carries two declarations of what it holds;
+ *  - two quantities sharing one unit field declare different `unitDimension`
+ *    values (L3, the check {@link refuseDishonestHomeAmount} makes for amounts
+ *    sharing a rate field): one column holds one code per row, so it cannot
+ *    satisfy two dimensions.
+ *
+ * Judged against the AUTHORED field map. Not judged on
+ * `ObjectExtensionSchema`, for the reason
+ * {@link refuseDishonestRecordCurrencyField} gives.
+ */
+function refuseDishonestRecordUnitField(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  type UnitConfigView = { unitMode?: unknown; unitField?: unknown; unitDimension?: unknown };
+  const map = fields as Record<string, { type?: unknown; unitConfig?: UnitConfigView } | null>;
+  const isText = (name: string): boolean => map[name]?.type === 'text';
+  const dimensionOwner = new Map<string, { quantity: string; dimension: string }>();
+  for (const [name, field] of Object.entries(map)) {
+    const config = field?.unitConfig;
+    if (config?.unitMode !== 'record' || typeof config.unitField !== 'string') continue;
+    const target = config.unitField;
+    const path = ['fields', name, 'unitConfig', 'unitField'];
+    const at = `\`${name}.unitConfig.unitField\` names \`${target}\``;
+    const candidates = Object.keys(map).filter((k) => k !== name && isText(k) && map[k]?.unitConfig === undefined);
+    const prescription =
+      '`unitField` must name a `text` field of this object that holds each record\'s unit code — '
+      + (candidates.length > 0
+        ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
+        : 'the object has none; declare one, conventionally `unit_code: Field.text()`.');
+    if (target.includes('.')) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a path, and a child cannot follow its parent's unit yet: \`unitField\` names one field of `
+          + 'this object. Give this object its own unit code field and point at it. The form '
+          + '`PARENT_FIELD.UNIT_FIELD` is reserved until an amendment of ADR-0158 admits it.',
+      });
+      continue;
+    }
+    if (target === name || !Object.prototype.hasOwnProperty.call(map, target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, but object \`${objectName}\` declares no other field \`${target}\`. ${prescription}`,
+      });
+      continue;
+    }
+    if (!isText(target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`${String(map[target]?.type)}\` field on object \`${objectName}\`; a unit is stored as its `
+          + `code (for example 'KGM'), never as a record id, in a \`text\` field. ${prescription}`,
+      });
+      continue;
+    }
+    if (map[target]?.unitConfig !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a field that declares \`unitConfig\` itself. The pointer is the declaration: a field a `
+          + `quantity points at holds that quantity's unit and carries no marker of its own. Delete \`unitConfig\` `
+          + `from \`${target}\`, and declare any \`unitDimension\` on \`${name}\`.`,
+      });
+      continue;
+    }
+    if (typeof config.unitDimension !== 'string') continue;
+    const holder = dimensionOwner.get(target);
+    if (holder === undefined) {
+      dimensionOwner.set(target, { quantity: name, dimension: config.unitDimension });
+    } else if (holder.dimension !== config.unitDimension) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fields', name, 'unitConfig', 'unitDimension'],
+        message: `\`${name}.unitConfig.unitDimension\` is \`'${config.unitDimension}'\`, but \`${holder.quantity}\` shares `
+          + `its unit field \`${target}\` and declares \`'${holder.dimension}'\`. One column holds one code per record, `
+          + `so it cannot be a unit of both. Declare the same \`unitDimension\` on both, or give \`${name}\` its own `
+          + 'unit field.',
+      });
+    }
+  }
+}
+
 /** A field's machine name, the grammar each segment of a two-segment `currencyField` is held to. */
 const RECORD_CURRENCY_PATH_SEGMENT = /^[a-z_][a-z0-9_]*$/;
 
@@ -4797,6 +4906,10 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
   // ISO 4217 `text` sibling — the same door: only the object holds the map.
   refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
+  // [ADR-0158 U4, L3] A `record`-mode quantity's `unitField` names a declared
+  // `text` sibling with no marker of its own — the same door: only the object
+  // holds the map.
+  refuseDishonestRecordUnitField(object.name, object.fields, ctx);
   // [ADR-0144 D6, amended] A `summary` carries a currency only where one is
   // admitted; the half its own object can see — same door.
   refuseUnadmittedSummaryCurrency(object.name, object.fields, ctx);
