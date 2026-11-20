@@ -1337,9 +1337,6 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
     helpText: 'description',
   },
   guidance: {
-    // Membership is declared the OTHER WAY ROUND, and this is the single most
-    // likely thing an author reaches for here — a group that lists its fields
-    // is what every other layout system in this space looks like.
     order:
       '`order` is not a group key — ARRAY ORDER is display order. `fieldGroups: [...]` ' +
       'renders top to bottom, so move the entry rather than numbering it.',
@@ -3366,9 +3363,12 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  *   group holds no fields — at `['fieldGroups', i, 'fields']`;
  * - a name one list repeats — at the repeat;
  * - a field two groups list — at the second listing, naming the first group;
- * - a listed field whose own `group` names a different group — at the
- *   listing AND at `['fields', <name>, 'group']`, each naming the other, so
- *   the author sees both places to fix.
+ * - a listed field whose own `group` names a different DECLARED group — at
+ *   the listing AND at `['fields', <name>, 'group']`, each naming the other,
+ *   so the author sees both places to fix. A `group` naming no declared key
+ *   is not another group (it means ungrouped, and lint reports it as
+ *   `field-group-undeclared`), so the list wins and nothing is refused —
+ *   renaming a group's key never makes its listed members unparseable.
  *
  * A listed name the object declares no field for is NOT judged: the layout
  * skips it, and refusing it would make the object unparseable the moment any
@@ -3384,6 +3384,14 @@ function refuseFieldGroupMembershipConflicts(fieldGroups: unknown, fields: unkno
   if (!Array.isArray(fieldGroups)) return;
   const fieldMap = fields !== null && typeof fields === 'object' ? (fields as Record<string, unknown>) : {};
   const listedIn = new Map<string, string>();
+  // Only a `group` naming ANOTHER DECLARED group disagrees with a list: one
+  // naming no declared key means ungrouped (lint reports it as
+  // `field-group-undeclared`), so the list simply wins.
+  const declaredKeys = new Set(
+    fieldGroups
+      .map((g: unknown) => (g !== null && typeof g === 'object' ? (g as { key?: unknown }).key : undefined))
+      .filter((k): k is string => typeof k === 'string'),
+  );
   fieldGroups.forEach((group: unknown, index: number) => {
     if (group === null || typeof group !== 'object') return;
     const { key, relatedList, fields: members } = group as { key?: unknown; relatedList?: unknown; fields?: unknown };
@@ -3421,7 +3429,7 @@ function refuseFieldGroupMembershipConflicts(fieldGroups: unknown, fields: unkno
       listedIn.set(name, key);
       const field = fieldMap[name];
       const own = field !== null && typeof field === 'object' ? (field as { group?: unknown }).group : undefined;
-      if (typeof own !== 'string' || own === key) return;
+      if (typeof own !== 'string' || own === key || !declaredKeys.has(own)) return;
       const message =
         `Field '${name}' is listed by the field group '${key}' (its \`fields\`), but its own \`group\` names `
         + `'${own}'. The two say different things: keep the field in '${key}'s list and drop its \`group\` `

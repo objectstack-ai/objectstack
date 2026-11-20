@@ -86,7 +86,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "키",
-        helpText: "이 객체 안에서 고유한 snake_case 머신 키입니다. 스키마는 다른 형식을 거부합니다. 필드는 이 키를 지정해 그룹에 들어가므로, 이름을 바꾸면 필드가 그룹에서 빠집니다."
+        helpText: "이 객체 안에서 고유한 snake_case 머신 키입니다. 스키마는 다른 형식을 거부합니다. 그룹의 필드 목록에 나열된 필드는 키 이름을 바꿔도 그룹에 남고, 자체 그룹 설정에서 이 키를 지정해 들어온 필드는 그룹에서 빠집니다."
       },
       "fieldGroups.label": {
         label: "레이블",

@@ -86,7 +86,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Clave",
-        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos se unen al grupo indicando esta clave, así que renombrarla los deja sin grupo."
+        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos que el grupo lista en Campos siguen en él al renombrar la clave; un campo que se une indicando esta clave en su propio ajuste de grupo queda sin grupo."
       },
       "fieldGroups.label": {
         label: "Etiqueta",

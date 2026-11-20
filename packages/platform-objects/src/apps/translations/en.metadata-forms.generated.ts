@@ -86,7 +86,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "Key",
-        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped."
+        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped."
       },
       "fieldGroups.label": {
         label: "Label",

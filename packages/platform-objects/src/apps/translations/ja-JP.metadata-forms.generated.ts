@@ -86,7 +86,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "キー",
-        helpText: "snake_case のマシンキーで、このオブジェクト内で一意です。それ以外はスキーマが拒否します。フィールドはこのキーを指定してグループに加わるため、キーを変更するとそれらのフィールドはどのグループにも属さなくなります。"
+        helpText: "snake_case のマシンキーで、このオブジェクト内で一意です。それ以外はスキーマが拒否します。グループの「フィールド」に挙げたフィールドは、キーを変更してもグループに残ります。自身のグループ設定でこのキーを指定して加わったフィールドは、どのグループにも属さなくなります。"
       },
       "fieldGroups.label": {
         label: "表示名",

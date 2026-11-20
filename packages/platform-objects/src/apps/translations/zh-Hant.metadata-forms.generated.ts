@@ -86,7 +86,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.key": {
         label: "鍵",
-        helpText: "snake_case 格式的機器鍵，在本物件內唯一——其他寫法會被 schema 拒絕。欄位透過填寫此鍵加入分組，因此重新命名它會使這些欄位變為未分組。"
+        helpText: "snake_case 格式的機器鍵，在本物件內唯一——其他寫法會被 schema 拒絕。分組在「欄位」中列出的欄位，重新命名此鍵後仍留在分組裡；透過自身分組設定填寫此鍵加入的欄位會變為未分組。"
       },
       "fieldGroups.label": {
         label: "顯示名稱",

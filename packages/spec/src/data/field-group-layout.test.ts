@@ -320,6 +320,19 @@ describe('fieldGroups[].fields — the object parse holds the two spellings in a
     expect(found[0].message).toContain("'money'");
   });
 
+  it('parses a listed field whose own group names an UNDECLARED key — not another group, so the list wins', () => {
+    // A group renamed after a list was written leaves its members' older
+    // `group` naming a key no group declares any more (lint's
+    // `field-group-undeclared`); the members stay in the list.
+    const def = {
+      ...base,
+      fields: { ...base.fields, account: { ...base.fields.account, group: 'basics_old' } },
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['account', 'name'] }],
+    };
+    expect(issues(def)).toEqual([]);
+    expect(deriveFieldGroupLayout(def)!.find((s) => s.key === 'basic')!.fields).toEqual(['account', 'name']);
+  });
+
   it('refuses a field two groups list, at the second listing', () => {
     const found = issues({
       ...base,

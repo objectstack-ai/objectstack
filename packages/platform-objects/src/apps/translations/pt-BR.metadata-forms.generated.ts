@@ -86,7 +86,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Chave",
-        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos entram no grupo ao nomear esta chave, portanto renomeá-la os deixa sem grupo."
+        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos que o grupo lista em Campos continuam nele quando a chave é renomeada; um campo que entra ao nomear esta chave na sua própria configuração de grupo fica sem grupo."
       },
       "fieldGroups.label": {
         label: "Rótulo",

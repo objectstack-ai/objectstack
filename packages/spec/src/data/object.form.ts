@@ -107,7 +107,7 @@ export const objectForm = defineForm({
           colSpan: 2,
           helpText: 'Ordered sections that group this object\'s fields on the entry form and the record detail page (ADR-0085); array order is display order. A group lists its fields, in order, in its Fields setting; a group without that list holds the fields that name its key in their own group setting. Fields in no group follow the groups, and a group no field joins is not drawn.',
           fields: [
-            { field: 'key', label: 'Key', type: 'text', required: true, helpText: 'Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped.' },
+            { field: 'key', label: 'Key', type: 'text', required: true, helpText: 'Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped.' },
             { field: 'label', label: 'Label', type: 'text', required: true, helpText: 'Header text of the group\'s section.' },
             { field: 'fields', label: 'Fields', type: 'tags', helpText: 'The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List.' },
             { field: 'icon', label: 'Icon', type: 'text', helpText: 'Lucide icon name shown beside the header on the record detail page (e.g. "banknote"). The entry form does not show it.' },

@@ -86,7 +86,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "Schlüssel",
-        helpText: "Maschinenschlüssel in snake_case, eindeutig innerhalb dieses Objekts – das Schema lehnt alles andere ab. Felder treten der Gruppe bei, indem sie diesen Schlüssel nennen; eine Umbenennung lässt sie daher ohne Gruppe."
+        helpText: "Maschinenschlüssel in snake_case, eindeutig innerhalb dieses Objekts – das Schema lehnt alles andere ab. Felder, die die Gruppe in ihren Feldern aufführt, bleiben bei einer Umbenennung in der Gruppe; ein Feld, das über diesen Schlüssel in seiner eigenen Gruppeneinstellung beitritt, ist danach ohne Gruppe."
       },
       "fieldGroups.label": {
         label: "Bezeichnung",
