@@ -23,7 +23,7 @@ import {
   useRowActionPlan,
   type RowActionMenuProps,
 } from './RowActionMenu';
-import { isDestructiveBulkDef, useBulkActionItems } from './BulkActionBar';
+import { orderSelectionMenuItems, useBulkActionItems, type OrderedBulkItem } from './BulkActionBar';
 import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '../bulkSelectAllMatchingCap';
 
 /**
@@ -88,6 +88,52 @@ export const RowContextMenuItems: React.FC<{
 };
 
 /**
+ * A selection's actions as menu items, in {@link orderSelectionMenuItems}'s
+ * order (objectstack#35554): the destructive entries close the list, after a
+ * separator, in the danger colour — the order one row's menu has. Read by the
+ * selection's context menu and by the page bar's "⋮".
+ */
+export const SelectionActionMenuEntries: React.FC<{
+  entries: OrderedBulkItem[];
+  selectedRows: any[];
+  onAction?: (action: string, selectedRows: any[]) => void;
+  onActionDef?: (def: BulkActionDef, selectedRows: any[]) => void;
+}> = ({ entries, selectedRows, onAction, onActionDef }) => (
+  <>
+    {entries.map((entry, index) => (
+      <React.Fragment key={entry.key}>
+        {entry.destructive && index > 0 && !entries[index - 1].destructive && (
+          <DropdownMenuSeparator data-testid="row-context-destructive-separator" />
+        )}
+        {entry.kind === 'def' ? (
+          <DropdownMenuItem
+            onClick={() => onActionDef?.(entry.def, selectedRows)}
+            data-testid={`row-context-bulk-${entry.def.name}`}
+            className={entry.destructive ? 'text-destructive focus:text-destructive' : undefined}
+          >
+            {entry.def.icon ? (
+              <LazyIcon name={toKebabIconName(entry.def.icon)} className="mr-2 h-4 w-4" />
+            ) : entry.destructive ? (
+              <Trash2 className="mr-2 h-4 w-4" />
+            ) : null}
+            {entry.def.label ?? formatActionLabel(entry.def.name)}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            onClick={() => onAction?.(entry.legacy.name, selectedRows)}
+            data-testid={`row-context-bulk-${entry.legacy.name}`}
+            className={entry.destructive ? 'text-destructive focus:text-destructive' : undefined}
+          >
+            {entry.destructive && <Trash2 className="mr-2 h-4 w-4" />}
+            {entry.legacy.label}
+          </DropdownMenuItem>
+        )}
+      </React.Fragment>
+    ))}
+  </>
+);
+
+/**
  * The context menu of a row inside a selection of two or more: the selection's
  * count, the bulk actions {@link useBulkActionItems} offers it — the bar's own
  * resolver, so the same items and gates as `BulkActionBar` — and Clear, as the
@@ -117,6 +163,7 @@ export const SelectionContextMenuItems: React.FC<{
   const t = useContextMenuTranslation();
   const items = useBulkActionItems({ selectedRows, actions, actionDefs, objectFields });
   const hasActions = items.defs.length > 0 || items.legacy.length > 0;
+  const ordered = orderSelectionMenuItems(items);
   return (
     <>
       <DropdownMenuLabel className="text-xs font-medium tabular-nums text-muted-foreground" data-testid="row-context-selection-count">
@@ -131,36 +178,12 @@ export const SelectionContextMenuItems: React.FC<{
           : t('grid.bulkSelected', { count: selectedRows.length, defaultValue: '{{count}} selected' })}
       </DropdownMenuLabel>
       {hasActions && <DropdownMenuSeparator />}
-      {items.defs.map((def) => {
-        const destructive = isDestructiveBulkDef(def);
-        const iconName = def.icon ? toKebabIconName(def.icon) : null;
-        return (
-          <DropdownMenuItem
-            key={def.name}
-            onClick={() => onActionDef?.(def, selectedRows)}
-            data-testid={`row-context-bulk-${def.name}`}
-            className={destructive ? 'text-destructive focus:text-destructive' : undefined}
-          >
-            {iconName ? (
-              <LazyIcon name={iconName} className="mr-2 h-4 w-4" />
-            ) : destructive ? (
-              <Trash2 className="mr-2 h-4 w-4" />
-            ) : null}
-            {def.label ?? formatActionLabel(def.name)}
-          </DropdownMenuItem>
-        );
-      })}
-      {items.legacy.map(({ name, label, destructive }) => (
-        <DropdownMenuItem
-          key={name}
-          onClick={() => onAction?.(name, selectedRows)}
-          data-testid={`row-context-bulk-${name}`}
-          className={destructive ? 'text-destructive focus:text-destructive' : undefined}
-        >
-          {destructive && <Trash2 className="mr-2 h-4 w-4" />}
-          {label}
-        </DropdownMenuItem>
-      ))}
+      <SelectionActionMenuEntries
+        entries={ordered}
+        selectedRows={selectedRows}
+        onAction={onAction}
+        onActionDef={onActionDef}
+      />
       <DropdownMenuSeparator />
       <DropdownMenuItem onClick={() => onClearSelection?.()} data-testid="row-context-clear-selection">
         <X className="mr-2 h-4 w-4" />

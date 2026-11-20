@@ -547,6 +547,18 @@ const ru = {
     bulkAllMatchingSelectedCapped: "Будут обработаны только первые {{cap}} подходящих записей из {{total}}.",
     bulkSelectedAllMatchesCapped: "Выбрано: {{cap}} (всего совпадений: {{total}})",
     bulkActions: "Массовые действия",
+    // objectstack#35554 — the list page bar while rows are selected.
+    selectedCount: "Выбрано: {{count}}",
+    selectedCount_one: "Выбрано: {{count}}",
+    selectedCount_few: "Выбрано: {{count}}",
+    selectedCount_many: "Выбрано: {{count}}",
+    selectedCount_other: "Выбрано: {{count}}",
+    selectedAllLoaded: "Выбраны все {{count}} на этой странице.",
+    selectedAllLoaded_one: "Выбраны все записи на этой странице ({{count}}).",
+    selectedAllLoaded_few: "Выбраны все записи на этой странице ({{count}}).",
+    selectedAllLoaded_many: "Выбраны все записи на этой странице ({{count}}).",
+    selectedAllLoaded_other: "Выбраны все записи на этой странице ({{count}}).",
+    selectAllTotal: "Выбрать все совпадения ({{total}})",
     bulk: {
       confirmDefault: "Будет применено к записям: {{count}}.",
       confirmDefault_one: "Будет применено к записям: {{count}}.",

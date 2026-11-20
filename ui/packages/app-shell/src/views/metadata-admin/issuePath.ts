@@ -6,6 +6,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import * as React from 'react';
+import { translateSchemaIssue, useMetadataLocale } from './i18n.js';
+import type { SchemaFormIssue } from './SchemaForm.js';
+
 /**
  * Render a (possibly nested) validation issue path into a human-readable trail
  * that names the offending element. A Zod issue on a dashboard widget arrives as
@@ -81,6 +85,32 @@ export function splitRowIssues<T extends { path: string }>(
     else kept.push(issue);
   }
   return { handDown, kept };
+}
+
+/**
+ * objectstack#35628 — whether a row the editor reports drawing (`drawn`, the
+ * inline register) draws an issue at `path`: some registered prefix IS the
+ * path or a segment-wise prefix of it (`config.columns` draws
+ * `config.columns.0`, never `config.columnsX`). A form over the whole draft
+ * registers its row keys, one-segment prefixes, so there this is #35499's
+ * head test; a form over a slice registers its keys under the slice's path
+ * (`config.filter`), so it never claims a sibling key's issue.
+ */
+export function issuePathDrawnBy(drawn: ReadonlySet<string>, path: string): boolean {
+  for (let p = path; p !== ''; p = p.slice(0, Math.max(0, p.lastIndexOf('.')))) {
+    if (drawn.has(p)) return true;
+  }
+  return false;
+}
+
+/**
+ * The issues under `prefix`, the prefix trimmed (`config.filter.0` →
+ * `filter.0` for `config`): what a form mounted over that slice of the draft
+ * is handed. The slice's own exact issues are not among them.
+ */
+export function issuesUnderPrefix<T extends { path: string }>(issues: readonly T[], prefix: string): T[] {
+  const lead = `${prefix}.`;
+  return issues.filter((i) => i.path.startsWith(lead)).map((i) => ({ ...i, path: i.path.slice(lead.length) }));
 }
 
 /** Best-effort stable identity of an array item, resolving an I18nLabel object
@@ -159,4 +189,98 @@ export function issueSliceFingerprint(rootValue: unknown, slicePath: string): st
     // an unfingerprintable slice must fail open like an unlocatable one.
     return undefined;
   }
+}
+
+/**
+ * objectstack#35628 — an inline register: each source registers the PATH
+ * PREFIX it draws, held while mounted and drawing; `onChange` hears the union
+ * (the host's `onInlineIssueFieldsChange`, judged by {@link issuePathDrawnBy}).
+ * A `SchemaForm`'s rows register their keys through it; a curated inspector
+ * builds one for its own rows and any form it mounts over a slice. The
+ * register is held in state, never memoised: rows key their effect on it.
+ */
+export function useIssuePrefixRegister(
+  onChange: ((prefixes: ReadonlySet<string>) => void) | undefined,
+): (prefix: string) => () => void {
+  const onChangeRef = React.useRef(onChange);
+  React.useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  const [counts] = React.useState(() => new Map<string, number>());
+  const [register] = React.useState(() => (prefix: string) => {
+    const publish = () => onChangeRef.current?.(new Set(counts.keys()));
+    counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
+    publish();
+    return () => {
+      const n = (counts.get(prefix) ?? 1) - 1;
+      if (n > 0) counts.set(prefix, n);
+      else counts.delete(prefix);
+      publish();
+    };
+  });
+  return register;
+}
+
+/**
+ * Registers, under `prefix`, the rows a `SchemaForm` mounted over the draft
+ * slice at `prefix` reports (the returned setter is that form's
+ * `onInlineIssueFieldsChange`), so the host hears `config.filter`, never
+ * `config` — a key the slice form does not render keeps its issue in the
+ * host's banner.
+ */
+export function useSliceFormIssueRows(
+  register: (prefix: string) => () => void,
+  prefix: string,
+): (rows: ReadonlySet<string>) => void {
+  const [rows, setRows] = React.useState<ReadonlySet<string>>(() => new Set());
+  React.useEffect(() => {
+    const offs = [...rows].map((row) => register(`${prefix}.${row}`));
+    return () => offs.forEach((off) => off());
+  }, [rows, prefix, register]);
+  return setRows;
+}
+
+/**
+ * The issue lines a curated inspector row draws for one path prefix, the way a
+ * `SchemaForm` row draws its own: an issue AT `prefix` as its message, a deeper
+ * one led by the trail of the rest of its path. The row registers `prefix`
+ * while mounted, so the host's banner and refusal line leave those issues out
+ * (objectstack#27865). Never deferred: no host hands a curated inspector a
+ * create form's show-on-touch deferral, so mounted is drawn.
+ */
+export function IssuePrefixLines({
+  issues,
+  prefix,
+  label,
+  value,
+  register,
+}: {
+  /** The host's issues, paths relative to the draft. */
+  issues: readonly SchemaFormIssue[] | undefined;
+  /** The dot-joined path this row edits (`label`, `config.columns`). */
+  prefix: string;
+  /** The row's visible label, the trail's head. */
+  label: string;
+  /** The draft value AT `prefix`, which a trail's indices resolve against. */
+  value: unknown;
+  register: (prefix: string) => () => void;
+}): React.ReactElement | null {
+  const locale = useMetadataLocale();
+  React.useEffect(() => register(prefix), [register, prefix]);
+  const lead = prefix.slice(prefix.lastIndexOf('.') + 1);
+  const lines = (issues ?? [])
+    .filter((i) => i.path === prefix || i.path.startsWith(`${prefix}.`))
+    .map((i) => {
+      const message = translateSchemaIssue(i, locale);
+      const rest = i.path.slice(prefix.length);
+      return rest ? `${describeIssuePath(label, `${lead}${rest}`, { [lead]: value })}: ${message}` : message;
+    });
+  if (lines.length === 0) return null;
+  return React.createElement(
+    React.Fragment,
+    null,
+    lines.map((m, i) =>
+      React.createElement('div', { key: i, 'data-testid': 'inspector-row-issue', className: 'text-xs text-destructive' }, m),
+    ),
+  );
 }

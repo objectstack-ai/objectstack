@@ -802,7 +802,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // when it mentions a denied field: server policy the caller cannot evaluate.
     membershipKeys: recordOf(ruleEntry),
     // Blocks.
-    userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep }),
+    // `transfer` (the Change Owner switch) is the same boolean-or-predicates union
+    // as the four CRUD flags, so it takes their disposition.
+    userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep, transfer: crudFlag }),
     external: block({
         remoteName: keep, remoteSchema: keep, writable: keep, introspectedAt: keep, ignoreColumns: keep,
         columnMap,

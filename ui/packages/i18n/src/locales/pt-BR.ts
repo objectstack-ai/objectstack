@@ -536,6 +536,16 @@ const pt = {
     bulkAllMatchingSelectedCapped: "Apenas os primeiros {{cap}} de {{total}} registros correspondentes serão processados.",
     bulkSelectedAllMatchesCapped: "{{cap}} selecionados (de {{total}} correspondências)",
     bulkActions: "Ações em massa",
+    // objectstack#35554 — the list page bar while rows are selected.
+    selectedCount: "{{count}} selecionados",
+    selectedCount_one: "{{count}} selecionado",
+    selectedCount_many: "{{count}} selecionados",
+    selectedCount_other: "{{count}} selecionados",
+    selectedAllLoaded: "Os {{count}} desta página estão selecionados.",
+    selectedAllLoaded_one: "{{count}} registro desta página está selecionado.",
+    selectedAllLoaded_many: "Os {{count}} desta página estão selecionados.",
+    selectedAllLoaded_other: "Os {{count}} desta página estão selecionados.",
+    selectAllTotal: "Selecionar todas as {{total}} correspondências",
     bulk: {
       confirmDefault: "Isto será aplicado a {{count}} registro(s).",
       confirmDefault_one: "Isto será aplicado a {{count}} registro.",

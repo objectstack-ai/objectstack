@@ -38,7 +38,7 @@ const fields = {
 | `email` | Email addresses — built-in format validation | `required`, `unique` |
 | `url` | Web URLs — built-in format validation | `required` |
 | `phone` | Phone numbers | `format` |
-| `password` | ⚠️ Masked-on-read input. On a generic object the value is stored **PLAINTEXT at rest** (never hashed — one-way hashing applies only inside the auth subsystem's own identity tables). Prefer `secret` for credentials; a generic `password` field triggers a build warning | `minLength`, `maxLength` |
+| `password` | ⚠️ Masked-on-read input. On a generic object the value is stored **PLAINTEXT at rest**. Prefer `secret` for credentials; a generic `password` field triggers a build warning | `minLength`, `maxLength` |
 | `secret` | Reversible **encrypted-at-rest** credential (DB password, API key, token) — encrypted on write via `ICryptoProvider`, masked on read, fail-closed (ADR-0100) | — |
 | `markdown` | Markdown-formatted content | `maxLength` |
 | `html` | Raw HTML content | `maxLength` |
@@ -165,10 +165,12 @@ Stored as JSON on the parent row — no separate table / FK:
 `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
 (default), the tenant `localization.currency`, else a plain number (never
 `$`); `'record'`, each record's code in the `text` field `currencyField`
-names, with `valueDomain: 'iso_4217_currency'`. A dataset measure's `currency`
+names, with `valueDomain: 'iso_4217_currency'`. Likewise `'iana_time_zone'`
+(`Asia/Shanghai`) and `'iso_3166_alpha2'` (`CN`) on a `text` field: the write
+refuses a non-member, so never a free-text or picklist copy. A dataset measure's `currency`
 (refused `DATASET_INVALID`): objectstack-ui → Dashboards. Switched a
 stored field to `'record'`? Backfill: `os migrate record-currency-codes --org <id>`
-(or `--all-organizations` for every one); a multi-organization database refuses
+(or `--all-organizations`); a multi-organization database refuses
 a run with neither.
 
 `homeAmount` (`'record'` only, all three required): the engine stores the
@@ -179,7 +181,7 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 **A roll-up of the home field.** A `sum` / `min` / `max` / `avg` `summary` over a
 child's `homeAmount.field` declares `currencyMode: 'dynamic'`, no `defaultCurrency`
 (ADR-0144: metadata never names the home currency, so never `'fixed'` with it).
-It shows in `localization.currency`; undeclared, a bare number. `defineStack`
+`defineStack`
 (`os validate`, the build) refuses `'dynamic'` on any other roll-up, and any
 `currencyConfig` on a `count`.
 
@@ -255,11 +257,11 @@ The `format` is literal text interleaved with `{...}` tokens:
 | `{YYYY}` `{YY}` `{MM}` `{DD}` `{YYYYMMDD}` | Generation date in the request's business timezone | `AD{YYYYMMDD}{0000}` → `AD202606170001` |
 | `{field_name}` | The value of another field **on the same record** | `{plan_no}{000}` → `PLAN-001001` |
 
-**The counter resets per "scope"** — everything rendered *before* the `{0000}` slot. So `AD{YYYYMMDD}{0000}` restarts each day, `{section}{island_zone}{000}` counts per group, `{plan_no}{000}` counts per parent — no separate reset config. A fixed-prefix format (`CASE-{0000}`) has an empty scope → one global counter.
+**The counter resets per "scope"** — everything rendered *before* the `{0000}` slot. So `AD{YYYYMMDD}{0000}` restarts each day, `{section}{island_zone}{000}` counts per group, `{plan_no}{000}` counts per parent — no separate reset config. A fixed-prefix format has an empty scope → one global counter.
 
 **Rules — get these wrong and records mis-number silently or fail to save:**
 
 1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty interpolated field makes the record number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
 2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique).
-3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps).
+3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000`.
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.

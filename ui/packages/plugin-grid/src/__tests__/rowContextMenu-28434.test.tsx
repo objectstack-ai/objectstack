@@ -197,10 +197,11 @@ describe('objectstack#28434 · a row\'s context menu lists exactly its "⋮" ite
     expect(context).toEqual([
       ...OPEN_ITEMS,
       'row-action-builtin-edit',
-      'row-action-builtin-delete',
       'row-action-promote',
       'row-action-submit_review',
       'row-action-archive',
+      // objectstack#35554: Delete closes the menu, after a separator.
+      'row-action-builtin-delete',
     ]);
   });
 

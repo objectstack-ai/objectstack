@@ -157,7 +157,7 @@ import {
   withServerOnlyErrors,
   type ServerDiagnostics,
 } from './draftVerdict.js';
-import { describeIssuePath, issuePathHead, issueSlicePath, issueSliceFingerprint } from './issuePath.js';
+import { describeIssuePath, issuePathDrawnBy, issueSlicePath, issueSliceFingerprint } from './issuePath.js';
 import { buildCreateModeBody, seedStructuralDefaults, unsetSeedPlaceholders } from './createBody.js';
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
@@ -718,8 +718,9 @@ function MetadataResourceEditPageImpl({
   const [createDirty, setCreateDirty] = React.useState(false);
   // objectstack#27865 — one message per mistake. `revealIssues` ends the create
   // form's show-on-touch deferral once Save is attempted; `inlineIssueFields`
-  // is what the form reports it draws inline (a top-level field, mounted, not
-  // deferred), which the summary banner and the refusal line leave out.
+  // is the path prefixes the form or default inspector reports it draws
+  // inline (a row, mounted, not deferred), which the summary banner and the
+  // refusal line leave out (`issuePathDrawnBy`, objectstack#35628).
   const [revealIssues, setRevealIssues] = React.useState(false);
   const [inlineIssueFields, setInlineIssueFields] = React.useState<ReadonlySet<string>>(() => new Set());
   const inlineIssueFieldsRef = React.useRef(inlineIssueFields);
@@ -2260,11 +2261,11 @@ function MetadataResourceEditPageImpl({
         // objectstack#27865 — a refusal the form draws in full on its fields is
         // said there, once. Only where the summary banner reads these issues
         // (a client validator exists), so a field that leaves the screen still
-        // has its message somewhere. Judged by the path's HEAD, the key the form
-        // places an issue by (objectstack#35499).
+        // has its message somewhere. Judged by the drawn path prefixes, the
+        // rows the form places an issue on (objectstack#35499, objectstack#35628).
         const drawnInline =
           hasClientValidator(type, draftMode) &&
-          mapped.every((m) => !!m.path && inlineIssueFieldsRef.current.has(issuePathHead(m.path)));
+          mapped.every((m) => !!m.path && issuePathDrawnBy(inlineIssueFieldsRef.current, m.path));
         if (drawnInline) {
           setError(null);
         } else if (mapped.length === 1 && !mapped[0].path) {
@@ -3418,13 +3419,13 @@ function MetadataResourceEditPageImpl({
                 return null;
               }
               // objectstack#27865 — an error the form already draws on its
-              // field is not repeated here — any issue whose HEAD names a row
-              // the form draws, which places it on that row or deeper
-              // (objectstack#35499).
+              // field is not repeated here — any issue under a path prefix a
+              // row draws, which places it on that row or deeper
+              // (objectstack#35499, objectstack#35628).
               const errs = liveErrors.filter(
                 (e) =>
                   !(
-                    inlineIssueFields.has(issuePathHead(e.path)) &&
+                    issuePathDrawnBy(inlineIssueFields, e.path) &&
                     displayIssues.some((d) => d.path === e.path)
                   ),
               );
@@ -3793,6 +3794,9 @@ function MetadataResourceEditPageImpl({
                               readOnly={formReadOnly}
                               locale={locale}
                               serverSchema={entry?.schema as Record<string, unknown> | undefined}
+                              issues={displayIssues}
+                              revealIssues={revealIssues}
+                              onInlineIssueFieldsChange={setInlineIssueFields}
                             />
                           )
                         ) : (
