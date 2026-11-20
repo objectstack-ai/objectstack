@@ -17,7 +17,7 @@ import {
  * objectstack#35455 — the hop pin. The POLICY half: which emitted shapes are
  * one wave, which are more, and which are refused as blind. The GRAPH half —
  * what Vite and rolldown actually emit — runs on every console build through
- * `viteEagerPreload()` in `apps/console/vite.config.ts`.
+ * `eagerPreload()` in `apps/console/vite.config.ts`.
  *
  * The fixtures are written in the shape the console build emits: minified
  * static imports (`import{a}from"./x.js"`), and `import()` sites wrapped as
@@ -65,13 +65,16 @@ function chunk(fileName: string, code: string, isEntry = false): EmittedChunk {
 const LIST_CLOSURE = [CRUD, PERSIST, SLUG];
 const RECORD_CLOSURE = [ACTIONS];
 
-function build(opts: { htmlPreloads: string[]; listDeps: string[] | null; recordDeps: string[] | null }): {
+function build(opts: { htmlPreloads: string[]; listDeps: string[] | null; recordDeps: string[] | null; base?: string }): {
   html: string;
   chunks: EmittedChunk[];
 } {
+  // Vite writes index.html's URLs under the build's `base`: `./assets/…` for
+  // the default relative base, `/console/assets/…` for the E2E and hosted one.
+  const at = opts.base ?? './';
   const html =
-    `<html><head><script type="module" crossorigin src="./${ENTRY}"></script>` +
-    opts.htmlPreloads.map((f) => `<link rel="modulepreload" crossorigin href="./${f}">`).join('') +
+    `<html><head><script type="module" crossorigin src="${at}${ENTRY}"></script>` +
+    opts.htmlPreloads.map((f) => `<link rel="modulepreload" crossorigin href="${at}${f}">`).join('') +
     `</head><body></body></html>`;
   const chunks = [
     chunk(ENTRY, entryCode(opts.listDeps, opts.recordDeps), true),
@@ -91,6 +94,35 @@ function build(opts: { htmlPreloads: string[]; listDeps: string[] | null; record
 const ONE_WAVE = () => build({ htmlPreloads: [VENDOR, SHELL], listDeps: LIST_CLOSURE, recordDeps: RECORD_CLOSURE });
 
 describe('vite-eager-preload: the hop pin (objectstack#35455)', () => {
+  it('reads index.html under an absolute base, as the E2E build writes it (VITE_BASE_PATH=/console/)', () => {
+    const preloaded = build({ base: '/console/', htmlPreloads: [VENDOR, SHELL], listDeps: LIST_CLOSURE, recordDeps: RECORD_CLOSURE });
+    const hops = measurePreloadHops(preloaded.html, preloaded.chunks, '/console/');
+    expect(hops).toMatchObject({ entry: ENTRY, eagerFiles: 3, eagerMaxWave: 1 });
+    expect(judgePreloadHops(hops).ok).toBe(true);
+    // The CONTROL holds under that base too: a missing preload tag is a late eager file.
+    const bare = build({ base: '/console/', htmlPreloads: [VENDOR], listDeps: LIST_CLOSURE, recordDeps: RECORD_CLOSURE });
+    expect(measurePreloadHops(bare.html, bare.chunks, '/console/')).toMatchObject({ eagerMaxWave: 2, eagerLate: [`${SHELL} (wave 2)`] });
+    expect(judgePreloadHops(measurePreloadHops(bare.html, bare.chunks, '/console/')).ok).toBe(false);
+  });
+
+  it('refuses to judge an index.html read under the wrong base, instead of walking from a guessed entry', () => {
+    // The reader that ignored `base` read every /console/ URL as an unknown
+    // file, walked from the first entry it was handed, and reported each
+    // preloaded eager file as wave 2.
+    const { html, chunks } = build({ base: '/console/', htmlPreloads: [VENDOR, SHELL], listDeps: LIST_CLOSURE, recordDeps: RECORD_CLOSURE });
+    const hops = measurePreloadHops(html, chunks, './');
+    expect(hops.entry).toBe('');
+    const verdict = judgePreloadHops(hops);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.message).toMatch(/^cannot judge: index\.html names none of the entry chunks/);
+  });
+
+  it('does not count a URL outside the base as one of the build\'s files', () => {
+    const html = `<script type="module" src="/console/${ENTRY}"></script><link rel="modulepreload" href="/other/${VENDOR}"><link rel="modulepreload" href="https://cdn.example/${SHELL}">`;
+    expect([...htmlNamedScripts(html, '/console/')]).toEqual([ENTRY]);
+    expect([...htmlNamedScripts(`<script type="module" src="/${ENTRY}"></script>`, './')]).toEqual([]);
+  });
+
   it('reads one wave when index.html names the eager closure and each import() preloads its static closure', () => {
     const { html, chunks } = ONE_WAVE();
     const hops = measurePreloadHops(html, chunks);
@@ -169,7 +201,7 @@ describe('vite-eager-preload: refuses a verdict it cannot see', () => {
 
   it('refuses when the eager walk reaches the entry alone', () => {
     const { chunks } = ONE_WAVE();
-    const html = '<html><head></head></html>';
+    const html = `<html><head><script type="module" src="./${ENTRY}"></script></head></html>`;
     const lone = chunks.map((c) => (c.isEntry ? { ...c, code: '', imports: [] } : c));
     expect(judgePreloadHops(measurePreloadHops(html, lone)).message).toMatch(/^cannot judge: the eager walk/);
   });

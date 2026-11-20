@@ -85,7 +85,10 @@ export interface DynamicSiteHops {
 }
 
 export interface PreloadHops {
+  /** The entry chunk index.html names; '' when it names none (read under `base`). */
   entry: string;
+  /** The public base the HTML URLs were read under (Vite's resolved `base`). */
+  base: string;
   eagerFiles: number;
   /** Highest wave among the eager files (1 = the HTML names them all). */
   eagerMaxWave: number;
@@ -158,15 +161,28 @@ export function dynamicSitesOf(fileName: string, code: string): { target: string
   return sites;
 }
 
-/** Files `index.html` names as module scripts or modulepreload links. */
-export function htmlNamedScripts(html: string): Set<string> {
+/**
+ * Files `index.html` names as module scripts or modulepreload links, as
+ * output paths. `base` is Vite's resolved `base`: under a relative base
+ * (`./`) the URLs are relative to `index.html`; under an absolute one
+ * (`/console/`, what the E2E and hosted builds use) every URL Vite writes
+ * starts with it, and a URL that does not is not one of this build's files.
+ */
+export function htmlNamedScripts(html: string, base = './'): Set<string> {
+  const absoluteBase = /^(?:[a-z][a-z\d+.-]*:)?\/\//i.test(base) || base.startsWith('/');
+  const prefix = absoluteBase ? (base.endsWith('/') ? base : `${base}/`) : '';
   const named = new Set<string>();
   for (const tag of html.match(/<(?:script|link)\b[^>]*>/gi) ?? []) {
     const isModuleScript = /^<script/i.test(tag) && /\btype\s*=\s*["']module["']/i.test(tag);
     const isPreload = /^<link/i.test(tag) && /\brel\s*=\s*["']modulepreload["']/i.test(tag);
     if (!isModuleScript && !isPreload) continue;
     const url = /\b(?:src|href)\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1];
-    if (url && url.endsWith('.js')) named.add(resolveRelative('index.html', url.replace(/^\//, '')));
+    if (!url || !url.endsWith('.js')) continue;
+    if (absoluteBase) {
+      if (url.startsWith(prefix)) named.add(resolveRelative('index.html', url.slice(prefix.length)));
+    } else if (!url.startsWith('/') && !/^[a-z][a-z\d+.-]*:/i.test(url)) {
+      named.add(resolveRelative('index.html', url));
+    }
   }
   return named;
 }
@@ -223,7 +239,7 @@ function staticClosure(root: string, edges: ReadonlyMap<string, readonly string[
 }
 
 /** The hop reading of an emitted console build. Pure. */
-export function measurePreloadHops(html: string, chunks: readonly EmittedChunk[]): PreloadHops {
+export function measurePreloadHops(html: string, chunks: readonly EmittedChunk[], base = './'): PreloadHops {
   const byFile = new Map(chunks.map((c) => [c.fileName, c]));
   const edges = new Map<string, string[]>();
   const parserMismatch: string[] = [];
@@ -239,8 +255,10 @@ export function measurePreloadHops(html: string, chunks: readonly EmittedChunk[]
     }
   }
   const entries = chunks.filter((c) => c.isEntry).map((c) => c.fileName);
-  const entry = entries.find((e) => htmlNamedScripts(html).has(e)) ?? entries[0] ?? '';
-  const named = htmlNamedScripts(html);
+  const named = htmlNamedScripts(html, base);
+  // No fallback to "the first entry": an HTML that names none of them was read
+  // wrongly (a base the reader did not strip), and that is refused below.
+  const entry = entries.find((e) => named.has(e)) ?? '';
   const eagerWave = entry ? waves([entry], named, edges, new Set()) : new Map<string, number>();
   const eager = new Set(eagerWave.keys());
   const eagerMaxWave = Math.max(0, ...eagerWave.values());
@@ -265,7 +283,7 @@ export function measurePreloadHops(html: string, chunks: readonly EmittedChunk[]
       });
     }
   }
-  return { entry, eagerFiles: eager.size, eagerMaxWave, eagerLate, dynamicSites, parserMismatch };
+  return { entry, base, eagerFiles: eager.size, eagerMaxWave, eagerLate, dynamicSites, parserMismatch };
 }
 
 export interface PreloadVerdict {
@@ -282,6 +300,14 @@ export function judgePreloadHops(hops: PreloadHops): PreloadVerdict {
         `cannot judge: the static-import parser disagrees with rolldown's chunk graph on ` +
         `${hops.parserMismatch.length} edge(s), so its wave count is not a reading of this build. ` +
         `First: ${hops.parserMismatch.slice(0, 3).join('; ')}. Fix staticImportsOf before trusting a wave count.`,
+    };
+  }
+  if (!hops.entry) {
+    return {
+      ok: false,
+      message:
+        `cannot judge: index.html names none of the entry chunks as a module script when its URLs are read under base ` +
+        `"${hops.base}", so the eager closure cannot be walked from what the browser is told to load. Is the build's base passed to the reader?`,
     };
   }
   if (hops.eagerFiles < 2) {
@@ -360,8 +386,14 @@ export function eagerPreload(): { plugin: Plugin; resolveDependencies: ResolveDe
     }
     return policy(filename, deps, context);
   };
+  // The resolved public base: index.html's URLs carry it (`/console/` in the
+  // E2E and hosted builds), and the reader strips exactly it.
+  let base = './';
   const plugin: Plugin = {
     name: 'assert-eager-preload',
+    configResolved(config) {
+      base = config.base;
+    },
     generateBundle(_options: Rollup.NormalizedOutputOptions, bundle: Rollup.OutputBundle) {
       eager.clear();
       for (const f of eagerClosureOf(bundle)) eager.add(f);
@@ -378,7 +410,7 @@ export function eagerPreload(): { plugin: Plugin; resolveDependencies: ResolveDe
             `recorded, so those import() sites repeat eager files: generateBundle must run before Vite's import analysis.`,
         );
       }
-      const verdict = judgePreloadHops(measurePreloadHops(html, chunks));
+      const verdict = judgePreloadHops(measurePreloadHops(html, chunks, base));
       if (!verdict.ok) this.error(`[assert-eager-preload] ${verdict.message}`);
       this.info(`[assert-eager-preload] ${verdict.message}`);
     },
