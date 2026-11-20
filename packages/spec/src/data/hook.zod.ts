@@ -337,8 +337,9 @@ function refuseUndeclaredLiteralRefusalCode(
 /**
  * [#34374, ruling 6913660232 parameter 7] The object-level check that refuses
  * `texts` nothing could ask for, and a key a hook's source asks for literally
- * (`ctx.text('key')`) that `texts` does not declare — the refusal catalogue's
- * two halves above, for the sentences a hook writes into a record.
+ * (`ctx.text('key')` or `ctx.text?.('key')`) that `texts` does not declare —
+ * the refusal catalogue's two halves above, for the sentences a hook writes
+ * into a record.
  */
 function refuseUndeclaredLiteralTextKey(
   hook: {
@@ -816,8 +817,8 @@ export const HookSchema = lazySchema(() => strictObject(
    * hook builds itself is written as it is (parameter 4).
    *
    * A key the hook's source asks for literally that `texts` does not declare
-   * is refused at save; any other undeclared key is refused when the hook
-   * runs. Served on every path a hook runs on — a sandboxed `js` body and an
+   * — `ctx.text('key')` or `ctx.text?.('key')` — is refused at save; any
+   * other undeclared key is refused when the hook runs. Served on every path a hook runs on — a sandboxed `js` body and an
    * in-process `handler` — and refused on a hook whose code cannot ask for one
    * (an `expression` body, or neither a body nor a handler). Keyed by hook
    * name, not by object. Absent: `ctx.text` has nothing to answer.
@@ -1928,6 +1929,35 @@ export const HookContextSchema = lazySchema(() => z.object({
     ),
 
   /**
+   * Declared Text (#34374, ruling 6913660232 parameter 7)
+   *
+   * `await ctx.text('follow_up_subject', { lead })` answers one of the hook's
+   * declared `texts` (see `HookSchema.texts`) in the ORGANIZATION's language,
+   * translated through `hooks.<hook>.texts.<key>.message`, the declared
+   * `message` as the fallback, its `{{ }}` holes filled from `params`. A key
+   * the hook does not declare rejects the call, and so does a Localization
+   * setting that cannot be read.
+   *
+   * The runtime binds it on every path a hook runs on — a sandboxed `js` body
+   * and an in-process `handler` (`buildHookTextSurface`). The save-time check
+   * reads the literal spellings `ctx.text('key'` and `ctx.text?.('key'`, so a
+   * key asked for through an alias or a computed name is only judged when the
+   * hook runs.
+   *
+   * Runtime-only, like {@link api} and {@link notice}: a live function, so the
+   * RUNTIME schema is `z.unknown()` (JSON Schema `{}`) and the type is a static
+   * cast. Optional for the same reason they are: a context parsed without the
+   * runtime carries none.
+   */
+  text: (z.unknown().optional() as unknown as z.ZodOptional<z.ZodType<HookTextReader, HookTextReader>>)
+    .describe(
+      'Answer one of the hook\'s declared texts: `await ctx.text(KEY, params?)` returns the sentence in the '
+      + 'organization\'s language (translated through hooks.<hook>.texts.<key>.message, the declared message as the '
+      + 'fallback, holes filled from params). Bound by the runtime on every path a hook runs on; a key the hook does '
+      + 'not declare rejects the call',
+    ),
+
+  /**
    * Current User Info
    * Convenience shortcut for session.userId + additional user metadata.
    * Populated by the engine when available.
@@ -1963,6 +1993,12 @@ export type HookEventType = z.input<typeof HookEvent>;
  * a non-empty string.
  */
 export type HookNoticeSetter = (message: string) => void;
+/**
+ * The function a hook calls as `ctx.text(key, params?)` (#34374) — see
+ * `HookContext.text` and `HookSchema.texts`. Resolves to the declared sentence
+ * in the organization's language; rejects a key the hook does not declare.
+ */
+export type HookTextReader = (key: string, params?: Record<string, unknown>) => Promise<string>;
 export type HookContext = z.input<typeof HookContextSchema>;
 /**
  * The engine's dispatch marker (#6966) — see `HookContext.dispatch`. Named so

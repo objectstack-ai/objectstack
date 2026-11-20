@@ -37,6 +37,7 @@ import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 import {
   ambientAppPackage,
   sameDockTarget,
+  type ChatDockConversationActions,
   type ChatDockHandoff,
   type ChatDockPresentation,
   type ChatDockTarget,
@@ -81,6 +82,18 @@ export interface ChatDockConversationProps {
   /** Rail and sheet only: the history list shown over the chat. */
   historyOpen?: boolean;
   onHistoryOpenChange?: (open: boolean) => void;
+  /**
+   * objectstack#35445 — the drawer's title bar offers Share and the Build
+   * Doctor in its 「···」 menu. A host that passes this receives what those
+   * two items act on, and the pane's own header row stops drawing them. The
+   * share dialog and the doctor's drawer stay here; the host opens them
+   * through the four props below, as it opens the history.
+   */
+  onActionsChange?: (actions: ChatDockConversationActions | undefined) => void;
+  shareOpen?: boolean;
+  onShareOpenChange?: (open: boolean) => void;
+  debugOpen?: boolean;
+  onDebugOpenChange?: (open: boolean) => void;
 }
 
 const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
@@ -127,6 +140,11 @@ export function ChatDockConversation({
   presentation = 'rail',
   historyOpen = false,
   onHistoryOpenChange,
+  onActionsChange,
+  shareOpen: shareOpenProp,
+  onShareOpenChange,
+  debugOpen: debugOpenProp,
+  onDebugOpenChange,
 }: ChatDockConversationProps) {
   const { agents, isLoading, error } = useAgents({ apiBase });
   const catalogNames = React.useMemo(() => agents.map((a) => a.name), [agents]);
@@ -343,18 +361,30 @@ export function ChatDockConversation({
     [conversationId],
   );
 
-  // Share and the Build Doctor, which the pane's header offers.
-  const [shareOpen, setShareOpen] = React.useState(false);
-  const [debugOpen, setDebugOpen] = React.useState(false);
+  // Share and the Build Doctor: the drawer's 「···」 menu offers them when its
+  // host takes them (objectstack#35445), else the pane's header does.
+  const [ownShareOpen, setOwnShareOpen] = React.useState(false);
+  const [ownDebugOpen, setOwnDebugOpen] = React.useState(false);
+  const shareOpen = shareOpenProp ?? ownShareOpen;
+  const debugOpen = debugOpenProp ?? ownDebugOpen;
+  const setShareOpen = onShareOpenChange ?? setOwnShareOpen;
+  const setDebugOpen = onDebugOpenChange ?? setOwnDebugOpen;
+  const actionsInHost = onActionsChange !== undefined;
   const restApiBase = React.useMemo(
     () => apiBase.replace(/\/v1\/ai$/, '').replace(/\/ai$/, '') || '/api',
     [apiBase],
   );
   const publicShareBase = React.useMemo(() => resolvePublicShareBase(), []);
-  const showDebug = agentHasCapability(agents, activeAgent, 'debug');
+  // objectstack#35445 — the Build Doctor reads a build's internals: offered
+  // only to a user who may build, whichever agent the thread runs.
+  const showDebug = agentHasCapability(agents, activeAgent, 'debug') && canAuthorMetadata;
+  const inert = !isLoading && agents.length === 0;
+  React.useEffect(() => {
+    onActionsChange?.(inert ? undefined : { conversationId, showDebug });
+  }, [onActionsChange, inert, conversationId, showDebug]);
 
   // OSS / no AI seat → the whole dock body is inert (the robot is gated too).
-  if (!isLoading && agents.length === 0) return null;
+  if (inert) return null;
 
   const history = (
     <ConversationsSidebar
@@ -405,6 +435,7 @@ export function ChatDockConversation({
             onShare={() => setShareOpen(true)}
             onDebug={() => setDebugOpen(true)}
             showDebug={showDebug}
+            actionsInHost={actionsInHost}
           />
         </div>
         {/* Rail and sheet: the history covers the chat while open; the pane

@@ -115,6 +115,23 @@ export function getResponsiveSpanClass(span: number | undefined, columns: number
   return '';
 }
 
+/** The frameless grid's columns by its column count, opened by container width. */
+const FRAMELESS_GRID_COLUMNS: Record<1 | 2 | 3, string> = {
+  1: 'grid-cols-1',
+  2: 'grid-cols-1 @xl:grid-cols-2',
+  3: 'grid-cols-1 @xl:grid-cols-2 @4xl:grid-cols-3',
+};
+
+/**
+ * A wide field's span on the frameless grid: the same container widths the
+ * grid opens its columns at, never more cells than the grid draws.
+ */
+export function framelessSpanClass(span: number | undefined, columns: 1 | 2 | 3): string {
+  if (!span || span <= 1 || columns <= 1) return '';
+  if (columns === 2 || span === 2) return '@xl:col-span-2';
+  return '@xl:col-span-2 @4xl:col-span-3';
+}
+
 /**
  * The `onChange` a read display is handed. The `readonly` branches of
  * `TextAreaField` and `TextField`, and the read-only `FormulaField` and
@@ -471,8 +488,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // A frameless section (objectstack#27055) takes 1–3 columns by the fields it
   // shows, never the object-wide count, and at most two beside the right
   // column of the two-column tier (objectstack#27524).
+  const framelessColumns = framelessSectionColumns(visibleFields.length, framelessColumnCap);
   const effectiveColumns = frameless
-    ? framelessSectionColumns(visibleFields.length, framelessColumnCap)
+    ? framelessColumns
     : Math.min(rawColumns, Math.max(1, visibleFields.length));
 
   const renderField = (field: DetailViewField) => {
@@ -799,16 +817,34 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // value (raw JSON, a GPS pair, a URL) sets the track's min width and
     // overflows into the neighbouring cell — visible once columns narrow
     // (objectui#2578). Allowing the item to shrink lets the value wrap.
+    // The frameless face (the default record page) draws a dense row: the
+    // label left in a fixed-width 12 px muted column, the value right at
+    // 13 px, one 32 px line for a one-line value.
     return (
-      <div key={field.name} className={cn("space-y-1.5 group min-w-0", spanClass)}>
+      <div
+        key={field.name}
+        className={cn(
+          frameless ? 'group flex min-w-0 items-start gap-3' : 'space-y-1.5 group min-w-0',
+          frameless ? framelessSpanClass(field.span, framelessColumns) : spanClass,
+        )}
+        data-detail-field-row={frameless ? '' : undefined}
+      >
         {/* The label as authored, in the header highlights' style: no case
             transform, which only Latin text takes, so a translated label and
             an untranslated one beside it read in one style. */}
-        <div className="text-xs font-medium text-muted-foreground">
-          {fieldLabel(objectName || '', field.name, field.label || field.name)}
+        <div
+          className={
+            frameless
+              ? 'w-28 shrink-0 truncate py-1 text-xs leading-6 text-muted-foreground'
+              : 'text-xs font-medium text-muted-foreground'
+          }
+          title={frameless ? fieldLabelText : undefined}
+          data-detail-field-label={frameless ? '' : undefined}
+        >
+          {fieldLabelText}
         </div>
         {isEditing && fieldEditable ? (
-          <div className="min-h-[44px] sm:min-h-0">
+          <div className={cn('min-h-[44px] sm:min-h-0', frameless && 'min-w-0 flex-1')}>
             <InlineFieldInput
               field={enrichedField}
               value={value}
@@ -844,6 +880,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         <div
           className={cn(
             "flex items-start justify-between gap-2 min-h-[44px] sm:min-h-0 rounded-md",
+            frameless && "min-w-0 flex-1",
             copyInteractive && "cursor-pointer active:bg-muted/60 transition-colors",
             // Editable fields hint interactivity on hover and enter edit on
             // double-click (Salesforce/Airtable pattern). The negative margin
@@ -862,7 +899,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           tabIndex={copyInteractive ? 0 : undefined}
           title={canInlineEditField ? t('detail.editInlineHint') : undefined}
         >
-          <div className="text-sm flex-1 min-w-0 break-words py-1">
+          <div
+            className={cn(
+              'flex-1 min-w-0 break-words',
+              frameless ? 'py-1 text-[13px] leading-6' : 'text-sm py-1',
+            )}
+          >
             {displayValue}
           </div>
           {canInlineEditField ? (
@@ -984,11 +1026,12 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         <div
           className={frameless ? cn(
             // Container queries, not viewport breakpoints: the details column
-            // is narrow on a wide screen (objectstack#27055).
-            'grid gap-x-4 gap-y-2.5',
-            effectiveColumns === 1 ? 'grid-cols-1' :
-            effectiveColumns === 2 ? 'grid-cols-1 @sm:grid-cols-2' :
-            'grid-cols-1 @sm:grid-cols-2 @lg:grid-cols-3'
+            // is narrow on a wide screen (objectstack#27055). A column holds a
+            // label-left row, so it opens at 36rem (two) and 56rem (three):
+            // two beside the right column, three without it, one in a narrow
+            // drawer.
+            'grid gap-x-6 gap-y-0',
+            FRAMELESS_GRID_COLUMNS[framelessColumns]
           ) : cn(
             "grid gap-3 sm:gap-4",
             effectiveColumns === 1 ? "grid-cols-1" :

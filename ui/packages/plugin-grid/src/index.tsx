@@ -37,6 +37,12 @@ export { useGroupedData } from './useGroupedData';
 export { GroupRow } from './GroupRow';
 export { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 export { BulkActionBar } from './components/BulkActionBar';
+// objectstack#35554 — the list page bar's selection slot, read by the Console
+// page header, and the kept scroll position a list host loads back to.
+export { useListPageBarHost } from './listPageBarSlot';
+export type { ListPageBarState } from './listPageBarSlot';
+export { readListScrollState } from './objectGridInfiniteLoad';
+export type { ListScrollState } from './objectGridInfiniteLoad';
 // The bare-name fold, its development warning and the bar's own gate (the
 // capability check, the switch-off and the per-record `visible`), for the one
 // other surface that draws a selection bar of its own: plugin-list's ListView

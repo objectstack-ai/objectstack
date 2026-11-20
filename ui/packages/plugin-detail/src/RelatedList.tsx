@@ -35,6 +35,7 @@ import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPred
 import {
   Plus,
   ExternalLink,
+  ArrowUpRight,
   ChevronLeft,
   ChevronRight,
   ArrowUpDown,
@@ -88,7 +89,7 @@ import {
 } from '@object-ui/core';
 import { useSafeFieldLabel, useRecordContext } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, withFollowedParent } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
 import {
@@ -703,111 +704,293 @@ const RelatedListLoadFailed: React.FC<{ error: unknown; onRetry: () => void }> =
 const ROLLED_UP_FIELD_TYPES = new Set(['number', 'integer', 'decimal']);
 
 /**
- * The child fields the record's own object rolls up with `sum`: a `summary`
- * field on the parent whose `summaryOperations` sums `field` of this child
- * `object` is the author's own declaration that the column adds up. Read off
- * the parent schema the record page already holds (`useRecordContext`), in
- * either container shape the metadata API serves. The roll-up's
- * `relationshipField` is not compared: which foreign key a sum runs through
- * does not change whether the child column is additive.
+ * A `sum` roll-up the record's own object declares over a column of this
+ * child: a `summary` field on the parent whose `summaryOperations` sums
+ * `field` of this child `object` — the author's own declaration that the
+ * column adds up (objectstack#29943). Read off the parent schema the record
+ * page already holds (`useRecordContext`), in either container shape the
+ * metadata API serves.
+ *
+ * `sameRows` says whether the roll-up's value IS this list's total
+ * (objectstack#35597): it sums every child row through this list's foreign key
+ * with no `filter` of its own. A roll-up names that key by its
+ * `relationshipField`; with none, the engine takes the child's FIRST `lookup` /
+ * `master_detail` field that references the parent
+ * (`ObjectQL.buildSummaryIndex`), so an absent one is this list's key only when
+ * this list's key is that field (`engineRollUpForeignKey`). A child with two
+ * keys to the same parent otherwise draws the other key's roll-up under this
+ * list. Only then may the parent's stored figure stand for the list; otherwise
+ * the column is still additive, and the server aggregates it over the list's
+ * own condition.
  */
-function rolledUpSumFields(parentFields: unknown, childObject: string | undefined): ReadonlySet<string> {
-  const out = new Set<string>();
+interface RolledUpSum {
+  readonly summaryField: string;
+  readonly sameRows: boolean;
+}
+
+/** A field container in either shape the metadata API serves, as `[name, def]` pairs in declared order. */
+function fieldEntriesOf(container: unknown): Array<[string | undefined, unknown]> {
+  if (!container || typeof container !== 'object') return [];
+  return Array.isArray(container)
+    ? container.map((def) => [typeof (def as any)?.name === 'string' ? (def as any).name : undefined, def])
+    : Object.entries(container as Record<string, unknown>);
+}
+
+/**
+ * The child's foreign key a roll-up with no `relationshipField` sums through:
+ * the engine's own pick (`ObjectQL.buildSummaryIndex`, the `fkField` scan) —
+ * the FIRST `lookup` / `master_detail` field, in the child's declared order,
+ * whose `reference` names the parent. `undefined` when none does.
+ */
+function engineRollUpForeignKey(childFields: unknown, parentObject: string | undefined): string | undefined {
+  if (!parentObject) return undefined;
+  for (const [name, def] of fieldEntriesOf(childFields)) {
+    const d = def as { type?: unknown; reference?: unknown } | null;
+    if (d?.type !== 'master_detail' && d?.type !== 'lookup') continue;
+    if (typeof name === 'string' && name !== '' && d.reference === parentObject) return name;
+  }
+  return undefined;
+}
+
+function rolledUpSums(
+  parentFields: unknown,
+  childObject: string | undefined,
+  referenceField: string | undefined,
+  childFields: unknown,
+  parentObject: string | undefined,
+): ReadonlyMap<string, RolledUpSum> {
+  const out = new Map<string, RolledUpSum>();
   if (!childObject || !parentFields || typeof parentFields !== 'object') return out;
-  const defs: unknown[] = Array.isArray(parentFields) ? parentFields : Object.values(parentFields as Record<string, unknown>);
-  for (const def of defs) {
-    const d = def as { type?: unknown; summaryOperations?: { object?: unknown; field?: unknown; function?: unknown } } | null;
+  const entries = fieldEntriesOf(parentFields);
+  const engineKey = engineRollUpForeignKey(childFields, parentObject);
+  for (const [name, def] of entries) {
+    const d = def as {
+      type?: unknown;
+      summaryOperations?: { object?: unknown; field?: unknown; function?: unknown; relationshipField?: unknown; filter?: unknown };
+    } | null;
     const ops = d?.type === 'summary' ? d.summaryOperations : undefined;
-    if (ops?.function === 'sum' && ops.object === childObject && typeof ops.field === 'string' && ops.field !== '') {
-      out.add(ops.field);
-    }
+    if (ops?.function !== 'sum' || ops.object !== childObject || typeof ops.field !== 'string' || ops.field === '') continue;
+    const sameRows =
+      typeof name === 'string' && name !== ''
+      && (ops.relationshipField === undefined
+        ? referenceField !== undefined && referenceField === engineKey
+        : ops.relationshipField === referenceField)
+      && (ops.filter === undefined || ops.filter === null);
+    const known = out.get(ops.field);
+    if (!known || (!known.sameRows && sameRows)) out.set(ops.field, { summaryField: name ?? '', sameRows });
   }
   return out;
 }
 
-/**
- * The one currency a currency column's counted rows are in, or `undefined`
- * when any row's currency is unknown or two rows disagree: each row resolves
- * through `resolveFieldCurrency`, the cell's own reader (a `fixed` code, the
- * tenant default for `dynamic`, the row's sibling code field for `record`).
- * A sum across currencies, or in a currency nobody named, is not a total.
- */
-function agreedRowCurrency(def: any, rows: readonly any[], tenantCurrency: string | undefined): string | undefined {
-  let agreed: string | undefined;
-  for (const row of rows) {
-    const code = resolveFieldCurrency(def, tenantCurrency, row);
-    if (!code) return undefined;
-    if (agreed === undefined) agreed = code;
-    else if (agreed.toUpperCase() !== code.toUpperCase()) return undefined;
-  }
-  return agreed;
+/** One figure of a body table's totals row, keyed by its column. */
+interface BodyTableTotal {
+  key: string;
+  label: string;
+  text: string;
+}
+
+/** How one additive column of a body table gets its total. */
+interface BodyTableTotalPlan {
+  key: string;
+  label: string;
+  /** The code field the server groups by: a `record`-mode amount whose rows name their own currency. */
+  groupBy?: string;
+  /** The one currency every row is in, for a currency column grouped by nothing. */
+  currency?: string;
+  /** The parent's stored roll-up, when it is this list's total (`RolledUpSum.sameRows`). */
+  stored?: number;
 }
 
 /**
- * The totals line of a body table: the sum of each additive column over the
- * rows on show (the page), labelled as the page's — never as the whole
- * list's, which a windowed list does not hold. Which columns are additive
- * (objectstack#29943):
+ * The totals row of a body table (objectstack#35597, under ADR-0035's
+ * server-owned rollup): each additive column totalled over EVERY child row of
+ * the list — the parent relationship AND the list's own declared filter, the
+ * condition its rows are read by — never a sum of the rows on show, which a
+ * row cap or a page holds only part of (objectstack#27055 drew 「本页合计」).
  *
- *  1. a `currency` column — amounts add up by type — totalled only when every
- *     counted row is in one known currency, and formatted in it;
+ * Which columns are additive is objectstack#29943's rule, unchanged:
+ *
+ *  1. a `currency` column, totalled in its one currency: a `fixed` code, the
+ *     tenant default for `dynamic`, the parent's code for a `record` amount
+ *     that follows its parent. A `record` amount whose rows carry their own
+ *     code is grouped by that code on the server, and totalled only when one
+ *     currency comes back — a sum across currencies is not a total;
  *  2. a `number` / `integer` / `decimal` column only when the record's object
- *     rolls it up with `sum` (`rolledUpSumFields`);
- *  3. nothing else. A line with nothing to total is not drawn.
+ *     rolls it up with `sum` (`rolledUpSums`);
+ *  3. nothing else.
+ *
+ * Where each total comes from:
+ *
+ *  - the parent's own `summary` field, when it sums the column over the same
+ *    rows (`sameRows`) and the list declares no filter of its own — the
+ *    engine keeps it current inside the write that moved the rows;
+ *  - otherwise one aggregate over the list's condition through the data
+ *    source's spec-shape `aggregate` (`POST /data/:object/query` with
+ *    `aggregations`, `engine.aggregate`), and one more per `record`-mode code
+ *    field, grouped by it. No new endpoint.
+ *
+ * A data source with no `aggregate`, a read that fails, or a list not scoped
+ * to a parent draws no totals at all rather than a client sum.
  */
-const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefined; objectSchema: any; childObject: string | undefined }> = ({
-  rows,
-  columns,
-  objectSchema,
-  childObject,
-}) => {
-  const { t } = useDetailTranslation();
+function useBodyTableTotals(opts: {
+  enabled: boolean;
+  columns: any[] | undefined;
+  objectSchema: any;
+  childObject: string | undefined;
+  dataSource: DataSource | undefined;
+  referenceField: string | undefined;
+  parentId: unknown;
+  listFilterNode: Record<string, any> | FilterNode | undefined;
+  filterKey: string;
+  refreshKey: unknown;
+}): BodyTableTotal[] {
+  const { enabled, columns, objectSchema, childObject, dataSource, referenceField, parentId, listFilterNode, filterKey, refreshKey } = opts;
   // The totals format in the reader's display locale, never the machine's.
   const displayLocale = useDisplayLocale();
   // The tenant default currency (ADR-0053) a `dynamic` amount displays in.
   const { currency: tenantCurrency } = useLocalization();
   // The record page's own object: the parent whose roll-ups name this child.
   const recordContext = useRecordContext();
-  const parentSchema = recordContext?.objectSchema as { fields?: unknown } | undefined;
+  const parentSchema = recordContext?.objectSchema as { name?: unknown; fields?: unknown } | undefined;
+  const parentObject = typeof parentSchema?.name === 'string' && parentSchema.name !== ''
+    ? parentSchema.name
+    : recordContext?.objectName || undefined;
   const parentRecord = recordContext?.data as Record<string, unknown> | undefined;
-  const rolledUp = rolledUpSumFields(parentSchema?.fields, childObject);
   const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
-  const totals: Array<{ key: string; label: string; text: string }> = [];
-  for (const col of columns ?? []) {
-    const key = col?.accessorKey || columnIdentity(col);
-    const def = key ? fields[key] : undefined;
-    if (!key || !def) continue;
-    const isCurrency = def.type === 'currency';
-    if (!isCurrency && !(ROLLED_UP_FIELD_TYPES.has(def.type) && rolledUp.has(key))) continue;
-    let sum = 0;
-    const counted: any[] = [];
-    for (const row of rows) {
-      const n = typeof row?.[key] === 'number' ? row[key] : Number(row?.[key]);
-      if (row?.[key] === null || row?.[key] === undefined || row?.[key] === '' || !Number.isFinite(n)) continue;
-      sum += n;
-      counted.push(row);
-    }
-    if (counted.length === 0) continue;
-    let text: string;
-    if (isCurrency) {
-      // Each row as its cell reads it: a row that follows its parent's
-      // currency carries the record this list hangs under (ADR-0144 D2).
-      const currency = agreedRowCurrency(def, counted.map((row) => withFollowedParent(row, def, parentRecord)), tenantCurrency);
-      if (!currency) continue;
-      text = formatCurrency(sum, currency, displayLocale);
-    } else {
-      try {
-        text = new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum);
-      } catch {
-        text = String(sum);
+
+  const plans = React.useMemo<BodyTableTotalPlan[]>(() => {
+    if (!enabled) return [];
+    const rolledUp = rolledUpSums(parentSchema?.fields, childObject, referenceField, objectSchema?.fields, parentObject);
+    const out: BodyTableTotalPlan[] = [];
+    for (const col of columns ?? []) {
+      const key = col?.accessorKey || columnIdentity(col);
+      const def = key ? fields[key] : undefined;
+      if (!key || !def) continue;
+      const isCurrency = def.type === 'currency';
+      const rollUp = rolledUp.get(key);
+      if (!isCurrency && !(ROLLED_UP_FIELD_TYPES.has(def.type) && rollUp)) continue;
+      const label = col.header || col.label || def.label || key;
+      const plan: BodyTableTotalPlan = { key, label };
+      if (isCurrency) {
+        const codeField = recordCurrencyField(def);
+        if (codeField !== undefined && !recordCurrencyPath(def)) {
+          plan.groupBy = codeField;
+        } else {
+          // A `record` amount following its parent reads the parent's code
+          // off the record this list hangs under (ADR-0144 D2).
+          const currency = resolveFieldCurrency(def, tenantCurrency, withFollowedParent({}, def, parentRecord) as any);
+          if (!currency) continue;
+          plan.currency = currency;
+        }
       }
+      if (!plan.groupBy && rollUp?.sameRows && listFilterNode === undefined) {
+        const stored = parentRecord?.[rollUp.summaryField];
+        const n = typeof stored === 'number' ? stored : typeof stored === 'string' && stored !== '' ? Number(stored) : NaN;
+        if (Number.isFinite(n)) plan.stored = n;
+      }
+      out.push(plan);
     }
-    totals.push({ key, label: col.header || col.label || def.label || key, text });
-  }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, columns, objectSchema, parentSchema, parentObject, parentRecord, childObject, referenceField, tenantCurrency, filterKey]);
+
+  const [sums, setSums] = React.useState<Record<string, { value: number; currency?: string }> | null>(null);
+  const scoped = !!referenceField && parentId !== undefined && parentId !== null && parentId !== '';
+  const aggregate = (dataSource as any)?.aggregate as ((resource: string, params: any) => Promise<any[]>) | undefined;
+  const plansKey = JSON.stringify(plans);
+  React.useEffect(() => {
+    if (plans.length === 0 || !childObject || !scoped) {
+      setSums(null);
+      return;
+    }
+    let cancelled = false;
+    const out: Record<string, { value: number; currency?: string }> = {};
+    for (const plan of plans) if (plan.stored !== undefined) out[plan.key] = { value: plan.stored, currency: plan.currency };
+    const queried = plans.filter((plan) => plan.stored === undefined);
+    if (queried.length === 0) {
+      setSums(out);
+      return;
+    }
+    if (typeof aggregate !== 'function') {
+      setSums(Object.keys(out).length > 0 ? out : null);
+      return;
+    }
+    const parentScope = composeParentScopeFilter(referenceField!, parentId as any, fields) as Record<string, any>;
+    const where = listFilterNode === undefined ? parentScope : mergeFilterNodes(parentScope, listFilterNode);
+    const sumOf = (plan: BodyTableTotalPlan) => ({ function: 'sum', field: plan.key, alias: plan.key });
+    const plain = queried.filter((plan) => plan.groupBy === undefined);
+    const byCode = new Map<string, BodyTableTotalPlan[]>();
+    for (const plan of queried) {
+      if (plan.groupBy === undefined) continue;
+      byCode.set(plan.groupBy, [...(byCode.get(plan.groupBy) ?? []), plan]);
+    }
+    const toNumber = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v !== '' ? Number(v) : NaN);
+    const reads: Array<Promise<void>> = [];
+    if (plain.length > 0) {
+      reads.push(aggregate.call(dataSource, childObject, { aggregations: plain.map(sumOf), where }).then((rows) => {
+        const row = Array.isArray(rows) ? rows[0] : undefined;
+        for (const plan of plain) {
+          const n = toNumber(row?.[plan.key]);
+          if (Number.isFinite(n)) out[plan.key] = { value: n, currency: plan.currency };
+        }
+      }));
+    }
+    for (const [codeField, group] of byCode) {
+      reads.push(aggregate.call(dataSource, childObject, { groupBy: [codeField], aggregations: group.map(sumOf), where }).then((rows) => {
+        const buckets = (Array.isArray(rows) ? rows : []).filter((row) => group.some((plan) => row?.[plan.key] !== null && row?.[plan.key] !== undefined));
+        // One known currency across every counted row, or no total.
+        if (buckets.length !== 1) return;
+        const code = buckets[0]?.[codeField];
+        if (typeof code !== 'string' || code === '') return;
+        for (const plan of group) {
+          const n = toNumber(buckets[0]?.[plan.key]);
+          if (Number.isFinite(n)) out[plan.key] = { value: n, currency: code };
+        }
+      }));
+    }
+    Promise.all(reads).then(
+      () => { if (!cancelled) setSums({ ...out }); },
+      () => { if (!cancelled) setSums(null); },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plansKey, childObject, scoped, referenceField, String(parentId), filterKey, aggregate, dataSource, refreshKey]);
+
+  return React.useMemo(() => {
+    if (!sums) return [];
+    const totals: BodyTableTotal[] = [];
+    for (const plan of plans) {
+      const sum = sums[plan.key];
+      if (!sum) continue;
+      let text: string;
+      if (sum.currency) {
+        text = formatCurrency(sum.value, sum.currency, displayLocale);
+      } else {
+        try {
+          text = new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum.value);
+        } catch {
+          text = String(sum.value);
+        }
+      }
+      totals.push({ key: plan.key, label: plan.label, text });
+    }
+    return totals;
+  }, [sums, plans, displayLocale]);
+}
+
+/**
+ * The totals of a body table as a line under it — the enlarged face's form;
+ * the table face draws the same figures as the table's own last row, each in
+ * its column (`summaryRow`). Labelled as the list's total, never as a page's.
+ */
+const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[] }> = ({ totals }) => {
+  const { t } = useDetailTranslation();
   if (totals.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs" data-body-table-totals="">
-      <span className="font-medium text-muted-foreground">{t('detail.bodyTableTotals', { defaultValue: 'Totals (this page)' })}</span>
+      <span className="font-medium text-muted-foreground">{t('form.masterDetail.total', { defaultValue: 'Total' })}</span>
       {totals.map((total) => (
         <span key={total.key} className="inline-flex items-center gap-1" data-body-table-total={total.key}>
           <span className="text-muted-foreground">{total.label}</span>
@@ -1049,7 +1232,24 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const [compactCard, setCompactCard] = React.useState<HTMLElement | null>(null);
   const cardSeen = useSeenOnce(compactCard, compact);
   const rowsWanted = !compact || (cardSeen && cardCount !== 0);
-  const effectivePageSize = compact ? COMPACT_RELATED_ROWS : pageSize && pageSize > 0 ? pageSize : 0;
+  // objectstack#27055, Target 8 — a body table of the default record page:
+  // collapsible, ⤢ to enlarge, a totals row, ↗ to its list, no 「查看全部」.
+  // Read here, above the row cap, which it changes.
+  const bodyTableIds = React.useContext(RecordBodyTablesContext);
+  const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
+  const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
+  // objectstack#35597 — a body table shows its first `pageSize` rows (ten by
+  // default, the page may say otherwise) and 「显示全部 N 条」 expands it in
+  // place: every row, one read, no pages. N is the server's count when the
+  // list reads window by window, so the expansion asks for exactly that many;
+  // a list holding its rows already shows them all.
+  const [bodyTableShowAll, setBodyTableShowAll] = React.useState(false);
+  const pagedSize = pageSize && pageSize > 0 ? pageSize : 0;
+  const effectivePageSize = compact
+    ? COMPACT_RELATED_ROWS
+    : bodyTable && bodyTableShowAll && pagedSize > 0
+      ? (total != null ? Math.max(pagedSize, total) : 0)
+      : pagedSize;
   // The built-in contains-filter is a CLIENT-side sweep over the list's
   // unmasked columns (objectui#10728, `unmaskedColumnKeysKey`) — inexpressible
   // as a generic server filter. While the user is typing in it
@@ -2787,6 +2987,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const showPagination = effectivePageSize > 0 && (windowed
     ? currentPage > 0 || canGoNext
     : sortedData.length > effectivePageSize);
+  // objectstack#35597 — the N of a body table's 「显示全部 N 条」: the server's
+  // count when it reads window by window, the rows it holds otherwise. Offered
+  // in place of the pages, on the first page, once N is known.
+  const bodyTableAllCount = windowed ? total : sortedData.length;
+  const bodyTableShowAllOffered =
+    bodyTable && !bodyTableShowAll && showPagination && currentPage === 0 && bodyTableAllCount != null;
 
   // Reset to first page when filter/sort changes
   React.useEffect(() => {
@@ -2858,12 +3064,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // enlarge), handed down by the arranged stack that draws it; `null`
   // anywhere else.
   const cardChrome = React.useContext(RelatedCardChromeContext);
-  // objectstack#27055, Target 8 — a body table of the default record page:
-  // collapsible, ⤢ to enlarge, a totals line, no 「查看全部」.
-  const bodyTableIds = React.useContext(RecordBodyTablesContext);
+  // ⤢ for a body table (`bodyTable`, read above the row cap).
   const enlargeRelated = React.useContext(RelatedEnlargeContext);
-  const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
-  const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
   const isCollapsible = collapsible || bodyTable;
   // objectstack#29945 — whether the body table is wider than the details
   // column it sits in (ADR-0085 keeps it there). While it is, the first
@@ -2878,6 +3080,41 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const handleRowClick = React.useMemo(
     () => (onRowClick ? (row: any, event?: any) => onRowClick(row, event, paginatedData) : undefined),
     [onRowClick, paginatedData],
+  );
+
+  // objectstack#35597 — the body table's totals, the server's over every row
+  // of the list (`useBodyTableTotals`). Re-asked when the list's count moves
+  // (a row added or removed) or the list is told to re-read.
+  const bodyTotals = useBodyTableTotals({
+    enabled: bodyTable,
+    columns: effectiveColumns,
+    objectSchema,
+    childObject: api || objectName,
+    dataSource,
+    referenceField,
+    parentId,
+    listFilterNode,
+    filterKey,
+    refreshKey: `${refreshNonce}:${windowed && total != null ? total : relatedData.length}`,
+  });
+  const totalLabel = t('form.masterDetail.total', { defaultValue: 'Total' });
+  // The totals as the table's own last row, each under its column
+  // (objectstack#35548's `summaryRow`): 「合计行，与列对齐」.
+  const bodySummaryRow = React.useMemo(
+    () => (bodyTotals.length > 0
+      ? { lead: totalLabel, cells: Object.fromEntries(bodyTotals.map((entry) => [entry.key, entry.text])) }
+      : undefined),
+    [bodyTotals, totalLabel],
+  );
+
+  // The column headers an empty body table still draws (objectstack#35597).
+  const emptyTableHeaders = React.useMemo(
+    () => (bodyTable
+      ? (tableColumns ?? [])
+        .map((col: any) => ({ key: String(col?.accessorKey || columnIdentity(col) || ''), label: columnHeader(col) ?? '' }))
+        .filter((header: { key: string; label: string }) => header.key !== '' && header.label !== '')
+      : []),
+    [bodyTable, tableColumns],
   );
 
   const viewSchema = React.useMemo(() => {
@@ -2963,6 +3200,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           // A body table wider than its column keeps its first column, the
           // row's identity, in view while it scrolls (objectstack#29945).
           ...(bodyTable && bodyTableOverflows ? { frozenColumns: 1 } : {}),
+          ...(bodyTable && bodySummaryRow ? { summaryRow: bodySummaryRow } : {}),
           pagination: false, // We handle pagination ourselves
           pageSize: effectivePageSize || 10,
           searchable: false,
@@ -3000,7 +3238,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodySummaryRow]);
 
   const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
 
@@ -3675,7 +3913,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 </Button>
               </div>
             )}
-            {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} childObject={api || objectName} />}
+            {bodyTable && <BodyTableTotalsLine totals={bodyTotals} />}
           </>
         )}
         {trailingDialogs}
@@ -3793,7 +4031,24 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 <Maximize2 className="h-3.5 w-3.5" />
               </Button>
             ))}
-            {onNew && (
+            {/* objectstack#35597 — 「↗」 beside a body table's title opens
+                the child's list page under this record's condition (the
+                host's `onViewAll`, which a body table draws no footer for). */}
+            {bodyTable && onViewAll && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-11 w-11 p-0 sm:h-7 sm:w-7 text-muted-foreground"
+                aria-label={t('detail.viewAll')}
+                title={t('detail.viewAll')}
+                data-body-table-open-list=""
+                onClick={(e) => { e.stopPropagation(); onViewAll(); }}
+              >
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {/* An empty, open body table offers New in its empty row instead. */}
+            {onNew && !(bodyTable && isEmpty && !collapsed && !loadFailure) && (
               <Button
                 variant={isEmpty ? 'ghost' : 'outline'}
                 size="sm"
@@ -3818,17 +4073,48 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
         </CardContent>
       )}
-      {/* objectstack#29944 — an empty body table keeps the shape of its
-          siblings: the header row, then the empty sentence where the table
-          would be. */}
+      {/* objectstack#29944, objectstack#35597 — an empty body table is
+          still drawn: its column headers, then ONE row saying it is empty,
+          with the entry to add the first one where the rows would be. */}
       {!collapsed && isEmpty && bodyTable && !loadFailure && (
         <CardContent className="pt-0 pb-4 px-4">
-          <p
-            className="rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground"
-            data-body-table-empty=""
-          >
-            {t('detail.noRelatedRecords')}
-          </p>
+          <div className="overflow-x-auto rounded-md border border-border/60" data-body-table-empty="">
+            <table className="w-full text-xs">
+              {emptyTableHeaders.length > 0 && (
+                <thead>
+                  <tr className="border-b border-border/60">
+                    {emptyTableHeaders.map((header) => (
+                      <th key={header.key} className="h-8 px-3 text-left font-medium text-muted-foreground whitespace-nowrap">
+                        {header.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+              )}
+              <tbody>
+                <tr data-body-table-empty-row="">
+                  <td colSpan={Math.max(1, emptyTableHeaders.length)} className="px-3 py-4 text-center text-muted-foreground">
+                    <span className="inline-flex flex-wrap items-center justify-center gap-2">
+                      <span>{t('detail.noRelatedRecords')}</span>
+                      {onNew && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={newDisabled}
+                          data-body-table-empty-add=""
+                          onClick={(e) => { e.stopPropagation(); onNew(); }}
+                          className="gap-1 h-11 sm:h-7 text-xs shadow-none"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          {t('detail.new')}
+                        </Button>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       )}
       {!collapsed && !isEmpty && !loadFailure && <CardContent className={cn('pt-0 pb-4 px-4')}>
@@ -3913,8 +4199,24 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         )}
 
+        {/* objectstack#35597 — a body table past its row cap offers
+            「显示全部 N 条」, which expands it in place (no pages); a list
+            whose count the server did not report keeps its pages. */}
+        {bodyTableShowAllOffered && (
+          <div className="mt-3 pt-3 border-t flex justify-center">
+            <button
+              type="button"
+              data-body-table-show-all=""
+              onClick={(e) => { e.stopPropagation(); setCurrentPage(0); setBodyTableShowAll(true); }}
+              className="text-xs text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1 transition-colors sm:min-h-0"
+            >
+              {`${t('list.showAll', { defaultValue: 'Show all' })} ${bodyTableAllCount}`}
+            </button>
+          </div>
+        )}
+
         {/* Pagination controls */}
-        {showPagination && (
+        {showPagination && !bodyTableShowAllOffered && (
           <div className="flex items-center justify-between mt-3 pt-3 border-t">
             <Button
               variant="outline"
@@ -3948,8 +4250,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             truncation condition: the full list page is worth opening even when
             every row fits here (sort, filter, export, a shareable URL). An
             empty list has nothing to see in full. */}
-        {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} childObject={api || objectName} />}
-
         {onViewAll && !isEmpty && !bodyTable && (
           <div className="mt-3 pt-3 border-t flex justify-center">
             <button

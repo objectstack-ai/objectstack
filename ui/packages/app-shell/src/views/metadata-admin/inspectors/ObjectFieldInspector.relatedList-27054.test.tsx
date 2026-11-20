@@ -39,6 +39,9 @@ const h = vi.hoisted(() => {
 });
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => h.client }));
 
+// The inspector's dynamic imports, paid at collection, not in a clocked case.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { ObjectFieldInspector } from './ObjectFieldInspector';
 import { deriveRelatedLists } from '../../../utils/deriveRelatedLists';
 import { t } from '../i18n';
@@ -60,11 +63,15 @@ const taskWith = (leadFk: Row): Row => ({
   },
 });
 
-/** An owned child of the lead: without `primary`, owned lists come first. */
+/**
+ * An owned child of the lead: without `primary`, owned lists come first. It
+ * declares `relatedList: true` to stay a side card (objectstack#35597: a
+ * `master_detail` with no `relatedList` is a body table).
+ */
 const NOTE = {
   name: 'note',
   label: 'Note',
-  fields: { body: { type: 'text' }, lead: { type: 'master_detail', reference: 'lead', label: 'Lead' } },
+  fields: { body: { type: 'text' }, lead: { type: 'master_detail', reference: 'lead', label: 'Lead', relatedList: true } },
 };
 
 function Designer({ initial, drafts }: { initial: Row; drafts: Row[] }) {
@@ -138,9 +145,9 @@ describe('ObjectFieldInspector — the related list on the parent (relatedList /
     expect(ObjectSchema.safeParse(last).success).toBe(true);
   });
 
-  it('「不显示」 writes false and drops the list; 「显示」 leaves the key absent', () => {
+  it('「不显示」 writes false and drops the list; 「显示」 leaves the key absent on a lookup', () => {
     const drafts: Row[] = [];
-    render(<Designer initial={taskWith({ type: 'master_detail', label: 'Lead', reference: 'lead', relatedList: 'primary' })} drafts={drafts} />);
+    render(<Designer initial={taskWith({ type: 'lookup', label: 'Lead', reference: 'lead', relatedList: 'primary' })} drafts={drafts} />);
     fireEvent.click(radio('hidden'));
     expect(leadFkOf(drafts.at(-1)!).relatedList).toBe(false);
     expect(relatedOrderOnLeadPage(drafts.at(-1)!)).toEqual(['note']);
@@ -149,6 +156,18 @@ describe('ObjectFieldInspector — the related list on the parent (relatedList /
     fireEvent.click(radio('shown'));
     const shown = leadFkOf(drafts.at(-1)!);
     expect('relatedList' in shown).toBe(false);
+    expect(ObjectSchema.safeParse(drafts.at(-1)!).success).toBe(true);
+  });
+
+  it('a plain master_detail with no relatedList reads as primary, and 「显示」 writes an explicit true (objectstack#35597)', () => {
+    // The record page's default since objectstack#35597: a `master_detail` FK
+    // that declares no `relatedList` is a body table, `inlineEdit` or not.
+    const drafts: Row[] = [];
+    render(<Designer initial={taskWith({ type: 'master_detail', label: 'Lead', reference: 'lead' })} drafts={drafts} />);
+    expect(radio('primary').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(radio('shown'));
+    expect(leadFkOf(drafts.at(-1)!).relatedList).toBe(true);
+    expect(deriveRelatedLists(LEAD as any, [drafts.at(-1)! as any])[0].isPrimary).toBe(false);
     expect(ObjectSchema.safeParse(drafts.at(-1)!).success).toBe(true);
   });
 

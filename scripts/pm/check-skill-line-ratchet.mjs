@@ -2,262 +2,62 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * pm instruction-surface line ratchet (#7341 item 1, #5925 item 7; per-file
- * extension #8700) — shrink-only ceilings on every file the PM protocol and
- * the dev-agent definition are made of.
+ * pm instruction-surface BYTE ratchet (#7341 item 1, #5925 item 7; per-file
+ * extension #8700; re-denominated in bytes by #35229) — shrink-only ceilings on
+ * every file the PM protocol and the dev-agent definition are made of.
  *
  *   node scripts/pm/check-skill-line-ratchet.mjs               # the gate
  *   node scripts/pm/check-skill-line-ratchet.mjs --self-test   # verify the checker
  *
+ * The file keeps its historical name (`line-ratchet`) because `package.json`,
+ * `.github/workflows/lint.yml` and the gate censuses address it by path; the
+ * unit it counts is BYTES.
+ *
  * ## Why ceilings
  *
- * `.claude/skills/pm-dispatch/SKILL.md` is read in full by every seat session
- * and every Routine fire. It reached 3,013 lines (~235 KB) before #7341's
- * extraction, and 2,568 before the #7885 principles-only rewrite (maintainer
- * ruling 2026-08-12: 「现有的项目经理 skills 应该大幅简化,只需要说原则,不需要
- * 写细节」) landed it at its current ceiling. The ratchet held it at 0% growth
- * — while the UN-ratcheted references/ and os-dev.md grew +31% in one shift
- * (maintainer ruling 2026-08-14: 「8685 字太多了 并且综合审查一下相关的skills是
- * 不是应该压缩字数。」). So the ceiling now covers the whole surface, per file:
- * the main file carries principles; references/ carries on-demand detail
- * (provenance is one line; stories live on cards, not in operational text);
- * incident case law lives in git history (issue-ID dereference is deprecated —
- * see check-skill-id-lint.mjs). Without a gate that intent erodes one
- * well-meaning paragraph at a time.
+ * `.claude/skills/pm-dispatch/SKILL.md` is read in full by every seat session and every Routine fire, and so is every other file in the map below: its size is a token cost paid again on each read. Without a gate the intent to keep it small erodes one well-meaning paragraph at a time. The main file carries principles; `references/` carries on-demand detail; provenance is one line, stories live on cards, and incident case law lives in git history.
+ *
+ * ## Why bytes, not lines
+ *
+ * The ceiling prices a token read, and tokens track bytes, not lines. While the ceiling counted lines, a file could grow at a flat line count: one PR grew `references/platform-readings.md` from 16,953 to 22,559 bytes (+33%) at 134/134 lines, green on every run. The max-line-length rule (maintainer ruling 2026-08-23, option B) held every prose line to 120 bytes so that a line would track bytes again, and it turned the skills into text wrapped at 120 bytes. Maintainer ruling 2026-11-18 16:19Z, verbatim and untranslated: 「同意」, to the fleet skills review and its order of improvements, whose first step is this one (quoted in the body of card #35229): the ratchet counts bytes, and prose is no longer held to a 120-byte line.
+ *
+ * So each file has ONE number: its size in UTF-8 bytes, exactly what `wc -c <file>` prints. A full sentence on one line costs its bytes and nothing more, so a skill may be written in full sentences. A re-wrap that swaps a space for a newline is byte-neutral, so it neither pays for content nor costs any. An un-wrap can free a few bytes (joining a wrapped list continuation deletes its newline and indent; joining two CJK lines deletes the newline), and those are real bytes of the read: the count is the cost, and deletion stays the only currency.
+ *
+ * The per-file table-row pin ({@link MAX_TABLE_ROW_BYTES}) is NOT retired with the line rule: it stands on its own ruling, and it now meters a table row beside the byte ceiling rather than in place of a line rule that exempted it.
  *
  * ## What is covered — and the published catalog, which deliberately is not
  *
- * "The whole surface" above means the CEILINGS map below, which is an
- * ENUMERATION, never a root glob: the pm-dispatch surface (SKILL.md, its
- * references/, the per-lane job descriptions), the four other
- * `.claude/skills/` playbook SKILL.md files, the dev-agent definition
- * `.claude/agents/os-dev.md`, and both root instruction files — `AGENTS.md`
- * and `CLAUDE.md`. Read a file's absence from the map as a fact to check, not
- * an oversight to infer — `.claude/hooks/` and `.claude/settings.json` carry no
- * ceiling.
+ * The CEILINGS map below is an ENUMERATION, never a root glob: the pm-dispatch surface (SKILL.md, its references/, the per-lane job descriptions), the four other `.claude/skills/` playbook SKILL.md files, the dev-agent definition `.claude/agents/os-dev.md`, and both root instruction files — `AGENTS.md` and `CLAUDE.md`. Read a file's absence from the map as a fact to check, not an oversight to infer — `.claude/hooks/` and `.claude/settings.json` carry no ceiling.
  *
- * The **published** `skills/` catalog — the one that ships to customer projects
- * — is deliberately OUTSIDE the ceiling. It is the omission worth stating
- * because it is by far the larger surface: eleven published SKILL.md totalling
- * ~10,400 lines, against ~3,700 covered here. Two reasons, both about the cost
- * curve the ratchet prices rather than about size (#9923):
- *
- *   - What the ratchet prices is a full-file token read paid PER SEAT SESSION
- *     and PER ROUTINE FIRE, which is what every covered file above costs. The
- *     published catalog is read by customer projects, not by this repo's seats
- *     — a different cost curve, and not the one this gate was built against.
- *   - The published catalog is already a governed, human-merge-only surface
- *     (Prime Directive #14), so growth there passes a human eye by
- *     construction — a control a ratchet would merely duplicate. Note this
- *     reason does not separate the two roots by itself: the covered files are
- *     governed at merge too. What no reviewer prices THERE is the recurring
- *     per-session read of reason one, which is why they still carry ceilings
- *     and the published catalog does not.
- *
- * Extending coverage to the published root is therefore a POLICY CHANGE, not a
- * maintenance edit: it needs its own card and a maintainer's ruling, not a
- * CEILINGS row added in passing. The self-test pins this boundary, because
- * enforcement cannot — a published-root entry would run perfectly green.
+ * The **published** `skills/` catalog — the one that ships to customer projects — is deliberately OUTSIDE this map (#9923). It is read by customer projects, not by this repo's seats, it is a governed, human-merge-only surface, and it has its own gate with its own unit, `scripts/check-skills-token-ratchet.mjs`. Extending THIS map to it is a policy change that needs its own card and a maintainer's ruling, not a row added in passing; the self-test pins the boundary, because enforcement cannot — a published-root entry would run perfectly green.
  *
  * ## The ratchet discipline (shrink-only, per file)
  *
- *   - A ceiling may be LOWERED by any PR that shrinks its file — lowering is
- *     always legitimate and encouraged.
- *   - RAISING one is authorized by the RULING OF RECORD that orders text into
- *     the file (maintainer ruling 2026-10-15, letter B, ruling record
- *     6184799323): the raising PR quotes that ruling comment's id and the
- *     measured line delta in its body and moves the CEILINGS row in the same
- *     PR by at most that delta — no second word from the maintainer. A raise
- *     quoting no ruling id stays RED; there is no tolerance band; every line
- *     no ruling ordered is still paid for by deletion (「新增以删减付账」);
- *     ceilings already landed are not revisited. The script cannot read
- *     rulings: the quote is checked by the seat's contract-review record and
- *     by the queue guard's reader, never here. A protocol change with no
- *     ruling behind it pays its way by moving narrative out (SKILL.md →
- *     references/) or compressing in place, instead of raising the roof.
- *   - The headroom between a file's count and its ceiling is the budget for
- *     ordinary rule edits between compressions; it is deliberately small.
- *   - A same-PR CROSS-FILE MOVE is the one raise an author may take without a
- *     per-instance ruling — under the three conditions in the section below, and
- *     never as a way to grow the corpus.
+ *   - A ceiling may be LOWERED by any PR that shrinks its file — lowering is always legitimate and encouraged.
+ *   - RAISING one is authorized by the RULING OF RECORD that orders text into the file (maintainer ruling 2026-10-15, letter B, ruling record 6184799323): the raising PR quotes that ruling comment's id and the measured byte delta in its body and moves the CEILINGS row in the same PR by at most that delta. A raise quoting no ruling id stays RED; there is no tolerance band; content no ruling ordered is paid for by deletion (「新增以删减付账」); ceilings already landed are not revisited. The script cannot read rulings: the quote is checked by the seat's contract-review record and by the queue guard's reader, never here.
+ *   - The headroom between a file's size and its ceiling is the budget for ordinary rule edits between compressions; it is deliberately small.
+ *   - A same-PR CROSS-FILE MOVE is a raise an author may take without a per-instance ruling — under the three conditions below, and never as a way to grow the corpus.
+ *   - A `readings-*.md` increment is the third raise path: it raises that file's row to the landed bytes with no decision card, the raising PR's body quoting the rule line that grants it and the measured byte delta (`.claude/skills/pm-dispatch/references/triage-duties.md`, 例外一).
  *
- * Missing file or empty read is RED, never a pass (#4690: a gate that cannot
- * find its input must fail, not skip).
+ * Missing file or empty read is RED, never a pass (#4690: a gate that cannot find its input must fail, not skip).
  *
  * ## The one raise an author may take alone: a same-PR CROSS-FILE MOVE
  *
- * Maintainer ruling, 2026-09-03, adopting the measured option A of the skills
- * optimization programme's third decision batch — verbatim and untranslated:
- * 「同意」, and the adopted text in the ruling comment's own words, which every
- * declaration below cites as {@link RULING_CITATION}:
+ * Maintainer ruling, 2026-09-03, adopting the measured option A of the skills optimization programme's third decision batch — verbatim and untranslated: 「同意」, and the adopted text in the ruling comment's own words, which every declaration cites as {@link RULING_CITATION}:
  *
  *   the per-file line ratchet admits a cross-file move in one PR when the
  *   destination's allowance rises by no more than the source's net decrease and
  *   total lines do not increase, with the ruling cited in the ratchet comment
  *
- * The defect it repairs is structural rather than a hardship claim: a FACT can
- * be in the wrong FILE. A per-repo gate reading written into one lane charter is
- * read by that lane and missed by the other six, and its single source is
- * `references/platform-readings.md`. Consolidating it there REDUCES the corpus —
- * one copy, one reader path — yet under a shrink-only per-file ceiling it was
- * impossible without a per-instance maintainer ruling, because the destination
- * sits at headroom 0 like every other entry. The ratchet was pricing a move as
- * though it were growth, and the file's own remedy sentence — move narrative out
- * rather than raise the roof — was the very act it could not price.
+ * The ruling was given in lines because lines were the unit then; the arithmetic is now read in bytes. A FACT can be in the wrong FILE, and consolidating it reduces the corpus, yet under a shrink-only per-file ceiling that was impossible without a per-instance ruling. ⛔ It is NOT a general raise: deletion at the source pays, restatement does not. Three conditions, all checked against {@link CROSS_FILE_MOVES}:
  *
- * ⛔ It is NOT a general raise, and it is not a re-wrap: deletion at the source
- * pays, restatement does not. Three conditions, all checked below against
- * {@link CROSS_FILE_MOVES}:
- *
- *   (a) the destination's raise is at most the NET DECREASE of the sources that
- *       move declares, per move;
+ *   (a) the destination's raise is at most the NET DECREASE of the sources that move declares, per move;
  *   (b) the sum of ceilings over the whole map does not increase;
  *   (c) the raised entry declares the ruling that authorises it.
  *
- * ### What this gate can see, and what stays a reviewer's job
+ * The script reads the WORKING TREE and its own map, never the PR diff, so a declaration records the ceiling each participant carried BEFORE the move and the arithmetic is computable from the tree alone — deterministic, hermetic, and available in a shallow CI checkout. That is why the declaration is in-tree data and not a baseline diff: a baseline mode would read a ref that a shallow clone need not have and that a sibling's fetch moves under the run, and it would answer nothing at all once the move had landed. What stays with the reviewer is COMPLETENESS: that each recorded `was` is the value on `origin/main`, and that no OTHER entry moved in the same PR. (b) follows from (a) over disjoint declarations, which {@link crossFileMoveTotalVerdict} requires; it is written out because it is the ruling's own wording.
  *
- * The script reads the WORKING TREE and its own map. It never sees the PR diff,
- * so it cannot know that a raise happened at all, still less that a decrease
- * landed in the same PR. What it can do — and now does — is hold a DECLARED move
- * to its own arithmetic: every participant records the ceiling it carried BEFORE
- * the move, so the raise, the decreases and the map-wide total are computable
- * from the tree alone. Deterministic, hermetic, and available in a shallow CI
- * checkout — which is why the declaration is in-tree data and not a
- * `git show origin/main:<this file>` baseline diff. A baseline mode would read a
- * ref that a shallow clone need not have and that a sibling's fetch moves under
- * the run, and it would answer nothing at all once the move had landed.
- *
- * What stays with the reviewer is COMPLETENESS: that each recorded `was` is the
- * value on `origin/main`, and that no OTHER entry moved in the same PR. Both are
- * one `git diff` away in the raising PR and neither is inferable from a tree. It
- * is the bar this map has always used — every ceiling in it is an author's
- * number, read at review against the diff — so a declaration weakens nothing: it
- * is the first raise path here that a machine can check at all.
- *
- * ⚠️ (b) is belt and braces, not a second independent control. Over declarations
- * whose participants are disjoint — which {@link crossFileMoveTotalVerdict}
- * requires — it follows from (a) summed over the moves. It is written out
- * because it is the ruling's own wording, and because it is the condition that
- * would still be right if (a) were ever loosened.
- *
- * ### A move's raise and an ORDINARY ruled raise are separate quantities
- *
- * A destination does not stop being an ordinary ceiling once a move lands on it.
- * When the maintainer later raises it the ordinary way — the header's own exit, a
- * ruling quoted in the raising PR — that raise belongs to the RULING, not to the
- * move, and this declaration must not claim it. `was` is a single number, so the
- * first author to meet the case had one lever only: carry the destination's `was`
- * forward by the ruled amount, which keeps the move's arithmetic right while
- * making the field mean two things at once. Measured on the tree, with `was` left
- * at its literal pre-move value: the gate read the move as `314 → 358 = +44
- * against −11` and went red twice — condition (a) and the map-wide total — for
- * lines no source was ever asked to pay.
- *
- * So the two quantities are recorded separately. A declaration may carry
- * `ruledRaises`: one record per ordinary ruled raise taken on the destination
- * SINCE the move, each with the ruling's own words and its date, subtracted
- * before the move's own raise is measured. `was` goes back to meaning exactly one
- * thing — the destination's ceiling on the day the move landed — which is what
- * the reviewer's completeness check has always held it to, for the destination
- * and its sources alike.
- *
- * ⛔ The subtraction is the load-bearing risk, and it mirrors the one (a) already
- * guards: a record nobody ruled would license corpus growth under a move's
- * warrant, silently and for as long as the declaration stands. Two shape bars
- * answer it — a record quoting no ruling is RED, and so is a set of records
- * claiming more lines than the destination's ceiling actually stands above `was`,
- * which is what stops an inflated record from reading as PAID DOWN. Neither bar
- * can prove the maintainer said the words, and neither pretends to: that is the
- * same completeness check the reviewer already runs on every `was` here, and it
- * is why the bar is a QUOTATION rather than a flag an author may simply set.
- *
- *
- * ## The max-line-length rule (#11106) — what makes a LINE a unit again
- *
- * The ratchet counts LINES while the paragraph above prices a per-session token
- * read, and tokens track BYTES, not lines. The drift was measured, not inferred:
- * one PR added five fact entries to `references/platform-readings.md` and grew it
- * 16,953 → 22,559 bytes (+33%) at a flat 134/134 line count, green on every run,
- * no ceiling raised and nothing in this gate able to see it. A file whose lines
- * run 400–830 bytes lets an author add arbitrary content at zero measured cost,
- * while an author who wraps at 80 columns pays a line per 80 bytes — the
- * incentive points at the less readable spelling.
- *
- * Maintainer ruling 2026-08-23 (option B), verbatim and untranslated:
- * 「10950 不考虑存量,其他接受你的建议」 — a max-line-length rule on the
- * ceilinged files plus a one-off re-wrap of the legacy long lines, restoring the
- * proportionality the line count was always assumed to have. Deliberately NOT a
- * second ratchet (option A) and not a disclaimer in this header (option C).
- *
- * ### Why 120 bytes
- *
- * It is the corpus's OWN upper bound, not a new house style: measured over the
- * 4,028 lines of the map above, 34 land at exactly 120 bytes and both wrap styles
- * already present sit under it — ASCII prose wraps at ≤91 bytes (~88 columns),
- * CJK prose at ≤120 bytes (50–60 characters, ~100–120 display columns, a CJK
- * character being 3 bytes and 2 columns wide). 120 is the one number both
- * conventions already satisfy, so the rule codifies what the careful authors were
- * doing rather than reflowing the corpus to an invented width. Bytes — not
- * characters, not columns — because bytes is what the header prices.
- *
- * ### The exemptions live in the RULE, and are STRUCTURAL
- *
- * A length rule that can demand an ILLEGAL wrap is worse than no rule: it teaches
- * authors to break a table, split a fence, or — the sharpest case here — wrap a
- * 行锚定 directive line (`Blocked-by:` / `Restart-when:` / `Restart-touch:`),
- * whose entire contract is that a grep finds it ANCHORED AT A LINE. So every
- * exemption is derived from the line's own syntax, and there is deliberately NO
- * exemption registry and no per-file allowlist: a list of blessed long lines
- * would be precisely the ratchet-expanding remedy #8435 keeps out of an author's
- * reach, and it would rot. The exempt classes are {@link EXEMPTION_CLASSES}.
- *
- * `unbreakable` is the load-bearing one: the gate asks only for wraps it can
- * itself produce. {@link wrapLine} is the canonical form, and an over-long line
- * is RED exactly when re-wrapping it would change it. A bare URL, a long path or
- * a single long code span has no legal break point, so it comes back unchanged
- * and passes — the rule never asks for the impossible.
- *
- * Two of the classes are about what a WRAP COSTS rather than what markdown
- * allows, and both were found by running the re-wrap and reading what broke:
- * `blockquote` (a continuation must repeat `>`, so the wrap would insert a
- * non-whitespace byte into a quotation) and `quotation` (a 「…」 ruling that
- * already spans lines is left exactly as its author broke it — moving the break
- * moved a phrase across it and turned `check-skill-frame-sync` red). Both cost
- * the corpus a handful of long lines, and both are cheaper than a rule that
- * edits a verbatim maintainer ruling to satisfy itself.
- *
- * ### What a wrap may move, stated once
- *
- * ONLY whitespace: a space becomes a newline, or a newline is inserted between
- * two East Asian characters (a segment break there is removed by the CSS
- * segment-break transformation rules, which is why the corpus already wraps CJK
- * prose mid-run). No break is offered at a CJK↔Latin junction without a space,
- * because that one WOULD render as a space. That property is what let the one-off
- * re-wrap prove itself: every file compared byte-identical after whitespace
- * normalization, with its inline code spans identical in sequence.
- *
- * ### The junction that leaked (#12081), and why it is invisible in the source
- *
- * One junction escaped the paragraph above and had to be measured to be found: a
- * break directly after an ASCII `,` `;` `:` that follows a HAN character. It is
- * not a CJK↔Latin junction — both sides are Chinese — but the MARK between them
- * is a narrow byte, so the segment break is not between two wide characters and
- * renders as a space. 34 such breaks survived the #11106 re-wrap across 15
- * ratcheted files. ⚠️ The defect is invisible in the source and visible only in
- * the render, which is the inverse of the usual reading: a reviewer reads these
- * files as source, where the break looks like ordinary wrapping, while the space
- * exists only for the agent that reads the RENDERED text — and that is the whole
- * population these files are written for.
- *
- * ⭐ It is also SELF-CONCEALING under re-wrap, which is why the mechanism is
- * written down here rather than left to a PR body. Re-flowing such a paragraph
- * and re-wrapping it FAITHFULLY must PRESERVE the space (it is what the text
- * renders as), so the space migrates out of the line break and into a literal
- * `", "` in the source. It then looks like the re-wrap introduced a space. It did
- * not — it only made an existing render visible. Anyone auditing a re-wrap by eye
- * will reach the wrong conclusion here. {@link hanAsciiPunctTail} closes the
- * channel at its source by refusing to OFFER the break, so no future wrap has to
- * choose between preserving a defect and hiding it.
+ * An ORDINARY ruled raise taken on a destination after its move belongs to the ruling, not to the move: a declaration records it under `ruledRaises` (the ruling's own words, its date, its byte delta), and it is subtracted before the move's raise is measured, so `was` keeps meaning one thing. A record quoting no ruling is RED, and so is a set of records claiming more than the destination's ceiling stands above `was`.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -266,2536 +66,151 @@ import { isEntrypoint } from '../invoked-as.mjs';
 
 const REPO_ROOT = new URL('../../', import.meta.url);
 
-// Post-compression counts (#8700 one-time pass; SKILL.md keeps its #7885
-// value). Shrink-only: lower freely, raise only with a maintainer ruling
-// quoted in the raising PR (see header).
-//
-// ⚠️ RE-PINNED ONCE, WHOLESALE, BY #11106. Eighteen of these numbers moved in a
-// single stroke and NONE of them is a content raise: the one-off re-wrap that
-// landed the max-line-length rule above re-flowed 555 legacy over-long lines,
-// and a line that used to hold 400–830 bytes is now three to seven lines holding
-// the same bytes. Each file's content was proved byte-identical after whitespace
-// normalization before its ceiling moved (per-file arithmetic in that PR's body).
-// So the pre-#11106 numbers are not comparable to these, and reading a jump like
-// 666 → 1,050 as slack would be exactly backwards — headroom is 0 on every one of
-// them, and each line is now capped at 120 bytes, which is what makes the count
-// track the token read the header prices. `landing-operations.md` moved the other
-// way (82 → 80, its standing headroom locked in) and `state-machine.md`,
-// `lanes/{engine,services,cli,skills}.md` and `CLAUDE.md` did not move at all —
-// they were already within budget on every line.
+// Every ceiling below is its file's size in UTF-8 bytes (`wc -c`) at BASE =
+// 74d3d831d, the merge-base of the re-basing PR, headroom 0. The rows were
+// generated by one command over this map's keys (`git show "$BASE:<path>" |
+// wc -c`), quoted in that PR's body so a reviewer can re-run it and diff the
+// output against this map. Of the four rows marked below, three were then
+// lowered to the size that PR's own edits landed (lowering is always
+// legitimate); the fourth, `triage-duties.md`, was edited byte-neutral and
+// equals the output. No number
+// here is a raise and none is slack. The line-era row comments are not carried
+// forward: they are in another unit, and they stay readable in git history
+// (`git show 74d3d831d:scripts/pm/check-skill-line-ratchet.mjs`). A PR that
+// moves a row later says why in its body; the row carries a one-line comment
+// only when a reader needs the ruling at the row.
 export const CEILINGS = new Map([
-  // Lowered 682 → 666 by the maintainer-ordered whole-text restructuring round
-  // (ruling 2026-08-23, verbatim: 「接受你的重构提案」): the four long
-  // state-table rows and the clause-② review-chain bullets sank to the two new
-  // references below, and the report-contract JSON is single-sourced from the
-  // dev-agent definition. Landed count, headroom 0, same convention.
-  // Lowered 1008 → 1005 by the run-to-empty triage ruling (maintainer
-  // 2026-08-25): the per-round 3–5-card budget and the `finding` >15
-  // concentrated-round trigger both left the 发现分诊轮 paragraph, and the
-  // ≤5-same-family batch convention that replaces them costs less than they
-  // did. Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  // Lowered 1005 → 811 by the rules-only rewrite (maintainer ruling: provenance
-  // narratives, incident post-mortems and rationale tails leave the corpus; one
-  // rule per ≤120-byte line, 红线 first, templates last). Landed count, headroom
-  // 0, same convention (lowering is always legitimate).
-  // Raised 811 → 812 by the queue-entry third-case ruling — an ORDINARY raise
-  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
-  // live PM chat with the director seat, 2026-09-08, decision batch #91, under
-  // the standing delegation 「继续决策」, adopting option A of the skills seat's
-  // recommendation; the director record's own words (#16516):
-  //   Ruled content is not growth: the ratchet's own maintainer exit exists for
-  //   exactly this, and the precedent (`state-machine.md` 43→44) is on the map.
-  //   Land the ready text (115 / 112 / 116 B lines) with all three conjunctive
-  //   conditions intact. ⛔ B refused (collapsing an unrelated rule to a pointer
-  //   is an unmeasured weakening of something else); ⛔ C refused (SKILL.md:44
-  //   同 PR 同改 is not waived); ⛔ D refused by triage already.
-  // The content is the #16502 ruling (decision batch #73, 2026-09-07, maintainer
-  // 「同意」 on options C + D): a red on a NON-required check admits a PR to the
-  // queue only when (a) the check's own source names the red as by-design on a
-  // pushed branch, (b) the check does not run on `merge_group`, and (c) the PR
-  // comment records which check and why — three conjunctive conditions, none
-  // droppable. ONE line, and it could not be paid in place — measured, not
-  // assumed: the conditions need ≥107 B against 8 spare bytes on the 112 B rule
-  // line; the tightest self-contained one-line form is 137 B; and of the file's
-  // 601 adjacent bullet pairs ZERO merge under the 120-byte cap (smallest 121 B,
-  // and that one splices two rules). So the two-case premise line is compressed
-  // in place (88 → 115 B) to carry the case's head and the conditions land as one
-  // 112 B line; re-wrap funding is refused per the 2026-08-17 rule, and deleting
-  // a ruled clause is refused on the state-machine precedent. Landed count,
-  // headroom 0, same convention.
-  // Raised 812 → 813 by the human-merge line-threshold ruling — an ORDINARY raise
-  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
-  // 2026-09-18, live chat beside ruling C on the regenerated-artefact landing,
-  // verbatim and untranslated: 「还有应该完善skills，修改代码量超过某个行数
-  // （比如5000）就应该人工审核。」 The content is ONE rule line beside the
-  // four-piece-terminal trigger: a PR over the human-merge line (3,000 changed
-  // lines since the maintainer's 2026-10-09 word; additions + deletions,
-  // generated files included) takes the same terminal, with no fact-layer
-  // exception; the mechanical face is `check-governed-merges.mjs`.
-  // It could not be paid in place — measured, not assumed: the trigger line it
-  // belongs beside stands at 118 B against the 120-byte cap and the shortest
-  // self-contained form of the rule is 111 B; of the file's 598 adjacent bullet
-  // pairs ZERO merge under the cap (smallest 123 B); and deleting a ruled
-  // clause is refused on the state-machine precedent. Ruled content is not
-  // growth (the 811 → 812 entry above). Landed count, headroom 0, same
-  // convention.
-  // Raised 813 → 819 by the product-only-queue charter ruling — an ORDINARY
-  // raise under this map's own maintainer exit, ⛔ not a cross-file move.
-  // Maintainer, 2026-09-21, live PM chat with the director seat, verbatim and
-  // untranslated: 「205 否，天花板抬到 819」 — the second clause is this ruling
-  // (the first is batch #205 item 1, on a different card); recorded by the
-  // director on #19457, comment 5754521737. The content is the six ruled edits
-  // of #19457 (ruling batch #202, letter B, plus the audit-retirement directive
-  // 「受管合并审计 以后不需要了，浪费时间。」 landed as its edit 6): the dev queue
-  // becomes product-only and a `tooling` card enters `pm:queue` only with an
-  // `Unblocks: #N` line or a named published surface; triage closes at first
-  // grading; a gate that misfires twice is deleted rather than repaired; at most
-  // one tooling card is dispatched fleet-wide; and `tooling` becomes a
-  // first-touch label with four named readers.
-  // It could not be paid in place — measured over three rounds, not assumed: the
-  // cost went 9 → 8 → 6 as everything payable was paid (three rules folded into
-  // existing lines, the four readers folded into the length-exempt glossary ROW,
-  // the close rule folded onto the 「无则关」 clause a sibling PR had landed
-  // meanwhile, and edit 6's deletions gave two lines back); every ceilinged file
-  // in this map stands at headroom 0, so no reference file can absorb the rest;
-  // the six that remain are one ruled rule each, 78–120 bytes, and no two of them
-  // pair under the 120-byte cap; and a declared cross-file move is zero-sum by
-  // construction — the destination's raise may not exceed the source's net
-  // decrease — so it can fund a move but never new content. Ruled content is not
-  // growth (the 811 → 812 entry above). SKILL.md is not a CROSS_FILE_MOVES
-  // destination, so no `ruledRaises` record applies. Landed count, headroom 0,
-  // same convention.
-  // Lowered 819 → 319 by the principle-only cut (maintainer, decision batch #213
-  // item 4, verbatim: 「1 2 4 同意」 on 「协议主文 819 → 约 300 行(红线 + 状态模型 +
-  // 入口 + 索引),派发 / 复核 / 入队细则各成一份按阶段读的 reference;同时删
-  // core-rules.md 双份」). Relocation, not deletion: 开轮互斥 / 座位贴协议 / Epic
-  // 子树车道 / 轮次报告与节奏 / 停止条件与待命 / 断粮与跨墙恢复 →
-  // references/seat-lifecycle.md; 平台读数纪律 → references/reading-discipline.md;
-  // 多仓协调 → references/cross-repo-coordination.md; 分诊座位职责 →
-  // references/triage-duties.md; 执行座位职责 (候选/认领/派发/收集/复核) →
-  // references/execution-duties.md; 入队与落地 → references/landing-operations.md
-  // (the one declared CROSS-FILE MOVE below; this file is its source). Every
-  // rule line moved verbatim; the ACCEPT path-fork block stays here under
-  // 路径分叉 because check:pm-governed-prose anchors its region in this file.
-  // Landed count, headroom 0, same convention (lowering is always legitimate).
-  // Lowered 319 → 318 by the domain:server lane merge (maintainer ruling
-  // 2026-10-22, letter 乙): the engine, services and cli rows of the 域车道 table
-  // became one row, and the alias rule for the three retired labels took one
-  // bullet. Then 318 → 317: #25240 (landed 2026-10-22, the claim template's
-  // `Metadata-protocol:` line) had paid one line more than it took and left
-  // the ceiling where it was; this ledger edit, merging `main` behind it,
-  // takes the ceiling down to the landed count. Then 317 → 318, which is still
-  // a lowering: #25348 (landed 2026-10-23, every autonomous-adjudication
-  // channel revoked) spent the last line of its 319 ceiling on the pointer
-  // line that binds every seat to the human floor; this branch, merged behind
-  // it, lands at 319 − 1 = 318, so the ceiling is the landed count once more.
-  // Headroom 0 (lowering is always legitimate).
-  // Raised 318 → 319 (#25663): maintainer ruling 6385407063, option A, verbatim
-  // 「同意 318→319」 (2026-10-24) — the claim template's `Premise:` line, the
-  // reading `dispatch-runbook.md` 派发前置 requires. Measured +1, ceiling +1;
-  // headroom 0. SKILL.md is not a CROSS_FILE_MOVES destination, so no
-  // `ruledRaises` record applies. Landed count, same convention.
-  // Unchanged at 319 by the external-text rule: its 红线 and its 阶段细则索引 row
-  // were paid by deleting two 红线 that restated rules AGENTS.md carries
-  // (worktree/stash, hook-enforced; `content/docs/releases/`, its Documentation
-  // Guardrails row), never by re-wrap.
-  // Unchanged at 319 by #25712 item 4: its `domain:ui` lane-table row was paid
-  // by deleting the hold rule's pin-consumer clause (no pin is left to consume)
-  // and folding the rest of that line into the `pm:on-hold` rule it qualified.
-  // Unchanged at 319 by the security lane (#29665; ruling of record: the
-  // amendment comment 6592303181 quoting the maintainer's verbatim 「这个应该算
-  // 一个车道吧？虽然你不需要打标签，应该也有处理的规则需要写入skills」, which
-  // orders ONE 域车道 row): the row was paid by deleting the 红线 that restated
-  // two sentences AGENTS.md Prime Directive #15 carries and outranks this file
-  // on (a publish nobody ordered is filed as an incident, never counter-published;
-  // a path to a release is not authorization to walk it), never by re-wrap.
-  // Raised 319 → 320 by the area-lease mode (an ORDINARY ruled raise; ruling of record:
-  // the maintainer, 2026-11-15, verbatim: 「然后应该立卡更新skills。这种方式适合推广到其他车道吗？」 ·
-  // 「所以是否分区域，如何分区域应该是动态的是吗？」 · 「你直接立卡，然后让 server 5 按照你的卡处理也可以」;
-  // quoted in the body of card #33751 (filing gate ③), claim comment 6892768967):
-  // one 阶段细则索引 row naming `references/area-lease.md` and its reader, which is
-  // also the one lane-wide line saying the mode is open to any lane past the split
-  // threshold (cheaper than a line in each `lanes/*.md`). Measured delta +1; landed
-  // count, headroom 0, same convention.
-  // Raised 320 → 321 by the repo:objectstack lane (#33959; an ORDINARY ruled raise; ruling of
-  // record: the maintainer, 2026-11-15, verbatim 「是否考虑开一个全仓调度车道，按照你现在的执行的方案。」 ·
-  // 「就是仓库名」, quoted in that card's body, filing gate ③): one 域车道 row naming
-  // `references/lanes/objectstack.md`. No existing row can carry it (the security · review · eval
-  // row is 1 B under its 341 B pin). Measured delta +1; landed count, headroom 0, same convention.
-  // Raised 321 → 329 by the two review levels (an ORDINARY ruled raise; ruling record
-  // 6897685514, the maintainer, 2026-11-15, verbatim: 「复审车道和你这里的复审不是一个概念吗？
-  // 你派出的任务需要审核，但未必都需要契约复审」 · 「我觉得一步到位，先和我讨论区别最明显的名字，
-  // 座位也可以改」 · 「L1 普通审核 / L2 契约审核」): the 〈审核两级〉 glossary at the entry point — a
-  // heading, its two blank lines and five rule lines (L1, L2, the tier by face, the two
-  // levels' rules never crossing, what keeps its old name). Measured delta +8; every other
-  // line the renaming touched kept its line. Landed count, headroom 0, same convention.
-  // 329 → 328 (#35215 G-A, current values and quotes out of the skill): the batch row's current values moved out, the retired `target:<major>` label row deleted; landed count.
-  ['.claude/skills/pm-dispatch/SKILL.md', 328],
-  // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
-  // 2026-08-20, quoted in the raising PR): three mandated conventions land in
-  // the runbook's triage sections. Landed count, headroom 0, same convention.
-  // Lowered 244 → 243: the decision-analysis template entry became a pointer
-  // to the reference file below (lowering is always legitimate).
-  // Lowered 243 → 242 by the restructuring round: the stale hourly-fire
-  // rationale clause collapsed into a pointer at contract-review.md.
-  // 274 -> 278 (maintainer ruling, 2026-08-29, PM chat, verbatim: 「12813 同意」 — option A):
-  // one ruling sized to the merged end-state of the three stacked PRs on this file. The +4 is
-  // the measured residual of the ⑦-method section after compression to its reasoned floor and
-  // real-deletion cuts were exhausted; re-wrap funding was refused per the 2026-08-17 rule.
-  // 278 -> 280 (maintainer ruling, 2026-09-02, live PM chat with the director seat, replying to
-  // decision batch #4 in which this card was item 2 — verbatim and untranslated:
-  // 「13973 帮我综合分析，并参考主流平台的方案，并给我解释为什么不能都用日期类型。其他同意」
-  // — 「其他同意」 adopts option A): the stop-condition bullet becomes the MERGED bullet, carrying the
-  // executability criterion — a fence clause is executable by a one-shot dev only if the action it
-  // demands is TERMINAL within the run — plus the two executable rewrite forms, so neither can be
-  // copied without the other. Prose, never a table row: the widest-table-row pin below stays at 0,
-  // which is what forecloses the compact two-row table the card and its triage both used. Funding
-  // the growth by deleting sibling rationale was refused by the same ruling (option D). Landed
-  // count, headroom 0, same convention.
-  // Lowered 280 → 241 by the rules-only rewrite of the seven core references
-  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
-  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
-  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  // Raised 241 → 245 by the pre-dispatch premise check (the same maintainer's
-  // word of 2026-10-23, 「立卡」 and 「并且立刻派发」 on the proposal 「席位派发前先用
-  // 子代理核实前提。核实成立就派；不成立、但改法明确的，就改卡后再派；判断不了的，
-  // 转决策，不占卡线程名额」; quoted on card #25507, claim comment 6370029859):
-  // four lines at the head of the pre-dispatch section — the read-only subagent
-  // and when a card-thread card runs it, the three exits, what 「改法明确」 may and
-  // may not change, and the `Premise:` claim line. Measured delta +4; the section
-  // heading was renamed in place. Not a CROSS_FILE_MOVES destination, so no
-  // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  // Raised 245 → 246 by the contract-review route (maintainer, 2026-11-13, in the
-  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
-  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
-  // comment 6879512661): one line in the dispatch-prompt section — the order
-  // carries the route, the dev names the owed review in its hand-back and never
-  // knocks, the seat sends it to a review seat, never triage. Measured delta +1.
-  // Landed count, headroom 0, same convention.
-  // 246 → 245 (#35215 G-A, current values and quotes out of the skill): an expired one-time calibration line deleted, quotes and ids trimmed; landed count.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 245],
-  // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
-  // mechanism detail extracted from SKILL.md — the four long state-table rows
-  // (state-machine.md) and the clause-② review-chain operational detail
-  // (contract-review.md). Set at landed line counts (headroom 0, same
-  // convention as the entries above).
-  // Raised 43 → 44 by the generated-artifact carve-out ruling (maintainer
-  // 2026-08-25, verbatim: "files that are generator-owned outputs inside
-  // `skills/**` are carved out of the governed-merge fork", with the follow-up
-  // ordering "the exemption in `check-governed-merges.mjs` plus the one-line
-  // state-machine doc note"). ONE line, and it could not be paid in place: the
-  // file holds 34 content lines over 3,467 bytes, and every bullet is already
-  // packed to its own minimum at the 120-byte cap (measured per bullet), so the
-  // only in-place payment available was deleting a ruled clause. Landed count,
-  // headroom 0 again, same convention.
-  // Lowered 44 → 42 by the rules-only rewrite of the seven core references
-  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
-  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
-  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate). Lowered 42 → 41 when the retired contract-review label's
-  // card-side-first line left (ruling record 5770886272 on #19061).
-  // Raised 41 → 43 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
-  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
-  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
-  // Two lines: 开着的卡离手恒落一态 in the cross-state rules, and the hold-lowers-the-grade line
-  // (`Restart-grade:`). Every bullet here already sits at its 120-byte minimum, so payment in place
-  // would have deleted a ruled clause. Measured delta +2; landed count, headroom 0.
-  // Raised 43 → 50 by the blocking-mechanism rules (#35259): an ORDINARY ruled raise under letter B
-  // (record 6184799323). The ruling of record is that card's body, which quotes the maintainer
-  // verbatim (2026-11-19: 「先立卡改机制，排查现有的卡改状态」, 「可以拆的都同意。」) and orders items 1–4,
-  // 7, 9 and 10 into this file: the hold-match default (+1), the `Blocked-by:` line as the only
-  // source (+1), what the daily scan also reports (+1), the blocker's grade (+1), the
-  // maintainer's-step card and where a card that needs its result points (+2), the product choice
-  // that goes to the decision box (+1). The full-discharge line replaces the old 上游已关 line (±0).
-  // Measured delta +7. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 50],
-  // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
-  // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
-  // `skills/**` changes making a falsifiable operator/contract semantic claim fall
-  // under the CONTENT limb, with the criterion narrowed to 「可证伪的语义主张」 and
-  // NOT 「提到契约」). The ruling sizes it at 补一句 and it landed as three lines,
-  // which could not be paid in place: the file's 41 content lines carry 577 bytes
-  // of total slack under the 120-byte cap (mean width 105.9), so absorbing the
-  // addition's 332 bytes without a new line means re-wrapping the whole file —
-  // re-wrap funding is refused per the 2026-08-17 rule, exactly as on the
-  // dispatch-runbook entry above — and the only other in-place payment available
-  // was deleting a ruled clause, refused on the state-machine precedent. Landed
-  // count, headroom 0 again, same convention.
-  // Raised 51 → 57 by the in-seat contract-review rework (maintainer ruling
-  // 2026-08-31, verbatim: 「项目经理是fable 或者可以派fable的子任务都可以自己
-  // contract view吧?」— the clause-② release moves from the external review
-  // chain to the dispatching seat). The judgment checklist, the context-isolated
-  // fable review subagent and the chain's demotion to optional audit land HERE
-  // so the ratcheted main file stays principles-only (it paid its own bullet
-  // down to a pointer). Paid in place first: the wheel-ownership bullet, the
-  // request-review clause and the standalone qualification bullet were deleted
-  // or folded; the residual +6 could not be paid without deleting ruled clauses
-  // (refused on the state-machine precedent). Landed count, headroom 0, same
-  // convention.
-  // Raised 57 → 60 by the clear-equals-land CRITERIA encoding — the 清标即落地
-  // section gains the arm-precondition list it never carried: an in-seat at-tier
-  // PASS on record, `needs:contract-review` cleared on BOTH carriers, and ALL of
-  // the PR's checks green (never the required subset), with the per-pair
-  // mechanical reading (`check-clause2-carriers --pair`) and its exit register,
-  // and the governed-surface boundary restated as unchanged. The rule is the
-  // 2026-08-31 director batch #17 ruling, verbatim and untranslated: 「同意」,
-  // which ordered the text into THIS file and THIS section; the raise itself is
-  // authorized by the maintainer on 2026-09-01, director decision batch A,
-  // verbatim and untranslated: 「同意。」 — that ruling also chose the FULL
-  // encoding over the 58-line bare minimum, so the two extra lines are ruled
-  // content, not slack. Paid in place first: the downgrade-fuse bullet's
-  // restatement of the served-tier READING collapsed to the platform-readings
-  // pointer it already carried (4 lines → 3, 437 B → 353 B), the one real
-  // deletion the surface had; the residual +4 could not be paid without deleting
-  // a ruled clause, and the nearest candidates were the governed-surface
-  // boundary and the terminal clause (refused on the state-machine precedent).
-  // Landed count, headroom 0, same convention.
-  // Raised 60 → 65 by the clause-② GRADING ruling — the criterion itself, which
-  // this file carried nowhere: the claim-time `Clause-②: yes|no` declaration is
-  // PROVISIONAL by design (it fixes the conservative dispatch tier; the real gate
-  // is the at-tier review at PR/report time, where the evidence and the cost
-  // live, and a declaration overturned there is the mechanism working, not a seat
-  // fault); the mechanical floor (any NEW exported symbol or NEW key on an
-  // already-published payload is always `yes`, checkable in the tree at claim
-  // time); and the conformance class held back from mechanization (populating an
-  // already-declared field, re-selecting an input class between two published
-  // codes), which needs at-tier judgement and dispatches as `yes` when the claim
-  // cannot tell — a false `yes` self-corrects, a false `no` ships. The full
-  // taxonomy and the claim-time decision procedure are BOTH declined under the
-  // startup-scope lens, and that refusal is itself ruled content here.
-  // The ruling is the maintainer's, 2026-09-01, verbatim and untranslated:
-  // 「同意」; it authorizes this raise in its own words, verbatim and
-  // untranslated, in comment 5494466874:
-  //   「若触行数天花板,按 #13900 裁决同型引用本评论提额」
-  // Paid in place FIRST, and the payment is real deleted bytes, never a re-wrap:
-  // the 放行 bullet's restated FAIL / 卡在决策 triple went (single source is
-  // SKILL.md 条款②入队闸门, which this file's own header already points at), and
-  // with it the 三样不变 clause — self-declared as 「单源见主文件」, and its
-  // governed-surface limb survives in-file in 落地前检三条 (「受管面不适用,
-  // draft-only 终局不变」). That bullet fell 6 lines → 4. Two further restatements
-  // were measured and REJECTED as payment because a LINE ratchet cannot bank
-  // them: 停靠短暂 in the 双载体 bullet (−45 B, 3 lines → 3) and 非放行必要条件
-  // in the 外部评审链 bullet (−24 B, 4 lines → 4). The residual +5 is the ruled
-  // addition at its reasoned floor — 773 bytes of ruled content is 7 lines at the
-  // 120-byte cap, and no sixth-line spelling exists that keeps 不是出货缺陷, the
-  // ruling's own justification for declining the taxonomy. Landed count, headroom
-  // 0, same convention.
-  // Raised 65 → 68 by the review-INDEPENDENCE carrier — the template half of
-  // direction A, whose guard half (finding row C4 in
-  // `check-clause2-carriers.mjs`) landed on its own and has been INERT ever
-  // since, because no verdict on the board carries the two lines it compares.
-  // The addition is one bullet in 复核归属与资格(席内): the verdict declares
-  // `Implemented-by:` (the identity that produced the diff — a `mode:subagent`
-  // dev's BRANCH, since a subagent has no session of its own, and a
-  // `mode:remote` dev's session id) and `Reviewed-by:` (the reviewing seat's
-  // session); the same session on both lines is a SELF-REVIEW and is not an
-  // independent review, while a verdict carrying neither line stays silent
-  // forever. Two rulings authorise it, both verbatim and untranslated. The
-  // direction (maintainer, 2026-09-01, live session with the director seat):
-  //   「同意 A」
-  // and the raise itself together with the spelling reading (maintainer,
-  // 2026-09-02, live PM chat, decision batch #12, adopting the recommendation
-  // "(i) approve the raise, (ii) reading a"):
-  //   「同意」
-  // The 2026-09-02 batch #1 ruling 「14324 等我发版，其他同意」 authorised the
-  // same raise on the branch that has since merged guard-only; ruling (i) above
-  // re-issues it for THIS patch round, which is why the raise is not a seat's
-  // own judgement about its own diff — the one act this card exists to record.
-  // Paid in place FIRST, and the payment is not available: the file's 64 lines
-  // hold 2,007 bytes of slack under the 120-byte cap (mean width 88.6), so the
-  // 436 bytes of ruled addition would fit only by re-flowing the whole file —
-  // re-wrap funding is refused per the 2026-08-17 rule, exactly as on the two
-  // raises above — and the only other in-place payment is deleting a ruled
-  // clause, refused on the state-machine precedent. The CROSS-FILE MOVE path
-  // below does not apply either: no other ceilinged file holds this fact, so
-  // there is no source deletion to pay with, and manufacturing one to dodge a
-  // ruled raise would grow the corpus by exactly the same lines with the
-  // warrant hidden. Landed count, headroom 0, same convention.
-  // Lowered 68 → 60 by the rules-only rewrite of the seven core references
-  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
-  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
-  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  // Raised 60 → 63 by the contract-review route (maintainer, 2026-11-13, in the
-  // triage seat's session, verbatim: 「立 skills 卡，把契约复审的路由直接改成 review 座位」
-  // and 「没有 fable 时，找 review 座位」; quoted in the body of card #33157, claim
-  // comment 6879512661): the one routing rule — a lane self-reviews only when it
-  // reaches the tier; otherwise (unreachable, 429, rationed) it knocks a seated
-  // review seat, never triage, then a sibling seat with the tier, else the
-  // owed-review list — replaces the 429-only line (+2), and its one-line verbatim
-  // provenance carrying those two operative quotes (+1). Measured delta +3.
-  // Landed count, headroom 0, same convention.
-  // 63 → 62 (#35215 G-A, current values and quotes out of the skill): the verbatim provenance line deleted; the route it backed stands above it; landed count.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 62],
-  // Business-perspective decision-analysis writing guide (maintainer ruling
-  // 2026-08-20: the four-facet analysis must argue from the business
-  // standpoint). Set at landed line count (headroom 0, same convention).
-  // Lowered 48 → 46 by the #12081 soft-break closure (lowering is always
-  // legitimate): three of this file's measured Han+ASCII-punct breaks merged
-  // back into their paragraphs, and two of the three paid for themselves.
-  // Raised 46 → 54 by TWO same-day maintainer rulings on the decision frame,
-  // both of which explicitly order their own encoding into the skills. Verbatim
-  // and untranslated — the decision-batch presentation rule:
-  //   「每批5张详细解释，不是这样一堆列给我，这个也要写入skills」
-  // and the axis-weighting rule, whose card-face half lands here (its full
-  // statement is in the frame's single source, SKILL.md 「升级与决策」, paid from
-  // that file's existing headroom):
-  //   「四维分析中，长期合理应该权重最高，至少50%」
-  // +5 for the presentation teeth (exactly-5 / stop-and-wait / ⛔ multi-batch,
-  // and the prose-per-card duty with its applicability boundary — presenting
-  // items for a RULING, never already-decided result statements), +3 for the
-  // weight floor with its two guards (read through axis ①'s own definition, so
-  // it cannot underwrite speculative expansion; recommendation-only, so it
-  // cannot move the human floor). Could not be paid in place: all 46 lines are
-  // already packed to their own minimum at the 120-byte cap (measured per line
-  // — the file was densified at phrase boundaries by #13389 and the widest
-  // reflow saving available is zero), and re-wrap funding is refused per the
-  // 2026-08-17 rule in any case; the only other in-place payment was deleting a
-  // ruled clause, refused on the state-machine precedent. Landed count, headroom
-  // 0 again, same convention.
-  // Lowered 54 → 50 by the rules-only rewrite of the seven core references
-  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
-  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
-  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  // Raised 49 → 50 by item 11 of the blocking-mechanism card (#35259): ruling records 6998694957
-  // (every decision for the maintainer goes through a ceiling-tier decision thread first; the
-  // seat-tier fallback line is removed) and 6999656302 (that thread runs at effort `xhigh`, `max`
-  // only when he names it). The one fallback line becomes two rule lines. Measured delta +1.
-  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // Raised 50 → 62 by the four-line maintainer brief (#35298): an ORDINARY ruled raise. The ruling
-  // of record is that card's body, which quotes the maintainer verbatim, 2026-11-19:
-  // 「目前的维护者速读，写的其实不是很好，感觉很多废话，应该从业务的角度写。」, then 「同意」 to the four-line
-  // shape. It orders the decision brief and its worked example into this file: the brief on top and its four
-  // lines (+3), the words it never carries (+1), what stays in the English analysis part (+1), the
-  // worked example (+6) and the blank line that closes its list (+1). Measured delta +12.
-  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 62],
-  // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
-  // 2026-08-23) — the three write-side sanitizer rows consolidated to one
-  // author rule + one measured-behaviour row per surface (body / comment).
-  // 133 → 130 (LOWERED, no ruling needed — shrinking is always legitimate):
-  // the REST-default read-order flip (maintainer ruling 2026-08-23, 「1+2+3」)
-  // consolidated the three channel-partition rows into two, and the per-
-  // operation channel mapping moved out to references/rest-channel.md below.
-  // The two right-sized-reads rows the same ruling ordered were paid from that
-  // saving in place, and three lines came back. Headroom 0 again.
-  // 314 → 324 by the CROSS-FILE MOVE the 2026-09-03 ruling authorises —
-  // #14685 item 5 (comment 5520452691), declared in CROSS_FILE_MOVES below and
-  // re-derived there on every run. Three misplaced per-repo facts consolidate
-  // into the file that is their single source: the objectstack required-check
-  // set with its `in_progress` and advisory boundaries (lanes/cli.md, −4), the
-  // two aggregate-reading gate boundaries (lanes/services.md, −2), and the
-  // merge_group count-is-not-a-mechanism tombstone (rest-channel.md, −5, moved
-  // byte-identically). The per-job-conclusion rule the first of those carried
-  // was NOT copied: this file already states it in 队列成员资格 above, so the
-  // moved bullet points at it instead — a move that restated it would be paying
-  // for a second copy. +10 against a net source decrease of 11, so the map's
-  // total falls by one; that is the ruling's own condition and the reason this
-  // is a move rather than a raise. Landed count, headroom 0, same convention.
-  // Raised 324 -> 358 by the intake-family ruling — an ORDINARY raise under this
-  // map's own maintainer exit, ⛔ not a cross-file move. Maintainer, live PM chat,
-  // 2026-09-04, decision batch #27, verbatim and untranslated: 「同意」 on option A,
-  // and the sentences that ruling adopts, in the director record's own words:
-  //   the ceiling for `.claude/skills/pm-dispatch/references/platform-readings.md`
-  //   is raised by the measured need, +34, to 358 — a named, sized raise under the
-  //   ratchet's own maintainer exit … The +34 is a ceiling of the raise, not a
-  //   target: if the eight readings land in fewer lines, the raise is the smaller
-  //   number.
-  // Spent in full, and measured per member by writing each reading and wrapping it
-  // rather than estimating: chain head +5 (the page-walk 422 refusal at offset
-  // ~9,900 and the asc + desc partition recipe), payload channel +5, search query
-  // shape +3, channel envelope +6, merge-queue instrument +8, queue progress +2,
-  // end-of-shift report +3, body repair +2 = +34 exactly. Could not be paid in
-  // place: the deletions this file can offer were measured at 0 whole lines (~307
-  // bytes spread over three bullets, none of them completing a line inside its own
-  // bullet), and re-wrap funding is refused per the 2026-08-17 rule. Landed count,
-  // headroom 0, same convention.
-  // Raised 358 -> 397 by the third-increment ruling — again an ORDINARY raise
-  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
-  // decision batch #34, 2026-09-04, verbatim and untranslated: 「决裁批 #34 同意」
-  // on the presented recommendation, item 1 = A; the director record's own
-  // sentence for that item: "raise the ceiling by the measured +39, 358 → 397".
-  // Spent in full, and measured the same way — each member written in the file's
-  // voice and wrapped by this module's own `wrapLine` rather than estimated:
-  // attribution-footer scoping +12 (the row is true per CHANNEL and per
-  // ACTION/INPUT over four observations, and names what is untested instead of
-  // resolving the mechanism into a law), the MCP-side rate refusal read as a
-  // window reading rather than a signal about the PR +6, the CDN cause behind
-  // 「本档的缺席不是读数」 +5, and the Routine transport family +16 (no connector
-  // tools in a fired session · self-binding's trade and its orphan-recovery rule
-  // · neither `sources` nor `model` on the create end) = +39 exactly. Two members
-  // shrank against `origin/main` before landing, because the file already carried
-  // the fact: a reading the table states is cited, never re-spelled. Nothing was
-  // paid in place — the deletions this file can offer were measured at 0 whole
-  // lines under the previous raise and nothing has been added since to delete —
-  // and re-wrap funding is refused per the 2026-08-17 rule. Landed count,
-  // headroom 0, same convention.
-  // Item 2 of the same ruling = C: the two quota sentences this increment leaves
-  // in tension — the standing 「⛔ 不据限流报文里的 user ID 推…」 and the new
-  // member's 未裁 clause beside it — BOTH STAY AS WRITTEN, pending a
-  // discriminating read. ⛔ Neither is edited here or there.
-  // ⚠️ This entry is also the DESTINATION of the cross-file move declared below,
-  // and NEITHER ordinary raise above is part of it. Both are recorded there as
-  // `ruledRaises` records quoting their own rulings, which is what keeps that
-  // declaration's `was` at this file's literal pre-move 314 while the move's own
-  // raise still reads +10 against the sources' −11.
-  // Lowered 397 → 359 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  // Raised 359 → 362 by the fourth-increment ruling — again an ORDINARY raise
-  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
-  // decision batch #56, 2026-09-06, verbatim and untranslated: 「其他同意」 on the
-  // presented recommendation, option A; the director record's own sentences for
-  // it (comment 5559776878):
-  //   The ceiling in `scripts/pm/check-skill-line-ratchet.mjs` for
-  //   `.claude/skills/pm-dispatch/references/platform-readings.md` moves 359 →
-  //   362 … All three lines land as authored … No existing line is deleted to pay
-  //   for them (option C rejected); no line is dropped (option B not needed).
-  // Spent in full at one line per reading, each written in this file's voice and
-  // wrapped by this module's own `wrapLine` rather than estimated: the zero-quota
-  // payload channel's timeline discriminant +1 (compare each array's `edges`
-  // length against `totalCount`; short means the NEWEST items are absent, so a
-  // claim check goes to the paged `get_comments` read), the authoritative reading
-  // of a multi-package `ELIFECYCLE` spray +1 (the `Failed:` line plus that
-  // package's own `##[error]`), and the first-differing-offset comparison that the
-  // platform's two-way blank-line normalisation around a trailing rule forces +1
-  // = +3 exactly. Nothing was paid in place: line-neutral folding was MEASURED,
-  // not assumed — of the file's 333 adjacent rule pairs, ZERO fit the 120-byte
-  // line cap when merged, so there is no re-wrap slack at all, and re-wrap funding
-  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0, same
-  // convention.
-  // Raised 388 → 395 by the SIXTH readings increment, taken under the STANDING
-  // one-file exception rather than a fresh decision card. `pm-dispatch`
-  // SKILL.md carries that exception, verbatim and untranslated:
-  //   「唯一例外:`platform-readings.md` 增量抬上限到落地行数,免决策卡,记
-  //   `ruledRaises` 引常设裁决。条件:席位验收评论逐条核实、去重计数(候选/落地/
-  //   已有/拒收)、一事一行、不计重排」
-  // so the number below is the LANDED count and the seat's ACCEPT carries the
-  // per-item verification and the candidate / landed / already-present / refused
-  // counts the exception requires. Spent at ONE line per deduplicated reading,
-  // each written in this file's voice: MCP's read limiter and write limiter are
-  // independent of each other, measured in both polarities (+1); a control
-  // word's hit does not license a different term's zero, since the same document
-  // is reachable by one term and empty by another (+1); a listing that returns a
-  // bare array and no total cannot announce its own truncation (+1) and the
-  // single-point 200/404 read that answers an existence question instead (+1);
-  // `issue_write` clears every field it is not passed, assignees included (+1);
-  // assignability is a repo+account property that moves mid-session, with its
-  // 204/404 probe (+1); a standalone marker line is dropped by the COMMENT read
-  // path with the bytes still in storage, so its absence is not evidence of a
-  // write-side strip (+1) = +7 exactly. Nothing was paid in place: the fourth
-  // increment MEASURED zero line-neutral folds among this file's adjacent rule
-  // pairs, and re-wrap funding is refused per the 2026-08-17 rule in any case.
-  // The same-PR correction of the footer-mechanism row is line-neutral and buys
-  // nothing. Landed count, headroom 0, same convention.
-  // Raised 395 → 402 by the SEVENTH readings increment, again under the STANDING
-  // one-file exception quoted above rather than a fresh decision card, and again
-  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
-  // deduplicated reading, each written in this file's voice: the dispatch-gates
-  // self-test runs past the container's 600 s foreground cap, so a timeout is not
-  // a verdict (+1); a push that re-folds an armed PR can drop the arm with no
-  // field saying so (+1); `enable_pr_auto_merge` succeeds on a PR already reading
-  // `mergeable_state: clean`, against its own tool description (+1); a `merged_by`
-  // named in `list_pull_requests`'s `fields` comes back absent, so an absent field
-  // is not a value reading (+1); PR labels ARE readable after all — leg ④, the two
-  // PR-native MCP endpoints (+1); the write side's mirror asymmetry, where
-  // `issue_write update` takes a PR number that read leg ① refuses (+1); and the
-  // TITLE truncation — the same read-side discard reaches titles, where it cuts
-  // from the first tag-shaped span to the END rather than leaving a hole, so a
-  // title-derived population count is only a lower bound (+1) = +7 exactly.
-  //
-  // ⚠️ That last line is a NEW ROW, not a rewrite, and the distinction was a
-  // review finding rather than the author's first instinct. It was first written
-  // as an in-place replacement of the read-side row above it, which silently cost
-  // that row its SUBJECT: the original names WHAT is discarded (an angle-bracketed
-  // span inside inline backticks, discarded whole, unescaped, undecodable), and
-  // that is the load-bearing contrast with the entity-escaping row before it,
-  // which IS reversible. The replacement left 「丢弃」 with no antecedent anywhere
-  // in the file. The read-side row is therefore restored BYTE-IDENTICAL to
-  // `origin/main` (blob c242297575d3c04205e47d9628ff0545e5d63da4) and the title
-  // fact pays for its own line.
-  //
-  // ONE correction is paid in place and buys nothing: the PR-label block's
-  // opening row, which said three blind legs where leg ④ now answers.
-  // The single-label omission this increment's carrier card was opened for did
-  // NOT reproduce, so it lands NO line — the negative reading is on the card.
-  // Nothing else was paid in place: the fourth increment MEASURED zero
-  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
-  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
-  // same convention.
-  // Raised 402 → 419 by the EIGHTH readings increment, again under the STANDING
-  // one-file exception quoted above rather than a fresh decision card, and again
-  // recorded as a `ruledRaises` record citing it. Its carrier card invited riders
-  // as comments, so the candidate set was 25 readings across the body and eleven
-  // rider comments; deduplicated against the file they land as 17 lines, one per
-  // reading, each written in this file's voice: the footer appender's
-  // discriminator is the SENT body's tail rather than the channel — a body
-  // already ending in the rule line + session-URL block gets nothing appended,
-  // measured in both directions on both channels (+1) — with its boundary, that
-  // no controlled pair has been sent and the fit is not a finding (+1); a call
-  // carrying no `body` argument changes the footer state not at all (+1); the
-  // strip reading recorded no input shape and is the one observation outside the
-  // fit (+1); a body stacking the harness's two-line block over the footer
-  // stores THREE attribution blocks (+1); the comment EDIT path is idempotent on
-  // a body that already ends in its block, unlike comment creation (+1); an
-  // issue-body `PATCH` normalises a pre-existing footer to the end instead of
-  // duplicating it (+1); the merge queue builds a BOUNDED window, so an entry
-  // past it shows neither queue ref nor `merge_group` run (+1); the
-  // `auto_merge_enabled` webhook payload names `merge` too, so the landing
-  // method is read off the squash commit's parent count (+1); the squash
-  // rewrites the authored co-author trailer while `Claude-Session:` survives
-  // (+1); web-page reachability forks per session AND per URL shape (+1), with
-  // the local permission classifier's pre-network refusal named as a THIRD
-  // mechanism that is not a 403 (+1); the PR page carries every comment's raw
-  // markdown in `clipboard-copy` value attributes (+1) while the ISSUE page
-  // carries no such thing and its mention counts are identical blind and
-  // sighted (+1); the public issues query page DOES serve SSR anchors and ANDs
-  // its `label:` filters, matching REST number for number on a small result and
-  // truncating silently on a large one (+1); the search index's zeros fork by
-  // TERM SHAPE — camelCase identifiers and quoted phrases return 0 where a
-  // hyphenated slug in the same sequence returns the full set (+1); and
-  // `list_pull_requests` addressed by `head: owner:branch` returns draft,
-  // labels, assignees and requested reviewers in ONE call (+1) = +17 exactly.
-  //
-  // FIVE corrections are paid in place and buy nothing: the create-side row's
-  // bare-REST-only attribution (both channels behave alike, keyed on the sent
-  // tail); the cell's closing row, which named the CHANNEL as the create-side
-  // variable; the `--pair` row, which lifted out of its paragraph read as
-  // "always exits 0 in-container" and now carries the exit-4 verdict it must not
-  // suppress; the search row's flat claim that a qualifier-shaped query returns
-  // 0, which a same-session control carrying a qualifier disproves; and the
-  // public-page boundary row's "no SSR results". Nothing else was paid in place:
-  // the fourth increment MEASURED zero line-neutral folds among this file's
-  // adjacent rule pairs, and re-wrap funding is refused per the 2026-08-17 rule
-  // in any case. Landed count, headroom 0, same convention.
-  // Raised 419 → 422 by the NINTH readings increment, again under the STANDING
-  // one-file exception quoted above rather than a fresh decision card, and again
-  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
-  // deduplicated reading, each written in this file's voice: the label-event
-  // stream `GET /issues/{n}/events` follows the SESSION GATE rather than being
-  // shut fleet-wide — 200 carrying each labeled/unlabeled name and timestamp,
-  // measured two-through-one-403 across three containers (+1); the quietest
-  // member of the shallow-checkout trap family is a WINDOWED `git log --grep`,
-  // which answers 0 results with exit 0 and no warning, so the reading drawn is
-  // "that commit never existed" (+1); and the response to
-  // `check-governed-merges`'s refusal is to deepen from a date BEFORE the
-  // window, never to enumerate past it, because a short list reads as
-  // COMPLIANCE (+1) = +3 exactly.
-  //
-  // ⚠️ The candidate set was larger than what landed, and the cut is the
-  // exception's own dedup condition doing its work rather than an author
-  // trimming: the authenticated 15,000 quota and the round-opening `rate_limit`
-  // read are already here, `/timeline` is already named twice (the
-  // queue-membership discriminant and the red-window row), "the gate forks per
-  // session, ⛔ never inherit another seat's 403" is already here, and the
-  // shallow clone's refusal-with-remedy is already the `check-governed-merges`
-  // row this increment appends to — that row carries the literal
-  // `git fetch --shallow-since=` spelling, so the dispatch's reading that this
-  // file holds ZERO lines on the shallow family was falsified on the tree before
-  // any line was written. Candidates 7 / landed 3 / already present 4 /
-  // refused 0. Nothing was paid in place: the fourth increment MEASURED zero
-  // line-neutral folds among this file's adjacent rule pairs, and re-wrap
-  // funding is refused per the 2026-08-17 rule in any case. Landed count,
-  // headroom 0, same convention.
-  // Raised 422 → 425 by the TENTH readings increment, again under the STANDING
-  // one-file exception quoted above rather than a fresh decision card, and again
-  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
-  // deduplicated reading, each written in this file's voice: arming auto-merge on
-  // a PR whose checks are ALL complete enqueues AT ONCE — 28–60 s from the enable
-  // call to `added_to_merge_queue` measured here, 17–20 s enqueue→merge across a
-  // dozen PRs on the sibling repo the carrier card was filed from — so no window
-  // stands between arming and landing (+1); a call made before mergeability
-  // settles arms CLASSIC auto-merge WITHOUT enqueueing, and the settled call is
-  // the one that enqueues (+1); and a GitHub label description is capped at 100
-  // CHARACTERS, a longer one refused with `422`, measured on a maintainer ruling
-  // fixed verbatim at 133 characters and therefore unstorable (+1) = +3 exactly.
-  //
-  // ⚠️ The candidate set was FOUR, and the cut is the exception's own dedup
-  // condition doing its work rather than an author trimming. The fourth reading —
-  // that an `enable_pr_auto_merge` success line carrying an EMPTY method and
-  // timestamp is a real arming and not the documented graceful no-op — is already
-  // on the tree in a stronger and more general form, at the two rows reading
-  // 「`enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述
-  // 的优雅失败相反」 and 「回显两向不可靠,空回显不等于未挂上」. The carrier card's own
-  // measurement was taken against `:13–:14` alone, which carry the FIELD's
-  // instability rather than the ECHO's, so the reading it drew — that the
-  // disambiguation is absent — was falsified on the tree before any line was
-  // written. Candidates 4 / landed 3 / already present 1 / refused 0.
-  //
-  // ⛔ The carrier card's who-flips half lands NO line here in any form: it is
-  // closed by `references/landing-operations.md`, which already holds it, and a
-  // second copy is what the consolidation ruling above exists to refuse.
-  //
-  // Nothing was paid in place: the fourth increment MEASURED zero line-neutral
-  // folds among this file's adjacent rule pairs, and re-wrap funding is refused
-  // per the 2026-08-17 rule in any case. Landed count, headroom 0, same
-  // convention.
-  // Raised 425 → 449 by the ELEVENTH readings increment, again under the STANDING
-  // one-file exception quoted above rather than a fresh decision card, and again
-  // recorded as a `ruledRaises` record citing it. Its carrier was a FOLDED family
-  // of five cards, so the candidate set spans all five bodies and their grading
-  // comments; deduplicated against the file they land as 23 lines, one per
-  // reading, each written in this file's voice and each ≤ 120 bytes: the
-  // `needs:contract-review` label is a merge gate in its own right, `blocked`
-  // beside `mergeable: true` against a label-less sibling's `clean` (+1) and the
-  // two `mergeable_state` sequences a ready flip produces, with `unstable` named
-  // TRANSIENT rather than a failed check (+1); the queue ref's embedded parent is
-  // a SPECULATIVE base that need not be on `main` yet (+1); every REST write
-  // through the egress proxy needs an explicit `Content-Type: application/json`
-  // or the proxy answers 415 with nothing written (+1), with the discriminator
-  // that makes it the PROXY's refusal rather than GitHub's — the refusal's
-  // `documentation_url` (+1); a footerless body on the `PATCH /pulls` cell stores
-  // exactly one, which is that cell's prescription (+1); the MCP `issue_write`
-  // UPDATE path eats a trailing rule+footer block while the call returns an id
-  // and a url (+1); the bare-REST issue-body cell recognises a BLOCK, so a bare
-  // footer with no rule line above it is not one and a whole block is appended
-  // (+1), and the two cells left unmeasured are named as unmeasured (+1); a
-  // bracketed placeholder survives inside an inline code span, where an entity
-  // does not decode (+1); the wake relay's own escaping is not the artefact's, so
-  // a published body is judged from a `GET` (+1); a `failure` can be superseded
-  // by a LATER failure carrying a different diagnosis, so the latest-per-name
-  // collapse runs before any verdict (+1); an exit code is a field literal and
-  // the reading is the printed verdict line (+1), with the measured instance —
-  // `check-governed-merges` exit 3 is GOVERNED on `--test` and PREREQUISITE NOT
-  // MET elsewhere (+1); `check-half-states.mjs` does full-repo I/O even for
-  // `--help`, so an output file read early is EMPTY rather than clean (+1), and
-  // `nohup … &` inside a backgrounded tool call reports a false `exit 0` (+1); an
-  // unquoted heredoc delimiter expands every backtick in the body (+1) and
-  // `cmd | tail; echo $?` reads tail's status (+1); the PR-body `Check Changeset`
-  // gate reads the clause-② declaration tolerantly, per its own failure text
-  // (+1), while the claim-comment limb's axis is line-initial PLACEMENT (+1) with
-  // only a `#` heading and a mid-line key breaking it, verified by IMPORTING
-  // `readClause2Line` rather than counting contiguous strings (+1); and the claim
-  // marker itself, absent from this file until now — `CLAIM_COMMENT_MARKER` reads
-  // a line-beginning `Claim:`/`Claimed:` with optional whitespace or one `>` (+1)
-  // and a `**` or backtick before the word makes the comment invisible to the
-  // round-opening mutex readings and to the enqueue limb (+1); and the rider
-  // admitted in the family's own review — a bare-REST issue `PATCH` carrying
-  // `labels` and `type` in ONE body answers 500 and writes nothing, while the
-  // same two fields as two consecutive writes both answer 200 (+1) = +24 exactly.
-  //
-  // FOUR corrections are paid in place and buy nothing, each because a new cell
-  // contradicts the row rather than extending it: the success-sequence row, which
-  // keyed on `removed_from_merge_queue` being followed by `merged` within ~1 s
-  // when the two are measured arriving in the SAME second and in no fixed order;
-  // the issue-body `PATCH` row, whose 「总数恒一条」 holds for a full block and for
-  // no footer but NOT for a bare footer without its rule line; and the
-  // write-entities prescription, which is true of body prose and false inside an
-  // inline code span, where the entity does not decode and corrupts a verbatim
-  // quotation. The fourth is the reviewer's own, authorised in the family's
-  // review against seven draft PRs read across two repos: a draft's
-  // `mergeable_state` answers `clean`, `blocked` or `unknown` like any other
-  // PR's, and NOT the literal `draft` the row asserted it always returns.
-  //
-  // ⚠️ The candidate set was larger than what landed, and the cut is the
-  // exception's own dedup condition doing its work rather than an author
-  // trimming. Already present, no edit: the `POST /pulls` create leg, whose
-  // discriminator is the SENT body's tail and whose +90 append is already here in
-  // a stronger form (measured both directions on both channels) — the family's
-  // create-leg readings CORROBORATE that row rather than adding to it; the
-  // comment `PATCH` idempotence row; the comment-creation +58 append; the general
-  // 「exactly one footer, idempotent on its own form, a different spelling yields
-  // more」 rule, which this file already carries as the THREE-block reading for a
-  // body stacking the harness's two-line block over the footer; queue progress
-  // being read from the `event=merge_group` runs, and the queue's serial 15–30
-  // minutes per PR, which together are the whole of the 「a quiet `main` tip is
-  // not a stall」 reading; and the inert echoed `merge_method`, re-measured a
-  // fourth time this round and unchanged. Candidates 33 / landed 26 readings
-  // (24 new lines + 4 in-place corrections; two readings needed two lines each
-  // under the 120-byte cap) / already present 7 / refused 0. The last two of the
-  // 33 arrived in the family's review round — the rider card's 500 reading and
-  // the draft `mergeable_state` correction — and are counted here, not deferred.
-  //
-  // Nothing else was paid in place: the fourth increment MEASURED zero
-  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
-  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
-  // same convention.
-  // Raised 449 → 451 by the TWELFTH readings increment, again under the STANDING
-  // one-file exception quoted above rather than a fresh decision card, and again
-  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
-  // deduplicated reading, each written in this file's voice: this table's own
-  // `mustName` does not require exclusivity, so pinning a seventh registry row
-  // cannot turn the table red (+1); and its corollary — a green gate is
-  // therefore NOT a reading that the count row beside it is current, which is
-  // exactly what leaves that row hand-maintained (+1) = +2 exactly.
-  //
-  // ONE correction is paid in place and buys nothing: the required-checks row
-  // and its wrapped continuation, which said six and named six. The new count
-  // and the seventh name land inside the two lines that row already occupied.
-  //
-  // ⚠️ ONE candidate was REFUSED rather than trimmed, and the refusal is this
-  // corpus's own standard doing the work. The seventh context's entry date and
-  // the card that pinned it were drafted as a third line; that is provenance
-  // narrative carrying a date and two issue numbers, which `check-skill-id-lint`
-  // refuses outright and which the 2026-08-12 ruling keeps out of the scanned
-  // corpus altogether. Its one operative residue — that the registry can lag the
-  // real required set — is already what the corollary line above says, so the
-  // line was DELETED rather than bought, and this increment is +2 and not the +3
-  // it was drafted at. Candidates 3 / landed 2 readings / already present 0 /
-  // refused 1.
-  //
-  // Nothing else was paid in place: the fourth increment MEASURED zero
-  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
-  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
-  // same convention.
-  // Raised 451 → 453 by the THIRTEENTH readings increment, again under the
-  // STANDING one-file exception quoted above rather than a fresh decision
-  // card, and again recorded as a `ruledRaises` record citing it. Spent at ONE
-  // line per deduplicated reading, each written in this file's voice, both
-  // from the Claude Code settings and permissions documentation and marked
-  // 文档载明未实测 in the file's own convention: the repository's shared
-  // `.claude/settings.json` `permissions.deny` is read in a cloud session
-  // and a deny at any scope is evaluated before every allow (+1); and its
-  // reading trap — a denied MCP tool is removed from the tool roster
-  // entirely, so a tool's absence reads as the deny working, never as a dead
-  // MCP server (+1) = +2 exactly. Candidates 2 / landed 2 / already present 0
-  // / refused 0. Nothing paid in place: the two lines sit beside the
-  // invalid-session pair they qualify. Landed count, headroom 0, same
-  // convention.
-  // Raised 453 → 454 by the FOURTEENTH readings increment, again under the
-  // STANDING one-file exception quoted above rather than a fresh decision
-  // card, and again recorded as a `ruledRaises` record citing it. Spent at ONE
-  // line for ONE deduplicated reading, written in this file's voice: a failed
-  // CI job's re-run is a CHANNEL split rather than a seat capability limit —
-  // the seat's REST token reads 403 on the job re-run endpoint while MCP
-  // `rerun_failed_jobs` reads 201 and re-queues the failed shards, so the one
-  // confirming re-run stays exercisable through the state-shaped tool the
-  // write-identity deny list still allows (+1) = +1 exactly. Candidates 2 /
-  // landed 1 / already present 1 / refused 0 — the second candidate, the PR-body
-  // footer reading, is already carried by the two 裸 REST `PATCH /pulls` lines
-  // and was refused as a duplicate rather than restated. Could not be paid in
-  // place, and the slack was MEASURED rather than assumed: of this file's 427
-  // adjacent bullet pairs ZERO merge under the 120-byte cap (smallest merged
-  // width 134 B), and the two neighbours the row joins offer 37 and 6 spare
-  // bytes against its 115 bytes of content; re-wrap funding is refused per the
-  // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
-  // Raised 454 → 459 by the FIFTEENTH readings increment, again under the
-  // STANDING one-file exception quoted above rather than a fresh decision
-  // card, and again recorded as a `ruledRaises` record citing it. Spent at ONE
-  // line per deduplicated reading, each written in this file's voice, all five
-  // from one measured account-level incident and its measured recovery: the
-  // suspension signal is `account was suspended` on every endpoint including
-  // `/rate_limit` and on git, with no reason given — a third 403 shape beside
-  // the session gate and the rate limit (+1); a suspension destroys the
-  // account's PRs, cards and comments while every branch and commit stays on
-  // the remote, because those belong to the repository (+1); a destroyed PR
-  // still holds its branch name — the API answers 404 yet a new PR on the same
-  // branch is refused — so the same commits go up under a NEW branch name (+1);
-  // the local object store is the last backup — every branch a reviewer fetched
-  // to verify on the tree still has its head locally after the suspension, and
-  // it pushes (+1); and a rebuilt PR self-reports four things in its body:
-  // byte-identical head, no rebase/amend/squash, numbers from the old base, CI
-  // decides (+1) = +5 exactly. Candidates 5 / landed 5 / already present 0 /
-  // refused 0 — the family grep (suspended / 停用 / 销毁 / 幽灵 / 重推 / 重建 /
-  // 对象库 / 分支名) on `origin/main` hit only the Routine-rebuild and
-  // issue-transfer rows, none of which carries any of the five.
-  //
-  // TWO corrections are paid in place and buy nothing: the quota block's
-  // 「限流、403、传输失败都要试过另一侧才说得出我没手段」 row and its 「⇒ MCP 限流先探
-  // REST 再定退避」 conclusion, which until this increment instructed the very
-  // same-identity channel switch that `rest-channel.md`'s identity-bound
-  // rate-limit rows forbid; both are re-conditioned in place, line-neutral, on
-  // the `GET /user` identity test, with the 403 and transport halves kept as
-  // the per-side readings they are. Nothing else was paid in place: the fourth
-  // increment MEASURED zero line-neutral folds among this file's adjacent rule
-  // pairs, and re-wrap funding is refused per the 2026-08-17 rule in any case.
-  // Landed count, headroom 0, same convention.
-  // Raised 459 → 465 by the SIXTEENTH readings increment, again under the
-  // STANDING one-file exception quoted above rather than a fresh decision
-  // card, and again recorded as a `ruledRaises` record citing it. Its carrier
-  // was a FOLDED family of seven cards, each graded separately and each
-  // checkable by its own control word. Spent at ONE line per deduplicated
-  // reading, each written in this file's voice: the write-identity probe — the
-  // discriminator between the two token classes is the read-back of the
-  // session's own write, and within it `user.type` (with `user.login`) ALONE,
-  // because `performed_via_github_app` names the same App under both classes
-  // and `GET /user` answers the bound account under both (+1); a suspension erases
-  // the account's EVENTS as well as its content, so a label stays on the card
-  // while the `labeled` event that wrote it is gone and 「who labelled what」 is
-  // unreconstructable (+1); the card `comments` COUNT over-reads — 1 against a
-  // comment list and a timeline that both read 0, with four same-round controls
-  // consistent, so the thread-empty question goes to those two channels (+1);
-  // the join-before-search instrument as a sixth reading trap — a phrase that
-  // exists only after joining reads zero for the SUBJECT and the CONTROL alike
-  // under a single-line grep (+1); the PR-keyed CI concurrency cell — both
-  // repositories key the group on the pull-request number, so re-running a
-  // SUPERSEDED head cancels the CURRENT head's run and a re-run is a write
-  // (+1); and the comment-write cell of the exclamation-mark-before-left-bracket
-  // loss, where the stored regex is already invalid and a reader who runs it
-  // gets a zero wearing a published provenance (+1) = +6 exactly. Candidates 12
-  // / landed 6 / rewritten in place 1 / already present 3 / refused 2 — the
-  // three already-present facts are the refused `/search/*` path's absent
-  // `total_count` and, for the mangling card, the trigger itself with its
-  // issue-body cells and the author-side prescription; the two refusals are a
-  // single self-healing observation and an explicitly falsifiable hypothesis,
-  // neither of which is a reading.
-  //
-  // FOUR corrections are paid in place and buy nothing: the three `search_issues`
-  // rows, whose stated basis 「限定符形回 `total_count: 0`」 is refuted by two
-  // independent sessions and by this increment's own REST control (the
-  // qualifier-shaped query and the deterministic list endpoint return the same
-  // 208 issues, number for number), are rewritten onto what is measured; and the
-  // reading-trap list's own count word moves 五 → 六 for the trap appended to it.
-  // Nothing else was paid in place: the fourth increment MEASURED zero
-  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
-  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
-  // same convention.
-  // Raised 465 → 466 by the SEVENTEENTH readings increment, again under the
-  // STANDING one-file exception quoted above rather than a fresh decision card,
-  // and again recorded as a `ruledRaises` record citing it. Its carrier was a
-  // FOLDED family of three cards, each graded separately and each checkable by
-  // its own control word. Spent at ONE line for the one deduplicated reading,
-  // written in this file's voice: in a merge-queue repository the squash
-  // commit's committer date is the ENQUEUE instant — the queue writes that
-  // commit onto its own ref at enqueue and fast-forwards `main` onto the same
-  // object later, so the date never moves — while `merged_at`, the `merged`
-  // timeline event and `removed_from_merge_queue` carry the fast-forward
-  // instant, identical across one group and measured 15–26 minutes later on
-  // eight landings, so a landing instant is read from `merged_at` or the
-  // `merged` event and never from `git log` (+1) = +1 exactly. Candidates 1 /
-  // landed 1 / already present 0 / refused 0 — the family grep (committer date
-  // / 入队时刻 / merged_at / 快进 / git log) on `origin/main` hit only the
-  // `merged: false`-beside-`merged_at` row and the starvation block's git-first
-  // rows, none of which carries the instant.
-  //
-  // THREE corrections are paid in place and buy nothing — a rewrite is not a
-  // raise. The two `mustName` rows, whose stated basis 「本表的 `mustName` 不要求
-  // 排他」 is refuted by the landed `statesTheSet` census in
-  // `scripts/check-required-contexts.mjs` (that array must now equal the
-  // required-context registry EXACTLY, and every literal in it must appear
-  // verbatim in the ledger, so an enrolment that does not follow the table is
-  // red on the enrolling PR), are rewritten onto what the gate does, keeping as
-  // the narrowed conclusion the residual that gate's own header records: the
-  // COUNT WORD introducing the list is ordinary prose, unpinned, hand-followed.
-  // And the dispatch-gates battery row, whose stated basis 「逾容器 600 秒前台
-  // 上限」 is contradicted by five runs on one box under sibling load — four of
-  // 432–436 s and, on this branch with another agent running the same battery,
-  // one of 450.2 s — is re-conditioned on what is measured: cap-sized, with the
-  // cap a property of the CALLER's container and the margin a property of how
-  // contended it is, the detached prescription unchanged.
-  // Nothing else was paid in place: re-wrap funding is refused per the
-  // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
-  // Raised 466 → 469 by the EIGHTEENTH readings increment, again under the
-  // STANDING one-file exception quoted above rather than a fresh decision card,
-  // and again recorded as a `ruledRaises` record citing it. Its carrier card
-  // named a MEASURABLE unknown — the missing half of a controlled contrast this
-  // map itself declares absent — and the probe was the raising PR's own body:
-  // composed to end in the signature line with NO rule line above it, sent once
-  // through a bare `POST /pulls`, then read back (11,689 bytes sent and one
-  // signature line, 11,780 stored and two, the send a strict PREFIX of the
-  // store). Spent at ONE line per deduplicated reading: on the PATCH channel the
-  // append is UNCONDITIONAL, so a sent tail that IS the rule-plus-signature
-  // block — the very shape the create side leaves alone — is appended to
-  // anyway, reproduced on a second send, and the create-side criterion does not
-  // carry to it (+1); a thread's count-versus-enumeration discrepancy is a
-  // TRANSIENT flag, because the count converges on the enumeration and after it
-  // converges the records are gone and the difference is zero, so that
-  // discriminant cannot be the only defence (+1); and the controlled contrast
-  // now holds only on the bare-REST create channel, the MCP create channel's
-  // same input being unmeasured, so the conclusion is not carried there (+1) =
-  // +3 exactly. Candidates 5 / landed 3 / already present 1 / refused 1 — the
-  // already-present one is that channel's operational cost, carried by
-  // 「⇒ 该格处方是不送页脚」 and by the attribution row beside it; the refusal is a
-  // residual row whose first clause restated its neighbour's own conclusion
-  // 「判据是送出体尾部」 and whose second clause named the comment surface and
-  // the patch cell's other input as uncontrolled when both are in fact measured.
-  // Absence was measured per row with a lit control: `收敛` reads 0 in this file
-  // against `计数` at 9, `瞬态` hits only the `unstable` and PR-files rows, and
-  // `updated_at` reads 0.
-  //
-  // THREE corrections are paid in place and buy nothing — a rewrite is not a
-  // raise. The prescription row 「PR 正文页脚不带前置横线」, whose spelling is
-  // precisely what TRIGGERS the create-side append, is split per action. The
-  // PATCH row is re-stated as a RULE instead of one of two rows of inputs. And
-  // the append-size row's 「恰 90 字节」 becomes 「字节数非常量(90/91)」:
-  // this increment's send measured 91 bytes on a body with no trailing newline,
-  // the appended line being the session-URL spelling, which the row now NAMES
-  // instead of leaving it to be inferred from a constant that is not one. ⛔ No
-  // cause is asserted for the spread — one reading each, and no controlled
-  // contrast on the trailing newline or on session-id length.
-  // Nothing else was paid in place: re-wrap funding is refused per the
-  // 2026-08-17 rule in any case. Landed count, headroom 0, same convention.
-  // Lowered 469 → 460 by the tool-first diet: nine readings a `scripts/pm` tool
-  // now holds were deleted whole (lowering is always legitimate). Landed count.
-  // 460 → 458 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  // 458 → 14: split by subject (card #35236, step 5 of the skills-review order of improvements,
-  // ordered by the maintainer's 「同意」 of 2026-11-18 16:19Z, quoted on that card) — every
-  // reading moved verbatim into the nine `readings-*.md` files below and this file became their
-  // index (lowering is always legitimate). Each new row is its file's landed count, headroom 0;
-  // the split's own cost, +20 lines (one title line and one blank per file, plus this index), is
-  // paid by that ruling and by nothing else.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 14],
-  // readings-queue 89 → 86, readings-channels 76 → 71, readings-write-shapes 84 → 81 (#35215 G-D): stale
-  // platform readings trimmed, the lesson kept; landed counts.
-  ['.claude/skills/pm-dispatch/references/readings-queue.md', 86],
-  ['.claude/skills/pm-dispatch/references/readings-channels.md', 71],
-  ['.claude/skills/pm-dispatch/references/readings-page.md', 21],
-  ['.claude/skills/pm-dispatch/references/readings-search.md', 43],
-  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 27],
-  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 81],
-  ['.claude/skills/pm-dispatch/references/readings-ci.md', 48],
-  ['.claude/skills/pm-dispatch/references/readings-shell.md', 25],
-  ['.claude/skills/pm-dispatch/references/readings-session.md', 51],
-  // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
-  // a REST twin (each row executed in a real session, provenance date carried
-  // per row), the handful that are GraphQL-only, and the queue-routing
-  // readings. The policy lives in readings-channels.md (platform-readings.md's
-  // quota section until the subject split); this
-  // file is the lookup table it points at, so the policy flip did not have to
-  // grow the hot file. Set at landed line count (headroom 0, same convention
-  // as the entries above).
-  // Raised 87 → 93 by a maintainer ruling (2026-09-01, 总监批 #22) that names
-  // this ceiling and orders its own encoding — the ratchet's own legitimate
-  // exit, and the raising PR quotes the ruling comment. Verbatim and
-  // untranslated (one quotation, wrapped only to fit this comment):
-  //   「**B 获授权**:`rest-channel.md` 天花板 87 → **≤93 行**,提额 PR 引用本裁决
-  //   评论(棘轮自己的合法出口);两条处方按 dev 已测的忠实版落(两个拒绝 +
-  //   `&page=N` 短页终止条件 + `open_issues_count` 减开放 PR 交叉核对 + 成因未知
-  //   边界 + 关键词对照结构性盲区注记)」
-  // and, same batch, the content-ownership call that says what is paid in place:
-  //   「**C 同批**:退役 L58 对红窗常设规则的复述 —— 内容归属裁定:**红窗规则由
-  //   `platform-readings.md` 配额段独家持有**,`rest-channel.md` 只留指路」
-  // Paid in place: that restatement and its adjacent blank are retired (−2), and
-  // the pointer the ruling permits is folded into the 不可迁移 heading at zero
-  // line cost — so the red-window rule now has exactly one home. Spent: +8, the
-  // two enumeration-completeness prescriptions (both refusals, the `&page=N`
-  // short-page termination, the `open_issues_count`-minus-open-PRs cross-check,
-  // the cause-unknown boundary, and the note that a keyword positive control is
-  // structurally blind to this class) plus the closed-inclusive dedup obligation
-  // the same batch ruled onto this file (「提额预算一次用足」). Could not be paid
-  // by re-wrap: the file measures zero reclaimable lines under this gate's own
-  // wrapLine, and re-wrap funding is refused per the 2026-08-17 rule in any
-  // case. Landed count, headroom 0, same convention.
-  // Lowered 93 → 88 as a SOURCE of the cross-file move recorded on
-  // platform-readings.md above: the merge_group count-is-not-a-mechanism
-  // tombstone left this table for the readings file, byte-identically. This
-  // file's own header already routes the queue-section readings there and
-  // refuses to keep a second copy, so nothing is left behind but the rows that
-  // are channel mappings. Landed count, headroom 0, same convention.
-  // Lowered 88 → 82 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  // 82 → 80 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  // 80 → 81 (#29160): one line naming the three advisory relay ops. The ruling of record is that card's body, which
-  // quotes the maintainer verbatim — 「可以，按方案改中继，能发这个操作的账号名单我稍后点名。」 and
-  // 「你写清楚issue就可以，让车道开发」 — names this file and the one line, and confirms the raise the seat stated in
-  // its comment 6572738609. Measured delta +1 (80 → 81 lines); landed count, headroom 0.
-  // 81 → 82 (#29420): one line naming the sealed advisory read, `advisory_read`. The ruling of record is that card's
-  // body, filed under the maintainer's verbatim 「按一次性密钥立卡」 and 「并派发」, which names this file and "one line
-  // naming the op, with the ratchet row raised by the measured delta only". Measured delta +1 (81 → 82 lines); landed
-  // count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 82],
-  // Lowered 84 → 77 by the rules-only rewrite of the seven core references
-  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
-  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
-  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  // 77 → 76 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  // Renamed from `references/review-checklist.md` by the two review levels (ruling record
-  // 6897685514): the L1 checklist, same 76 lines, the key moved with the file.
-  // 76 → 80 (#34343): four lines, two review rules — a one-off codemod is never committed, and a move's growth is
-  // accounted per file. The ruling of record is that card's body, which quotes the maintainer verbatim —
-  // 「这种代码就是垃圾啊，我为什么要合并，以及如何避免类似的问题」 and 「yes」 to the proposal — and names the review
-  // checklist and both rules. Measured delta +4 (76 → 80 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 80],
-  // The old path's stub: one pointer line to the file above, so a link, a record or a
-  // running thread that still names it lands somewhere (same ruling record). A NEW row at
-  // its landed count; the stub is deleted with the alias, never grown.
-  ['.claude/skills/pm-dispatch/references/review-checklist.md', 1],
-  // Lowered 80 → 69 by the rules-only rewrite of the seven core references
-  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
-  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
-  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  // Raised 69 → 101 by the CROSS-FILE MOVE declared in CROSS_FILE_MOVES below
-  // (the principle-only cut of SKILL.md, decision batch #213 item 4): the
-  // 入队与落地 clause block — 29 rule lines, its heading and blank lines — moved
-  // verbatim out of SKILL.md, whose ceiling fell 819 → 319 in the same PR; +32
-  // against a net source decrease of 500. Landed count, headroom 0, same
-  // convention.
-  // Raised 101 → 102 by the main-green doorbell — an ORDINARY raise on a
-  // CROSS_FILE_MOVES destination, recorded under that entry's `ruledRaises`
-  // below, ⛔ not a second move. The text is §C's resume line: a seat that
-  // receives `Notify: main-green` merges `origin/main` through the relay's
-  // `pr_update_branch`, drops its `Waits-on:` line and resumes landing as §C's
-  // last step says; the hold line itself (`Waits-on: main-red #n`) folded into
-  // §C's existing release-condition line at zero lines. Ruling of record: the
-  // main-red resume card (#29445, filing gate ③, a task the maintainer set
-  // directly), maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
-  // Measured delta +1 (101 → 102); landed count, headroom 0.
-  // Raised 102 → 107 by the merge-queue jump rule — an ORDINARY raise on the
-  // same destination, recorded under that entry's `ruledRaises` below, ⛔ not a
-  // second move. The text is when a seat may ring the relay's `pr_enqueue_front`
-  // ((a)(b)(c), audit comment first, one jumper per repository, FAILED handling).
-  // Ruling of record: the jump card (#31403, filing gate ③, a task on the
-  // maintainer's word), maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;
-  // letter 「A」 recorded as comment 6729640900. Measured delta +5 (102 → 107);
-  // landed count, headroom 0.
-  // Raised 107 → 108 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
-  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
-  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
-  // The `Part of` close-out pair became three lines: the remainder's state for its lane, the three
-  // legal states, and the comment plus the write door's refusal. Measured delta +1; headroom 0.
-  // Raised 108 → 112 by the merge-queue stewardship card — an ORDINARY raise on the same destination,
-  // recorded under that entry's `ruledRaises` below, ⛔ not a second move. The text is the relay's two new
-  // queue doors and the landing seat's queue duty: the jump's over-3,000-line lift (an authorised approval
-  // on the head, or carried by the maintainer's comment), `pr_dequeue`'s three causes with its audit
-  // comment and read-back, and "who queued it watches it". The jump's former §7 line folded into its
-  // refusal line at zero lines. Ruling of record: the queue card (#33647, filing gate ③, maintainer-directed
-  // in the triage seat's session), maintainer verbatim and untranslated: 「建议有专人来跟进队列吗？这种操作不应该等我」;
-  // its items 1–3 order this text. Measured delta +4 (108 → 112); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 112],
-  // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
-  // rolls to production, which the landing window (ends at MERGED) never
-  // covered: post-roll placement/latency reading with the waker-bias re-draw
-  // physics, one real user-path probe, the tourniquet rule for replayed live
-  // state, orphaned-loop resumption, and the honesty clause. Set at landed line
-  // count (headroom 0, same convention as the entries above). It is pointed at
-  // from landing-operations.md, whose ceiling is the entry directly above and is
-  // deliberately not restated here: a live number copied into a neighbour's
-  // comment goes stale the next time that file moves — which is what happened to
-  // the arithmetic this sentence replaces.
-  // Lowered 58 → 50 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/release-aftercare.md', 50],
-  // Lowered 105 → 91 by the rules-only rewrite of the seven core references
-  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
-  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
-  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
-  // legitimate).
-  // 91 → 88 (#25753): the console-pin release precondition retired with the pin; landed count.
-  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 88],
-  // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
-  // grep cannot see, and the local preflight, one fact per line per repo. Added
-  // by the protocol-text family PR, which could not carry its own ceiling: that
-  // dispatch declared a closed file surface (SKILL.md + os-dev.md + the new page
-  // + one pointer line) with stop-on-breach, and this script sat outside it. A
-  // pm-dispatch references file is read per seat session like every entry above,
-  // so its absence here was a coverage gap, not the header's deliberate omission
-  // (that one is the published `skills/` catalog, and only it). Set at the landed
-  // line count read from this ratchet's own run — headroom 0, same convention as
-  // the entries above.
-  // Lowered 34 → 32 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/true-green.md', 32],
-  // Per-surface compile/typecheck coverage index — which surfaces a repo-wide
-  // typecheck actually reaches, which are compiled only by their own package's
-  // script, and the frozen ones. #12098: after true-green.md above it was the
-  // LAST pm-dispatch references file with no row, found by enumerating the
-  // directory against this map rather than by noticing one file. A references
-  // file is read per seat session like every entry above, so its absence was a
-  // coverage gap, not the header's deliberate omission (that one is the
-  // published `skills/` catalog, and only it). Set at the landed line count read
-  // from this ratchet's own run — headroom 0, same convention. ⚠️ Its seven
-  // over-120B lines are all `table` rows, structurally exempt and NOT
-  // re-wrappable; they are metered instead by MAX_TABLE_ROW_BYTES below.
-  // Lowered 26 → 24 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 24],
-  // `references/core-rules.md` (151) left this map with the file: it was the
-  // declared subset of SKILL.md, and the principle-only cut (maintainer,
-  // decision batch #213 item 4, verbatim: 「1 2 4 同意」 on 「协议主文 819 → 约 300
-  // 行(红线 + 状态模型 + 入口 + 索引),派发 / 复核 / 入队细则各成一份按阶段读的
-  // reference;同时删 core-rules.md 双份」) deleted the duplicate.
-  // Five per-phase references created by that cut, each holding sections moved
-  // VERBATIM out of SKILL.md (819 → 319 in the same PR) and opening with one
-  // line naming which seat reads it on which fire. New files, landed at their
-  // own counts (headroom 0, same convention as every entry above); added rows,
-  // paid for by the SKILL.md decrease — the map's total goes down.
-  // 96 → 98 (#29754): an off-shift seat's items (it signed off, or two
-  // `Request: progress` knocks went unanswered) go to an online sibling seat
-  // of the same lane, which claims them with `Resume-from:` citing the brief;
-  // the exceptions (a decision-card wait, no online sibling ⇒ 「待席」 on the
-  // round record, security items stay with the security seat). The sign-off
-  // line keeps the `Release:` + `Resume-from:` transit back to `pm:queue`
-  // (`check-handover.mjs` (a) still reads it) and names the sibling as the
-  // next claimant; the two-unanswered-knocks case cites triage's round record
-  // through execution-duties.md's 接管 shape, since no brief exists. Ruling of
-  // record: amendment 6595840476 on #29754 (maintainer 「同意：下班席位的卡交给
-  // 兄弟席」), which names this file, under #29775 letter A, record 6595514258
-  // (「同意29775 A」). Measured delta +2 (96 → 98 lines); landed count, headroom 0.
-  // Raised 98 → 99 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
-  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
-  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
-  // One line: a stay-behind card takes its lane's state in the `seat-offline` stroke, or triage
-  // sets it on reading that knock. Measured delta +1; landed count, headroom 0.
-  // Raised 99 → 100 by the area-lease mode (an ORDINARY ruled raise; ruling of record:
-  // the maintainer, 2026-11-15, verbatim: 「然后应该立卡更新skills。这种方式适合推广到其他车道吗？」 ·
-  // 「所以是否分区域，如何分区域应该是动态的是吗？」 · 「你直接立卡，然后让 server 5 按照你的卡处理也可以」;
-  // quoted in the body of card #33751 (filing gate ③), claim comment 6892768967):
-  // one line, the moving seat — an outgoing account still draining moves to a free
-  // seat with its own mailbox, the seat post carries the ownership split, and it posts
-  // `ownership transferred` when done. Measured delta +1; landed count, headroom 0.
-  // 100 → 99 (#35215 G-A, current values and quotes out of the skill): the expired pre-filed-children transition line deleted; landed count.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 99],
-  // Area-lease mode (any lane): dynamic partitioning at seating and at every hand-over
-  // or shift, startup with the maintainer's authorising line per seat thread (an area
-  // thread carries none), the in-area rules as pointers to their owning references, the
-  // cross-account hand-over on GitHub and the ownership split. Ordered by the same ruling
-  // of record as the two raises above. A NEW file, so this is an added row and no other
-  // row moves for it; set at the landed line count, headroom 0, same convention as every
-  // entry above. Lowered 60 → 59 when the area-thread authorising line was removed
-  // (lowering is always legitimate); landed count, headroom 0.
-  // Raised 59 → 71 on top of that baseline by three ORDINARY ruled raises, measured
-  // against the 59-line file on main: +12 in all, landed count, headroom 0.
-  // (a) +8, the area-mode rules; ruling of record: the maintainer, 2026-11-15, verbatim:
-  // 「写仓库」, approving the coordinator's proposal to write the day's area-mode rules into
-  // the repo; quoted in the body of card #33907 (filing gate ③), claim comment 6895484790:
-  // the pre-claim three checks recorded in the claim, the declaration self-check, analysed
-  // cross-lane cards staying in lane, re-splitting a backed-up area, contract-tier review
-  // of batched Chinese decisions, landing within ten minutes. The dated eight-area example
-  // was deleted to pay part of it.
-  // (b) +1, the area self-review rule; ruling of record: the maintainer, 2026-11-15T16:06Z,
-  // decision card, verbatim: 「50 行内由区自审」, recorded in comment 6897821873 on card
-  // #34007: a PR of at most 50 changed lines that edits only text or tests and declares
-  // `Clause-②: no` with no other contract face is self-reviewed by its area against
-  // review-checklist.md; every other PR goes to the seat's review thread.
-  // (c) +3, the area throughput and cost rules; ruling of record: the maintainer,
-  // 2026-11-15T16:08Z, verbatim: 「同意他的建议：每区先开 2 个开发代理，上一个 PR 进了合并队列
-  // 再领下一张卡；不单独做 p3；只复审已经变绿、不再改的提交；线程 effort 用 high。」, recorded in
-  // the same comment 6897821873: the final-green-head review line, the contract-record line
-  // (contract-review.md's head-move exception; a same patch-id main merge keeps only the
-  // thread's ACCEPT) and the cost line; the 2-dev merge-queue gate and the p3 ride-along
-  // replace the old lines in place. The dev line is then reworded in place, +0, by the
-  // maintainer's 2026-11-15T16:56Z ruling, verbatim: 「建议每区3个，你通过降低开发节约token没有意义啊」
-  // · 「我要尽快处理」, recorded in comment 6898023768 on #34007 (superseding the 2-dev cap):
-  // each area keeps 3 devs running with a freed slot refilled at once, the queue gate per
-  // slot, a PR waiting on a person (Tier H or a decision) frees its slot, and the cost line
-  // saves tokens without cutting devs.
-  ['.claude/skills/pm-dispatch/references/area-lease.md', 71],
-  // The project coordinator's interface with the seat threads (maintainer's
-  // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
-  // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
-  // post, cross-lane p1-first intake, one project-wide card-thread cap with
-  // waiting threads not counting, effort and tier by difficulty, ruling
-  // threads, quota pause, language and reporting — each section naming its
-  // reader and pointing at the rule's single source instead of restating it.
-  // It is beside seat-lifecycle.md because the coordinator is not a
-  // `domain:*` seat. A NEW file, so this is not a raise and funds nothing —
-  // set at the landed line count, headroom 0, same convention as above.
-  // 49 → 51: an ordinary ruled raise. The ruling of record is the maintainer's
-  // 2026-11-19 word, verbatim: 「同意」 on the coordinator's three dispatch rules,
-  // 「用 fable先评审你这个意见」, then his decision-card choice 「加两行,并修代改级漏洞」;
-  // quoted in the body of the card it ordered, claim comment 7000373266. Two
-  // lines: open whenever a slot is free, ordering only by `Blocked-by:` and the
-  // seat's serial queue; a grade-only word writes the grade and opens nothing.
-  // Measured delta +2. Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/coordinator.md', 51],
-  // The external-text reference (whose text instructs, whose is data) and the
-  // fork-PR flow it amends. Both are NEW to this map, so neither is a raise —
-  // set at the landed line count, headroom 0, same convention as above.
-  ['.claude/skills/pm-dispatch/references/untrusted-text.md', 54],
-  // The fleet-wide security-findings rule (never a card, never a public
-  // mechanism, a repository security advisory as the private card). Ruling
-  // of record: the #29111 card body, filed under the maintainer's verbatim,
-  // untranslated 「同意方案，选 B，立卡」; the raises below cite it as "#29111".
-  // A NEW file, so an added row that funds nothing — set at the landed line
-  // count, headroom 0, same convention as above.
-  // 55 → 56 (#29420): one line pointing a seat's read of an advisory at the sealed relay read, `advisory_read`, where
-  // §3 had it read under its own account (a cloud seat's account is refused). The ruling of record is that card's
-  // body, filed under the maintainer's verbatim 「按一次性密钥立卡」 and 「并派发」, which names this file "by the
-  // measured delta only". Measured delta +1 (55 → 56 lines); landed count, headroom 0.
-  // 56 → 62 (#29665): the owner section — every finding is `security#1`'s from intake to publish, the finder's two
-  // acts (a relay draft and one opaque-id doorbell), the relay-refused fallback — plus the security lane added to
-  // §8's pointer list in place. Ruling of record: that card's body, filed under the maintainer's verbatim
-  // 「设 security#1 座位」, and its amendment comment 6592303181 (「这个应该算一个车道吧？…」) naming this file's
-  // new section. Measured delta +6 (56 → 62 lines); landed count, headroom 0.
-  // 62 → 64 (#29731): the finder reports and never fixes in place — no widening of the PR or branch in hand, no
-  // own fix branch, no hardening on the same surface — and the task that cannot proceed without that code path
-  // stops as `blocked` with the opaque cause line while the seat parks the card. Ruling of record: that card's
-  // body, filed under the maintainer's verbatim 「开发中遇到的问题应该通过安全通道上报而不是直接处理」. The
-  // dev's route and the fix-only-by-order sentence folded into existing lines (§9 L60, §3 L28). Measured
-  // delta +2 (62 → 64 lines); landed count, headroom 0.
-  // 64 → 65 (#30114): the private-repository branch — a seat tells a public repository from a private one by its
-  // `private` flag read from the API, a private repository's private card is an ordinary `security` issue its fix
-  // is dispatched from, and its PRs, commits and changesets still state the rule and link that issue. +4 lines,
-  // paid by three same-file deletions (a stale private-repository line, the seat's own-account sentence, the
-  // cross-repo finder's filing line); the one-line remainder raised on the maintainer's ruling of record, comment
-  // 6704167516 on that card (option A, 2026-11-07). Measured delta +1 (64 → 65 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/security-findings.md', 65],
-  ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
-  ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
-  // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so
-  // its sibling-checkout and pin-lag lines were deleted (lowering is legitimate).
-  ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 47],
-  // Unchanged at 120 through the maintainer's revocation of every autonomous-
-  // adjudication channel: the delegated-adjudication lane, its confidence gate
-  // and the first-class self-ruling gate left (−13), and the same ruling batch
-  // ordered the human floor widened and the risk / workload criteria written
-  // as judgeable lines (+13); landed count, headroom 0, same convention.
-  // Lowered 120 → 103 as the SOURCE of the cross-file move declared in
-  // CROSS_FILE_MOVES below (the thin triage seat): the release board, the
-  // cross-repo pin chain and the decision-inbox duties moved into the 总监席
-  // charter; the fork-PR sweep and the hold/closed re-validation went to the
-  // lane patrol (dispatch-runbook.md, line-neutral there). The human-ruling
-  // floor and the risk / workload tests stayed intact. Landed count, headroom 0,
-  // same convention (lowering is always legitimate).
-  // Lowered 103 → 102 when the whole-card cloud route (PR #26749) merged with
-  // main's cloud-involvement lines; landed count, headroom 0, same convention.
-  // Lowered 102 → 99 by the triage push-list card (#28921): lines 10-11 and
-  // 94-95 each merged after deleting what contract-review.md and AGENTS.md
-  // already state, and the reporting pair 101-102 replaced by one pointer to the
-  // push list in lanes/triage.md. Landed count, headroom 0, same convention.
-  // Raised 99 → 100 by the main-green doorbell — an ORDINARY raise, ⛔ not a
-  // cross-file move. The text is two lines beside the main-red anchor duties:
-  // when an anchor card closes, triage (the director when triage is absent)
-  // reads the open PRs whose body carries a line-leading `Waits-on: main-red
-  // #n`, rings each one's seat once with `Notify: main-green` in the same
-  // round and counts them in the round record, with the worked example (anchor
-  // #N closes ⇒ PRs #a and #b each get one knock). One line was paid by
-  // deleting the Clause-② boundary test that execution-duties.md already states
-  // (its `Clause-②` line and its narrowing line), so the net is +1. Ruling of
-  // record: the main-red resume card (#29445, filing gate ③, a task the
-  // maintainer set directly), maintainer verbatim and untranslated:
-  // 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
-  // Measured delta +1 (99 → 100); landed count, headroom 0.
-  // Raised 100 → 101 under ruling record 6184799323 letter B — an ORDINARY
-  // raise, ⛔ not a cross-file move. Ruling of record 6722123324 (rule 7, the
-  // devx charter) ends 'Triage shows these metrics in the daily dashboard's
-  // lane section', and that line had no written home (#31558). The text is one
-  // line beside the daily-fire duties pointing at lanes/devx.md's metric line,
-  // never restating the six; no line of this file restates text another file
-  // carries, so a deletion would have dropped a live rule. Measured delta +1
-  // (100 → 101); landed count, headroom 0.
-  // Raised 101 → 103 by the no-stateless-card rules (an ORDINARY ruled raise; ruling of record:
-  // the maintainer in the triage seat's session, 2026-11-14, verbatim: 「优化建议，可以skills立卡优化」
-  // on triage's five proposals; quoted in the body of card #33484, claim comment 6885221965).
-  // Two lines: the awaiting-maintainer list with each card's age, and the five disjunctions run by
-  // `scripts/pm/first-touch-sweep.mjs`; the self-repair line took `+降 p3` in place. Measured delta
-  // +2; landed count, headroom 0.
-  // Raised 103 → 104 by the same ruling of record as filing-gate.md's 82
-  // (6891082225, letter B, 「b」): the 24h flow line in the round record (issues
-  // created, closed and net; PRs merged; open p1; new cards citing a contract
-  // review), which no rule text carried. The per-PR carve-out of the
-  // ADR/skills-text line changed in place. Measured delta +1; landed count,
-  // headroom 0.
-  // Raised 104 → 108 by the p3 first-touch standard (an ORDINARY ruled raise;
-  // ruling of record: comment 6943048358 on card #34153, the maintainer's
-  // choice 「四张全部 A」 on decision card cmsg_01FdL1XeUyvVNxLreh3F4Qi9WwExMWYmK6rBq81gx1Ameh,
-  // 2026-11-17: 「p3 标准写进规则并放宽 4 行」, ceiling at most 108 by the measured
-  // growth). Five lines: scope and precedence, the close rule (close item hit
-  // and no keep item hit ⇒ close; it outranks every not-closed rule here and in
-  // the filing gate; anything else stays), the close list and the keep list.
-  // One line paid: the cloud fallback now lives only in lanes/cloud.md, which
-  // triage-duties.md's cloud line points to. Measured delta +4; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 108],
-  // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
-  // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
-  // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
-  // carrying an item whose fix lands in another lane is split out by the finding
-  // seat itself, the new card filed with no `domain:*` and first line
-  // `carries item k of #N; #N keeps items …`; triage stamps the domain at first
-  // touch and may regrade; the split-off card does not inherit the parent's
-  // domain (that inheritance stays with sub-issues of the card's own lane), and
-  // the parent keeps `Fixes` on its remaining items. Ordered by ruling record
-  // 6184818831 on #23579 (letter D, item 3); maintainer, 2026-10-15, verbatim
-  // and untranslated: 「同意」. Two lines, measured: the tightest one-line
-  // spelling of the ruled content is 235 B against the 120-byte cap, and the two
-  // lines land at 120 B and 119 B. Authorized under ruling record 6184799323 on
-  // #23606 (letter B, item 1; maintainer 「同意」): a ruling of record that orders
-  // text into a ratcheted file raises that file's ceiling by the measured lines
-  // the text needs, the ruling id and the delta quoted in the raising PR's body.
-  // This file is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
-  // applies. Landed count, headroom 0, same convention.
-  // Raised 185 → 188 by the build-heavy routing ruling — an ORDINARY raise, ⛔
-  // not a cross-file move (card #23607). The text is three rule lines beside the
-  // `mode:cloud` line in 〈派发〉: a card whose declared file surface writes
-  // `packages/spec/src/**` and at least one other package is build-heavy and is
-  // dispatched `mode:cloud`, one container per such card; a container runs at
-  // most one build-heavy subagent at a time; the cloud session pulls the turbo
-  // remote cache for the closure, and the first such dispatch measures its fixed
-  // cost (install plus cache pull) and records it on its card. Ordered by ruling
-  // record 6184828752 on #23607 (letters F1 A · F2 A, item 2); maintainer,
-  // 2026-10-15, verbatim and untranslated: 「同意」. Three lines, measured: the
-  // tightest one-line spelling of the ruled content is 245 B against the
-  // 120-byte cap, and neither two-line split fits — the test with the
-  // per-container limit is 137 B at its tightest, the limit with the cache and
-  // fixed-cost parts 141 B; the three lines land at 112 B, 95 B and 79 B.
-  // Authorized under ruling record 6184799323 on #23606 (letter B, item 1;
-  // maintainer 「同意」), the ruling id and the delta quoted in the raising PR's
-  // body. The same ruling's F1 lines in `.claude/agents/os-dev.md` (+2) fit
-  // that file's standing headroom, so its row does not move. Not a
-  // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
-  // count, headroom 0, same convention.
-  // Raised 188 → 189 by the addition-side enumeration-row ruling — an ORDINARY
-  // raise, ⛔ not a cross-file move. One line under the implementation-card
-  // file-surface line naming the exception lanes/skills.md defines. Ordered by
-  // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
-  // ruling record 6184799323 (letter B). Measured delta +1; headroom 0.
-  // Raised 189 → 190 by the effort-step-down ruling (card #32784) — an ORDINARY
-  // raise, ⛔ not a cross-file move. The 〈派发〉 effort line now names three
-  // kinds of would-be-M card that dispatch at `medium` (review-nit follow-up,
-  // same-family edge card, copy- or changeset-only touch-up), adds epic child
-  // cards to the `xhigh` list, and says the `xhigh` list outranks the three.
-  // Ordered by ruling record 6830795926 (maintainer, verbatim: 「同意，立卡更新
-  // skills」); authorized under ruling record 6184799323 (letter B). Measured:
-  // the old line was already 120 B, the added content alone is over 40 B, so the
-  // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
-  // Lowered 190 → 189 (#35259, item 5): the line on writing and removing the retired
-  // blocking-cache label left with the label (lowering is always legitimate). Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
-  // New file, landed at its own count (headroom 0, same convention as every
-  // entry above): the filing gate and the grading/reading criteria the triage
-  // seat applies. A new pm-dispatch references file belongs in this map by the
-  // header's own definition of the covered surface — the map is an
-  // ENUMERATION, so a file that is merely absent is silently unratcheted.
-  // Raised 58 → 61 by the protocol-first grading ruling — an ORDINARY raise
-  // (maintainer, 2026-10-14, live chat, verbatim and untranslated: 「23431 同意。」,
-  // adopting letter B of the seat analysis; ruling record 6164802336 on #23431).
-  // The maintainer's order puts every metadata-protocol change, and every
-  // REST/data-door narrowing, at p1 in every lane; written in the file's house
-  // style it needs four rule lines at its measured floor (116/120/120/95 bytes;
-  // no three-line spelling fits the 120-byte cap), and the grading section holds
-  // exactly one restatement to pay with (the line restating the four-answers
-  // rule beside it), so +4 −1 leaves +3. This file is not a CROSS_FILE_MOVES
-  // destination, so no `ruledRaises` record applies. Landed count, headroom 0,
-  // same convention.
-  // Raised 61 → 64 by the same rule's second half — an ORDINARY raise
-  // (maintainer, 2026-10-14, live chat, verbatim and untranslated: 「23431 同意」,
-  // adopting letter A on the consumer-follow-up principle; ruling record
-  // 6166489573 on #23431). A consumer repo's follow-up card of a protocol change
-  // is p1 only when its absence breaks users, and every such follow-up is listed
-  // on the consumer's first-release card for the new major: three rule lines at
-  // their measured floor (116/119/93 bytes; no two-line spelling fits the
-  // 120-byte cap), with no restatement left in the section to pay with. Not a
-  // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
-  // count, headroom 0, same convention.
-  // Raised 64 → 68 by the business-rationale card (maintainer's word 2026-10-23,
-  // project chat, verbatim and untranslated: 「我说的是业务需求上的合理性，谁来判断」
-  // and 「立卡」 on the proposal that names the field and the three triage exits;
-  // quoted on card #25507 and in its claim, comment 6370029859). The text is the
-  // fourth filing-gate answer 「业务理由」 (who benefits, the scenario, the cost of
-  // not doing it) and the triage reading of it: clear and on the North-Star
-  // direction ⇒ queue; missing or not holding ⇒ returned to the filer, never
-  // written for them and never closed on it; a product trade-off ⇒ the decision
-  // inbox; batch filings sampled to the maintainer. Five lines landed, one paid
-  // in place (③ and ④ of the gate merged onto one line), so the measured delta
-  // is +4. Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
-  // applies. Landed count, headroom 0, same convention.
-  // 68 → 66 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  // 66 → 67 (#29111): the ruling orders 「安全发现」 into the not-a-card list;
-  // the possible-data-leak reach exception left the exceptions line in place,
-  // so the measured delta is +1.
-  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // 67 → 79 (#32997): an ordinary ruled raise under letter B (record
-  // 6184799323). The ruling of record is the maintainer's 2026-11-13 grading
-  // ruling quoted verbatim in the card body (「只是读代码得出的最高 p2。这个没必要吧，
-  // 我们的客户不多。」 and 「不需要限额，也不需要自动关。其他同意。」; triage audit
-  // 6846766675), which orders the nine adopted grading rules into 〈定级判据〉.
-  // Under the 120-byte line cap they take 14 lines; the old focus-raise and
-  // reach-cap lines fold into rules 8 and 2 and are deleted, so the measured
-  // delta is +12. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // 79 → 82 (#33718): an ordinary ruled raise. The ruling of record is 6891082225
-  // (letter B, the maintainer's 「b」): keep the review default and change only
-  // the form review follow-ups take. Three lines: one checklist card per
-  // reviewed PR that later reviews append to, p3 copy and docs nits into the
-  // area's loose-ends card, and the dedupe search before a review files. The
-  // quota line (one card per defect) is untouched. Measured delta +3.
-  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // 82 → 83: an ordinary ruled raise by the same ruling of record as
-  // coordinator.md's 51 (claim comment 7000373266): a grade the fleet wrote on
-  // the maintainer's word, its comment opening `Ruling-ref: priority:pN`, reads
-  // as his. Measured delta +1. Landed count, headroom 0.
-  // 83 → 87 (#35259): an ordinary ruled raise. Rulings of record: the card body (items 6 and 8 —
-  // fleet cards of one topic block each other only when they edit the same file; block only the
-  // part that waits, +2) and scope comment 6998230415 (the five issue-type rules the maintainer
-  // approved with 「同意」: no card for a problem in a feature whose code has not merged, and the
-  // type is set card by card — none on an epic or tracking card, Task for ops and verification,
-  // +2). Measured delta +4. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // −4 (#35215 G-A, current values and quotes out of the skill): the dated quote block and one maintainer quote deleted; the rules under them stand; landed count.
-  // Merged (#35385 meets #35406): 83 + 4 (#35259) − 4 (#35215 G-A) = 83, measured after the merge.
-  // Landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 83],
-  // The project layer above the seats (maintainer's word: ONE project form, the
-  // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
-  // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
-  // a generated roster board). A NEW file, so this is an added row that funds
-  // nothing; set at the landed line count, headroom 0, same convention as above.
-  // 54 → 55 (#29111): the ruling keeps 「⛔ 不敲:安全发现」 and points the
-  // mailbox at the shared rule; the pointer does not fit the full 不敲 line,
-  // so the measured delta is +1. Not a CROSS_FILE_MOVES destination. Landed
-  // count, headroom 0.
-  // 55 → 56 (#29665): the `Notify: security` row (finder → `security#1`, the
-  // opaque id alone) — the 不敲 line drops 安全发现 and the pointer line narrows
-  // to the mechanism, in place; the ring itself needs one line. Ruling of
-  // record: the card body (「设 security#1 座位」) and amendment comment
-  // 6592303181, which names this file's mailbox row. Measured delta +1
-  // (55 → 56 lines); landed count, headroom 0.
-  // 56 → 58 (#29754): the `Request: progress` / `Notify: progress` pair
-  // (triage → the claiming seat on an item idle 3 h; the seat back with its
-  // record) and the 不敲 line's 「催」 turned from a ban into a rate — one knock
-  // per item per 60 min, an answered ETA holds it, parked or decision-waiting
-  // items are not knocked. Ruling of record: #29775 letter A, record
-  // 6595514258 (maintainer 「同意29775 A」), with the card's amendments
-  // 6595244387 (the rate) and 6595840476. The key row and the record/rate
-  // line are the two lines the ruling orders; the 不敲 line was rewritten in
-  // place. Measured delta +2 (56 → 58 lines); landed count, headroom 0.
-  // Raised 58 → 59 by the main-green doorbell — an ORDINARY raise, ⛔ not a
-  // cross-file move. The text is one 〈信箱 PR〉 scenario row: when a main-red
-  // anchor card closes, triage (the director when triage is absent) rings the
-  // seat of every open PR whose body carries `Waits-on: main-red #n` with
-  // `Notify: main-green`; the key's full spelling lives in
-  // `record-recognisers.mjs` MAILBOX_KEYS, which the self-test pins against this
-  // section both ways, so the row cannot be folded into a neighbour (each sits
-  // at 113–120 B against the 120-byte cap). Ruling of record: the main-red
-  // resume card (#29445, filing gate ③, a task the maintainer set directly),
-  // maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
-  // Measured delta +1 (58 → 59); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/project-forms.md', 59],
-  // The app-vs-platform boundary — the deciding question (could this be written
-  // from the metadata alone, with no knowledge of this company?), the publication
-  // test (one consumer is a use, two is a contract) and the two anti-patterns.
-  // It is on-demand DETAIL by this header's own division of labour: AGENTS.md
-  // carries the one routing row, this file carries the rule and the measurement
-  // behind each clause. A NEW file, so this is not a raise and funds nothing —
-  // set at the landed line count, headroom 0, same convention as above.
-  ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 66],
-  // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
-  // descriptions move from seat-post prose into versioned skill references).
-  // Set at landed line counts (headroom 0, same convention as above).
-  // Each −1: whole-text restructuring round, PR-2 (maintainer ruling
-  // 2026-08-23) — the patrol-anchor sentence was carried verbatim by all seven
-  // lanes and now lives once in SKILL.md 执行座位职责, so every lane drops it.
-  // engine.md 32 + services.md 27 + cli.md 29 → server.md (maintainer ruling
-  // 2026-10-22, verbatim: 「就叫 server 吧」, then 「同意」 on letter 乙 — the
-  // engine, services and cli lanes fold into one `domain:server` lane; the
-  // charter keeps three sections, one per former surface, and a seat reads the
-  // section its claim's file surface names). A consolidation, not a raise: the
-  // three per-lane spec red lines became one lane-wide line and the two
-  // pointers between the former lanes left, so the merged file lands one line
-  // under the 88 the three rows summed to. A NEW file, so an added row set at
-  // the landed line count, headroom 0, same convention as above.
-  // 87 → 86 (#29111): the security-card disclosure pair became one pointer
-  // at security-findings.md (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/server.md', 86],
-  // Lowered 39 → 38 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 36],
-  // Lowered 35 → 33 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  // Raised 33 → 35 by the addition-side enumeration-row ruling — an ORDINARY
-  // raise, ⛔ not a cross-file move. Two lines under the product-lane bar on
-  // `skills/**`: the PR that adds an authorable top-level key or a bound live
-  // member adds its enumeration row itself, and what that row is. Ordered by
-  // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
-  // ruling record 6184799323 (letter B). Two lines, measured: rule plus
-  // definition do not fit the 120-byte cap as one; they land at 113 B and 115 B.
-  // Measured delta +2; headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
-  // Lowered 46 → 43 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  // Lowered 43 → 42 by the fleet-v2 text slice: the first-touch line restated
-  // triage-duties.md for a retired lane seat. Landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 42],
-  // domain:ui lane charter — the objectui execution seat's job description. It is
-  // the one lane the multi-repo charter ADDS beyond the domain table, and it was
-  // the only live lane in that directory carrying no versioned charter. A lane
-  // charter is read per seat session like every entry above. Set at the landed
-  // line count read from this ratchet's own run (headroom 0, same convention as
-  // above); it is a NEW file, so this is an added row and no other row moves.
-  // Lowered 38 → 23 by #25712 item 4: `ui/` is a workspace of this repo, so the
-  // sister-repo seat steps (`pnpm objectui:refresh`, pin moves) were deleted.
-  // Lowered 23 → 20 by the fleet-v2 text slice: three seat-form lines of the retired
-  // lane seat, covered by lanes/objectstack.md and SKILL.md. Landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 20],
-  // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
-  // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
-  // community edition). Set at landed line count (headroom 0, same convention).
-  // 45 → 44: same patrol-anchor hoist deletion as the six lanes above.
-  // Lowered 57 → 53 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  // Lowered 53 → 21: each repository's rules live in that repository, so the
-  // product content left for hotcrm's own AGENTS.md and docs/PRIORITIES.md. One
-  // pointer there and one to cross-repo-coordination.md stayed, beside the
-  // shared seat mechanics. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 21],
-  // repo:mobile lane charter — the on-demand seat for the native shell that
-  // hosts the Console (maintainer choice 2026-11-02, verbatim: "Register, seat
-  // on demand (Recommended)"). A NEW file, so this is an added row and no other
-  // row moves; set at the landed line count (headroom 0, same convention).
-  ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 56],
-  // security lane charter — the `security#N` seat that owns every security
-  // finding from intake to publish (maintainer, #29665 card body, verbatim:
-  // 「设 security#1 座位」; amendment comment 6592303181: 「这个应该算一个车道吧？
-  // 虽然你不需要打标签，应该也有处理的规则需要写入skills」). Pointers only: the
-  // never-public rules stay in security-findings.md. A NEW file, so this is an
-  // added row and no other row moves; set at the landed line count (headroom 0,
-  // same convention).
-  // 34 → 53 (#29726): the maintainer's working rules for the seat — the
-  // isolated `CONTRACT_REVIEW_TIER` review before any question reaches the
-  // maintainer, cloud orders for heavy fixes, the per-object close-out, the
-  // relay `closed` move on merge and the pre-release publish-or-not list, the
-  // intake and read rules — plus the review's S1 (two restated lines become
-  // pointers) and S2 (the label is the hand-over). Ruling of record: that card's
-  // body (rulings 1–3, each verbatim there; the order to write them in is
-  // 「这些都应该写到你的skills」), and its amendment comment 6595626876 (「目前的修复都关闭」,
-  // 「你处理完的可以都先关闭」, 「哪些高危要发布应该在我版本发布前决策吧」). Measured
-  // delta +19 (34 → 53 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/security.md', 53],
-  // Project Director seat charter (maintainer ruling 2026-08-27, verbatim:
-  // 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」; the file
-  // carries it as a rule line since the rules-only rewrite, not as this quotation)
-  // — a human-invoked seat holding the contract-review after-audit, the
-  // adjudication duty, the maintainer-action ledger and the governed-merge audit,
-  // with any number of summons running concurrently: no occupant, no handover. A
-  // lane charter is read per seat session like every entry above. Set at the
-  // landed line count read from this ratchet's own run (headroom 0, same
-  // convention as the entries above).
-  // 75 → 77: maintainer-directed placement (2026-08-27, verbatim: 「创业阶段不渐进
-  // 应该写入项目总监skills」) — the no-gradualism standing rule lands here by that
-  // directive; the file sat at headroom 0 with no losslessly compressible slack in
-  // the touched sections (arithmetic in the raising PR), so the directive is the
-  // ruling that pays for exactly the two lines it dictates.
-  // Lowered 77 → 72 by the rules-only rewrite (maintainer 2026-09-04:
-  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
-  // ruling citations and incident narrative left; every rule stayed. Landed count,
-  // headroom 0, same convention (lowering is always legitimate).
-  // Lowered 72 → 70 by the same revocation: the in-project delegated-ruling
-  // channel and its standing order left; `needs_decision` joins the ruling
-  // batch the maintainer rules by hand. Landed count, headroom 0, same convention.
-  // Raised 70 → 87 by the CROSS-FILE MOVE declared in CROSS_FILE_MOVES below
-  // (the thin triage seat): the release board (5), the cross-repo pin chain (3,
-  // extended to every app repo) and the decision-inbox duties (2) moved in from
-  // triage-duties.md, whose ceiling fell 120 → 103 in the same PR, with the
-  // daily digest, the thin-triage pairing and the roster pointer the same word
-  // ordered; +17 against a net source decrease of 17. Landed count, headroom 0,
-  // same convention.
-  // 87 → 88 (#25558): ruling D of director batch #10, comment 6378083450 —
-  // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
-  // 「`lanes/director.md` 职责行」: the seat an app project summons reviews that
-  // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
-  // recorded under the move below as a `ruledRaises` record.
-  // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
-  // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
-  // 82 → 81 (#35215 G-A, current values and quotes out of the skill): a provenance line deleted; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 81],
-  // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
-  // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
-  // seat session like every entry above. Set at the landed line count read from
-  // this ratchet's own run (headroom 0, same convention as above); it is a NEW
-  // file, so this is an added row and no other row moves.
-  // 7 → 8 (#25558): ruling D of director batch #10, comment 6378083450 —
-  // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
-  // 「`lanes/triage.md`「应用仓无分诊席」之后补「应用仓业务理由由该项目召唤的
-  // 总监席复核;第三方应用的总监是其自身维护者」」. Measured +1, ceiling +1.
-  // 8 → 15 by the triage push-list card (#28921). Ruling of record: the card
-  // body's maintainer words, verbatim and untranslated, 「由分诊每天出一次中文进度
-  // 表，频率太低，而且有问题的时候要找我，没问题我也不需要看」, 「需要我协助的时候你
-  // 应该推送消息给我 os-zhuang，但是需要和我沟通哪些情况下」 and 「立卡」 on the push
-  // list (「同意推送清单，立卡？」) whose card names this file, plus the addendum
-  // comment 6568980556 「pr 超过 6小时没更新，如果不是带决策或者是被阻塞，应该都属于
-  // 有问题吧」. The text is the push list:
-  // no progress table, the seven cases split at-once / end-of-round, one push per
-  // round, the 6 h stale-PR case and the not-pushed list. Eight lines landed, one
-  // paid in place (the scope line, which cross-repo-coordination.md states for
-  // the same reader), so the measured delta is +7; triage-duties.md fell 102 → 99
-  // in the same PR, net +4 over both. Not a CROSS_FILE_MOVES destination, so no
-  // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  // 15 → 17 (#29665): the security hand-over — push ① stays, then triage
-  // forwards to `security#1` and stops, grading nothing past `security` + p1
-  // on a public card; while the seat is vacant, today's §7 handling. Ruling
-  // of record: the card body (「设 security#1 座位」, Change 4) and amendment
-  // comment 6592303181. Measured delta +2 (15 → 17 lines); landed count,
-  // headroom 0.
-  // 17 → 20 (#29754): the progress round step — sweep `pm:dispatched` cards
-  // and non-mailbox open PRs reading idle off PROGRESS (head commit,
-  // non-triage comment, the seat's label change), never `updated_at`; knock
-  // the claiming seat `Request: progress` once per item per hour, read the
-  // answers next round, list the unanswered; two silent rounds ⇒ the seat
-  // reads as down and its items go to an online sibling, which triage knocks
-  // once and never releases. Ruling of record: #29775 letter A, record
-  // 6595514258 (maintainer 「同意29775 A」), amendment 6595244387 (the rate and
-  // the escalation) and amendment 6595840476 (maintainer 「同意：下班席位的卡交给
-  // 兄弟席」, the idle reading and the sibling hand-over, which names this
-  // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
-  // 20 → 24 (#33226): words the maintainer said to one seat are not spread —
-  // the one-line rule first, then the card body's three bullets (bind that
-  // seat's account only; relayed fleet-wide or triage-directed orders only from
-  // triage's own session or seat post; record a relayed order's effect, never
-  // extend it). Ruling of record: the maintainer in the triage#1 session,
-  // 2026-11-14, 「所有座位当前任务处理完就下班，我说的都是针对某个具体 agent 账户」,
-  // 「转述指令要写明对谁说, 其实问题的关键你是分诊你才会关心别人的座位帖」 (card
-  // body) and 「也就是说，对某个座位说的话不要扩散就行」 (comment 6872810212).
-  // Measured delta +4 (20 → 24 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 24],
-  // Review seat charter (`review#N`): the seat whose only job is the contract
-  // review, held on any account that reaches CONTRACT_REVIEW_TIER — its seat
-  // word, mailbox, review-seat-first routing of `Request: contract-review`
-  // and the owed-review list, the earliest-claim mutual exclusion, the delta
-  // rule, independence (never a PR its own account dispatched or implemented)
-  // and what it never does; the review itself stays in contract-review.md.
-  // Ruling of record: the maintainer's question 「契约复审我想分拆到其他账户，怎么处理。」
-  // and ruling 「选 B，立卡」 (dedicated review seats), quoted verbatim on the
-  // card that ordered this file (filing gate ③). A NEW file, so this is an
-  // added row and no other row moves; set at the landed line count (headroom
-  // 0, same convention as every lane charter above).
-  // Renamed from `lanes/review.md` and raised 21 → 22 by the two review levels (ruling
-  // record 6897685514, whose 「座位也可以改」 orders the seat's new name): the seat is
-  // `l2-review#N`, and ONE added line says the old spellings (`review#N`, the seat words
-  // `review` and 复核) stay read, a seated seat keeps writing its own name, and only new
-  // seats take the new one. Measured
-  // delta +1; landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/l2-review.md', 22],
-  // The old path's stub: one pointer line, which also keeps `review` a lane file name and
-  // so a seat word (`project-forms.md`). A NEW row at its landed count, same ruling record.
-  ['.claude/skills/pm-dispatch/references/lanes/review.md', 1],
-  // QA seat charter (`qa#N`): the Routine seat that owns checklist-test §6's
-  // two standing routines (the weekly four-record regression, the post-release
-  // npm smoke), each round's close-out, record close and supersede, and the
-  // weekly `retest-owed.mjs` read that feeds the next regression; it dispatches
-  // no dev and changes no product code. Ruling of record: the maintainer's
-  // letter A on the card that ordered this file, 「同意 新设 qa#1」, recorded
-  // verbatim in triage's ruling comment 6715420603, whose workload names
-  // `references/lanes/qa.md`. A NEW file, so this is an added row and no other
-  // row moves; set at the landed line count (headroom 0, same convention as
-  // every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/qa.md', 29],
-  // AI eval seat charter (`eval#N`): the standing seat that runs the AI
-  // regressions (scenario cards over MCP, the in-product Q&A baseline, the
-  // hosted chat eval set, the five AI write gates) on the maintainer's
-  // Routines cadence; it dispatches no dev and changes no product code.
-  // Ruling of record: comment 6721331178, the maintainer's 「同意开 AI 评测 车道」
-  // transcribed verbatim, whose workload names `references/lanes/eval.md`. A
-  // NEW file, so this is an added row and no other row moves; set at the
-  // landed line count (headroom 0, same convention as every lane charter above).
-  // 45 → 44 (merge of #35406 into #35385): #35215 G-A touched the file at an unchanged count; the
-  // ceiling drops to the measured count after the merge (lowering is always legitimate). Headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 44],
-  // Merge-queue seat charter (`queue#N`): the neutral cross-lane seat that
-  // patrols the queue (the 90-minute stall check, head-ejection causes, flake
-  // anchors, flake-victim re-queues, the front-jump under the existing three
-  // reasons); it holds no lane card and lands nothing of its own. Ruling of
-  // record: the card that ordered this file carries the maintainer's verbatim
-  // 「建议有专人来跟进队列吗？这种操作不应该等我」 (filing gate ③), and triage's
-  // landing-order comment 6889317333 names `references/lanes/queue.md` as its
-  // first PR. A NEW file, so this is an added row and no other row moves; set
-  // at the landed line count (headroom 0, same convention as every lane
-  // charter above).
-  // Raised 30 → 32 by the same card's PR 2 (an ORDINARY ruled raise; no move
-  // touches this file). The text is the charter widened to the relay's two new
-  // queue doors: the jump's over-3,000-line lift (an authorised approval on the
-  // head, or carried by the maintainer's `approval_comment`) and `pr_dequeue`,
-  // which this seat may use for causes (a)(b) when the landing seat is offline,
-  // with the relay's own audit comment and read-back. The "maintainer removes
-  // it" interim section lost one line. Ruling of record: the queue card
-  // (#33647, filing gate ③), verbatim 「建议有专人来跟进队列吗？这种操作不应该等我」;
-  // its order names this widening. Measured delta +2; landed count, headroom 0.
-  // 32 → 31 (merge of #35406 into #35385): #35215 G-A touched the file at an unchanged count; the
-  // ceiling drops to the measured count after the merge (lowering is always legitimate). Headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 31],
-  // repo:cloud lane charter: the cloud seats keep first-touch triage of the
-  // cloud repo, run the first-touch sweep before they claim, set grade and
-  // state when they file, and triage's daily reconciliation is the backstop;
-  // the cloud seats' own standing commitments come from the companion card
-  // #31918. Ruling of record: comment 6739409918, the maintainer's letter A,
-  // whose workload names `lanes/cloud.md`. A NEW file, so this is an added
-  // row and no other row moves; set at the landed line count (headroom 0,
-  // same convention as every lane charter above).
-  // Lowered 28 → 19 on the same ground as the hotcrm charter: cloud's first
-  // touch, grading, take order, enterprise and security rules are one pointer
-  // to the cloud repo; the cross-repo mechanics stayed. Landed count,
-  // headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 19],
-  // repo:objectstack lane charter: the whole-repo dispatch lane, several seats on several
-  // accounts, each running area-lease mode and splitting areas through the lease tables on
-  // their seat posts (#33959; ruling of record: the maintainer, 2026-11-15, verbatim in that
-  // card's body). A NEW file, so this is an added row and no other row moves; set at the landed
-  // line count (headroom 0, same convention as every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 35],
-  // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
-  // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
-  // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
-  // Lowered 470 → 466 by the #12081 residual soft-break paydown (lowering is
-  // always legitimate, and the same closure lowered decision-analysis.md above):
-  // this file's last 8 Han+ASCII-punct breaks merged back into their paragraphs,
-  // and 4 of the 8 paid for themselves. Zero content change — the diff is
-  // byte-identical after whitespace normalization (39,313 B both sides), so the
-  // 4 lines are re-flow slack, never a cut. Headroom 0 again, same convention.
-  // Raised 466 → 469 by the axis-weighting ruling (maintainer 2026-09-01, PM
-  // chat, verbatim and untranslated): 「四维分析中，长期合理应该权重最高，至少50%」.
-  // This file is not a `check:skill-frame-sync` COPIES entry, but it names the
-  // decision frame's mechanism (the dev reads it from the PM's pasted copy at
-  // dispatch time), and a rule that changes which recommendation the frame
-  // yields still has to reach that description — the #5130 drift is exactly a
-  // frame-semantics change that skipped a mirror. +3 lines,
-  // folded into the existing binding sentence rather than added as a new
-  // paragraph. ⚠️ Re-wrap funding was AVAILABLE here and was REFUSED: three
-  // paragraphs nearby carry wrap artifacts (two orphan lines of 6 and 8 bytes)
-  // worth exactly the 3 lines needed, and merging them would have landed this
-  // file at 466/466 with no raise — that is 筹行, banned by the 2026-08-17
-  // ruling, since the ratchet governs content volume and lines are only its
-  // machine-readable proxy. Measured both ways before reverting to the raise.
-  // The density fix is legitimate on its own and belongs in a net-reducing PR
-  // (2026-08-29 ruling), not this one. Landed count, headroom 0, same convention.
-  // Lowered 469 → 403 by the rules-only rewrite (maintainer ruling: provenance
-  // narratives, incident post-mortems and rationale tails leave the corpus; one
-  // rule per ≤120-byte line; the frontmatter, section order, pinned spellings and
-  // the report JSON keep their operative content). Landed count, headroom 0, same
-  // convention (lowering is always legitimate). Lowered 403 → 402 when the
-  // retired contract-review label's reporting line left (ruling record
-  // 5770886272 on #19061).
-  // Raised 402 → 404 by the scoped-checklist ruling — an ORDINARY raise, ⛔ not
-  // a cross-file move (card #23665). The text is two rule lines beside the
-  // trigger-shaped rules in 〈本地验证范围〉: a PR that renames or removes an
-  // exported symbol runs the scoped platform-checklist check on its changed
-  // files before push (`node scripts/check-platform-checklist.mjs
-  // --changed-from origin/main`, the mode's own spelling) and records the
-  // verdict line verbatim in its report's `gates` field; the run is not a
-  // derived family — `--commands` never lists it, and `--ran` reports it as
-  // outside the derivation, not an error. Ordered by ruling record 6190922830
-  // on #23653 (letter C, item 3); maintainer, 2026-10-15, verbatim and
-  // untranslated: 「C (推荐)」. The ruling sized the text as one line; measured,
-  // the ruled content does not fit one under the 120-byte cap: the command
-  // alone is 70 B in its code span, the tightest one-line spelling carrying
-  // trigger, command and the `gates` clause is 125 B, and the two lines land
-  // at 119 B and 119 B. Authorized under ruling record 6184799323 on #23606
-  // (letter B, item 1; maintainer 「同意」): a ruling of record that orders text
-  // into a ratcheted file raises that file's ceiling by the measured lines the
-  // text needs, the ruling id and the delta quoted in the raising PR's body.
-  // Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record applies.
-  // Landed count, headroom 0, same convention.
-  // 404 → 402 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  // 402 → 405 (#29111): the ruling orders the private report field
-  // `security_findings`: the delivery sentence names the comment copy's value
-  // (+1), one rule line routes the finding to the field (+1) and the JSON
-  // template gains it (+1), +3 measured, no restatement in the file to pay with.
-  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // 405 → 407 (#35259): an ordinary ruled raise. Rulings of record: comment 6998694957 (item 11 — a
-  // dev run never asks the maintainer directly: it reports `needs_decision` and the seat takes it
-  // to the decision thread, +1) and the card body (item 8 — a `blocked` report names the part that
-  // can go first, +1). Measured delta +2. Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // 407 → 410 (#35298): an ordinary ruled raise. The ruling of record is that card's body (the
-  // maintainer, 2026-11-19, verbatim 「同意」 to the four-line brief). The six-line definition (4
-  // lines) becomes the four-line one with what each line says (4), the words it never carries (+1)
-  // and the two readings that move to the English part (+2). Measured delta +3.
-  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  ['.claude/agents/os-dev.md', 410],
-  // #9473: the other four `.claude/skills/` are read in full by the sessions
-  // that use them too — the erosion mechanism the ratchet exists to stop
-  // isn't specific to the pm-dispatch surface. Set at current counts on
-  // `origin/main` (headroom 0, same convention as the entries above).
-  // 238 → 246: the ruling of record that orders text into the file — the
-  // maintainer's 「以上应该写入你的 checklist skills」, recorded verbatim with the
-  // rulings it orders in comment 6433562861 — +8 measured lines (write doors,
-  // file-every-defect, auth/authz fix dispatch, QA run is not a lane card).
-  // 246 → 259: the ruling of record that orders text into the file — the
-  // maintainer's 2026-10-29 words for #27382 and #27390, collected verbatim in
-  // comment 6500750765 — +13 measured lines (a security finding gets no card and
-  // the PM session dispatches its fix, the runner only tests, runner effort by
-  // card shape per backend, the spend line).
-  // 259 → 276: the ruling of record on #27377 — the maintainer's four
-  // standing-regression options and 「这些都应该写到 checklist skills 中」, recorded
-  // verbatim in comment 6501246005 — +17 measured lines: 20 ruled (the
-  // `touched:<sha>` selector row, retest trigger 4, the npm smoke locator
-  // exception in §5, §6 standing regression) less 3 repaid by rejoining §5
-  // wraps that had broken mid-word.
-  // 276 → 277: comment 6500750765 again, +1 measured line: retest trigger 2's
-  // security-hardening clause (no card exists, so the PM session that landed the
-  // hardening re-runs the item itself).
-  // 277 → 276 (#29111): the Guardrails security definition and fix dispatch
-  // became a pointer at pm-dispatch security-findings.md (lowering is legitimate).
-  // 276 → 279: ruling comment 6715420603 (maintainer letter A, 「同意 新设 qa#1」)
-  // orders the card's three text fixes, two of which land here: §6 names the
-  // `qa#1` seat as the routines' one owner (a rewrite in place, 0 lines), and §5
-  // gains the close line (close-out complete ⇒ the QA seat closes the record
-  // `completed`; residuals stay on their cards, retests owed through
-  // `retest-owed.mjs`). Measured delta +3 (two text lines and their paragraph
-  // break), ceiling moved by +3; landed count, headroom 0.
-  ['.claude/skills/checklist-test/SKILL.md', 279],
-  ['.claude/skills/checklist-author/SKILL.md', 62],
-  // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/dogfood-verification/SKILL.md', 140],
-  // 328 → 334 (#10848): maintainer-ruled (2026-08-22, Option A) — convention 5
-  // replaced with the pin's house sentence AND the pin docblock's one allowed
-  // variant shape carried into the skill, +6 lines within the card's budget.
-  ['.claude/skills/spec-property-retirement/SKILL.md', 337],
-  // #9792: root AGENTS.md is the largest, most-read, most binding instruction
-  // file in the repo and had no ceiling — the hole the oversized 39-line
-  // read-layer clause (compacted by #9715) entered through. Set at its line
-  // count on `origin/main` after #9715 landed (headroom 0, same convention).
-  //
-  // 958 → 961 (#10126): the ONE raise this map has taken, by the header's own
-  // escape hatch. The queue-incident remediation adds a three-line convention to
-  // § Build & Test — clocked windows measure behaviour, never loading — and the
-  // section it joins had two lines of lossless rewrap headroom against a
-  // three-line cost, so it could not be paid for in place. Maintainer ruling
-  // 2026-08-20, verbatim and untranslated: 「A — 抬上限到 961 (Recommended)」
-  // (issue #10126, comment 5353111732). Headroom is 0 again by construction, and
-  // the next author needing a line is back to compressing.
-  //
-  // 1149 → 1150 (#11819): Prime Directive #15's warrant sentence described the
-  // Version Packages PR as regenerated "on every push to main" — false since the
-  // #11233 trigger split. The correct sentence (six-hourly schedule; push drives
-  // the publish lane) is longer, and the whole paragraph measures zero lossless
-  // rewrap headroom, so the correction costs one line. Maintainer ruling
-  // 2026-08-25, verbatim and untranslated, accepting the measured +1/D1 option:
-  // 「我看到了,你分析过了,接受你的建议」. Headroom is 0 again by construction.
-  //
-  // 1150 → 1158 (#10855 / PR #11908): the published-spellings mirror re-sync.
-  // AGENTS.md's copy of check-cross-package-test-inputs' RECOGNISED_PATH_SPELLINGS
-  // had drifted — the two findUp ANCHOR seeds and the ⛔ manifest-name prohibition
-  // qualifying them were missing. Twice before, the stale line over there was the
-  // stated REASON FOR A PROHIBITION (#10163, #10854), so a rotting mirror does not
-  // merely misinform: it launders an obsolete rule into a live one. The honest
-  // re-sync measures +8 on the reflowed (#11948) layout — published block 11 → 17
-  // lines, prose paragraph 4 → 6 — and lossless rewrap headroom across that
-  // section measures 0, so it cannot be paid in place. From here the mirror is
-  // mechanically enforced by check-published-list-mirrors.mjs, which prices any
-  // later drift at the moment it is incurred rather than letting it accrue.
-  // Maintainer ruling 2026-08-25 (option C1), verbatim and untranslated:
-  // 「我看到了,你分析过了,接受你的建议」 — recorded on PR #11908. Headroom is 0
-  // again by construction.
-  //
-  // 1158 → 1162 (#12756, folding #12896 + the #12874-A line): PD #14's editable
-  // prose amended to the 2026-08-27 approve-gated queue ruling — the superseded
-  // "Reviewed + approved + fully green does not override this" replaced by the
-  // GOVERNED_APPROVERS pinned-approval landing path, the agent-never-approves
-  // prohibition, and the pure-regeneration proactive-approval line (the queue leg
-  // then installed nothing, so the byte-equality lift never evaluated; SUPERSEDED
-  // 2026-09-01/#14067); § Skills' twin sentence reconditioned in place at net 0.
-  // All three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
-  // and the card's seven-cut ledger was exhausted first: held draft +2, the
-  // proactive-approval rider +2 (a 161-byte minimal variant still wraps to +2;
-  // anything smaller drops ruled content), fold 0. Maintainer batch ruling
-  // 2026-08-29, verbatim and untranslated: 「执行，批 #1 其他卡同意」 — recorded
-  // on #12756 and quoted in the PR. Headroom is 0 again by construction.
-  //
-  // 1162 → 1058: the rules-only rewrite — every incident narrative, ruling date and
-  // quotation out, every rule kept as one sentence; re-pinned at the landed count,
-  // headroom 0 (lowering is always legitimate).
-  //
-  // 1058 → 1068: the merge-tree corollary (PR #15885, card #15871), +10 lines — a
-  // local `merge-tree` of a `merge=os-regen` path is NOT GitHub's mergeability, the
-  // driver-less bare-clone probe that answers GitHub's question, and the ⛔ refusal
-  // of `-c merge.os-regen.driver=`. Maintainer ruling, verbatim and untranslated:
-  // 「同意」 (decision batch #63, 2026-09-07, PR #15885 comment 5564103435) and
-  // 「15885 你接手跟进合并」 (2026-09-07, quoted in the director's correction comment
-  // on PR #15885). Re-wrap and cross-file moves are refused per the header: the
-  // bullet is already typeset at the surrounding block's 90-byte prose width, and
-  // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
-  // applies. Landed count, headroom 0, same convention.
-  //
-  // 1068 → 1074 (card #16851): Multi-agent discipline §3 narrowed from an
-  // unconditional force-push ban to "never force-push a SHARED branch", plus the
-  // five criteria that make a branch provably unshared before `--force-with-lease`
-  // is allowed — the ban's own rationale (a parallel agent's work) was already
-  // scoped that way, and check-partof-closing-keyword RULE 2 can only be satisfied
-  // by rewriting a commit message, so the unconditional wording had already been
-  // broken once in practice. +6 lines, exactly the ruled budget: two lines cannot
-  // carry five criteria, and the item measures 0 lossless rewrap headroom at the
-  // list's ~90-byte prose width. Maintainer ruling, verbatim and untranslated:
-  // 「其他同意」 (decision batch #111 item 4, 2026-09-10, on analysis 5615846806
-  // option A; recorded by the director on #16851 comment 5617189215, which also
-  // rules the net budget of 6). AGENTS.md is not a CROSS_FILE_MOVES destination,
-  // so no `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  //
-  // 1074 → 1075 (card #16973): the Post-Task Checklist's changeset rule gains the
-  // ruled exception — a bug fix in a released package takes `patch` UNLESS the PR
-  // declares `Clause-②: yes`, in which case at least `minor`. Until this line the
-  // two live authorities disagreed on the same PR — this item's sentence and the
-  // maintainer's own level ruling — and an author could satisfy either and cite it;
-  // the LEVEL axis of check-changeset-no-major.mjs has judged it the second way
-  // since #16055, so the text is being brought to the gate, not the gate to the
-  // text. +1 line against the ruled budget of 2, and forced: the item's paragraph
-  // measures 543 bytes of prose, which four lines cannot hold under the 120-byte
-  // rule above (4 × 120 = 480), so there is no lossless rewrap at any width.
-  // Maintainer ruling, verbatim and untranslated: 「其他同意」 (decision batch #111
-  // item 3, 2026-09-10, on analysis 5615846581 option A, forward-only; recorded by
-  // the director on #16973 comment 5617188486, which also rules the net budget of 2
-  // and holds the gate's LEVEL axis unchanged). AGENTS.md is not a CROSS_FILE_MOVES
-  // destination, so no `ruledRaises` record applies. Landed count, headroom 0, same
-  // convention.
-  //
-  // 1075 → 1099 (card #15410): the `--self-test` shape section — nothing in this repo
-  // said what a self-test must look like, so every author re-derived it and the two
-  // holes (no assertion floor; no verdict handshake) kept being re-entered. Landed as
-  // the two judgeable clauses plus one pointer line: the floor pins battery NAMES with
-  // a per-battery minimum (never one total), and the verdict sets a module-level flag
-  // the dispatch refuses on when unset. The narrative, the census numbers and the two
-  // worked non-handshake shapes are NOT here — they were moved into
-  // `docs/audits/2026-09-self-test-shape-census.md`, which the pointer line names
-  // alongside the `scripts/measure-self-test-floor.mjs` docblock. +24 lines, the
-  // measured count of the compressed section including its heading, against a first
-  // draft that measured 41; the section has 0 lossless rewrap headroom at the
-  // surrounding ~100-byte prose width, and the ruling's single pointer line is two
-  // physical lines only because one would be 170B against this file's own 120-byte
-  // per-line budget. Maintainer ruling, verbatim and untranslated:
-  // 「135 同意」 (decision batch #135 item 4, 2026-09-15, presented as 「B,目标 ≤ 24 行,
-  // 并按实测行数抬上限」; recorded by the director on #15410 comment 5682595374, which
-  // also refuses option D). AGENTS.md is not a CROSS_FILE_MOVES destination, so no
-  // `ruledRaises` record applies. Landed count, headroom 0, same convention.
-  //
-  // 1099 → 1109 (card #16233): § Degradation log levels' third-legal-answer
-  // paragraph brought to the instrument, per letter C — a `catch` that delivers by
-  // RETURNING an outcome object (`return { ok: false, error }`, a `failed` receipt)
-  // has no callee to declare, so it is ⛔ never added to
-  // `DURABILITY_CRITICAL_CALLEES` or to either `FAILURE_PROPAGATION_*` map,
-  // ⛔ never baselined and ⛔ never log-bolted to green the checker; it is pinned by
-  // its own file's test and its population read from
-  // `scripts/measure-return-propagating-durability-seams.mjs`. Until this line the
-  // text prescribed, for all 12 censused seams, the two remedies the gate's own
-  // header refuses — correct code reds the gate, and the only two ways to green it
-  // were the two it forbids. +10 lines, measured: the paragraph goes 10 → 20
-  // physical lines and the file 1099 → 1109, and it is bought by CONTENT, not by
-  // bad wrapping. Re-measured on the merged tree with this gate's own `wrapLine`,
-  // at the width the section is actually typeset at (median 85 B, p90 89 B, max
-  // 90 B — inside the ≤91-byte ASCII-prose convention the 120-byte cap above
-  // codifies): a greedy rewrap returns exactly the 20 lines the paragraph already
-  // occupies at 90 B, and 21 at 88 B ⇒ 0 lossless-rewrap headroom. Lines come back
-  // only by re-typesetting ASCII prose ABOVE that convention (18 at 100 B, 15 at
-  // 120 B; the whole section 88 → 69 at 120 B), which is the reflow that cap
-  // documents itself as NOT imposing — and re-wrap funding is refused per the
-  // 2026-08-17 rule in any case. Maintainer ruling, verbatim and untranslated:
-  // 「1. #19214 / 卡 #16233 —— AGENTS.md 行预算, A 批 +10(1099→1109)」
-  // — the maintainer's live instruction to `session_019srGWGCBBCBHqcDoRZpQRh`,
-  // recorded on #16233 comment 5750261694; it rules the line budget that the
-  // standing letter-C ruling 5716260390 left unruled when it named the text.
-  // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
-  // applies. Landed count, headroom 0, same convention.
-  //
-  // 1109 → 1116 (card #19641, PR #19642): the six-line rule that every GitHub
-  // write leaves through scripts/pm/ as the fleet's App identity, behind the
-  // shared write gate — bought by CONTENT (a rule with no prior spelling
-  // anywhere in the file), after the paragraph was first compressed from
-  // sixteen lines to six. Maintainer ruling, verbatim and untranslated:
-  // 「同意 A（推荐）」 — the maintainer's live instruction to the desktop session
-  // that raised it, recorded on #19641 comment 5771401251 together with the
-  // option A text it accepted (raise to 1116, ruling quoted in the PR body).
-  // Landed count, headroom 0, same convention.
-  //
-  // 1116 → 1117 (card #23534, PR #23596): the per-file test-budget sentence
-  // ruling record 6181973363 item 4 orders — bought by CONTENT; a greedy rewrap
-  // at the paragraph's own width needs 4 lines for the 3-line tail (measured).
-  // Maintainer ruling, verbatim and untranslated: 「A 上限抬到 1117 (Recommended)」
-  // — the maintainer's live answer to the seat session, recorded on PR #23596
-  // comment 6184004601. Landed count, headroom 0, same convention.
-  // Lowered 1117 → 1112 by #25712 item 4: the objectui sibling-repo steps were
-  // deleted once `ui/` became a workspace here. Landed count, headroom 0.
-  // Lowered 1112 → 1050 by #26081 (ruling record 6417533492, letter A): the file
-  // gained a table of contents, and the MECHANISM prose of § Build & Test and
-  // § Multi-agent working discipline moved verbatim to the docs/agents topic pages,
-  // each rule staying as one executable sentence plus a pointer. A LOWERING, which
-  // needs no ruling of its own — the ruling is quoted because it ordered the move.
-  // Landed count, headroom 0.
-  ['AGENTS.md', 1050],
-  // #9965: root CLAUDE.md is the other repo-root instruction file — same read
-  // path (every seat session), same governance (Prime Directive #14). It is
-  // structurally growth-prone in the way the ratchet is built for: it exists to
-  // inline the rules that must never be missed, so every new must-never-miss
-  // rule is an argument for appending to it. Maintainer ruling 2026-08-20,
-  // verbatim and untranslated: 「其他接受你的建议。」 (issue #9965, comment
-  // 5353931707) — rationale on record: a one-line ceiling now prevents compound
-  // growth cheaply. Set at its line count on `origin/main` (headroom 0, same
-  // convention as the entries above).
-  // 86 → 41: the ownership excerpt rewritten by role in the same rules-only pass;
-  // re-pinned at the landed count, headroom 0.
-  // 41 → 5: the inlined never-miss digest left the file entirely — it is now a pure
-  // pointer at AGENTS.md, which carries every rule it used to restate. Maintainer
-  // ruling 2026-09-09, verbatim and untranslated: 「其次 claude.md 是不是直接让他阅读
-  // agents.md 即可，没必要维护两套。所有仓库都有类似的问题」 (program #17161, card
-  // #17162). A LOWERING, which needs no ruling of its own — quoted because the
-  // ruling is what emptied the file. Re-pinned at the landed count, headroom 0: the
-  // 36 lines of slack a shrink leaves behind are exactly the budget a future digest
-  // would re-accrete into, which is the growth this entry exists to price.
-  ['CLAUDE.md', 5],
+  ['.claude/skills/pm-dispatch/SKILL.md', 33872], // lowered 33934 → 33872 by the re-basing PR's own edit
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 20070],
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 4189],
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 6419],
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 4892],
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 1082],
+  ['.claude/skills/pm-dispatch/references/readings-queue.md', 9074],
+  ['.claude/skills/pm-dispatch/references/readings-channels.md', 7138],
+  ['.claude/skills/pm-dispatch/references/readings-page.md', 2126],
+  ['.claude/skills/pm-dispatch/references/readings-search.md', 4413],
+  ['.claude/skills/pm-dispatch/references/readings-issue-fields.md', 2597],
+  ['.claude/skills/pm-dispatch/references/readings-write-shapes.md', 8410],
+  ['.claude/skills/pm-dispatch/references/readings-ci.md', 4900],
+  ['.claude/skills/pm-dispatch/references/readings-shell.md', 2492],
+  ['.claude/skills/pm-dispatch/references/readings-session.md', 4874],
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 7698],
+  ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 6875],
+  ['.claude/skills/pm-dispatch/references/review-checklist.md', 79],
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 10717],
+  ['.claude/skills/pm-dispatch/references/release-aftercare.md', 3526],
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 7722],
+  ['.claude/skills/pm-dispatch/references/true-green.md', 2068],
+  ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 2488],
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9071],
+  ['.claude/skills/pm-dispatch/references/area-lease.md', 6401],
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 3781],
+  ['.claude/skills/pm-dispatch/references/untrusted-text.md', 3280],
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 3934],
+  ['.claude/skills/pm-dispatch/references/external-contributions.md', 2006],
+  ['.claude/skills/pm-dispatch/references/reading-discipline.md', 3822],
+  ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 4959],
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 12399], // edited byte-neutral by the re-basing PR (12399 → 12399)
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 19810],
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 8386],
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 4669],
+  ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 3928],
+  ['.claude/skills/pm-dispatch/references/lanes/server.md', 4832],
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 2533],
+  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 2666], // lowered 2682 → 2666 by the re-basing PR's own edit
+  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 3299],
+  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 1041],
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 1320],
+  ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 3990],
+  ['.claude/skills/pm-dispatch/references/lanes/security.md', 4196],
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 6958],
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 2530],
+  ['.claude/skills/pm-dispatch/references/lanes/l2-review.md', 1462],
+  ['.claude/skills/pm-dispatch/references/lanes/review.md', 120],
+  ['.claude/skills/pm-dispatch/references/lanes/qa.md', 2235],
+  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 2694],
+  ['.claude/skills/pm-dispatch/references/lanes/queue.md', 2003],
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 1232],
+  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 2270],
+  ['.claude/agents/os-dev.md', 38848], // lowered 39008 → 38848 by the re-basing PR's own edit
+  ['.claude/skills/checklist-test/SKILL.md', 19560],
+  ['.claude/skills/checklist-author/SKILL.md', 3574],
+  ['.claude/skills/dogfood-verification/SKILL.md', 9526],
+  ['.claude/skills/spec-property-retirement/SKILL.md', 26922],
+  ['AGENTS.md', 78106],
+  ['CLAUDE.md', 273],
 ]);
 
 /**
  * The ruling that authorises a cross-file move, spelled once. Every declaration
  * in {@link CROSS_FILE_MOVES} must name it; a raise that names nothing is a
- * raise, not a move, and the header's escape hatch (a maintainer ruling quoted
+ * raise, not a move, and the header's ordinary path (the ruling of record quoted
  * in the raising PR) is the only other way one lands.
  */
 export const RULING_CITATION = '#14685 item 5 (comment 5520452691)';
 
 /**
- * Declared same-PR CROSS-FILE MOVES — the raise path the header section above
- * authorises. Keyed by DESTINATION (the entry whose ceiling rose); one
- * declaration per destination, and no path appears twice across the map.
- *
- * Each declaration carries the ceilings its participants held BEFORE the move,
- * which is what makes the whole arithmetic computable from this file alone:
+ * Declared same-PR CROSS-FILE MOVES — the raise path the header authorises.
+ * Keyed by DESTINATION (the entry whose ceiling rose); one declaration per
+ * destination, and no path appears twice across the map.
  *
  *   ruling   the authorising ruling — must name {@link RULING_CITATION}
- *   was      the destination's ceiling before the move — its LITERAL pre-move
- *            value, never carried forward past a later ordinary raise
+ *   was      the destination's ceiling before the move, in bytes — its LITERAL
+ *            pre-move value, never carried forward past a later ordinary raise
  *   sources  [path, ceiling-before-the-move] for every file that paid for it
  *   ruledRaises
  *            optional; one `{ruling, date, delta}` record per ORDINARY ruled
- *            raise taken on the destination SINCE the move, subtracted before
- *            this move's raise is measured (header: the two quantities). Its
- *            `ruling` carries the maintainer's own words as a verbatim
- *            quotation, in either spelling the ceilings above already use —
- *            「…」 or "…" — and a record without one is RED.
+ *            raise taken on the destination SINCE the move, `delta` in bytes,
+ *            `ruling` carrying the maintainer's own words as a verbatim
+ *            quotation (「…」 or "…"). A record without one is RED.
  *
- * ⛔ NOT somewhere to record a raise no move paid for. A declaration is a CLAIM
- * about an arithmetic, and {@link crossFileMoveVerdict} re-derives that
- * arithmetic from the live map on every run rather than trusting the prose
- * beside it.
+ * ⛔ NOT somewhere to record a raise no move paid for, and not the place an
+ * ordinary raise on a file that is no move's destination is booked: that raise
+ * is the header's ordinary path, quoted in the raising PR's body. A declaration
+ * is a CLAIM about an arithmetic, and {@link crossFileMoveVerdict} re-derives it
+ * from the live map on every run. A declaration keeps working after its PR
+ * lands: lowering the destination later reads as PAID DOWN, while raising a
+ * SOURCE later re-opens the move (the destination would keep what it was given
+ * while the files that paid for it grow back).
  *
- * ⚠️ A declaration keeps working after its PR lands, and the two directions are
- * deliberately asymmetric. Lowering the destination later is always legitimate,
- * so a destination that has fallen back to or below its `was` reads as PAID
- * DOWN and passes. Raising a SOURCE later is the loophole the move mechanism
- * would otherwise open — the destination keeps the lines it was given while the
- * files that paid for them grow back, and the corpus is up on net with the
- * move's warrant silently spent — so the sum is re-checked against the sources'
- * pre-move values for as long as the declaration stands. That red belongs to
- * the later raise, not to this one, and its author is holding the ruling that
- * has to account for it.
- *
- * ⚠️ A later ORDINARY raise on the destination is a THIRD direction and is
- * neither of those two: it is the maintainer's, so it neither re-opens the move
- * nor pays it down. It belongs in `ruledRaises`, where it is subtracted — which
- * is what lets `was` stay one fact instead of a running total.
+ * EMPTY at the byte re-base, deliberately. The three line-era declarations (into
+ * `references/platform-readings.md`, `references/landing-operations.md` and
+ * `references/lanes/director.md`) recorded `was` values and ruled raises in
+ * LINES, which no byte ceiling can be compared with, and the re-base landed every
+ * participant at headroom 0, so nothing remained for their arithmetic to guard.
+ * Re-declaring them in bytes would be worse than dropping them: a zero-byte move
+ * pins its sources at today's size, so any later ordinary ruled raise on a source
+ * (`SKILL.md`, `triage-duties.md`, `rest-channel.md`, `lanes/server.md`) would
+ * read as the move re-opening and go red for bytes no move ever took. The
+ * platform-readings declaration also credited the map with lines that were moved
+ * into the nine `readings-*.md` files rather than deleted; it goes with the rest.
+ * The next move writes a fresh declaration, in bytes.
  */
-export const CROSS_FILE_MOVES = new Map([
-  // The readings consolidation — the first move taken under the ruling, and the
-  // one it was ruled for. Sources' `was` values are their ceilings on
-  // `origin/main` at f3ae441fa2; the reviewer holds them against that diff.
-  [
-    '.claude/skills/pm-dispatch/references/platform-readings.md',
-    {
-      ruling: 'per-repo readings consolidation, authorised by #14685 item 5 (comment 5520452691)',
-      // The destination's LITERAL ceiling on the day this move landed, and one
-      // fact: it is NOT carried forward past the ordinary ruled raise the same
-      // entry took on 2026-09-04, which is recorded below instead. So the
-      // reviewer's completeness check keeps the single shape it has always had —
-      // every `was` here, destination and sources alike, is that participant's
-      // ceiling on `origin/main` at f3ae441fa2, held against that diff.
-      was: 314,
-      // ORDINARY ruled raises taken on this destination SINCE the move. Each is
-      // the maintainer's rather than this move's, so each is subtracted before
-      // the move's raise is measured: 397 − 314 − (34 + 39) leaves the +10 the
-      // move landed with, against the same net source decrease of 11. Recording
-      // them here rather than inside `was` is the whole point — with neither, the
-      // same tree reads the move as +83 against −11 and reds twice, for lines no
-      // source was ever asked to pay. The list GROWS by one record per ruled
-      // raise; ⛔ `was` never moves, so the reviewer's completeness check keeps
-      // the one shape it has always had.
-      ruledRaises: [
-        {
-          // Quoted beside this entry's ceiling above, where the +34 is accounted
-          // for line by line. Copied from there, not paraphrased.
-          ruling:
-            'the intake-family raise on `.claude/skills/pm-dispatch/references/platform-readings.md`'
-            + ' — maintainer, live PM chat, 2026-09-04, decision batch #27, verbatim and'
-            + ' untranslated: 「同意」 on option A, and the sentences that ruling adopts, in the'
-            + ' director record\'s own words: "the ceiling for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` is raised by the'
-            + ' measured need, +34, to 358 — a named, sized raise under the ratchet\'s own'
-            + ' maintainer exit … The +34 is a ceiling of the raise, not a target: if the eight'
-            + ' readings land in fewer lines, the raise is the smaller number."',
-          date: '2026-09-04',
-          delta: 34,
-        },
-        // RETIRED HERE, and retired rather than re-numbered, because the ceiling
-        // above no longer stands high enough to carry both records. The rules-only
-        // rewrite gave 38 of these 73 ruled lines back (397 → 359), so 35 of them
-        // still stand while the destination is only 45 above `was` — and a set of
-        // records claiming more than that reads as an over-claim, which is exactly
-        // what `crossFileMoveVerdict` refused. The header names the remedy: a ruled
-        // raise since given back is spent, so retire its record. The THIRD-INCREMENT
-        // record is the one retired (maintainer, decision batch #34, 2026-09-04,
-        // 「决裁批 #34 同意」, +39, quoted in full beside the ceiling above) rather
-        // than the intake-family record below it, and the choice is the conservative
-        // direction rather than a preference: 34 declared against 35 actually
-        // standing prices this move at +11 for a raise that took +10, while keeping
-        // the +39 instead would price it at +6 — under-pricing the move is the
-        // failure the header warns about. Neither ruling is reopened by this: both
-        // are still quoted beside the ceiling, which is where a reader gets back to
-        // them, and the lines they bought are the lines this rewrite handed back.
-        {
-          // Quoted beside this entry's ceiling above, where the +3 is accounted
-          // for line by line. Copied from there, not paraphrased.
-          ruling:
-            'the fourth-increment raise on'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — maintainer,'
-            + ' decision batch #56, 2026-09-06, verbatim and untranslated: 「其他同意」 on option'
-            + ' A, and the sentences that ruling adopts, in the director record\'s own words'
-            + ' (comment 5559776878): "The ceiling in `scripts/pm/check-skill-line-ratchet.mjs`'
-            + ' for `.claude/skills/pm-dispatch/references/platform-readings.md` moves 359 → 362'
-            + ' … All three lines land as authored … No existing line is deleted to pay for them'
-            + ' (option C rejected); no line is dropped (option B not needed)."',
-          date: '2026-09-06',
-          delta: 3,
-        },
-        {
-          // The ruling's own words, copied from comment 5563909225 rather than
-          // paraphrased; the +26 is accounted for line by line on PR #16379.
-          ruling:
-            'the fifth-increment raise on'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — maintainer,'
-            + ' decision batch #62, 2026-09-07, verbatim and untranslated: 「同意」 on option'
-            + ' A, and the sentences that ruling adopts, in the director record\'s own words'
-            + ' (comment 5563909225): "`references/platform-readings.md`\'s line ceiling rises'
-            + ' to the measured count: 385 on today\'s `main` (359 → 385), or 388 if PR'
-            + ' #15955\'s ruled raise (362) lands first — the same +26 either way."',
-          date: '2026-09-07',
-          delta: 26,
-        },
-        {
-          // The STANDING exception's own words, copied from `pm-dispatch`
-          // SKILL.md rather than paraphrased; the +7 is accounted for line by
-          // line beside this entry's ceiling above. This raise takes no decision
-          // card BECAUSE the exception says it does not, and it is recorded here
-          // BECAUSE the exception says to record it here.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-07',
-          delta: 7,
-        },
-        {
-          // The SEVENTH increment, under the same STANDING exception — the same
-          // words, quoted again rather than cross-referenced, because a record
-          // that quotes no ruling is RED and each record stands alone. The +7 is
-          // accounted for line by line beside this entry's ceiling above.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-08',
-          delta: 7,
-        },
-        {
-          // The EIGHTH increment, under the same STANDING exception — the same
-          // words again, for the same reason: a record that quotes no ruling is
-          // RED and each record stands alone. The +17 is accounted for line by
-          // line beside this entry's ceiling above, and the exception's own
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // dedup table and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-09',
-          delta: 17,
-        },
-        {
-          // The NINTH increment, under the same STANDING exception — the same
-          // words again, for the same reason: a record that quotes no ruling is
-          // RED and each record stands alone. The +3 is accounted for line by
-          // line beside this entry's ceiling above, and the exception's own
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // dedup table and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-10',
-          delta: 3,
-        },
-        {
-          // The TENTH increment, under the same STANDING exception — the same
-          // words again, for the same reason: a record that quotes no ruling is
-          // RED and each record stands alone. The +3 is accounted for line by
-          // line beside this entry's ceiling above, and the exception's own
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // dedup table and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-10',
-          delta: 3,
-        },
-        {
-          // The ELEVENTH increment, under the same STANDING exception — the same
-          // words again, for the same reason: a record that quotes no ruling is
-          // RED and each record stands alone. The +24 is accounted for line by
-          // line beside this entry's ceiling above, and the exception's own
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // dedup table and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-12',
-          delta: 24,
-        },
-        {
-          // The TWELFTH increment, under the same STANDING exception — the same
-          // words again, for the same reason: a record that quotes no ruling is
-          // RED and each record stands alone. The +2 is accounted for line by
-          // line beside this entry's ceiling above, and the exception's own
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // dedup table and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-13',
-          delta: 2,
-        },
-        {
-          // The THIRTEENTH increment, under the same STANDING exception — the
-          // same words again, for the same reason: a record that quotes no
-          // ruling is RED and each record stands alone. The +2 is accounted for
-          // line by line beside this entry's ceiling above; the exception's
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // body and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-13',
-          delta: 2,
-        },
-        {
-          // The FOURTEENTH increment, under the same STANDING exception — the
-          // same words again, for the same reason: a record that quotes no
-          // ruling is RED and each record stands alone. The +1 is accounted for
-          // line by line beside this entry's ceiling above; the exception's
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // body and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-14',
-          delta: 1,
-        },
-        {
-          // The FIFTEENTH increment, under the same STANDING exception — the
-          // same words again, for the same reason: a record that quotes no
-          // ruling is RED and each record stands alone. The +5 is accounted for
-          // line by line beside this entry's ceiling above; the exception's
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // body and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-15',
-          delta: 5,
-        },
-        {
-          // The SIXTEENTH increment, under the same STANDING exception — the
-          // same words again, for the same reason: a record that quotes no
-          // ruling is RED and each record stands alone. The +6 is accounted for
-          // line by line beside this entry's ceiling above; the exception's
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // body and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-15',
-          delta: 6,
-        },
-        {
-          // The SEVENTEENTH increment, under the same STANDING exception — the
-          // same words again, for the same reason: a record that quotes no
-          // ruling is RED and each record stands alone. The +1 is accounted for
-          // line by line beside this entry's ceiling above; the exception's
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // body and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
-            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
-            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
-          date: '2026-09-15',
-          delta: 1,
-        },
-        {
-          // The EIGHTEENTH increment, under the same STANDING exception — the
-          // same words again, for the same reason: a record that quotes no
-          // ruling is RED and each record stands alone. The +3 is accounted for
-          // line by line beside this entry's ceiling above; the exception's
-          // conditions (per-item verification and the candidate / landed /
-          // already-present / refused counts) are carried by the raising PR's
-          // body and the seat's ACCEPT.
-          ruling:
-            'the standing one-file exception for'
-            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
-            + ' SKILL.md, verbatim and untranslated: 「唯一例外：`platform-readings.md`'
-            + ' 增量抬上限到落地行数，免决策卡，记 `ruledRaises` 引常设裁决。条件：席位验收评论'
-            + '逐条核实、去重计数（候选/落地/已有/拒收）、一事一行、不计重排」',
-          date: '2026-09-18',
-          delta: 3,
-        },
-      ],
-      sources: [
-        // Two of the three original sources, lanes/cli.md (`was` 35) and
-        // lanes/services.md (`was` 30), merged with lanes/engine.md into
-        // lanes/server.md on 2026-10-22 (maintainer ruling, letter 乙). The
-        // merged file carries their place: its `was` is 35 + 30 + 32, the two
-        // sources' recorded pre-move ceilings plus engine.md's ceiling at the
-        // merge — engine.md was never a source, so entering it at its own
-        // ceiling adds nothing to the decrease this move was paid with. The
-        // 9 lines the two charters had already paid stay counted, and what the
-        // merge itself deleted is counted once, here.
-        ['.claude/skills/pm-dispatch/references/lanes/server.md', 97],
-        ['.claude/skills/pm-dispatch/references/rest-channel.md', 93],
-      ],
-    },
-  ],
-  // The principle-only cut of SKILL.md (maintainer, decision batch #213 item 4):
-  // the 入队与落地 clause block moved verbatim into the file that already held
-  // its A–D operating detail. `was` values are the participants' ceilings on
-  // `origin/main` at fae870352; the reviewer holds them against that diff. The
-  // five NEW per-phase references of the same PR are added rows, not
-  // destinations — a move needs a pre-move ceiling, which a new file has none
-  // of — and the same source decrease is what pays for them.
-  [
-    '.claude/skills/pm-dispatch/references/landing-operations.md',
-    {
-      ruling: '入队与落地 consolidation into landing-operations.md under the principle-only cut of SKILL.md, authorised by #14685 item 5 (comment 5520452691)',
-      was: 69,
-      sources: [['.claude/skills/pm-dispatch/SKILL.md', 819]],
-      ruledRaises: [
-        {
-          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
-          ruling:
-            'the main-green resume line on `.claude/skills/pm-dispatch/references/landing-operations.md` §C'
-            + ' — the main-red resume card (#29445, filing gate ③, a task the maintainer set directly),'
-            + ' maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」',
-          date: '2026-11-03',
-          delta: 1,
-        },
-        {
-          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
-          ruling:
-            'the merge-queue jump rule on `.claude/skills/pm-dispatch/references/landing-operations.md`'
-            + ' — the jump card (#31403, filing gate ③, a task on the maintainer\'s word),'
-            + ' maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;'
-            + ' letter 「A」 recorded as comment 6729640900',
-          date: '2026-11-09',
-          delta: 5,
-        },
-        {
-          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
-          ruling:
-            'the relay queue doors and the landing seat\'s queue duty on `.claude/skills/pm-dispatch/references/landing-operations.md`'
-            + ' — the queue card (#33647, filing gate ③, maintainer-directed in the triage seat\'s session),'
-            + ' maintainer verbatim and untranslated: 「建议有专人来跟进队列吗？这种操作不应该等我」',
-          date: '2026-11-15',
-          delta: 4,
-        },
-      ],
-    },
-  ],
-  // The thin triage seat (maintainer's word 2026-10-23, verbatim and
-  // untranslated: 「分诊不忙不如留给总监管」): the 分诊席 keeps bare-card first
-  // touch and cross-lane dedupe; its daily duties — the release board, the
-  // cross-repo pin chain, the decision-inbox duties — moved into the 总监席
-  // charter. `was` values are the participants' ceilings on `origin/main`
-  // before the move; the reviewer holds them against that diff.
-  [
-    '.claude/skills/pm-dispatch/references/lanes/director.md',
-    {
-      ruling: 'the triage daily duties (release board, pin chain, decision-inbox duties) consolidated into the 总监席 charter on the maintainer\'s word of 2026-10-23 「分诊不忙不如留给总监管」, under the cross-file move authorised by #14685 item 5 (comment 5520452691)',
-      was: 70,
-      sources: [['.claude/skills/pm-dispatch/references/triage-duties.md', 120]],
-      ruledRaises: [
-        {
-          ruling:
-            'the app-repo business-rationale duty line on `.claude/skills/pm-dispatch/references/lanes/director.md`'
-            + ' — ruling D of director batch #10, comment 6378083450, maintainer verbatim and untranslated:'
-            + ' 「#25558 记为 D」, adopting the record\'s workload 「`lanes/director.md` 职责行」.',
-          date: '2026-10-24',
-          delta: 1,
-        },
-      ],
-    },
-  ],
-]);
+export const CROSS_FILE_MOVES = new Map([]);
 
 /**
- * Per-file MAX TABLE ROW BYTES — the second ratchet, and the only metered thing
- * in this file that is not a line count (#11947).
- *
- * ## The hole it closes
- *
- * The 120-byte line rule above exempts a markdown table row by shape, and that
- * exemption is correct — a wrapped `|` row is a different table. But it is not
- * free, and until this map nothing measured what flowed through it. A table row
- * grows by WIDENING A CELL, which costs zero lines and passes both existing
- * controls: the line ratchet counts it as one line, and the length rule exempts
- * it. Measured on the corpus when this landed, the five longest surviving lines
- * were all table rows, led by `AGENTS.md` at 1,081 bytes.
- *
- * The widening is not hypothetical and not broad decay — it is HEAVY-TAIL, which
- * is what sized this remedy. Per-row byte drift keyed by first cell between two
- * refs of `origin/main`: of ~100 matched rows, essentially none moved, while the
- * corpus's two longest lines both reached their length inside two weeks through
- * exactly this channel (`AGENTS.md` 639 → 1,081 bytes; one `domain:engine` row
- * 101 → 765, a 7x). A corpus-wide new RULE would be sized for a defect that
- * lives in two or three rows per file; a shrink-only PIN catches precisely the
- * measured defect and nothing else.
+ * Per-file MAX TABLE ROW BYTES — a second meter beside the byte ceiling, kept by
+ * its own ruling (#11947).
  *
  * ## The ruling
  *
  * Maintainer ruling 2026-08-25 (issue #11947, comment 5406811814), verbatim and
- * untranslated: 「同意」 — accepting option 1, the A-ratchet, over option 2 (a
- * whole-file byte ceiling on the two table-heavy files, the narrowed form of the
- * option already declined corpus-wide by #11106) and option 3 (nothing, refuted
- * by the measurement above). The other five structural exemption classes —
- * quotation, blockquote, unbreakable, anchored, fence — are untouched and remain
- * load-bearing and human-audited.
+ * untranslated: 「同意」 — accepting option 1, a shrink-only pin on each file's
+ * widest table row, over option 2 (a whole-file byte ceiling on the two
+ * table-heavy files) and option 3 (nothing). It was ruled while the ceiling
+ * counted lines and the 120-byte line rule exempted a table row by shape, so a
+ * widened cell cost nothing at all. The byte ceiling now meters every byte of a
+ * row too; the pin stands beside it until a ruling retires it, and the
+ * 2026-11-18 ruling that moved the ceiling to bytes does not name it.
  *
  * ## The discipline, which is the ceilings' discipline
  *
  * Seeded at each file's OWN widest table row on the day this landed, read from
  * {@link scanTableRows} rather than measured by hand — no invented constants,
- * the same idiom as the ceilings above and {@link MAX_LINE_BYTES}. Shrink-only:
- * lowering is always legitimate and consolidation pays the pin down; raising one
- * requires a maintainer ruling quoted in the raising PR.
+ * the same idiom as the ceilings above. Shrink-only: lowering is always
+ * legitimate and consolidation pays the pin down; raising one requires a
+ * maintainer ruling quoted in the raising PR.
  *
  * ⚠️ A pin of 0 is a MEASUREMENT, not a disabled row: that file has no table row
  * today, so its widest is 0. It is deliberately not an omission — an uncovered
@@ -2890,92 +305,92 @@ export const MAX_TABLE_ROW_BYTES = new Map([
  * The repo-ROOT files of the map above, spelled so `scripts/pm/dispatch-gates.mjs`
  * can derive this gate from a card that touches one.
  *
- * ## The gap this closes
- *
  * That tool reads a gate's population out of the path literals in the gate's own
- * source, and "looks like a path" there means "carries a separator" (plus a short
- * allowlist of dotted top-level dirs). Every key above satisfies that except the
- * repo-root files — a repo-root FILE has no separator to be found by. So before
- * this list existed an AGENTS.md card derived ZERO gates, and the dev met this
- * ratchet as red CI instead of as a local command. That lands on the largest
- * ceiling in the map at headroom 0, where one added paragraph crosses it. CI
- * still enforces either way (lint.yml carries no path filter) — what was missing
- * was discoverability, and this restores it.
+ * source, and "looks like a path" there means "carries a separator". A repo-root
+ * FILE has none, so before this list existed an AGENTS.md card derived ZERO
+ * gates and the dev met this ratchet as red CI instead of as a local command.
+ * `<file>/**` is the only form that reaches a repo-root file: dispatch-gates
+ * collapses a hint's globs before comparing, which reduces each back to its bare
+ * filename and matches that path alone. (Widening the extractor to bare
+ * top-level `*.md` literals was measured and refused: 8 of the 17 pairs it adds
+ * are fabricated, from gates that spell `README.md` as a basename.)
  *
- * ## Why the subtree spelling, and why it covers exactly the root files
- *
- * `<file>/**` is the only form that reaches a repo-root file: the extractor
- * requires the separator, and dispatch-gates collapses a hint's globs before
- * comparing, which reduces each back to its bare filename and matches that path
- * alone. Nothing in the tree lives under `AGENTS.md/` or `CLAUDE.md/`, so neither
- * claims a directory — measured at exactly one (gate, file) pair added per root
- * file, one family gaining coverage.
- *
- * The alternative was widening the extractor to accept bare top-level `*.md`
- * literals. Measured over 114 families x 6326 tracked files it is cheap by
- * VOLUME (+17 pairs) and fails on PROVENANCE: 8 of those 17 are fabricated,
- * because gates spell `README.md` and `CHANGELOG.md` as BASENAMES they join with
- * a package directory (a manifest `files` entry, a per-package exclusion, a
- * remote directory listing). A README.md card would come back with six leads of
- * which five name a gate that never reads that file — the false-lead class
- * dispatch-gates' own header errs against, one extension over from the
- * `package.json` basenames it already refuses.
- *
- * ## This is provenance, NOT a lookup key
- *
- * `run` opens files through CEILINGS. This list is read by nothing in this
- * script, and deliberately does not live in that map: a key rewritten into the
- * glob form would send the ratchet looking for a file that does not exist. The
- * self-test pins both halves — every separator-less ceiling is declared here,
- * and nothing declared here is a CEILINGS key.
+ * This is provenance, NOT a lookup key: `run` opens files through CEILINGS, and a
+ * key rewritten into the glob form would send the ratchet looking for a file that
+ * does not exist. The self-test pins both halves.
  */
 export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**', 'CLAUDE.md/**'];
 
-export function verdict(rel, lineCount, maxLines) {
-  if (lineCount === 0) return { ok: false, msg: `${rel} read as empty — refusing to treat a missing/empty input as a pass (#4690).` };
-  if (lineCount > maxLines) {
+/** A file's size in the ratchet's unit: UTF-8 bytes, what `wc -c` prints. */
+export function countBytes(text) {
+  return Buffer.byteLength(text, 'utf8');
+}
+
+export function verdict(rel, byteCount, maxBytes) {
+  if (byteCount === 0) return { ok: false, msg: `${rel} read as empty — refusing to treat a missing/empty input as a pass (#4690).` };
+  if (byteCount > maxBytes) {
     return {
       ok: false,
       msg:
-        `${rel} is ${lineCount} lines; the ratchet ceiling is ${maxLines}. ` +
+        `${rel} is ${byteCount} bytes; the ratchet ceiling is ${maxBytes} (${byteCount - maxBytes} over). ` +
         'Keep the surface compressed: principles in SKILL.md, on-demand detail in ' +
         '.claude/skills/pm-dispatch/references/ — provenance is one line, stories live on cards, ' +
         'not in operational text. Raising a ceiling is authorized only by the ruling of record that ' +
-        'orders the text: its comment id and the measured line delta quoted in the raising PR\'s body, ' +
+        'orders the text: its comment id and the measured byte delta quoted in the raising PR\'s body, ' +
         'the `CEILINGS` row moved in the same PR by at most that delta. A raise quoting no ruling id ' +
         'stays red, and there is no tolerance band.',
     };
   }
-  return { ok: true, msg: `${rel} is ${lineCount} lines (ceiling ${maxLines}; headroom ${maxLines - lineCount}).` };
-}
-
-function countLines(text) {
-  return text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+  return { ok: true, msg: `${rel} is ${byteCount} bytes (ceiling ${maxBytes}; headroom ${maxBytes - byteCount}).` };
 }
 
 /**
- * A VERBATIM QUOTATION, in either spelling the ceilings above already use: 「…」
- * for the maintainer's own Chinese, and "…" for the English text a ruling adopts
- * (both are present up there — the 2026-08-25 generated-artifact carve-out is
- * quoted the second way). The bar is the quotation, never the bracket.
+ * The per-file byte judgement `run` makes, as a pure function so the self-test
+ * drives the same path the gate does. `text` is `null` when the file could not
+ * be read.
+ *
+ * ⭐ Deliberately absent: any reading of LINE LENGTH. Prose may run any length
+ * (header: why bytes); the self-test pins that a file of one long line is judged
+ * by its bytes alone.
+ *
+ * @param {string} rel repo-relative path
+ * @param {string | null} text the file's contents
+ * @param {number} maxBytes its ceiling
+ * @returns {{ok: boolean, msg: string, bytes?: number}}
+ */
+export function fileVerdict(rel, text, maxBytes) {
+  if (text === null || text === undefined) {
+    return { ok: false, msg: `cannot read ${rel} — red, not a skip (#4690).` };
+  }
+  const n = countBytes(text);
+  return { ...verdict(rel, n, maxBytes), bytes: n };
+}
+
+/**
+ * Above this much headroom `run` suggests lowering the ceiling. Informational
+ * only: every ceiling is landed at headroom 0, so headroom means content has
+ * since been paid down.
+ */
+export const HEADROOM_HINT_BYTES = 4096;
+
+/**
+ * A VERBATIM QUOTATION, in either spelling a ruling is quoted in: 「…」 for the
+ * maintainer's own Chinese, "…" for the English text a ruling adopts. The bar
+ * is the quotation, never the bracket.
  */
 const VERBATIM_QUOTATION = /「[^」]+」|"[^"]+"|“[^”]+”/u;
 
 /** When the ruling was given, `YYYY-MM-DD` — how a reader gets back to it. */
 const RULED_RAISE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+const plural = (n) => (n === 1 ? '' : 's');
+
 /**
  * The ORDINARY ruled raises recorded against a move's DESTINATION — validated,
  * then summed, so {@link crossFileMoveVerdict} can take them out of the rise
- * before it prices the move.
- *
- * Every bar here exists because the subtraction is a licence to grow: lines it
- * removes from the move's raise are lines the sources are never asked to pay
- * for. So a record must name a positive line count, quote the ruling that
- * authorised it, and date it. None of that proves the maintainer said the words
- * — that is the reviewer's completeness check, the same one every `was` in this
- * map has always relied on — but it does mean a record nobody ruled has to be
- * written as a forgery rather than reached by an oversight.
+ * before it prices the move. Every bar exists because the subtraction is a
+ * licence to grow: bytes it removes from the move's raise are bytes the sources
+ * are never asked to pay for.
  *
  * @param {string} dest destination path, for the message
  * @param {{ruledRaises?: Array<{ruling?: string, date?: string, delta?: number}>}} move
@@ -2991,13 +406,13 @@ function ruledRaisesVerdict(dest, move) {
   for (const record of records) {
     const where = `cross-file move into ${dest}: an ordinary ruled raise recorded against the destination`;
     if (!Number.isInteger(record?.delta) || record.delta <= 0) {
-      return bad(`${where} names no usable line count ("delta"). A ruled raise is a positive number of lines; lowering is always legitimate and is never recorded here.`);
+      return bad(`${where} names no usable byte count ("delta"). A ruled raise is a positive number of bytes; lowering is always legitimate and is never recorded here.`);
     }
     if (!VERBATIM_QUOTATION.test(String(record?.ruling ?? ''))) {
-      return bad(`${where} (${record.delta} lines) quotes no ruling. A raise is the maintainer's or it is not a raise, so the record carries the ruling's own words verbatim — 「…」 or "…", the way every ceiling in this map quotes one. Un-ruled, this subtraction would take lines out of the move's raise that the sources were never asked to pay for.`);
+      return bad(`${where} (${record.delta} bytes) quotes no ruling. A raise is the maintainer's or it is not a raise, so the record carries the ruling's own words verbatim — 「…」 or "…". Un-ruled, this subtraction would take bytes out of the move's raise that the sources were never asked to pay for.`);
     }
     if (!RULED_RAISE_DATE.test(String(record?.date ?? ''))) {
-      return bad(`${where} (${record.delta} lines) carries no ruling date (YYYY-MM-DD), which is how a reader gets from this record back to the ruling it quotes.`);
+      return bad(`${where} (${record.delta} bytes) carries no ruling date (YYYY-MM-DD), which is how a reader gets from this record back to the ruling it quotes.`);
     }
     total += record.delta;
   }
@@ -3007,7 +422,7 @@ function ruledRaisesVerdict(dest, move) {
 /**
  * The same sum with no verdict, for {@link crossFileMoveTotalVerdict}. A
  * malformed record is already RED in {@link crossFileMoveVerdict}, which reads
- * every declaration on every run, so a green run never reaches this with one.
+ * every declaration on every run.
  *
  * @param {{ruledRaises?: Array<{delta?: number}>}} move
  */
@@ -3017,12 +432,10 @@ function ruledRaiseSum(move) {
 }
 
 /**
- * One declared cross-file move, re-derived from the live ceiling map.
- *
- * Conditions (a) and (c) of the ruling; (b) is map-wide and lives in
+ * One declared cross-file move, re-derived from the live ceiling map —
+ * conditions (a) and (c) of the ruling; (b) is map-wide and lives in
  * {@link crossFileMoveTotalVerdict}. Every failure names the arithmetic it read,
- * because the author's next move is to correct one of those numbers and a
- * verdict that hides them cannot be acted on.
+ * because the author's next move is to correct one of those numbers.
  *
  * @param {string} dest destination path — a key of `ceilings`
  * @param {{ruling?: string, was?: number, sources?: Array<[string, number]>}} move
@@ -3034,7 +447,7 @@ export function crossFileMoveVerdict(dest, move, ceilings) {
     return bad(`cross-file move declares ${dest} as its destination, which carries no ceiling — red, not a skip (#4690). A move can only land between files this map covers.`);
   }
   if (!String(move?.ruling ?? '').includes(RULING_CITATION)) {
-    return bad(`cross-file move into ${dest} cites no authorising ruling — it must name "${RULING_CITATION}". An undeclared raise is a raise, and raising a ceiling otherwise requires the ruling of record that orders the text: its comment id and the measured line delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta.`);
+    return bad(`cross-file move into ${dest} cites no authorising ruling — it must name "${RULING_CITATION}". An undeclared raise is a raise, and raising a ceiling otherwise requires the ruling of record that orders the text: its comment id and the measured byte delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta.`);
   }
   if (!Number.isInteger(move.was) || move.was <= 0) {
     return bad(`cross-file move into ${dest} records no usable pre-move ceiling ("was"), so its raise cannot be measured — red, not a skip (#4690).`);
@@ -3056,34 +469,27 @@ export function crossFileMoveVerdict(dest, move, ceilings) {
   const ruled = ruledRaisesVerdict(dest, move);
   if (!ruled.ok) return ruled;
   if (ruled.total > gross) {
-    return bad(`cross-file move into ${dest} states ${ruled.total} lines of ordinary ruled raise on its destination, an over-claim: its ceiling stands only ${gross} above the ${move.was} it moved from. Lowering is always legitimate, but a ruled raise since given back is spent — retire its record, because leaving it here prices this move's own raise below what the move actually took.`);
+    return bad(`cross-file move into ${dest} states ${ruled.total} bytes of ordinary ruled raise on its destination, an over-claim: its ceiling stands only ${gross} above the ${move.was} it moved from. Lowering is always legitimate, but a ruled raise since given back is spent — retire its record, because leaving it here prices this move's own raise below what the move actually took.`);
   }
   const raise = gross - ruled.total;
-  const less = ruled.total > 0 ? `, less ${ruled.total} line${ruled.total === 1 ? '' : 's'} of ordinary ruled raise` : '';
+  const less = ruled.total > 0 ? `, less ${ruled.total} byte${plural(ruled.total)} of ordinary ruled raise` : '';
   if (raise <= 0) {
-    return { ok: true, msg: `cross-file move into ${dest} is paid down: its ceiling is ${ceilings.get(dest)}, and all ${gross} line${gross === 1 ? '' : 's'} it stands above the ${move.was} it moved from are ordinary ruled raises recorded against it, so this move keeps none of them (sources: ${parts}).` };
+    return { ok: true, msg: `cross-file move into ${dest} is paid down: its ceiling is ${ceilings.get(dest)}, and all ${gross} byte${plural(gross)} it stands above the ${move.was} it moved from are ordinary ruled raises recorded against it, so this move keeps none of them (sources: ${parts}).` };
   }
   const decrease = sources.reduce((sum, [src, wasSrc]) => sum + (wasSrc - ceilings.get(src)), 0);
   if (raise > decrease) {
-    return bad(`cross-file move into ${dest} raises its ceiling ${move.was}→${ceilings.get(dest)}${less} (+${raise}) against a net source decrease of ${decrease} (${parts}). A move pays for itself by DELETION at the source; re-wrapping does not pay, and a raise the sources do not cover is an ordinary raise, which needs the ruling of record that orders the text: its comment id and the measured line delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta. If part of that rise IS such a raise, record it under \`ruledRaises\` with the ruling's own words instead of carrying \`was\` forward: an ordinary ruled raise and a move's raise are separate quantities, and this arithmetic measures only the second.`);
+    return bad(`cross-file move into ${dest} raises its ceiling ${move.was}→${ceilings.get(dest)}${less} (+${raise}) against a net source decrease of ${decrease} (${parts}). A move pays for itself by DELETION at the source, and a raise the sources do not cover is an ordinary raise, which needs the ruling of record that orders the text: its comment id and the measured byte delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta. If part of that rise IS such a raise, record it under \`ruledRaises\` with the ruling's own words instead of carrying \`was\` forward: an ordinary ruled raise and a move's raise are separate quantities, and this arithmetic measures only the second.`);
   }
   return { ok: true, msg: `cross-file move into ${dest}: +${raise} (${move.was}→${ceilings.get(dest)}${less}) against a net source decrease of ${decrease} (${parts}); authorised by ${RULING_CITATION}.` };
 }
 
 /**
  * Condition (b): the sum of ceilings over the whole map does not increase.
- *
- * Computed as the map-wide sum with every declared participant restored to its
- * pre-move value, minus the map-wide sum today — untouched entries cancel, so
- * the difference is exactly the declared participants' net movement. A
- * destination's ordinary ruled raises are restored ALONGSIDE its `was`, for the
- * same reason {@link crossFileMoveVerdict} subtracts them: those lines are the
- * maintainer's and were never this move's to move, so they must cancel here
- * exactly as an untouched entry does. Left in, they would report a corpus
- * growing by lines the ruling already paid for. Disjoint
- * participants are REQUIRED, and that is what keeps the reduction honest: a
- * source named by two declarations would have its single decrease counted twice
- * by (a) and once here, and the two conditions would stop agreeing.
+ * Computed as the declared participants' net movement against their pre-move
+ * values (untouched entries cancel); a destination's ordinary ruled raises are
+ * restored alongside its `was`, because those bytes were never the move's.
+ * Disjoint participants are REQUIRED: a source named by two declarations would
+ * have its single decrease counted twice by (a) and once here.
  *
  * @param {Map<string, {was?: number, sources?: Array<[string, number]>}>} moves
  * @param {Map<string, number>} ceilings
@@ -3102,271 +508,36 @@ export function crossFileMoveTotalVerdict(moves, ceilings) {
     }
   }
   if (net > 0) {
-    return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} line${net === 1 ? '' : 's'}. The ruling admits a move only while total lines do not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — the ruling of record that orders the text: its comment id and the measured line delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta.` };
+    return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} byte${plural(net)}. The ruling admits a move only while the total does not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — the ruling of record that orders the text: its comment id and the measured byte delta quoted in the raising PR's body, the \`CEILINGS\` row moved in the same PR by at most that delta.` };
   }
-  return { ok: true, msg: `declared cross-file moves: ${moves.size}, total ceilings ${net === 0 ? 'unchanged' : `down ${-net} line${net === -1 ? '' : 's'}`}.` };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// The max-line-length rule (#11106). See the header for why 120 and why bytes.
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const MAX_LINE_BYTES = 120;
-
-/** The closed, structural exemption set — no registry, no per-file allowlist. */
-export const EXEMPTION_CLASSES = Object.freeze({
-  fence: 'fenced code block (``` / ~~~), fence lines included — a wrapped fence is a different program',
-  table: 'markdown table row — a wrapped `|` row is a different table',
-  heading: 'ATX heading — a heading has no continuation line',
-  frontmatter: 'YAML front matter — a scalar is not markdown prose',
-  anchored: 'line-anchored directive example (Blocked-by: / Restart-when: / Restart-touch: / Unlock-when:) — 行锚定: the contract IS that a grep finds it at a line start, so wrapping one teaches a broken spelling',
-  quotation: 'a line inside a MULTI-line 「…」/『…』 verbatim maintainer ruling — the quote already spans lines exactly as its author wrote it, and re-flowing it moves where phrases split. Measured: an earlier cut of the #11106 wrapper moved one break and turned check-skill-frame-sync red, because 「我们是一个创业项目,…」 stopped being findable on one line. A quote that fits on ONE line is not exempt — it is an atom instead, so surrounding prose still wraps around it intact',
-  blockquote: 'blockquote line — its continuation must repeat `>`, so wrapping one INSERTS a non-whitespace byte. Every blockquote in this corpus is a verbatim maintainer ruling, and a length rule may not demand a content edit to a quotation. (Lazy continuation would avoid the marker and is refused for the same reason it is refused by hand: a later blank line silently drops text out of the quote.)',
-  unbreakable: 'no legal break point — a bare URL, a long path or one long code span; wrapLine returns it unchanged, so the gate never demands a wrap it cannot produce',
-});
-
-const bytes = (s) => Buffer.byteLength(s, 'utf8');
-
-// Wide (East Asian) characters: a segment break BETWEEN two of these is removed
-// by the CSS segment-break transformation rules, which is why the corpus already
-// wraps CJK prose mid-run with no space. A break at a CJK↔Latin junction with no
-// space would render AS a space, so it is not a legal break and is not offered.
-const WIDE =
-  /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
-// Kinsoku: never strand a closing mark at a line head, never leave an opener at a line tail.
-const NO_BREAK_BEFORE = '。，、;；:：?？!!)）]】}』」〉》·…%,.;:?!)]}’”';
-const NO_BREAK_AFTER = '(（[【{『「〈《‘“';
-// #12081 — the OTHER no-break-after class, and the reason it is a separate test
-// rather than three more characters in the string above. `,` `;` `:` are legal
-// break points in ASCII prose ("first, second") and must stay legal there. What
-// is never legal is one of them written directly after a HAN character: this
-// corpus spells CJK sentence-internal punctuation in ASCII throughout (measured
-// on `.claude/agents/os-dev.md`: 197 ASCII commas after a Han character, 0
-// fullwidth U+FF0C), so such a mark is a CJK sentence mark that happens to be a
-// narrow byte. A segment break after it is NOT between two wide characters, so
-// the CSS segment-break transformation KEEPS it and it renders as a SPACE —
-// mid-sentence, in prose that has no spaces anywhere else. The successor
-// character is irrelevant to that: the mark itself is narrow, so the break
-// renders as a space whatever follows.
-const HAN = /\p{Script=Han}/u;
-// Sequences markdown reads as the start of a NEW block — a continuation line may never begin with one.
-const BLOCK_START = /^(#{1,6}(\s|$)|[-*+](\s|$)|\d+[.)](\s|$)|>|\||`{3}|~{3}|-{3}|={3})/;
-
-const isFence = (line) => /^\s*(```|~~~)/.test(line);
-const isTableRow = (line) => /^\s*\|/.test(line);
-const isHeading = (line) => /^\s*#{1,6}(\s|$)/.test(line);
-// Anchored at the line's own head, after at most an indent, a quote/list marker and an opening backtick.
-const isAnchoredDirective = (line) =>
-  /^\s*(?:>\s*)?(?:[-*+]\s+)?`?(?:Blocked-by|Restart-when|Restart-touch|Unlock-when):/.test(line);
-
-/**
- * Split a line into its markdown prefix, the continuation prefix a wrapped tail
- * inherits, and the body to be re-flowed. List continuations align under the
- * marker's content column; blockquote continuations repeat the quote marker.
- */
-export function splitPrefix(line) {
-  let m;
-  if ((m = /^(\s*(?:[-*+]|\d+[.)])\s+)/.exec(line))) return { head: m[1], cont: ' '.repeat(m[1].length), body: line.slice(m[1].length) };
-  if ((m = /^(\s*>+\s?)/.exec(line))) return { head: m[1], cont: m[1], body: line.slice(m[1].length) };
-  m = /^(\s*)/.exec(line);
-  return { head: m[1], cont: m[1], body: line.slice(m[1].length) };
-}
-
-/**
- * Break the body into atoms — the units a wrap may be placed BETWEEN, never
- * inside. Inline code spans, markdown links, autolinks and bare URLs are single
- * atoms (that is what protects `Blocked-by: #N` written as a code span, and every
- * URL in the corpus); a CJK character is its own atom; everything else is a word.
- *
- * 「…」 and 『…』 are atoms too, and that one is load-bearing rather than tidy.
- * A corner-bracket quotation in this corpus is a VERBATIM maintainer ruling —
- * AGENTS.md 语言规则 requires it be carried untranslated and unrewritten — and
- * things GREP it. Measured while landing #11106: an earlier cut of this wrapper
- * broke 「我们是一个创业项目,…」 across two lines and turned
- * `check-skill-frame-sync`'s self-test red, because a phrase inside a governed
- * quotation stopped being findable on one line. A soft break does not change what
- * a reader sees, but it does change what a matcher sees, and quoted rulings are
- * the text most likely to be matched.
- */
-export function atomize(body) {
-  const atoms = [];
-  let sp = false;
-  for (let i = 0; i < body.length; ) {
-    if (/\s/.test(body[i])) { sp = true; i++; continue; }
-    const rest = body.slice(i);
-    const m =
-      /^(`+)[\s\S]*?\1/.exec(rest) ||
-      /^「[^」\n]*」/.exec(rest) ||          // verbatim maintainer ruling — see below
-      /^『[^』\n]*』/.exec(rest) ||
-      /^!?\[[^\]\n]*\]\([^)\s]*\)/.exec(rest) ||
-      /^<https?:[^>\s]*>/.exec(rest) ||
-      /^https?:\/\/\S+/.exec(rest);
-    if (m) { atoms.push({ text: m[0], cjk: false, sp }); i += m[0].length; sp = false; continue; }
-    if (WIDE.test(body[i])) { atoms.push({ text: body[i], cjk: true, sp }); i++; sp = false; continue; }
-    let j = i;
-    while (j < body.length && !/\s/.test(body[j]) && !WIDE.test(body[j])) {
-      if (j > i && (body[j] === '`' || body[j] === '[' || /^https?:\/\//.test(body.slice(j)))) break;
-      j++;
-    }
-    atoms.push({ text: body.slice(i, j), cjk: false, sp });
-    i = j;
-    sp = false;
-  }
-  return atoms;
-}
-
-/**
- * Does `atoms[i]` end in an ASCII `,` `;` `:` that itself follows a Han
- * character? Then a break placed AFTER it renders as a space (see the comment
- * on {@link HAN}) and {@link breakLegal} refuses it.
- *
- * The mark can sit either inside the atom (`态,` never happens — a wide char is
- * its own atom — but `PR,` and `第2章,` do) or be the whole atom, in which case
- * the Han character is the tail of the PRECEDING atom and only when no space
- * separates them: `常态, 不是` has the mark after `态`, while `见 , 后` does not.
- */
-export function hanAsciiPunctTail(atoms, i) {
-  const a = atoms[i];
-  if (!a || !/[,;:]$/.test(a.text)) return false;
-  const inner = a.text.slice(0, -1);
-  if (inner.length > 0) return HAN.test(inner[inner.length - 1]);
-  if (a.sp) return false;         // whitespace before the mark — it follows nothing
-  const prev = atoms[i - 1];
-  return !!prev && HAN.test(prev.text[prev.text.length - 1]);
-}
-
-export function breakLegal(atoms, k) {
-  const a = atoms[k - 1];
-  const b = atoms[k];
-  const last = a.text[a.text.length - 1];
-  if (NO_BREAK_AFTER.includes(last)) return false;
-  if (NO_BREAK_BEFORE.includes(b.text[0])) return false;
-  if (hanAsciiPunctTail(atoms, k - 1)) return false;   // #12081 — renders as a space
-  if (b.sp) return true;          // an existing space becomes the newline
-  return a.cjk && b.cjk;          // segment break between two wide chars renders as nothing
-}
-
-function renderSeg(atoms, from, to, pfx) {
-  let s = pfx;
-  for (let i = from; i < to; i++) s += (i > from && atoms[i].sp ? ' ' : '') + atoms[i].text;
-  return s;
-}
-
-// A break is refused when the tail it starts would read as a new markdown block.
-// Tested on the tail alone: the continuation prefix is whitespace (or a repeated
-// quote marker), which is the block context being CONTINUED, never a new one.
-function startsBlock(atoms, k) {
-  const tail = atoms[k].text + (atoms[k + 1] ? (atoms[k + 1].sp ? ' ' : '') + atoms[k + 1].text : '');
-  return BLOCK_START.test(tail);
-}
-
-/**
- * The canonical wrapped form of one line. Greedy, and it only ever moves
- * WHITESPACE: a space becomes a newline, or a newline is inserted between two
- * wide characters. Returns `[line]` unchanged when the line already fits or when
- * no legal break exists — which is exactly the `unbreakable` exemption.
- */
-export function wrapLine(line, limit = MAX_LINE_BYTES) {
-  if (bytes(line) <= limit) return [line];
-  const { head, cont, body } = splitPrefix(line);
-  const trail = /\s*$/.exec(body)[0];
-  const atoms = atomize(body.slice(0, body.length - trail.length));
-  if (atoms.length === 0) return [line];
-  const out = [];
-  let from = 0;
-  let pfx = head;
-  for (;;) {
-    const full = renderSeg(atoms, from, atoms.length, pfx);
-    if (bytes(full) <= limit) { out.push(full); break; }
-    let chosen = -1;
-    for (let k = from + 1; k < atoms.length; k++) {
-      if (!breakLegal(atoms, k) || startsBlock(atoms, k)) continue;
-      if (bytes(renderSeg(atoms, from, k, pfx)) <= limit) chosen = k;
-      else break;                 // segment length is monotonic in k
-    }
-    if (chosen === -1) {          // nothing fits: take the first legal break at all, if any
-      for (let k = from + 1; k < atoms.length; k++) {
-        if (breakLegal(atoms, k) && !startsBlock(atoms, k)) { chosen = k; break; }
-      }
-    }
-    if (chosen === -1) { out.push(full); break; }
-    out.push(renderSeg(atoms, from, chosen, pfx));
-    from = chosen;
-    pfx = cont;
-  }
-  out[out.length - 1] += trail;
-  return out.length === 1 ? [line] : out;
-}
-
-/**
- * Classify one line of `text` at index `i` (0-based) given the block state the
- * scan carries. Returns an exemption key, `null` when the line is compliant, or
- * `'over'` when it is over budget and re-wrappable — the RED case.
- */
-/** The block state a line-by-line scan carries. Both the gate and any re-wrap must advance it identically. */
-export function initialState() {
-  return { fence: false, frontMatter: false, quote: false };
-}
-
-const quoteMarks = (line) => [/「/g, /」/g, /『/g, /』/g].map((r) => (line.match(r) ?? []).length);
-
-/** Advance the block state PAST `line` (index `i`, 0-based). Pure — returns a new state. */
-export function advanceState(line, state, i) {
-  const s = { ...state };
-  if (i === 0 && line.trim() === '---') { s.frontMatter = true; return s; }
-  if (state.frontMatter) { if (line.trim() === '---') s.frontMatter = false; return s; }
-  if (isFence(line)) { s.fence = !s.fence; return s; }
-  if (s.fence) return s;
-  const [open, close, open2, close2] = quoteMarks(line);
-  const opens = open + open2;
-  const closes = close + close2;
-  if (s.quote) { if (closes > 0 && closes >= opens) s.quote = false; }
-  else if (opens > closes) s.quote = true;
-  return s;
-}
-
-export function classifyLine(line, state) {
-  if (state.frontMatter) return 'frontmatter';
-  if (state.fence || isFence(line)) return 'fence';
-  // A multi-line ruling quote is judged before the budget: its line structure is
-  // the author's, and it stays whether or not this particular line is long.
-  const [open, close, open2, close2] = quoteMarks(line);
-  if (state.quote || open + open2 > close + close2) return bytes(line) <= MAX_LINE_BYTES ? null : 'quotation';
-  if (bytes(line) <= MAX_LINE_BYTES) return null;
-  if (isTableRow(line)) return 'table';
-  if (isHeading(line)) return 'heading';
-  if (isAnchoredDirective(line)) return 'anchored';
-  if (/^\s*>/.test(line)) return 'blockquote';
-  if (wrapLine(line).length === 1) return 'unbreakable';
-  return 'over';
-}
-
-/** Scan a whole file; returns `{ offenders, exempt }`, offenders being 1-based line numbers. */
-export function scanLineLengths(text) {
-  const lines = text.split('\n');
-  if (text.endsWith('\n')) lines.pop();
-  let state = initialState();
-  const offenders = [];
-  const exempt = new Map();
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const kind = classifyLine(line, state);
-    state = advanceState(line, state, i);
-    if (kind === 'over') offenders.push({ line: i + 1, bytes: bytes(line) });
-    else if (kind) exempt.set(kind, (exempt.get(kind) ?? 0) + 1);
-  }
-  return { offenders, exempt };
+  return { ok: true, msg: `declared cross-file moves: ${moves.size}, total ceilings ${net === 0 ? 'unchanged' : `down ${-net} byte${plural(-net)}`}.` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The max-table-row-bytes pin (#11947). See MAX_TABLE_ROW_BYTES for why.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const isFence = (line) => /^\s*(```|~~~)/.test(line);
+const isTableRow = (line) => /^\s*\|/.test(line);
+
+/** The block state the table-row scan carries: inside a fence, inside front matter. */
+export function initialState() {
+  return { fence: false, frontMatter: false };
+}
+
+/** Advance the block state PAST `line` (index `i`, 0-based). Pure — returns a new state. */
+export function advanceState(line, state, i) {
+  const s = { ...state };
+  if (i === 0 && line.trim() === '---') { s.frontMatter = true; return s; }
+  if (state.frontMatter) { if (line.trim() === '---') s.frontMatter = false; return s; }
+  if (isFence(line)) s.fence = !s.fence;
+  return s;
+}
+
 /**
  * The widest markdown table row in `text`, in bytes, with its 1-based line
  * number. Fenced and front-matter regions are not table rows however they are
- * spelled, so the block state is carried exactly as {@link scanLineLengths}
- * carries it. A file with no table row measures 0 — that is a MEASUREMENT, not a
+ * spelled. A file with no table row measures 0 — that is a MEASUREMENT, not a
  * sentinel, and it is what seeds the pin of every such file.
  */
 export function scanTableRows(text) {
@@ -3381,7 +552,7 @@ export function scanTableRows(text) {
     state = advanceState(line, state, i);
     if (before.fence || isFence(line) || before.frontMatter) continue;
     if (!isTableRow(line)) continue;
-    const b = bytes(line);
+    const b = countBytes(line);
     if (b > widest) { widest = b; at = i + 1; }
   }
   return { widest, line: at };
@@ -3402,68 +573,46 @@ export function tableRowVerdict(rel, widest, at, pin) {
       ok: false,
       msg:
         `${rel} has a ${widest}-byte table row at L${at}; the max-table-row-bytes pin is ${pin}. ` +
-        'A table row is the one shape the 120-byte line rule cannot reach — a wrapped `|` row is a ' +
-        'different table — so its width is metered here instead, and widening a cell costs zero ' +
-        'lines. Move the row\'s detail into prose or a reference file, or consolidate two rows into ' +
-        'one; either pays the pin down. There is no allowlist, and raising a pin requires a ' +
-        'maintainer ruling quoted in the PR.',
+        'A table row\'s width is pinned per file by its own ruling, beside the file\'s byte ceiling — ' +
+        'widening a cell is the measured defect that pin was ruled for. Move the row\'s detail into ' +
+        'prose or a reference file, or consolidate two rows into one; either pays the pin down. ' +
+        'There is no allowlist, and raising a pin requires a maintainer ruling quoted in the PR.',
     };
   }
   return { ok: true, msg: `${rel}: widest table row is ${widest} bytes (pin ${pin}; headroom ${pin - widest}).` };
 }
 
-export function lengthVerdict(rel, offenders) {
-  if (offenders.length === 0) return { ok: true, msg: `${rel}: every line is within ${MAX_LINE_BYTES} bytes (or structurally exempt).` };
-  const shown = offenders.slice(0, 5).map((o) => `L${o.line} (${o.bytes}B)`).join(', ');
-  return {
-    ok: false,
-    msg:
-      `${rel} has ${offenders.length} line(s) over the ${MAX_LINE_BYTES}-byte budget: ${shown}` +
-      `${offenders.length > 5 ? `, +${offenders.length - 5} more` : ''}. ` +
-      'The ratchet counts lines to price a per-session token read, so a long line is an unmetered tax — ' +
-      'wrap each one at a legal break point (a space, or between two CJK characters), keeping its content ' +
-      'byte-identical. Tables, fences, headings, front matter, line-anchored `Blocked-by:`-family directives ' +
-      'and lines with no legal break point are already exempt by shape — the exemptions are structural and ' +
-      'there is no allowlist to add a line to.',
-  };
-}
-
 function run() {
   let failed = 0;
-  for (const [rel, maxLines] of CEILINGS) {
-    let text;
+  for (const [rel, maxBytes] of CEILINGS) {
+    let text = null;
     try {
       text = readFileSync(new URL(rel, REPO_ROOT), 'utf8');
     } catch {
-      console.error(`✗ check-skill-line-ratchet: cannot read ${rel} — red, not a skip (#4690).`);
-      failed++;
-      continue;
+      text = null;
     }
-    const lv = lengthVerdict(rel, scanLineLengths(text).offenders);
-    if (!lv.ok) {
-      failed++;
-      console.error(`✗ check-skill-line-ratchet: ${lv.msg}`);
-    }
-    const tr = scanTableRows(text);
-    const tv = tableRowVerdict(rel, tr.widest, tr.line, MAX_TABLE_ROW_BYTES.get(rel));
-    if (!tv.ok) {
-      failed++;
-      console.error(`✗ check-skill-line-ratchet: ${tv.msg}`);
-    } else {
-      const slack = MAX_TABLE_ROW_BYTES.get(rel) - tr.widest;
-      if (slack > 0) {
-        console.log(`ℹ️  ${rel}: max-table-row-bytes headroom is ${slack} — every pin is seeded at 0 headroom, so a row has been paid down; lower the pin to ${tr.widest} (shrink-only ratchets tighten opportunistically).`);
+    const v = fileVerdict(rel, text, maxBytes);
+    if (text !== null) {
+      const tr = scanTableRows(text);
+      const tv = tableRowVerdict(rel, tr.widest, tr.line, MAX_TABLE_ROW_BYTES.get(rel));
+      if (!tv.ok) {
+        failed++;
+        console.error(`✗ check-skill-line-ratchet: ${tv.msg}`);
+      } else {
+        const slack = MAX_TABLE_ROW_BYTES.get(rel) - tr.widest;
+        if (slack > 0) {
+          console.log(`ℹ️  ${rel}: max-table-row-bytes headroom is ${slack} — every pin is seeded at 0 headroom, so a row has been paid down; lower the pin to ${tr.widest} (shrink-only ratchets tighten opportunistically).`);
+        }
+        console.log(`✓ check-skill-line-ratchet: ${tv.msg}`);
       }
-      console.log(`✓ check-skill-line-ratchet: ${tv.msg}`);
     }
-    const v = verdict(rel, countLines(text), maxLines);
     if (!v.ok) {
       failed++;
       console.error(`✗ check-skill-line-ratchet: ${v.msg}`);
       continue;
     }
-    if (maxLines - countLines(text) > 120) {
-      console.log(`ℹ️  ${rel}: headroom is ${maxLines - countLines(text)} lines — consider lowering its ceiling (shrink-only ratchets tighten opportunistically).`);
+    if (maxBytes - v.bytes > HEADROOM_HINT_BYTES) {
+      console.log(`ℹ️  ${rel}: headroom is ${maxBytes - v.bytes} bytes — consider lowering its ceiling to ${v.bytes} (shrink-only ratchets tighten opportunistically).`);
     }
     console.log(`✓ check-skill-line-ratchet: ${v.msg}`);
   }
@@ -3488,53 +637,44 @@ function run() {
 
 // -- The self-test's own battery roster and floor (#13489) ------------------
 //
-// `--self-test` reaching its verdict used to be this self-test's ONLY success
-// condition, so "every case held" and "the cases never ran" printed the same
-// line. Closed the PR #13487 way: what is pinned is the registered NAMES, not a
-// number.
+// `--self-test` reaching its verdict used to be its ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. This
+// self-test is TABLE-DRIVEN — one `cases` table, one loop — so each row LABEL is
+// a declared battery with a floor of 1, and `registerCase(name)` is the first
+// statement of the loop body. The roster is a LITERAL the table is checked
+// against (a roster derived from the table would let a deleted row delete its
+// own floor), and every row is a literal `[label, actual, expected]` — no label
+// is computed, so every row is floored.
 //
-// This self-test is TABLE-DRIVEN -- one `cases` table, one loop over it, and a
-// sink (`failed++`) that writes only when a case FAILS. Routing THAT sink
-// through `registerCase()` would register a case only when it fails: a fully
-// green run would register 0 and every battery would read DID NOT RUN, the
-// floor inverted rather than installed. So the roster is the table's own rows.
-// Each row LABEL is a declared battery, verbatim, with a floor of 1, and
-// `registerCase(name)` is the first statement of the driving loop body -- so the
-// case is attributed to the row actually being run. There is no `battery()`
-// opener: for a table-driven self-test the ROW is the battery.
-//
-// ⭐ ALL 157 rows are floored, the four `...(() => { ... })()` spreads included.
-// Those spreads were flagged in the batch-8 census as an IIFE-produced block
-// whose rows could not take a literal roster key. Measured here, that premise
-// does not hold for this file: each IIFE is a SCOPING device that declares
-// local fixture consts and then `return [...]`s an array of LITERAL
-// `[label, actual, expected]` rows. No row label is a template string, none is
-// computed, and no row is produced by a `map`/`push`/loop. Three independent
-// readings agree on 157 -- the source labels extracted by indentation, the
-// literal row starts, and the `cases.length` the green line prints on a run --
-// so nothing here is the `extra`-call residue of PR #15286, and leaving any row
-// outside the roster would have been the lossy reading.
-//
-// A pinned TOTAL is not the repair, and neither is a roster DERIVED from the
-// table: `cases.length` moves with the table, so a deleted row would delete its
-// own floor. The roster below is a LITERAL the table is checked against, which
-// is what lets a deleted or renamed row name ITSELF in the refusal.
-//
-// The counts are a FLOOR, not an equality -- a row that grows into several
-// registrations must not red. 1 is the honest floor for a table row: the loop
-// reaches it exactly once per run.
+// The counts are a FLOOR, not an equality: 1 is the honest floor for a table
+// row, which the loop reaches exactly once per run.
 const SELF_TEST_BATTERIES = Object.freeze({
   'under the ceiling -> green': 1,
   'at the ceiling -> green': 1,
   'over the ceiling -> red': 1,
   'red message names the file': 1,
   'red message names the remedy': 1,
-  'red message names the ruled raise form: the ordering ruling\'s comment id and the measured line delta in the raising PR body': 1,
+  'red message names the ruled raise form: the ordering ruling\'s comment id and the measured byte delta in the raising PR body': 1,
   'red message bounds the raise by that measured delta': 1,
   'red message says a raise quoting no ruling id stays red, with no tolerance band': 1,
   'red message names the authoring rule': 1,
+  'red message states the overage in bytes': 1,
   'empty read -> red, not a skip': 1,
+  'unreadable file -> red, not a skip': 1,
+  'the unit is UTF-8 bytes, exactly what `wc -c` prints': 1,
+  'a CJK character costs its three bytes, not one unit': 1,
+  'a trailing newline is a byte like any other': 1,
+  'content added at a FLAT line count is metered — the drift the line unit could not see': 1,
+  '...and the same growth fits once the ceiling has the bytes': 1,
+  'a re-wrap (one space turned into a newline) is byte-neutral: it neither pays nor costs': 1,
+  '...so a re-wrap of a file at its ceiling stays green, where a line count would have read it as growth': 1,
+  'prose may run past 120 bytes: one 600-byte sentence under its ceiling is green': 1,
+  '...and a 600-byte CJK prose line too': 1,
+  '...and a wide table row is judged by the same byte count': 1,
+  '...while the SAME long line over its ceiling is red, so the green above is the byte count and not a skip': 1,
+  'the verdict names no line-length budget at all': 1,
   'every covered file has a positive ceiling': 1,
+  'the map is denominated in bytes: every live ceiling exceeds its file\'s line count': 1,
   'SKILL.md is covered': 1,
   'the dev-agent definition is covered': 1,
   'all five compressed references are covered': 1,
@@ -3550,73 +690,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'both root instruction files are declared': 1,
   'the declared form is NOT a CEILINGS key': 1,
   'the published skills/ catalog is deliberately uncovered': 1,
-  'budget is 120 bytes': 1,
-  'a short ASCII line -> green': 1,
-  'a long ASCII line -> RED': 1,
-  'a short CJK line -> green': 1,
-  'a long CJK line -> RED': 1,
-  'the RED message names the budget': 1,
-  'the RED message names the line number': 1,
-  'the RED message offers NO allowlist to add a line to': 1,
-  'no offenders -> green verdict': 1,
-  'a long line inside a fence is exempt': 1,
-  '...and the SAME line outside one is RED': 1,
-  'scan: a fenced long line yields no offender': 1,
-  'scan: the fence closes again': 1,
-  'a long table row is exempt': 1,
-  '...and the same cells as prose are RED': 1,
-  'a long heading is exempt': 1,
-  '...and the same text as a paragraph is RED': 1,
-  'front matter is exempt': 1,
-  'scan: front matter closes at the second ---': 1,
-  'an anchored Blocked-by: line is exempt': 1,
-  'Restart-when: too': 1,
-  'Restart-touch: too': 1,
-  'but a MID-PROSE mention is not exempt — the escape hatch is line-anchored only': 1,
-  'a long blockquote line is exempt': 1,
-  '...including one indented inside a list': 1,
-  '...and the same quotation unquoted is RED': 1,
-  'a bare over-long URL is exempt': 1,
-  'a single over-long code span is exempt': 1,
-  '...but prose LEADING to that URL is RED (wrap first, URL lands alone)': 1,
-  'wrapLine splits a long CJK line': 1,
-  'every wrapped CJK segment is within budget': 1,
-  'wrapping a CJK line changes NOTHING but whitespace': 1,
-  'wrapping an ASCII line changes NOTHING but whitespace': 1,
-  'a list continuation is indented under the marker': 1,
-  'no continuation line opens a new markdown block': 1,
-  'wrapLine is idempotent — its output is the canonical form': 1,
-  'wrapLine leaves a short line untouched': 1,
-  'wrapLine never breaks inside a code span': 1,
-  'wrapLine never breaks inside a 「…」 ruling quote': 1,
-  '...nor inside a 『…』 one': 1,
-  'a quote longer than the budget makes its line unbreakable, not RED': 1,
-  'a line OPENING an unterminated 「 is exempt': 1,
-  'a line INSIDE an open quote is exempt': 1,
-  '...and the same line outside one is RED — the exemption is the quote, not the text': 1,
-  'a SHORT line inside a quote is simply green, not counted exempt': 1,
-  'advanceState opens on an unmatched 「': 1,
-  'advanceState closes on the matching 」': 1,
-  'a quote opened and closed on ONE line does not open the state': 1,
-  'advanceState does not track quotes inside a fence': 1,
-  'scan: a two-line quote yields quotation exemptions, not offenders': 1,
-  'wrapLine never strands a closing 。 at a line head': 1,
-  'an ASCII , after a Han character is a no-break-after mark': 1,
-  '...and ; and : are the same mark class': 1,
-  '...but after a LATIN word it stays an ordinary break point': 1,
-  '...and a mark with a space before it follows nothing': 1,
-  '...and an atom not ending in one is never the mark': 1,
-  'breakLegal refuses the break after a Han+ASCII mark': 1,
-  '...a mark with no following space was never a break point to begin with': 1,
-  '...still allows the CJK-to-CJK break one atom earlier': 1,
-  '...and still allows an ordinary ASCII space break': 1,
-  'wrapLine splits the trap line': 1,
-  'no wrapped line ends on a Han+ASCII mark — the break is no longer OFFERED': 1,
-  '...the line it took instead is still within budget': 1,
-  '...and it moved only whitespace, as every wrap must': 1,
-  'the SAME shape with a Latin word before the mark still breaks there': 1,
-  'wrapLine is still idempotent under the new rule': 1,
-  'a long table row is EXEMPT from the 120-byte line rule': 1,
+  'a wide table row costs its bytes against the file ceiling like any other line': 1,
   '...and the same row is METERED by its file pin': 1,
   'at exactly the pin -> green': 1,
   'one byte wider -> RED (widening a cell is the measured defect)': 1,
@@ -3636,6 +710,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a `|` line inside a FENCE is not a table row': 1,
   'a `|` line in FRONT MATTER is not a table row': 1,
   'a file with no table row measures 0': 1,
+  'a table row AFTER a closed fence is measured: the fence state closes again': 1,
+  'a table row AFTER closed front matter is measured: the front-matter state ends at its second ---': 1,
   'every ceilinged file carries a pin': 1,
   'and the pin map names no file the ceiling map does not cover': 1,
   'every pin is a non-negative integer': 1,
@@ -3649,19 +725,20 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '...and the ordinary path it names is the ruled form, not a per-instance maintainer word': 1,
   '...and the citation refusal names the same ruled form for the ordinary path': 1,
   '...and the RED total names the same ruled form for the ordinary path': 1,
-  'none of the four line-ceiling refusals still sends the author to a per-instance maintainer ruling': 1,
-  'cross-file move — a raise EXCEEDING the net decrease is RED, even by one line': 1,
+  'none of the four ceiling refusals still sends the author to a per-instance maintainer ruling': 1,
+  'none of the four ceiling refusals speaks of lines: the unit they name is bytes': 1,
+  'cross-file move — a raise EXCEEDING the net decrease is RED, even by one byte': 1,
   '...while a raise exactly equal to it is legal': 1,
   'cross-file move — a declaration citing no ruling is RED, however sound its arithmetic': 1,
   '...and the RED verdict spells the citation it wanted': 1,
   'cross-file move — declarations whose net movement is 0 leave the map total unchanged': 1,
   'cross-file move — a declaration whose participants net POSITIVE fails the total (+2 here)': 1,
-  '...and the RED total names the lines it grew by': 1,
+  '...and the RED total names the bytes it grew by': 1,
   '...and a net-negative move reports the corpus shrinking': 1,
   'cross-file move — one source may not pay for two destinations': 1,
   'cross-file move — a destination lowered back to or below its pre-move ceiling reads as PAID DOWN, never as red (lowering is always legitimate)': 1,
   '...and says so rather than reporting an arithmetic it can no longer measure': 1,
-  'cross-file move — a SOURCE grown back past what it paid re-opens the move (the loophole: the destination keeps the lines while the payers grow back)': 1,
+  'cross-file move — a SOURCE grown back past what it paid re-opens the move (the loophole: the destination keeps the bytes while the payers grow back)': 1,
   'cross-file move — an unknown destination is RED, not a skip (#4690)': 1,
   'cross-file move — an unknown source is RED, not a skip (#4690)': 1,
   'cross-file move — a file may not pay its own raise': 1,
@@ -3671,7 +748,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'every live participant is a file this map covers': 1,
   'ruled raise — a destination that later took an ordinary ruled raise PASSES with `was` at its literal pre-move value': 1,
   '...and the verdict prices the MOVE, not the ruling: +10 against the sources\' net 11': 1,
-  '...and names the ruled lines it took out, so the arithmetic can be read back': 1,
+  '...and names the ruled bytes it took out, so the arithmetic can be read back': 1,
   '...while the SAME tree with the raise unrecorded is the double red this record ends': 1,
   '...whose first half reads the ruling as the move\'s: +44 against 11': 1,
   '...and which now sends the author to the record rather than to `was`': 1,
@@ -3680,14 +757,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'ruled raise — a record quoting NO ruling is RED (the licence is the maintainer\'s or it does not exist)': 1,
   '...and the RED verdict says what it wanted': 1,
   '...while an ENGLISH ruling quoted the way this map already quotes one passes': 1,
-  'ruled raise — a record with no line count is RED': 1,
-  'ruled raise — a NEGATIVE line count is RED: lowering is always legitimate and is never recorded here': 1,
+  'ruled raise — a record with no byte count is RED': 1,
+  'ruled raise — a NEGATIVE byte count is RED: lowering is always legitimate and is never recorded here': 1,
   'ruled raise — a record with no ruling DATE is RED': 1,
-  'ruled raise — records claiming MORE lines than the ceiling stands above `was` are RED': 1,
+  'ruled raise — records claiming MORE bytes than the ceiling stands above `was` are RED': 1,
   '...which is the loophole that closes: an inflated record would otherwise read the move as paid down and pass forever': 1,
   'ruled raise — a destination whose whole rise is ruled keeps none of it for the move, and reads as paid down': 1,
   'ruled raise — a declaration carrying no record behaves exactly as before (every case above this group is one)': 1,
-  'every live ruled-raise record quotes its ruling, dates it, and names a positive line count': 1,
+  'every live ruled-raise record quotes its ruling, dates it, and names a positive byte count': 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -3695,8 +772,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the duplicate-label refusal: two rows sharing a label collapse to ONE key in
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
-// collided.
-const SELF_TEST_BATTERY_FLOOR = 164;
+// collided. Lowered 164 → 114 by the byte re-base. Left (77): the 66 rows of the
+// max-line-length rule and its Han-punctuation break rule, retired with the
+// rule; the pin row that read the line rule's table exemption; and 10 rows
+// relabelled from lines to bytes. Arrived (27): those 10 relabels; the pin
+// pair's new first half (the byte ceiling meters a wide row too); and 16
+// byte-unit rows (the overage, the unreadable file, the twelve unit rows, the
+// map denominated in bytes, the refusals speaking of bytes). Raised 114 → 116
+// by the contract review's S1: two scanTableRows rows that pin a fence and
+// front matter CLOSING, the job two retired line-rule scan rows used to do
+// for the shared advanceState.
+const SELF_TEST_BATTERY_FLOOR = 116;
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
@@ -3706,25 +792,11 @@ const SELF_TEST_VERDICT = 'check-skill-line-ratchet self-test reached its verdic
 
 // -- The lane roster, DERIVED from the tree (#15965) -------------------------
 //
-// The case this replaced was an `.every` over eight literal lane names, so the
-// ninth lane file was pinned by nothing: a ceiling row put there for it kept
-// that case green without the case ever naming it, and deleting that row again
-// was caught only by the map-wide cases, which say nothing about a row that is
-// simply GONE. The roster is now read from the DIRECTORY, so the tree and the
-// map are two independent sources checked against one another: a new lane file
-// is pinned by construction, there is no list to keep in step, and no count in
-// the label to keep in step with the list. (This is NOT the derivation the
-// battery-floor note above refuses. That one would read the roster from the
-// very table it checks, so a deleted row would delete its own floor; this one
-// reads a DIFFERENT source from the one it checks, which is the whole repair.)
-//
-// Deriving a roster introduces one failure mode of its own, and it is the same
-// shape as the defect above: `[].every(...)` is `true`, so a lanes/ directory
-// that cannot be read would report perfect coverage of nothing. The verdict
-// therefore refuses an EMPTY roster outright -- #4690's cannot-read rule, on a
-// directory rather than a file. Each red path carries a fixture case beside the
-// live one, because enforcement holds neither: a red path that stopped working
-// runs green forever, which is the same reason the case exists at all.
+// The roster is read from the DIRECTORY, so the tree and the map are two
+// independent sources checked against one another: a new lane file is pinned by
+// construction. A derived roster has one failure mode of its own — `[].every()`
+// is `true`, so an unreadable lanes/ directory would report perfect coverage of
+// nothing — and the verdict therefore refuses an EMPTY roster outright.
 const LANES_DIR = '.claude/skills/pm-dispatch/references/lanes/';
 
 /**
@@ -3743,7 +815,7 @@ export function laneFilesOnDisk() {
 
 /**
  * Every lane file in the tree carries a ceiling row keyed by its repo-relative
- * path -- the key spelling `CEILINGS` itself uses, forward slashes and all.
+ * path — the key spelling `CEILINGS` itself uses.
  *
  * @param {string[]} laneFiles lane file names, as read from the tree
  * @param {Map<string, number>} ceilings the ceiling map to hold them against
@@ -3766,8 +838,19 @@ export function laneRosterVerdict(laneFiles, ceilings) {
   return { ok: true, msg: `all ${laneFiles.length} lane/seat job descriptions in the tree carry a ceiling row.` };
 }
 
+/** Line count of a live covered file, for the unit pin; `0` when unreadable. */
+function liveLineCount(rel) {
+  try {
+    const text = readFileSync(new URL(rel, REPO_ROOT), 'utf8');
+    return text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+  } catch {
+    return 0;
+  }
+}
+
 function selfTest() {
   const rel = '.claude/skills/pm-dispatch/SKILL.md';
+  const red = verdict(rel, 9999, 3050);
   // Fixture for the derived roster's naming red path: a tree that carries
   // triage.md, against a map holding a row for engine.md only.
   const laneGap = laneRosterVerdict(['engine.md', 'triage.md'], new Map([[`${LANES_DIR}engine.md`, 32]]));
@@ -3775,17 +858,51 @@ function selfTest() {
     ['under the ceiling -> green', verdict(rel, 2900, 3050).ok, true],
     ['at the ceiling -> green', verdict(rel, 3050, 3050).ok, true],
     ['over the ceiling -> red', verdict(rel, 3051, 3050).ok, false],
-    ['red message names the file', verdict(rel, 9999, 3050).msg.includes(rel), true],
-    ['red message names the remedy', verdict(rel, 9999, 3050).msg.includes('references/'), true],
+    ['red message names the file', red.msg.includes(rel), true],
+    ['red message names the remedy', red.msg.includes('references/'), true],
     // The ruled raise form (maintainer ruling 2026-10-15, letter B, ruling record
-    // 6184799323): the ordering ruling's comment id and the measured line delta,
+    // 6184799323): the ordering ruling's comment id and the measured delta,
     // quoted in the raising PR's body; the row moves by at most that delta.
-    ['red message names the ruled raise form: the ordering ruling\'s comment id and the measured line delta in the raising PR body', verdict(rel, 9999, 3050).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
-    ['red message bounds the raise by that measured delta', verdict(rel, 9999, 3050).msg.includes('by at most that delta'), true],
-    ['red message says a raise quoting no ruling id stays red, with no tolerance band', verdict(rel, 9999, 3050).msg.includes('no ruling id stays red') && verdict(rel, 9999, 3050).msg.includes('no tolerance band'), true],
-    ['red message names the authoring rule', verdict(rel, 9999, 3050).msg.includes('stories live on cards'), true],
-    ['empty read -> red, not a skip', verdict(rel, 0, 3050).ok, false],
+    ['red message names the ruled raise form: the ordering ruling\'s comment id and the measured byte delta in the raising PR body', red.msg.includes('its comment id and the measured byte delta quoted in the raising PR\'s body'), true],
+    ['red message bounds the raise by that measured delta', red.msg.includes('by at most that delta'), true],
+    ['red message says a raise quoting no ruling id stays red, with no tolerance band', red.msg.includes('no ruling id stays red') && red.msg.includes('no tolerance band'), true],
+    ['red message names the authoring rule', red.msg.includes('stories live on cards'), true],
+    ['red message states the overage in bytes', red.msg.includes('9999 bytes') && red.msg.includes('6949 over'), true],
+    ['empty read -> red, not a skip', fileVerdict(rel, '', 3050).ok, false],
+    ['unreadable file -> red, not a skip', fileVerdict(rel, null, 3050).ok, false],
+    // ── The unit: bytes, and nothing about lines ─────────────────────────────
+    // Each row is a PAIR or a measured near-twin, so a case can only pass by the
+    // unit actually being bytes: a line-counting implementation fails them.
+    ...(() => {
+      const asciiSentence = `${'This is one full sentence of skill prose that runs on. '.repeat(11).slice(0, 599)}\n`; // 600 bytes, one line
+      const cjkSentence = `${'中文规则正文'.repeat(33)}内容`;                                             // 33 × 18 + 6 = 600 bytes, one line
+      const wideRow = `| a | ${'中文内容'.repeat(25)} |\n`;                                             // 6 + 300 + 3 = 309 bytes
+      const tenRules = `${Array.from({ length: 10 }, (_, i) => `- rule ${i}`).join('\n')}\n`;
+      // The same ten lines, with content appended to one of them: line count
+      // flat, bytes up. Exactly the drift the line unit could not see.
+      const tenRulesGrown = tenRules.replace('- rule 3', `- rule 3 ${'and more text '.repeat(10).trim()}`);
+      const wrapBefore = 'one long sentence that the author wraps\n';
+      const wrapAfter = 'one long sentence\nthat the author wraps\n';
+      return [
+        ['the unit is UTF-8 bytes, exactly what `wc -c` prints', countBytes('abc\n'), 4],
+        ['a CJK character costs its three bytes, not one unit', countBytes('中文'), 6],
+        ['a trailing newline is a byte like any other', countBytes('x\n') - countBytes('x'), 1],
+        ['content added at a FLAT line count is metered — the drift the line unit could not see', tenRulesGrown.split('\n').length === tenRules.split('\n').length && !fileVerdict('f.md', tenRulesGrown, countBytes(tenRules)).ok, true],
+        ['...and the same growth fits once the ceiling has the bytes', fileVerdict('f.md', tenRulesGrown, countBytes(tenRulesGrown)).ok, true],
+        ['a re-wrap (one space turned into a newline) is byte-neutral: it neither pays nor costs', countBytes(wrapAfter) - countBytes(wrapBefore), 0],
+        ['...so a re-wrap of a file at its ceiling stays green, where a line count would have read it as growth', wrapAfter.split('\n').length > wrapBefore.split('\n').length && fileVerdict('f.md', wrapAfter, countBytes(wrapBefore)).ok, true],
+        ['prose may run past 120 bytes: one 600-byte sentence under its ceiling is green', countBytes(asciiSentence) === 600 && fileVerdict('f.md', asciiSentence, 600).ok, true],
+        ['...and a 600-byte CJK prose line too', countBytes(cjkSentence) === 600 && fileVerdict('f.md', cjkSentence, 600).ok, true],
+        ['...and a wide table row is judged by the same byte count', countBytes(wideRow) > 120 && fileVerdict('f.md', wideRow, countBytes(wideRow)).ok, true],
+        ['...while the SAME long line over its ceiling is red, so the green above is the byte count and not a skip', fileVerdict('f.md', asciiSentence, 599).ok, false],
+        ['the verdict names no line-length budget at all', [fileVerdict('f.md', asciiSentence, 600).msg, fileVerdict('f.md', asciiSentence, 599).msg].some((m) => /120|per line|line length|wrap/i.test(m)), false],
+      ];
+    })(),
     ['every covered file has a positive ceiling', [...CEILINGS.values()].every((n) => Number.isInteger(n) && n > 0), true],
+    // A re-base that left one row in lines would pass every other case here and
+    // hand that file ~100x headroom. No file of this corpus averages a byte per
+    // line, so a ceiling at or below the line count is a row nobody re-based.
+    ['the map is denominated in bytes: every live ceiling exceeds its file\'s line count', [...CEILINGS].every(([k, n]) => n > liveLineCount(k)), true],
     ['SKILL.md is covered', CEILINGS.has('.claude/skills/pm-dispatch/SKILL.md'), true],
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
     ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'l1-review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
@@ -3795,157 +912,27 @@ function selfTest() {
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
     ['root CLAUDE.md is covered (#9965)', CEILINGS.has('CLAUDE.md'), true],
-    // #12098: the last uncovered pm-dispatch references file. Found by
-    // enumerating the directory against this map, not by noticing one file.
     ['references/compile-surfaces.md is covered (#12098)', CEILINGS.has('.claude/skills/pm-dispatch/references/compile-surfaces.md'), true],
     // The dispatch-gates declaration (#9964). Enforcement cannot hold any of
-    // these: the declaration is read by another tool entirely, so a wrong or
-    // missing entry runs perfectly green here and only shows up as a dev
-    // dispatched on a root-file card with an empty gate brief.
+    // these: the declaration is read by another tool entirely.
     ['every separator-less ceiling declares a root-file watch hint', [...CEILINGS.keys()].filter((k) => !k.includes('/')).every((k) => ROOT_FILE_WATCH_HINTS.includes(`${k}/**`)), true],
     ['and the declaration names no file the map does not cover', ROOT_FILE_WATCH_HINTS.every((h) => CEILINGS.has(h.replace(/\/\*+$/, ''))), true],
     ['both root instruction files are declared', ROOT_FILE_WATCH_HINTS.join(',') === 'AGENTS.md/**,CLAUDE.md/**', true],
-    // Provenance, never a lookup key: `run` opens every CEILINGS key, so the
-    // glob form appearing there would make the ratchet read a path that does
-    // not exist — red under #4690's cannot-read rule, for a file that is fine.
     ['the declared form is NOT a CEILINGS key', [...CEILINGS.keys()].some((k) => ROOT_FILE_WATCH_HINTS.includes(k)), false],
-    // The boundary the header states, pinned (#9923). Enforcement cannot hold
-    // it: a ceiling on a real published SKILL.md runs green like any other row,
-    // so without this case the header paragraph could drift from the map
-    // silently. Extending coverage to the published catalog is a policy change
-    // — it lands with a maintainer ruling that also deletes this case.
+    // The boundary the header states, pinned (#9923): a ceiling on a real
+    // published SKILL.md runs green like any other row.
     ['the published skills/ catalog is deliberately uncovered', [...CEILINGS.keys()].some((k) => k.startsWith('skills/')), false],
-    // ── The max-line-length rule (#11106): red/green pairs, one per class ────
-    // Each pair is the SAME content in a compliant and a non-compliant shape, so
-    // a case can only pass by the rule actually discriminating. The exemption
-    // cases carry a RED twin in a non-exempt shape for the same reason: an
-    // exemption that swallowed everything would run green against a bare assert.
-    ...(() => {
-      const clean = { fence: false, frontMatter: false };
-      const asciiShort = `- ${'word '.repeat(20).trim()}`;                       // 104 bytes
-      const asciiLong = `- ${'word '.repeat(30).trim()}`;                        // 154 bytes
-      const cjkShort = `${'中文内容'.repeat(9)}。`;                                // 111 bytes
-      const cjkLong = `${'中文内容'.repeat(20)}。`;                                // 243 bytes
-      const url = `  <https://example.invalid/${'x'.repeat(200)}>`;
-      const wrapped = wrapLine(cjkLong);
-      const wrappedAscii = wrapLine(asciiLong);
-      return [
-        ['budget is 120 bytes', MAX_LINE_BYTES, 120],
-        ['a short ASCII line -> green', classifyLine(asciiShort, clean), null],
-        ['a long ASCII line -> RED', classifyLine(asciiLong, clean), 'over'],
-        ['a short CJK line -> green', classifyLine(cjkShort, clean), null],
-        ['a long CJK line -> RED', classifyLine(cjkLong, clean), 'over'],
-        ['the RED message names the budget', lengthVerdict('f.md', [{ line: 1, bytes: 200 }]).msg.includes('120-byte'), true],
-        ['the RED message names the line number', lengthVerdict('f.md', [{ line: 7, bytes: 200 }]).msg.includes('L7'), true],
-        ['the RED message offers NO allowlist to add a line to', lengthVerdict('f.md', [{ line: 1, bytes: 200 }]).msg.includes('no allowlist'), true],
-        ['no offenders -> green verdict', lengthVerdict('f.md', []).ok, true],
-        // E1 fence
-        ['a long line inside a fence is exempt', classifyLine(cjkLong, { fence: true, frontMatter: false }), 'fence'],
-        ['...and the SAME line outside one is RED', classifyLine(cjkLong, clean), 'over'],
-        ['scan: a fenced long line yields no offender', scanLineLengths(`\`\`\`js\n// ${'x'.repeat(200)}\n\`\`\`\n`).offenders.length, 0],
-        ['scan: the fence closes again', scanLineLengths(`\`\`\`\nx\n\`\`\`\n${cjkLong}\n`).offenders.length, 1],
-        // E2 table
-        ['a long table row is exempt', classifyLine(`| a | ${cjkLong} |`, clean), 'table'],
-        ['...and the same cells as prose are RED', classifyLine(`a ${cjkLong}`, clean), 'over'],
-        // E3 heading / front matter
-        ['a long heading is exempt', classifyLine(`## ${cjkLong}`, clean), 'heading'],
-        ['...and the same text as a paragraph is RED', classifyLine(cjkLong, clean), 'over'],
-        ['front matter is exempt', classifyLine(`description: ${cjkLong}`, { fence: false, frontMatter: true }), 'frontmatter'],
-        ['scan: front matter closes at the second ---', scanLineLengths(`---\nname: x\n---\n${cjkLong}\n`).offenders.length, 1],
-        // E4 line-anchored directives — 行锚定 doctrine
-        ['an anchored Blocked-by: line is exempt', classifyLine(`Blocked-by: #1 ${cjkLong}`, clean), 'anchored'],
-        ['Restart-when: too', classifyLine(`- \`Restart-when: closed o/r#1\` ${cjkLong}`, clean), 'anchored'],
-        ['Restart-touch: too', classifyLine(`> Restart-touch: a/b.ts ${cjkLong}`, clean), 'anchored'],
-        ['but a MID-PROSE mention is not exempt — the escape hatch is line-anchored only', classifyLine(`${cjkLong} \`Blocked-by:\``, clean), 'over'],
-        // E6 blockquote — wrapping one would INSERT a `>`, i.e. a content edit
-        ['a long blockquote line is exempt', classifyLine(`> ${cjkLong}`, clean), 'blockquote'],
-        ['...including one indented inside a list', classifyLine(`    > ${cjkLong}`, clean), 'blockquote'],
-        ['...and the same quotation unquoted is RED', classifyLine(cjkLong, clean), 'over'],
-        // E5 unbreakable — the class that keeps the gate from demanding the impossible
-        ['a bare over-long URL is exempt', classifyLine(url, clean), 'unbreakable'],
-        ['a single over-long code span is exempt', classifyLine(`\`${'p/'.repeat(80)}\``, clean), 'unbreakable'],
-        ['...but prose LEADING to that URL is RED (wrap first, URL lands alone)', classifyLine(`${cjkShort} ${url.trim()}`, clean), 'over'],
-        // wrapLine: the canonical form, and it only ever moves whitespace
-        ['wrapLine splits a long CJK line', wrapped.length > 1, true],
-        ['every wrapped CJK segment is within budget', wrapped.every((l) => Buffer.byteLength(l, 'utf8') <= 120), true],
-        ['wrapping a CJK line changes NOTHING but whitespace', wrapped.join('').replace(/\s+/g, ''), cjkLong.replace(/\s+/g, '')],
-        ['wrapping an ASCII line changes NOTHING but whitespace', wrappedAscii.join(' ').replace(/\s+/g, ' '), asciiLong],
-        ['a list continuation is indented under the marker', wrappedAscii.slice(1).every((l) => l.startsWith('  ') && !l.startsWith('   ')), true],
-        ['no continuation line opens a new markdown block', [...wrapped.slice(1), ...wrappedAscii.slice(1)].every((l) => !/^([-*+>|]|#{1,6}|\d+[.)])(\s|$)/.test(l.trimStart())), true],
-        ['wrapLine is idempotent — its output is the canonical form', wrapped.flatMap((l) => wrapLine(l)).join('\n'), wrapped.join('\n')],
-        ['wrapLine leaves a short line untouched', wrapLine(cjkShort), [cjkShort]],
-        ['wrapLine never breaks inside a code span', wrapLine(`${cjkShort} \`a b c d\` ${cjkShort}`).every((l) => (l.match(/`/g) ?? []).length % 2 === 0), true],
-        // A verbatim ruling quote is grep-visible only while it stays on one line.
-        ['wrapLine never breaks inside a 「…」 ruling quote', wrapLine(`${cjkShort}(维护者指示:「我们是一个创业项目,核心能力优先」)${cjkShort}`).every((l) => (l.match(/[「」]/g) ?? []).length !== 1), true],
-        ['...nor inside a 『…』 one', wrapLine(`${cjkShort}『${'引文'.repeat(12)}』${cjkShort}`).every((l) => (l.match(/[『』]/g) ?? []).length !== 1), true],
-        ['a quote longer than the budget makes its line unbreakable, not RED', classifyLine(`「${'引文'.repeat(30)}」`, clean), 'unbreakable'],
-        // E7 multi-line ruling quotes — line structure preserved, not re-flowed
-        ['a line OPENING an unterminated 「 is exempt', classifyLine(`维护者指示:「${'引文'.repeat(30)}`, clean), 'quotation'],
-        ['a line INSIDE an open quote is exempt', classifyLine(cjkLong, { fence: false, frontMatter: false, quote: true }), 'quotation'],
-        ['...and the same line outside one is RED — the exemption is the quote, not the text', classifyLine(cjkLong, clean), 'over'],
-        ['a SHORT line inside a quote is simply green, not counted exempt', classifyLine(cjkShort, { fence: false, frontMatter: false, quote: true }), null],
-        ['advanceState opens on an unmatched 「', advanceState('说:「引文', initialState(), 3).quote, true],
-        ['advanceState closes on the matching 」', advanceState('引文结束」后续', { fence: false, frontMatter: false, quote: true }, 4).quote, false],
-        ['a quote opened and closed on ONE line does not open the state', advanceState('说:「引文」完', initialState(), 3).quote, false],
-        ['advanceState does not track quotes inside a fence', advanceState('说:「引文', { fence: true, frontMatter: false, quote: false }, 3).quote, false],
-        ['scan: a two-line quote yields quotation exemptions, not offenders', scanLineLengths(`维护者:「${'引'.repeat(60)}\n${'文'.repeat(60)}」\n`).offenders.length, 0],
-        ['wrapLine never strands a closing 。 at a line head', wrapped.slice(1).every((l) => !'。,、;:?!)]}'.includes(l.trimStart()[0])), true],
-      ];
-    })(),
-    // ── #12081: no break after an ASCII `,;:` that follows a Han character ───
-    // Every case is a PAIR discriminating on the Han condition alone, because
-    // the failure mode of a blunt fix is silently forbidding the ASCII-prose
-    // comma break too, which no corpus line would ever reveal.
-    ...(() => {
-      const hanComma = atomize('常态,不是许可');           // 常 态 , 不 是 许 可
-      const hanCommaSpaced = atomize('常态, 不是');        // 常 态 , 不(sp) 是
-      const asciiComma = atomize('first, second');       // "first," · "second"
-      const spaced = atomize('常态 , 不是');               // the mark follows a space
-      // The one shape where the OLD wrapper actually took the break: the atom
-      // after the mark carries a space and is too long to append, so the only
-      // segment that fits ends ON the mark.
-      const hanTrap = `${'中文内容'.repeat(9)}, \`${'p/'.repeat(40)}\``;
-      const latinTwin = `${'word '.repeat(18)}end, \`${'p/'.repeat(40)}\``;
-      const wrappedTrap = wrapLine(hanTrap);
-      const wrappedTwin = wrapLine(latinTwin);
-      return [
-        ['an ASCII , after a Han character is a no-break-after mark', hanAsciiPunctTail(hanComma, 2), true],
-        ['...and ; and : are the same mark class', ['常态;不是', '常态:不是'].every((s) => hanAsciiPunctTail(atomize(s), 2)), true],
-        ['...but after a LATIN word it stays an ordinary break point', hanAsciiPunctTail(asciiComma, 0), false],
-        ['...and a mark with a space before it follows nothing', hanAsciiPunctTail(spaced, 2), false],
-        ['...and an atom not ending in one is never the mark', hanAsciiPunctTail(hanComma, 1), false],
-        ['breakLegal refuses the break after a Han+ASCII mark', breakLegal(hanCommaSpaced, 3), false],
-        // Why only ONE shape ever leaked, pinned so the case above cannot pass
-        // for the wrong reason: with no space after the mark there was never a
-        // legal break there anyway (neither side is wide), so the defect could
-        // only enter where the author had written `, ` and the wrapper spent it.
-        ['...a mark with no following space was never a break point to begin with', breakLegal(hanComma, 3), false],
-        ['...still allows the CJK-to-CJK break one atom earlier', breakLegal(hanComma, 1), true],
-        ['...and still allows an ordinary ASCII space break', breakLegal(asciiComma, 1), true],
-        // End to end, on the shape that used to produce the defect.
-        ['wrapLine splits the trap line', wrappedTrap.length > 1, true],
-        ['no wrapped line ends on a Han+ASCII mark — the break is no longer OFFERED', wrappedTrap.every((l) => !/\p{Script=Han}[,;:]$/u.test(l)), true],
-        ['...the line it took instead is still within budget', wrappedTrap.every((l) => Buffer.byteLength(l, 'utf8') <= 120), true],
-        ['...and it moved only whitespace, as every wrap must', wrappedTrap.join('').replace(/\s+/g, ''), hanTrap.replace(/\s+/g, '')],
-        // The RED twin: identical shape, Latin before the mark. If this one also
-        // stopped breaking, the rule would be over-broad and the case above
-        // would pass for the wrong reason.
-        ['the SAME shape with a Latin word before the mark still breaks there', wrappedTwin.some((l) => l.endsWith('end,')), true],
-        ['wrapLine is still idempotent under the new rule', wrappedTrap.flatMap((l) => wrapLine(l)).join('\n'), wrappedTrap.join('\n')],
-      ];
-    })(),
-    // ── #11947: the per-file max-table-row-bytes pin ────────────────────────
+    // ── #11947: the per-file max-table-row-bytes pin, kept by its ruling ────
     ...(() => {
       const row = `| a | ${'中文内容'.repeat(20)} |`;      // 6 + 240 + 2 = 248 bytes
       const doc = `# t\n\n| a | b |\n|---|---|\n${row}\n`; // the row lands on line 5
       const fenced = `\`\`\`\n| a | ${'x'.repeat(200)} |\n\`\`\`\n`;
-      const clean = { fence: false, frontMatter: false };
       const red = tableRowVerdict('f.md', 999, 3, 100);
       return [
-        // The pairing that IS this card: the length rule exempts the row by
-        // shape, and the pin meters the same row instead. A case asserting only
-        // one half would pass under either control alone.
-        ['a long table row is EXEMPT from the 120-byte line rule', classifyLine(row, clean), 'table'],
+        // The pairing: two meters on the SAME row. The byte ceiling counts every
+        // byte of it (one past the ceiling is red), and the pin meters its width.
+        // A case asserting only one half would pass under either control alone.
+        ['a wide table row costs its bytes against the file ceiling like any other line', fileVerdict('f.md', `${row}\n`, countBytes(row)).ok, false],
         ['...and the same row is METERED by its file pin', tableRowVerdict('f.md', 248, 5, 247).ok, false],
         ['at exactly the pin -> green', tableRowVerdict('f.md', 248, 5, 248).ok, true],
         ['one byte wider -> RED (widening a cell is the measured defect)', tableRowVerdict('f.md', 249, 5, 248).ok, false],
@@ -3967,6 +954,11 @@ function selfTest() {
         ['a `|` line inside a FENCE is not a table row', scanTableRows(fenced).widest, 0],
         ['a `|` line in FRONT MATTER is not a table row', scanTableRows('---\n| a |\n---\n').widest, 0],
         ['a file with no table row measures 0', scanTableRows('中文内容\n').widest, 0],
+        // The scan shares advanceState, so both CLOSING transitions are pinned
+        // here: an advanceState that never closed a fence, or never left front
+        // matter, would skip every later line and read 0, under the real pin.
+        ['a table row AFTER a closed fence is measured: the fence state closes again', scanTableRows(`\`\`\`\n| f |\n\`\`\`\n| ${'w'.repeat(40)} |\n`).widest, 44],
+        ['a table row AFTER closed front matter is measured: the front-matter state ends at its second ---', scanTableRows(`---\nname: x\n---\n| ${'m'.repeat(30)} |\n`).widest, 34],
         // The two maps must stay in step; enforcement cannot hold this, because
         // a file missing from the pin map is simply never consulted.
         ['every ceilinged file carries a pin', [...CEILINGS.keys()].every((k) => MAX_TABLE_ROW_BYTES.has(k)), true],
@@ -3975,7 +967,7 @@ function selfTest() {
         ['the published skills/ catalog is uncovered here too', [...MAX_TABLE_ROW_BYTES.keys()].some((k) => k.startsWith('skills/')), false],
       ];
     })(),
-    // ── The cross-file move (the 2026-09-03 ruling) ─────────────────────────
+    // ── The cross-file move (the 2026-09-03 ruling), in bytes ───────────────
     // Every case is a PAIR or a near-twin of a legal declaration, because the
     // failure mode of a loose implementation is a `move` that licenses an
     // ordinary raise — which would run green forever and retire the ratchet.
@@ -3996,9 +988,7 @@ function selfTest() {
       const uncited = { ...decl, ruling: 'moved from a.md + b.md' };
       const mv = (map, d = decl) => crossFileMoveVerdict('dest.md', d, map);
       const total = (map, moves) => crossFileMoveTotalVerdict(new Map(moves), map);
-      // The shape this separation exists for, at the real numbers it was measured
-      // on: a live move whose destination later took an ORDINARY ruled raise. The
-      // ceilings are platform-readings.md's and its three sources', so the pin
+      // A move whose destination later took an ORDINARY ruled raise; the pin
       // fails if the two quantities are ever folded back together.
       const readings = ceil({ 'dest.md': 358, 'a.md': 31, 'b.md': 28, 'c.md': 88 });
       const ruledRec = { ruling: 'maintainer, 2026-09-04, verbatim: 「同意」', date: '2026-09-04', delta: 34 };
@@ -4006,6 +996,8 @@ function selfTest() {
       const withRuled = { ...moved, ruledRaises: [ruledRec] };
       const rr = (over) => crossFileMoveVerdict('dest.md', { ...moved, ruledRaises: [{ ...ruledRec, ...over }] }, readings);
       const mvR = (d = withRuled) => crossFileMoveVerdict('dest.md', d, readings);
+      const ORDINARY_PATH = 'its comment id and the measured byte delta quoted in the raising PR\'s body';
+      const refusals = [red.msg, mv(unpaid).msg, mv(paid, uncited).msg, total(short, [['dest.md', decl]]).msg];
       return [
         ['the citation is the ruling this file was given', RULING_CITATION, '#14685 item 5 (comment 5520452691)'],
         // (1) A legal move passes — the assertion the other three are read against.
@@ -4014,64 +1006,61 @@ function selfTest() {
         // (2) A raise with no decrease behind it is an ordinary raise.
         ['cross-file move — a raise whose sources did NOT shrink is RED (the whole defect: a `move` that licenses an ordinary raise would run green forever)', mv(unpaid).ok, false],
         ['...and the RED verdict names the raise and the net decrease it fell short of', mv(unpaid).msg.includes('+5') && mv(unpaid).msg.includes('decrease of 0'), true],
-        ['...and sends the author to the ordinary path rather than to a bigger declaration', mv(unpaid).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
+        ['...and sends the author to the ordinary path rather than to a bigger declaration', mv(unpaid).msg.includes(ORDINARY_PATH), true],
         ['...and the ordinary path it names is the ruled form, not a per-instance maintainer word', mv(unpaid).msg.includes('by at most that delta') && !mv(unpaid).msg.includes('maintainer ruling quoted'), true],
-        // (3) Partly paid is not paid — the boundary case, one line short.
-        ['cross-file move — a raise EXCEEDING the net decrease is RED, even by one line', mv(short).ok, false],
+        // (3) Partly paid is not paid — the boundary case, one byte short.
+        ['cross-file move — a raise EXCEEDING the net decrease is RED, even by one byte', mv(short).ok, false],
         ['...while a raise exactly equal to it is legal', crossFileMoveVerdict('dest.md', { ...decl, was: 98 }, ceil({ 'dest.md': 105, 'a.md': 27, 'b.md': 16 })).ok, true],
         // (4) The citation. A raise that names no ruling is not a move at all.
         ['cross-file move — a declaration citing no ruling is RED, however sound its arithmetic', mv(paid, uncited).ok, false],
         ['...and the RED verdict spells the citation it wanted', mv(paid, uncited).msg.includes(RULING_CITATION), true],
-        ['...and the citation refusal names the same ruled form for the ordinary path', mv(paid, uncited).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
-        // (5) Condition (b), map-wide. Stated separately because it is the
-        // ruling's own wording; over disjoint participants it follows from (a).
+        ['...and the citation refusal names the same ruled form for the ordinary path', mv(paid, uncited).msg.includes(ORDINARY_PATH), true],
+        // (5) Condition (b), map-wide.
         ['cross-file move — declarations whose net movement is 0 leave the map total unchanged', total(paid, [['dest.md', decl]]).ok, true],
         ['cross-file move — a declaration whose participants net POSITIVE fails the total (+2 here)', total(short, [['dest.md', decl]]).ok, false],
-        ['...and the RED total names the lines it grew by', total(short, [['dest.md', decl]]).msg.includes('by 2 lines'), true],
-        ['...and the RED total names the same ruled form for the ordinary path', total(short, [['dest.md', decl]]).msg.includes('its comment id and the measured line delta quoted in the raising PR\'s body'), true],
-        // The old form — a per-instance maintainer word quoted in the PR — is gone
-        // from every line-ceiling refusal; the table-row pin's refusal is not one.
-        ['none of the four line-ceiling refusals still sends the author to a per-instance maintainer ruling', [verdict(rel, 9999, 3050).msg, mv(unpaid).msg, mv(paid, uncited).msg, total(short, [['dest.md', decl]]).msg].some((m) => m.includes('maintainer ruling quoted')), false],
-        ['...and a net-negative move reports the corpus shrinking', total(paidDown, [['dest.md', decl]]).msg.includes('down 9 lines'), true],
+        ['...and the RED total names the bytes it grew by', total(short, [['dest.md', decl]]).msg.includes('by 2 bytes'), true],
+        ['...and the RED total names the same ruled form for the ordinary path', total(short, [['dest.md', decl]]).msg.includes(ORDINARY_PATH), true],
+        ['none of the four ceiling refusals still sends the author to a per-instance maintainer ruling', refusals.some((m) => m.includes('maintainer ruling quoted')), false],
+        ['none of the four ceiling refusals speaks of lines: the unit they name is bytes', refusals.some((m) => /\d+ lines?\b|line delta/.test(m)) || !refusals.every((m) => m.includes('byte')), false],
+        ['...and a net-negative move reports the corpus shrinking', total(paidDown, [['dest.md', decl]]).msg.includes('down 9 bytes'), true],
         // (6) Disjointness — the one thing that makes (a) summed equal (b).
         ['cross-file move — one source may not pay for two destinations', total(ceil({ 'dest.md': 105, 'other.md': 105, 'a.md': 27, 'b.md': 16 }), [['dest.md', decl], ['other.md', { ruling: RULING_CITATION, was: 100, sources: [['a.md', 30]] }]]).ok, false],
         // (7) Lifecycle, both directions — asymmetric on purpose.
         ['cross-file move — a destination lowered back to or below its pre-move ceiling reads as PAID DOWN, never as red (lowering is always legitimate)', mv(paidDown).ok, true],
         ['...and says so rather than reporting an arithmetic it can no longer measure', mv(paidDown).msg.includes('paid down'), true],
-        ['cross-file move — a SOURCE grown back past what it paid re-opens the move (the loophole: the destination keeps the lines while the payers grow back)', mv(regrown).ok, false],
+        ['cross-file move — a SOURCE grown back past what it paid re-opens the move (the loophole: the destination keeps the bytes while the payers grow back)', mv(regrown).ok, false],
         // (8) Participants must be files this map covers — a typo is RED, not a skip.
         ['cross-file move — an unknown destination is RED, not a skip (#4690)', crossFileMoveVerdict('nope.md', decl, paid).ok, false],
         ['cross-file move — an unknown source is RED, not a skip (#4690)', mv(paid, { ...decl, sources: [['nope.md', 30]] }).ok, false],
         ['cross-file move — a file may not pay its own raise', mv(paid, { ...decl, sources: [['dest.md', 130]] }).ok, false],
         ['cross-file move — a declaration naming no source at all is RED', mv(paid, { ...decl, sources: [] }).ok, false],
-        // (9) The live map. Enforcement covers the arithmetic; what it cannot
-        // cover is the shape of a declaration nobody has written yet, so the
-        // fields every declaration must carry are pinned here.
+        // (9) The live map. Enforcement covers the arithmetic; the fields every
+        // declaration must carry are pinned here (vacuously true while the map
+        // is empty, which is correct: there is no declaration to be malformed).
         ['every live declaration cites the ruling', [...CROSS_FILE_MOVES.values()].every((m) => String(m.ruling ?? '').includes(RULING_CITATION)), true],
         ['every live declaration names its destination\'s pre-move ceiling and at least one source', [...CROSS_FILE_MOVES.values()].every((m) => Number.isInteger(m.was) && Array.isArray(m.sources) && m.sources.length > 0), true],
         ['every live participant is a file this map covers', [...CROSS_FILE_MOVES].every(([d, m]) => CEILINGS.has(d) && m.sources.every(([s]) => CEILINGS.has(s))), true],
         // (10) An ORDINARY ruled raise on the destination is not this move's.
-        // The whole group is one pair: the same tree, recorded and unrecorded.
         ['ruled raise — a destination that later took an ordinary ruled raise PASSES with `was` at its literal pre-move value', mvR().ok, true],
         ['...and the verdict prices the MOVE, not the ruling: +10 against the sources\' net 11', mvR().msg.includes('+10') && mvR().msg.includes('decrease of 11'), true],
-        ['...and names the ruled lines it took out, so the arithmetic can be read back', mvR().msg.includes('less 34 lines of ordinary ruled raise'), true],
+        ['...and names the ruled bytes it took out, so the arithmetic can be read back', mvR().msg.includes('less 34 bytes of ordinary ruled raise'), true],
         ['...while the SAME tree with the raise unrecorded is the double red this record ends', mvR(moved).ok, false],
         ['...whose first half reads the ruling as the move\'s: +44 against 11', mvR(moved).msg.includes('+44') && mvR(moved).msg.includes('decrease of 11'), true],
         ['...and which now sends the author to the record rather than to `was`', mvR(moved).msg.includes('ruledRaises'), true],
-        ['ruled raise — the map-wide total subtracts it too, and reads the corpus DOWN 1', total(readings, [['dest.md', withRuled]]).ok && total(readings, [['dest.md', withRuled]]).msg.includes('down 1 line'), true],
-        ['...where the unrecorded twin reports the corpus growing by 33', total(readings, [['dest.md', moved]]).msg.includes('by 33 lines'), true],
+        ['ruled raise — the map-wide total subtracts it too, and reads the corpus DOWN 1', total(readings, [['dest.md', withRuled]]).ok && total(readings, [['dest.md', withRuled]]).msg.includes('down 1 byte'), true],
+        ['...where the unrecorded twin reports the corpus growing by 33', total(readings, [['dest.md', moved]]).msg.includes('by 33 bytes'), true],
         // The subtraction is a licence to grow, so every bar on it is pinned.
-        ['ruled raise — a record quoting NO ruling is RED (the licence is the maintainer\'s or it does not exist)', rr({ ruling: 'the intake-family raise, +34 lines' }).ok, false],
-        ['...and the RED verdict says what it wanted', rr({ ruling: 'the intake-family raise, +34 lines' }).msg.includes('quotes no ruling'), true],
+        ['ruled raise — a record quoting NO ruling is RED (the licence is the maintainer\'s or it does not exist)', rr({ ruling: 'the intake-family raise, +34 bytes' }).ok, false],
+        ['...and the RED verdict says what it wanted', rr({ ruling: 'the intake-family raise, +34 bytes' }).msg.includes('quotes no ruling'), true],
         ['...while an ENGLISH ruling quoted the way this map already quotes one passes', rr({ ruling: 'maintainer 2026-09-04, verbatim: "the ceiling is raised by the measured need, +34"' }).ok, true],
-        ['ruled raise — a record with no line count is RED', rr({ delta: undefined }).ok, false],
-        ['ruled raise — a NEGATIVE line count is RED: lowering is always legitimate and is never recorded here', rr({ delta: -34 }).ok, false],
+        ['ruled raise — a record with no byte count is RED', rr({ delta: undefined }).ok, false],
+        ['ruled raise — a NEGATIVE byte count is RED: lowering is always legitimate and is never recorded here', rr({ delta: -34 }).ok, false],
         ['ruled raise — a record with no ruling DATE is RED', rr({ date: undefined }).ok, false],
-        ['ruled raise — records claiming MORE lines than the ceiling stands above `was` are RED', rr({ delta: 90 }).ok, false],
+        ['ruled raise — records claiming MORE bytes than the ceiling stands above `was` are RED', rr({ delta: 90 }).ok, false],
         ['...which is the loophole that closes: an inflated record would otherwise read the move as paid down and pass forever', rr({ delta: 90 }).msg.includes('over-claim'), true],
         ['ruled raise — a destination whose whole rise is ruled keeps none of it for the move, and reads as paid down', rr({ delta: 44 }).ok && rr({ delta: 44 }).msg.includes('paid down'), true],
         ['ruled raise — a declaration carrying no record behaves exactly as before (every case above this group is one)', mv(paid).ok && mv(paid).msg.includes('+5'), true],
-        ['every live ruled-raise record quotes its ruling, dates it, and names a positive line count', [...CROSS_FILE_MOVES.values()].every((m) => (m.ruledRaises ?? []).every((r) => VERBATIM_QUOTATION.test(String(r?.ruling ?? '')) && RULED_RAISE_DATE.test(String(r?.date ?? '')) && Number.isInteger(r?.delta) && r.delta > 0)), true],
+        ['every live ruled-raise record quotes its ruling, dates it, and names a positive byte count', [...CROSS_FILE_MOVES.values()].every((m) => (m.ruledRaises ?? []).every((r) => VERBATIM_QUOTATION.test(String(r?.ruling ?? '')) && RULED_RAISE_DATE.test(String(r?.date ?? '')) && Number.isInteger(r?.delta) && r.delta > 0)), true],
       ];
     })(),
   ].map((c) => (Array.isArray(c[1]) || (c[1] && typeof c[1] === 'object') ? [c[0], JSON.stringify(c[1]), JSON.stringify(c[2])] : c));

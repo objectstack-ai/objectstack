@@ -1679,7 +1679,7 @@ export const FieldSchema = lazySchema(() => {
   // (batch #218 item 2, letter 乙) words. The describe names the type set the
   // key still applies to, for the same reason as above.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it — a `formula` whose `returnType` is `percent` counts the places of its displayed percentage, as a `percent` field does, so a fraction result is rounded to `scale + 2` places. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -1746,7 +1746,7 @@ export const FieldSchema = lazySchema(() => {
    * header chips. The liveness row is `live` and names the relay sites that
    * carry the key to that renderer.
    */
-  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field, or a `formula` whose `returnType` is `percent`, is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
@@ -2112,7 +2112,8 @@ export const FieldSchema = lazySchema(() => {
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
    *   - `true` / absent  → shown as an auxiliary panel on the parent's record
-   *                       page. There is no count-based auto-split.
+   *                       page (absent on a `master_detail` field: see below).
+   *                       There is no count-based auto-split.
    *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): shown as
    *                       a full-width table in the record's detail body, not
    *                       as an auxiliary panel. A field group's `relatedList`
@@ -2125,10 +2126,12 @@ export const FieldSchema = lazySchema(() => {
    * How the record page lays these out is ADR-0085's to define; this key states
    * the relationship's role, not the page's chrome.
    *
-   * Absent on a `master_detail` field that sets `inlineEdit`, the list is
-   * `'primary'` by default: line items edited inside the parent's form are part
-   * of its main content (a quote's lines belong under the quote, not beside
-   * it). Write `relatedList: true` to keep such a list an auxiliary panel.
+   * Absent on a `master_detail` field, the list is `'primary'` by default
+   * (#35597, amending #27069 which also required `inlineEdit`): rows the parent
+   * owns are part of its main content (a quote's lines belong under the quote,
+   * not beside it), whether or not the parent's form edits them inline. Write
+   * `relatedList: true` to keep such a list an auxiliary panel, or `false` to
+   * hide it. Absent on a `lookup` field, the list stays an auxiliary panel.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -2141,7 +2144,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). true = an auxiliary panel on the record page; absent = \'primary\' (a body table) on a master_detail field, an auxiliary panel on a lookup field; false = hidden: the child object is not shown on the parent record page; \'primary\' = a body table: part of the record\'s main content, shown as a full-width table in the record\'s detail body. Write true on a master_detail field to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
@@ -2372,7 +2375,8 @@ export const FieldSchema = lazySchema(() => {
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
    * measures, display formatting, validation — read a declared type instead of
    * re-parsing the expression. Authoring stamps it from the inferred CEL type;
-   * absent when the type can't be proven (an ambiguous/`dyn` expression).
+   * absent when the type can't be proven (an ambiguous/`dyn` expression),
+   * except that a declared `percent` or `currency` stays (below).
    *
    * `currency` (#22727): the result is an amount of money. It carries its
    * currency exactly the way a `currency` field does — through the formula's
@@ -2382,9 +2386,24 @@ export const FieldSchema = lazySchema(() => {
    * at AUTHORING, where `@objectstack/formula`'s `inferFormulaReturn` proves the
    * result is money and answers the source's currency for the stamp to copy.
    * The value itself is a bare number, as a currency field's is.
+   *
+   * `percent` (#35047): the result is a ratio, read exactly as a `percent`
+   * field reads its stored value — one convention, never a second one. The
+   * value is a FRACTION (`0.25` reads `25%`), unless the formula declares a
+   * `max` above 1, the percent field's own whole-percent statement
+   * (`percentScaleOf`), when it is percentage points. Its `scale` counts the
+   * decimal places of the displayed percentage, as on a `percent` field
+   * (absent ⇒ 0), so the engine rounds a fraction to `scale + 2` places and a
+   * whole percentage to `scale`. It is DECLARED, never inferred: no CEL type
+   * proves a quotient is a percentage, so authoring keeps a declared `percent`
+   * under every verdict that proves no other type — where it would stamp
+   * `number`, and where the type is unproven (a field-over-field quotient such
+   * as `record.spent / record.budget` types `dyn`), which would otherwise
+   * clear it. A declared `currency` is kept the same way. A verdict that
+   * proves `text`, `boolean` or `date` still stamps.
    */
-  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency']).optional()
-    .describe('Inferred value type of a formula field (number/text/boolean/date/currency). `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency).'),
+  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency', 'percent']).optional()
+    .describe('Value type of a formula field (number/text/boolean/date/currency/percent). Authoring stamps `number`, `text`, `boolean` or `date` from the expression\'s inferred type and leaves it absent when none is proven; `currency` and `percent` are declared by the author, and a verdict that proves no other type (`number`, or none) keeps them. `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face.'),
   summaryOperations: strictObject({
     surface: 'this roll-up summary',
     history: FIELD_HISTORY,

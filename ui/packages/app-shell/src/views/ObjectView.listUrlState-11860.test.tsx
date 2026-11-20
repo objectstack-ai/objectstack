@@ -659,17 +659,18 @@ const groupParamOf = (host: Host) => {
 };
 const BY_PRIORITY = { fields: [{ field: 'priority', order: 'desc', collapsed: false }] };
 
-/** Since objectui#12423 the Group editor is a section of the toolbar's Display panel. */
+/** The Group editor is the Group level of the toolbar's Display menu. */
 async function openGroupPanel() {
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
   await settle();
+  fireEvent.click(within(screen.getByTestId('view-settings-content')).getByTestId('options-row-group'));
+  await settle();
 }
 
-/** The Group section's own Clear, inside the Display panel. */
+/** The Group level's own Clear, inside the Display menu. */
 function clearGrouping() {
   const panel = screen.getByTestId('view-settings-content');
-  const title = within(panel).getByRole('button', { name: /^group/i });
-  fireEvent.click(within(title.parentElement!).getByRole('button', { name: 'Clear' }));
+  fireEvent.click(within(panel).getByTestId('options-group-clear'));
 }
 
 describe('the toolbar grouping is in the URL too (objectui#11860)', () => {

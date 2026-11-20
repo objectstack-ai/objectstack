@@ -1572,9 +1572,9 @@ const actionObject = () => strictObject({
    * rejects the call. A string the body builds itself is written as it is
    * (parameter 4).
    *
-   * A key the body asks for literally that `texts` does not declare is
-   * refused at save; any other undeclared key is refused when the action
-   * runs, as a fault naming the action and the key. Served where an action
+   * A key the body asks for literally that `texts` does not declare —
+   * `ctx.text('key')` or `ctx.text?.('key')` — is refused at save; any other
+   * undeclared key is refused when the action runs, as a fault naming the action and the key. Served where an action
    * runs code of its own: a `type: 'script'` action's sandboxed `js` body —
    * which is also what `os build` lowers an inline `target` function to.
    * Refused on every other action: another `type` (its `target` is a URL,
@@ -2658,8 +2658,8 @@ export type ActionText = z.input<typeof ActionTextSchema>;
  * [#34374 PR2] The object-level check on an action's `texts`, the twin of
  * `HookSchema`'s: `texts` nothing the action runs could ask for is refused at
  * `texts`, and a key the body's source asks for literally
- * (`ctx.text('key')`) that `texts` does not declare is refused at
- * `body.source`, one issue each. A key that arrives any other way is the
+ * (`ctx.text('key')` or `ctx.text?.('key')`) that `texts` does not declare is
+ * refused at `body.source`, one issue each. A key that arrives any other way is the
  * run-time refusal's.
  */
 function refuseUndeclaredLiteralActionTextKey(

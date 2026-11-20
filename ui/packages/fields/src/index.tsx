@@ -2477,6 +2477,11 @@ function ReferencedRecordLink({
       <a
         href={href}
         className={cn('text-primary underline-offset-4 hover:underline', className)}
+        // A host's list grid draws a referenced record as a small chip led by
+        // the name's first letter (objectstack#35548); these say which link
+        // is one and what its letter is. Nothing else reads them.
+        data-record-link=""
+        data-initial={recordLinkInitial(label)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own
@@ -2495,6 +2500,12 @@ function ReferencedRecordLink({
       </a>
     </RecordHoverCard>
   );
+}
+
+/** The first character of a referenced record's name, upper-cased, or none. */
+function recordLinkInitial(label: string | undefined): string | undefined {
+  const first = Array.from((label ?? '').trim())[0];
+  return first ? first.toLocaleUpperCase() : undefined;
 }
 
 /**
@@ -2899,6 +2910,19 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // currency is its row's code field (ADR-0144 D2).
   if (valueType === 'currency') {
     return <CurrencyCellRenderer value={value} field={field} dependentValues={dependentValues} />;
+  }
+
+  // A declared PERCENT is a ratio (objectstack#35047): the spec reads it
+  // "as a `percent` field reads its stored value", so it is drawn by the
+  // percent cell itself, as the percent field it reads like. The cell asks
+  // `resolveFieldScale` by the field's `type`, so the type handed over is
+  // `percent`: a formula's own type has no absent-`scale` row, and an
+  // undeclared width would fall to `formatPercent`'s private default while
+  // the form face read `0`. Everything else is this formula's own — `scale`,
+  // the `max` that says whole-percent storage, `percentDisplay`.
+  // ⛔ No second percent formatter here.
+  if (valueType === 'percent') {
+    return <PercentCellRenderer value={value} field={{ ...(field as object), type: 'percent' } as CellRendererProps['field']} />;
   }
 
   // A declared BOOLEAN reads the locale's Yes / No word (objectui#11748), the

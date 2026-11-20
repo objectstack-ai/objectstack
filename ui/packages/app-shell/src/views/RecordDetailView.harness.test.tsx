@@ -1305,15 +1305,15 @@ describe('RecordDetailView.pageHeaderTitleFls-10499', () => {
       // email, and the readable name was on screen nowhere. The H1 now reads the
       // same row: it shows the name, and the hidden `name` row is its duplicate,
       // as on a backend that strips `email`. The name is in the record once, in
-      // the H1; it does not come back as a body row. The top bar's crumb
-      // 「对象 › 记录名」 (objectstack#27524) names the record with the same
-      // gated title, never the denied email.
+      // the H1; it does not come back as a body row. The H1 is the top bar's
+      // record name (objectstack#35593: one header row, 「对象 / 记录名」), with
+      // the same gated title, never the denied email.
       await renderRecordPage({ titleFormat: '{email}' }, denying('email'), 'Ada Lovelace');
       const bar = document.querySelector('[data-record-top-bar]');
-      expect(bar?.textContent).toContain('Ada Lovelace');
+      await waitFor(() => expect(bar?.querySelector('h1')?.textContent).toContain('Ada Lovelace'));
       expect(bar?.textContent).not.toContain(EMAIL);
       const text = document.body.textContent ?? '';
-      expect(text.split('Ada Lovelace').length - 1 - ((bar?.textContent ?? '').split('Ada Lovelace').length - 1)).toBe(1);
+      expect(text.split('Ada Lovelace').length - 1).toBe(1);
       expect(text).toContain('555-0100');
     });
 
@@ -1848,12 +1848,14 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
       ...(relatedLists ? { relatedLists } : {}),
       fields: BASE_FIELDS,
     },
+    // `relatedList: true` keeps the owned child a side card here
+    // (objectstack#35597: a master_detail with no relatedList is a body table).
     {
       name: 'showcase_task',
       label: 'Task',
       pluralLabel: 'Tasks',
       managedBy: 'platform',
-      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
     },
     {
       name: 'showcase_note',
@@ -2086,6 +2088,32 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
       expect(cardOrder(container)).toEqual(['showcase_note.quote']);
       await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
       expect(detailsText(container)).toContain('Lines');
+    });
+  });
+
+  describe('RecordDetailView — the relation type decides, not inlineEdit (objectstack#35597)', () => {
+    it('a master_detail with NO inlineEdit and no relatedList is a body table: drawn in the details, no card', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+      // Drawn even with no rows (the data source answers every list empty).
+      await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      expect(container.querySelector('[data-record-column="details"] [data-body-table-empty]')).not.toBeNull();
+    });
+
+    it('relatedList: false hides it: neither a body table nor a card', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: false }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+      await waitFor(() => expect(detailsText(container)).toContain('Lines'), { timeout: 5000 });
+      expect(detailsText(container)).not.toContain('Tasks');
+    });
+
+    it('relatedList: true keeps it a side card', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_task.quote', 'showcase_note.quote']);
+      expect(detailsText(container)).not.toContain('Tasks');
     });
   });
 });
@@ -2379,7 +2407,9 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
       label: 'Task',
       pluralLabel: 'Tasks',
       managedBy: 'platform',
-      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+      // `relatedList: true` keeps it a side list with a tab: a plain
+      // master_detail FK is an overview body table since objectstack#35597.
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
     },
     {
       name: 'showcase_note',

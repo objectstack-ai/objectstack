@@ -81,7 +81,10 @@ describe('activity entries keep their time on one line (objectstack#34614)', () 
     const { container } = render(<RecordActivityTimeline items={[comment]} />);
     const when = container.querySelector('[data-feed-when]');
     expect(tokens(when)).toContain('whitespace-nowrap');
-    expect(tokens(when?.parentElement ?? null)).toContain('flex-wrap');
+    // The time rides at the right end of the header (objectstack#35602), in a
+    // tail that is one piece of the wrapping header row.
+    expect(tokens(when?.parentElement ?? null)).toContain('ml-auto');
+    expect(tokens(when?.parentElement?.parentElement ?? null)).toContain('flex-wrap');
   });
 
   it("a folded run's header does the same", () => {
@@ -100,12 +103,16 @@ describe('activity entries keep their time on one line (objectstack#34614)', () 
     const { container } = render(<RecordActivityTimeline items={items} />);
     const count = container.querySelector('[data-testid="activity-fold-count"]');
     expect(count).not.toBeNull();
-    const when = count!.parentElement!.querySelector('[data-feed-when]');
-    expect(tokens(when)).toContain('whitespace-nowrap');
-    expect(tokens(count!.parentElement)).toContain('flex-wrap');
+    // Since objectstack#35602 a fold is one 30 px line: the time is a fixed,
+    // unbreakable piece at its end and the text before it truncates instead.
+    const foldRow = count!.closest('[data-stream-row]');
+    const when = foldRow!.querySelector('[data-stream-when]');
+    expect(tokens(when)).toEqual(expect.arrayContaining(['whitespace-nowrap', 'shrink-0']));
+    expect(tokens(foldRow!.querySelector('.flex-1'))).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+    expect(tokens(count)).toEqual(expect.arrayContaining(['whitespace-nowrap', 'shrink-0']));
   });
 
-  it('a compact system line keeps "· time" as one unbreakable unit after a break opportunity', () => {
+  it('a compact system line keeps its time as one unbreakable unit at the end of the row', () => {
     const change = {
       id: 'a2',
       type: 'field_change',
@@ -117,13 +124,13 @@ describe('activity entries keep their time on one line (objectstack#34614)', () 
     const { container } = render(
       <RecordActivityTimeline items={mergeTimelineStream([change], null)} variant="stream" titleLabel="Timeline" />,
     );
+    // Since objectstack#35602 the system line is one 30 px row: who, what,
+    // and the time as a fixed, unbreakable piece at the right end; the what
+    // truncates instead of pushing the time onto a line of its own.
     const unit = container.querySelector('[data-stream-system-row] [data-stream-when]');
-    expect(tokens(unit)).toContain('whitespace-nowrap');
-    expect(unit?.textContent?.startsWith('· ')).toBe(true);
-    // The space before the unit is OUTSIDE it, so the line can still break there.
-    expect(unit?.previousSibling?.textContent).toBe(' ');
-    // The line reads exactly as it did: "… · Ada Lovelace · 3d ago".
-    expect(container.querySelector('[data-stream-system-row] p')?.textContent).toContain('Ada Lovelace · ');
+    expect(tokens(unit)).toEqual(expect.arrayContaining(['whitespace-nowrap', 'shrink-0']));
+    expect(unit?.textContent).not.toBe('');
+    expect(container.querySelector('[data-stream-system-row] [data-stream-actor]')?.textContent).toBe('Ada Lovelace');
   });
 
   it("a reply's header wraps between pieces and its time never breaks", () => {

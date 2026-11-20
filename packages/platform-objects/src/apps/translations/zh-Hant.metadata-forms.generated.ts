@@ -427,7 +427,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       userActions: {
         label: "使用者操作",
-        helpText: "UI 用戶端在本物件的記錄上提供哪些通用入口（新增、匯入、編輯、刪除、匯出），逐項覆寫 managedBy 的預設值。未設定的入口保持該預設值：platform 提供全部五項；config 和 system-data 提供除匯入外的全部；engine-owned、append-only 和 better-auth 只提供匯出。未改動過的開關不寫入任何值，所以即使預設提供該入口，它也顯示為關閉。在 engine-owned 或 append-only 物件上，開啟某個入口還會允許使用者透過資料 API 執行該寫入。使用者仍需要相應的權限。"
+        helpText: "UI 用戶端在本物件的記錄上提供哪些通用入口（新增、匯入、編輯、刪除、匯出），逐項覆寫 managedBy 的預設值。未設定的入口保持該預設值：platform 提供全部五項；config 和 system-data 提供除匯入外的全部；engine-owned、append-only 和 better-auth 只提供匯出。未改動過的開關不寫入任何值，所以即使預設提供該入口，它也顯示為關閉。在 engine-owned 或 append-only 物件上，開啟某個入口還會允許使用者透過資料 API 執行該寫入。使用者仍需要相應的權限。變更負責人不屬於該矩陣：其預設值取決於共用模型（見其條目）。"
       },
       "userActions.create": {
         label: "新增",
@@ -448,6 +448,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "userActions.exportCsv": {
         label: "匯出 CSV",
         helpText: "CSV 匯出入口。未設定：顯示，因為每個 managedBy 類別預設都提供匯出。"
+      },
+      "userActions.transfer": {
+        label: "變更負責人",
+        helpText: "變更負責人操作（單筆與批次）：開啟即提供，關閉即隱藏。未設定時開啟，但 controlled_by_parent 明細物件預設關閉。僅在記錄有可重新指派負責人的物件上提供（ownership 為 user 或未設定、無 managedBy、不是 sys_ 物件、owner_id 未設為唯讀，外部物件上 owner_id 已宣告或已對應）；在其他物件上開啟會被拒絕。它只控制該操作，不影響直接編輯 owner_id。已儲存的 {enabled, visibleWhen, disabledWhen} 物件逐鍵編輯；在原始碼中寫一個即可按每筆記錄控制該操作。"
       },
       editMode: {
         label: "編輯方式",
@@ -988,6 +992,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "refusals.params": {
         label: "參數",
         helpText: "句子可填入的名稱（例如 state）：內文丟擲 { code, params: { state } }，{{ state }} 預留位置即顯示該值。不填：句子為純文字"
+      },
+      texts: {
+        label: "文字",
+        helpText: "掛鉤寫入記錄的句子，以其程式碼透過 ctx.text 請求的 snake_case 鍵為鍵（例如 follow_up_subject）。掛鉤取得依組織語言翻譯的宣告句子，無翻譯時退回宣告的句子。適用於 JavaScript（L2）內文或處理器；運算式內文宣告會被拒絕"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "程式碼請求此鍵時掛鉤寫入的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
+      },
+      "texts.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 lead）：程式碼請求 ctx.text(key, { lead })，{{ lead }} 預留位置即顯示該值。不填：句子為純文字"
       },
       handler: {
         label: "處理器",
@@ -1880,6 +1896,42 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "body.memoryMb": {
         label: "記憶體（MB）",
         helpText: "單次呼叫記憶體上限（MB，最大 256）"
+      },
+      refusals: {
+        label: "拒絕目錄",
+        helpText: "拒絕目錄，以操作內文丟擲的 SCREAMING_SNAKE 錯誤碼為鍵（例如 SIGN_IN_REQUIRED）。呼叫方讀到宣告的提示語（依其語言翻譯）和宣告的狀態碼。適用於 script 操作的 JavaScript（L2）內文；運算式內文宣告會被拒絕"
+      },
+      "refusals.message": {
+        label: "提示語",
+        helpText: "內文丟擲此錯誤碼時使用者讀到的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
+      },
+      "refusals.status": {
+        label: "狀態碼",
+        helpText: "拒絕的 HTTP 狀態碼（400–499）。不填：400"
+      },
+      "refusals.reasons": {
+        label: "原因",
+        helpText: "同一錯誤碼下的更多句子，以內文在錯誤碼旁丟擲的 snake_case 原因為鍵（{ code, reason }）。線上的錯誤碼和狀態碼仍取本條目的；未在此宣告的原因會被拒絕。不填：丟擲的原因不被讀取"
+      },
+      "refusals.reasons.message": {
+        label: "提示語",
+        helpText: "內文在此錯誤碼下丟擲此原因時使用者讀到的句子。其中的 {{ }} 預留位置遵循本條目的參數"
+      },
+      "refusals.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 state）：內文丟擲 { code, params: { state } }，{{ state }} 預留位置即顯示該值。不填：句子為純文字"
+      },
+      texts: {
+        label: "文字",
+        helpText: "操作寫入記錄的句子，以其內文透過 ctx.text 請求的 snake_case 鍵為鍵（例如 email_subject）。內文取得依組織語言翻譯的宣告句子，無翻譯時退回宣告的句子。適用於 script 操作的 JavaScript（L2）內文；運算式內文宣告會被拒絕"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "內文請求此鍵時操作寫入的句子。純文字；若該條目宣告了參數，則 {{ name }} 預留位置填入一個已宣告的參數"
+      },
+      "texts.params": {
+        label: "參數",
+        helpText: "句子可填入的名稱（例如 subject）：內文請求 ctx.text(key, { subject })，{{ subject }} 預留位置即顯示該值。不填：句子為純文字"
       },
       params: {
         label: "參數",

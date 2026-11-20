@@ -68,6 +68,7 @@ import { LocalizationProvider } from '@object-ui/i18n';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 // Registers the REAL `list-view` (and the `object-gallery` this file replaces below).
 import '../index';
+import { openAdvancedFilter } from './conditionPanels';
 
 const OBJECT = 'crm_task';
 
@@ -805,7 +806,7 @@ describe('objectui#13047 — measured NOT honoured on a page `list-view` node (h
   it('`filterableFields`: RETIRED (objectui#13118) — the list does not read it as the Filter panel\'s field list, so "Add filter" starts where it does without the key', async () => {
     const firstFilterField = async (): Promise<string> => {
       fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-      await screen.findByText('Filter Records');
+      await openAdvancedFilter();
       const panel = screen.getByText('Filter Records').closest('[role="dialog"]') as HTMLElement;
       fireEvent.click(within(panel).getByRole('button', { name: /add filter/i }));
       let text = '';

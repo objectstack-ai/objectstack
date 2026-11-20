@@ -296,7 +296,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 | 守卫 | 一句话 |
 |:--|:--|
-| `scripts/pm/check-skill-line-ratchet.mjs` | 本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限凭下令写入的裁决记录:其评论 id 与实测行数增量引在 PR 正文,同 PR 移上限行至多增量;无裁决 id 即红;⛔ re-wrap 不得用作筹行,新增以删减付账;不买内容的密度修复允许 |
+| `scripts/pm/check-skill-line-ratchet.mjs` | 本文件字节数只降不升(`pnpm check:pm-skill-ratchet`);抬上限凭下令写入的裁决记录:其评论 id 与实测字节增量引在 PR 正文,同 PR 移上限行至多增量;无裁决 id 即红;新增以删减付账 |
 | `scripts/pm/check-skill-id-lint.mjs` | 本技能与 os-dev 定义的操作文本 ⛔ 不引用 issue 编号(`pnpm check:pm-skill-id-lint`) |
 | `scripts/pm/check-half-states.mjs` | label/assignee/PR 半状态的 report-only 巡查(含已过 L1 就绪却无人落地的孤儿 PR 检测) |
 | `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;本地枚举零 API,仅归因走查询) |
@@ -317,7 +317,7 @@ Worktree: `<repo>-issue-<n>`
 Domain: `domain:<x>`
 Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
-Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定>`
+Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定;xhigh 同行引其时长读数、实测记录或常设令的 id 与时刻>`
 Clause-②: yes | no
 Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; levels: AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and each changeset body; a kind other than `none` or a `(narrowing)` arm owes the PR body a third line, from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it; the seat files the owed card, rewriting `owed — FILES` to `#N` before ACCEPT via `references/seat-post-protocol.md`'s PR-body line)
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)

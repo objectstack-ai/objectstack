@@ -330,9 +330,11 @@ function parseDiagnostics(schema: z.ZodType, candidate: unknown): MetadataDiagno
     // KIND, fewest-issues wins, `unrecognized_keys` breaks the tie, ties all
     // emitted under a cap, nested unions recursed with absolute paths) is
     // defined once, so opening a broken document and saving it give the author
-    // the same words. The expansion is strictly additive — the union's own
-    // entry is still first, so any consumer reading `errors[0]` today reads the
-    // same entry after this change.
+    // the same words — including which union heads stay: a head that is only
+    // zod's bare `"Invalid input"` is dropped once an entry below explains it,
+    // so `errors[0]` is the first located cause, and a head carrying the
+    // schema's own sentence stays ahead of its causes. Read entries by `path`
+    // and `code`, never by index.
     const errors = zodIssuesToMetadataIssues(parsed.error.issues);
 
     return { valid: false, errors };
