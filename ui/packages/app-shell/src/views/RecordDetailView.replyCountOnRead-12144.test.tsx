@@ -198,7 +198,19 @@ async function mount(comments: Record<string, unknown>[], options: MountOptions 
 
 type View = Awaited<ReturnType<typeof mount>>['view'];
 
-const replyInputs = (view: View) => view.queryAllByPlaceholderText(REPLY_PLACEHOLDER);
+/**
+ * Open every comment's 「回复」: since the dense activity rows (objectstack#35602)
+ * the offered reply input opens behind that toggle instead of standing open.
+ */
+const openReplies = () =>
+  document
+    .querySelectorAll<HTMLButtonElement>('[data-feed-reply-toggle][aria-expanded="false"]')
+    .forEach((toggle) => fireEvent.click(toggle));
+
+const replyInputs = (view: View) => {
+  openReplies();
+  return view.queryAllByPlaceholderText(REPLY_PLACEHOLDER);
+};
 /** The reply-count toggle `ThreadedReplies` draws above a comment's replies. */
 const replyToggles = (view: View) => view.queryAllByRole('button', { name: /\d+ repl/ });
 
@@ -207,8 +219,9 @@ const replyToggles = (view: View) => view.queryAllByRole('button', { name: /\d+ 
  * which holds the item's own row and, after it, its `ThreadedReplies`.
  */
 function rootRowOf(view: View, body: string): HTMLElement {
-  const rows = view.getByText(body).closest('.space-y-4')!.children;
-  const row = Array.from(rows).find((r) => r.textContent?.includes(body));
+  openReplies();
+  // The keyed comment (or one-line) row since the dense rows (objectstack#35602).
+  const row = view.getByText(body).closest('[data-stream-comment-row],[data-stream-row]');
   if (!row) throw new Error(`no feed row holds ${JSON.stringify(body)}`);
   return row as HTMLElement;
 }
@@ -291,8 +304,11 @@ describe('a comment read from the server offers the reply input where the caller
 describe('CONTROL: with threading off the list is unchanged (objectui#12144)', () => {
   it('a reply is a row of its own in read order, with no reply toggle and no reply input', async () => {
     const { view } = await mount([PARENT, CHILD, LONE], { pages: [PAGE_THREADING_OFF] });
-    const list = view.getByText(PARENT_BODY).closest('.space-y-4')!;
-    const rows = Array.from(list.children).map((r) => r.textContent ?? '');
+    // The feed's root rows in order, across its day groups (objectstack#35602).
+    const list = view.getByText(PARENT_BODY).closest('[data-stream-list]')!;
+    const rows = Array.from(list.querySelectorAll('[data-stream-comment-row],[data-stream-row]'))
+      .filter((r) => !r.parentElement?.closest('[data-stream-comment-row],[data-stream-row]'))
+      .map((r) => r.textContent ?? '');
     expect(rows).toHaveLength(3);
     expect(rows[0]).toContain(PARENT_BODY);
     expect(rows[1]).toContain(CHILD_BODY);

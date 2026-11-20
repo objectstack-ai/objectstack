@@ -138,6 +138,8 @@ const childObject = {
       reference: PARENT,
       label: 'Quote',
       relatedListColumns: ['name', 'quantity'],
+      // A side list (objectstack#35597: a plain master_detail FK is an overview body table).
+      relatedList: true,
     },
   },
 };

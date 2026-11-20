@@ -59,8 +59,11 @@
  * one; at run time the action then answers a coded `500` naming itself and the
  * compile error (`quickjs-runner.ts`).
  *
- * Only action bodies are judged. Hook and job bodies run in `(async (ctx) => {
- * … })`, a different wrapper, and are outside this rule.
+ * Hook and job bodies run in a different wrapper, `(async (ctx) => { … })`,
+ * and are judged by `hook-body-does-not-compile` / `job-body-does-not-compile`
+ * (`validate-hook-body-compiles.ts`), which read their compile failures through
+ * the same {@link judgeBodyCompile}, so every body kind takes the same severity
+ * split.
  */
 
 import { ACTION_BODY_PARAMETERS, actionBodyFunctionExpression } from './action-body-wrapper.js';
@@ -148,6 +151,101 @@ const REGEXP_FLAGS = /^SyntaxError: Invalid regular expression flags/;
 /** A redeclaration the host names (`Identifier 'input' has already been declared`), and the name. */
 const REDECLARED = /^SyntaxError: Identifier '([^']+)' has already been declared/;
 
+/** How a compile failure is classified; every body kind's rule reads the same classes. */
+export type BodyCompileShape =
+  /** A regular-expression PATTERN the host refuses — the one `warning` arm. */
+  | 'regexp-pattern'
+  /** A regular-expression literal that never closes on its line. */
+  | 'regexp-unterminated'
+  /** A regular-expression literal whose flags are not a flag set. */
+  | 'regexp-flags'
+  /** A parameter of the wrapper declared again. */
+  | 'redeclared-parameter'
+  /** Any other compile failure. */
+  | 'other';
+
+/** What compiling one body inside its wrapper said, when it did not compile. */
+export interface BodyCompileVerdict {
+  /** `warning` for a regular-expression pattern only; every other failure is an `error`. */
+  severity: 'error' | 'warning';
+  shape: BodyCompileShape;
+  /** The host's sentence, `SyntaxError: …`. */
+  error: string;
+  /** `, line N` when the host named a line (line N of the source), else empty. */
+  at: string;
+  /** The wrapper parameter declared again, on `redeclared-parameter`. */
+  parameter?: string;
+}
+
+/**
+ * Compile `expression` — a body's wrapper with the body inside it, from the one
+ * function the runtime builds it with — and classify why it did not compile, or
+ * answer `undefined` when it compiled (or when the host cannot judge).
+ * `parameters` are the wrapper's own bindings, so a redeclared one is named.
+ */
+export function judgeBodyCompile(expression: string, parameters: readonly string[]): BodyCompileVerdict | undefined {
+  const failure = hostCompileFailure(expression);
+  if (!failure) return undefined;
+
+  const at = failure.line !== undefined ? `, line ${failure.line}` : '';
+  const redeclared = REDECLARED.exec(failure.error)?.[1];
+  const parameter = redeclared !== undefined && parameters.includes(redeclared) ? redeclared : undefined;
+  const shape: BodyCompileShape = parameter !== undefined
+    ? 'redeclared-parameter'
+    : REGEXP_PATTERN_FAILURE.test(failure.error)
+      ? 'regexp-pattern'
+      : REGEXP_UNTERMINATED.test(failure.error)
+        ? 'regexp-unterminated'
+        : REGEXP_FLAGS.test(failure.error)
+          ? 'regexp-flags'
+          : 'other';
+
+  return {
+    severity: shape === 'regexp-pattern' ? 'warning' : 'error',
+    shape,
+    error: failure.error,
+    at,
+    ...(parameter !== undefined ? { parameter } : {}),
+  };
+}
+
+/**
+ * The finding's message for a verdict: `wrapper` is the wrapper shown with an
+ * ellipsis for the body, `subject` the body's owner as a noun (`this action`).
+ */
+export function bodyCompileMessage(verdict: BodyCompileVerdict, wrapper: string, subject: string): string {
+  return verdict.shape === 'regexp-pattern'
+    ? `body's regular expression is refused by this host's engine (${verdict.error}${verdict.at}); the runtime's ` +
+      `engine may accept it, but if it does not, every run of ${subject} fails`
+    : `body does not compile in the wrapper the runtime runs it in, ` +
+      `${wrapper} (${verdict.error}${verdict.at}), so every run of ${subject} fails`;
+}
+
+/**
+ * The finding's hint for a verdict. The two body-kind-specific answers are the
+ * caller's — what to do about a redeclared parameter, and the generic fix — and
+ * the regular-expression answers are the same for every kind.
+ */
+export function bodyCompileHint(
+  verdict: BodyCompileVerdict,
+  own: { redeclared: (parameter: string) => string; other: string },
+): string {
+  switch (verdict.shape) {
+    case 'redeclared-parameter':
+      return own.redeclared(verdict.parameter!);
+    case 'regexp-pattern':
+      return 'Rewrite the regular expression in a form both engines accept, or build it with new RegExp(…) at run time';
+    case 'regexp-unterminated':
+      return 'A `/` opens a regular-expression literal that never closes on its line: close it with `/`, write a ' +
+        '`/` inside it as `\\/`, or, if the `/` is a division, give it a left-hand operand';
+    case 'regexp-flags':
+      return 'A regular-expression literal\'s flags are letters from `dgimsuvy`, each at most once, and never ' +
+        '`u` with `v`';
+    default:
+      return own.other;
+  }
+}
+
 /**
  * Every L2 action body that does not compile in the runtime's action wrapper.
  * Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or post-parse stacks.
@@ -159,42 +257,24 @@ export function validateActionBodyCompiles(stack: Record<string, unknown>): Acti
   if (!stack || typeof stack !== 'object') return findings;
 
   for (const site of collectActionBodies(stack)) {
-    const failure = hostCompileFailure(actionBodyFunctionExpression(site.source));
-    if (!failure) continue;
-
-    const at = failure.line !== undefined ? `, line ${failure.line}` : '';
-    const regexp = REGEXP_PATTERN_FAILURE.test(failure.error);
-    const unterminated = REGEXP_UNTERMINATED.test(failure.error);
-    const flags = REGEXP_FLAGS.test(failure.error);
-    const redeclared = REDECLARED.exec(failure.error)?.[1];
-    const parameter = redeclared !== undefined && (ACTION_BODY_PARAMETERS as readonly string[]).includes(redeclared)
-      ? redeclared
-      : undefined;
+    const verdict = judgeBodyCompile(actionBodyFunctionExpression(site.source), ACTION_BODY_PARAMETERS);
+    if (!verdict) continue;
 
     findings.push({
-      severity: regexp ? 'warning' : 'error',
+      severity: verdict.severity,
       rule: ACTION_BODY_DOES_NOT_COMPILE,
       where: `action "${site.name}" › body`,
       path: site.path,
-      message: regexp
-        ? `body's regular expression is refused by this host's engine (${failure.error}${at}); the runtime's ` +
-          `engine may accept it, but if it does not, every run of this action fails`
-        : `body does not compile in the wrapper the runtime runs it in, ` +
-          `${actionBodyFunctionExpression('…')} (${failure.error}${at}), so every run of this action fails`,
-      hint: parameter !== undefined
-        ? `\`${parameter}\` is already a parameter of the wrapper: use it as it is (the action's params are ` +
+      message: bodyCompileMessage(verdict, actionBodyFunctionExpression('…'), 'this action'),
+      hint: bodyCompileHint(verdict, {
+        redeclared: (parameter) =>
+          `\`${parameter}\` is already a parameter of the wrapper: use it as it is (the action's params are ` +
           `\`input\`, the context is \`ctx\`), or give the local another name, e.g. ` +
-          `\`const params = ctx.input || {}\``
-        : regexp
-          ? 'Rewrite the regular expression in a form both engines accept, or build it with new RegExp(…) at run time'
-          : unterminated
-            ? 'A `/` opens a regular-expression literal that never closes on its line: close it with `/`, write a ' +
-              '`/` inside it as `\\/`, or, if the `/` is a division, give it a left-hand operand'
-            : flags
-              ? 'A regular-expression literal\'s flags are letters from `dgimsuvy`, each at most once, and never ' +
-                '`u` with `v`'
-              : `Fix body.source so it compiles as the statements of an async function whose parameters are ` +
-                `${ACTION_BODY_PARAMETERS.map((p) => `\`${p}\``).join(' and ')}`,
+          `\`const params = ctx.input || {}\``,
+        other:
+          `Fix body.source so it compiles as the statements of an async function whose parameters are ` +
+          `${ACTION_BODY_PARAMETERS.map((p) => `\`${p}\``).join(' and ')}`,
+      }),
     });
   }
 

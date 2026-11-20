@@ -302,7 +302,6 @@ export type ListPersonalizationPart =
   | 'density'
   | 'layout'
   | 'rowColor'
-  | 'rowNumbers'
   | 'inlineEdit';
 
 export interface ListViewProps {
@@ -462,14 +461,6 @@ export interface ListViewProps {
    */
   toolbarLeading?: React.ReactNode | ((state: ListToolbarLeadingState) => React.ReactNode);
   /**
-   * Whether the grid opens with row numbers in its leading cell — the opening
-   * state of the Display control's session-only switch, and what its "Reset to
-   * view default" returns to. Default `true`. A HOST prop, never a schema key:
-   * the console's Setup app opens its lists without them (objectui#12606), a
-   * posture of the console, not of the view.
-   */
-  defaultRowNumbers?: boolean;
-  /**
    * A host-drawn node beside each row's title in the grid (objectui#13330),
    * handed to `ObjectGrid`'s `rowAdornment`: the cell of the object's declared
    * name field when a column shows it, else the first shown column, and the
@@ -573,7 +564,7 @@ export interface ListViewProps {
    * search (the Filter panel's finished conditions, the user-filter chips, the
    * "In a queue" toggle; the view's declared `filter` is never one); `search`
    * is a term the list applies. The Display-only settings (`layout`,
-   * `rowColor`, `rowNumbers`, `inlineEdit`) are those the Display control
+   * `rowColor`, `inlineEdit`) are those the Display control
    * counts. The gallery card size is not a part: it is kept per object, not
    * per view. `columns` is never reported here, since the column layout is
    * the host's own stored state; it is in the type so a host can add it.
@@ -703,6 +694,19 @@ export interface ListViewProps {
    * notification. A HOST prop, never a schema key.
    */
   onPageChange?: (page: number) => void;
+  /**
+   * Fields whose conditions in `schema.filter` the HOST draws itself as its
+   * own tags (objectstack#35727) — the data page's 「Filtered by」 row for the
+   * conditions its address carries. The list still filters on them; its
+   * condition row draws no locked chip for them, so each condition shows
+   * once, and 「Reset」 (which never clears the view's filter) is not offered
+   * for them.
+   *
+   * A HOST prop, never a schema key: which surface draws a condition is the
+   * page's layout, not anything an author writes. Absent ⇒ every condition of
+   * the view's filter is a locked chip, exactly as before.
+   */
+  hostDrawnConditionFields?: ReadonlyArray<string>;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -1502,7 +1506,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.display': 'Display',
   'list.options': 'Options',
   'list.layout': 'Layout',
-  'list.rowNumbers': 'Row numbers',
   'list.resetToViewDefault': 'Reset to view default',
   // The Display control's Open records section (objectstack#26681).
   'list.recordOpen': 'Open records',
@@ -2116,7 +2119,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialFilters,
   initialSearchTerm,
   toolbarLeading,
-  defaultRowNumbers = true,
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
@@ -2133,6 +2135,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   recordOpen,
   page,
   onPageChange,
+  hostDrawnConditionFields,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
   // The switcher can be enabled either by the host component (prop) or by
@@ -3043,11 +3046,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     [onInlineEditChange]
   );
 
-  // Row numbers on the grid's leading cell — the Display control's switch
-  // (objectui#12423). Session-only and in memory: nothing stores it, and it
-  // opens on the host's `defaultRowNumbers` (on unless a host says otherwise)
-  // with every list.
-  const [rowNumbers, setRowNumbers] = React.useState(defaultRowNumbers);
 
   // Export State
   const [showExport, setShowExport] = React.useState(false);
@@ -6517,7 +6515,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     density: toolbarFlags.showDensity && (currentView === 'gallery'
       ? galleryCardSize !== authoredGalleryCardSize
       : density.mode !== viewDefaultDensity),
-    rowNumbers: currentView === 'grid' && rowNumbers !== defaultRowNumbers,
     inlineEdit: currentView === 'grid' && inlineEditOffered && inlineEdit !== !!schema.inlineEdit,
   };
   const displayChangedCount = Object.values(displayDeviation).filter(Boolean).length;
@@ -6553,7 +6550,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   if (displayDeviation.density && currentView !== 'gallery') personalizationParts.push('density');
   if (displayDeviation.layout) personalizationParts.push('layout');
   if (displayDeviation.color) personalizationParts.push('rowColor');
-  if (displayDeviation.rowNumbers) personalizationParts.push('rowNumbers');
   if (displayDeviation.inlineEdit) personalizationParts.push('inlineEdit');
   const personalizationKey = personalizationParts.join(',');
   const onPersonalizationChangeRef = React.useRef(onPersonalizationChange);
@@ -6593,7 +6589,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         density.setMode(viewDefaultDensity);
       }
     }
-    if (displayDeviation.rowNumbers) setRowNumbers(defaultRowNumbers);
     if (displayDeviation.inlineEdit) updateInlineEdit(!!schema.inlineEdit);
     if (onRestoreViewDefaults && restoredParts.length > 0) onRestoreViewDefaults(restoredParts);
   };
@@ -7548,8 +7543,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               updateHiddenFields={updateListedFields}
               addableFields={addableFields}
               onAddField={addListedField}
-              rowNumbers={rowNumbers}
-              setRowNumbers={currentView === 'grid' ? setRowNumbers : undefined}
               /* [#4647] The Display panel's inline-edit entry — the SECOND
                  render site for this affordance, and the one with no gate at
                  all: it never even required `onInlineEditChange`. Same
@@ -7868,7 +7861,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           {/* objectstack#35549 / #35550: sort chips, the view's own
               conditions as locked chips, the reader's filter chips, then
               「Add filter」 and 「Reset」. It draws nothing while there is
-              nothing to show, so the slot stays empty and takes no height. */}
+              nothing to show, so the slot stays empty and takes no height.
+              objectstack#35727: a condition the host draws as its own tag is
+              no locked chip here, and 「Reset」 is drawn only while the
+              reader has something of their own to reset. */}
           <ConditionChipRow
             sort={currentSort}
             sortFields={sortFields}
@@ -7877,10 +7873,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             filterFields={filterFields}
             onFiltersChange={applyPanelFilters}
             viewFilter={authoredFilter}
+            hostDrawnFields={hostDrawnConditionFields}
+            dataSource={dataSource}
             shownFields={shownFieldNames}
             renderAdvanced={advancedFilterBuilder}
-            onReset={handleResetConditions}
-            resetDisabled={!conditionsDifferFromView}
+            onReset={conditionsDifferFromView ? handleResetConditions : undefined}
           />
         </div>
       )}
@@ -8230,11 +8227,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // one, and this React prop is not authored. Only the grid reads
               // it, so only the grid is handed it.
               ? { objectFields: objectDef.fields }
-              : {})}
-            {...(viewComponentSchema.type === 'object-grid'
-              // objectui#12423 — the Display control's Row numbers switch, on
-              // the grid's host channel (a React prop, never a node key).
-              ? { showRowNumbers: rowNumbers }
               : {})}
             {...(onRowsChange && rowGroupsSource === 'grid' && viewComponentSchema.type === 'object-grid'
               // objectstack#28461 — the grouped grid's open groups and their

@@ -1,19 +1,12 @@
 ---
 name: objectstack-ui
 description: >
-  Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt),
-  Apps (navigation), Pages (structured plus the HTML and React source-authoring
-  tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and
-  package Docs (`src/docs/*.md`). Use when
-  the user is adding `*.view.ts` / `*.page.ts` / `*.app.ts` /
-  `*.dashboard.ts` / `*.report.ts` / `*.dataset.ts` / `*.action.ts` /
-  `src/docs/*.md` files or designing a Studio-rendered UI surface.
-  Do not use for: data schema (see objectstack-data), multi-step flows that
-  BRANCH on logic between steps (those are `*.flow.ts` with `type: 'screen'` —
-  see objectstack-automation; a stepped form over ONE object is this skill's
-  `formViews` `type: 'wizard'`), or Studio's own admin UI (that
-  ships with the platform). CEL expressions in
-  visibility/conditional rules: load objectstack-formula alongside.
+  Build what users see in an ObjectStack app, in a project or through MCP: list
+  / form / kanban / calendar views, navigation, pages, dashboards, reports,
+  charts, action buttons and package docs. Use when changing a screen, menu,
+  chart or button, or editing `*.view.ts` / `*.page.ts` / `*.app.ts`. Not for
+  objects and fields (objectstack-data), screen flows that branch between steps
+  (objectstack-automation), or `@object-ui/*` React code (objectui).
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:

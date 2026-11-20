@@ -19,7 +19,10 @@
 # `node scripts/pm/check-governed-queue-guard.mjs --self-test` reads this file
 # (`codeownersMirrorVerdict`) and reds when a Tier H row has no line here, when
 # any line names fewer or other owners than that constant, or when a Tier S row
-# (`.claude/**`, which lands on a seat's review of record) is routed here. A
+# (`.claude/**`, which lands on a seat's review of record) is routed here. That
+# row splits by declaration since 2026-11-19, and the two paths under it that
+# no declaration moves to a seat — the hooks and the settings files — each
+# carry a line of their own, which the same self-test demands. A
 # Tier H row carrying the register's low-risk arm (`lowRisk`: the two skills
 # catalogs and the root ADR tree) has NO line here and reds if one is added:
 # the relay's per-pull review plan reads the arm and decides who is asked
@@ -48,7 +51,9 @@
 # The enforcement chain is routed the same way, deliberately: a PR that edits
 # the audit script, the approver constant or this file is a governance change —
 # without these entries the rule could be lifted by editing the enforcers
-# instead of the surfaces.
+# instead of the surfaces. Since 2026-11-19 the four guard scripts are register
+# rows themselves (Tier H) and sit with the surfaces below; this file is the one
+# enforcer still routed as a chain row.
 
 # Tier H governed surfaces — the register's rows with tier H, less the
 # low-risk arm's `/docs/adr/` and `/skills/` rows (see the header)
@@ -56,6 +61,15 @@
 /CLAUDE.md @os-zhuang
 /docs/NORTH-STAR.md @os-zhuang
 /.github/workflows/ @os-zhuang
+/scripts/pm/check-governed-merges.mjs @os-zhuang
+/scripts/pm/check-governed-queue-guard.mjs @os-zhuang
+/scripts/pm/record-recognisers.mjs @os-zhuang
+/scripts/pm/dispatch-gates.mjs @os-zhuang
+
+# Always Tier H under the root `.claude/` row, whatever a pull declares — the
+# row itself has no line, since its other paths can land on a seat's record
+/.claude/hooks/ @os-zhuang
+/.claude/settings*.json @os-zhuang
 
 # Tier H governed surfaces of the nested `ui/` workspace (#25712) — the same
 # register rows, under `ui/`; `ui/.claude/` is Tier H, unlike the root tree;
@@ -68,5 +82,3 @@
 
 # The enforcement chain
 /.github/CODEOWNERS @os-zhuang
-/scripts/pm/check-governed-merges.mjs @os-zhuang
-/scripts/pm/check-governed-queue-guard.mjs @os-zhuang

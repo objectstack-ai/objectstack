@@ -11,7 +11,8 @@
  * line amount whose `currencyField` is `invoice.currency_code` draws in the
  * page record's currency, in each cell and in the body table's totals line,
  * though the rows hold the relation as a bare id. A sibling-pointer amount
- * reads each row's own code.
+ * reads each row's own code. The total is the server's sum over the parent's
+ * lines (objectstack#35597), drawn in the parent's currency.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -50,9 +51,10 @@ function renderOnParent(parent: Record<string, unknown>, columns: Array<{ field:
             api="inv_line"
             objectName="inv_line"
             referenceField="invoice"
+            parentId={String(parent.id)}
             columns={columns}
             data={ROWS as any[]}
-            dataSource={{ find: vi.fn(async () => ROWS), getObjectSchema: vi.fn(async () => ({ name: 'inv_line', fields: LINE_FIELDS })) } as any}
+            dataSource={{ find: vi.fn(async () => ROWS), aggregate: vi.fn(async () => [{ amount: 1334.5 }]), getObjectSchema: vi.fn(async () => ({ name: 'inv_line', fields: LINE_FIELDS })) } as any}
           />
         </RecordBodyTablesContext.Provider>
       </RecordContextProvider>
@@ -66,7 +68,7 @@ describe('related list: lines that follow the page record (ADR-0144 D2 as amende
     await waitFor(() => expect(screen.getByText('L1')).toBeInTheDocument());
     await waitFor(() => expect(text(document.querySelector('tbody'))).toContain('€1,234.50'));
     expect(text(document.querySelector('tbody'))).toContain('€100.00');
-    await waitFor(() => expect(text(document.querySelector('[data-body-table-total="amount"]'))).toContain('€1,334.50'));
+    await waitFor(() => expect(text(document.querySelector('[data-testid="data-table-summary-amount"]'))).toContain('€1,334.50'));
   });
 
   it('a parent in another currency draws in its own', async () => {

@@ -177,6 +177,7 @@ import { activeConcurrentIndexDeferral, attachUniqueConstraintSql, clearConcurre
 import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type MediaColumnMovePlan, type MediaColumnMoveRefusal, type MediaColumnMoveScan } from './media-column-move.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+import { SQLITE_BOOLEAN_TEXT_SPELLINGS } from './sql-driver-sqlite-serialisation.js';
 import { renderExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { renderDeclaredRenameRefusal } from './declared-rename.js';
 import { aggregandColumnClass } from '@objectstack/core';
@@ -2058,8 +2059,22 @@ export async function backfillCanonicalTimes(this: Pick<SchemaSyncHost, 'canonic
  * `boolean`), the driver's own writes stored the REAL its JS number bound as,
  * as that text, until it bound `sqliteBooleanBinding`'s `'1'` / `'0'`. `IN`
  * compares with the BINARY collation, so `'TRUE'` or `'yes'` is not selected.
+ * The four are the `legacy` rows of `SQLITE_BOOLEAN_TEXT_SPELLINGS`, the table
+ * the write door binds from, so no write stores one of them any more and
+ * neither door nor convergence can take a spelling the other does not.
  */
-const SQLITE_LEGACY_BOOLEAN_TEXT = `typeof(??) = 'text' and ?? in ('true', 'false', '1.0', '0.0')`;
+const SQLITE_LEGACY_BOOLEAN_TEXT = `typeof(??) = 'text' and ?? in (${sqlTextList((s) => s.legacy)})`;
+
+/**
+ * The spellings of {@link SQLITE_BOOLEAN_TEXT_SPELLINGS} that `pick` keeps, as a
+ * SQL list of string literals (`'true', 'false', '1.0', '0.0'` for the legacy
+ * ones). The table is the write door's too (`sqliteBooleanWriteReading`), so
+ * the convergence and the write accept one set of spellings. Each spelling is
+ * a constant of that table, never a caller's value, and holds no quote.
+ */
+function sqlTextList(pick: (s: (typeof SQLITE_BOOLEAN_TEXT_SPELLINGS)[number]) => boolean): string {
+  return SQLITE_BOOLEAN_TEXT_SPELLINGS.filter(pick).map((s) => `'${s.text}'`).join(', ');
+}
 
 /**
  * [#34973] How many ids of the converted rows the backfill's `info` line
@@ -2126,7 +2141,7 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
       // `1` / `0`: it already reads as its boolean, so it is not withheld.
       const counted: any = await this.knex.raw(
         `select count(*) as text_rows, coalesce(sum(case when ${SQLITE_LEGACY_BOOLEAN_TEXT} then 1 else 0 end), 0) as legacy, ` +
-          `coalesce(sum(case when ?? in ('1', '0') then 1 else 0 end), 0) as canonical ` +
+          `coalesce(sum(case when ?? in (${sqlTextList((s) => !s.legacy)}) then 1 else 0 end), 0) as canonical ` +
           `from ?? where typeof(??) = 'text'`,
         [field, field, field, table, field],
       );
@@ -2139,7 +2154,7 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
           [table, field, field, BOOLEAN_BACKFILL_SAMPLE_IDS],
         );
         const res = await this.knex.raw(
-          `update ?? set ?? = case when ?? in ('true', '1.0') then 1 else 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
+          `update ?? set ?? = case when ?? in (${sqlTextList((s) => s.legacy && s.value)}) then 1 else 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
           [table, field, field, field, field],
         );
         // better-sqlite3 reports `changes`; a client whose raw path returns

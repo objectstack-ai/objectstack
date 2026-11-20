@@ -6188,8 +6188,11 @@ export class AuthManager {
    * `/sso/update-provider` body; the answer is the PUBLIC-ROUTABLE origins of its `issuer` and every explicit
    * `oidcConfig` endpoint. Private / internal / loopback hosts are never
    * trusted this way (better-auth's `isPublicRoutableHost`, the same predicate
-   * its own sub-endpoint check uses). Best-effort: anything unreadable yields
-   * `[]`.
+   * its own sub-endpoint check uses). A name that looks public is judged by
+   * its name here; the host a registration's discovery reads is resolved, and
+   * each address judged, before the register door hands this list on
+   * (`refuseSsoDiscoveryHostNotPublic`). Best-effort: anything unreadable
+   * yields `[]`.
    *
    * ⛔ Never an accepted `Origin`: the request's own origin check reads the
    * deployment's configured trusted origins alone. This list reaches two

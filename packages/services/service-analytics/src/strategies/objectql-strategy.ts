@@ -719,7 +719,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // ADR-0021 D-C — the base object's read scope (tenant + RLS) MUST be ANDed
     // in before the query leaves the strategy (#3597). A base-only query has a
     // single object in play, so one base-object scope is sufficient here.
-    const rows = await ctx.executeAggregate!(objectName, {
+    const aggregateInput = {
       // Structured groupBy items ({field, dateGranularity}) pass through the
       // executeAggregate bridge to engine.aggregate, which buckets them. The
       // contract types groupBy as string[]; the cast carries the richer shape.
@@ -737,7 +737,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // principal-less, which plugin-security used to let through — the #3597
       // shape — and since ADR-0096 D5 refuses.
       context: ctx.context,
-    });
+    };
+    // [order and cut] A top-N is ordered and cut by the database where the
+    // engine can serve that (`readOrderCut`); declined, the face reads every
+    // group, as it always has, and cuts in memory.
+    const cut = await this.readOrderCut(query, cube, objectName, aggregateInput, ctx);
+    const rows = cut?.rows ?? await ctx.executeAggregate!(objectName, aggregateInput);
 
     // Remap short field names back to cube-qualified names. Driven by
     // `projectedDimensions`, so a `timeDimensions`-only bucket — grouped by
@@ -774,8 +779,64 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     } catch {
       sql = undefined;
     }
-    const answer = this.orderAndWindow(query, mappedRows);
+    const answer = cut ? this.windowServedCut(query, mappedRows, cut.totalGroups) : this.orderAndWindow(query, mappedRows);
     return sql ? { rows: answer, fields, sql } : { rows: answer, fields };
+  }
+
+  /**
+   * [order and cut] The query's top-N read as the database's own ordered and
+   * cut statement (objectql `aggregate-order-cut.ts`): `order` becomes the
+   * engine's `orderBy` over the aggregated row's columns, the cut is `offset +
+   * limit` groups, and the count of groups before it comes back with them. A
+   * text order is the database's (its collation, NULL last) — the order the
+   * native face's `ORDER BY` gives, ruled for this face too (arm A of the
+   * maintainer's ruling on the top-N card).
+   *
+   * `undefined` — and the caller reads every group and cuts in memory
+   * ({@link orderAndWindow}) — when there is nothing to cut (no `limit`), an
+   * order key names no column of the row, the host wires no seam, or the
+   * engine declines: a driver that compiles no cut (memory, MongoDB, OData),
+   * a date bucket or zone the driver does not compile, a measure filter it
+   * does not evaluate. The request is declinable, so no refusal reaches the
+   * caller. A label-ordered key (a select or lookup dimension ordered by its
+   * display label) never reaches here: the dataset executor orders those in
+   * memory and hands this face no window (`canPushDownWindow`).
+   */
+  private async readOrderCut(
+    query: AnalyticsQuery,
+    cube: Cube,
+    objectName: string,
+    input: Parameters<NonNullable<StrategyContext['executeAggregate']>>[1],
+    ctx: StrategyContext,
+  ): Promise<{ rows: Record<string, unknown>[]; totalGroups: number } | undefined> {
+    const seam = (ctx as DatasetScopedStrategyContext).executeOrderCutAggregate;
+    if (typeof seam !== 'function' || query.limit == null) return undefined;
+    const limit = (query.offset != null && query.offset > 0 ? query.offset : 0) + query.limit;
+    if (!Number.isInteger(limit) || limit < 1) return undefined;
+    const dimensions = new Set(this.projectedDimensions(query));
+    const measures = new Set(query.measures ?? []);
+    const orderBy: Array<{ field: string; order: 'asc' | 'desc' }> = [];
+    for (const [member, order] of Object.entries(query.order ?? {})) {
+      const field = measures.has(member) ? member
+        : dimensions.has(member) ? this.resolveFieldName(cube, member, 'dimension') : undefined;
+      if (field === undefined) return undefined;
+      // A second key on a column already ordered breaks no tie: dropped, as
+      // the comparator would pass over it.
+      if (!orderBy.some((k) => k.field === field)) orderBy.push({ field, order });
+    }
+    const answer = await seam.call(ctx, objectName, input, { orderBy, limit });
+    return answer.served ? { rows: answer.rows, totalGroups: answer.totalGroups } : undefined;
+  }
+
+  /**
+   * [order and cut] The window over rows the database already ordered and cut
+   * to `offset + limit` groups: only the `offset` is left to skip, and the
+   * rows keep the database's order. The group count is the statement's.
+   */
+  private windowServedCut(query: AnalyticsQuery, rows: Record<string, unknown>[], totalGroups: number): Record<string, unknown>[] {
+    const groupCount = groupCountRequestOf(query);
+    if (groupCount) groupCount.outcome = { groupCount: totalGroups };
+    return applyWindow(rows, query.limit, query.offset);
   }
 
   /**
@@ -783,10 +844,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * aggregated answer — the statement {@link generateSql} echoes, and the
    * clauses `NativeSQLStrategy` compiles from the same three keys.
    *
-   * `engine.aggregate` has no ordering or window grammar
-   * (`EngineAggregateOptions` declares neither), so the engine returns every
-   * group in its own arrival order and the face is where these keys are
-   * applied. Before this, the face dropped all three: every date-bucketed
+   * `engine.aggregate`'s query has no ordering or window grammar
+   * (`EngineAggregateOptions` declares neither), and where the engine does
+   * not order and cut the groups itself ({@link readOrderCut}: no `limit`, or
+   * a read it declines) it returns every group in its own arrival order and
+   * the face is where these keys are applied. Before this, the face dropped all three: every date-bucketed
    * query — which the native face declines, so it lands here — answered every
    * bucket unordered while its echoed `sql` and `/analytics/sql` rendered
    * `ORDER BY … LIMIT …`.
@@ -814,11 +876,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    */
   private orderAndWindow(query: AnalyticsQuery, rows: Record<string, unknown>[]): Record<string, unknown>[] {
     // [query_dataset totalGroups] The rows in hand are every group: no read
-    // above hands `engine.aggregate` an order or a window, so it answers the
-    // whole grid, and the cut is this line's. A caller that asked for the
-    // group count (`dataset-group-count.ts`) gets the grid's length before the
-    // cut — no read is added for it. A read that ever hands the engine a
-    // window must take the count from the engine instead, never from here.
+    // here handed `engine.aggregate` an order or a window (a cut the engine
+    // served answers through `windowServedCut`), so it answered the whole
+    // grid, and the cut is this line's. A caller that asked for the group
+    // count (`dataset-group-count.ts`) gets the grid's length before the cut
+    // — no read is added for it.
     const groupCount = groupCountRequestOf(query);
     if (groupCount) answerWholeGrid(rows, groupCount);
     return applyWindow(applyOrdering(rows, query.order), query.limit, query.offset);

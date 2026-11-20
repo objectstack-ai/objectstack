@@ -615,7 +615,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -655,7 +655,8 @@
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
         "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the selection actions the page bar shows (since #35554 the list page has no bottom bulk bar), or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal",
-        "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: a 44px page bar with the object's icon and name on the left and ⋮ (description, import, favorite) and 「+ 新建」 on the right; a 40px view bar with ONE switcher trigger reading type icon → view name → record count → caret on the left and 「筛选」「排序」「选项」 plus the search icon on the right; no condition row height while no condition is set; on the grid a 32px header and 33px rows at 13px; and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same two bars (objectstack#35548; the count beside the view name returns, after objectstack#34603 removed it)"
+        "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: a 44px page bar with the object's icon and name on the left and ⋮ (description, import, favorite) and 「+ 新建」 on the right; a 40px view bar with ONE switcher trigger reading type icon → view name → record count → caret on the left and 「筛选」「排序」「选项」 plus the search icon on the right; no condition row height while no condition is set; on the grid a 32px header and 33px rows at 13px; and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same two bars (objectstack#35548; the count beside the view name returns, after objectstack#34603 removed it)",
+        "at 1280×800 with the sidebar open, read the left edges of the list page on All Tasks (a list whose columns fit) and on a list that scrolls sideways (stage one by showing every field of showcase_task through 选项 → 字段): the page bar's object icon, the view bar's view icon, the header's select-all box, each row's checkbox and the footer's record count each start 16px from the main area's left; the selection column is 40px on both lists and stays 40px, pinned at the left, after scrolling to the far right and back; no row shows a number and each row's checkbox shows without a hover; the view bar's last trigger label and the page bar's 「+ 新建」 end 16px from the right; at 375 wide no leading item sits closer than 12px to the left (objectstack#35663)"
       ],
       "acceptance": [
         {
@@ -723,6 +724,12 @@
           "oracle": "dom",
           "verify": "read getBoundingClientRect and the computed font size of each part at 1280×800 zh-CN (the geometry and order halves are pinned by ui/e2e/list-frame-geometry-35548.spec.ts over the real class strings; the kanban half by ui/packages/plugin-list/src/__tests__/ListView.viewBarLeading-35548.test.tsx); the summary half needs a view whose columns declare `summary`, which task.view.ts does not, so stage one in the showcase's customization pair as negative[0] does",
           "evidence": "light and dark screenshots of the grid and the kanban, plus the measured heights"
+        },
+        {
+          "clause": "the list page has one left edge: page-bar icon, view-bar icon, select-all box, row checkboxes and footer count each at 16px (±1) from the main area on a list that fits and on one that scrolls sideways; the selection column is 40px on both and keeps its width and its left pin after a sideways scroll and back, with no gap between frozen cells; no row numbers; every row checkbox visible at rest; at 375 no leading item closer than 12px",
+          "oracle": "dom",
+          "verify": "read getBoundingClientRect of each item from the main area's left at 1280×800 on both lists, and the computed opacity of the row checkboxes with the pointer off the table (pinned by ui/e2e/list-left-edge-35663.spec.ts over the real ObjectGrid, PageHeader and view-bar classes)",
+          "evidence": "screenshots of both lists at rest and scrolled, plus the measured edges"
         }
       ],
       "negative": [
@@ -812,6 +819,12 @@
           "date": "2026-11-19",
           "change": "steps[4] and acceptance[3] (clause and verify) follow #35554: a list view that declares no `pagination` has no pager and loads its next window as it scrolls (top=50, then top=50&skip=50), and only a view that declares `pagination` pages; the paging variant now walks both. steps[8] names where the bulk actions are offered now — the page bar, while rows are selected — instead of the retired bottom bulk bar. Read at base e01b8bed (after #35548)",
           "ref": "#35554"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-19",
+          "change": "steps[11] and its acceptance clause added: the list page's left edge (objectstack#35663, epic #35547). The page bar's icon, the view bar's icon, the select-all box, every row's checkbox and the footer's count share one 16px line, the selection column is 40px at any width and under a sideways scroll, and the grid draws no row numbers (each row's checkbox shows at rest). No earlier clause changed",
+          "ref": "#35663"
         }
       ]
     },
@@ -7150,6 +7163,99 @@
           "date": "2026-11-10",
           "change": "initial — a list link's filter judged whole (#31869). Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.master-detail-body-tables",
+      "title": "A master_detail child is a table in the record overview by default: above the field sections, drawn when empty, capped with show-all, totalled by the server, and never a tab or a side card",
+      "since": "v18.6",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "showcase_task.project is a master_detail FK to showcase_project with no relatedList and no inlineEdit, relatedListTitle 'Tasks' (examples/app-showcase/src/data/objects/task.object.ts); the seed gives 'Website Relaunch' five tasks",
+          "a project with no task: create one ('QA Empty Project') before step 3"
+        ]
+      },
+      "steps": [
+        "open the 'Website Relaunch' project's full record page at a column-tier width (1440×900) and screenshot the overview",
+        "read the tab row and the right column",
+        "open 'QA Empty Project' the same way and screenshot the Tasks table",
+        "on 'Website Relaunch', click the Tasks table's ↗ button; read the address bar and the list",
+        "open 'Website Relaunch' from the project list in the record drawer and screenshot it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the Tasks table is drawn in the overview's left column, under the header strip's stage bar and key fields and above the first field section",
+          "oracle": "dom",
+          "verify": "in the details column the record:related_list node for showcase_task precedes the first record:details node (ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement)",
+          "evidence": "the overview screenshot"
+        },
+        {
+          "clause": "the body table has no tab of its own and no card in the right column",
+          "oracle": "dom",
+          "verify": "the tab row names no 'Tasks' tab (also not in its '+N' dropdown) and the right column holds no Tasks card",
+          "evidence": "the overview screenshot"
+        },
+        {
+          "clause": "an empty body table still draws its column headers and one empty row with an add entry",
+          "oracle": "dom",
+          "verify": "the Tasks table on 'QA Empty Project' shows its headers and one row [data-body-table-empty-row] reading 'No related records found' with a New button; clicking New opens a task create form with Project filled",
+          "evidence": "the empty-project screenshot"
+        },
+        {
+          "clause": "↗ opens the child list filtered to this parent",
+          "oracle": "dom",
+          "verify": "the showcase_task list opens holding exactly the five Website Relaunch tasks",
+          "evidence": "the list screenshot and the URL"
+        },
+        {
+          "clause": "the drawer draws the same overview: the Tasks table above the field sections",
+          "oracle": "dom",
+          "verify": "the drawer's overview shows the Tasks table before the first field section",
+          "evidence": "the drawer screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the default cap of 10 with 'Show all N' expanding in place, the total read from the parent's summary field or a server aggregate over every child row (never a sum of the rows shown), the rule cells (no relatedList → body; false → hidden; true → side; lookup → side), and an authored page's master_detail list getting the body treatment",
+          "oracle": "test",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx, ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts and ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx from ui/ with vitest, and packages/spec/src/data/related-list-body-table.test.ts with the spec vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a Tasks tab on the tab row, or a Tasks card in the right column, is a FAIL: a body table is drawn once, in the overview",
+        "an empty Tasks table collapsing to a one-line sentence with no headers is a FAIL",
+        "a total that changes when 'Show all' is clicked is a FAIL: the total is over every child row, never the rows shown"
+      ],
+      "traps": [
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx (cap, show-all, ↗, empty row, server totals), ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts (placement), ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx (the relation type decides, objectstack#35597), packages/spec/src/data/related-list-body-table.test.ts (the rule cells); no live spec opens the overview"
+      },
+      "source": [
+        "packages/spec/src/data/related-list-body-table.ts#isBodyTableRelationship",
+        "ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement",
+        "ui/packages/plugin-detail/src/RelatedList.tsx#useBodyTableTotals",
+        "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#authoredBodyTableIds",
+        "docs/adr/0035-config-driven-master-detail.md (Amended 2026-11-19)",
+        "#35597"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-19",
+          "change": "initial — master_detail children are overview body tables by default (#35597, epic #35590), read from source on the PR branch; no live run made",
+          "ref": "#35597"
         }
       ]
     }

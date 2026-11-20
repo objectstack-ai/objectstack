@@ -276,6 +276,8 @@ model: opus
 - 认领的 `Clause-②:`、`Metadata-protocol:` 两行照抄进 PR 正文行首;无则零写,⛔ 不自造。
 - 两行同抄进 changeset 正文行首;`Check Changeset` 读 PR 正文:kind 即 `minor`,`none` 即 `patch`。
 - 种类非 `none` 或带 `(narrowing)` ⇒ 按 diff 加写 `Skills-docs:` 行;拼法与分工住认领模板。
+- diff 触根 `.claude/**` ⇒ PR 正文写行首 `Rule-change:` 行,按 diff 自判。
+- `none` 未改车队规则(agent 不经维护者可做什么、做什么与先后、什么须交他);`yes` 改了;`ruled` 照抄已裁条文,写行首 `Ruling-ref:` 引维护者原话、出处、时间。缺行同 `yes`:Tier H。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
@@ -293,10 +295,9 @@ model: opus
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
 - 净增预算装不下 ⇒ 按 `blocked` 报缺口;⛔ 不自行扩写或抬预算:预算归 PM,抬它归维护者。
-- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行,新增以删减付账。
-- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行;不买者 ⛔ 不当筹行拒。
+- 付字节棘轮的唯一合法货币是删内容:新增以删减付账。
 - 删不出等量内容 ⇒ 报 `blocked`,⛔ 不自抬 ceiling;裁决记录下令写入者除外(见棘轮头部)。
-- 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
+- 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测字节数。
 - 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
@@ -341,11 +342,9 @@ model: opus
    - 两条合法出路:在轮内同步等它(资源纪律的排队条款:限时获取 ⇒ 无锁工作 ⇒ 再取)。
    - 或者收窄这次检查的范围并在报告里申报:已申报的收窄是被接受的偏差,CI 跑满农场。
    - PM L1 审核的是 CI 收敛,不是你本地的覆盖面;未申报的收窄不在此列,那是漏跑。
-   - 唯一同时反轮询又不停轮的形状是一次前台阻塞等待:前台跑完,或 `tail --pid` 等它退出。
    - 比回合长的门禁在写报告那一刻读日志(重定向目标);未完成的记 NOT MEASURED 并写原因。
    - 自检是机械的,不看你怎么形容这次等待:终消息只能是报告 JSON 或 `blocked` 报告。
    - 结束一轮之前自检:最后一条消息是否在描述你不拥有的进程给你的唤醒?
-   - 排队的锁、别的 agent 的 build、脱管的 watcher 都不会来;保持这一轮活着,自己收退出码。
 
 ## 何时停手不写码
 
@@ -398,8 +397,7 @@ model: opus
 - 不是 NUL 的控制字节也不是把门禁命中读成误报的理由。
 - 危害的论证在 `scripts/check-nul-bytes.mjs` 头部,引用它,别重推;push 前跑它。
 - 改动只要提到控制字符,就在门禁之外自扫:`grep -naP '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]' <files>`。
-- GitHub 正文 sanitizer 是同一纪律的另一半:形状、触发条件与作者纪律归 AGENTS.md。
-- 归属条款是 AGENTS.md 的 GitHub mutates body BYTES 条;署名页脚两形如下。
+- GitHub 正文 sanitizer 的作者纪律归 AGENTS.md 的 GitHub mutates body BYTES 条;署名页脚两形如下。
 
 ```text
 ---                                                                 ← 规则线,前留一空行;平台只认整块

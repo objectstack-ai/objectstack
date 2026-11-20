@@ -28,7 +28,7 @@
  */
 
 import * as React from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ListView } from '@object-ui/plugin-list';
 import { useNavigationOverlay, useRowPredicate } from '@object-ui/react';
 import {
@@ -42,7 +42,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@object-ui/components';
-import { Database, Lock, MoreHorizontal, Plus, Save, X } from 'lucide-react';
+import { Database, Lock, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -84,6 +84,35 @@ import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
+import {
+  RECORD_FORM_LINK_PARAM,
+  RECORD_FORM_OBJECT_PARAM,
+  RECORD_FORM_PARAM,
+  RECORD_TRAIL_PARAM,
+  buildRecordTrailHref,
+  decodeRecordTrail,
+  type RecordTrailEntry,
+} from '../urlParams.js';
+
+/**
+ * The relationship field of `objectDef` that points at the source record of a
+ * list opened from that record's related list (objectstack#35601): its one
+ * single-valued `lookup` / `master_detail` whose `reference` is the source's
+ * object. `undefined` when there is none, or more than one (the source alone
+ * does not say which).
+ */
+export function sourceRelationshipField(objectDef: any, source: RecordTrailEntry | undefined): string | undefined {
+  if (!source || !objectDef?.fields || typeof objectDef.fields !== 'object') return undefined;
+  const entries: Array<[string, any]> = Array.isArray(objectDef.fields)
+    ? objectDef.fields.map((f: any) => [f?.name, f])
+    : Object.entries(objectDef.fields);
+  const hits = entries.filter(([name, def]) =>
+    typeof name === 'string'
+    && (def?.type === 'lookup' || def?.type === 'master_detail')
+    && def?.reference === source.o
+    && def?.multiple !== true);
+  return hits.length === 1 ? hits[0][0] : undefined;
+}
 
 /** Field types the auto-derived user-filter bar offers as dropdowns. */
 const USER_FILTER_TYPES = new Set(['select', 'multiselect', 'radio', 'enum', 'boolean']);
@@ -313,6 +342,39 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   // One display chip per field — a date-bucket drill's two range triples
   // (>= start, < end) collapse into a single "start → end" chip (objectstack-ai/objectstack#1752).
   const filterChips = React.useMemo(() => groupFilterChips(urlFilters), [urlFilters]);
+
+  /**
+   * objectstack#35601 — a list opened by a record's related list (「↗」)
+   * carries that record as its SOURCE, in the record trail (`?from=`, the last
+   * entry): the breadcrumb names it, the source condition's chip names the
+   * record instead of its id, 「Reset」 puts that condition back, and New
+   * creates a record linked to it. The condition itself stays an ordinary URL
+   * filter, removable like any other: the source only names it.
+   */
+  const sourceTrail = React.useMemo(
+    () => decodeRecordTrail(searchParams.get(RECORD_TRAIL_PARAM)),
+    [searchParams],
+  );
+  const source = sourceTrail.length > 0 ? sourceTrail[sourceTrail.length - 1] : undefined;
+  const sourceField = React.useMemo(() => sourceRelationshipField(objectDef, source), [objectDef, source]);
+  const sourceDef = sourceField ? (objects || []).find((o: any) => o?.name === source?.o) : undefined;
+  const sourceConditionOn = !!source && !!sourceField
+    && urlFilters.some(([field, op, value]) => field === sourceField && op === '=' && String(value) === source.i);
+  const sourceFilterKey = sourceField ? `filter[${sourceField}]` : undefined;
+  const conditionsAreSourced = sourceConditionOn
+    && Array.from(searchParams.keys()).every((k) => k === sourceFilterKey || !(k.startsWith('filter[') || k.startsWith('uf_')));
+  const resetToSource = React.useCallback(() => {
+    if (!source || !sourceFilterKey) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams();
+      for (const [k, v] of prev.entries()) {
+        if (k.startsWith('filter[') || k.startsWith('uf_')) continue;
+        next.append(k, v);
+      }
+      next.set(sourceFilterKey, source.i);
+      return next;
+    });
+  }, [source, sourceFilterKey, setSearchParams]);
 
   const removeUrlFilter = React.useCallback(
     (field: string) => {
@@ -588,7 +650,19 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const newButton = objectCanCreate && createVisible ? (
     <Button
       size="sm"
-      onClick={() => navigate('../new', { relative: 'path' })}
+      onClick={() => {
+        // objectstack#35601 — under a source, New is that record's child:
+        // the record form overlay, linked to it (as the related list's New).
+        if (source && sourceField) {
+          const sp = new URLSearchParams(searchParams);
+          sp.set(RECORD_FORM_PARAM, 'new');
+          sp.set(RECORD_FORM_OBJECT_PARAM, objectDef.name);
+          sp.set(RECORD_FORM_LINK_PARAM, `${sourceField}:${source.i}`);
+          setSearchParams(sp);
+          return;
+        }
+        navigate('../new', { relative: 'path' });
+      }}
       disabled={createDisabled}
       className="shadow-none gap-1.5 h-8 sm:h-9"
       data-testid="object-data-new-button"
@@ -612,8 +686,32 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     </Button>
   ) : null;
 
+  // objectstack#35601 — 「Object / Record / this list」: the way back to the
+  // record whose related list opened this one.
+  const sourceCrumbs = source && sourceField && appName ? (
+    <nav
+      className="flex min-w-0 items-center gap-1 px-3 pt-2 text-xs text-muted-foreground sm:px-4"
+      data-testid="object-data-source-crumbs"
+    >
+      <Link className="truncate hover:text-foreground hover:underline" to={`/apps/${appName}/${source.o}`}>
+        {sourceDef ? servedObjectPluralLabel(sourceDef, language, objectPluralLabel) : source.o}
+      </Link>
+      <span aria-hidden="true">/</span>
+      <Link
+        className="truncate hover:text-foreground hover:underline"
+        to={buildRecordTrailHref(`/apps/${appName}`, source, sourceTrail.slice(0, -1))}
+        data-testid="object-data-source-record"
+      >
+        {source.t || source.i}
+      </Link>
+      <span aria-hidden="true">/</span>
+      <span className="truncate text-foreground">{servedObjectPluralLabel(objectDef, language, objectPluralLabel)}</span>
+    </nav>
+  ) : null;
+
   return (
     <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden" data-testid="object-data-page">
+      {sourceCrumbs}
       <div className="hidden sm:block">
         <PageHeader
           title={
@@ -673,7 +771,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       {/* URL filter chips — visible + individually removable (unlike Odoo's
           invisible action domain). Removal rewrites the URL, which is the
           single source of truth for this surface. */}
-      {urlFilters.length > 0 && (
+      {(urlFilters.length > 0 || (source && sourceField)) && (
         <div
           className="flex flex-wrap items-center gap-1.5 border-b px-3 sm:px-4 py-2 shrink-0"
           data-testid="object-data-filter-chips"
@@ -698,7 +796,9 @@ export function ObjectDataPage({ dataSource, objects }: any) {
                 (objectui#3469 deleted exactly that pattern from this console).
               */}
               <span className="text-muted-foreground">
-                {textKey && text !== undefined ? `${t(textKey)} ${text}` : textKey ? t(textKey) : text}
+                {field === sourceField && sourceConditionOn
+                  ? source?.t || text
+                  : textKey && text !== undefined ? `${t(textKey)} ${text}` : textKey ? t(textKey) : text}
               </span>
               <button
                 type="button"
@@ -714,6 +814,20 @@ export function ObjectDataPage({ dataSource, objects }: any) {
               </button>
             </span>
           ))}
+          {source && sourceField && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+              onClick={resetToSource}
+              disabled={conditionsAreSourced}
+              data-testid="object-data-reset-source"
+            >
+              <RotateCcw className="h-3 w-3" aria-hidden="true" />
+              {t('common.reset')}
+            </Button>
+          )}
         </div>
       )}
 
@@ -728,6 +842,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             // objectstack#33317 — a list-only object's rows open nothing, so
             // the grid draws them no record link and no Open.
             rowOpensRecord={recordServed}
+            // objectstack#35727 — the address conditions are this page's own
+            // 「Filtered by」 tags; the list filters on them and draws no
+            // second, locked chip for them.
+            hostDrawnConditionFields={urlFilters.map(([field]) => field)}
           />
         )}
       </div>

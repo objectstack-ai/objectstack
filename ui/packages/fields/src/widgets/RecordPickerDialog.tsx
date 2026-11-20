@@ -35,6 +35,7 @@ import {
   ArrowDown,
   SlidersHorizontal,
   X,
+  Plus,
 } from 'lucide-react';
 import type { DataSource, LookupColumnDef } from '@object-ui/types';
 // The repo's single filter sink (`packages/core/src/utils/filter-converter.ts`)
@@ -526,6 +527,14 @@ export interface RecordPickerDialogProps {
    * )}
    */
   renderGrid?: (props: RecordPickerGridSlotProps) => React.ReactNode;
+
+  /**
+   * A first row above the records that creates one instead of picking one
+   * (objectstack#35601: a record page's related tab offers its 「新建」 here,
+   * so 「+ 添加」 is one entry). Choosing it is the host's to handle; the
+   * dialog only draws the row. Absent, nothing is drawn.
+   */
+  createRow?: { label: string; onSelect: () => void };
 }
 
 /**
@@ -577,6 +586,7 @@ export function RecordPickerDialog({
   filterColumns,
   renderFilterBar,
   renderGrid,
+  createRow,
 }: RecordPickerDialogProps) {
   // The column the record title stands in for. The `'name'` default only keys
   // that column; `declaredDisplayField` is what the title resolver ranks.
@@ -1344,6 +1354,21 @@ export function RecordPickerDialog({
               </Button>
             )}
           </div>
+        )}
+
+        {createRow && (
+          <button
+            type="button"
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-left text-sm text-primary hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              PHONE_TOUCH_HEIGHT,
+            )}
+            onClick={createRow.onSelect}
+            data-testid="record-picker-create-row"
+          >
+            <Plus className="size-4 shrink-0" aria-hidden="true" />
+            {createRow.label}
+          </button>
         )}
 
         {/* Grid area — external ObjectGrid via renderGrid slot, or built-in table */}

@@ -21,6 +21,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, act, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+// The ObjectView chain reaches a dynamic `import('@objectstack/lint')`; pay its
+// first load during collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 const { perms } = vi.hoisted(() => ({
   // ONE stable object: `ListView` names `perms` in its fetch dependency list.
@@ -139,9 +142,12 @@ describe('a record list under Setup drops the `#` column and keeps Display (obje
     expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
   });
 
-  it('CONTROL — the same list under another app numbers its rows and draws Display', async () => {
+  // objectstack#35663 — row numbers are off on every list now, not only under
+  // Setup: the leading cell is the checkbox. The same list under another app
+  // draws no `#` either, and draws Display.
+  it('the same list under another app draws no `#` column either, and draws Display', async () => {
     await mount('crm', 'sys_team_12606');
-    expect(rowNumberCells()).toBe(ROWS.length);
+    expect(rowNumberCells()).toBe(0);
     expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
   });
 });

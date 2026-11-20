@@ -642,8 +642,20 @@ export function RelatedRecordActionsBridge({
               )
             : null;
         if (viewAllFilter) {
-          const viewAllPath = recordListPath(appName, objectName, viewAllFilter);
-          handlers.onViewAll = () => navigate(viewAllPath);
+          const listPath = recordListPath(appName, objectName, viewAllFilter);
+          // objectstack#35601 — the list names the record it was opened from:
+          // the record trail (`?from=`) gains this parent, which the list page
+          // reads for its breadcrumb, its source chip, 「Reset」 and New.
+          // Read off the live URL at the click, as `recordPath` reads it.
+          const viewAllPath = () => parentObjectName && parentRecordId
+            ? `${listPath}${listPath.includes('?') ? '&' : '?'}${new URLSearchParams({
+                [RECORD_TRAIL_PARAM]: appendRecordTrail(
+                  new URLSearchParams(window.location.search).get(RECORD_TRAIL_PARAM),
+                  { o: parentObjectName, i: parentRecordId, ...(parentTitle ? { t: parentTitle } : {}) },
+                ),
+              }).toString()}`
+            : listPath;
+          handlers.onViewAll = () => navigate(viewAllPath());
         }
 
         if (aff.create) {
@@ -713,7 +725,7 @@ export function RelatedRecordActionsBridge({
     // the #4646 create predicates: a parent record that changes (a save, a
     // status transition) must re-resolve "+ New" for every related list under
     // it, or the toolbar keeps answering for the record's previous state.
-    [objects, base, appName, navigate, dataSource, localizeActionTexts, runRowAction, openChildForm, recordHref, openRecord, perms, parentRecord, parentObjectFields, predicateScope, hasParentRecord, parentFromList],
+    [objects, base, appName, navigate, dataSource, localizeActionTexts, runRowAction, openChildForm, recordHref, openRecord, perms, parentRecord, parentObjectFields, predicateScope, hasParentRecord, parentFromList, parentObjectName, parentRecordId, parentTitle],
   );
 
   return (

@@ -76,15 +76,18 @@ describe('DetailSection — the frameless face (objectstack#27055)', () => {
     expect(title.parentElement!.className).toContain('border-b');
   });
 
+  // The breakpoints are the dense label-left rows' (objectstack#35602): a
+  // row needs its 112 px label beside the value, so two columns from a 36rem
+  // container and three from a 56rem one.
   it('lays five fields in two columns and six in three', () => {
     const five = render(onDefaultPage(<DetailSection section={identity} data={data} />));
-    expect(gridOf(five.container)!.className).toContain('@sm:grid-cols-2');
-    expect(gridOf(five.container)!.className).not.toContain('@lg:grid-cols-3');
+    expect(gridOf(five.container)!.className).toContain('@xl:grid-cols-2');
+    expect(gridOf(five.container)!.className).not.toContain('@4xl:grid-cols-3');
     cleanup();
     const six = section('Company', ['company', 'job', 'industry', 'site', 'revenue', 'staff']);
     const sixData = { company: 'A', job: 'B', industry: 'C', site: 'D', revenue: 1, staff: 2 };
     const { container } = render(onDefaultPage(<DetailSection section={six} data={sixData} />));
-    expect(gridOf(container)!.className).toContain('@lg:grid-cols-3');
+    expect(gridOf(container)!.className).toContain('@4xl:grid-cols-3');
   });
 
   it('collapses from its title row', () => {
