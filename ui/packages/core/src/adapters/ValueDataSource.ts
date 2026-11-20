@@ -19,6 +19,7 @@ import type {
   AggregateResult,
 } from '@object-ui/types';
 import {
+  ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE,
   asciiCaseInsensitiveContains,
   canonicalAstOperator,
   FILTER_OPERATORS,
@@ -134,6 +135,20 @@ const DOLLAR_FLAG_OPERATORS = new Set(['$null', '$exists', '$empty']);
  * {@link DOLLAR_FLAG_OPERATORS} at its call site.
  */
 const DOLLAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(FILTER_OPERATORS);
+
+/**
+ * The operators that compare their comparand by EQUALITY, MEMBERSHIP or TEXT
+ * rather than by order, in each dialect. Under these a class instance is
+ * refused (see {@link classInstanceComparandRefusalReason}); under the
+ * orderings and `$between` it is compared through its `valueOf`. `$icontains`
+ * is not here: its own text door already refuses every non-string comparand.
+ */
+const DOLLAR_BY_VALUE_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$in', '$nin', '$contains', '$notContains', '$startsWith', '$endsWith',
+]);
+const AST_BY_VALUE_OPERATORS: ReadonlySet<string> = new Set([
+  '=', '!=', 'in', 'nin', 'contains', 'not_contains', 'starts_with', 'ends_with',
+]);
 
 /**
  * Is this stored value EMPTY, in the sense the spec's `$empty` operator gives
@@ -503,6 +518,9 @@ function nestedRelationRefusalReason(field: string, key: string): string {
  * The first key of an AST comparand that is a nested relation condition, or
  * `undefined` when it is not one. The shape is the one `convertFiltersToAST`
  * lowers to `[rel, '=', condition]`: a non-empty PLAIN object with no `$` key.
+ * The two name one population: the converter's operator-map test is the same
+ * prototype test, so a plain object of another realm is a comparand to both,
+ * refused by the converter and by {@link objectComparandRefusal} here.
  *
  * Plain means prototype `Object.prototype` or `null`, the test the spec's
  * filter walk uses to tell filter structure from data. A class instance is
@@ -531,6 +549,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The refusal for a flag operator (`$null`, `$exists`, `$empty`) whose flag is
+ * not a boolean. `SpecialOperatorSchema` declares all three `z.boolean()`, and
+ * the spec's save door and every query face refuse anything else.
+ */
+function nonBooleanFlagRefusalReason(field: string, operator: string, flag: unknown): string {
+  return `filter operator '${operator}' on field '${field}' takes a boolean flag (true or false); `
+    + `received ${describeComparand(flag)}`;
+}
+
+/**
  * The refusal for an EMPTY plain object, `{}`, in comparand position. There is
  * no key to name, and it is neither a comparison value nor a relation
  * constraint, so it gets a sentence of its own. `{ field: {} }` as a field's
@@ -542,19 +570,107 @@ function emptyObjectComparandRefusalReason(field: string): string {
     + `neither a comparison value nor a nested relation constraint`;
 }
 
-/** {@link plainObjectComparandRefusal} for one value: a whole comparand or one list member. */
-function plainObjectValueRefusal(field: string, value: unknown): string | undefined {
+/**
+ * The refusal for a `{ $now, addDays }` date anchor in comparand position.
+ * `NowAnchorSchema` declares it and the platform resolves it, but the shift is
+ * made in the compared column's temporal form (a calendar day for a `date`
+ * column, an instant for a `datetime` one), and this matcher has no field types
+ * to read a form from: the same reason {@link resolveFieldReference} refuses a
+ * `{ $field, addDays }` offset. Compared as an object, it read as the text
+ * `[object Object]`.
+ */
+function nowAnchorComparandRefusalReason(field: string): string {
+  return `filter comparand on field '${field}' is a { $now, addDays } date anchor, which the `
+    + 'in-memory matcher does not resolve: the platform shifts the current instant in the '
+    + "compared column's temporal form, and this matcher has no field types to read one from";
+}
+
+/**
+ * The refusal for a plain object with a `$` key that is neither a `{ $field }`
+ * reference nor a `{ $now }` anchor, such as `{ $foo: 1 }`, in comparand
+ * position. The spec's comparand door refuses it as a plain object no driver
+ * can compare.
+ */
+function operatorKeyedComparandRefusalReason(field: string, key: string): string {
+  return `filter comparand on field '${field}' is an object carrying the key '${key}', which is `
+    + 'neither a comparison value nor a { $field } reference';
+}
+
+/**
+ * Is `value` a plain object of ANOTHER realm (an iframe, a `vm` context)? Its
+ * prototype is that realm's `Object.prototype`, whose own prototype is `null`.
+ * The spec's filter walk does not read it as filter structure, and it has no
+ * `valueOf` worth comparing, so in comparand position it is refused under every
+ * operator, the way the spec's comparand door refuses it.
+ */
+function isForeignRealmPlainObject(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || isPlainObject(value)) return false;
+  const proto = Object.getPrototypeOf(value) as object | null;
+  return proto !== null && Object.getPrototypeOf(proto) === null;
+}
+
+function foreignRealmComparandRefusalReason(field: string): string {
+  return `filter comparand on field '${field}' is a plain object from another realm, which is `
+    + 'neither a comparison value nor filter structure here';
+}
+
+/** `a Moment instance`, or a fallback when the constructor cannot be read. */
+function instanceName(value: object): string {
+  try {
+    const name = (Object.getPrototypeOf(value) as { constructor?: { name?: unknown } } | null)
+      ?.constructor?.name;
+    if (typeof name === 'string' && name !== '') return `a ${name} instance`;
+  } catch {
+    // fall through: a refusal sentence must never throw
+  }
+  return 'an object of an unrecognised type';
+}
+
+/**
+ * The refusal for a class instance (a moment or luxon date, a decimal object,
+ * a `RegExp`, a `Map`) as the comparand of an equality, membership or text
+ * operator. It is data, and the ordering operators compare it through its
+ * `valueOf`; these operators would compare it by reference (`$eq` no row,
+ * `$ne` / `$nin` every row) or as its text, and the spec's comparand door
+ * refuses it at every one of them. One sentence for both dialects: it names no
+ * operator.
+ */
+function classInstanceComparandRefusalReason(field: string, value: object): string {
+  return `filter comparand on field '${field}' is ${instanceName(value)}, which the in-memory `
+    + 'matcher compares only by order (through its valueOf, under $gt / $gte / $lt / $lte / '
+    + '$between); an equality, membership or text comparison would read it by reference or as '
+    + `text, so a comparison value there must be ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}`;
+}
+
+/**
+ * {@link objectComparandRefusal} for one value: a whole comparand or one list
+ * member. `byValue` is whether the operator compares by equality, membership or
+ * text rather than by order.
+ */
+function objectValueRefusal(field: string, value: unknown, byValue: boolean): string | undefined {
   const key = nestedRelationComparandKey(value);
   if (key !== undefined) return nestedRelationRefusalReason(field, key);
-  if (isPlainObject(value) && Object.keys(value).length === 0) {
-    return emptyObjectComparandRefusalReason(field);
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value);
+    if (keys.length === 0) return emptyObjectComparandRefusalReason(field);
+    // A `{ $field }` reference is resolved, or refused by name, further on.
+    if (isFieldReferenceComparand(value)) return undefined;
+    if ('$now' in value) return nowAnchorComparandRefusalReason(field);
+    return operatorKeyedComparandRefusalReason(field, keys.find((k) => k.startsWith('$')) ?? keys[0]);
+  }
+  if (isForeignRealmPlainObject(value)) return foreignRealmComparandRefusalReason(field);
+  if (
+    byValue && value !== null && typeof value === 'object' && !Array.isArray(value)
+    && !isAcceptedFilterComparand(value)
+  ) {
+    return classInstanceComparandRefusalReason(field, value);
   }
   return undefined;
 }
 
 /**
- * The refusal for a comparand that is a PLAIN object with no `$` key, empty or
- * not, or `undefined` when the comparand is not one. ONE builder for both arms:
+ * The refusal for an OBJECT comparand this matcher cannot compare, or
+ * `undefined` when the comparand is not one. ONE builder for both arms:
  * {@link matchesComparisonNode} calls it for every AST operator that reads the
  * value slot, and {@link matchesDollarOperator} for every `$` operator of the
  * spec's `FILTER_OPERATORS` that reads a comparand.
@@ -568,22 +684,32 @@ function plainObjectValueRefusal(field: string, value: unknown): string | undefi
  * (`normalizeFilterComparandTypes`) refuses the same comparand in both
  * positions, so a `provider: 'value'` list refuses where the platform does.
  *
- * A NON-EMPTY one is a nested relation condition and gets
- * {@link nestedRelationRefusalReason}, which names its first key. An EMPTY one,
- * `{}`, has no key to name and gets {@link emptyObjectComparandRefusalReason}.
- * A `Date`, a class instance and a `{ $field }` reference are not plain objects
- * with no `$` key, so they are still compared.
+ * What is refused, under every operator that reads a comparand:
+ *
+ * - a plain object with no `$` key: a NON-EMPTY one is a nested relation
+ *   condition and gets {@link nestedRelationRefusalReason}, which names its
+ *   first key; an EMPTY one, `{}`, gets {@link emptyObjectComparandRefusalReason};
+ * - a plain object with a `$` key that is not a `{ $field }` reference: the
+ *   `{ $now, addDays }` date anchor gets {@link nowAnchorComparandRefusalReason},
+ *   any other one {@link operatorKeyedComparandRefusalReason};
+ * - a plain object of another realm ({@link isForeignRealmPlainObject}).
+ *
+ * And, only under an operator that compares by equality, membership or text
+ * (`byValue`), a class instance ({@link classInstanceComparandRefusalReason}).
+ * Under an ordering it is data compared through its `valueOf`, so it is not
+ * refused there. A `Date` and a `{ $field }` reference are still compared.
  */
-function plainObjectComparandRefusal(
+function objectComparandRefusal(
   field: string,
   rawTarget: unknown,
   listOperator: boolean,
+  byValue: boolean,
 ): string | undefined {
-  const whole = plainObjectValueRefusal(field, rawTarget);
+  const whole = objectValueRefusal(field, rawTarget, byValue);
   if (whole !== undefined) return whole;
   if (listOperator && Array.isArray(rawTarget)) {
     for (const member of rawTarget) {
-      const refusal = plainObjectValueRefusal(field, member);
+      const refusal = objectValueRefusal(field, member, byValue);
       if (refusal !== undefined) return refusal;
     }
   }
@@ -647,10 +773,14 @@ function matchesComparisonNode(
   // the object form of the same filter is refused by name. Checked for every
   // operator that reads the slot, so `!=` cannot answer it as every row, and
   // for each member of a list comparand, so `nin` cannot either. An EMPTY plain
-  // object, `{}`, is refused by the same builder in a sentence of its own.
+  // object, `{}`, a `$`-keyed object that is no `{ $field }` reference (the
+  // `{ $now, addDays }` anchor among them), a plain object of another realm and,
+  // under an equality, membership or text operator, a class instance are
+  // refused by the same builder, each in a sentence of its own.
   if (!AST_NO_COMPARAND_OPERATORS.has(operator)) {
-    const plainRefusal = plainObjectComparandRefusal(
+    const plainRefusal = objectComparandRefusal(
       field, rawTarget, AST_LIST_COMPARAND_OPERATORS.has(operator),
+      AST_BY_VALUE_OPERATORS.has(operator),
     );
     if (plainRefusal !== undefined) return refuseFilterNode(refusals, plainRefusal);
   }
@@ -931,20 +1061,20 @@ function matchesDollarOperator(
     return refuseListMemberFieldReference(refusals, field, operator);
   }
 
-  // A plain object with no `$` key as the comparand, NON-EMPTY or EMPTY (`{}`),
-  // whole or as a list member: the AST arm's refusals, from the same builder,
-  // so `$ne` / `$notContains` / `$nin` cannot answer it as every row. A
-  // non-empty one gets the nested-relation sentence, `{}` its own. Judged for
-  // every declared operator that reads a comparand. The three flag operators
-  // are not: `$empty` refuses a non-boolean flag on its own arm, and `$null` /
-  // `$exists` read their flag's truthiness, as their lowering does. Keys
-  // outside `FILTER_OPERATORS` keep the refusal the `default` arm gives them.
+  // An object comparand this matcher cannot compare, whole or as a list member:
+  // the AST arm's refusals, from the same builder, so `$ne` / `$notContains` /
+  // `$nin` cannot answer it as every row. See objectComparandRefusal for the
+  // population. Judged for every declared operator that reads a comparand. The
+  // three flag operators are not: each refuses a non-boolean flag on its own
+  // arm below. Keys outside `FILTER_OPERATORS` keep the refusal the `default`
+  // arm gives them.
   if (
     DOLLAR_COMPARAND_OPERATORS.has(operator)
     && !DOLLAR_FLAG_OPERATORS.has(operator)
   ) {
-    const plainRefusal = plainObjectComparandRefusal(
+    const plainRefusal = objectComparandRefusal(
       field, rawTarget, DOLLAR_LIST_COMPARAND_OPERATORS.has(operator),
+      DOLLAR_BY_VALUE_OPERATORS.has(operator),
     );
     if (plainRefusal !== undefined) return refuseFilterNode(refusals, plainRefusal);
   }
@@ -1009,15 +1139,20 @@ function matchesDollarOperator(
     // -- Null-ness. Unlike the AST spelling, direction comes from the VALUE:
     // `$null: true` is IS NULL and `$null: false` is IS NOT NULL, which is the
     // lowering `convertFiltersToAST` already performs.
+    //
+    // The flag is a BOOLEAN by declaration (`SpecialOperatorSchema`), so
+    // anything else is refused here rather than read for its truthiness, as
+    // `$empty` below is and as the converter refuses it before lowering: a
+    // truthy `'no'` would have answered the IS NULL rows.
     case '$null':
-      return target
-        ? value === null || value === undefined
-        : value !== null && value !== undefined;
+      if (target === true) return value === null || value === undefined;
+      if (target === false) return value !== null && value !== undefined;
+      return refuseFilterNode(refusals, nonBooleanFlagRefusalReason(field, operator, target));
 
     // `$exists` is the exact INVERSE of `$null`, and that is the platform's own
     // reading rather than one invented here: `convertFiltersToAST`
     // (`../utils/filter-converter.ts`) lowers `$exists: true` to `is_not_null`
-    // and `$exists: false` to `is_null`, three lines below where it lowers
+    // and `$exists: false` to `is_null`, in the same arm where it lowers
     // `$null` the other way round. Both operators are absent from that file's
     // `convertOperatorToAST` map and both are special-cased BEFORE it, so that
     // map's silence is not a decision about either of them. Two producers in
@@ -1027,9 +1162,9 @@ function matchesDollarOperator(
     // would have turned "every row" into "no rows" on a filter that looks like
     // it works, which is the one outcome worse than the bug.
     case '$exists':
-      return target
-        ? value !== null && value !== undefined
-        : value === null || value === undefined;
+      if (target === true) return value !== null && value !== undefined;
+      if (target === false) return value === null || value === undefined;
+      return refuseFilterNode(refusals, nonBooleanFlagRefusalReason(field, operator, target));
 
     // objectui#11094 — `$empty`, which `@objectstack/spec` 17.6.0 admitted to
     // `FILTER_OPERATORS` (objectstack#20446) and to which it lowers `is_empty` /
@@ -1044,11 +1179,7 @@ function matchesDollarOperator(
     case '$empty':
       if (target === true) return isEmptyStoredValue(value);
       if (target === false) return !isEmptyStoredValue(value);
-      return refuseFilterNode(
-        refusals,
-        `filter operator '$empty' on field '${field}' takes a boolean flag (true or false); `
-        + `received ${describeComparand(target)}`,
-      );
+      return refuseFilterNode(refusals, nonBooleanFlagRefusalReason(field, operator, target));
 
     // objectui#8515 — the hand-authored IMPLICIT form `{ amount: { $field: 'x' } }`.
     // It is not a reference comparand: an object whose only key starts with `$`
