@@ -144,7 +144,7 @@ export async function endWhatTheAccountAddedBeforeAReset(
     await stores.accounts.deleteAccount(account.id);
     ended.signInAccounts += 1;
   }
-  const engine = stores.apiKeys;
+  const engine: ApiKeyStore | undefined = stores.apiKeys;
   if (!engine) return ended;
   // Each pass revokes what the read answered, and the next read no longer
   // answers it; a key that a pass revoked and the next read still answers was
