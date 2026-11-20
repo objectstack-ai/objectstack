@@ -62,7 +62,9 @@
  * anything derived from it — no spelling correction (`write 'KGM'` beside a
  * stored `kgm`, `'H87'` beside a stored `EA`) and no dimension, since either
  * would tell a caller who may edit the quantity but not read the code field
- * what the field holds.
+ * what the field holds. A resting code that is no unit code, and a resting
+ * blank, also name the run that converts stored free text
+ * ({@link unitCodeBackfillRemedy}, Open item 9 point 7).
  */
 
 import { standardUnitOf, UNIT_DIMENSION_BASE_CODES, type StandardUnit } from '@objectstack/spec/data';
@@ -345,7 +347,8 @@ export function assertUnitCodes(
         `${head}'${quantity}' holds a quantity in the unit its record names (unitMode: 'record'), and its unit code `
           + `field '${codeField}' is blank${also}. The row was not written. Write the record's unit code (for example `
           + `'${source.dimension ? exampleCodeOf(source.dimension) : 'KGM'}') into '${codeField}' in the same write, or `
-          + `leave '${quantity}' empty. The server never fills a unit in.`,
+          + `leave '${quantity}' empty. The server never fills a unit in.`
+          + (codeWritten ? '' : unitCodeBackfillRemedy(object, codeField, true)),
         object, codeField, quantity,
       );
     }
@@ -372,7 +375,8 @@ export function assertUnitCodes(
               ? `The piece is 'H87'; write 'H87'.`
               : `Codes are exact uppercase with no spaces; write '${verdict.hint}'.`
             : 'Write a standard code, or add the unit to the organization\'s Units of Measure first.')
-          + remedyTail,
+          + remedyTail
+          + (codeWritten ? '' : unitCodeBackfillRemedy(object, codeField, false)),
         object, codeField, quantity,
       );
     }
@@ -399,6 +403,22 @@ export function assertUnitCodes(
       );
     }
   }
+}
+
+/**
+ * [ADR-0158 Open item 9 point 7] The run that converts a field's stored free
+ * text into codes, named by the two refusals a resting value can cause: a
+ * quantity written beside a resting code that is no unit code, or beside a
+ * resting blank (`unit-code-backfill.ts`, `os migrate unit-codes` and its REST
+ * twin). Never a written code's remedy: that writer chose the value. The
+ * metadata save's `unit_code_field_declared` / `unit_mode_to_record` finding
+ * names the same run (`@objectstack/metadata-protocol`, `protocol-write-face.ts`).
+ */
+export function unitCodeBackfillRemedy(object: string, codeField: string, blank: boolean): string {
+  return ` Rows stored before '${codeField}' was a unit code field are converted all at once by an organization admin, `
+    + `from a mapping of each stored text to its code, with \`os migrate unit-codes --object ${object} --field ${codeField} `
+    + '--map-file <mapping file>`' + (blank ? ' (an entry "" gives a blank unit beside a quantity its code)' : '')
+    + ' or `POST /api/v1/meta/_migrate-unit-codes`: a dry run lists each stored value, and --apply (or "apply": true) writes.';
 }
 
 /** Does an update payload touch any unit code field, or a quantity pointing at one? */
