@@ -556,6 +556,69 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
     });
   });
 
+  describe('S5, the declared narrowing on delete: a newly matched row a beforeDelete hook refuses refuses the whole delete', () => {
+    /** Ids the hook refuses; empty outside these cases, so the hook is inert for every other case in the file. */
+    const refuseDeleteOf = new Set<string>();
+    beforeAll(() => {
+      engine.registerHook(
+        'beforeDelete',
+        async (ctx: any) => {
+          if (refuseDeleteOf.has(String(ctx.input?.id))) {
+            throw Object.assign(new Error('refused by the beforeDelete hook'), { status: 409 });
+          }
+        },
+        { object: DEAL },
+      );
+    });
+
+    const refusalOf = (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: unknown) => e,
+      ) as Promise<{ statusCode?: unknown; status?: unknown; message?: unknown } | null>;
+
+    it('ALICE: by id r1 is deleted and r2 refused; by predicate the delete is refused whole and r1 stays', async () => {
+      // Before this change the predicate delete matched r1 alone (the floor)
+      // and answered success with r1 deleted. r2 is now matched too, because
+      // its by-id delete would replace the floor, and the hook refuses it, so
+      // the whole delete is refused and nothing is deleted.
+      const caller = memberOf(ALICE, REP_SET.name);
+      const copy = await seedDeals();
+      refuseDeleteOf.add(copy.ids.r2);
+      try {
+        const refusal = await refusalOf(predicateWrite(DEAL, 'delete', copy.batch, caller));
+        expect(refusal, 'the predicate delete is refused').not.toBeNull();
+        expect(refusal?.statusCode ?? refusal?.status).toBe(409);
+        expect(await changedRows(DEAL, copy.ids, 'delete')).toEqual([]);
+
+        const byIdCopy = await seedDeals();
+        refuseDeleteOf.add(byIdCopy.ids.r2);
+        expect(await refusalOf(engine.delete(DEAL, { where: { id: byIdCopy.ids.r1 }, context: { ...caller } } as never))).toBeNull();
+        const r2ById = await refusalOf(engine.delete(DEAL, { where: { id: byIdCopy.ids.r2 }, context: { ...caller } } as never));
+        expect(r2ById?.statusCode ?? r2ById?.status).toBe(409);
+        expect(await changedRows(DEAL, byIdCopy.ids, 'delete')).toEqual(['r1']);
+      } finally {
+        refuseDeleteOf.clear();
+      }
+    });
+
+    it('a Modify All holder: the predicate delete now matches all four rows and is refused whole by the hook on r2', async () => {
+      // Before this change the manager's predicate delete matched no row (the
+      // floor: they created none) and answered success with nothing deleted.
+      const caller = memberOf(MANAGER, MANAGER_SET.name);
+      const copy = await seedDeals();
+      refuseDeleteOf.add(copy.ids.r2);
+      try {
+        const refusal = await refusalOf(predicateWrite(DEAL, 'delete', copy.batch, caller));
+        expect(refusal, 'the predicate delete is refused').not.toBeNull();
+        expect(refusal?.statusCode ?? refusal?.status).toBe(409);
+        expect(await changedRows(DEAL, copy.ids, 'delete')).toEqual([]);
+      } finally {
+        refuseDeleteOf.clear();
+      }
+    });
+  });
+
   it('a predicate write over more candidates than one verdict batch (25) asks about each row once and writes every one', async () => {
     const batch = `bulk_${++seq}`;
     const ids = Array.from({ length: 60 }, (_, i) => `${batch}_${String(i).padStart(2, '0')}`);
