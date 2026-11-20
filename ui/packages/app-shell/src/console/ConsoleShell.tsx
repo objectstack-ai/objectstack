@@ -38,6 +38,7 @@ import { NavigationProvider } from '../context/NavigationContext.js';
 import { FavoritesProvider } from '../context/FavoritesProvider.js';
 import { RecentItemsProvider, useDropDeletedRecordsFromRecents } from '../context/RecentItemsProvider.js';
 import { FlowPaletteRecentsProvider } from '../context/FlowPaletteRecentsProvider.js';
+import { LastAppProvider, LAST_APP_PREFERENCE_KEY } from '../context/LastAppProvider.js';
 import {
   UserStateAdaptersProvider,
   useAttachListStateFamily,
@@ -200,6 +201,7 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
             <FavoritesProvider>
               <RecentItemsProvider>
                 <FlowPaletteRecentsProvider>
+                  <LastAppProvider>
                   <ListPreferencesProvider>
                     <RecordPreferencesProvider>
                       {/* objectui#4467 — the impersonation indicator. Above the
@@ -234,6 +236,7 @@ function ConsoleShellProviders({ children }: { children: ReactNode }) {
                       <NotificationAlerts />
                     </RecordPreferencesProvider>
                   </ListPreferencesProvider>
+                  </LastAppProvider>
                 </FlowPaletteRecentsProvider>
               </RecentItemsProvider>
             </FavoritesProvider>
@@ -387,6 +390,7 @@ function UserStateBridge() {
       attach('favorites', null);
       attach('recent', null);
       attach('flowPaletteRecents', null);
+      attach('lastApp', null);
       attachListState(null);
       attachRecordState(null);
       return;
@@ -406,6 +410,12 @@ function UserStateBridge() {
       userId: user.id,
       key: 'ui.flow.palette.recents',
     });
+    // objectstack#35881 — the person's last app, where a phone lands.
+    const lastApp = createObjectStackUserStateAdapter<string>({
+      dataSource,
+      userId: user.id,
+      key: LAST_APP_PREFERENCE_KEY,
+    });
     // objectui#12418 — every object's list state, `ui.list.<object>`: a key
     // family, loaded by prefix in the same one read as the three slots above.
     const listState = createObjectStackUserPreferenceFamily({
@@ -416,6 +426,7 @@ function UserStateBridge() {
     attach('favorites', favorites);
     attach('recent', recent);
     attach('flowPaletteRecents', flowPaletteRecents);
+    attach('lastApp', lastApp);
     // objectstack#25883 — every object's record-page state, `ui.record.<object>`
     // ("show empty fields"): a second key family in the same one read.
     const recordState = createObjectStackUserPreferenceFamily({
@@ -429,6 +440,7 @@ function UserStateBridge() {
       attach('favorites', null);
       attach('recent', null);
       attach('flowPaletteRecents', null);
+      attach('lastApp', null);
       attachListState(null);
       attachRecordState(null);
     };

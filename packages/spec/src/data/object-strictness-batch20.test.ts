@@ -456,10 +456,16 @@ describe('批 20, unknown keys refused — curation is anchored to the sibling c
       accept(ObjectSchema, { ...OBJ, enable: { clone: false } });
     });
 
-    it('`fieldGroups[].fields` states the direction of the membership edge', () => {
-      const msg = rejectOnObject({ fieldGroups: [{ key: 'g', label: 'G', fields: ['name'] }] });
-      expect(msg).toContain('group');
-      // The claim: membership really is declared on the FIELD.
+    // `fieldGroups[].fields` left this list: it is a real key now (a group
+    // lists its own members, `ObjectFieldGroupSchema.fields`), so the pin that
+    // refused it and pointed at `Field.group` flips to acceptance of BOTH
+    // spellings — the older one is still read.
+    it('`fieldGroups[].fields` is a real key now, and the older `Field.group` still parses', () => {
+      accept(ObjectSchema, {
+        ...OBJ,
+        fields: { name: { type: 'text', label: 'Name' } },
+        fieldGroups: [{ key: 'g', label: 'G', fields: ['name'] }],
+      });
       accept(ObjectSchema, {
         ...OBJ,
         fields: { name: { type: 'text', label: 'Name', group: 'g' } },

@@ -8,6 +8,7 @@
  * passed in; the component reads the returned callback.
  */
 
+import type { ColumnSummary } from '@objectstack/spec/ui';
 import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
@@ -169,6 +170,13 @@ export function useObjectViewListRenderer({
         rename?: (label: string) => boolean | Promise<boolean>;
         save?: () => void;
         reset?: () => void;
+        /**
+         * objectstack#35702 — save a footer calculation on the open view (wired
+         * only for a reader who may change it); resolves whether it was saved.
+         */
+        pickSummary?: (field: string, summary: ColumnSummary | null) => boolean | Promise<boolean>;
+        /** objectstack#35702 — the columns the view declares: the only ones a pick may change. */
+        summaryPickFields?: readonly string[];
     };
 }) {
     // objectstack#35551 — the host hands fresh closures every render; the list
@@ -178,6 +186,9 @@ export function useObjectViewListRenderer({
     const offersRename = !!listViewActions?.rename;
     const offersSave = !!listViewActions?.save;
     const offersReset = !!listViewActions?.reset;
+    const offersSummaryPick = !!listViewActions?.pickSummary;
+    // Keyed on content, never the array's identity (a fresh one every render).
+    const summaryPickKey = (listViewActions?.summaryPickFields ?? []).join('\n');
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -1043,6 +1054,10 @@ export function useObjectViewListRenderer({
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
                 onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
+                onColumnSummaryPick={offersSummaryPick
+                    ? (field: string, summary: ColumnSummary | null) => listViewActionsRef.current?.pickSummary?.(field, summary) ?? false
+                    : undefined}
+                columnSummaryPickFields={offersSummaryPick ? summaryPickKey.split('\n').filter(Boolean) : undefined}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1142,7 +1157,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, openInPanel, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, openInPanel, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, summaryPickKey, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

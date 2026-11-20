@@ -86,11 +86,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "键",
-        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。字段通过填写此键加入分组，因此重命名它会使这些字段变为未分组。"
+        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。分组在「字段」中列出的字段，重命名此键后仍留在分组里；通过自身分组设置填写此键加入的字段会变为未分组。"
       },
       "fieldGroups.label": {
         label: "显示名称",
         helpText: "该分组所在分区的标题文字。"
+      },
+      "fieldGroups.fields": {
+        label: "字段",
+        helpText: "该分组显示的字段及其顺序（字段名）。填写后，它决定分组内的顺序，不移动任何字段。这里列出的字段，其自身的分组设置不能指向别的分组；一个字段只能被一个分组列出。不能与关联列表同时使用。"
       },
       "fieldGroups.icon": {
         label: "图标",

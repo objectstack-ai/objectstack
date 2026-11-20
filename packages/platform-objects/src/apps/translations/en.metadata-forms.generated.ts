@@ -82,15 +82,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fieldGroups: {
         label: "Field Groups",
-        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A field joins a group by naming its key in the field's own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
+        helpText: "Ordered sections that group this object's fields on the entry form and the record detail page (ADR-0085); array order is display order. A group lists its fields, in order, in its Fields setting; a group without that list holds the fields that name its key in their own group setting. Fields in no group follow the groups, and a group no field joins is not drawn."
       },
       "fieldGroups.key": {
         label: "Key",
-        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields join the group by naming this key, so renaming it leaves them ungrouped."
+        helpText: "Machine key in snake_case, unique within this object — the schema refuses anything else. Fields the group lists in its Fields stay with it when the key is renamed; a field that joins by naming this key in its own group setting is left ungrouped."
       },
       "fieldGroups.label": {
         label: "Label",
         helpText: "Header text of the group's section."
+      },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
       },
       "fieldGroups.icon": {
         label: "Icon",

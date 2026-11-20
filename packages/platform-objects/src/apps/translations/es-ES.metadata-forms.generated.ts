@@ -86,11 +86,15 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Clave",
-        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos se unen al grupo indicando esta clave, así que renombrarla los deja sin grupo."
+        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos que el grupo lista en Campos siguen en él al renombrar la clave; un campo que se une indicando esta clave en su propio ajuste de grupo queda sin grupo."
       },
       "fieldGroups.label": {
         label: "Etiqueta",
         helpText: "Texto del encabezado de la sección del grupo."
+      },
+      "fieldGroups.fields": {
+        label: "Campos",
+        helpText: "Los campos que muestra este grupo, en orden de visualización (nombres de campo). Si se rellena, fija el orden dentro del grupo sin mover ningún campo. Un campo que esta lista nombra no puede indicar otro grupo en su propio ajuste de grupo, y un campo solo puede figurar en un grupo. No se permite junto con Lista relacionada."
       },
       "fieldGroups.icon": {
         label: "Icono",

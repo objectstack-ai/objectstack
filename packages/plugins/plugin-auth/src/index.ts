@@ -35,6 +35,14 @@ export {
   authEmailLocaleFromRequest,
   AuthManager,
 } from './auth-manager.js';
+// The shape a host's `session.create.before` hook may return: better-auth's
+// `{ data }` (required, as better-auth types it) plus an ordered
+// `activeOrganizationCandidates` list. The session is scoped to the first
+// candidate the organization's own access policy admits; none admitted is
+// refused as a single choice is. The host lists only organizations the user is
+// a member of. Only the type is published: the judgement and its helpers stay
+// inside the framework.
+export type { SessionCreateBeforeResult } from './session-organization-candidates.js';
 // The IdP locale rule, for a host whose sign-in does not run through the OIDC
 // seams (the cloud's sso-exchange hand-off): `AuthManager.applyIdpLocaleClaim`
 // takes this claim. A user's language preference is written only while it is
