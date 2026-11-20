@@ -1169,6 +1169,17 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * security, sharing, the ADR-0092 identity write guard — early-returns on
    * `isSystem` by design. A middleware that gates on `isSystem` therefore sees
    * nothing; one that does not, runs.
+   *
+   * **Session creation's organization, with fallbacks (#35829).** A host's
+   * `session.create.before` chooses the new session's organization and wins
+   * over the framework's default (see {@link autoActiveOrganization}); the
+   * framework then refuses the sign-in when that organization's own allowed
+   * IP ranges do not admit the request (`SESSION_SCOPING_REFUSAL`). To accept
+   * a fallback instead, the hook returns an ordered
+   * `activeOrganizationCandidates` list beside `data` (the package export
+   * `SessionCreateBeforeResult`): the session is scoped to the first of
+   * `data.activeOrganizationId`, then the list, that the scoping admits, and
+   * none admitted is refused as before. No list keeps the single choice.
    */
   databaseHooks?: BetterAuthOptions['databaseHooks'];
 
