@@ -345,7 +345,7 @@ The body runs in an isolated QuickJS VM, **not** Node:
   the hook, the `SyntaxError` and its line. Fix: use `ctx` as it is, or rename
   the local (`const input = ctx.input || {};`). A job's `js` body runs in the
   same wrapper: `job-body-does-not-compile`, from the three commands. A regex
-  pattern only the checking engine refuses is a warning.
+  pattern the checking engine refuses is a warning: the runtime may accept it.
 
 > **A deadline stamped from an hours table is calendar hours** — nights, weekends and
 > holidays count. Name it `*_CALENDAR_HOURS` (`SLA_CALENDAR_HOURS`, or its camelCase)
@@ -774,9 +774,8 @@ the layout both real hook modules in the repo use.
 
 ## Best Practices
 
-✅ **DO** — set
-`async: true` for non-critical background work; go through `ctx.api` for
-cross-object operations; refuse a business rule by a
+✅ **DO** — set `async: true` for non-critical background work; go through
+`ctx.api` for cross-object operations; refuse a business rule by a
 [declared code](#declared-refusals-refusals); test hooks in isolation.
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); write
