@@ -180,6 +180,24 @@ export const STANDARD_UNITS: Readonly<Record<string, StandardUnit>> = Object.fre
 });
 
 /**
+ * The ONE membership lookup of the standard unit table (ADR-0158 U1): the
+ * entry {@link STANDARD_UNITS} holds for `code` as an OWN property, or
+ * `undefined` when it holds none.
+ *
+ * Every reader that asks "is this a standard code, and of which dimension"
+ * asks here: the build-time check of a `fixed` unit (`unitConfig.unit` in
+ * `field.zod.ts` enumerates the same own keys) and the engine's write-time
+ * membership check (ADR-0158 U5). An own-property lookup, so an inherited name
+ * such as `toString`, `constructor` or `__proto__` is never a member, and an
+ * exact one: `kgm` and ` KGM` are not `KGM` (U4: "exact uppercase").
+ */
+export function standardUnitOf(code: unknown): StandardUnit | undefined {
+  return typeof code === 'string' && Object.prototype.hasOwnProperty.call(STANDARD_UNITS, code)
+    ? STANDARD_UNITS[code]
+    : undefined;
+}
+
+/**
  * The organization unit code namespace (ADR-0158 U3), as a regular-expression
  * source: uppercase letters, digits and underscores, starting with a letter or
  * a digit, at most 32 characters, and EITHER at least 4 characters long OR

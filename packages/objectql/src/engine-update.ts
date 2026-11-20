@@ -51,6 +51,7 @@ import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertUnitCodes, organizationUnitRowsOf, readOrganizationUnits, touchesUnitCodes } from './validation/unit-code-membership.js';
 import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts, settleBulkHomeAmounts } from './home-amount-projection.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { stripSearchCompanion } from './search-companion.js';
@@ -1646,6 +1647,18 @@ export class UpdateFacet {
                    object, currencyFields, followCodes ? followCodes(currencyImage) : currencyImage,
                    'update', currencyPayload, hookContext.input.id, updateMsgCtx, parentCodeFieldServingOf(this._registry),
                  );
+                 // [ADR-0158 U5, Open item 9] …and on the same image, each unit
+                 // code the payload writes, or rests beside a quantity it writes,
+                 // is a member of the row's organization; no written quantity
+                 // stands beside a blank code. Free unless the payload touches one.
+                 if (touchesUnitCodes(currencyFields, currencyPayload)) {
+                   const unitOrganization = ObjectQL.homeAmountOrganizationOf(currencyImage, opCtx.context);
+                   const organizationUnits = await readOrganizationUnits(
+                     currencyFields, [{ image: currencyImage, touched: currencyPayload, organizationId: unitOrganization }], 'update',
+                     organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+                   );
+                   assertUnitCodes(object, currencyFields, currencyImage, 'update', currencyPayload, hookContext.input.id, unitOrganization, organizationUnits);
+                 }
                }
                // [ADR-0144 D2, amended] …and a record a child row follows the
                // currency of keeps its code field: a change of it is refused
@@ -2065,6 +2078,24 @@ export class UpdateFacet {
                        );
                        for (const { row, image } of images) {
                            assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id, updateMsgCtx, parentCodeFieldServingOf(this._registry));
+                       }
+                   }
+                   // [ADR-0158 U5, Open item 9] The predicate-path twin of the unit
+                   // check: every matched row with the payload over it, one
+                   // organization-unit read per organization for the whole set.
+                   if (touchesUnitCodes(currencyFields, currencyPayload)) {
+                       const unitImages = ((await readPriorRows()) ?? [])
+                         .filter((row) => row != null && typeof row === 'object')
+                         .map((row) => {
+                           const image = { ...row, ...currencyPayload };
+                           return { row, image, touched: currencyPayload, organizationId: ObjectQL.homeAmountOrganizationOf(image, opCtx.context) };
+                         });
+                       const organizationUnits = await readOrganizationUnits(
+                         currencyFields, unitImages, 'update',
+                         organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+                       );
+                       for (const { row, image, organizationId } of unitImages) {
+                           assertUnitCodes(object, currencyFields, image, 'update', currencyPayload, row?.id, organizationId, organizationUnits);
                        }
                    }
                    // [ADR-0144 D2, amended] The predicate-path twin of the
