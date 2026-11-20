@@ -65,6 +65,9 @@ vi.mock('./CreateViewDialog', () => ({ CreateViewDialog: () => null }));
 vi.mock('./metadata-admin/useMetadata', () => ({ useMetadataClient: () => ({}) }));
 
 import { I18nProvider } from '@object-ui/i18n';
+// The page reaches a dynamic `import('@objectstack/lint')`; its first load is
+// paid here, at collection, never inside a clocked test window.
+import '@objectstack/lint';
 import { ObjectDataPage } from './ObjectDataPage';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
@@ -126,7 +129,7 @@ function renderAt(config: typeof ZH, search: string) {
 }
 
 const recordReads = (ds: { find: ReturnType<typeof vi.fn> }) =>
-  ds.find.mock.calls.filter(([object]: [string]) => object === OBJECT_NAME);
+  ds.find.mock.calls.filter((call: unknown[]) => call[0] === OBJECT_NAME);
 
 beforeEach(() => {
   cleanup();
