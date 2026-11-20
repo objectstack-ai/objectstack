@@ -19,16 +19,17 @@
  * `ObjectView` calling the page's `renderListView` and the real `ListView`.
  *
  * WHAT IS PINNED.
- *  - No view-tab bar, tab row or toolbar slot; the title is the switcher,
- *    with the view's label and no record count beside it (objectstack#34603):
- *    the list's footer says how many records the view holds.
+ *  - No view-tab bar or tab row. Since objectstack#35548 the switcher leads
+ *    the list's view bar (its `toolbarLeading` slot) at every width, reading
+ *    the view type's icon, the view's label, the record count and a caret;
+ *    the page bar's heading names the object alone.
  *  - The dropdown: a search box, the views in their declared order, search
  *    narrowing them, and choosing one switching the list.
  *  - 📌 keeps the pinned view per object (the reader's workspace preference)
  *    and the object's bare address opens it, also on the next mount; unpinned,
  *    the declared default opens again.
  *  - A record open beside the list (the split pane) leaves the same one
- *    switcher in the title.
+ *    switcher.
  *  - On a phone (objectstack#27058) the page header is not drawn, and the
  *    same one switcher, with no count either, leads the list's toolbar row
  *    (its `toolbarLeading` slot): the same dropdown, and choosing a view
@@ -185,22 +186,31 @@ afterEach(() => {
 });
 
 describe('objectstack#27594 — the list title is the view switcher', () => {
-  it('draws no view-tab bar, tab row or toolbar slot; the title names the view and no count (objectstack#34603)', async () => {
+  it('draws no view-tab bar or tab row; the view bar leads with the switcher: icon, view, count, caret (objectstack#35548)', async () => {
     setViewportWidth(1440);
     mountLeads();
     await listToolbar();
 
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
-    expect(screen.queryByTestId('list-toolbar-leading')).toBeNull();
 
+    // The page bar names the object; the switcher leads the list's view bar.
     const heading = screen.getByRole('heading', { level: 1 });
-    expect(heading.contains(switcher())).toBe(true);
-    expect(switcher()).toHaveTextContent('View 1');
-    // Once the list has reported its count, the footer says it and the title does not.
+    expect(heading.contains(switcher())).toBe(false);
+    expect(screen.getByTestId('list-toolbar-leading').contains(switcher())).toBe(true);
+    expect(within(switcher()).getByTestId('list-view-switcher-label')).toHaveTextContent(/^View 1$/);
+    // Once the list has reported its count it is drawn beside the view name
+    // (the maintainer's 「记录数显示在下拉左侧」, after objectstack#34603 had
+    // taken it away), between the name and the caret.
     await footerCount();
-    expect(screen.queryByTestId('list-view-switcher-count')).toBeNull();
-    expect(switcher().parentElement).toHaveTextContent(/^View 1$/);
+    await waitFor(() => expect(within(switcher()).getByTestId('list-view-switcher-count')).toHaveTextContent(/^1$/));
+    const parts = Array.from(switcher().querySelectorAll('[data-testid^="list-view-switcher-"]')).map((el) => el.getAttribute('data-testid'));
+    expect(parts).toEqual([
+      'list-view-switcher-type-icon',
+      'list-view-switcher-label',
+      'list-view-switcher-count',
+      'list-view-switcher-caret',
+    ]);
   });
 
   it('opens a dropdown with a search box and every view in its declared order', async () => {
@@ -295,11 +305,11 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
     expect(screen.getByTestId('list-toolbar-leading').contains(switcher())).toBe(true);
     expect(screen.queryByRole('heading', { level: 1 })?.contains(switcher()) ?? false).toBe(false);
     expect(switcher()).toHaveTextContent('View 1');
-    // The phone still shows the record count, once, in the list's footer, and
-    // nothing beside the view name.
+    // The phone still shows the record count in the list's footer; beside
+    // the view name it is not drawn below `sm` (objectstack#35548 leaves the
+    // phone as it was).
     await footerCount();
-    expect(screen.queryByTestId('list-view-switcher-count')).toBeNull();
-    expect(switcher().parentElement).toHaveTextContent(/^View 1$/);
+    expect(screen.getByTestId('list-view-switcher-count')).toHaveClass('max-sm:hidden');
     expect(screen.getByTestId('list-toolbar-leading').contains(screen.getByTestId('record-count-bar'))).toBe(false);
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();

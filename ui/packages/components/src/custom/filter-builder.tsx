@@ -1186,7 +1186,6 @@ function toPairBounds(
 
 const useSafeFilterTranslation = createSafeTranslation(
   {
-    'filterBuilder.where': 'Where',
     'filterBuilder.and': 'AND',
     'filterBuilder.or': 'OR',
     'filterBuilder.clearAll': 'Clear all',
@@ -1271,7 +1270,7 @@ const useSafeFilterTranslation = createSafeTranslation(
     // missing side.
     'validation.required': '{{field}} is required',
   },
-  'filterBuilder.where',
+  'filterBuilder.and',
 )
 
 /**
@@ -2279,7 +2278,6 @@ function FilterBuilder({
     <div className={cn("space-y-3", className)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{t('filterBuilder.where')}</span>
           {visibleConditions.length > 1 && (
             <Button
               type="button"

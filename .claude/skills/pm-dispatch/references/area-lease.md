@@ -44,7 +44,7 @@
   所落 PR 欠的红检查读日志(`readings-ci.md`)派子代理读,一读兼守本条与该文。
 - 每区 dev 位空即补;逐位上张 PR 入合并队列才领下张,此前跑修复轮;Tier H 或待裁 PR 让位。
 - 席每轮逐区查;取卡照点名范围次序,p0/p1 插队;p3 留收口或搭同文件 PR 成批(每 PR ≤5 卡)。
-- 同函数互相牵连的卡合一 PR,准入照 `execution-duties.md` 折叠五门,额度墙亦照该文。
+- 认领必答:同区卡过 `execution-duties.md` 折叠五门即默认合一 PR,否则串行;额度墙亦照该文。
 - 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席 L1/L2;他道席在线只通知;
   本条先于条款②行(`execution-duties.md`)、移道的 `lanes/spec.md` 与 `--tier` 提示;
   交出闭集:他道在线席已认领、cloud 路由、安全、ADR。

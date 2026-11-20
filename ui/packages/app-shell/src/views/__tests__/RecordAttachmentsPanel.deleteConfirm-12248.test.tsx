@@ -34,7 +34,7 @@ import { builtInLocales } from '@object-ui/i18n/locales';
 import { RecordAttachmentsPanel } from '../RecordAttachmentsPanel';
 
 type Pack = {
-  detail: { deleteAttachment: string; deleteAttachmentConfirm: string };
+  detail: { deleteAttachment: string; deleteAttachmentConfirm: string; attachmentActions: string };
   objectActions: { deleteConfirmButton: string };
   actionConfirm: { title: string; confirm: string; cancel: string };
 };
@@ -71,11 +71,19 @@ async function mountPanel(language: 'en' | 'zh' = 'en') {
   return dataSource;
 }
 
-/** The delete button on the row listing `fileName`. */
-function deleteButtonOf(fileName: string, pack: Pack): HTMLElement {
+/**
+ * The delete item of the row listing `fileName`: a file row carries its
+ * Download and Delete in its ⋮ menu since the dense attachments rows
+ * (objectstack#35602), so the menu is opened first.
+ */
+async function deleteButtonOf(fileName: string, pack: Pack): Promise<HTMLElement> {
   const li = screen.getByText(fileName).closest('li');
   if (!li) throw new Error(`no row for ${fileName}`);
-  return within(li as HTMLElement).getByRole('button', { name: pack.detail.deleteAttachment });
+  const trigger = within(li as HTMLElement).getByRole('button', {
+    name: fill(pack.detail.attachmentActions, { name: fileName }),
+  });
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+  return screen.findByRole('menuitem', { name: pack.detail.deleteAttachment });
 }
 
 afterEach(() => {
@@ -90,7 +98,7 @@ describe('attachment delete asks through the console confirm dialog (objectui#12
       const pack = PACKS[language];
       const dataSource = await mountPanel(language);
 
-      fireEvent.click(deleteButtonOf('invoice.pdf', pack));
+      fireEvent.click(await deleteButtonOf('invoice.pdf', pack));
 
       const dialog = await screen.findByRole('alertdialog');
       expect(within(dialog).getByRole('heading')).toHaveTextContent(pack.detail.deleteAttachment);
@@ -111,7 +119,7 @@ describe('attachment delete asks through the console confirm dialog (objectui#12
     const pack = PACKS.en;
     const dataSource = await mountPanel();
 
-    fireEvent.click(deleteButtonOf('invoice.pdf', pack));
+    fireEvent.click(await deleteButtonOf('invoice.pdf', pack));
     const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: pack.actionConfirm.cancel }));
 
@@ -125,7 +133,7 @@ describe('attachment delete asks through the console confirm dialog (objectui#12
     const pack = PACKS.en;
     const dataSource = await mountPanel();
 
-    fireEvent.click(deleteButtonOf('invoice.pdf', pack));
+    fireEvent.click(await deleteButtonOf('invoice.pdf', pack));
     const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByRole('button', { name: pack.objectActions.deleteConfirmButton }));
 

@@ -280,16 +280,20 @@ describe('RecordPageColumns — the approval band is drawn once per page (object
     harness.body = null;
   });
 
+  // The `lines` group positions the body table between the two sections
+  // (objectstack#35597 draws an unplaced body table above every section, so
+  // the split this suite pins is the group-placed one).
   const quote = {
     name: 'quote',
     fields: {
-      name: { type: 'text', label: 'Name' },
+      name: { type: 'text', label: 'Name', group: 'basic' },
       terms: { type: 'textarea', label: 'Terms', group: 'terms' },
     },
+    fieldGroups: [{ key: 'basic' }, { key: 'lines', relatedList: 'quote_line_item' }, { key: 'terms' }],
   };
   const SECTIONS = [
-    { label: 'Basic', fields: ['name'] },
-    { label: 'Terms', fields: ['terms'] },
+    { name: 'basic', label: 'Basic', fields: ['name'] },
+    { name: 'terms', label: 'Terms', fields: ['terms'] },
   ];
   const LINES = { objectName: 'quote_line_item', relationshipField: 'quote', title: 'Line items', isPrimary: true };
   const split = buildDefaultPageColumns(buildDefaultPageSchema(quote, { sections: SECTIONS, related: [LINES] }))!;

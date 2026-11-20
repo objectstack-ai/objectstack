@@ -8,6 +8,7 @@ HTTP Server adapter for ObjectStack using Hono.
 - **Fast**: Built on Hono, a high-performance web framework.
 - **Full Protocol Support**: Automatically provides all ObjectStack Runtime endpoints (Auth, Data, Metadata, etc.).
 - **Middleware**: Supports standard Hono middleware.
+  A whole-server middleware (`use('*')`) registered after the transport's middleware seam must not change any state a session read depends on (headers, the caller's address, request-scoped context): the seam's session read is reused by routes across it. Middleware that needs to change such state must be path-scoped, or the transport must stop sharing the seam's read past it.
 - **Wildcard CORS**: Supports wildcard patterns in CORS origins (compatible with better-auth).
 
 ## Usage

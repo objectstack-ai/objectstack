@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveRelatedLists } from '../deriveRelatedLists';
+import { authoredBodyTableIds, deriveRelatedLists } from '../deriveRelatedLists';
 import { normalizeSchemaReferenceKeys } from '@object-ui/core';
 
 const project = { name: 'project', label: 'Project', fields: { name: { type: 'text' } } };
@@ -11,7 +11,7 @@ describe('deriveRelatedLists', () => {
     expect(deriveRelatedLists(project, null as any)).toEqual([]);
   });
 
-  it('derives a related list from a master_detail child (owned)', () => {
+  it('derives a related list from a master_detail child (owned) — a body table by default (objectstack#35597)', () => {
     const task = {
       name: 'task',
       label: 'Task',
@@ -24,7 +24,7 @@ describe('deriveRelatedLists', () => {
         childLabel: 'Task',
         referenceField: 'project',
         isOwned: true,
-        isPrimary: false,
+        isPrimary: true,
       },
     ]);
   });
@@ -289,5 +289,48 @@ describe('deriveRelatedLists — a child the data API does not expose', () => {
     const out = deriveRelatedLists(user, [user, device, session], { includeHidden: true });
     expect(out.find((r) => r.childObject === 'sys_user_device')).toMatchObject({ referenceField: 'user_id', isHidden: true });
     expect(out.find((r) => r.childObject === 'sys_session')?.isHidden).toBeUndefined();
+  });
+});
+
+/**
+ * objectstack#35597 — an AUTHORED record page gives a master-detail list it
+ * places the body-table treatment: its body tables are the related lists it
+ * places, anywhere in its tree, whose relationship the record page counts as a
+ * body table (the derived list's `isPrimary`).
+ */
+describe('authoredBodyTableIds (objectstack#35597)', () => {
+  const quote = { name: 'quote', label: 'Quote', fields: { name: { type: 'text' } } };
+  const line = { name: 'quote_line', label: 'Line', fields: { quote: { type: 'master_detail', reference: 'quote' } } };
+  const note = { name: 'note', label: 'Note', fields: { quote: { type: 'lookup', reference: 'quote' } } };
+  const sideLine = { name: 'quote_term', label: 'Term', fields: { quote: { type: 'master_detail', reference: 'quote', relatedList: true } } };
+  const relations = deriveRelatedLists(quote, [quote, line, note, sideLine]);
+  const list = (objectName: string, inBag = false) =>
+    inBag
+      ? { type: 'record:related_list', properties: { objectName, relationshipField: 'quote' } }
+      : { type: 'record:related_list', objectName, relationshipField: 'quote' };
+  const page = {
+    type: 'record',
+    regions: [{
+      name: 'main',
+      components: [
+        { type: 'page:tabs', properties: { items: [{ label: 'Lines', children: [list('quote_line', true)] }] } },
+        list('note'),
+        list('quote_term'),
+      ],
+    }],
+  };
+
+  it('names the master-detail list the page places, in either prop spelling; not a lookup or a side master-detail', () => {
+    expect([...authoredBodyTableIds(page, relations)]).toEqual(['quote_line.quote']);
+  });
+
+  it("CONTROL — 'primary' on a lookup makes its placed list a body table too", () => {
+    const primaryNote = { ...note, fields: { quote: { type: 'lookup', reference: 'quote', relatedList: 'primary' } } };
+    const ids = authoredBodyTableIds(page, deriveRelatedLists(quote, [quote, line, primaryNote]));
+    expect([...ids].sort()).toEqual(['note.quote', 'quote_line.quote']);
+  });
+
+  it('a page placing no related list has no body table', () => {
+    expect(authoredBodyTableIds({ type: 'record', regions: [] }, relations).size).toBe(0);
   });
 });

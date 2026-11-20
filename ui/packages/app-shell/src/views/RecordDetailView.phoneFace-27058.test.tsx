@@ -415,8 +415,10 @@ describe('the record page on a phone (objectstack#27058)', () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`]);
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     expect(actionBar()).toBeNull();
-    const header = document.querySelector('[data-record-page-root] header') as HTMLElement;
+    // objectstack#35593 — the header's row is the page's one top row: its
+    // group sits in the top bar's action slot.
     const toolbar = await waitFor(() => {
+      const header = document.querySelector('[data-record-top-bar-actions]') as HTMLElement;
       const el = within(header).getByRole('toolbar');
       return el;
     });
@@ -431,10 +433,11 @@ describe('the record page on a phone (objectstack#27058)', () => {
  * objectstack#35016 — one `⋯` per screen on a record pending the reader's
  * approval, and no unpressable action in the phone bar's first slot.
  *
- *  - desktop: the header row keeps the page's one `⋯`; the approval band's
- *    other levers sit behind a NAMED entry (text and a chevron, no `⋯`);
- *  - phone, approval-locked: the bar's first button is pressable — the
- *    locked Edit moved into the bar's `⋯`, still drawn and still off;
+ *  - desktop: the header's ONE group holds the page's one `⋯`, the other
+ *    approval levers first in it (objectstack#35593: no band of its own);
+ *  - phone, approval-locked: the bar is the same group, Approve the only
+ *    filled button and pressable; an approval lock draws no Edit
+ *    (objectstack#35593, #35419);
  *  - control: the same page with no request keeps [Edit][Convert Lead][⋯].
  */
 const APPROVAL_OBJECT = 'sys_approval_request';
@@ -508,36 +511,46 @@ describe('one ⋯ per screen on a record pending approval (objectstack#35016)', 
     __resetRecordApprovalsStore();
   });
 
-  it('desktop: exactly one ⋯ (the header row), and the band\'s other levers behind a named entry', async () => {
+  // objectstack#35593 — the band is gone: the decisions are the header's ONE
+  // group, and its one ⋮ holds the other levers, then the record's actions.
+  it('desktop: exactly one ⋯, the header group\'s, holding the other levers, a separator, then the record\'s actions', async () => {
     setWidth(1440);
     stubApprovals(PENDING_REQUEST);
     mountApprovalPage();
-    const entry = await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
-    expect(entry.textContent).toBe('More approval actions');
-    expect(entry.querySelector('svg.lucide-chevron-down')).toBeTruthy();
-    const header = document.querySelector('[data-record-page-root] header') as HTMLElement;
-    const row = await waitFor(() => within(header).getByRole('toolbar'));
-    const more = within(row).getByRole('button', { name: 'More actions' });
+    const more = await screen.findByTestId('declared-actions-header-menu', undefined, { timeout: 5000 });
+    expect(more.closest('[data-record-top-bar-actions]')).toBeTruthy();
+    expect(screen.queryByTestId('declared-actions-decision-menu')).toBeNull();
     expect(ellipsisTriggers()).toEqual([more]);
-    fireEvent.pointerDown(entry, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const row = more.closest('[role="toolbar"]') as HTMLElement;
+    const buttons = Array.from(row.querySelectorAll('button')).map((b) => b.getAttribute('aria-label') || b.textContent?.trim());
+    expect(buttons).toEqual(['Approve', 'Reject', 'More actions']);
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.trim())).toEqual(['Reassign', 'Send back', 'Request info']);
+    const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent?.trim());
+    expect(items.slice(0, 3)).toEqual(['Reassign', 'Send back', 'Request info']);
+    expect(items).toContain('Convert Lead');
+    expect(items).not.toContain('Edit');
+    expect(within(menu).getByTestId('declared-actions-header-menu-separator')).toBeTruthy();
   });
 
-  it('phone, approval-locked: the bar\'s first button is pressable, and the locked Edit is in its ⋯', async () => {
+  // objectstack#35593 / #35419 — on a phone the bar draws the same group:
+  // Approve, the ONLY filled button, Reject outlined, and the one ⋮.
+  it('phone, pending on me: the bar is [Approve][Reject][⋯], Approve the only filled button, no Edit', async () => {
     stubApprovals(PENDING_REQUEST);
     mountApprovalPage();
-    await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
     await barDrawn();
-    await waitFor(() => expect(barButtons()).toEqual(['Convert Lead', 'Assign', 'More actions']));
-    const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
-    expect(first.disabled).toBe(false);
+    await waitFor(() => expect(barButtons()).toEqual(['Approve', 'Reject', 'More actions']));
+    const approve = within(actionBar()!).getByTestId('declared-action-approval_approve');
+    const reject = within(actionBar()!).getByTestId('declared-action-approval_reject');
+    expect(approve.getAttribute('data-header-tone')).toBe('primary');
+    expect(reject.getAttribute('data-header-tone')).toBe('secondary');
+    expect((approve as HTMLButtonElement).disabled).toBe(false);
     expect(ellipsisTriggers()).toHaveLength(1);
     fireEvent.pointerDown(within(actionBar()!).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
     const menu = await screen.findByRole('menu');
-    const edit = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.trim() === 'Edit');
-    expect(edit).toBeTruthy();
-    expect(edit!.getAttribute('aria-disabled')).toBe('true');
+    const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent?.trim());
+    expect(items.slice(0, 3)).toEqual(['Reassign', 'Send back', 'Request info']);
+    expect(items).not.toContain('Edit');
   });
 
   it('control: no request, the bar keeps [Edit][Convert Lead][⋯] with Edit pressable', async () => {
@@ -587,7 +600,8 @@ function leadLockedByState(): PageObjects {
 async function desktopRowEdit(): Promise<HTMLButtonElement> {
   return waitFor(
     () => {
-      const header = document.querySelector('[data-record-page-root] header') as HTMLElement | null;
+      // The header's group, in the page's one top row (objectstack#35593).
+      const header = document.querySelector('[data-record-top-bar-actions]') as HTMLElement | null;
       expect(header).toBeTruthy();
       const row = within(header!).getByRole('toolbar');
       const edit = within(row).getAllByRole('button').find((b) => b.textContent?.trim() === 'Edit');
@@ -651,13 +665,13 @@ describe('a phone bar never leads with an Edit that is off, for any reason (obje
     expect(actionBar()).toBeNull();
   });
 
-  it('control, desktop: the approval lock keeps Edit greyed in place in the header row', async () => {
+  it('control, desktop: the approval lock draws no Edit in the header row (objectstack#35593)', async () => {
     setWidth(1440);
     stubApprovals(PENDING_REQUEST);
     mountApprovalPage();
-    await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
-    const edit = await desktopRowEdit();
-    await waitFor(() => expect(edit.disabled).toBe(true));
+    const more = await screen.findByTestId('declared-actions-header-menu', undefined, { timeout: 5000 });
+    const row = more.closest('[role="toolbar"]') as HTMLElement;
+    expect(within(row).queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(actionBar()).toBeNull();
   });
 });
@@ -714,7 +728,7 @@ describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', ()
     setWidth(1440);
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledDelete(LOCKS_NEW));
     const header = await waitFor(() => {
-      const el = document.querySelector('[data-record-page-root] header') as HTMLElement | null;
+      const el = document.querySelector('[data-record-top-bar-actions]') as HTMLElement | null;
       expect(el).toBeTruthy();
       return el!;
     }, { timeout: 5000 });
@@ -746,14 +760,13 @@ describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', ()
     expect(screen.queryByText(PREDICATE_REASON)).toBeNull();
   });
 
-  it('control, desktop: an approval-locked Edit whose disabledWhen also holds gives the band, never the generic reason', async () => {
+  it('control, desktop: an approval-locked record whose edit disabledWhen also holds draws no Edit and no generic reason', async () => {
     setWidth(1440);
     stubApprovals(PENDING_REQUEST);
     mountApprovalPage(leadWithDisabledEdit(LOCKS_NEW) as unknown[]);
-    await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
-    const edit = await desktopRowEdit();
-    await waitFor(() => expect(edit.disabled).toBe(true));
-    expect(edit.hasAttribute('aria-describedby')).toBe(false);
+    const more = await screen.findByTestId('declared-actions-header-menu', undefined, { timeout: 5000 });
+    const row = more.closest('[role="toolbar"]') as HTMLElement;
+    expect(within(row).queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(screen.queryByText(PREDICATE_REASON)).toBeNull();
   });
 });

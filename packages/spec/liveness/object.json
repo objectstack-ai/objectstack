@@ -45,7 +45,7 @@
     "highlightFields": {
       "status": "live",
       "proof": "packages/qa/dogfood/test/semantic-roles.dogfood.test.ts#semantic-roles-served",
-      "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, detail highlight strip (first 4)."
+      "note": "ADR-0085 semantic role (renamed from compactLayout): objectui default list/grid columns (ObjectGrid/ObjectView/InterfaceListPage), child-record previews (first entry), record:details auto layout, detail highlight strip (first RECORD_HIGHLIGHTS_MAX = 6, after the title)."
     },
     "relatedLists": {
       "status": "live",
@@ -229,7 +229,45 @@
     },
     "userActions": {
       "status": "live",
-      "note": "objectui ObjectGrid per-object CRUD."
+      "verifiedAt": "2026-11-19",
+      "evidence": "packages/spec/src/data/object.zod.ts#resolveCrudAffordances (collapses `obj.userActions` onto the managedBy bucket's default row, the one resolution of the five CRUD entries); ui/packages/core/src/utils/managedBy.ts#resolveEffectiveCrudAffordances (hands the object's `userActions` to it and intersects the answer with the server's effective API operations)",
+      "note": "Drilled 2026-11-19 when `transfer` (the Change Owner switch, ruling 7000907189 point 1, card #35401) landed beside the five CRUD entries with a different verdict: the container used to carry one blanket `live` (\"objectui ObjectGrid per-object CRUD.\") and was recorded in undrilled-containers.baseline.json, so its children had no verdict of their own. Each child below is graded by its own reader, measured at this tree: create/import/edit/delete read through resolveCrudAffordances by the server write guard, the apiMethods reconciliation, the /me/permissions clamp and the console's affordance rows; exportCsv by nothing past the resolver (see its row); transfer by nothing yet (planned).",
+      "children": {
+        "create": {
+          "status": "live",
+          "verifiedAt": "2026-11-19",
+          "evidence": "packages/plugins/plugin-security/src/system-write-guard.ts#assertEngineOwnedWriteAllowed (a user-context `insert` on an engine-owned bucket needs the resolved `create`); packages/spec/src/data/managed-api-affordance.ts#checkManagedApiMethodAffordances, applied by packages/objectql/src/registry-top-level.ts#reconcileManagedApiMethods (strips an apiMethods `create` the resolved affordance does not grant); packages/core/src/security/effective-object-permissions.ts#clampManagedObjectWrites (the /me/permissions clamp reads `userActions.create`); ui/packages/core/src/utils/affordanceGrants.ts#resolveAffordance (the `listNew`, `relatedNew`, `gridAddRow` and form rows read the resolved `create` and `createPredicates`); ui/packages/app-shell/src/views/objectViewToolbarAffordances.ts#useObjectViewToolbarAffordances (evaluates `createPredicates` once per toolbar)"
+        },
+        "import": {
+          "status": "live",
+          "verifiedAt": "2026-11-19",
+          "evidence": "ui/packages/core/src/utils/affordanceGrants.ts#resolveAffordance (the `listImport` row reads the resolved `import` and `importPredicates`); ui/packages/app-shell/src/views/objectViewToolbarAffordances.ts#useObjectViewToolbarAffordances (gates the CSV import entry on that verdict and evaluates `importPredicates` once per toolbar)"
+        },
+        "edit": {
+          "status": "live",
+          "verifiedAt": "2026-11-19",
+          "evidence": "packages/plugins/plugin-security/src/system-write-guard.ts#assertEngineOwnedWriteAllowed (a user-context `update`, `upsert` or `transfer` on an engine-owned bucket needs the resolved `edit`); packages/spec/src/data/managed-api-affordance.ts#checkManagedApiMethodAffordances (apiMethods `update` against the resolved `edit`); packages/core/src/security/effective-object-permissions.ts#clampManagedObjectWrites (reads `userActions.edit`); ui/packages/core/src/utils/affordanceGrants.ts#resolveAffordance (the `rowEdit`, `recordEdit`, `listInlineEdit` and form rows read the resolved `edit` and `editPredicates`); ui/packages/plugin-grid/src/ObjectGrid.tsx#ObjectGrid (per-row edit verdict and `editPredicates`)"
+        },
+        "delete": {
+          "status": "live",
+          "verifiedAt": "2026-11-19",
+          "evidence": "packages/plugins/plugin-security/src/system-write-guard.ts#assertEngineOwnedWriteAllowed (a user-context `delete`, `purge` or `restore` on an engine-owned bucket needs the resolved `delete`); packages/spec/src/data/managed-api-affordance.ts#checkManagedApiMethodAffordances (apiMethods `delete` against the resolved `delete`); packages/core/src/security/effective-object-permissions.ts#clampManagedObjectWrites (reads `userActions.delete`); ui/packages/core/src/utils/affordanceGrants.ts#resolveAffordance (the `rowDelete`, `recordDelete`, `listBulkDelete` and related-list rows read the resolved `delete` and `deletePredicates`); ui/packages/plugin-grid/src/ObjectGrid.tsx#ObjectGrid (per-row delete verdict and `objectDeletePredicates`)"
+        },
+        "exportCsv": {
+          "status": "dead",
+          "verifiedAt": "2026-11-19",
+          "authorHint": "Remove it: no export menu reads it, so it neither shows nor hides CSV export. The export entry follows the view's exportOptions and the object's effective API operations.",
+          "note": "Measured 2026-11-19 while drilling this container, by closing the call graph by hand: the key's only reader is packages/spec/src/data/object.zod.ts#resolveCrudAffordances, which copies it onto `CrudAffordances.exportCsv`, and nothing reads that bit. Server side: plugin-security's WRITE_OP_AFFORDANCE and the spec's MANAGED_WRITE_VERB_AFFORDANCE map only create/edit/delete, and core's clampManagedObjectWrites reads only create/edit/delete. Console side: ui/packages/core/src/utils/managedBy.ts#resolveEffectiveCrudAffordances only ANDs the bit with the effective `export` operation, AFFORDANCE_GRANTS has no export row (its `crud` column is create/import/edit/delete), and the export menus (ui/packages/plugin-grid/src/ObjectGrid.tsx `exportEnabled`, ui/packages/plugin-list/src/ListView.tsx `exportPermitted`, ui/packages/plugin-detail/src/RelatedList.tsx, ui/packages/plugin-report/src/ReportExport.tsx) gate on `exportOptions`, `operations.export`, `allowExport` and the effective `export` operation, never on it. `git grep exportCsv` over packages/ and ui/ at this tree returns the declaration, the resolver, the form row, the FLS table (`keep`) and tests only. So `exportCsv: false` does not hide the export entry. Its blanket `live` came from the container's undrilled verdict; drilling may not fan that out (README, Granularity). Enforce-or-remove (ADR-0049) is owed: wire the console export menus to the resolved bit, or retire the key."
+        },
+        "transfer": {
+          "status": "planned",
+          "verifiedAt": "2026-11-19",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the Change Owner action it turns on or off ships in a later release, so until then no endpoint or console button honours this switch.",
+          "evidence": "packages/spec/src/data/object.zod.ts#refuseIneligibleUserActionTransfer (the parse REFUSAL, live: `transfer: true` or `{ enabled: true }` on an object that is not structurally eligible is refused at `userActions.transfer`, naming the reason); packages/spec/src/data/user-action-transfer.ts#resolveUserActionTransfer (the one resolution: eligibility via isTransferEligible, then the switch, then the sharingModel default), which no runtime calls yet",
+          "note": "PLANNED RECORD (ruling 7000907189 point 1, spec card #35401): the per-object Change Owner switch, the union its four CRUD siblings take, with a sharingModel-derived default (on, except off on a controlled_by_parent detail) and a structural eligibility no switch can widen (packages/spec/src/data/user-action-transfer.ts#isTransferEligible: the injected owner_id, an owner provable on an external object, owner_id not readonly). READ BY NOTHING YET: the server's Change Owner endpoint (card #35402) and the console's action (card #35403) are its readers, both Blocked-by #35401. Flip to `live` on the commit that lands the first of them, citing it, and drop `authorWarn` / `authorHint` in the same edit."
+        }
+      }
     },
     "systemFields": {
       "status": "live",

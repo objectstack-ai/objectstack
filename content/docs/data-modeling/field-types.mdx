@@ -687,7 +687,7 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
 | `expression` | `string \| Expression` | **required** | CEL calculation expression |
-| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'` | — | Declared value type of the computed result. `currency`: an amount of money, in the currency the formula's own `currencyConfig` declares (none: dynamic; over record-mode amounts, `record` with their `currencyField`) |
+| `returnType` | `'number' \| 'text' \| 'boolean' \| 'date' \| 'currency' \| 'percent'` | — | Declared value type of the computed result. `currency`: an amount of money, in the currency the formula's own `currencyConfig` declares (none: dynamic; over record-mode amounts, `record` with their `currencyField`). `percent`: a ratio, read as a `percent` field reads its stored value — a fraction (`0.25` shows `25%`, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0) and its `percentDisplay` picks the bar or the plain face. Declared, never inferred |
 
 ```typescript
 { name: 'total', label: 'Total', type: 'formula', expression: 'record.quantity * record.unit_price', returnType: 'number' }
@@ -697,7 +697,8 @@ Calculated field using a CEL expression (see [Expressions](/docs/data-modeling/f
 evaluates the expression. The form and the grid cell draw it by `returnType`: `number` is
 formatted as a number field formats it (to the field's `scale`), `boolean` as Yes / No in the
 UI language (a non-boolean reads empty), `date` as the date field's absolute face (not the
-grid's relative one), and `text` in a monospace font. With no `returnType`, a number is drawn
+grid's relative one), `percent` as a percent field draws it (its `scale`, `max` and
+`percentDisplay`), and `text` in a monospace font. With no `returnType`, a number is drawn
 as a number and anything else as text; nothing is inferred from the expression.
 
 #### `expression` on a stored field

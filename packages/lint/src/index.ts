@@ -1029,10 +1029,30 @@ export type {
 export {
   validateActionBodyCompiles,
   hostCompileFailure,
+  judgeBodyCompile,
   ACTION_BODY_DOES_NOT_COMPILE,
 } from './validate-action-body-compiles.js';
-export type { ActionBodyCompileFinding, HostCompileFailure } from './validate-action-body-compiles.js';
-export { ACTION_BODY_PARAMETERS, actionBodyFunctionExpression } from './action-body-wrapper.js';
+export type {
+  ActionBodyCompileFinding,
+  HostCompileFailure,
+  BodyCompileShape,
+  BodyCompileVerdict,
+} from './validate-action-body-compiles.js';
+export {
+  ACTION_BODY_PARAMETERS,
+  actionBodyFunctionExpression,
+  HOOK_BODY_PARAMETERS,
+  hookBodyFunctionExpression,
+} from './action-body-wrapper.js';
+
+// The same compile check over hook and job bodies, in their own `(ctx)`
+// wrapper, which the runtime builds from `hookBodyFunctionExpression`.
+export {
+  validateHookAndJobBodyCompiles,
+  HOOK_BODY_DOES_NOT_COMPILE,
+  JOB_BODY_DOES_NOT_COMPILE,
+} from './validate-hook-body-compiles.js';
+export type { HookBodyCompileFinding } from './validate-hook-body-compiles.js';
 
 // The same write-set question on the third surface — a flow `update_record`
 // node's structural `config.fields`. Shares the hook rule's field index and

@@ -203,16 +203,18 @@ describe('record header: iconed system entries, Delete set apart in the ⋯, Edi
   it('the ⋯ holds the system group with Delete last, after a separator; Edit is not in it', async () => {
     await mountRecordPage(FULL_ROW);
     const menu = await openOverflow();
-    // The host's Refresh leads the ⋯, set apart (objectstack#27055).
-    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Add to favorites', 'Share', '---', 'Delete']);
+    // The host's Refresh leads the ⋯, set apart (objectstack#27055); the app
+    // actions past the row's one inline slot (objectstack#35593) come next.
+    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Schedule Follow-up', 'Log a Call', 'Add to favorites', 'Share', '---', 'Delete']);
   });
 
-  it('with three app actions in the header, Edit stays a labelled button after them, opens the edit session, and nothing is icon-only', async () => {
+  it('with three app actions in the header, the first leads, Edit stays a labelled button after it, opens the edit session, and nothing is icon-only', async () => {
     const { onEdit } = await mountRecordPage(FULL_ROW);
     const bar = toolbar();
     const buttons = Array.from(bar.querySelectorAll(':scope > button, :scope > span > button'));
     const names = buttons.map((b) => b.getAttribute('aria-label') ?? text(b));
-    expect(names).toEqual(['Convert Lead', 'Schedule Follow-up', 'Log a Call', 'Edit', 'More actions']);
+    // objectstack#35593 — the one-row header: Edit, ONE app action, the ⋯.
+    expect(names).toEqual(['Convert Lead', 'Edit', 'More actions']);
 
     const edit = screen.getByRole('button', { name: 'Edit' });
     expect(text(edit)).toBe('Edit');

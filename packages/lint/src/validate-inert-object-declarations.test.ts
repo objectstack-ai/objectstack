@@ -45,6 +45,26 @@ describe('state-machine-no-initial-states', () => {
     expect(validateInertObjectDeclarations({ objects: [task({ status: STATUS }, [machine({ active: false })])] })).toEqual([]);
   });
 
+  it('is silent on an update-only machine with no `initialStates`: the engine never runs it on create', () => {
+    expect(validateInertObjectDeclarations({ objects: [task({ status: STATUS }, [machine({ events: ['update'] })])] })).toEqual([]);
+    expect(validateInertObjectDeclarations({ objects: [task({ status: STATUS }, [machine({ events: [] })])] })).toEqual([]);
+  });
+
+  it('still refuses a machine whose `events` name `insert`, or leave it to the default', () => {
+    const objects = [
+      task({ status: STATUS }, [
+        machine({ name: 'explicit_insert', events: ['insert'] }),
+        machine({ name: 'both', events: ['update', 'insert'] }),
+        machine({ name: 'defaulted' }),
+      ]),
+    ];
+    expect(validateInertObjectDeclarations({ objects }).map((f) => [f.rule, f.path])).toEqual([
+      [STATE_MACHINE_NO_INITIAL_STATES, 'objects[0].validations[0]'],
+      [STATE_MACHINE_NO_INITIAL_STATES, 'objects[0].validations[1]'],
+      [STATE_MACHINE_NO_INITIAL_STATES, 'objects[0].validations[2]'],
+    ]);
+  });
+
   it('is silent when the machine declares its entry states, and on other validation types', () => {
     expect(validateInertObjectDeclarations({
       objects: [task({ status: STATUS }, [machine({ initialStates: ['draft'] }), { name: 'r', type: 'script', message: 'm', condition: 'false' }])],
@@ -57,6 +77,12 @@ describe('the runtime publish gate refuses an object write carrying the declarat
     const item = task({ status: STATUS }, [machine()]);
     const verdict = runRuntimeAuthoringRules({ type: 'object', item });
     expect(verdict.errors.map((f) => f.rule)).toContain(STATE_MACHINE_NO_INITIAL_STATES);
+  });
+
+  it('passes an `object` write whose only machine is update-only', () => {
+    const item = task({ status: STATUS }, [machine({ events: ['update'] })]);
+    const verdict = runRuntimeAuthoringRules({ type: 'object', item });
+    expect(verdict.errors.map((f) => f.rule)).not.toContain(STATE_MACHINE_NO_INITIAL_STATES);
   });
 
   it('a required boolean is not refused: the form treats false as present', () => {

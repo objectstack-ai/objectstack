@@ -29,6 +29,7 @@ import { slugify } from '../createDerive.js';
 import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import { t } from '../i18n.js';
 import { IconPickerWidget } from '../widgets.js';
+import { IssuePrefixLines, useIssuePrefixRegister } from '../issuePath.js';
 
 export function ObjectDefaultInspector({
   name,
@@ -36,8 +37,23 @@ export function ObjectDefaultInspector({
   onPatch,
   readOnly,
   locale,
+  issues,
+  onInlineIssueFieldsChange,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
+  // objectstack#35628 — each row below edits one top-level key and draws the
+  // host's issues under it; every other path (fields, validations, …) stays
+  // in the host's banner.
+  const registerIssuePrefix = useIssuePrefixRegister(onInlineIssueFieldsChange);
+  const issueLines = (key: string, rowLabel: string) => (
+    <IssuePrefixLines
+      issues={issues}
+      prefix={key}
+      label={rowLabel}
+      value={draft[key]}
+      register={registerIssuePrefix}
+    />
+  );
   // The host passes an empty `name` only while creating a new object.
   const createMode = !name;
   const str = (key: string) => (typeof draft[key] === 'string' ? (draft[key] as string) : '');
@@ -94,6 +110,7 @@ export function ObjectDefaultInspector({
             testId="object-name-input"
             placeholder={tr('designer.object.namePlaceholder')}
           />
+          {issueLines('name', tr('designer.object.name'))}
         </Field>
         <InspectorTextField
           label={tr('designer.object.label')}
@@ -102,6 +119,7 @@ export function ObjectDefaultInspector({
           disabled={readOnly}
           placeholder={tr('designer.object.labelPlaceholder')}
         />
+        {issueLines('label', tr('designer.object.label'))}
         <InspectorTextField
           label={tr('designer.object.pluralLabel')}
           value={str('pluralLabel')}
@@ -109,6 +127,7 @@ export function ObjectDefaultInspector({
           disabled={readOnly}
           placeholder={tr('designer.object.pluralPlaceholder')}
         />
+        {issueLines('pluralLabel', tr('designer.object.pluralLabel'))}
         {/* objectui#12531 — the icon is picked from the catalog the console
             ships (preview, search, an inline warning on a name that matches no
             icon) rather than typed blind. Clearing it patches `icon: undefined`,
@@ -122,6 +141,7 @@ export function ObjectDefaultInspector({
             onChange={(v) => onPatch({ icon: typeof v === 'string' && v !== '' ? v : undefined })}
             readOnly={readOnly}
           />
+          {issueLines('icon', tr('designer.object.icon'))}
         </div>
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">{tr('designer.object.description')}</Label>
@@ -133,9 +153,10 @@ export function ObjectDefaultInspector({
             onChange={(e) => onPatch({ description: e.target.value || undefined })}
             className="w-full text-sm rounded-md border bg-background px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
           />
+          {issueLines('description', tr('designer.object.description'))}
         </div>
       </Section>
-      <AccessSection draft={draft} onPatch={onPatch} readOnly={readOnly} tr={tr} />
+      <AccessSection draft={draft} onPatch={onPatch} readOnly={readOnly} tr={tr} issueLines={issueLines} />
     </InspectorShell>
   );
 }
@@ -189,11 +210,14 @@ function AccessSection({
   onPatch,
   readOnly,
   tr,
+  issueLines,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
   readOnly?: boolean;
   tr: (key: string) => string;
+  /** The issue lines of the row editing a top-level key (objectstack#35628). */
+  issueLines: (key: string, rowLabel: string) => React.ReactNode;
 }) {
   const perOpSupported = usePerOpSupport();
 
@@ -266,6 +290,7 @@ function AccessSection({
               <SelectItem value="private">{tr('designer.object.posture.private')}</SelectItem>
             </SelectContent>
           </Select>
+          {issueLines('access', tr('designer.object.posture'))}
         </div>
       </Field>
 
@@ -327,6 +352,7 @@ function AccessSection({
               ))}
             </div>
           )}
+          {issueLines('requiredPermissions', tr('designer.object.reqPerms'))}
         </div>
       </Field>
     </Section>

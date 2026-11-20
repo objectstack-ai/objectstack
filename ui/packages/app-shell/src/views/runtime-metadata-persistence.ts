@@ -41,6 +41,7 @@
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
+import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
 
 /** The runtime-editable artifact types ADR-0034 unifies. `page` (a record
  *  `PageSchema`) joins the original three (#1541): a record page is edited in
@@ -136,6 +137,78 @@ export interface RuntimePersistCtx {
    * Absent → nothing object-scoped can be named, and the write is left alone.
    */
   objectName?: string | null;
+  /**
+   * objectstack#35624 — the app the console is in, for a NEW view
+   * ({@link createRuntimeMetadata}). Absent (outside any app, or a caller that
+   * creates no view) → the create saves as before, naming no package.
+   */
+  app?: RuntimeCreateApp | null;
+}
+
+/**
+ * objectstack#35624 — the app a console create runs in, and what it is told
+ * when the create cannot be saved there.
+ */
+export interface RuntimeCreateApp {
+  /**
+   * The routed app's package — the one the draft preview bar counts
+   * (`draftBarPackageOf`), so a view saved into it, or into its customization
+   * package, is a view that bar counts and publishes. `null` outside any app.
+   */
+  packageId: string | null;
+  /**
+   * Called after a create that had an app but was saved naming no package (no
+   * writable package of the app could be had, {@link resolveRuntimeCreatePackage}).
+   * The save itself landed; this says where it went.
+   */
+  onSavedOutsideApp?: () => void;
+}
+
+/** The two package doors {@link resolveRuntimeCreatePackage} asks. */
+export interface RuntimeCreatePackageDoors {
+  /** Every listed package by id, with the server's `writable` verdict. */
+  listPackages: () => Promise<ReadonlyMap<string, { writable: boolean }>>;
+  /** `POST /packages/:base/ensure-customization`: the base's pair, created on first use. */
+  ensureCustomization: (basePackageId: string) => Promise<{ packageId: string; writable: boolean }>;
+}
+
+const PACKAGE_DOORS: RuntimeCreatePackageDoors = {
+  listPackages: fetchListedPackageManifests,
+  ensureCustomization: ensureCustomizationPackage,
+};
+
+/**
+ * objectstack#35624 (ruling C, 「C 存进应用定制包」) — where a view created in
+ * an app's console is saved: the app's own package when it is writable, else
+ * the app's customization package `<base>.custom` (ADR-0146 D3, the App is the
+ * customization unit), asked of the ensure door, which creates it on first use
+ * and names it, so its id is never spelled here. `null` when neither can be
+ * had: the app's package is not listed, or the ensure door refuses (a walled
+ * deployment answers a tenant administrator `403`; a kernel base is refused
+ * too). The caller then saves naming no package, as before this card, and says
+ * so ({@link RuntimeCreateApp.onSavedOutsideApp}).
+ *
+ * A refusal here never fails the create: the ruling's fallback is the
+ * package-less save, so a door that answers no is reported and passed over.
+ */
+export async function resolveRuntimeCreatePackage(
+  appPackageId: string | null | undefined,
+  doors: RuntimeCreatePackageDoors = PACKAGE_DOORS,
+): Promise<string | null> {
+  if (!appPackageId) return null;
+  try {
+    const listed = (await doors.listPackages()).get(appPackageId);
+    if (!listed) return null;
+    if (listed.writable) return appPackageId;
+    const pair = await doors.ensureCustomization(appPackageId);
+    return pair.writable ? pair.packageId : null;
+  } catch (err) {
+    console.warn(
+      `[runtime-metadata] the customization package of "${appPackageId}" could not be had; the view is saved naming no package:`,
+      err,
+    );
+    return null;
+  }
 }
 
 /**
@@ -347,6 +420,17 @@ export function viewEnvelope(
  * caller's auto-activation). A new view's spec (default columns, the
  * kanban/gallery sub-config) is built before it gets here, by `buildNewViewSpec`
  * (`newViewSpec.ts`), and the auto-activation stays in the call site.
+ *
+ * objectstack#35624 — a NEW VIEW created in an app ({@link RuntimePersistCtx.app})
+ * is saved into the app ({@link resolveRuntimeCreatePackage}): into a package
+ * the app's draft preview bar counts and publishes, and that travels with the
+ * app's customization. Its later edit, read, discard and publish name no
+ * package, as every call of this module does: the `/meta` doors address a
+ * name's one holding package when the request names none (ADR-0146 D8), so
+ * they reach this draft in the pair, and a view saved package-less before this
+ * card keeps its package-less address (a `?package=` there would fork it).
+ * Only the view callers pass an app; a report, dashboard or page is created
+ * exactly as before.
  */
 export async function createRuntimeMetadata(
   type: RuntimeArtifactType,
@@ -364,9 +448,19 @@ export async function createRuntimeMetadata(
         ' The server PUT /meta/:type/:name route requires a name segment.',
     );
   }
-  await ctx.metadataClient.save(type, name, body, { mode: 'draft' });
+  const app = type === 'view' ? ctx.app : null;
+  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId) : null;
+  await ctx.metadataClient.save(type, name, body, packageId ? { mode: 'draft', packageId } : { mode: 'draft' });
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
+  if (app?.packageId && !packageId) {
+    // The write landed: a notice that fails must not report it as refused.
+    try {
+      app.onSavedOutsideApp?.();
+    } catch (err) {
+      console.warn('[runtime-metadata] the saved-outside-app notice failed:', err);
+    }
+  }
   return name;
 }
 

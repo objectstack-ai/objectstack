@@ -928,7 +928,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (73)...
+  → Running author-time rules (74)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -2923,6 +2923,7 @@ os lint --json         # JSON output for CI
 os lint --skip-i18n    # Skip the translation coverage checks entirely
 os lint --include-platform     # Audit the platform built-in i18n keys too
 os lint --eval --eval-min 80   # Score the bundled generation corpus instead
+os lint --item view.json --type view   # Judge ONE item file, no project needed
 ```
 
 **Options.** Every flag the command declares, and its one positional:
@@ -2941,6 +2942,8 @@ os lint --eval --eval-min 80   # Score the bundled generation corpus instead
 | `--eval` | Run the metadata-generation eval over the bundled golden corpus and report scores — a different run, see below |
 | `--eval-min <n>` | Minimum passing score per eval case (default `75`) |
 | `--generator <path>` | Path to a module that default-exports `(prompt, id) => stack`; enables live eval, scoring generated output instead of fixtures. Requires `--eval` |
+| `--item <file>` | Lint ONE metadata item instead of a project: a JSON file holding the item, the body `os meta register --data` takes. Requires `--type`. See **One item** below |
+| `--type <type>` | The metadata type of the `--item` file (`object`, `view`, `flow`, …; a collection's plural spelling is accepted too). Requires `--item` |
 
 **`--eval` is a different run, not an extra check.** It short-circuits the
 project lint entirely and scores the bundled generation corpus, so it does not
@@ -2948,6 +2951,28 @@ combine with the style flags above. `--generator` applies only inside it:
 passed without `--eval` the run exits **1** and says so on both faces, rather
 than accepting a flag nothing outside eval mode reads (which is what it did
 before #15550 — including for a generator path that did not exist).
+
+**One item (`--item`).** For a developer or an AI client authoring metadata
+item by item against a runtime, with no project on disk:
+`os lint --item view.json --type view` places the item alone in a stack and runs
+the shared rule table over it, plus `os lint`'s per-entry naming, label and
+structure conventions. A rule whose verdict on the item needs metadata the run
+does not have is **not run, and named**: the run measures, rule by rule, which
+top-level stack keys the rule reads while judging the item, and a rule that read
+anything beside the item's own collection has its findings dropped and is listed
+with the keys it read (`notJudged` on the `--json` face). `os lint`'s own
+namespace-prefix, i18n-coverage and (for an object) data-model families judge
+the package or the whole stack and are listed as not run (`familiesNotRun`).
+Two limits of the measurement: a rule that resolves the item's references to
+other items of the same type sees no such item, and a rule that walks every
+collection is listed as not run even where it would have judged the item alone.
+The exit code reads as a project run's (`--strict` included). It does not
+combine with a configuration path, `--score` or `--eval`. Stage the item for
+review with `os meta register <type> --data view.json --package <id> --mode draft`:
+the draft is stored into that package's Studio Changes, nothing is published, and
+the command reads the draft back and prints the publish verdict the runtime serves
+on it (`valid`, its errors and warnings; `publishVerdict` on `--format json`).
+`--mode draft` without `--package` is refused before any request.
 
 It does not replace `os validate`: `os lint` never parses the stack against the
 Zod schema (a schema error is `os validate`'s verdict to give), and it emits no
@@ -3029,9 +3054,17 @@ os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   
    object): every stage reports it as not exercised, and the CRUD stage lists
    it `skipped` as `external datasource "NAME" (writes allowed)` or
    `(read-only)`, which does not fail the run. An object that requires a
-   reference to it is skipped too. A write the app itself makes there, its seed
-   or a hook or flow that a stage's write fires, goes where the app sends it,
-   as under `os dev`. With `--rls`, a second fresh boot proves the
+   reference to it is skipped too, and its reason says the target was withheld
+   on purpose. A write the app itself makes there, its seed or a hook or flow
+   that a stage's write fires, goes where the app sends it, as under `os dev`.
+   A declared managed datasource (`schemaMode: 'managed'`, or none declared) is
+   not connected to the database it names: verify runs it on a fresh in-memory
+   store, as it runs its own default one, so every write to its objects stays
+   in memory and they are still exercised. One whose engine has no in-memory
+   stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
+   and its objects are `skipped` as `managed datasource "NAME" (driver
+   "DRIVER"): not exercised`. Only verify's own writes are withheld: the app's
+   seed, hooks and flows still write to that real database. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
    the run. With `--reference-shapes`, another fresh boot proves that every

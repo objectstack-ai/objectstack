@@ -2442,6 +2442,13 @@ export default class Doctor extends Command {
     // Display environment results
     let hasErrors = false;
     let hasWarnings = false;
+    // Whether some warning that fired carries a fix that only `--verbose`
+    // prints. The summary's re-run advice promises exactly that, so it follows
+    // this, not `hasWarnings`: a bare `printWarning` (missing tests,
+    // `@deprecated` usages, circular dependencies, unused objects, orphan
+    // views) has no fix in either mode, and a fix printed unasked (the
+    // protocol-gap hint, the unique-scope prescription) is already on screen.
+    let hasVerboseOnlyFix = false;
     
     console.log('');
     results.forEach((result) => {
@@ -2451,7 +2458,10 @@ export default class Doctor extends Command {
       renderHealthCheckResult(result, flags.verbose);
 
       if (result.status === 'error') hasErrors = true;
-      if (result.status === 'warning') hasWarnings = true;
+      if (result.status === 'warning') {
+        hasWarnings = true;
+        if (result.fix) hasVerboseOnlyFix = true;
+      }
     });
 
     // ── Extended Checks ──────────────────────────────────────────────
@@ -2641,6 +2651,7 @@ export default class Doctor extends Command {
                 printError(`${f.where}: ${f.message}`);
               } else {
                 hasWarnings = true;
+                if (f.hint) hasVerboseOnlyFix = true;
                 printWarning(`${f.where}: ${f.message}`);
               }
               if (flags.verbose) {
@@ -2677,6 +2688,7 @@ export default class Doctor extends Command {
         // above a warning. Inert today: that list filters on `error`.
         results.push(finding);
         hasWarnings = true;
+        if (finding.fix) hasVerboseOnlyFix = true;
       }
     }
 
@@ -2687,6 +2699,7 @@ export default class Doctor extends Command {
       const deprecations = scanDeprecatedPatterns(scanDir);
       if (deprecations.length > 0) {
         hasWarnings = true;
+        hasVerboseOnlyFix = true;
         for (const dep of deprecations) {
           printWarning(`${dep.file}:${dep.line} — ${dep.description}`);
           if (flags.verbose) {
@@ -2743,8 +2756,11 @@ export default class Doctor extends Command {
       console.log(chalk.yellow('⚠️  Environment is functional but has some warnings.'));
       // Only when the flag is off: under `--verbose` the fix suggestions this
       // line points at are already printed above, so advising the operator to
-      // pass the flag they just passed sends them to re-run for nothing.
-      if (!flags.verbose) {
+      // pass the flag they just passed sends them to re-run for nothing. And
+      // only when there is such a suggestion: a re-run whose warnings carry no
+      // hidden fix prints nothing more, so the advice would send them for
+      // nothing just the same.
+      if (!flags.verbose && hasVerboseOnlyFix) {
         console.log(chalk.dim('   Run with --verbose to see fix suggestions.'));
       }
     } else {

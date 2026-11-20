@@ -1,8 +1,10 @@
 /**
- * The view switcher of the Console `ObjectView` (`./ObjectView.tsx`): the list
- * title is the switcher (objectstack#27594). The title reads
- * 「VIEW LABEL ▾」, with no record count beside it (objectstack#34603: the
- * list's footer says how many records it holds), and opens a dropdown — a search box, then the
+ * The view switcher of the Console `ObjectView` (`./ObjectView.tsx`): it leads
+ * the list's view bar (objectstack#35548) and reads, as ONE trigger, the open
+ * layout's type icon, the view label, the record count and the caret
+ * 「▦ VIEW LABEL 23 ▾」. The count is the list's own (`ListRecordCountContext`,
+ * provided where the list hands the switcher its slot), so the switcher draws
+ * none where no list counts for it (a chart). It opens a dropdown — a search box, then the
  * reader's pinned view (📌), the views they opened lately, and every view, the
  * authored ones first — so an object with many views is switched the way it is
  * with two. It replaced the flat view-tab row (`ViewTabBar`), which overflowed
@@ -20,25 +22,26 @@
  * packages and environment declare. Their rows offer Rename and Delete too,
  * and their 📌 is the same pin: a personal view pinned is the reader's default.
  *
- * The dropdown ends with Save as my view (the list on screen saved as one of
- * the reader's own views, offered to any reader the server lets save one),
- * New view (the Create View dialog) and, for an admin, Manage views
- * (`ManageViewsDialog`): the rename, delete, shared default and configure acts
- * that each tab's ▾ menu used to carry.
+ * The dropdown's body is `./objectViewSwitcherMenu.tsx` (objectstack#35553).
+ * It ends with 「Add view」, which turns the dropdown into the in-place create
+ * card (Save as my view folds into it: one of the reader's own views by
+ * default, a shared draft for a reader who may create one), and, for an
+ * admin, Manage views (`ManageViewsDialog`): the rename, delete, shared
+ * default and configure acts that each tab's ▾ menu used to carry.
  *
- * Below `sm` the page header is not drawn. On a phone the same switcher leads
- * the list's toolbar row (`ListView`'s `toolbarLeading`) or heads a chart
- * (objectstack#27058): one switcher on every width, and the app bar draws no
- * view dropdown of its own.
+ * At every width the switcher leads the list's toolbar row (`ListView`'s
+ * `toolbarLeading`) or heads a chart (objectstack#27058, objectstack#35548):
+ * one switcher on every width, and neither the page bar nor the app bar draws
+ * a view dropdown of its own.
  */
 
-import { useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
-import { cn, Input, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
+import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type SetStateAction } from 'react';
+import { cn, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
 import type { ViewTabItem } from '@object-ui/plugin-view';
 import { resolveViewId } from '@object-ui/core';
 import { useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { BookmarkPlus, Check, ChevronDown, ListOrdered, Pencil, Pin, Plus, Star, Trash2 } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { viewRowId } from '../utils/viewIdentity.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useListViewFavorites, type ListViewFavorites } from '../layout/listViewFavorites.js';
@@ -48,11 +51,24 @@ import { VIEW_TYPE_ICONS } from './objectViewHelpers.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+import { ObjectViewSwitcherMenu, type SwitcherCreateOptions } from './objectViewSwitcherMenu.js';
+import { useCreateViewInPlace } from './objectViewViewCrud.js';
 
 type TFn = ReturnType<typeof useObjectTranslation>['t'];
 
-/** How many views the dropdown's Recent section lists at most. */
-const RECENT_VIEW_LIMIT = 3;
+/**
+ * What the list on screen tells the switcher that leads its view bar
+ * (objectstack#35548): how many records it holds (`null` while it does not say)
+ * and the layout it draws, which a reader's personal layout change can make
+ * differ from the view's own type. Absent (no provider) ⇒ the switcher shows
+ * no count and the view's own type icon.
+ */
+export interface ListRecordCountState {
+    count: number | null;
+    layout?: string;
+}
+
+export const ListRecordCountContext = createContext<ListRecordCountState | null>(null);
 
 /** One view the switcher offers. */
 export interface TitleSwitcherView {
@@ -72,7 +88,7 @@ export interface ObjectViewTitleSwitcherProps {
     activeViewId: string;
     /** The title's text: the open view's label, or the object's when none is open. */
     activeLabel: string;
-    /** The open view's description, the title's tooltip (a chart face's; a list draws its own). */
+    /** The open view's description, the trigger's tooltip (objectstack#35548: on every face). */
     description?: string;
     onViewChange: (viewId: string) => void;
     /** The reader's pinned view for this object, if any. */
@@ -88,35 +104,20 @@ export interface ObjectViewTitleSwitcherProps {
     /** The ☆ of each row; absent off an app route, where no row offers one. */
     favorites: ListViewFavorites | null;
     viewTypeIcons?: Record<string, ComponentType<{ className?: string }>>;
-    /** New view: the Create View dialog. Absent ⇒ not offered. */
+    /** 「Add view」 with no create card: the Create View dialog. Absent ⇒ only the card, if any. */
     onAddView?: () => void;
     /** Manage views: the admin's dialog. Absent ⇒ not offered. */
     onManageViews?: () => void;
-    /** Save as my view: the list on screen as one of the reader's own views. Absent ⇒ not offered. */
-    onSavePersonalView?: () => void;
     /** Rename one of the reader's own views. Absent ⇒ not offered. */
     onRenamePersonalView?: (viewId: string) => void;
     /** Delete one of the reader's own views. Absent ⇒ not offered. */
     onDeletePersonalView?: (viewId: string) => void;
+    /**
+     * 「Add view」 as the in-place create card (objectstack#35553); Save as my
+     * view folds into it. Absent ⇒ `onAddView`, if any.
+     */
+    create?: SwitcherCreateOptions;
     t: TFn;
-}
-
-/** The authored views first, then the saved ones, each in the list's order; the reader's own last. */
-function authoredFirst(views: readonly TitleSwitcherView[]): TitleSwitcherView[] {
-    return [
-        ...views.filter((v) => v.authored),
-        ...views.filter((v) => !v.authored && !v.personal),
-        ...views.filter((v) => v.personal),
-    ];
-}
-
-function SectionLabel({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
-    return (
-        <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {icon}
-            {children}
-        </div>
-    );
 }
 
 export function ObjectViewTitleSwitcher({
@@ -132,149 +133,28 @@ export function ObjectViewTitleSwitcher({
     viewTypeIcons = VIEW_TYPE_ICONS,
     onAddView,
     onManageViews,
-    onSavePersonalView,
     onRenamePersonalView,
     onDeletePersonalView,
+    create,
     t,
 }: ObjectViewTitleSwitcherProps) {
     const [open, setOpen] = useState(false);
-    const [query, setQuery] = useState('');
+    const listState = useContext(ListRecordCountContext);
+    const displayLocale = useDisplayLocale();
 
     const byId = useMemo(() => new Map(views.map((v) => [v.id, v])), [views]);
-    const all = useMemo(() => authoredFirst(views), [views]);
-    const shared = all.filter((v) => !v.personal);
-    const mine = all.filter((v) => v.personal);
-    const pinned = pinnedViewId && onPinnedViewChange ? byId.get(pinnedViewId) : undefined;
-    const recent = recentViewIds
-        .filter((id) => id !== pinned?.id)
-        .map((id) => byId.get(id))
-        .filter((v): v is TitleSwitcherView => !!v)
-        .slice(0, RECENT_VIEW_LIMIT);
-    const needle = query.trim().toLocaleLowerCase();
-    const matches = needle ? all.filter((v) => v.label.toLocaleLowerCase().includes(needle)) : all;
+    const activeType = listState?.layout ?? byId.get(activeViewId)?.type;
+    const ActiveIcon = activeType ? viewTypeIcons[activeType] : undefined;
+    const count = listState?.count ?? null;
 
-    const onOpenChange = (next: boolean) => {
-        setOpen(next);
-        if (!next) setQuery('');
-    };
     const choose = (viewId: string) => {
-        onOpenChange(false);
+        setOpen(false);
         if (viewId !== activeViewId) onViewChange(viewId);
-    };
-
-    const row = (view: TitleSwitcherView, section: string) => {
-        const Icon = viewTypeIcons[view.type];
-        const active = view.id === activeViewId;
-        const isPinned = view.id === pinned?.id;
-        const inMenu = !!favorites?.inMenu(view.id);
-        const starred = !inMenu && !!favorites?.isFavorite(view.id);
-        const starLabel = inMenu
-            ? t('view.switcher.inMenu', { defaultValue: 'Already in the menu' })
-            : starred
-                ? t('common.removeFromFavorites', { defaultValue: 'Remove from favorites' })
-                : t('common.addToFavorites', { defaultValue: 'Add to favorites' });
-        const pinLabel = isPinned
-            ? t('view.switcher.unpin', { defaultValue: 'Unpin: the list opens its default view again' })
-            : t('view.switcher.pin', { defaultValue: 'Pin: open this view by default' });
-        const renameLabel = t('view.rename', { defaultValue: 'Rename' });
-        const deleteLabel = t('view.deleteView', { defaultValue: 'Delete View' });
-        const iconButton = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-        // Shown on hover or focus, and always while set, so a starred or pinned
-        // view says so without a hover.
-        // A touch screen has no hover, so there they always show.
-        const reveal = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100';
-        return (
-            <div
-                key={`${section}:${view.id}`}
-                data-testid={`view-switcher-row-${view.id}`}
-                data-section={section}
-                className="group flex items-center gap-0.5 rounded-sm hover:bg-muted"
-            >
-                <button
-                    type="button"
-                    onClick={() => choose(view.id)}
-                    aria-current={active ? 'true' : undefined}
-                    className={cn(
-                        'flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm max-sm:min-h-11',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        active ? 'font-medium text-foreground' : 'text-foreground/90',
-                    )}
-                >
-                    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
-                        {Icon ? <Icon className="h-4 w-4" /> : null}
-                    </span>
-                    <span className="truncate">{view.label}</span>
-                    {active && <Check className="ml-auto h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
-                </button>
-                {favorites && (
-                    <button
-                        type="button"
-                        data-testid="view-switcher-star"
-                        aria-label={starLabel}
-                        title={starLabel}
-                        aria-pressed={starred}
-                        aria-disabled={inMenu || undefined}
-                        onClick={() => { if (!inMenu) favorites.toggle(view.id, view.label); }}
-                        className={cn(
-                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm max-sm:h-11 max-sm:w-11',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                            inMenu
-                                ? 'cursor-default text-muted-foreground/40'
-                                : 'text-muted-foreground hover:text-foreground',
-                            !starred && reveal,
-                        )}
-                    >
-                        <Star className={cn('h-3.5 w-3.5', starred && 'fill-current text-amber-500')} />
-                    </button>
-                )}
-                {onPinnedViewChange && (
-                    <button
-                        type="button"
-                        data-testid="view-switcher-pin"
-                        aria-label={pinLabel}
-                        title={pinLabel}
-                        aria-pressed={isPinned}
-                        onClick={() => onPinnedViewChange(isPinned ? null : view.id)}
-                        className={cn(
-                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                            isPinned ? 'text-foreground' : reveal,
-                        )}
-                    >
-                        <Pin className={cn('h-3.5 w-3.5', isPinned && 'fill-current')} />
-                    </button>
-                )}
-                {view.personal && onRenamePersonalView && (
-                    <button
-                        type="button"
-                        data-testid="view-switcher-rename"
-                        aria-label={renameLabel}
-                        title={renameLabel}
-                        onClick={() => { onOpenChange(false); onRenamePersonalView(view.id); }}
-                        className={cn(iconButton, reveal)}
-                    >
-                        <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                )}
-                {view.personal && onDeletePersonalView && (
-                    <button
-                        type="button"
-                        data-testid="view-switcher-delete"
-                        aria-label={deleteLabel}
-                        title={deleteLabel}
-                        onClick={() => { onOpenChange(false); onDeletePersonalView(view.id); }}
-                        className={cn(iconButton, reveal)}
-                    >
-                        <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                )}
-            </div>
-        );
     };
 
     return (
         <span className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
-            <Popover open={open} onOpenChange={onOpenChange}>
+            <Popover open={open} onOpenChange={setOpen}>
                 <PopoverTrigger asChild>
                     <button
                         type="button"
@@ -284,115 +164,73 @@ export function ObjectViewTitleSwitcher({
                         // margin pulled out of it truncated the label it was sized for.
                         className={cn(
                             // Below `sm` the trigger is a 44 px touch target.
-                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left max-sm:min-h-11 max-sm:min-w-11',
+                            // One trigger, 28px tall and 13px like every control of the
+                            // view bar (objectstack#35548): type icon, label, count, caret.
+                            'inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] font-medium leading-none max-sm:min-h-11 max-sm:min-w-11',
                             // Inset: the title clips what overflows it (`truncate`), an outer ring included.
                             'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',
                         )}
                     >
-                        <span className="truncate">{activeLabel}</span>
-                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        {ActiveIcon && (
+                            <span className="flex shrink-0 text-muted-foreground" data-testid="list-view-switcher-type-icon" aria-hidden="true">
+                                {createElement(ActiveIcon, { className: 'h-4 w-4' })}
+                            </span>
+                        )}
+                        <span className="truncate" data-testid="list-view-switcher-label">{activeLabel}</span>
+                        {count !== null && (
+                            <span className="shrink-0 font-normal tabular-nums text-muted-foreground max-sm:hidden" data-testid="list-view-switcher-count">
+                                {count.toLocaleString(displayLocale)}
+                            </span>
+                        )}
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" data-testid="list-view-switcher-caret" aria-hidden="true" />
                     </button>
                 </PopoverTrigger>
+                {/* The dropdown's body (objectstack#35553): the views, grouped, and
+                    「Add view」, which turns it into the in-place create card. */}
                 <PopoverContent
                     align="start"
                     className="w-72 p-0"
                     data-testid="list-view-switcher-menu"
                     aria-label={t('view.switcher.label', { defaultValue: 'Views' })}
                 >
-                    <div className="border-b p-2">
-                        <Input
-                            autoFocus
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            placeholder={t('view.searchViews', { defaultValue: 'Search views' })}
-                            aria-label={t('view.searchViews', { defaultValue: 'Search views' })}
-                            data-testid="list-view-switcher-search"
-                            className="h-8 max-sm:h-11"
-                        />
-                    </div>
-                    <div className="max-h-80 overflow-y-auto p-1">
-                        {needle ? (
-                            matches.length > 0
-                                ? matches.map((v) => row(v, 'match'))
-                                : (
-                                    <p className="px-2 py-3 text-center text-sm text-muted-foreground" data-testid="list-view-switcher-empty">
-                                        {t('view.noViewsFound', { defaultValue: 'No views match your search.' })}
-                                    </p>
-                                )
-                        ) : (
-                            <>
-                                {pinned && (
-                                    <div data-testid="list-view-switcher-pinned">
-                                        <SectionLabel icon={<Pin className="h-3 w-3" aria-hidden="true" />}>
-                                            {t('view.switcher.pinned', { defaultValue: 'Pinned' })}
-                                        </SectionLabel>
-                                        {row(pinned, 'pinned')}
-                                    </div>
-                                )}
-                                {recent.length > 0 && (
-                                    <div data-testid="list-view-switcher-recent">
-                                        <SectionLabel>{t('view.switcher.recent', { defaultValue: 'Recent' })}</SectionLabel>
-                                        {recent.map((v) => row(v, 'recent'))}
-                                    </div>
-                                )}
-                                {mine.length > 0 && (
-                                    <div data-testid="list-view-switcher-mine">
-                                        <SectionLabel>{t('view.switcher.myViews', { defaultValue: 'My views' })}</SectionLabel>
-                                        {mine.map((v) => row(v, 'mine'))}
-                                    </div>
-                                )}
-                                {shared.length > 0 && (
-                                    <div data-testid="list-view-switcher-all">
-                                        <SectionLabel>{t('view.switcher.all', { defaultValue: 'All views' })}</SectionLabel>
-                                        {shared.map((v) => row(v, 'all'))}
-                                    </div>
-                                )}
-                            </>
-                        )}
-                    </div>
-                    {(onSavePersonalView || onAddView || onManageViews) && (
-                        <div className="border-t p-1">
-                            {onSavePersonalView && (
-                                <button
-                                    type="button"
-                                    data-testid="list-view-switcher-save-mine"
-                                    onClick={() => { onOpenChange(false); onSavePersonalView(); }}
-                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
-                                >
-                                    <BookmarkPlus className="h-4 w-4 text-muted-foreground" />
-                                    {t('view.switcher.saveAsMyView', { defaultValue: 'Save as my view' })}
-                                </button>
-                            )}
-                            {onAddView && (
-                                <button
-                                    type="button"
-                                    data-testid="list-view-switcher-new"
-                                    onClick={() => { onOpenChange(false); onAddView(); }}
-                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
-                                >
-                                    <Plus className="h-4 w-4 text-muted-foreground" />
-                                    {t('view.addNewView', { defaultValue: 'Add new view' })}
-                                </button>
-                            )}
-                            {onManageViews && (
-                                <button
-                                    type="button"
-                                    data-testid="list-view-switcher-manage"
-                                    onClick={() => { onOpenChange(false); onManageViews(); }}
-                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
-                                >
-                                    <ListOrdered className="h-4 w-4 text-muted-foreground" />
-                                    {t('view.manageViews', { defaultValue: 'Manage views' })}
-                                </button>
-                            )}
-                        </div>
-                    )}
+                    <ObjectViewSwitcherMenu
+                        views={views}
+                        activeViewId={activeViewId}
+                        onChoose={choose}
+                        onClose={() => setOpen(false)}
+                        pinnedViewId={pinnedViewId}
+                        onPinnedViewChange={onPinnedViewChange}
+                        recentViewIds={recentViewIds}
+                        favorites={favorites}
+                        viewTypeIcons={viewTypeIcons}
+                        onManageViews={onManageViews}
+                        onRenamePersonalView={onRenamePersonalView}
+                        onDeletePersonalView={onDeletePersonalView}
+                        create={create}
+                        onAddView={onAddView}
+                        t={t}
+                    />
                 </PopoverContent>
             </Popover>
         </span>
     );
 }
+
+/** The field names an open view's columns list (a name, or `{ field }`). */
+function shownFieldsOf(view: Record<string, any> | undefined): string[] {
+    const columns = Array.isArray(view?.columns) ? view.columns : [];
+    return columns
+        .map((column: unknown) => (typeof column === 'string' ? column : (column as { field?: unknown })?.field))
+        .filter((name: unknown): name is string => typeof name === 'string' && name.length > 0);
+}
+
+// The doors of a host that offers no in-place create: never called, since no
+// card is drawn without `create`.
+const NO_LIST_STATE = () => ({ url: {} });
+const REFUSE_SAVE = async (): Promise<string> => { throw new Error('no personal views here'); };
+const IGNORE = () => {};
+const REFUSE_CREATE = async (): Promise<boolean> => false;
 
 /**
  * The view items (which `ManageViewsDialog` lists too) and the title switcher
@@ -418,7 +256,7 @@ export function useObjectViewTitleSwitcher({
     setPinnedViewId,
     appSegment,
     personalViewIds,
-    onSavePersonalView,
+    create,
     onRenamePersonalView,
     onDeletePersonalView,
 }: {
@@ -443,17 +281,48 @@ export function useObjectViewTitleSwitcher({
     appSegment: string | undefined;
     /** The ids of the reader's own views among `views` (objectstack#29635). */
     personalViewIds: ReadonlySet<string>;
-    onSavePersonalView?: () => void;
+    /**
+     * The in-place create of the dropdown's 「Add view」 (objectstack#35553):
+     * who may create which kind, whether the list holds unsaved filters or
+     * sort, and the host's doors (`useCreateViewInPlace`). Neither kind
+     * allowed ⇒ no card, and an admin keeps the Create View dialog.
+     */
+    create?: Omit<Parameters<typeof useCreateViewInPlace>[0], 'objectName' | 't'> & {
+        canCreatePersonal: boolean;
+        canCreateShared: boolean;
+        hasUnsavedConditions: boolean;
+    };
     onRenamePersonalView?: (viewId: string) => void;
     onDeletePersonalView?: (viewId: string) => void;
 }) {
-    // objectui#12528 — the view's description is shown once. A list face
-    // draws it itself, as the info control at the start of its toolbar row
-    // (`ListView`, with no leading node from the host). A chart face has no
-    // such row, so there it rides on the switcher, as the title's tooltip:
-    // resolved the way `ListView` resolves the same text (`pickLocalized` on
-    // the display locale), and gated on the same switch the relay hands
-    // `ListView` as `appearance.showDescription`: `false` shows it nowhere.
+    const createInPlace = useCreateViewInPlace({
+        objectName: objectDef.name,
+        activeView: create?.activeView,
+        readListState: create?.readListState ?? NO_LIST_STATE,
+        savePersonal: create?.savePersonal ?? REFUSE_SAVE,
+        openPersonal: create?.openPersonal ?? IGNORE,
+        createShared: create?.createShared ?? REFUSE_CREATE,
+        clearSourceListState: create?.clearSourceListState,
+        t,
+    });
+    const createOptions: SwitcherCreateOptions | undefined = create && (create.canCreatePersonal || create.canCreateShared)
+        ? {
+            objectDef,
+            canCreatePersonal: create.canCreatePersonal,
+            canCreateShared: create.canCreateShared,
+            hasUnsavedConditions: create.hasUnsavedConditions,
+            shownFields: shownFieldsOf(create.activeView),
+            onCreate: createInPlace,
+        }
+        : undefined;
+    // objectui#12528 — the view's description is shown once. It rides on the
+    // switcher, as the trigger's tooltip, on every face: since
+    // objectstack#35548 the switcher leads the list's view bar (the list's
+    // `toolbarLeading`), and a list with a leading node draws no info control
+    // of its own. Resolved the way `ListView` resolves the same text
+    // (`pickLocalized` on the display locale), and gated on the same switch
+    // the relay hands `ListView` as `appearance.showDescription`: `false`
+    // shows it nowhere.
     const displayLocale = useDisplayLocale();
     const viewItems: ViewTabItem[] = views.map((view: any) => {
         const saved = savedViews.find((sv: any) => viewRowId(sv) === view.id);
@@ -526,7 +395,7 @@ export function useObjectViewTitleSwitcher({
             views={switcherViews}
             activeViewId={openViewId}
             activeLabel={titleLabel}
-            description={openView?.type === 'chart' ? openView.description : undefined}
+            description={openView?.description}
             onViewChange={handleViewChange}
             pinnedViewId={pinnedViewId}
             onPinnedViewChange={setPinnedViewId}
@@ -534,7 +403,7 @@ export function useObjectViewTitleSwitcher({
             favorites={favorites}
             onAddView={isAdmin ? handleAddView : undefined}
             onManageViews={isAdmin ? () => setManageViewsOpen(true) : undefined}
-            onSavePersonalView={onSavePersonalView}
+            create={createOptions}
             onRenamePersonalView={onRenamePersonalView}
             onDeletePersonalView={onDeletePersonalView}
             t={t}

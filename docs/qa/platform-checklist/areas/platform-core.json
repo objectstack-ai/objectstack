@@ -3205,10 +3205,10 @@
     },
     {
       "id": "platform-core.seed-mode-matrix",
-      "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` inserts and deletes nothing, DECLARED and IMPLEMENTED alike (no caller clears the table): its posture is scored as bare insert, never ticked as scoped deletion",
+      "title": "Seed mode matrix (update/upsert/ignore): each live mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and the retired `insert` and `replace` are refused at the draft save with SeedMode's own prescription, so neither can reach a load",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -3216,12 +3216,11 @@
         "app": "showcase",
         "requires": [
           "a runtime-created WRITABLE package (the metadata-authoring-roundtrip fixture) — `seed` is allowRuntimeCreate, so per-mode scratch seeds are authored as drafts (PUT /api/v1/meta/seed/<name> with an explicit `mode`) and applied by publish (applySeedBodies materializes published seed bodies through the SAME SeedLoaderService the boot path uses — packages/runtime/src/seed-loader.ts is a re-export shim of it). The seed BODY carries object, mode, records (and externalId when not the default) and NO `name` key — the URL names the seed, and SeedSchema is strict (packages/spec/src/data/seed.zod.ts#SeedSchema), so a body `name` answers 422 unrecognized_keys — and one that differs from the URL's name is refused even earlier, 400 VALIDATION_ERROR (measured at 756220c4)",
-          "a scratch target object in the same writable package (do NOT aim mode probes, least of all replace/insert replays, at seeded showcase objects — destructive-in-place: it contaminates platform-core.seed-integrity's baselines)"
+          "a scratch target object in the same writable package (do NOT aim mode probes, least of all upsert replays, at seeded showcase objects — destructive-in-place: it contaminates platform-core.seed-integrity's baselines)"
         ],
         "knownGaps": [
           "the publish response's seedApplied summary surfaces inserted/updated/errors but not per-row skip detail — the `ignore says so` clause therefore reads the skip from effect (counts + untouched values) plus the loader's summary where surfaced, not from a UI report",
-          "`insert` mode's schema comment says 'fail on duplicate', but the loader does NO matching in insert mode (no existing-records preload) — the failure only materializes where the object itself carries a unique constraint; on an unconstrained scratch object an insert replay simply duplicates rows. The matrix records both shapes honestly",
-          "after insert mode has duplicated a natural key (acceptance[3]'s unconstrained shape), upsert and update bind each key to ONE of the duplicates and leave the other unconverged, silently: loadExistingRecords (packages/metadata-protocol/src/seed-loader.ts) keys an unordered find by externalId, so the last row read wins — the NEWER duplicate on QA run #24779's SQLite boot, which upsert rewrote while the original kept its value. No clause scores it: record it beside acceptance[3] as an observation, never as a FAIL of acceptance[0] or negative[0]"
+          "the load's refusal of a STORED dataset that still declares a retired mode (refused alone, its error carrying SeedMode's own prescription, every other dataset landing) is not reachable from this item: the draft save refuses both modes first (steps[4] and [5]), so a retired mode never stores. It is scored from its unit pin, packages/metadata-protocol/src/seed-loader-retired-mode-34613.test.ts, never by a live run"
         ]
       },
       "steps": [
@@ -3229,9 +3228,9 @@
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
-        "INSERT: seed draft (mode insert) re-declaring A → a SECOND A-named row appears (no matching in insert mode); record the duplication; if the object declares a unique key on the natural key instead, record the refusal — either shape is the mode's real contract",
-        "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything, which is what SeedMode now declares for replace ('deleting nothing: for a cache table the caller cleared'). Score F's survival as the declared posture; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
-        "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because steps 2–4 rewrote A's rows (update mode set A to a2, insert mode added a second A-named row), so it re-converges them to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
+        "INSERT (retired): PUT a seed draft (mode insert) declaring A → refused 422 INVALID_METADATA, one issues[] entry {path: 'mode', code: 'invalid_value'} whose message is SeedMode's own prescription (`seed.mode: 'insert'` was removed in @objectstack/spec 18.7.0 …); nothing is stored under the seed's name",
+        "REPLACE (retired): the same draft with mode replace → the same 422 refusal at `mode`, carrying replace's own prescription (it inserted every record and left clearing the table to the caller); nothing is stored",
+        "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because the UPDATE step set A to a2, so it re-converges A to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
         "teardown: the writable package's own delete, or discard the run's own DB"
       ],
       "acceptance": [
@@ -3254,21 +3253,21 @@
           "evidence": "A's before/after read + E's read"
         },
         {
-          "clause": "insert never matches: a replay adds rows again on an unconstrained object (the duplication is the honest observation), and only an object-level unique constraint turns it into the schema comment's 'fail on duplicate' — record which shape this run's fixture produced",
+          "clause": "the retired `insert` (it matched no row, so every replay inserted each record again) is refused at the draft save: 422 INVALID_METADATA with SeedMode's own prescription at `mode`, and nothing is stored — no seed can duplicate rows by its mode",
           "oracle": "api",
-          "verify": "the duplicate A-named rows (or the constraint refusal) after step 4",
-          "evidence": "the post-insert row listing (or the refusal body)"
+          "verify": "the refusal body after step 4: code INVALID_METADATA, status 422, the issues[] entry at path mode whose message opens with the `seed.mode: 'insert'` was removed sentence; no seed stored under the name",
+          "evidence": "the refusal body"
         },
         {
-          "clause": "EXPECTED POSTURE (declared = implemented): `replace` inserts every record with no match and deletes nothing. SeedMode's replace member declares 'Insert every record, no match, deleting nothing: for a cache table the caller cleared', SeedSchema's mode description says replace 'does the same and deletes nothing: it is for a table the caller cleared', and writeRecord's replace arm is that bare insert (its comment 'caller should have cleared the table'; NO caller anywhere clears it), so pre-existing rows SURVIVE a replace-mode publish. F's survival is the declared behaviour: neither a gap to record nor data loss to file; the run must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements a clear (in the loader or in a caller), this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
+          "clause": "the retired `replace` (it inserted every record and deleted nothing, leaving the clear to a caller that never existed) is refused the same way with its own prescription — no mode deletes, so no run ticks a scoped deletion",
           "oracle": "api",
-          "verify": "F (undeclared, hand-inserted) still present after the replace publish; G inserted; grep evidence: the only 'replace' write arm is the insert in seed-loader.ts's writeRecord, and decideWriteAction (the batched mirror) routes replace to insert — cite the symbols, never a line number",
-          "evidence": "F's surviving read + G's read + the source excerpt"
+          "verify": "the refusal body after step 5, as acceptance[3] with replace; source: SEED_MODE_RETIRED in seed.zod.ts holds both prescriptions and SeedMode reads them through enumWithRetiredValues — cite the symbols, never a line number",
+          "evidence": "the refusal body + the source excerpt"
         },
         {
-          "clause": "the mode vocabulary is the spec's own five and the resolution seam is one line: dataset.mode || config.defaultMode ('ignore'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a sixth mode lands",
+          "clause": "the live mode vocabulary is the spec's own three (SEED_MODE_VALUES: update, upsert, ignore; insert and replace sit in SEED_MODE_RETIRED) and the resolution seam is one line: dataset.mode || config.defaultMode ('ignore'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a live mode lands or leaves",
           "oracle": "build",
-          "verify": "SeedMode members at seed.zod.ts; the resolution at metadata-protocol/src/seed-loader.ts; the runtime re-export shim proving one implementation",
+          "verify": "SEED_MODE_VALUES and SeedMode at seed.zod.ts; the resolution at metadata-protocol/src/seed-loader.ts; the runtime re-export shim proving one implementation",
           "evidence": "the three source excerpts"
         }
       ],
@@ -3277,21 +3276,19 @@
         "update creating a row, or ignore rewriting one, is a mode doing another mode's verb — FAIL"
       ],
       "variants": [
-        "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
         "mode update — matched rows only; unmatched skipped, never created",
         "mode upsert — create-or-update on externalId with no-op-replay skip",
-        "mode replace — bare insert, no matching, nothing deleted: DECLARED and IMPLEMENTED alike (the expected-posture clause)",
         "mode ignore — insert-if-absent; existing rows never rewritten"
       ],
       "enumSource": {
         "file": "packages/spec/src/data/seed.zod.ts",
-        "export": "SeedMode",
-        "expect": 5
+        "export": "SEED_MODE_VALUES",
+        "expect": 3
       },
       "traps": ["destructive-in-place", "seed-data-thin", "silent-coercion"],
       "source": [
-        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Insert every record, no match, deleting nothing: for a cache table the caller cleared'), (SeedSchema's mode description — replace 'does the same and deletes nothing: it is for a table the caller cleared')",
-        "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment), (decideWriteAction — the batched mirror, replace → insert),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
+        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — enumWithRetiredValues over SEED_MODE_VALUES, the three live modes, and SEED_MODE_RETIRED, the insert and replace prescriptions a parse answers)",
+        "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload — every live mode matches on externalId), (writeRecord per-mode switch), (decideWriteAction — the batched mirror),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
         "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode is SeedSchema.shape.mode, default 'ignore')",
         "packages/metadata-protocol/src/protocol.ts#applySeedBodies+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
         "packages/runtime/src/seed-loader.ts#SeedLoaderService (the MOVED shim — one SeedLoaderService for every path)",
@@ -3346,6 +3343,12 @@
           "date": "2026-11-08",
           "change": "steps[0], acceptance[0].clause and acceptance[5].clause re-pointed to the ignore default, plus variants[2] and source[2] (an accepted extension in the same item, so it does not contradict the clauses). Stale-spec finding of QA run #31486 (subject 0647dabb, rule R-1, acceptance[5]): PR #30152 made a seed create-only by default, an omitted mode is ignore. Read at 4894cfe1: packages/spec/src/data/seed.zod.ts SeedSchema mode is SeedMode.default('ignore'); seed-loader.zod.ts SeedLoaderConfigSchema defaultMode is SeedSchema.shape.mode; the seam in packages/metadata-protocol/src/seed-loader.ts writeRecord is unchanged (dataset.mode || config.defaultMode). steps[0] also carries the run's note that an unprefixed draft fails the whole publish-drafts batch (outcome 'refused', publishedCount 0; protocol.ts publishPackageDrafts pre-flight). Every probe step declares its mode, so no verdict moves",
           "ref": "#31497"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-19",
+          "change": "title, fixtures, steps[4] to [6], acceptance[3] to [5], variants, enumSource and source[0] to [1] revised to the three live modes. #34791 (#34613) retired `insert` and `replace` at the schema: SeedMode became enumWithRetiredValues(SEED_MODE_VALUES, SEED_MODE_RETIRED), so the pin read 0 members and the watchdog went red; it now counts SEED_MODE_VALUES (3). steps[4] and [5] and acceptance[3] and [4] score the two retired modes as refused at the draft save, the answer measured in-process at base b65488a8 (the save door's own suite, protocol.seed-external-id-refusal.test.ts): 422 INVALID_METADATA, issue at mode, code invalid_value, message the mode's prescription. knownGaps[1] and [2] described insert-mode duplication and go with it; the stored-dataset refusal is recorded as scored from its unit pin. No live-mode verdict moves",
+          "ref": "#35297"
         }
       ]
     },

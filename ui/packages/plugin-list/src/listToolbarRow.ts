@@ -25,9 +25,12 @@
  * lays them out in Chromium with real Tailwind and measures the view name.
  */
 
-/** The toolbar row. */
+/**
+ * The toolbar row: the list's view bar, 40px from `sm` up (objectstack#35548),
+ * its border included. Below `sm` it keeps its padding so it can wrap.
+ */
 export const TOOLBAR_ROW =
-  'border-b px-2 sm:px-4 py-1.5 flex items-center justify-between gap-1 sm:gap-2 bg-background';
+  'border-b px-2 py-1.5 sm:h-10 sm:px-4 sm:py-0 flex items-center justify-between gap-1 sm:gap-2 bg-background';
 /** Added to the row below `sm` when a host passes a leading node. */
 export const TOOLBAR_ROW_LEADING_PHONE = 'max-sm:flex-wrap max-sm:gap-x-2 max-sm:gap-y-1';
 
@@ -49,8 +52,15 @@ export const TOOLBAR_USER_FILTERS = 'shrink-0 min-w-0 overflow-x-auto';
 /** Added below `sm` with a leading node: alone on a line, the chips scroll inside it. */
 export const TOOLBAR_USER_FILTERS_LEADING_PHONE = 'max-sm:shrink';
 
-/** The tool cluster. */
-export const TOOLBAR_CLUSTER =
-  'flex items-center gap-0 shrink-0 rounded-lg border border-border bg-muted/40 p-0.5 shadow-sm';
+/** The tool cluster: plain text triggers, no frame (objectstack#35548). */
+export const TOOLBAR_CLUSTER = 'flex items-center gap-0.5 shrink-0';
+
+/**
+ * A text trigger of the view bar — 「Filter」「Sort」「Options」
+ * (objectstack#35548): 28px tall, 13px, the name shown from `sm` up (below
+ * `sm` the trigger keeps its icon and a 44px touch target).
+ */
+export const TOOLBAR_TEXT_TRIGGER =
+  'h-7 min-w-7 gap-1 px-1.5 sm:px-2 text-[13px] font-normal text-muted-foreground hover:text-foreground transition-colors duration-150';
 /** Added below `sm` with a leading node: on a wrapped line the cluster keeps the right edge. */
 export const TOOLBAR_CLUSTER_LEADING_PHONE = 'max-sm:ml-auto';

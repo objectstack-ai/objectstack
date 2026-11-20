@@ -10,6 +10,11 @@
  * `master_detail` FK that sets `inlineEdit` AND declares `relatedList: true` is
  * a side card, as `relatedList`'s own description says ("write true to keep it
  * a side card"); the page used to draw it as a body table.
+ *
+ * #35597 moved two more cells, the rule's own change: a `master_detail` FK with
+ * no `relatedList` is a body table whatever `inlineEdit` says (absent or
+ * `false` used to be a side card). Every `lookup` cell, every explicit
+ * `relatedList` cell and every inline-edited cell keeps its verdict.
  */
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
@@ -28,12 +33,14 @@ describe('isBodyTableRelationship — the verdict table', () => {
     ['lookup', false, undefined, false],
     ['lookup', 'primary', undefined, true],
     ['lookup', undefined, 'grid', false],
-    ['master_detail', undefined, undefined, false],
-    ['master_detail', undefined, false, false],
+    ['master_detail', undefined, undefined, true],
+    ['master_detail', undefined, false, true],
     ['master_detail', undefined, true, true],
     ['master_detail', undefined, 'grid', true],
     ['master_detail', undefined, 'form', true],
     ['master_detail', 'primary', undefined, true],
+    ['master_detail', true, undefined, false],
+    ['master_detail', false, undefined, false],
     ['master_detail', true, 'grid', false],
     ['master_detail', false, 'grid', false],
     ['text', 'primary', undefined, false],
@@ -54,9 +61,12 @@ describe('fieldGroupBodyTableRefusal — the sentence both surfaces write', () =
   const side: NamedInboundRelationship = { child: 'task', field: 'lead_id', def: { type: 'lookup' } };
   const hidden: NamedInboundRelationship = { child: 'note', field: 'lead_id', def: { type: 'lookup', relatedList: false } };
   const body: NamedInboundRelationship = { child: 'line', field: 'lead_id', def: { type: 'master_detail', inlineEdit: 'grid' } };
+  // #35597: a plain master_detail (no inlineEdit, no relatedList) is a body table too.
+  const plainOwned: NamedInboundRelationship = { child: 'step', field: 'lead_id', def: { type: 'master_detail' } };
 
   it('is undefined when every named relationship is a body table, or none is named', () => {
     expect(fieldGroupBodyTableRefusal('lead', 0, 'line', [body])).toBeUndefined();
+    expect(fieldGroupBodyTableRefusal('lead', 0, 'step', [plainOwned])).toBeUndefined();
     expect(fieldGroupBodyTableRefusal('lead', 0, 'nope', [])).toBeUndefined();
   });
 
@@ -64,7 +74,7 @@ describe('fieldGroupBodyTableRefusal — the sentence both surfaces write', () =
     expect(fieldGroupBodyTableRefusal('lead', 2, 'task', [side])).toBe(
       "Object 'lead' fieldGroups[2].relatedList 'task' names a related list that is not a body table: " +
         "'task.lead_id' is a side card. A field group's relatedList only positions a body table (a FK declaring " +
-        "relatedList: 'primary', or a master_detail FK that sets inlineEdit and declares no relatedList), so the " +
+        "relatedList: 'primary', or a master_detail FK that declares no relatedList), so the " +
         "record page draws nothing at the group for any other list. Set relatedList: 'primary' on that FK, or " +
         "remove the group's relatedList.",
     );
@@ -89,7 +99,7 @@ describe('fieldGroups[i].relatedList describes the body-table rule it enforces',
   const text = root.properties?.relatedList?.description ?? '';
 
   it('says it names a body table only, and that any other list is refused with the remedy', () => {
-    expect(text).toContain("It names a body table only (a FK declaring relatedList: 'primary', or a master_detail FK that sets inlineEdit and declares no relatedList)");
+    expect(text).toContain("It names a body table only (a FK declaring relatedList: 'primary', or a master_detail FK that declares no relatedList)");
     expect(text).toContain('a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused');
     expect(text).toContain("set relatedList: 'primary' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group's relatedList");
   });

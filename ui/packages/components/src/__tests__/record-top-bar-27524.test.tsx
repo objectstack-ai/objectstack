@@ -46,7 +46,8 @@ describe('RecordTopBar (objectstack#27524, Target 7)', () => {
       />,
     );
     const bar = document.querySelector('[data-record-top-bar]')!;
-    expect(bar.className).toContain('h-10');
+    // objectstack#35593 — 44 px: the record header's one row.
+    expect(bar.className).toContain('sm:h-11');
     expect(screen.getByText('Leads › Mira Costa')).toBeInTheDocument();
     expect(order()).toEqual(['position', 'next', 'previous', 'divider', 'toggles', 'close']);
     const position = document.querySelector('[data-record-top-bar-position]')!;
@@ -57,6 +58,30 @@ describe('RecordTopBar (objectstack#27524, Target 7)', () => {
     expect((screen.getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Next record' }));
     expect(onNext).toHaveBeenCalledTimes(1);
+  });
+
+  it('the record header\'s slot sits after the hairline, then its own hairline, then ⊟ (objectstack#35593)', () => {
+    const slot = React.createRef<HTMLSpanElement>();
+    render(
+      <RecordTopBar
+        stepper={{ onNext: () => {}, position: { index: 0, total: 3 } }}
+        actionSlotRef={slot}
+        toggles={<button type="button" data-testid="toggles">⊟</button>}
+      />,
+    );
+    const controls = Array.from(document.querySelector('[data-record-top-bar-controls]')!.children).map(
+      (el) => el.getAttribute('data-record-top-bar-step')
+        ?? (el.hasAttribute('data-record-top-bar-position') ? 'position' : null)
+        ?? (el.hasAttribute('data-record-top-bar-actions') ? 'actions' : null)
+        ?? (el.hasAttribute('data-record-top-bar-divider') ? `divider:${el.getAttribute('data-record-top-bar-divider') || 'step'}` : null)
+        ?? el.getAttribute('data-testid'),
+    );
+    expect(controls).toEqual(['position', 'next', 'previous', 'divider:step', 'actions', 'divider:actions', 'toggles']);
+    // The slot is the host's element, empty until a header portals into it,
+    // and both it and its hairline hide while it is empty.
+    expect(slot.current).toBe(document.querySelector('[data-record-top-bar-actions]'));
+    expect(slot.current!.className).toContain('empty:hidden');
+    expect(document.querySelector('[data-record-top-bar-divider="actions"]')!.className).toContain('peer-empty/actions:hidden');
   });
 
   it('draws only what it is handed: no list context, no counter, no ↓ ↑ and no hairline', () => {

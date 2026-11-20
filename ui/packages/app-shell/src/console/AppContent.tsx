@@ -67,7 +67,7 @@ import {
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
-import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
+import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import {
   packagedActionsStudioPath,
@@ -589,6 +589,20 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   ].join(',');
   const bucketsSettled = useLazyMetadataSettled(routeReadsKey, ensureType, getTypeStatus);
   const routeReadsSettled = bucketsSettled && (!objectScope || objectScopeReady);
+  // objectstack#35535 — an object's list reads its saved views when
+  // `ObjectView` mounts, which waits for the list's lazy modules. Its read
+  // starts here instead, in the commit where the route can render: the scope
+  // has settled with its views in hand (the app bundle, or the `/meta/view`
+  // list it waited for), so the read joins that and asks nothing new, and the
+  // route's object is one `ObjectView` draws. Only on an app the URL names, and
+  // outside a draft preview, whose list read is another request.
+  const viewReadObject = objectViewRouteObject(appSubPath, hostRoutePaths);
+  const viewReadReady =
+    !!viewReadObject && routeReadsSettled && allObjects.some((o) => o?.name === viewReadObject);
+  useEffect(() => {
+    if (!viewReadObject || !viewReadReady || !bundleAppName || previewDrafts) return;
+    prefetchObjectViewRows(dataSource, viewReadObject);
+  }, [dataSource, viewReadObject, viewReadReady, bundleAppName, previewDrafts]);
   // Set once the first frame past the splash has rendered. After it, a route
   // waiting on its buckets draws its skeleton inside the console chrome rather
   // than taking the whole console back to the splash.

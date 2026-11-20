@@ -103,8 +103,10 @@ describe('[#27312] relatedList: \'primary\' describes the v3 body table', () => 
   const text = descriptionAt(fieldRoot, ['relatedList']);
 
   it('states each value\'s role on the record page and cites ADR-0085 for the layout', () => {
-    expect(text).toContain('false = the child object is not shown on the parent record page');
-    expect(text).toContain('true/absent = shown as an auxiliary panel on the record page');
+    expect(text).toContain('false = hidden: the child object is not shown on the parent record page');
+    expect(text).toContain('true = an auxiliary panel on the record page');
+    expect(text).toContain('absent = \'primary\' (a body table) on a master_detail field, an auxiliary panel on a lookup field');
+    expect(text).not.toContain('true/absent');
     expect(text).toContain('shown as a full-width table in the record\'s detail body');
     expect(text).toContain('The page layout is defined by ADR-0085');
   });
