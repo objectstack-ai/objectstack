@@ -100,15 +100,18 @@ test('the timeline stream\'s Changes chip shows display values (localized dates,
   const foldEntries = fold.getByTestId('activity-fold-entries');
   // The three UPDATE entries render as change lines; wait for the latest one.
   await expect(foldEntries.locator('[data-stream-change]', { hasText: 'Owner' }).first()).toBeVisible({ timeout: 15_000 });
-  // The fold counts the rows it expands to, and holds all three updates. (The
-  // Changes chip also draws the creation's own audit entry as a change line,
-  // which folds in beside them when it is stamped the same day, so the count
-  // is not pinned to exactly three.)
+  // The fold holds exactly the three updates. The creation's own audit entry
+  // is the record's creation, not one more edit: it never folds in beside
+  // them, even stamped the same day by the same person (objectstack#35788).
   const foldRow = foldEntries.locator('[data-stream-row]');
+  await expect(foldRow, 'the fold holds the three updates and nothing else').toHaveCount(3);
+  await expect(fold).toHaveAttribute('data-fold-count', '3');
   await expect(foldRow.filter({ hasText: 'Customer Since', hasNotText: 'Lifecycle' }), 'the date update').toHaveCount(1);
   await expect(foldRow.filter({ hasText: 'Finance' }), 'the lifecycle and industry update').toHaveCount(1);
   await expect(foldRow.filter({ hasText: other.name }), 'the owner update').toHaveCount(1);
-  await expect(fold).toHaveAttribute('data-fold-count', String(await foldRow.count()));
+  // The creation is said at most once, and never inside the fold.
+  await expect(foldRow.filter({ hasText: name }), 'no creation line in the fold').toHaveCount(0);
+  expect(await stream.locator('[data-stream-row]', { hasText: name }).count(), 'the creation at most once').toBeLessThanOrEqual(1);
   const text = (await stream.innerText()).replace(/\s+/g, ' ');
   // What the change lines say, without the fold row's summary (which names
   // fields, not values): every positive read below is of a real line, and
