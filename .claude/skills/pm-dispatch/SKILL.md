@@ -188,11 +188,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 ## 路径分叉
 
 - **ACCEPT 之后的路径分叉**:翻 ready/挂 auto-merge/入队前 `get_files` 取路径面,⛔ 不看报告自述。
-- governed 面(定 Tier,非车道):`docs/adr/**`+`.claude/**`+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`。
-- governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
-- 另含 `ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
-- 守卫仪器恒 H(本仓):`scripts/pm/check-governed-merges.mjs`+`scripts/pm/check-governed-queue-guard.mjs`
-- 同含 `scripts/pm/record-recognisers.mjs`+`scripts/pm/dispatch-gates.mjs`;守卫 workflow、settings、hooks 恒 H。
+- governed 面(定 Tier,非车道):`docs/adr/**`+`.claude/**`+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`+`AGENTS.md`+`CLAUDE.md`+`ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
+- `GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
+- 恒 H:守卫仪器 `scripts/pm/check-governed-merges.mjs`+`scripts/pm/check-governed-queue-guard.mjs`+`scripts/pm/record-recognisers.mjs`+`scripts/pm/dispatch-gates.mjs`+守卫 workflow+settings+hooks。
 - 定档 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
 - >3000 行(含生成物,additions+deletions)或申报收窄同换终局四件套含③请审,⛔ 无 Tier S 例外。
 - ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读四行+席位意见,其下 `## 席位核对`。
@@ -207,7 +205,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「要你做什么」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
-- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地,守卫仪器除外。
+- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地,守卫除外。
 - Tier S = `Rule-change: none`/`ruled` 记录核过的 `.claude/**`+下行面,余皆 H;达档 PASS 后 ready→入队。
 - 本仓 workflows 读 `readWorkflowDiff`(发布面/C2/拒读⇒H),技能与只增 ADR `lowRiskArmVerdict`,未读⇒H。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
@@ -319,7 +317,7 @@ Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
 Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定;xhigh 同行引其时长读数、实测记录或常设令的 id 与时刻>`
 Clause-②: yes | no
-Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; levels: AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and each changeset body; a kind other than `none` or a `(narrowing)` arm owes the PR body a third line, from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it; the seat files the owed card, rewriting `owed — FILES` to `#N` before ACCEPT via `references/seat-post-protocol.md`'s PR-body line; a diff touching the root `.claude/**` owes the PR body one more line-start line, from the diff: `Rule-change: none | ruled | yes`, where `none` changes no fleet rule, `ruled` copies a maintainer ruling quoted on a line-start `Ruling-ref:` line and `yes` changes one, and a missing line lands as Tier H like `yes`)
+Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; levels: AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and each changeset body; a kind other than `none` or a `(narrowing)` arm owes the PR body a third line, from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it; the seat files the owed card, rewriting `owed — FILES` to `#N` before ACCEPT via `references/seat-post-protocol.md`'s PR-body line)
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)
