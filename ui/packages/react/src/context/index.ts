@@ -38,6 +38,6 @@ export * from './DrillNavigationContext.js';
 export * from './HostNavigationContext.js';
 export { useHostMapStyle, HostMapStyleProvider } from './HostMapStyleContext.js';
 export { useRecordPagePreferences, RecordPagePreferencesProvider } from './RecordPagePreferencesContext.js';
-export type { RecordPagePreference, RecordPagePreferencesStore } from './RecordPagePreferencesContext.js';
+export type { RecordPagePreference, RecordPagePreferencesStore, RelatedListPreference } from './RecordPagePreferencesContext.js';
 export * from './RelatedRecordActionsContext.js';
 export { PrintPageProvider, usePrintPage } from './PrintPageContext.js';

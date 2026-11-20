@@ -85,7 +85,7 @@ import {
   type ActionResult,
   type FilterNode,
 } from '@object-ui/core';
-import { useSafeFieldLabel, useRecordContext } from '@object-ui/react';
+import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type RelatedListPreference } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
@@ -795,6 +795,11 @@ interface BodyTableTotalPlan {
   groupBy?: string;
   /** The one currency every row is in, for a currency column grouped by nothing. */
   currency?: string;
+  /**
+   * A currency column whose currency does not resolve (objectstack#35710): its
+   * total is drawn the way its cells are, as an amount with no symbol.
+   */
+  amount?: true;
   /** The parent's stored roll-up, when it is this list's total (`RolledUpSum.sameRows`). */
   stored?: number;
 }
@@ -810,7 +815,8 @@ interface BodyTableTotalPlan {
  *
  *  1. a `currency` column, totalled in its one currency: a `fixed` code, the
  *     tenant default for `dynamic`, the parent's code for a `record` amount
- *     that follows its parent. A `record` amount whose rows carry their own
+ *     that follows its parent; with none resolving, as an amount with no
+ *     symbol, as its cells draw (objectstack#35710). A `record` amount whose rows carry their own
  *     code is grouped by that code on the server, and totalled only when one
  *     currency comes back — a sum across currencies is not a total;
  *  2. a `number` / `integer` / `decimal` column only when the record's object
@@ -876,9 +882,12 @@ function useBodyTableTotals(opts: {
         } else {
           // A `record` amount following its parent reads the parent's code
           // off the record this list hangs under (ADR-0144 D2).
+          // With none resolving (no code of its own, no tenant default), the
+          // total is still the server's figure, drawn without a symbol, as
+          // the column's cells are (objectstack#35710).
           const currency = resolveFieldCurrency(def, tenantCurrency, withFollowedParent({}, def, parentRecord) as any);
-          if (!currency) continue;
-          plan.currency = currency;
+          if (currency) plan.currency = currency;
+          else plan.amount = true;
         }
       }
       if (!plan.groupBy && rollUp?.sameRows && listFilterNode === undefined) {
@@ -965,6 +974,8 @@ function useBodyTableTotals(opts: {
       let text: string;
       if (sum.currency) {
         text = formatCurrency(sum.value, sum.currency, displayLocale);
+      } else if (plan.amount) {
+        text = formatCurrency(sum.value, undefined, displayLocale);
       } else {
         try {
           text = new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum.value);
@@ -1365,6 +1376,37 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const bodyTableIds = React.useContext(RecordBodyTablesContext);
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
+  // objectstack#35601 — the related tab remembers the reader's header sort and
+  // column widths, per list, in their record-page preferences (the
+  // `sys_user_preference` row of the parent object's record page). No store,
+  // no memory: the list's own default, as before.
+  const pagePreferences = useRecordPagePreferences();
+  const preferenceContext = useRecordContext();
+  const preferenceObject = (typeof (preferenceContext?.objectSchema as { name?: unknown } | undefined)?.name === 'string'
+    ? (preferenceContext!.objectSchema as { name: string }).name
+    : preferenceContext?.objectName) || undefined;
+  const preferenceKey = enlargedFace && pagePreferences && preferenceObject && ownRelationshipId ? ownRelationshipId : null;
+  const storedListPreference = preferenceKey ? pagePreferences!.get(preferenceObject!).relatedLists?.[preferenceKey] : undefined;
+  const writeListPreference = React.useCallback(
+    (patch: RelatedListPreference) => {
+      if (!preferenceKey || !pagePreferences || !preferenceObject) return;
+      const lists = pagePreferences.get(preferenceObject).relatedLists ?? {};
+      pagePreferences.update(preferenceObject, {
+        relatedLists: { ...lists, [preferenceKey]: { ...lists[preferenceKey], ...patch } },
+      });
+    },
+    [preferenceKey, pagePreferences, preferenceObject],
+  );
+  // The remembered sort applies once, when it is first read; a header click
+  // after that is the reader's and is written back.
+  const storedSortApplied = React.useRef(false);
+  const storedSort = storedListPreference?.sort;
+  React.useEffect(() => {
+    if (storedSortApplied.current || !storedSort) return;
+    storedSortApplied.current = true;
+    setSortField(storedSort.field);
+    setSortDirection(storedSort.order);
+  }, [storedSort]);
   // objectstack#35597 — a body table shows its first `pageSize` rows (ten by
   // default, the page may say otherwise) and 「显示全部 N 条」 expands it in
   // place: every row, one read, no pages. N is the server's count when the
@@ -3190,8 +3232,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       setCurrentPage(0);
       setSortField(first.field);
       setSortDirection(first.order);
+      storedSortApplied.current = true;
+      writeListPreference({ sort: { field: first.field, order: first.order } });
     },
-    [unmaskedColumnKeysKey],
+    [unmaskedColumnKeysKey, writeListPreference],
   );
 
   // A `grid`/`table` list renders a real table, whose column headers carry the
@@ -3280,8 +3324,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     if (enlargedFace && (type === 'grid' || type === 'table')) {
       return {
         type: 'object-grid',
+        // Its own column-layout key, apart from the object's list page grid.
+        ...(ownRelationshipId ? { id: `related-${ownRelationshipId}` } : {}),
         objectName: api,
         data: { provider: 'value', items: paginatedData },
+        ...(storedListPreference?.columnState ? { columnState: storedListPreference.columnState } : {}),
         columns: effectiveColumns
           .map((c: any) => c.accessorKey || columnIdentity(c))
           .filter(Boolean),
@@ -3381,7 +3428,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodySummaryRow]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodySummaryRow, ownRelationshipId, storedListPreference?.columnState]);
 
   const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
 
@@ -3422,8 +3469,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       ...(objectSchema?.fields ? { objectFields: objectSchema.fields } : {}),
       ...(onRowEdit ? { onEdit: onRowEdit } : {}),
       ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
+      ...(preferenceKey ? { onColumnStateChange: (columnState: RelatedListPreference['columnState']) => writeListPreference({ columnState }) } : {}),
     };
-  }, [enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow]);
+  }, [preferenceKey, writeListPreference, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow]);
 
   // objectstack#35601 — a stateful child (tasks) is grouped by its status on
   // the related tab: open groups first, completed last (`statusGroupsOf`).
