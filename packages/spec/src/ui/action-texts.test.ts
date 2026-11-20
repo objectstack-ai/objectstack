@@ -130,13 +130,12 @@ describe('Action.texts — a key the body asks for literally is refused at save 
     expect(ActionSchema.safeParse({ ...base, body: body(source), texts: TEXTS }).success).toBe(true);
   });
 
-  // The optional-call and non-null call shapes are literal asks too, read by
-  // the one key reader the hook door shares.
+  // The optional-call shape is a literal ask too, read by the one key reader
+  // the hook door shares. (An action's door reads `body.source` alone: it has
+  // no handler path.)
   const SHAPES = [
     ['ctx.text?.(', (k: string) => `ctx.text?.('${k}')`],
     ['await ctx.text?.(', (k: string) => `await ctx.text?.('${k}', { subject: input.subject })`],
-    ['ctx.text!(', (k: string) => `ctx.text!('${k}')`],
-    ['await ctx.text!(', (k: string) => `await ctx.text!('${k}', { subject: input.subject })`],
   ] as const;
 
   it.each(SHAPES)('refuses an undeclared key asked for as %s at save, with the same sentence', (_shape, ask) => {
