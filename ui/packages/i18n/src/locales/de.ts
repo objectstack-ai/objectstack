@@ -941,8 +941,6 @@ const de = {
     recordOpen: "Datensätze öffnen",
     recordOpenDrawer: "Seitenleiste",
     recordOpenPage: "Ganze Seite",
-    recordOpenNote: "Ihre persönliche Einstellung, nicht Teil der Objektdeklaration. Das ↗ eines Datensatzes öffnet immer die ganze Seite.",
-    recordOpenDeclaredPage: "Dieses Objekt ist so deklariert, dass es als ganze Seite geöffnet wird",
     addGroup: "Gruppenfeld hinzufügen",
     collapsedByDefault: "Standardmäßig eingeklappt",
     removeGroup: "Entfernen",
@@ -952,6 +950,21 @@ const de = {
     withheldFieldsLeftOut: "Nicht angezeigt, gefiltert, sortiert oder gruppiert nach {{fields}}: Das Paket, das das Feld hinzufügt, ist deaktiviert. Es kehrt zurück, sobald das Paket aktiviert wird.",
     inlineEditShort: "Inline bearbeiten",
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'Ansichtsname',
+      fields: 'Felder',
+      fieldsShown: '{{count}} angezeigt',
+      fieldsShown_one: '{{count}} angezeigt',
+      fieldsShown_other: '{{count}} angezeigt',
+      rowHeight: 'Zeilenhöhe',
+      rowHeightCompact: 'Kompakt',
+      rowHeightStandard: 'Standard',
+      rowHeightSpacious: 'Großzügig',
+      more: 'Mehr',
+      restoreDefaults: 'Standard wiederherstellen',
+      recordOpenAlwaysPage: 'Datensätze öffnen sich immer als ganze Seite',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1181,6 +1194,8 @@ const de = {
     manageViewsDescription: "Alle Ansichten dieses Objekts neu anordnen, umbenennen, anheften oder löschen.",
     searchViews: "Ansichten suchen",
     addNewView: "Neue Ansicht hinzufügen",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Diese Ansicht wurde als Entwurf außerhalb dieser App gespeichert, weil das Anpassungspaket der App hier nicht verwendet werden kann. Die Entwurfsleiste dieser App zählt und veröffentlicht sie nicht: Veröffentlichen Sie sie über die Startseite.",
     done: "Fertig",
     noViewsFound: "Keine Ansichten entsprechen Ihrer Suche.",
     // objectstack#27594 — the list title's view switcher.
@@ -1188,14 +1203,20 @@ const de = {
       label: "Ansichten",
       pinned: "Angeheftet",
       recent: "Zuletzt",
-      all: "Alle Ansichten",
       pin: "Anheften: diese Ansicht standardmäßig öffnen",
       unpin: "Lösen: die Liste öffnet wieder ihre Standardansicht",
       inMenu: "Bereits im Menü",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Meine Ansichten",
-      saveAsMyView: "Als meine Ansicht speichern",
       myViewName: "Name der Ansicht",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: 'Geteilte Ansichten',
+      addView: 'Ansicht hinzufügen',
+      typeLabel: 'Ansichtstyp',
+      includeCurrent: 'Aktuelle Filter und Sortierung übernehmen',
+      scopeShared: 'Geteilt',
+      scopeHint: 'Geteilte Ansichten sieht jeder, der diese Liste sehen kann',
+      create: 'Erstellen',
     },
     dragToReorder: "Zum Neuanordnen ziehen",
     defaultView: "Standardansicht",
@@ -4810,7 +4831,6 @@ const de = {
   filterBuilder: {
     currency: 'Währung',
     currencyNeedsAnd: 'Ein Währungsbetrag wird nur dann in der gewählten Währung verglichen, wenn alle Bedingungen zutreffen müssen (UND).',
-    where: "Wo",
     and: "UND",
     or: "ODER",
     clearAll: "Alle löschen",
@@ -4901,6 +4921,7 @@ const de = {
       after: 'nach',
     },
     sort: {
+      advanced: 'Alle Sortierebenen',
       direction: 'Richtung',
       ascending: 'Aufsteigend',
       descending: 'Absteigend',

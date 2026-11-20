@@ -1230,8 +1230,6 @@ const en = {
     recordOpen: 'Open records',
     recordOpenDrawer: 'Drawer',
     recordOpenPage: 'Full page',
-    recordOpenNote: 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
-    recordOpenDeclaredPage: 'This object is declared to open as a full page',
     addGroup: 'Add group field',
     collapsedByDefault: 'Collapsed by default',
     removeGroup: 'Remove',
@@ -1241,6 +1239,21 @@ const en = {
     withheldFieldsLeftOut: 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'View name',
+      fields: 'Fields',
+      fieldsShown: '{{count}} shown',
+      fieldsShown_one: '{{count}} shown',
+      fieldsShown_other: '{{count}} shown',
+      rowHeight: 'Row height',
+      rowHeightCompact: 'Compact',
+      rowHeightStandard: 'Standard',
+      rowHeightSpacious: 'Spacious',
+      more: 'More',
+      restoreDefaults: 'Restore defaults',
+      recordOpenAlwaysPage: 'Records always open as a full page',
+    },
   },
   managedByBadge: {
     config: {
@@ -1476,6 +1489,8 @@ const en = {
     manageViewsDescription: 'Reorder, rename, pin, or delete every view in this object.',
     searchViews: 'Search views',
     addNewView: 'Add new view',
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: 'This view was saved as a draft outside this app, because the app’s customization package cannot be used here. This app’s draft bar does not count or publish it: publish it from Home.',
     done: 'Done',
     noViewsFound: 'No views match your search.',
     // objectstack#27594 — the list title's view switcher.
@@ -1483,14 +1498,20 @@ const en = {
       label: 'Views',
       pinned: 'Pinned',
       recent: 'Recent',
-      all: 'All views',
       pin: 'Pin: open this view by default',
       unpin: 'Unpin: the list opens its default view again',
       inMenu: 'Already in the menu',
       // objectstack#29635 — the reader's own views (My views).
       myViews: 'My views',
-      saveAsMyView: 'Save as my view',
       myViewName: 'View name',
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: 'Shared views',
+      addView: 'Add view',
+      typeLabel: 'View type',
+      includeCurrent: 'Include the current filters and sort',
+      scopeShared: 'Shared',
+      scopeHint: 'Shared views are seen by everyone who can see this list',
+      create: 'Create',
     },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
@@ -5565,7 +5586,6 @@ const en = {
   filterBuilder: {
     currency: 'Currency',
     currencyNeedsAnd: 'A currency amount is compared within the chosen currency only when every condition must match (AND).',
-    where: 'Where',
     and: 'AND',
     or: 'OR',
     clearAll: 'Clear all',
@@ -5656,6 +5676,7 @@ const en = {
       after: 'after',
     },
     sort: {
+      advanced: 'All sort levels',
       direction: 'Direction',
       ascending: 'Ascending',
       descending: 'Descending',

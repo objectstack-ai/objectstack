@@ -968,8 +968,6 @@ const fr = {
     recordOpen: "Ouvrir les enregistrements",
     recordOpenDrawer: "Panneau latéral",
     recordOpenPage: "Pleine page",
-    recordOpenNote: "Votre préférence personnelle, hors de la déclaration de l’objet. Le ↗ d’un enregistrement ouvre toujours la pleine page.",
-    recordOpenDeclaredPage: "Cet objet est déclaré pour s’ouvrir en pleine page",
     addGroup: "Ajouter un champ de groupe",
     collapsedByDefault: "Réduit par défaut",
     removeGroup: "Supprimer",
@@ -979,6 +977,22 @@ const fr = {
     withheldFieldsLeftOut: "Non affiché, filtré, trié ni groupé par {{fields}} : le paquet qui ajoute ce champ est désactivé. Il revient lorsque le paquet est réactivé.",
     inlineEditShort: "Édition en ligne",
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'Nom de la vue',
+      fields: 'Champs',
+      fieldsShown: 'Affichés : {{count}}',
+      fieldsShown_one: '{{count}} affiché',
+      fieldsShown_many: '{{count}} affichés',
+      fieldsShown_other: '{{count}} affichés',
+      rowHeight: 'Hauteur des lignes',
+      rowHeightCompact: 'Compacte',
+      rowHeightStandard: 'Standard',
+      rowHeightSpacious: 'Spacieuse',
+      more: 'Plus',
+      restoreDefaults: 'Rétablir les valeurs par défaut',
+      recordOpenAlwaysPage: 'Les enregistrements s’ouvrent toujours en pleine page',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1211,6 +1225,8 @@ const fr = {
     manageViewsDescription: "Réorganiser, renommer, épingler ou supprimer toutes les vues de cet objet.",
     searchViews: "Rechercher des vues",
     addNewView: "Ajouter une nouvelle vue",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Cette vue a été enregistrée comme brouillon en dehors de cette application, car le package de personnalisation de l’application ne peut pas être utilisé ici. La barre de brouillons de cette application ne la compte pas et ne la publie pas : publiez-la depuis l’accueil.",
     done: "Terminé",
     noViewsFound: "Aucune vue ne correspond à votre recherche.",
     // objectstack#27594 — the list title's view switcher.
@@ -1218,14 +1234,20 @@ const fr = {
       label: "Vues",
       pinned: "Épinglée",
       recent: "Récentes",
-      all: "Toutes les vues",
       pin: "Épingler : ouvrir cette vue par défaut",
       unpin: "Désépingler : la liste rouvre sa vue par défaut",
       inMenu: "Déjà dans le menu",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Mes vues",
-      saveAsMyView: "Enregistrer comme ma vue",
       myViewName: "Nom de la vue",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: 'Vues partagées',
+      addView: 'Ajouter une vue',
+      typeLabel: 'Type de vue',
+      includeCurrent: 'Inclure les filtres et le tri actuels',
+      scopeShared: 'Partagée',
+      scopeHint: 'Les vues partagées sont visibles par tous ceux qui voient cette liste',
+      create: 'Créer',
     },
     dragToReorder: "Glisser pour réorganiser",
     defaultView: "Vue par défaut",
@@ -4951,7 +4973,6 @@ const fr = {
   filterBuilder: {
     currency: 'Devise',
     currencyNeedsAnd: "Un montant en devise n'est comparé dans la devise choisie que lorsque toutes les conditions doivent être remplies (ET).",
-    where: "Où",
     and: "ET",
     or: "OU",
     clearAll: "Tout effacer",
@@ -5042,6 +5063,7 @@ const fr = {
       after: 'après',
     },
     sort: {
+      advanced: 'Tous les niveaux de tri',
       direction: 'Sens',
       ascending: 'Croissant',
       descending: 'Décroissant',

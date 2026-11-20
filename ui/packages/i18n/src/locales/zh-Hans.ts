@@ -968,8 +968,6 @@ const zh = {
     recordOpen: '打开记录',
     recordOpenDrawer: '抽屉',
     recordOpenPage: '整页',
-    recordOpenNote: '个人偏好，不进对象声明；记录的 ↗ 总能打开整页',
-    recordOpenDeclaredPage: '此对象声明为整页打开',
     addGroup: '添加分组字段',
     collapsedByDefault: '默认折叠',
     removeGroup: '删除',
@@ -979,6 +977,21 @@ const zh = {
     withheldFieldsLeftOut: '未显示 {{fields}}，也未按其筛选、排序或分组：添加该字段的软件包已停用，启用后即恢复。',
     inlineEditShort: '行内编辑',
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: '视图名称',
+      fields: '字段',
+      fieldsShown: '已显示 {{count}} 个',
+      fieldsShown_one: '已显示 {{count}} 个',
+      fieldsShown_other: '已显示 {{count}} 个',
+      rowHeight: '行高',
+      rowHeightCompact: '紧凑',
+      rowHeightStandard: '标准',
+      rowHeightSpacious: '宽松',
+      more: '更多',
+      restoreDefaults: '恢复默认',
+      recordOpenAlwaysPage: '记录总是整页打开',
+    },
   },
   managedByBadge: {
     config: {
@@ -1208,6 +1221,8 @@ const zh = {
     manageViewsDescription: '对该对象的所有视图进行重新排序、重命名、固定或删除。',
     searchViews: '搜索视图',
     addNewView: '新建视图',
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: '此视图已作为草稿保存在本应用之外，因为此处无法使用本应用的定制包。本应用的草稿条不会计入或发布它：请在首页发布。',
     done: '完成',
     noViewsFound: '没有匹配的视图。',
     // objectstack#27594 — the list title's view switcher.
@@ -1215,14 +1230,20 @@ const zh = {
       label: '视图',
       pinned: '固定',
       recent: '最近',
-      all: '全部',
       pin: '固定：默认打开此视图',
       unpin: '取消固定：列表恢复打开默认视图',
       inMenu: '已在菜单中',
       // objectstack#29635 — the reader's own views (My views).
       myViews: '我的视图',
-      saveAsMyView: '另存为我的视图',
       myViewName: '视图名称',
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: '共享视图',
+      addView: '添加视图',
+      typeLabel: '视图类型',
+      includeCurrent: '包含当前的筛选和排序',
+      scopeShared: '共享',
+      scopeHint: '共享视图对能看到此列表的所有人可见',
+      create: '创建',
     },
     dragToReorder: '拖动排序',
     defaultView: '默认视图',
@@ -4869,7 +4890,6 @@ const zh = {
   filterBuilder: {
     currency: '币种',
     currencyNeedsAnd: '只有在「全部条件都满足（AND）」时，币种金额才按所选币种比较。',
-    where: '其中',
     and: '且',
     or: '或',
     clearAll: '清除全部',
@@ -4960,6 +4980,7 @@ const zh = {
       after: '晚于',
     },
     sort: {
+      advanced: '全部排序级别',
       direction: '方向',
       ascending: '升序',
       descending: '降序',

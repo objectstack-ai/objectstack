@@ -62,6 +62,7 @@ import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
+import { openAdvancedSort } from './conditionPanels';
 
 /**
  * Puts back, after the calling block's last test, what the block's hooks and
@@ -1968,7 +1969,13 @@ describe('ListView.draftOnlyColumn-34807', () => {
     const content = document.getElementById(trigger.getAttribute('aria-controls') ?? '');
     if (!content) throw new Error(`no popover content for "${text(trigger)}"`);
     try {
-      return await comboboxOptions(within(content).getAllByRole('combobox')[0]);
+      // The trigger opens the shared field list (objectstack#35549); its
+      // advanced step is the builder, whose first picker reads the same list.
+      // Both are read, so a field either offers is caught.
+      const listed = Array.from(content.querySelectorAll('[role="option"][data-field]')).map(text);
+      fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
+      const advanced = await within(content).findByTestId(/^(filter|sort)-panel-advanced$/);
+      return [...listed, ...(await comboboxOptions(within(advanced).getAllByRole('combobox')[0]))];
     } finally {
       fireEvent.click(trigger);
       await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
@@ -2232,7 +2239,8 @@ describe('ListView.switcherChrome-7547', () => {
  * objectui#12621 — the list toolbar's Display menu closes once a layout is
  * chosen, and on Escape, returning focus to the Display trigger. The panel's
  * toggles keep it open: the control below flips Row numbers and density and
- * finds the panel still drawn.
+ * finds the panel still drawn. The panel is a menu whose rows open a second
+ * level; the Layout level lists every layout as a radio, at any count.
  */
 describe('ListView.displayMenuClose-12621', () => {
   restoreAfterBlock();
@@ -2308,22 +2316,27 @@ describe('ListView.displayMenuClose-12621', () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   }
 
+  /** Open the menu's Layout level and choose Kanban among its radios. */
+  async function chooseKanban(content: HTMLElement, layouts: string[]) {
+    fireEvent.click(within(content).getByTestId('options-row-layout'));
+    const list = await within(content).findByTestId('view-switcher-list');
+    expect(within(list).getAllByRole('radio').map((r) => r.textContent?.trim())).toEqual(layouts);
+    fireEvent.click(within(list).getByRole('radio', { name: 'Kanban' }));
+  }
+
   describe('the Display menu closes when its work is done (objectui#12621)', () => {
-    it('choosing Kanban in the segmented Layout row closes the menu and focuses the trigger', async () => {
+    it('choosing Kanban on the Layout level closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      const row = within(content).getByTestId('display-layout-row');
-      fireEvent.click(within(row).getByRole('tab', { name: 'Kanban' }));
+      await chooseKanban(content, ['Grid', 'Kanban']);
       await screen.findByTestId('object-kanban-stub');
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('choosing Kanban in the nested Layout dropdown closes the menu and focuses the trigger', async () => {
+    it('with five layouts the level is the same list, and choosing Kanban closes the menu and focuses the trigger', async () => {
       mount(FIVE);
       const { trigger, content } = await openDisplay();
-      const row = within(content).getByTestId('display-layout-row');
-      fireEvent.click(within(row).getByTestId('view-switcher-dropdown'));
-      fireEvent.click(await screen.findByRole('button', { name: 'Kanban' }));
+      await chooseKanban(content, ['Grid', 'Kanban', 'Gallery', 'Calendar', 'Timeline']);
       await screen.findByTestId('object-kanban-stub');
       await expectClosedWithFocusOn(trigger);
     });
@@ -2331,17 +2344,20 @@ describe('ListView.displayMenuClose-12621', () => {
     it('Escape closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      fireEvent.keyDown(within(content).getByTestId('display-row-numbers-toggle'), { key: 'Escape' });
+      fireEvent.keyDown(within(content).getByTestId('options-row-more'), { key: 'Escape' });
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('control: toggling Row numbers and cycling density keep the menu open', async () => {
+    it('control: toggling Row numbers and choosing a row height keep the menu open', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      const toggle = within(content).getByTestId('display-row-numbers-toggle');
+      fireEvent.click(within(content).getByTestId('options-row-more'));
+      const toggle = await within(content).findByTestId('display-row-numbers-toggle');
       fireEvent.click(toggle);
       await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
-      fireEvent.click(within(content).getByTestId('view-settings-density-cycle'));
+      fireEvent.click(within(content).getByTestId('options-back'));
+      fireEvent.click(await within(content).findByTestId('options-row-row-height'));
+      fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
       await waitFor(() => expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('2'));
       expect(screen.getByTestId('view-settings-content')).toBe(content);
       expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -2822,7 +2838,7 @@ describe('ListView.resetSortToDefaultNoProviderFallback', () => {
     );
     await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-    await screen.findByText('Sort Records');
+    await openAdvancedSort();
   }
 
   describe('ListView reset-sort control — English fallback with no provider (objectui#4396)', () => {
@@ -3109,12 +3125,13 @@ describe('ListView.groupPickerUnstored-32631', () => {
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });
 
-    it('the Display popover\'s Group section offers the same', async () => {
+    it('the Display popover\'s Group level offers the same', async () => {
       const { onGroupingChange } = mount({ compactToolbar: true });
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
       const content = await screen.findByTestId('view-settings-content');
-      fireEvent.click(within(content).getByTestId('grouping-add'));
+      fireEvent.click(within(content).getByTestId('options-row-group'));
+      fireEvent.click(await within(content).findByTestId('grouping-add'));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
       expect(await openOptions(within(content).getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });

@@ -2127,17 +2127,27 @@ export class ObjectStackClient {
      * named like one of the door's sub-resources (`history`, `audit`, `diff`,
      * …) has no qualified path, so a `namespace` for it is refused before any
      * request with `400 VALIDATION_ERROR`: read it with `packageId`.
+     *
+     * [#34777] `state: 'draft'` (`?state=draft`) reads the item's pending
+     * DRAFT row instead of the published one: the strict draft read Studio's
+     * editor opens, whose `item._diagnostics` carries what publishing that
+     * draft would refuse (the runtime gate's verdict, #26707). Beside
+     * `packageId` it reads that package's draft. `'active'` is the default
+     * said out loud and sends nothing, as on `deleteItem`'s `state`: the door
+     * reads `state=draft` alone, so a call without it is byte-identical to
+     * what this method sent before the member existed.
      */
     getItem: async (
         type: string,
         name: string,
-        options?: { packageId?: string; callerPackage?: string } & QualifiedAddressOptions,
+        options?: { packageId?: string; callerPackage?: string; state?: 'active' | 'draft' } & QualifiedAddressOptions,
     ): Promise<GetMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const qualifier = metaItemQualifier(type, name, options);
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         if (options?.callerPackage) params.set('callerPackage', options.callerPackage);
+        if (options?.state === 'draft') params.set('state', 'draft');
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -8697,17 +8707,19 @@ export class ScopedEnvironmentClient {
     /**
      * Same `{ type, name, item }` envelope as the unscoped surface (#5563),
      * and the same qualifiers: `packageId` or `namespace` (ADR-0150 D5), and
-     * the same caller arm, `callerPackage` (ADR-0150 D3).
+     * the same caller arm, `callerPackage` (ADR-0150 D3), and the same draft
+     * read, `state: 'draft'` (`?state=draft`, #34777).
      */
     getItem: async (
       type: string,
       name: string,
-      options?: { packageId?: string; callerPackage?: string } & QualifiedAddressOptions,
+      options?: { packageId?: string; callerPackage?: string; state?: 'active' | 'draft' } & QualifiedAddressOptions,
     ): Promise<GetMetaItemResponse> => {
       const qualifier = metaItemQualifier(type, name, options);
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       if (options?.callerPackage) params.set('callerPackage', options.callerPackage);
+      if (options?.state === 'draft') params.set('state', 'draft');
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);

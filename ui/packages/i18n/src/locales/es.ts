@@ -973,8 +973,6 @@ const es = {
     recordOpen: "Abrir registros",
     recordOpenDrawer: "Panel lateral",
     recordOpenPage: "Página completa",
-    recordOpenNote: "Tu preferencia personal, no forma parte de la declaración del objeto. El ↗ de un registro siempre abre la página completa.",
-    recordOpenDeclaredPage: "Este objeto está declarado para abrirse como página completa",
     addGroup: "Agregar campo de grupo",
     collapsedByDefault: "Contraído por defecto",
     removeGroup: "Eliminar",
@@ -984,6 +982,22 @@ const es = {
     withheldFieldsLeftOut: "Sin mostrar, filtrar, ordenar ni agrupar por {{fields}}: el paquete que lo añade está desactivado. Vuelve cuando se activa el paquete.",
     inlineEditShort: "Edición en línea",
     inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'Nombre de la vista',
+      fields: 'Campos',
+      fieldsShown: 'Visibles: {{count}}',
+      fieldsShown_one: '{{count}} visible',
+      fieldsShown_many: '{{count}} visibles',
+      fieldsShown_other: '{{count}} visibles',
+      rowHeight: 'Alto de fila',
+      rowHeightCompact: 'Compacto',
+      rowHeightStandard: 'Estándar',
+      rowHeightSpacious: 'Amplio',
+      more: 'Más',
+      restoreDefaults: 'Restaurar valores predeterminados',
+      recordOpenAlwaysPage: 'Los registros siempre se abren a página completa',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1216,6 +1230,8 @@ const es = {
     manageViewsDescription: "Reordenar, renombrar, fijar o eliminar todas las vistas de este objeto.",
     searchViews: "Buscar vistas",
     addNewView: "Agregar nueva vista",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Esta vista se guardó como borrador fuera de esta aplicación, porque aquí no se puede usar el paquete de personalización de la aplicación. La barra de borradores de esta aplicación no la cuenta ni la publica: publícala desde Inicio.",
     done: "Listo",
     noViewsFound: "Ninguna vista coincide con su búsqueda.",
     // objectstack#27594 — the list title's view switcher.
@@ -1223,14 +1239,20 @@ const es = {
       label: "Vistas",
       pinned: "Fijada",
       recent: "Recientes",
-      all: "Todas las vistas",
       pin: "Fijar: abrir esta vista de forma predeterminada",
       unpin: "Desfijar: la lista vuelve a abrir su vista predeterminada",
       inMenu: "Ya está en el menú",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Mis vistas",
-      saveAsMyView: "Guardar como mi vista",
       myViewName: "Nombre de la vista",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: 'Vistas compartidas',
+      addView: 'Añadir vista',
+      typeLabel: 'Tipo de vista',
+      includeCurrent: 'Incluir los filtros y el orden actuales',
+      scopeShared: 'Compartida',
+      scopeHint: 'Las vistas compartidas las ve cualquiera que pueda ver esta lista',
+      create: 'Crear',
     },
     dragToReorder: "Arrastrar para reordenar",
     defaultView: "Vista predeterminada",
@@ -4955,7 +4977,6 @@ const es = {
   filterBuilder: {
     currency: 'Moneda',
     currencyNeedsAnd: 'Un importe en moneda solo se compara en la moneda elegida cuando deben cumplirse todas las condiciones (Y).',
-    where: "Donde",
     and: "Y",
     or: "O",
     clearAll: "Borrar todo",
@@ -5046,6 +5067,7 @@ const es = {
       after: 'después de',
     },
     sort: {
+      advanced: 'Todos los niveles de orden',
       direction: 'Dirección',
       ascending: 'Ascendente',
       descending: 'Descendente',

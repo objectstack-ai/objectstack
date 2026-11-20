@@ -941,8 +941,6 @@ const ko = {
     recordOpen: "레코드 열기",
     recordOpenDrawer: "서랍",
     recordOpenPage: "전체 페이지",
-    recordOpenNote: "개인 설정이며 객체 선언에 포함되지 않습니다. 레코드의 ↗는 항상 전체 페이지를 엽니다.",
-    recordOpenDeclaredPage: "이 객체는 전체 페이지로 열리도록 선언되어 있습니다",
     addGroup: "그룹 필드 추가",
     collapsedByDefault: "기본적으로 접힘",
     removeGroup: "제거",
@@ -952,6 +950,21 @@ const ko = {
     withheldFieldsLeftOut: "{{fields}} 기준 표시, 필터, 정렬, 그룹화가 적용되지 않았습니다. 이 필드를 추가하는 패키지가 비활성화되어 있습니다. 패키지를 활성화하면 다시 나타납니다.",
     inlineEditShort: "인라인 편집",
     inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: '보기 이름',
+      fields: '필드',
+      fieldsShown: '{{count}}개 표시됨',
+      fieldsShown_one: '{{count}}개 표시됨',
+      fieldsShown_other: '{{count}}개 표시됨',
+      rowHeight: '행 높이',
+      rowHeightCompact: '좁게',
+      rowHeightStandard: '표준',
+      rowHeightSpacious: '넓게',
+      more: '더 보기',
+      restoreDefaults: '기본값 복원',
+      recordOpenAlwaysPage: '레코드는 항상 전체 페이지로 열립니다',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1181,6 +1194,8 @@ const ko = {
     manageViewsDescription: "이 객체의 모든 보기를 재정렬, 이름 변경, 고정 또는 삭제합니다.",
     searchViews: "보기 검색",
     addNewView: "새 보기 추가",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "이 앱의 사용자 지정 패키지를 여기서 사용할 수 없어 이 보기는 앱 외부에 초안으로 저장되었습니다. 이 앱의 초안 표시줄은 이 보기를 집계하거나 게시하지 않습니다. 홈에서 게시하세요.",
     done: "완료",
     noViewsFound: "검색과 일치하는 보기가 없습니다.",
     // objectstack#27594 — the list title's view switcher.
@@ -1188,14 +1203,20 @@ const ko = {
       label: "보기",
       pinned: "고정됨",
       recent: "최근",
-      all: "모든 보기",
       pin: "고정: 이 보기를 기본으로 열기",
       unpin: "고정 해제: 목록이 기본 보기를 다시 엽니다",
       inMenu: "이미 메뉴에 있음",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "내 뷰",
-      saveAsMyView: "내 뷰로 저장",
       myViewName: "뷰 이름",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: '공유 보기',
+      addView: '보기 추가',
+      typeLabel: '보기 유형',
+      includeCurrent: '현재 필터와 정렬 포함',
+      scopeShared: '공유',
+      scopeHint: '공유 보기는 이 목록을 볼 수 있는 모든 사람에게 표시됩니다',
+      create: '만들기',
     },
     dragToReorder: "드래그하여 순서 변경",
     defaultView: "기본 보기",
@@ -4809,7 +4830,6 @@ const ko = {
   filterBuilder: {
     currency: '통화',
     currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
-    where: "조건",
     and: "그리고",
     or: "또는",
     clearAll: "모두 지우기",
@@ -4900,6 +4920,7 @@ const ko = {
       after: '이후',
     },
     sort: {
+      advanced: '모든 정렬 단계',
       direction: '방향',
       ascending: '오름차순',
       descending: '내림차순',

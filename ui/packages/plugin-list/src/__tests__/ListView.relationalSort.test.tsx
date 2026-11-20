@@ -26,6 +26,7 @@ import React from 'react';
 import { ListView } from '../ListView';
 import type { ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
+import { openAdvancedSort } from './conditionPanels';
 
 const objectDef = {
   name: 'contacts',
@@ -77,7 +78,7 @@ async function openSortPopover(schema: ListViewSchema) {
   );
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-  return await screen.findByText('Sort Records');
+  return await openAdvancedSort();
 }
 
 /** Labels offered by the sort field <Select> (Radix renders them on open). */
@@ -182,7 +183,7 @@ describe('ListView sort picker — relational fields (objectui#3096)', () => {
     );
     await waitFor(() => expect(flatDataSource.getObjectSchema).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-    await screen.findByText('Sort Records');
+    await openAdvancedSort();
     expect(screen.queryByTestId('sort-relational-info')).toBeNull();
   });
 });

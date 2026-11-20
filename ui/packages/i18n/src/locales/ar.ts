@@ -1058,8 +1058,6 @@ const ar = {
     recordOpen: "فتح السجلات",
     recordOpenDrawer: "درج جانبي",
     recordOpenPage: "صفحة كاملة",
-    recordOpenNote: "تفضيلك الشخصي، وليس جزءًا من تعريف الكائن. يفتح ↗ الخاص بالسجل الصفحة الكاملة دائمًا.",
-    recordOpenDeclaredPage: "هذا الكائن مُعرَّف ليُفتح كصفحة كاملة",
     addGroup: "إضافة حقل مجموعة",
     collapsedByDefault: "مطوي افتراضياً",
     removeGroup: "إزالة",
@@ -1069,6 +1067,25 @@ const ar = {
     withheldFieldsLeftOut: "لا يتم العرض أو التصفية أو الفرز أو التجميع حسب {{fields}}: الحزمة التي تضيف هذا الحقل معطلة. سيعود عند تفعيل الحزمة.",
     inlineEditShort: "تحرير مضمّن",
     inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'اسم العرض',
+      fields: 'الحقول',
+      fieldsShown: 'الحقول المعروضة: {{count}}',
+      fieldsShown_zero: '{{count}} حقل معروض',
+      fieldsShown_one: '{{count}} حقل معروض',
+      fieldsShown_two: 'حقلان معروضان ({{count}})',
+      fieldsShown_few: '{{count}} حقول معروضة',
+      fieldsShown_many: '{{count}} حقلًا معروضًا',
+      fieldsShown_other: '{{count}} حقل معروض',
+      rowHeight: 'ارتفاع الصف',
+      rowHeightCompact: 'مضغوط',
+      rowHeightStandard: 'قياسي',
+      rowHeightSpacious: 'واسع',
+      more: 'المزيد',
+      restoreDefaults: 'استعادة الافتراضي',
+      recordOpenAlwaysPage: 'تُفتح السجلات دائمًا في صفحة كاملة',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1310,6 +1327,8 @@ const ar = {
     manageViewsDescription: "إعادة ترتيب جميع طرق عرض هذا الكائن أو إعادة تسميتها أو تثبيتها أو حذفها.",
     searchViews: "البحث في العروض",
     addNewView: "إضافة عرض جديد",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "حُفظ هذا العرض كمسودة خارج هذا التطبيق، لأنه لا يمكن استخدام حزمة تخصيص التطبيق هنا. لا يحتسبه شريط مسودات هذا التطبيق ولا ينشره: انشره من الصفحة الرئيسية.",
     done: "تم",
     noViewsFound: "لا توجد عروض تطابق بحثك.",
     // objectstack#27594 — the list title's view switcher.
@@ -1317,14 +1336,20 @@ const ar = {
       label: "العروض",
       pinned: "مثبّت",
       recent: "الأخيرة",
-      all: "كل العروض",
       pin: "تثبيت: فتح هذا العرض افتراضيًا",
       unpin: "إلغاء التثبيت: تفتح القائمة عرضها الافتراضي مجددًا",
       inMenu: "موجود بالفعل في القائمة",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "طرق العرض الخاصة بي",
-      saveAsMyView: "حفظ كطريقة عرض خاصة بي",
       myViewName: "اسم طريقة العرض",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: 'العروض المشتركة',
+      addView: 'إضافة عرض',
+      typeLabel: 'نوع العرض',
+      includeCurrent: 'تضمين عوامل التصفية والفرز الحالية',
+      scopeShared: 'مشترك',
+      scopeHint: 'العروض المشتركة يراها كل من يمكنه رؤية هذه القائمة',
+      create: 'إنشاء',
     },
     dragToReorder: "اسحب لإعادة الترتيب",
     defaultView: "العرض الافتراضي",
@@ -5387,7 +5412,6 @@ const ar = {
   filterBuilder: {
     currency: 'العملة',
     currencyNeedsAnd: 'لا تُقارن المبالغ بالعملة المختارة إلا عندما يجب تحقق كل الشروط (AND).',
-    where: "حيث",
     and: "و",
     or: "أو",
     clearAll: "مسح الكل",
@@ -5478,6 +5502,7 @@ const ar = {
       after: 'بعد',
     },
     sort: {
+      advanced: 'كل مستويات الفرز',
       direction: 'الاتجاه',
       ascending: 'تصاعدي',
       descending: 'تنازلي',

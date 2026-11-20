@@ -941,8 +941,6 @@ const ja = {
     recordOpen: "レコードを開く",
     recordOpenDrawer: "ドロワー",
     recordOpenPage: "フルページ",
-    recordOpenNote: "個人の設定で、オブジェクトの宣言には含まれません。レコードの ↗ はいつでもフルページを開きます。",
-    recordOpenDeclaredPage: "このオブジェクトはフルページで開くよう宣言されています",
     addGroup: "グループフィールドを追加",
     collapsedByDefault: "デフォルトで折りたたむ",
     removeGroup: "削除",
@@ -952,6 +950,21 @@ const ja = {
     withheldFieldsLeftOut: "{{fields}} は表示、絞り込み、並べ替え、グループ化されていません。この項目を追加するパッケージが無効になっています。パッケージを有効にすると戻ります。",
     inlineEditShort: "インライン編集",
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'ビュー名',
+      fields: 'フィールド',
+      fieldsShown: '{{count}} 件表示中',
+      fieldsShown_one: '{{count}} 件表示中',
+      fieldsShown_other: '{{count}} 件表示中',
+      rowHeight: '行の高さ',
+      rowHeightCompact: 'コンパクト',
+      rowHeightStandard: '標準',
+      rowHeightSpacious: 'ゆったり',
+      more: 'その他',
+      restoreDefaults: 'デフォルトに戻す',
+      recordOpenAlwaysPage: 'レコードは常にページ全体で開きます',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1181,6 +1194,8 @@ const ja = {
     manageViewsDescription: "このオブジェクトのすべてのビューを並べ替え、名前変更、固定、削除できます。",
     searchViews: "ビューを検索",
     addNewView: "新しいビューを追加",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "このビューは、このアプリのカスタマイズパッケージをここでは使用できないため、アプリの外に下書きとして保存されました。このアプリの下書きバーでは集計も公開もされません。ホームから公開してください。",
     done: "完了",
     noViewsFound: "検索に一致するビューはありません。",
     // objectstack#27594 — the list title's view switcher.
@@ -1188,14 +1203,20 @@ const ja = {
       label: "ビュー",
       pinned: "固定",
       recent: "最近",
-      all: "すべてのビュー",
       pin: "固定：このビューを既定で開く",
       unpin: "固定を解除：リストは既定のビューを再び開きます",
       inMenu: "すでにメニューにあります",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "マイビュー",
-      saveAsMyView: "マイビューとして保存",
       myViewName: "ビュー名",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: '共有ビュー',
+      addView: 'ビューを追加',
+      typeLabel: 'ビューの種類',
+      includeCurrent: '現在のフィルターと並べ替えを含める',
+      scopeShared: '共有',
+      scopeHint: '共有ビューはこのリストを見られる全員に表示されます',
+      create: '作成',
     },
     dragToReorder: "ドラッグして並べ替え",
     defaultView: "デフォルトビュー",
@@ -4812,7 +4833,6 @@ const ja = {
   filterBuilder: {
     currency: '通貨',
     currencyNeedsAnd: '通貨金額は、すべての条件を満たす必要がある場合（AND）にのみ、選択した通貨で比較されます。',
-    where: "条件",
     and: "かつ",
     or: "または",
     clearAll: "すべてクリア",
@@ -4903,6 +4923,7 @@ const ja = {
       after: 'より後',
     },
     sort: {
+      advanced: 'すべての並べ替えレベル',
       direction: '方向',
       ascending: '昇順',
       descending: '降順',

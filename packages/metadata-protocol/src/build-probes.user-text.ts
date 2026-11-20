@@ -49,7 +49,7 @@
  * | `probes_unavailable` | `count` | no name: one finding covers every dashboard of the publish |
  * | `widget_empty_result` | `dashboard`, `widget`, `dataset` | all three by label |
  * | `rollup_never_computed` | `object`, `field`, `child`, `cause` (`fills` · `named`) | the parent object, the roll-up field and the child object by label |
- * | `seed_reference_unresolved` | `object`, `field`, `target`, `count` | the seeded object, its reference field and the target object by label |
+ * | `seed_reference_unresolved` | `object`, `field`, `target`, `count`, `cause` (`seed` · `mixed` · `mode` · `stored`) | the seeded object, its reference field and the target object by label |
  * | `flow_connector_action_unresolved` | `flow`, `step`, `connector`, `cause` (`refused` · `no-action` · `degraded`) | flow and step by label; the connector by its name (the step names it so) |
  *
  * A label is the published body's own (`label`, a widget's `title`), read
@@ -920,75 +920,75 @@ const WIDGET_EMPTY_RESULT: UserTextEntry = {
     `예상과 다르다면 읽어 오는 레코드(날짜와 값)를 확인한 후 다시 게시하세요.`,
 };
 
-/** `rollup_never_computed`: a roll-up field reads blank on every record that has related records; `cause` `named` is a min, max or avg roll-up, which the plain run does not fill. */
+/** `rollup_never_computed`: a roll-up field reads blank on the records checked that have related records (one organization's sampled parents); `cause` `named` is a min, max or avg roll-up, which the plain run does not fill. */
 const ROLLUP_NEVER_COMPUTED: UserTextEntry = {
   en: (p) =>
-    `The roll-up field "${p.field}" on "${p.object}" is blank on every record that has related "${p.child}" ` +
+    `The roll-up field "${p.field}" on "${p.object}" is blank on the records checked that have related "${p.child}" ` +
     `records: its stored value was never calculated for them. ` +
     (p.cause === 'named'
       ? `Ask whoever runs this environment to recalculate it by name (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, naming this field): a minimum, ` +
         `maximum or average roll-up is not filled by the plain recalculation.`
       : `Ask whoever runs this environment to recalculate the roll-ups (\`os migrate summary-nulls --apply\`).`),
   'zh-Hans': (p) =>
-    `“${p.object}”的汇总字段“${p.field}”在每条有相关“${p.child}”记录的记录上都是空的：它的存储值从未为这些记录计算过。` +
+    `“${p.object}”的汇总字段“${p.field}”在所检查的、有相关“${p.child}”记录的记录上都是空的：它的存储值从未为这些记录计算过。` +
     (p.cause === 'named'
       ? `请让负责此环境的人按名称重新计算它（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`，并指明此字段）：最小值、最大值或平均值汇总不会被普通的重新计算填充。`
       : `请让负责此环境的人重新计算汇总字段（\`os migrate summary-nulls --apply\`）。`),
   'zh-Hant': (p) =>
-    `「${p.object}」的匯總欄位「${p.field}」在每筆有相關「${p.child}」記錄的記錄上都是空的：它的儲存值從未為這些記錄計算過。` +
+    `「${p.object}」的匯總欄位「${p.field}」在所檢查的、有相關「${p.child}」記錄的記錄上都是空的：它的儲存值從未為這些記錄計算過。` +
     (p.cause === 'named'
       ? `請讓負責此環境的人按名稱重新計算它（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`，並指明此欄位）：最小值、最大值或平均值匯總不會被一般的重新計算填入。`
       : `請讓負責此環境的人重新計算匯總欄位（\`os migrate summary-nulls --apply\`）。`),
   es: (p) =>
-    `El campo de resumen "${p.field}" de "${p.object}" está vacío en todos los registros que tienen registros ` +
+    `El campo de resumen "${p.field}" de "${p.object}" está vacío en los registros revisados que tienen registros ` +
     `relacionados de "${p.child}": su valor almacenado nunca se calculó para ellos. ` +
     (p.cause === 'named'
       ? `Pida a quien administra este entorno que lo recalcule por nombre (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, indicando este campo): ` +
         `un resumen de mínimo, máximo o promedio no se rellena con el recálculo normal.`
       : `Pida a quien administra este entorno que recalcule los resúmenes (\`os migrate summary-nulls --apply\`).`),
   ar: (p) =>
-    `حقل التجميع "${p.field}" في "${p.object}" فارغ في كل سجل له سجلات "${p.child}" مرتبطة: لم تُحسب قيمته المخزنة لها قط. ` +
+    `حقل التجميع "${p.field}" في "${p.object}" فارغ في السجلات التي فُحصت ولها سجلات "${p.child}" مرتبطة: لم تُحسب قيمته المخزنة لها قط. ` +
     (p.cause === 'named'
       ? `اطلب من مسؤول هذه البيئة إعادة حسابه بالاسم (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` مع تسمية هذا الحقل): ` +
         `حقل تجميع الحد الأدنى أو الأقصى أو المتوسط لا تملؤه إعادة الحساب العادية.`
       : `اطلب من مسؤول هذه البيئة إعادة حساب حقول التجميع (\`os migrate summary-nulls --apply\`).`),
   fr: (p) =>
-    `Le champ de synthèse « ${p.field} » de « ${p.object} » est vide sur chaque enregistrement qui a des ` +
+    `Le champ de synthèse « ${p.field} » de « ${p.object} » est vide sur les enregistrements vérifiés qui ont des ` +
     `enregistrements « ${p.child} » liés : sa valeur stockée n’a jamais été calculée pour eux. ` +
     (p.cause === 'named'
       ? `Demandez à la personne qui gère cet environnement de le recalculer nommément (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, en nommant ce ` +
         `champ) : une synthèse minimum, maximum ou moyenne n’est pas remplie par le recalcul ordinaire.`
       : `Demandez à la personne qui gère cet environnement de recalculer les synthèses (\`os migrate summary-nulls --apply\`).`),
   'pt-BR': (p) =>
-    `O campo de resumo "${p.field}" de "${p.object}" está vazio em todos os registros que têm registros ` +
+    `O campo de resumo "${p.field}" de "${p.object}" está vazio nos registros verificados que têm registros ` +
     `relacionados de "${p.child}": seu valor armazenado nunca foi calculado para eles. ` +
     (p.cause === 'named'
       ? `Peça a quem administra este ambiente que o recalcule pelo nome (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, indicando este campo): ` +
         `um resumo de mínimo, máximo ou média não é preenchido pelo recálculo comum.`
       : `Peça a quem administra este ambiente que recalcule os resumos (\`os migrate summary-nulls --apply\`).`),
   ru: (p) =>
-    `Сводное поле «${p.field}» объекта «${p.object}» пустое во всех записях, у которых есть связанные записи ` +
+    `Сводное поле «${p.field}» объекта «${p.object}» пустое в проверенных записях, у которых есть связанные записи ` +
     `«${p.child}»: его сохранённое значение для них ни разу не рассчитывалось. ` +
     (p.cause === 'named'
       ? `Попросите администратора этой среды пересчитать его по имени (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` с указанием этого поля): ` +
         `сводное поле минимума, максимума или среднего обычный пересчёт не заполняет.`
       : `Попросите администратора этой среды пересчитать сводные поля (\`os migrate summary-nulls --apply\`).`),
   de: (p) =>
-    `Das Rollup-Feld „${p.field}“ in „${p.object}“ ist bei jedem Datensatz mit verknüpften „${p.child}“-Datensätzen ` +
+    `Das Rollup-Feld „${p.field}“ in „${p.object}“ ist bei den geprüften Datensätzen mit verknüpften „${p.child}“-Datensätzen ` +
     `leer: Sein gespeicherter Wert wurde für sie nie berechnet. ` +
     (p.cause === 'named'
       ? `Bitten Sie die Person, die diese Umgebung betreibt, es namentlich neu zu berechnen (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` mit diesem ` +
         `Feld): Ein Minimum-, Maximum- oder Durchschnitts-Rollup füllt die normale Neuberechnung nicht.`
       : `Bitten Sie die Person, die diese Umgebung betreibt, die Rollups neu zu berechnen (\`os migrate summary-nulls --apply\`).`),
   ja: (p) =>
-    `「${p.object}」の積み上げ集計項目「${p.field}」は、関連する「${p.child}」レコードを持つすべてのレコードで空です。` +
+    `「${p.object}」の積み上げ集計項目「${p.field}」は、関連する「${p.child}」レコードを持つ、確認したレコードで空です。` +
     `保存値がこれらのレコードについて一度も計算されていません。` +
     (p.cause === 'named'
       ? `この環境の管理者に、この項目を指定した再計算（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`）を依頼してください。` +
         `最小・最大・平均の集計は通常の再計算では埋まりません。`
       : `この環境の管理者に集計の再計算（\`os migrate summary-nulls --apply\`）を依頼してください。`),
   ko: (p) =>
-    `"${p.object}"의 롤업 필드 "${p.field}"가 관련 "${p.child}" 레코드가 있는 모든 레코드에서 비어 있습니다. ` +
+    `"${p.object}"의 롤업 필드 "${p.field}"가 관련 "${p.child}" 레코드가 있는, 확인한 레코드에서 비어 있습니다. ` +
     `저장된 값이 이 레코드들에 대해 한 번도 계산되지 않았습니다. ` +
     (p.cause === 'named'
       ? `이 환경의 관리자에게 이 필드를 지정한 재계산(\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`)을 요청하세요. ` +
@@ -996,47 +996,174 @@ const ROLLUP_NEVER_COMPUTED: UserTextEntry = {
       : `이 환경의 관리자에게 롤업 재계산(\`os migrate summary-nulls --apply\`)을 요청하세요.`),
 };
 
-/** `seed_reference_unresolved`: sample records point at records that do not exist. */
+/**
+ * `seed_reference_unresolved`: sample records point at records that do not exist. The repair is the one a
+ * republish actually reaches: `seed` — the sample data writes the field back onto the records it finds again,
+ * so it is fixed there; `mode` — the sample data leaves the records it finds as they are (the default), so the
+ * stored records are fixed, or the sample data is set to update them; `stored` — the sample data never writes
+ * that field onto a record it finds again, so only the stored records can be fixed; `mixed` — some of the sample
+ * data writes the field back onto the records it finds again and some does not, and which record came from which
+ * cannot be told, so it is fixed in the sample data AND on the stored records (or the records are deleted and the
+ * corrected sample data published again).
+ */
 const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   en: (p) =>
     `Some sample "${p.object}" records (${p.count} value(s) in "${p.field}") point to "${p.target}" records that ` +
-    `do not exist, so on those records "${p.field}" leads nowhere. Fix or clear "${p.field}" in the sample data, ` +
-    `then publish again.`,
+    `do not exist, so on those records "${p.field}" leads nowhere. ` +
+    (p.cause === 'mixed'
+      ? `Publishing again writes some of these sample values back onto records that already exist and leaves others as they are. ` +
+        `Fix or clear "${p.field}" in the sample data, and also fix or clear it on those records, or delete them and publish ` +
+        `the corrected sample data again.`
+      : p.cause === 'mode'
+      ? `Publishing again does not change records that already exist. Fix or clear "${p.field}" on those records, ` +
+        `or delete them and publish the corrected sample data again, or set the sample data to update the records ` +
+        `it finds (upsert) and fix "${p.field}" there.`
+      : p.cause === 'stored'
+      ? `Publishing again does not change "${p.field}" on records that already exist. Fix or clear "${p.field}" on ` +
+        `those records, or delete them and publish the corrected sample data again.`
+      : `Fix or clear "${p.field}" in the sample data, then publish again.`),
   'zh-Hans': (p) =>
     `部分“${p.object}”示例记录（“${p.field}”中有 ${p.count} 个值）指向不存在的“${p.target}”记录，因此这些记录上的“${p.field}”指向空处。` +
-    `请在示例数据中修正或清空“${p.field}”，然后重新发布。`,
+    (p.cause === 'mixed'
+      ? `重新发布会把部分示例值写回已存在的记录，其余记录则保持不变。请在示例数据中修正或清空“${p.field}”，同时在这些记录上修正或清空它，` +
+        `或删除这些记录后重新发布修正后的示例数据。`
+      : p.cause === 'mode'
+      ? `重新发布不会更改已存在的记录。请在这些记录上修正或清空“${p.field}”，或删除它们后重新发布修正后的示例数据；` +
+        `也可以把示例数据设为更新它找到的记录（upsert），并在其中修正“${p.field}”。`
+      : p.cause === 'stored'
+      ? `重新发布不会更改已存在记录上的“${p.field}”。请在这些记录上修正或清空“${p.field}”，或删除它们后重新发布修正后的示例数据。`
+      : `请在示例数据中修正或清空“${p.field}”，然后重新发布。`),
   'zh-Hant': (p) =>
     `部分「${p.object}」示例記錄（「${p.field}」中有 ${p.count} 個值）指向不存在的「${p.target}」記錄，因此這些記錄上的「${p.field}」指向空處。` +
-    `請在示例資料中修正或清空「${p.field}」，然後重新發布。`,
+    (p.cause === 'mixed'
+      ? `重新發布會把部分示例值寫回已存在的記錄，其餘記錄則保持不變。請在示例資料中修正或清空「${p.field}」，同時在這些記錄上修正或清空它，` +
+        `或刪除這些記錄後重新發布修正後的示例資料。`
+      : p.cause === 'mode'
+      ? `重新發布不會變更已存在的記錄。請在這些記錄上修正或清空「${p.field}」，或刪除它們後重新發布修正後的示例資料；` +
+        `也可以把示例資料設為更新它找到的記錄（upsert），並在其中修正「${p.field}」。`
+      : p.cause === 'stored'
+      ? `重新發布不會變更已存在記錄上的「${p.field}」。請在這些記錄上修正或清空「${p.field}」，或刪除它們後重新發布修正後的示例資料。`
+      : `請在示例資料中修正或清空「${p.field}」，然後重新發布。`),
   es: (p) =>
     `Algunos registros de ejemplo de "${p.object}" (${p.count} valor(es) en "${p.field}") apuntan a registros de ` +
-    `"${p.target}" que no existen, así que en esos registros "${p.field}" no lleva a ninguna parte. Corrija o vacíe ` +
-    `"${p.field}" en los datos de ejemplo y vuelva a publicar.`,
+    `"${p.target}" que no existen, así que en esos registros "${p.field}" no lleva a ninguna parte. ` +
+    (p.cause === 'mixed'
+      ? `Volver a publicar escribe algunos de estos valores de ejemplo en registros que ya existen y deja otros como están. ` +
+        `Corrija o vacíe "${p.field}" en los datos de ejemplo y, además, corríjalo o vacíelo en esos registros, o elimínelos ` +
+        `y vuelva a publicar los datos de ejemplo corregidos.`
+      : p.cause === 'mode'
+      ? `Volver a publicar no cambia los registros que ya existen. Corrija o vacíe "${p.field}" en esos registros, ` +
+        `o elimínelos y vuelva a publicar los datos de ejemplo corregidos, o configure los datos de ejemplo para ` +
+        `actualizar los registros que encuentran (upsert) y corrija "${p.field}" en ellos.`
+      : p.cause === 'stored'
+      ? `Volver a publicar no cambia "${p.field}" en los registros que ya existen. Corrija o vacíe "${p.field}" en ` +
+        `esos registros, o elimínelos y vuelva a publicar los datos de ejemplo corregidos.`
+      : `Corrija o vacíe "${p.field}" en los datos de ejemplo y vuelva a publicar.`),
   ar: (p) =>
     `بعض سجلات "${p.object}" التجريبية (${p.count} قيمة في "${p.field}") تشير إلى سجلات "${p.target}" غير موجودة، ` +
-    `لذلك لا يؤدي "${p.field}" في هذه السجلات إلى أي مكان. صحّح "${p.field}" في البيانات التجريبية أو أفرغه، ثم أعد النشر.`,
+    `لذلك لا يؤدي "${p.field}" في هذه السجلات إلى أي مكان. ` +
+    (p.cause === 'mixed'
+      ? `إعادة النشر تكتب بعض هذه القيم التجريبية فوق سجلات موجودة بالفعل وتترك غيرها كما هي. صحّح "${p.field}" في البيانات ` +
+        `التجريبية أو أفرغه، وصحّحه أيضًا في تلك السجلات أو أفرغه، أو احذفها ثم أعد نشر البيانات التجريبية المصحّحة.`
+      : p.cause === 'mode'
+      ? `إعادة النشر لا تغيّر السجلات الموجودة بالفعل. صحّح "${p.field}" في تلك السجلات أو أفرغه، أو احذفها ثم أعد نشر ` +
+        `البيانات التجريبية المصحّحة، أو اضبط البيانات التجريبية لتحديث السجلات التي تجدها (upsert) وصحّح "${p.field}" فيها.`
+      : p.cause === 'stored'
+      ? `إعادة النشر لا تغيّر "${p.field}" في السجلات الموجودة بالفعل. صحّح "${p.field}" في تلك السجلات أو أفرغه، ` +
+        `أو احذفها ثم أعد نشر البيانات التجريبية المصحّحة.`
+      : `صحّح "${p.field}" في البيانات التجريبية أو أفرغه، ثم أعد النشر.`),
   fr: (p) =>
     `Certains enregistrements d’exemple « ${p.object} » (${p.count} valeur(s) dans « ${p.field} ») pointent vers ` +
     `des enregistrements « ${p.target} » inexistants : sur ces enregistrements, « ${p.field} » ne mène nulle part. ` +
-    `Corrigez ou videz « ${p.field} » dans les données d’exemple, puis publiez à nouveau.`,
+    (p.cause === 'mixed'
+      ? `Publier à nouveau réécrit certaines de ces valeurs d’exemple sur des enregistrements qui existent déjà et laisse les ` +
+        `autres tels quels. Corrigez ou videz « ${p.field} » dans les données d’exemple, et corrigez-le ou videz-le aussi sur ` +
+        `ces enregistrements, ou supprimez-les et publiez à nouveau les données d’exemple corrigées.`
+      : p.cause === 'mode'
+      ? `Publier à nouveau ne modifie pas les enregistrements qui existent déjà. Corrigez ou videz « ${p.field} » sur ` +
+        `ces enregistrements, ou supprimez-les et publiez à nouveau les données d’exemple corrigées, ou réglez les ` +
+        `données d’exemple pour qu’elles mettent à jour les enregistrements qu’elles retrouvent (upsert) et corrigez-y « ${p.field} ».`
+      : p.cause === 'stored'
+      ? `Publier à nouveau ne modifie pas « ${p.field} » sur les enregistrements qui existent déjà. Corrigez ou videz ` +
+        `« ${p.field} » sur ces enregistrements, ou supprimez-les et publiez à nouveau les données d’exemple corrigées.`
+      : `Corrigez ou videz « ${p.field} » dans les données d’exemple, puis publiez à nouveau.`),
   'pt-BR': (p) =>
     `Alguns registros de exemplo de "${p.object}" (${p.count} valor(es) em "${p.field}") apontam para registros de ` +
-    `"${p.target}" que não existem, então nesses registros "${p.field}" não leva a lugar nenhum. Corrija ou limpe ` +
-    `"${p.field}" nos dados de exemplo e publique novamente.`,
+    `"${p.target}" que não existem, então nesses registros "${p.field}" não leva a lugar nenhum. ` +
+    (p.cause === 'mixed'
+      ? `Publicar novamente grava alguns desses valores de exemplo em registros que já existem e deixa outros como estão. ` +
+        `Corrija ou limpe "${p.field}" nos dados de exemplo e também corrija-o ou limpe-o nesses registros, ou exclua-os e ` +
+        `publique novamente os dados de exemplo corrigidos.`
+      : p.cause === 'mode'
+      ? `Publicar novamente não altera registros que já existem. Corrija ou limpe "${p.field}" nesses registros, ` +
+        `ou exclua-os e publique novamente os dados de exemplo corrigidos, ou configure os dados de exemplo para ` +
+        `atualizar os registros que encontram (upsert) e corrija "${p.field}" neles.`
+      : p.cause === 'stored'
+      ? `Publicar novamente não altera "${p.field}" em registros que já existem. Corrija ou limpe "${p.field}" ` +
+        `nesses registros, ou exclua-os e publique novamente os dados de exemplo corrigidos.`
+      : `Corrija ou limpe "${p.field}" nos dados de exemplo e publique novamente.`),
   ru: (p) =>
     `Некоторые примеры записей «${p.object}» (значений в поле «${p.field}»: ${p.count}) ссылаются на ` +
-    `несуществующие записи «${p.target}», поэтому в этих записях «${p.field}» никуда не ведёт. Исправьте или ` +
-    `очистите «${p.field}» в примерах данных и опубликуйте снова.`,
+    `несуществующие записи «${p.target}», поэтому в этих записях «${p.field}» никуда не ведёт. ` +
+    (p.cause === 'mixed'
+      ? `Повторная публикация записывает часть этих значений из примеров данных в уже существующие записи, а остальные ` +
+        `оставляет как есть. Исправьте или очистите «${p.field}» в примерах данных, а также исправьте или очистите его в этих ` +
+        `записях, либо удалите их и снова опубликуйте исправленные примеры данных.`
+      : p.cause === 'mode'
+      ? `Повторная публикация не меняет уже существующие записи. Исправьте или очистите «${p.field}» в этих записях, ` +
+        `либо удалите их и снова опубликуйте исправленные примеры данных, либо настройте примеры данных на ` +
+        `обновление найденных записей (upsert) и исправьте «${p.field}» в них.`
+      : p.cause === 'stored'
+      ? `Повторная публикация не меняет «${p.field}» в уже существующих записях. Исправьте или очистите ` +
+        `«${p.field}» в этих записях, либо удалите их и снова опубликуйте исправленные примеры данных.`
+      : `Исправьте или очистите «${p.field}» в примерах данных и опубликуйте снова.`),
   de: (p) =>
     `Einige Beispieldatensätze von „${p.object}“ (${p.count} Wert(e) in „${p.field}“) verweisen auf „${p.target}“-` +
-    `Datensätze, die nicht existieren, sodass „${p.field}“ bei diesen Datensätzen ins Leere führt. Korrigieren oder ` +
-    `leeren Sie „${p.field}“ in den Beispieldaten und veröffentlichen Sie dann erneut.`,
+    `Datensätze, die nicht existieren, sodass „${p.field}“ bei diesen Datensätzen ins Leere führt. ` +
+    (p.cause === 'mixed'
+      ? `Erneutes Veröffentlichen schreibt einige dieser Beispielwerte in bereits vorhandene Datensätze zurück und lässt andere ` +
+        `unverändert. Korrigieren oder leeren Sie „${p.field}“ in den Beispieldaten und zusätzlich in diesen Datensätzen, oder ` +
+        `löschen Sie sie und veröffentlichen Sie die korrigierten Beispieldaten erneut.`
+      : p.cause === 'mode'
+      ? `Erneutes Veröffentlichen ändert bereits vorhandene Datensätze nicht. Korrigieren oder leeren Sie „${p.field}“ ` +
+        `in diesen Datensätzen, oder löschen Sie sie und veröffentlichen Sie die korrigierten Beispieldaten erneut, ` +
+        `oder stellen Sie die Beispieldaten so ein, dass sie gefundene Datensätze aktualisieren (upsert), und ` +
+        `korrigieren Sie „${p.field}“ dort.`
+      : p.cause === 'stored'
+      ? `Erneutes Veröffentlichen ändert „${p.field}“ in bereits vorhandenen Datensätzen nicht. Korrigieren oder ` +
+        `leeren Sie „${p.field}“ in diesen Datensätzen, oder löschen Sie sie und veröffentlichen Sie die korrigierten ` +
+        `Beispieldaten erneut.`
+      : `Korrigieren oder leeren Sie „${p.field}“ in den Beispieldaten und veröffentlichen Sie dann erneut.`),
   ja: (p) =>
     `「${p.object}」のサンプルレコードの一部（「${p.field}」の値 ${p.count} 件）が存在しない「${p.target}」レコードを参照しているため、` +
-    `それらのレコードの「${p.field}」はどこにもつながりません。サンプルデータの「${p.field}」を修正するか空にしてから、もう一度公開してください。`,
+    `それらのレコードの「${p.field}」はどこにもつながりません。` +
+    (p.cause === 'mixed'
+      ? `もう一度公開すると、これらのサンプル値の一部は既に存在するレコードに書き戻され、残りはそのままになります。` +
+        `サンプルデータの「${p.field}」を修正するか空にし、さらにそれらのレコードの「${p.field}」も修正するか空にするか、` +
+        `レコードを削除して修正したサンプルデータをもう一度公開してください。`
+      : p.cause === 'mode'
+      ? `もう一度公開しても、既に存在するレコードは変わりません。それらのレコードの「${p.field}」を修正するか空にするか、` +
+        `レコードを削除して修正したサンプルデータをもう一度公開するか、サンプルデータを見つかったレコードを更新する設定（upsert）にして` +
+        `そこで「${p.field}」を修正してください。`
+      : p.cause === 'stored'
+      ? `もう一度公開しても、既に存在するレコードの「${p.field}」は変わりません。それらのレコードの「${p.field}」を修正するか空にするか、` +
+        `レコードを削除して修正したサンプルデータをもう一度公開してください。`
+      : `サンプルデータの「${p.field}」を修正するか空にしてから、もう一度公開してください。`),
   ko: (p) =>
     `일부 "${p.object}" 샘플 레코드("${p.field}"의 값 ${p.count}개)가 존재하지 않는 "${p.target}" 레코드를 가리키므로 ` +
-    `해당 레코드의 "${p.field}"는 아무 곳으로도 연결되지 않습니다. 샘플 데이터에서 "${p.field}"를 수정하거나 비운 후 다시 게시하세요.`,
+    `해당 레코드의 "${p.field}"는 아무 곳으로도 연결되지 않습니다. ` +
+    (p.cause === 'mixed'
+      ? `다시 게시하면 이 샘플 값 중 일부는 이미 있는 레코드에 다시 기록되고 나머지는 그대로 남습니다. ` +
+        `샘플 데이터에서 "${p.field}"를 수정하거나 비우고, 해당 레코드에서도 수정하거나 비우거나, ` +
+        `레코드를 삭제한 후 수정한 샘플 데이터를 다시 게시하세요.`
+      : p.cause === 'mode'
+      ? `다시 게시해도 이미 있는 레코드는 바뀌지 않습니다. 해당 레코드에서 "${p.field}"를 수정하거나 비우거나, ` +
+        `레코드를 삭제한 후 수정한 샘플 데이터를 다시 게시하거나, 샘플 데이터가 찾은 레코드를 업데이트하도록(upsert) ` +
+        `설정하고 거기서 "${p.field}"를 수정하세요.`
+      : p.cause === 'stored'
+      ? `다시 게시해도 이미 있는 레코드의 "${p.field}"는 바뀌지 않습니다. 해당 레코드에서 "${p.field}"를 수정하거나 ` +
+        `비우거나, 레코드를 삭제한 후 수정한 샘플 데이터를 다시 게시하세요.`
+      : `샘플 데이터에서 "${p.field}"를 수정하거나 비운 후 다시 게시하세요.`),
 };
 
 /**

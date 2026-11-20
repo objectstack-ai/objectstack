@@ -1001,8 +1001,6 @@ const ru = {
     recordOpen: "Открытие записей",
     recordOpenDrawer: "Боковая панель",
     recordOpenPage: "Вся страница",
-    recordOpenNote: "Ваша личная настройка, не входит в объявление объекта. ↗ у записи всегда открывает её на всю страницу.",
-    recordOpenDeclaredPage: "Этот объект объявлен для открытия на всю страницу",
     addGroup: "Добавить поле группировки",
     collapsedByDefault: "Свёрнуто по умолчанию",
     removeGroup: "Удалить",
@@ -1012,6 +1010,23 @@ const ru = {
     withheldFieldsLeftOut: "Не показано, без фильтрации, сортировки и группировки по {{fields}}: пакет, который добавляет это поле, отключён. Поле вернётся, когда пакет будет включён.",
     inlineEditShort: "Встроенное редактирование",
     inlineEditLabel: "Редактировать записи в таблице (щёлкните ячейку для редактирования)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'Название представления',
+      fields: 'Поля',
+      fieldsShown: 'Показано: {{count}}',
+      fieldsShown_one: 'Показано: {{count}}',
+      fieldsShown_few: 'Показано: {{count}}',
+      fieldsShown_many: 'Показано: {{count}}',
+      fieldsShown_other: 'Показано: {{count}}',
+      rowHeight: 'Высота строк',
+      rowHeightCompact: 'Компактная',
+      rowHeightStandard: 'Стандартная',
+      rowHeightSpacious: 'Просторная',
+      more: 'Ещё',
+      restoreDefaults: 'Восстановить по умолчанию',
+      recordOpenAlwaysPage: 'Записи всегда открываются на всю страницу',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1247,6 +1262,8 @@ const ru = {
     manageViewsDescription: "Переупорядочьте, переименуйте, закрепите или удалите все представления этого объекта.",
     searchViews: "Поиск представлений",
     addNewView: "Добавить новое представление",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Это представление сохранено как черновик вне этого приложения, потому что пакет настройки приложения здесь недоступен. Панель черновиков этого приложения не учитывает и не публикует его: опубликуйте его с главной страницы.",
     done: "Готово",
     noViewsFound: "Представления не найдены.",
     // objectstack#27594 — the list title's view switcher.
@@ -1254,14 +1271,20 @@ const ru = {
       label: "Представления",
       pinned: "Закреплено",
       recent: "Недавние",
-      all: "Все представления",
       pin: "Закрепить: открывать это представление по умолчанию",
       unpin: "Открепить: список снова открывает представление по умолчанию",
       inMenu: "Уже в меню",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Мои представления",
-      saveAsMyView: "Сохранить как моё представление",
       myViewName: "Название представления",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: 'Общие представления',
+      addView: 'Добавить представление',
+      typeLabel: 'Тип представления',
+      includeCurrent: 'Включить текущие фильтры и сортировку',
+      scopeShared: 'Общее',
+      scopeHint: 'Общие представления видны всем, кто видит этот список',
+      create: 'Создать',
     },
     dragToReorder: "Перетащите для изменения порядка",
     defaultView: "Представление по умолчанию",
@@ -5109,7 +5132,6 @@ const ru = {
   filterBuilder: {
     currency: 'Валюта',
     currencyNeedsAnd: 'Денежная сумма сравнивается в выбранной валюте, только когда должны выполняться все условия (И).',
-    where: "Где",
     and: "И",
     or: "ИЛИ",
     clearAll: "Очистить всё",
@@ -5200,6 +5222,7 @@ const ru = {
       after: 'после',
     },
     sort: {
+      advanced: 'Все уровни сортировки',
       direction: 'Направление',
       ascending: 'По возрастанию',
       descending: 'По убыванию',

@@ -968,8 +968,6 @@ const pt = {
     recordOpen: "Abrir registros",
     recordOpenDrawer: "Painel lateral",
     recordOpenPage: "Página inteira",
-    recordOpenNote: "Sua preferência pessoal, não faz parte da declaração do objeto. O ↗ de um registro sempre abre a página inteira.",
-    recordOpenDeclaredPage: "Este objeto está declarado para abrir como página inteira",
     addGroup: "Adicionar campo de grupo",
     collapsedByDefault: "Recolhido por padrão",
     removeGroup: "Remover",
@@ -979,6 +977,22 @@ const pt = {
     withheldFieldsLeftOut: "Sem exibir, filtrar, ordenar nem agrupar por {{fields}}: o pacote que o adiciona está desativado. Ele volta quando o pacote for ativado.",
     inlineEditShort: "Edição em linha",
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
+    // The list's Options menu.
+    optionsMenu: {
+      viewName: 'Nome da visualização',
+      fields: 'Campos',
+      fieldsShown: 'Exibidos: {{count}}',
+      fieldsShown_one: '{{count}} exibido',
+      fieldsShown_many: '{{count}} exibidos',
+      fieldsShown_other: '{{count}} exibidos',
+      rowHeight: 'Altura da linha',
+      rowHeightCompact: 'Compacta',
+      rowHeightStandard: 'Padrão',
+      rowHeightSpacious: 'Espaçosa',
+      more: 'Mais',
+      restoreDefaults: 'Restaurar padrões',
+      recordOpenAlwaysPage: 'Os registros sempre abrem em página inteira',
+    },
   },
   managedByBadge: {
     systemWritable: {
@@ -1211,6 +1225,8 @@ const pt = {
     manageViewsDescription: "Reordenar, renomear, fixar ou excluir todas as exibições deste objeto.",
     searchViews: "Pesquisar exibições",
     addNewView: "Adicionar nova exibição",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Esta exibição foi salva como rascunho fora deste aplicativo, porque o pacote de personalização do aplicativo não pode ser usado aqui. A barra de rascunhos deste aplicativo não a conta nem a publica: publique-a pela página inicial.",
     done: "Concluído",
     noViewsFound: "Nenhuma exibição corresponde à sua pesquisa.",
     // objectstack#27594 — the list title's view switcher.
@@ -1218,14 +1234,20 @@ const pt = {
       label: "Exibições",
       pinned: "Fixada",
       recent: "Recentes",
-      all: "Todas as exibições",
       pin: "Fixar: abrir esta exibição por padrão",
       unpin: "Desafixar: a lista volta a abrir a exibição padrão",
       inMenu: "Já está no menu",
       // objectstack#29635 — the reader's own views (My views).
       myViews: "Minhas visualizações",
-      saveAsMyView: "Salvar como minha visualização",
       myViewName: "Nome da visualização",
+      // The view dropdown's groups, its 「Add view」 entry and the in-place create card.
+      sharedViews: 'Visualizações compartilhadas',
+      addView: 'Adicionar visualização',
+      typeLabel: 'Tipo de visualização',
+      includeCurrent: 'Incluir os filtros e a ordenação atuais',
+      scopeShared: 'Compartilhada',
+      scopeHint: 'Visualizações compartilhadas são vistas por todos que podem ver esta lista',
+      create: 'Criar',
     },
     dragToReorder: "Arrastar para reordenar",
     defaultView: "Exibição padrão",
@@ -4950,7 +4972,6 @@ const pt = {
   filterBuilder: {
     currency: 'Moeda',
     currencyNeedsAnd: 'Um valor em moeda só é comparado na moeda escolhida quando todas as condições devem ser atendidas (E).',
-    where: "Onde",
     and: "E",
     or: "OU",
     clearAll: "Limpar tudo",
@@ -5041,6 +5062,7 @@ const pt = {
       after: 'depois de',
     },
     sort: {
+      advanced: 'Todos os níveis de ordenação',
       direction: 'Direção',
       ascending: 'Crescente',
       descending: 'Decrescente',

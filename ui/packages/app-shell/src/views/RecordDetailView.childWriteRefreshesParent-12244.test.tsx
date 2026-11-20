@@ -280,11 +280,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The record's header: its own row, or, on a page, the name it draws into the
+// top bar's one row (objectstack#35593). Either is the same element across a
+// re-read that does not remount the page.
+const HEADER = 'header, [data-record-header-title]';
+
 describe('RecordDetailView — a child write in a related list refreshes the parent (objectui#12244)', () => {
   it('a row Delete in the related list re-reads the parent and shows the recomputed total', async () => {
     const { ds, rollup } = await settledPage();
     expect(rollup()).toBe(9000);
-    const headerBefore = document.querySelector('header');
+    const headerBefore = document.querySelector(HEADER);
     expect(headerBefore).toBeTruthy();
 
     const row = screen.getByText('Seat licence').closest('tr')!;
@@ -301,13 +306,13 @@ describe('RecordDetailView — a child write in a related list refreshes the par
     await waitFor(() => expect(figureShown(3000)).toBe(true));
     expect(figureShown(9000)).toBe(false);
     // In place: the same header node, the list's face still the open one.
-    expect(document.querySelector('header')).toBe(headerBefore);
+    expect(document.querySelector(HEADER)).toBe(headerBefore);
     expect(document.querySelector(`[data-related-enlarged="${CHILD}.${PARENT}"]`)).not.toBeNull();
   });
 
   it('a child update through the dataSource (the form overlay\'s save) re-reads the parent', async () => {
     const { ds, rollup } = await settledPage();
-    const headerBefore = document.querySelector('header');
+    const headerBefore = document.querySelector(HEADER);
 
     await act(async () => {
       await ds.update(CHILD, 'l-2', { quantity: 2 });
@@ -316,7 +321,7 @@ describe('RecordDetailView — a child write in a related list refreshes the par
     expect(rollup()).toBe(12000);
     await waitFor(() => expect(parentReads(ds)).toBe(2));
     await waitFor(() => expect(figureShown(12000)).toBe(true));
-    expect(document.querySelector('header')).toBe(headerBefore);
+    expect(document.querySelector(HEADER)).toBe(headerBefore);
   });
 
   it('a child row action that bypasses the dataSource (an object-wide child change) re-reads the parent', async () => {
