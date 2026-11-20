@@ -98,9 +98,21 @@ function innerMembers(leaf: FixedReadLeaf, ctx: EvalContext): unknown[] {
   // `tenantScope: 'none'` is the only declared value: the inner read is unwalled
   // unless the reading under test walls it.
   const walled = ctx.reading === 'inner-read-walled' && ctx.tenantId !== undefined;
+  // The description's predicate maps name columns. A `$`-key is no column of any
+  // table, so it is refused, never read as a field the row lacks.
   return rowsOf(ctx.set, read.table)
-    .filter((row) => Object.entries(read.equals).every(([column, value]) => row[column] === value))
-    .filter((row) => Object.entries(read.memberOf).every(([column, values]) => values.includes(row[column] as string)))
+    .filter((row) =>
+      Object.entries(read.equals).every(([column, value]) => {
+        if (column.startsWith('$')) throw new Error(`a fixed inner read's equals names columns, not ${column}`);
+        return row[column] === value;
+      }),
+    )
+    .filter((row) =>
+      Object.entries(read.memberOf).every(([column, values]) => {
+        if (column.startsWith('$')) throw new Error(`a fixed inner read's memberOf names columns, not ${column}`);
+        return values.includes(row[column] as string);
+      }),
+    )
     .filter((row) => !walled || row[ctx.set.tenantField] === ctx.tenantId)
     .map((row) => row[read.column])
     .filter((value) => ctx.reading === 'blank-guard-missing' || (value !== null && value !== ''));
