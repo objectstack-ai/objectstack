@@ -62,10 +62,12 @@
  * by how far apart the two rows' stamps fall (hooks that run between the two
  * creations take as long as they take): the account's `user.create.before`
  * notes it on the request's endpoint context, and the credential row's
- * `account.create.before` gives a row created in that request the account's
- * own id ({@link noteAccountCreatedInRequest}, {@link firstPasswordMark},
- * composed in `auth-manager-database-hooks.ts`). The clock reads a row that
- * carries its account's id and has not been written over since its creation
+ * `account.create.before` gives a row created in that request an id derived
+ * from the account's ({@link firstPasswordRowId}; never the account's own id,
+ * which names its `sys_user` row: {@link noteAccountCreatedInRequest},
+ * {@link firstPasswordMark}, composed in `auth-manager-database-hooks.ts`).
+ * The clock reads a row that carries that id and has not been written over
+ * since its creation
  * (its update stamp no earlier than its creation stamp and within
  * {@link FIRST_CREDENTIAL_WINDOW_MS} of it: the vendor takes the two stamps
  * separately, in one write) as no change.
@@ -206,8 +208,19 @@ export async function readCredentialChangedAt(reader: CredentialClockReader, use
   if (updated === undefined) return undefined;
   const created = toMs(account?.createdAt);
   const writtenOver = created === undefined || updated < created || updated - created > FIRST_CREDENTIAL_WINDOW_MS;
-  if (!writtenOver && account?.id === userId) return undefined;
+  if (!writtenOver && account?.id === firstPasswordRowId(userId)) return undefined;
   return updated;
+}
+
+/**
+ * The id a credential row created in its account's own creation request
+ * carries: derived from the account's id, never equal to it (the account's id
+ * names its `sys_user` row, and a record id is read across objects, as the
+ * audit trail's `record_id` is) and never one better-auth generates (those
+ * are alphanumeric).
+ */
+export function firstPasswordRowId(userId: string): string {
+  return `${userId}-credential`;
 }
 
 /**
@@ -231,7 +244,7 @@ export function noteAccountCreatedInRequest(ctx: unknown, email: unknown): void 
 
 /**
  * `account.create.before`: the mark of an account's first password — the
- * fields that give the credential row its account's own id — when the row
+ * fields that give the credential row {@link firstPasswordRowId} — when the row
  * (provider `credential`, `accountId` the account's id) is created in the
  * request that created its account; `undefined` otherwise, and when the
  * account cannot be read (the row then reads as a change: fail closed).
@@ -244,7 +257,7 @@ export async function firstPasswordMark(account: any, ctx: any): Promise<{ id: s
   if (!created?.size) return undefined;
   try {
     const email: unknown = (await ctx.context.internalAdapter.findUserById(userId))?.email;
-    return typeof email === 'string' && created.has(email.toLowerCase()) ? { id: userId } : undefined;
+    return typeof email === 'string' && created.has(email.toLowerCase()) ? { id: firstPasswordRowId(userId) } : undefined;
   } catch {
     return undefined;
   }

@@ -133,8 +133,8 @@ export function composeDatabaseHooks(
   // provider link. Asked FIRST, before the host's own `create.before`, for
   // every writer of a credential row. See service-account-identity.ts.
   // An account's first password — the credential row created in the request
-  // that created the account — is born with the account's own id, the mark
-  // the credential clock reads (credential-change-ends-prior-access.ts, "An
+  // that created the account — is born with an id derived from the account's
+  // (`firstPasswordRowId`), the mark the credential clock reads (credential-change-ends-prior-access.ts, "An
   // account's first password"). Asked after the host's hook, whose `false`
   // (refuse the row) is honoured first and whose fields it keeps.
   const hostAccountBefore = (host as any)?.account?.create?.before;

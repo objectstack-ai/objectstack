@@ -33,7 +33,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { AuthPlugin } from './auth-plugin.js';
-import { issuedBeforeCredentialChange, readCredentialChangedAt } from './credential-change-ends-prior-access.js';
+import { firstPasswordRowId, issuedBeforeCredentialChange, readCredentialChangedAt } from './credential-change-ends-prior-access.js';
 import { authIdentityObjects } from './manifest.js';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
@@ -689,8 +689,8 @@ describe('the predicate and its clock', () => {
   it("the clock is the last write over the credential row; an account's first password and no row are no change", async () => {
     const reader = (account: unknown) => ({ findCredentialAccount: async () => account }) as never;
     const created = '2026-01-01T00:00:00.000Z';
-    // `u`'s first password: the row carries the account's own id.
-    const first = (updatedAt: unknown, createdAt: unknown = created) => reader({ id: 'u', createdAt, updatedAt });
+    // `u`'s first password: the row carries the id derived from the account's.
+    const first = (updatedAt: unknown, createdAt: unknown = created) => reader({ id: firstPasswordRowId('u'), createdAt, updatedAt });
     expect(await readCredentialChangedAt(reader(null), 'u')).toBeUndefined();
     expect(await readCredentialChangedAt(first(created), 'u')).toBeUndefined();
     // The vendor takes the row's two stamps separately, in one write.
@@ -707,14 +707,17 @@ describe('the predicate and its clock', () => {
     ).rejects.toThrow('down');
   });
 
-  it("a credential row that does not carry its account's id is a change at its creation", async () => {
+  it("a credential row that does not carry the id derived from its account's is a change at its creation", async () => {
     const at = '2026-02-01T00:00:00.000Z';
     const read = (account: unknown) => readCredentialChangedAt({ findCredentialAccount: async () => account } as never, 'u');
     // Created onto an account that was already there, outside a request, or before the rule shipped.
     expect(await read({ id: 'some-other-id', createdAt: at, updatedAt: at })).toBe(Date.parse(at));
     expect(await read({ createdAt: at, updatedAt: at })).toBe(Date.parse(at));
+    // The account's own id names its `sys_user` row, never its first password.
+    expect(firstPasswordRowId('u')).not.toBe('u');
+    expect(await read({ id: 'u', createdAt: at, updatedAt: at })).toBe(Date.parse(at));
     // A row whose creation cannot be read is judged written over.
-    expect(await read({ id: 'u', updatedAt: at })).toBe(Date.parse(at));
+    expect(await read({ id: firstPasswordRowId('u'), updatedAt: at })).toBe(Date.parse(at));
   });
 });
 
