@@ -130,7 +130,7 @@
  */
 
 import { withoutOperationPrivateKeys } from '@objectstack/core';
-import { resolveDisplayField } from '@objectstack/spec/data';
+import { resolveDisplayField, type EngineQueryOptions } from '@objectstack/spec/data';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { redactSnapshot, resolveReadableSnapshotFields, type FieldVisibilitySource } from './payload-redaction.js';
 import { negotiatedReaderLocale, readerLabelsFor, type ReaderLabelI18n } from './reader-locale-labels.js';
@@ -861,7 +861,7 @@ export function bindDetailRowLockHook(
             fields: ['id', ...edges.map((e) => e.fk)],
             limit: 1,
             context: { ...SYSTEM_CTX },
-          } as any);
+          } satisfies EngineQueryOptions);
           previous = Array.isArray(rows) && rows[0] ? rows[0] : undefined;
         } catch {
           previous = undefined;

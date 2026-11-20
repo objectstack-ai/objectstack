@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindDetailRowLockHook } from './lifecycle-hooks.js';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const opportunity = {
@@ -138,7 +139,7 @@ describe('ruling A — a locked master\'s detail rows refuse insert / update / d
     expectLocked(await refusal(() => engine.insert('opportunity_line', { product: 'C', quantity: 2, opportunity: lockedId }, USER)));
     const created = await engine.insert('opportunity_line', { product: 'C', quantity: 2, opportunity: freeId }, USER);
     expect(created?.id).toBeTruthy();
-    const underLocked = await engine.find('opportunity_line', { where: { opportunity: lockedId }, context: { isSystem: true } } as any);
+    const underLocked = await engine.find('opportunity_line', { where: { opportunity: lockedId }, context: { isSystem: true } } satisfies EngineQueryOptions);
     expect(underLocked).toHaveLength(1);
   });
 
@@ -173,7 +174,7 @@ describe('ruling A — a locked master\'s detail rows refuse insert / update / d
       'opportunity_line',
       { where: { quantity: 1 }, multi: true, ...USER } as any,
     )));
-    expect(await engine.find('opportunity_line', { where: { quantity: 1 }, context: { isSystem: true } } as any)).toHaveLength(2);
+    expect(await engine.find('opportunity_line', { where: { quantity: 1 }, context: { isSystem: true } } satisfies EngineQueryOptions)).toHaveLength(2);
   });
 
   it('the batch path (one transaction): a refused row rolls the whole transaction back', async () => {
