@@ -3155,8 +3155,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     if (row === undefined || col === undefined) return;
     setCellNotice(null);
     rove(rowIndex, colIndex);
+    if (selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex) {
+      // Selected already, so no render follows to move the focus: a click on
+      // the cell took it to the cell itself, where a typed key is lost.
+      focusSelectionRef.current = false;
+      tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]')?.focus();
+      return;
+    }
     focusSelectionRef.current = true;
-    if (selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex) return;
     setSelectedCell({ rowIndex, colIndex });
     cellSelection?.onCellSelect?.(row, col.accessorKey);
   };
@@ -4441,13 +4447,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // where its column does.
                               ...(pinnedRightOffset ? { right: pinnedRightOffset } : {}),
                             }}
+                            onMouseDown={selectFirst ? (e) => {
+                              // The double-click is the edit gesture here, so its second
+                              // press does not select the word under the pointer.
+                              if (e.detail > 1 && !isEditing && !isCellWidgetTarget(e.target, e.currentTarget)) e.preventDefault();
+                            } : undefined}
                             onDoubleClick={(e) => {
                               if (selectFirst) {
                                 // objectstack#35684 — a double-click on the cell (not on a
                                 // link it draws) edits; a two-state cell already flipped on
-                                // the second click. A touch never edits in place.
+                                // the second click. A touch never edits in place. A word the
+                                // browser selected on the way is not a text selection.
                                 if (isEditing || isTouchPress(e) || isCellWidgetTarget(e.target, e.currentTarget)) return;
-                                if (hasTextSelectionIn(e.currentTarget)) return;
+                                window.getSelection?.()?.removeAllRanges();
                                 e.stopPropagation();
                                 if (!togglesCell(row, col)) attemptEdit(rowIndex, colIndex);
                                 return;

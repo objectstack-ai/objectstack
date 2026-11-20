@@ -30,6 +30,9 @@ import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
 // Registers `data-table` at module scope, not in a hook (objectui#3010).
 import '../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 import { GridCellSelectionProvider, type GridCellSelection } from '../context/gridCellSelection';
 
 afterEach(cleanup);
@@ -116,6 +119,31 @@ describe('data-table select-first — double-click, Enter and F2 edit', () => {
     expect(t.editor()!.selectionStart).toBe(5);
     expect(t.editor()!.selectionEnd).toBe(5);
     expect(t.onRowClick).not.toHaveBeenCalled();
+  });
+
+  it('a double-click over the text edits, though the browser selected a word on the way', () => {
+    const t = renderTable();
+    fireEvent.click(t.cell(0, 0));
+    // The second press keeps the word under the pointer unselected…
+    expect(fireEvent.mouseDown(t.cell(0, 0), { detail: 2 })).toBe(false);
+    // …and a word a browser selected anyway does not stop the edit.
+    const range = document.createRange();
+    range.selectNodeContents(screen.getByText('Alpha'));
+    window.getSelection()!.addRange(range);
+    fireEvent.doubleClick(t.cell(0, 0));
+    expect(t.editor()).toHaveValue('Alpha');
+    expect(window.getSelection()!.isCollapsed).toBe(true);
+  });
+
+  it('a second click on the selected cell gives the focus back to it, so a typed key still edits', () => {
+    const t = renderTable();
+    fireEvent.click(t.cell(0, 0));
+    // A real press focuses the cell it lands on; `fireEvent.click` does not.
+    t.cell(0, 0).focus();
+    fireEvent.click(t.cell(0, 0));
+    expect(document.activeElement).toBe(t.catcher());
+    fireEvent.change(t.catcher()!, { target: { value: 'Z' } });
+    expect(t.editor()).toHaveValue('Z');
   });
 
   it.each(['Enter', 'F2'])('%s on the selected cell opens the editor on the value', (key) => {

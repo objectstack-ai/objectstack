@@ -29,6 +29,9 @@ import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
 // Registers `data-table` at module scope, not in a hook (objectui#3010).
 import '../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 import { GridCellSelectionProvider, type GridCellSelection } from '../context/gridCellSelection';
 
 afterEach(() => {
