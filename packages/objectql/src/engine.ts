@@ -4667,12 +4667,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolvePredicateRelated: (...a) => this.resolvePredicateRelated(...a),
       resolveOptionPermissions: (...a) => this.resolveOptionPermissions(...a),
       getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
-      // [#34821] The parent fields calculated from the roll-ups a multi-row insert preview moves.
-      facade: this,
-      getSchema: (...a) => this.getSchema(...a),
-      resolveFormulaPermissions: (...a) => this.resolveFormulaPermissions(...a),
-      resolveFormulaRelated: (...a) => this.resolveFormulaRelated(...a),
-      formulaOptionLabels: (...a) => this.formulaOptionLabels(...a),
+      facade: this, getSchema: (...a) => this.getSchema(...a), resolveFormulaPermissions: (...a) => this.resolveFormulaPermissions(...a), resolveFormulaRelated: (...a) => this.resolveFormulaRelated(...a), formulaOptionLabels: (...a) => this.formulaOptionLabels(...a), // [#34821]
       assertReferencesResolve: (...a) => this.assertReferencesResolve(...a),
       previewHomeAmounts: (...a) => this.previewHomeAmounts(...a),
       homeAmountServing: (...a) => this.homeAmountServing(...a),
