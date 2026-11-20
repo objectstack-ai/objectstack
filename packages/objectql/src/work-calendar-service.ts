@@ -56,7 +56,8 @@
  * one. Judged: the period columns (D7: no period crosses midnight; D10:
  * `24:00` is a legal end; `off` carries none, `on` carries its date's full
  * periods); `maintained_from` on or before `maintained_through`; one default
- * per organization. A create that leaves `timezone` out takes the
+ * per organization; an exception's calendar is one of its own organization's.
+ * A create that leaves `timezone` out takes the
  * organization's `localization.timezone` (D7), stored as the calendar's own.
  *
  * The hooks take the organization from the session, every writer's alike: a
@@ -82,6 +83,16 @@
  * update is judged row by row, as the engine hands the hook each matched row
  * with its stored image: one matched row whose organization would change
  * refuses the whole write.
+ *
+ * An exception date names a calendar of its own organization. On a create,
+ * and on an update that carries `calendar`, the hooks read the calendar by id
+ * in the exception's organization (the session's on a create, by the rule
+ * above; the stored row's on an update) and refuse on `calendar` when none
+ * comes back. A calendar of another organization and an id that names no
+ * calendar meet the same refusal, word for word, so it tells a writer nothing
+ * about any other organization. A create the hooks cannot read for (its row
+ * names an organization other than the session's, or it has no organization
+ * outside `single`) is refused the same way: write it under its organization.
  */
 
 import {
@@ -303,6 +314,12 @@ function periodsRefusal(field: string, value: unknown): FieldRefusal | undefined
   return { field, code: 'invalid_value', message, value };
 }
 
+/** Where an update's elevated reads run: the stored row's own organization (see the module note). */
+function updateReadOrganization(previous: Row, posture: TenancyPosture): ReadScope {
+  const organizationId = organizationOf(previous.organization_id);
+  return mayReadIn(organizationId, posture) ? { read: true, organizationId } : { read: false };
+}
+
 /**
  * Where an insert's elevated reads run: the session's organization (see the
  * module note), `read: false` when the hooks make none.
@@ -398,6 +415,30 @@ function refuseOrganizationChange(object: string, data: Row, previous: Row): voi
   refuse(object, [{ field: 'organization_id', code: 'invalid_value', message: STAYS_IN_ORGANIZATION[object]! }]);
 }
 
+/** The fixed reason for an exception whose calendar its organization does not hold: no organization, code or id. */
+const CALENDAR_OF_OWN_ORGANIZATION = 'An exception date names a calendar of its own organization.';
+
+/**
+ * Refuse an exception whose `calendar` its own organization does not hold:
+ * one read by id in `scope`'s organization (see the module note). A blank is
+ * left to `required`.
+ */
+async function refuseForeignCalendar(engine: WorkCalendarReadEngine, ctx: any, data: Row, scope: ReadScope): Promise<void> {
+  if (!hasOwn(data, 'calendar')) return;
+  const ref = data.calendar;
+  if (ref === undefined || ref === null || ref === '') return;
+  if (scope.read && (typeof ref === 'string' || typeof ref === 'number')) {
+    const held = (await engine.find(WORK_CALENDAR_OBJECT, {
+      where: { id: String(ref) },
+      fields: ['id'],
+      limit: 1,
+      context: readContext(scope.organizationId, ctx?.transaction),
+    })).filter(isRow);
+    if (held.length > 0) return;
+  }
+  refuse(WORK_CALENDAR_EXCEPTION_OBJECT, [{ field: 'calendar', code: 'invalid_value', message: CALENDAR_OF_OWN_ORGANIZATION }]);
+}
+
 /** Judge an exception row's post-image (ADR-0157 D10) when the write carries its kind or periods. */
 function judgeException(data: Row, previous: Row | undefined): void {
   if (!hasOwn(data, 'kind') && !hasOwn(data, 'periods')) return;
@@ -456,20 +497,21 @@ export function installWorkCalendarHooks(
     if (!isRow(data) || !previous) return;
     refuseOrganizationChange(WORK_CALENDAR_OBJECT, data, previous);
     // The stored row's own organization: the engine read it under the write's own scope.
-    const organizationId = organizationOf(previous.organization_id);
-    const scope: ReadScope = mayReadIn(organizationId, postureNow()) ? { read: true, organizationId } : { read: false };
-    await judgeCalendar(engine, ctx, data, previous, scope);
+    await judgeCalendar(engine, ctx, data, previous, updateReadOrganization(previous, postureNow()));
   });
-  bind('beforeInsert', WORK_CALENDAR_EXCEPTION_OBJECT, (ctx: any) => {
+  bind('beforeInsert', WORK_CALENDAR_EXCEPTION_OBJECT, async (ctx: any) => {
     const row = ctx?.input?.data;
-    if (isRow(row)) judgeException(row, undefined);
+    if (!isRow(row)) return;
+    judgeException(row, undefined);
+    await refuseForeignCalendar(engine, ctx, row, insertReadOrganization(ctx, row, postureNow()));
   });
-  bind('beforeUpdate', WORK_CALENDAR_EXCEPTION_OBJECT, (ctx: any) => {
+  bind('beforeUpdate', WORK_CALENDAR_EXCEPTION_OBJECT, async (ctx: any) => {
     const data = ctx?.input?.data;
     const previous = isRow(ctx?.previous) ? ctx.previous : undefined;
     if (!isRow(data) || !previous) return;
     refuseOrganizationChange(WORK_CALENDAR_EXCEPTION_OBJECT, data, previous);
     judgeException(data, previous);
+    await refuseForeignCalendar(engine, ctx, data, updateReadOrganization(previous, postureNow()));
   });
   const both = [WORK_CALENDAR_OBJECT, WORK_CALENDAR_EXCEPTION_OBJECT];
   for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) bind(event, both, () => service.invalidate());

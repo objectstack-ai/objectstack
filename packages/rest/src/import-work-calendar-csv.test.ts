@@ -20,7 +20,10 @@
  *   organization the session or the payload names;
  * - a calendar, and each of its exception dates, stays in its organization:
  *   an update that changes `organization_id` is refused before any read,
- *   system writes included, while an edit that keeps it lands.
+ *   system writes included, while an edit that keeps it lands;
+ * - an exception date names a calendar of its own organization: a calendar
+ *   of another organization and an id that names no calendar meet one
+ *   refusal, the same body for both.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -242,8 +245,8 @@ async function seed(posture: 'group' | 'isolated') {
   // org_b holds a default; org_a holds none, so a read in org_a would admit the edit.
   const storedDefault = await put('org_b', 'b_main', { is_default: true });
   const stored = await put('org_b', 'b_alt');
-  await put('org_a', 'a_main');
-  return { ctx, stored, storedDefault, reads: recordDefaultReads(ctx.engine) };
+  const foreign = await put('org_a', 'a_main');
+  return { ctx, stored, storedDefault, foreign, reads: recordDefaultReads(ctx.engine) };
 }
 
 /** The refusal an engine write meets, or `undefined` when it lands. */
@@ -336,5 +339,61 @@ describe('a calendar and its exceptions stay in their organization (ADR-0157 D2)
     const calendarRow: any = await ctx.engine.findOne('sys_work_calendar', { where: { id: stored }, context: { isSystem: true } as any });
     const dayRow: any = await ctx.engine.findOne('sys_work_calendar_exception', { where: { id: day }, context: { isSystem: true } as any });
     expect([calendarRow.name, calendarRow.organization_id, dayRow.note, dayRow.organization_id]).toEqual(['B Alternate', 'org_b', 'National Day holiday', 'org_b']);
+  });
+});
+
+describe('an exception date names a calendar of its own organization (ADR-0157 D2)', () => {
+  // A system writer in org_b, where `stored` lives; `foreign` lives in org_a.
+  const asSystem = { context: { userId: 'calendar-admin', tenantId: 'org_b', isSystem: true } as any };
+  const REASON = 'An exception date names a calendar of its own organization.';
+  const NO_SUCH_CALENDAR = 'cal_no_such_calendar';
+  const day = (calendar: string, date = '2026-10-01') => ({ calendar, date, kind: 'off' });
+
+  /** The refusal as a caller meets it: the resolved envelope, whole. */
+  const envelope = (err: unknown) => resolveThrownHttpError(err) as any;
+  const REFUSED = { status: 400, code: 'VALIDATION_FAILED', details: { fields: [expect.objectContaining({ field: 'calendar', code: 'invalid_value' })] } };
+
+  const daysOf = async (ctx: Booted) =>
+    ((await ctx.engine.find('sys_work_calendar_exception', { context: { isSystem: true } as any })) as any[])
+      .map((r) => [r.calendar, String(r.date).slice(0, 10), r.organization_id]);
+
+  it('refuses a calendar of another organization, on create and on an update that carries calendar', async () => {
+    const { ctx, stored, foreign } = await seed('isolated');
+    const created = await refusalOf(ctx.engine.insert('sys_work_calendar_exception', day(foreign), asSystem));
+    expect(envelope(created)).toMatchObject(REFUSED);
+    expect(envelope(created).message).toContain(REASON);
+
+    // A create whose row names the calendar's organization, not the session's, is not read for: the same refusal.
+    const elsewhere = await refusalOf(ctx.engine.insert('sys_work_calendar_exception', { ...day(foreign), organization_id: 'org_a' }, asSystem));
+    expect(envelope(elsewhere)).toMatchObject(REFUSED);
+
+    const own = String(((await ctx.engine.insert('sys_work_calendar_exception', day(stored), asSystem)) as any).id);
+    const repointed = await refusalOf(ctx.engine.update('sys_work_calendar_exception', { id: own, calendar: foreign }, asSystem));
+    expect(envelope(repointed)).toMatchObject(REFUSED);
+    expect(await daysOf(ctx)).toEqual([[stored, '2026-10-01', 'org_b']]);
+  });
+
+  it('refuses an id that names no calendar with the same body as a calendar of another organization', async () => {
+    const { ctx, foreign } = await seed('isolated');
+    const other = await refusalOf(ctx.engine.insert('sys_work_calendar_exception', day(foreign), asSystem));
+    const none = await refusalOf(ctx.engine.insert('sys_work_calendar_exception', day(NO_SUCH_CALENDAR), asSystem));
+
+    expect(envelope(none)).toMatchObject(REFUSED);
+    expect(JSON.stringify(envelope(none))).toBe(JSON.stringify(envelope(other)));
+    for (const named of [foreign, NO_SUCH_CALENDAR, 'org_a', 'org_b', 'a_main']) expect(JSON.stringify(envelope(other))).not.toContain(named);
+
+    // The same through the create door, for a member of org_b: one body for both.
+    ctx.session.organizationId = 'org_b';
+    const viaOther = await post(ctx, 'sys_work_calendar_exception', day(foreign));
+    const viaNone = await post(ctx, 'sys_work_calendar_exception', day(NO_SUCH_CALENDAR));
+    expect(viaOther).toMatchObject({ status: 400, json: { code: 'VALIDATION_FAILED', fields: [expect.objectContaining({ field: 'calendar', code: 'invalid_value' })] } });
+    expect(JSON.stringify(viaNone)).toBe(JSON.stringify(viaOther));
+  });
+
+  it('CONTROL: a calendar of its own organization lands, on create and on update', async () => {
+    const { ctx, stored, storedDefault } = await seed('isolated');
+    const own = String(((await ctx.engine.insert('sys_work_calendar_exception', day(stored), asSystem)) as any).id);
+    expect(await refusalOf(ctx.engine.update('sys_work_calendar_exception', { id: own, calendar: storedDefault }, asSystem))).toBeUndefined();
+    expect(await daysOf(ctx)).toEqual([[storedDefault, '2026-10-01', 'org_b']]);
   });
 });
