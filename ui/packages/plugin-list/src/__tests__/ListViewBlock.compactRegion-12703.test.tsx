@@ -10,7 +10,7 @@
  * objectui#12703 — a `list-view` block in a page region narrower than half the
  * page takes the compact posture: a header with the list's title and record
  * count over two-line rows, without the toolbar, the view tabs and the
- * row-number column. A region half the page or wider takes the capped
+ * grid. A region half the page or wider takes the capped
  * posture instead (objectstack#26613, pinned in
  * `ListViewBlock.cappedPageBlock-26613.test.tsx`), and no page region keeps the
  * full list.
@@ -21,12 +21,12 @@
  * test has no layout, so the widths come from a stand-in `ResizeObserver` that
  * reports one width per observed element — the page body
  * (`[data-page-type] > div`) and each region's grid (`[data-region]`). The
- * grid is a spy: the full list is "the grid was mounted, with row numbers",
- * and the compact list is "the grid was never mounted".
+ * grid is a spy: the full list is "the grid was mounted, under the toolbar"
+ * (objectstack#35663: no list numbers its rows any more), and the compact list is "the grid was never mounted".
  *
  * What is pinned:
  *  (a) the block in the `aside` (320 of 1200) draws no toolbar, no tabs and
- *      no grid (so no `#` column), and one two-line row per record: the
+ *      no grid, and one two-line row per record: the
  *      view's first column over its second;
  *  (b) its header carries the block's title and the record count;
  *  (c) CONTROL — the block in `main` (856 of 1200) on the same page is not
@@ -240,7 +240,7 @@ describe('a list outside any page region is unchanged (objectui#12703)', () => {
     await waitFor(() => expect(view.getByTestId('grid-spy')).toBeTruthy());
     expect(view.getByTestId('toolbar-filter-trigger')).toBeTruthy();
     expect(view.queryByTestId('list-compact-rows')).toBeNull();
-    expect(gridProps[gridProps.length - 1]?.showRowNumbers).toBe(true);
+    expect(gridProps.length).toBeGreaterThan(0);
   });
 
   it('(d) CONTROL: the list-view block with no page around it draws the full list', async () => {

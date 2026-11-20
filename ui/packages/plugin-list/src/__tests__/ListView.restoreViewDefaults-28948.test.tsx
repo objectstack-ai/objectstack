@@ -202,11 +202,11 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
 
   it('CONTROL: settings outside the preference reset as before and name nothing', async () => {
     const onRestoreViewDefaults = vi.fn();
-    mount({}, { viewDefaults: {}, onRestoreViewDefaults, defaultRowNumbers: true });
+    mount({}, { viewDefaults: {}, onRestoreViewDefaults });
     const content = await openDisplay();
-    // Row numbers sit on the menu's More level; the reset is on the menu itself.
+    // Edit inline sits on the menu's More level; the reset is on the menu itself.
     fireEvent.click(within(content).getByTestId('options-row-more'));
-    fireEvent.click(await within(content).findByTestId('display-row-numbers-toggle'));
+    fireEvent.click(await within(content).findByTestId('toolbar-inline-edit-toggle'));
     fireEvent.click(within(content).getByTestId('options-back'));
     await waitFor(() => expect(within(content).getByTestId('display-reset-button')).toBeEnabled());
     fireEvent.click(within(content).getByTestId('display-reset-button'));
