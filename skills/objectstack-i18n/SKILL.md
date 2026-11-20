@@ -1,14 +1,12 @@
 ---
 name: objectstack-i18n
 description: >
-  Author ObjectStack translation bundles — object/field labels, view text,
-  app navigation strings, automation messages — and configure locale
-  fallback, coverage reporting, and the source layout. Use when the user is
-  adding `*.translation.ts` files, authoring a `translation` metadata item in
-  the Studio or through the metadata API, shipping a generated bundle from a
-  package or plugin, wiring a new locale, or resolving missing-translation
-  warnings. Do not use for general i18n library questions unrelated to
-  ObjectStack bundles.
+  Translate an ObjectStack app, in a project or through MCP: object and field
+  labels, select options, view, navigation and dashboard text, automation
+  messages; add a locale, and find and fill missing keys (`os i18n check`). Use
+  when adding a language, relabelling for a locale, or editing
+  `*.translation.ts` or a `translation` metadata item. Not for i18n libraries
+  outside ObjectStack bundles, or `@object-ui/*` component strings (objectui).
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
