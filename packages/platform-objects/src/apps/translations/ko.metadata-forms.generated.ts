@@ -1350,7 +1350,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "항목 클릭 탐색 구성(기본값 drawer, page, new_window 또는 none)"
       },
       "navigation.mode": {
-        label: "모드"
+        label: "모드",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "탐색 방지",

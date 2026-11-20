@@ -1350,7 +1350,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "點選條目時的導覽設定（預設為抽屜，也可為 page、new_window 或 none）"
       },
       "navigation.mode": {
-        label: "模式"
+        label: "模式",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "禁止導覽",

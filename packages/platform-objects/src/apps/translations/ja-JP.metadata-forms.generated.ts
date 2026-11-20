@@ -1350,7 +1350,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "項目をクリックしたときのナビゲーション設定（既定はドロワー。page、new_window、none も指定可）"
       },
       "navigation.mode": {
-        label: "モード"
+        label: "モード",
+        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
       },
       "navigation.preventNavigation": {
         label: "ナビゲーションを無効化",
