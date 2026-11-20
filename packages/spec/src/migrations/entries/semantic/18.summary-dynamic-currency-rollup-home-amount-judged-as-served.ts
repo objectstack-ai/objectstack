@@ -29,11 +29,12 @@ export const entry: SemanticMigration = {
     + 'the record-mode amount that converts into it',
   reason:
     'A `dynamic` summary is drawn in the organization\'s home currency, which is right only for a roll-up of an amount '
-    + 'in that currency: a child `currency` field in `dynamic` mode, a stored home amount included. `defineStack` '
-    + 'admitted it only there, but the engine registry, which a single-object save on a '
-    + 'running server meets, judged only `record` roll-ups, so a `dynamic` roll-up over a `fixed` EUR amount, a plain '
-    + 'number or a formula was stored and its total shown with the home currency\'s symbol. It is now refused 422 '
-    + '`INVALID_METADATA` there, in the words `defineStack` uses. A `homeAmount` makes a field a home amount only where '
+    + 'in that currency: a child `currency` field in `dynamic` mode, a stored home amount included. Both doors now '
+    + 'admit it only there. Before this entry, `defineStack` judged it (then admitting a stored home amount alone), '
+    + 'but the engine registry, which a single-object save on a running server meets, judged only `record` roll-ups, '
+    + 'so a `dynamic` roll-up over a `fixed` EUR amount, a plain number or a formula was stored and its total shown '
+    + 'with the home currency\'s symbol. Since this entry it is refused 422 `INVALID_METADATA` there, in the words '
+    + '`defineStack` uses. A `homeAmount` makes a field a home amount only where '
     + 'it is valid as declared (a record-mode `currency` amount naming another `readonly` `dynamic` currency field of '
     + 'the same object, with no `expression`, claimed by that one amount), so an extension cannot make a plain number '
     + 'a home amount by naming it. Roll-ups stored before this release keep loading at every boot, which is not asked. '

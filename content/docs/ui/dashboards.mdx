@@ -577,18 +577,18 @@ the base rows whose relationship points at a record it returned:
   unfiltered set.
 - A related field the caller cannot read is refused (`403 PERMISSION_DENIED`), as
   filtering on it directly would be.
-- On a SQL datasource the related condition usually runs inside the same
-  statement, as a subquery, so the number of matching related records is not
-  limited. Where the engine reads the matching related ids first instead (a
-  related object on another datasource, a federated one, one whose reads an
-  object-scoped middleware or an `afterFind` hook shapes, or one read under
-  different driver options than the queried object, its tenant scope most
-  commonly; the full list is in
-  [Query Syntax](/docs/protocol/objectql/query-syntax)), more than 1,000 of them
-  are refused (`400 INVALID_FILTER`), never truncated. Narrow the related
-  condition. On a driver that compiles no subquery, such as MongoDB, a
-  condition through a single-valued relation is refused before anything is
-  read (`400 INVALID_FILTER`), naming the two-step route.
+- On a SQL datasource a condition through a single-valued relation usually
+  runs inside the same statement, as a subquery, so the number of matching
+  related records is not limited. Where the engine reads the matching related
+  ids first instead (a multi-valued relation, on every driver; a related object
+  on another datasource, a federated one, one whose reads an object-scoped
+  middleware or an `afterFind` hook shapes, or one read under different driver
+  options than the queried object, its tenant scope most commonly; the full
+  list is in [Query Syntax](/docs/protocol/objectql/query-syntax)), more than
+  1,000 of them are refused (`400 INVALID_FILTER`), never truncated. Narrow the
+  related condition. On a driver that cannot run it in one read (MongoDB,
+  OData), a condition through a single-valued relation is refused before
+  anything is read (`400 INVALID_FILTER`), naming the two-step route.
 - These are refused (`400 INVALID_FIELD`) rather than answered differently: a
   path of four or more relationships (`line.plan.order.customer.tier`), a
   related-field condition under `$not` (write `$ne` / `$nin` inside the

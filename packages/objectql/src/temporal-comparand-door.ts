@@ -146,7 +146,8 @@
  *
  * These are not junk: the rule reads each one, as the wrong value, so each
  * answered rows. Their refusal says so in its own words ({@link misreadClassOf})
- * rather than in the junk class's "compared as text, selecting every row or none".
+ * rather than in the junk class's "compared as text: it may select every row,
+ * none or the wrong ones".
  *
  * ## [#20480] An instant on a `time` column outside the four-digit years
  *
@@ -719,10 +720,10 @@ export function assertTemporalComparandsInterpretable(
   if (!hit) return;
   // [#20240] [#20264] A comparand whose year falls outside the kind's years
   // gets words that say so. It is not junk, which is compared as text and may
-  // select every row or none: its text orders as no day or instant does, so
-  // it answers the WRONG rows (or, on PostgreSQL, a database error) — or
-  // [#20280], for a `datetime`
-  // in 0001..0999, it names a year MySQL's `DATETIME` does not document.
+  // select every row, none or the wrong ones: its text orders as no day or
+  // instant does, so it answers the WRONG rows (or, on PostgreSQL, a database
+  // error) — or [#20280], for a `datetime` in 0001..0999, it names a year
+  // MySQL's `DATETIME` does not document.
   // [#27173] Each arm: the verdict, the prescription, then the consequence.
   const yearClass = yearClassOf(hit);
   if (yearClass) {
@@ -745,8 +746,8 @@ export function assertTemporalComparandsInterpretable(
     `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} `
     + `field against ${preview(hit.value)} at ${hit.path}, which is not a ${hit.kind} value `
     + `this platform can interpret. ${REMEDY[hit.kind]} The filter was NOT applied. As written `
-    + 'it would reach the driver and be compared as text, selecting every row or none, a 200 '
-    + 'indistinguishable from a real answer.',
+    + 'it would reach the driver and be compared as text: it may select every row, none or the '
+    + 'wrong ones (or raise a database error), an answer indistinguishable from a real one.',
   );
 }
 
@@ -824,8 +825,9 @@ export function assertHavingTemporalComparandsInterpretable(
   throw invalidFilterError(
     `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
     + `which is not a ${hit.kind} value this platform can interpret. ${REMEDY[hit.kind]} The `
-    + '`having` was NOT applied. Compared with each group as written, it would keep no group or '
-    + 'every group, a 200 indistinguishable from a real answer.',
+    + '`having` was NOT applied. As written it would be compared with each group as text: it may '
+    + 'keep every group, none or the wrong ones (or raise a database error), an answer '
+    + 'indistinguishable from a real one.',
   );
 }
 

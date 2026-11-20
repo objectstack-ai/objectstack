@@ -221,12 +221,12 @@ describe('[#20264] the temporal-comparand door — a year outside the kind\'s ye
     expect(reads, 'every refusal precedes the driver').toHaveLength(3);
   });
 
-  it('the refusal names the year class, not the junk class\'s "selecting every row or none"', async () => {
+  it('the refusal names the year class, not the junk class\'s "every row, none or the wrong ones"', async () => {
     const err = await refusalOf(engine.find('ledger', { where: { opened_at: { $gt: Y10000 } } }));
     expect(err!.message).toContain("'opened_at'");
     expect(err!.message).toContain('where.opened_at.$gt');
     expect(err!.message).toContain('1000 to 9999');
-    expect(err!.message).not.toContain('compared as text, selecting every row or none');
+    expect(err!.message).not.toContain('compared as text: it may select every row, none or the wrong ones');
     // A `date` keeps its own years in its words.
     const day = await refusalOf(engine.find('ledger', { where: { placed_on: { $gt: Y10000 } } }));
     expect(day!.message).toContain('0001 to 9999');

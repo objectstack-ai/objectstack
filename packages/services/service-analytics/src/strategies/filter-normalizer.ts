@@ -631,8 +631,8 @@ export type NormalizedFilterNode =
    * `$not` it wraps every `$nin` in the NULL escape
    * (`{ $or: [{ f: { $null: true } }, { f: { $nin: [] } }] }`), whose `notSet`
    * leaf names the member. Inside a `$not` it takes that escape when a row with
-   * no value satisfies every operator of the field's spec (`$nin` alone, or
-   * beside `$null: true` / `$eq: null`); for a mixed spec it takes a `$null:
+   * no value satisfies every operator of the field's spec (for example `$nin`
+   * alone, or beside `$null: true` / `$eq: null`); for a mixed spec it takes a `$null:
    * false` requirement instead, a `set` leaf on the member, as its own conjunct
    * or the enclosing conjunct that already requires the field. So a `$not`
    * never meets the constant bare either: {@link notOf} receives the escape's

@@ -206,8 +206,9 @@
  *   answers as the engine answers a filter judged with no caller. The
  *   field-aware doors run first: on a `date`, `datetime` or `time` field a
  *   period key or a context token is judged as written and answers
- *   `INVALID_FILTER` (the temporal door), and on a number field every
- *   placeholder does (the number door). Otherwise the resolver answers: a
+ *   `INVALID_FILTER` (the temporal door), and on a number or a boolean field
+ *   every placeholder does (the number door and its boolean arm). Otherwise
+ *   the resolver answers: a
  *   context token or a record-context token `FILTER_TOKEN_UNRESOLVED`, an
  *   unknown one `FILTER_TOKEN_UNKNOWN`, while a date macro and a period key
  *   resolve with no caller (a date macro then judged by its year). An RLS
