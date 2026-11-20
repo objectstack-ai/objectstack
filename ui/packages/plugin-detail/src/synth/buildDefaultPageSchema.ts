@@ -142,10 +142,22 @@ export interface ObjectDefFieldLike {
 }
 
 export interface BuildPageOptions {
-  /** Override the auto-derived highlight field list. */
+  /**
+   * ACCEPTED BUT NEVER READ by {@link buildDefaultPageSchema} and
+   * {@link buildDefaultTabs} (objectstack#35891). The default page draws no
+   * highlight strip and no stage bar, and the Details body keeps every
+   * grouped field (objectstack#35849), so these three keys have nothing left
+   * to override there. Only {@link buildDefaultHighlights} reads them, for a
+   * page that places the strip itself.
+   *
+   * They stay declared because this interface ships in a published `.d.ts`,
+   * as `ObjectDefLike.primaryField` does (objectui#7287); removing them is
+   * objectstack#35943's change, not a rider here.
+   */
   highlightFields?: string[];
-  /** Override the auto-derived statusField / stages. */
+  /** Accepted but never read by the default page — see `highlightFields`. */
   statusField?: string;
+  /** Accepted but never read by the default page — see `highlightFields`. */
   stages?: Array<{ value: any; label: string }>;
   /** Override the auto-derived section grouping. The heading rides `label` —
    *  the one slot `@object-ui/types` declares (objectui#6190). */
@@ -1178,8 +1190,6 @@ export function buildDefaultPageSchema(
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
-      highlightFields: options.highlightFields,
-      statusField: options.statusField,
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
@@ -1197,8 +1207,6 @@ export function buildDefaultPageSchema(
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
-      highlightFields: options.highlightFields,
-      statusField: options.statusField,
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
