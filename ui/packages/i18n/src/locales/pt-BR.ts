@@ -1497,6 +1497,12 @@ const pt = {
     timeline: "Atividade",
     relatedColumn: "Coluna direita",
     timelineComposer: "Escreva uma nota… @ para mencionar",
+    streamToday: "Hoje",
+    streamYesterday: "Ontem",
+    viewApproval: "Ver aprovação",
+    attachmentsDropHint: "Solte arquivos aqui ou",
+    attachmentsChooseFile: "escolha um arquivo",
+    attachmentActions: "Mais para {{name}}",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} seções vazias",
     emptySections_one: "{{count}} seção vazia",

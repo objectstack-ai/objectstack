@@ -1626,6 +1626,12 @@ const ar = {
     timeline: "النشاط",
     relatedColumn: "العمود الجانبي",
     timelineComposer: "اكتب ملاحظة… @ للإشارة",
+    streamToday: "اليوم",
+    streamYesterday: "أمس",
+    viewApproval: "عرض الموافقة",
+    attachmentsDropHint: "أفلت الملفات هنا، أو",
+    attachmentsChooseFile: "اختر ملفًا",
+    attachmentActions: "المزيد لـ {{name}}",
     // objectstack#27055 — the record page v3.
     emptySections: "أقسام فارغة: {{count}}",
     emptySections_zero: "أقسام فارغة: {{count}}",

@@ -1377,6 +1377,12 @@ const zh = {
     timeline: '动态',
     relatedColumn: '右栏',
     timelineComposer: '写一条备注… @ 提到同事',
+    streamToday: '今天',
+    streamYesterday: '昨天',
+    viewApproval: '看审批',
+    attachmentsDropHint: '拖入文件，或',
+    attachmentsChooseFile: '选择文件',
+    attachmentActions: '{{name}} 的更多操作',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} 个空分区',
     emptySections_one: '{{count}} 个空分区',

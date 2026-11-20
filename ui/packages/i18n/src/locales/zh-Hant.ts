@@ -1377,6 +1377,12 @@ const zhHant = {
     timeline: '動態',
     relatedColumn: '右欄',
     timelineComposer: '寫一條備註… @ 提到同事',
+    streamToday: '今天',
+    streamYesterday: '昨天',
+    viewApproval: '看審批',
+    attachmentsDropHint: '拖入檔案，或',
+    attachmentsChooseFile: '選擇檔案',
+    attachmentActions: '{{name}} 的更多操作',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} 個空分割槽',
     emptySections_one: '{{count}} 個空分割槽',

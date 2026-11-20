@@ -1670,6 +1670,14 @@ const en = {
     timeline: 'Activity',
     relatedColumn: 'Right column',
     timelineComposer: 'Write a note… @ to mention',
+    // The record page's dense activity and attachments: day headers,
+    // an approval entry's link, the empty drop line and a file row's ⋮.
+    streamToday: 'Today',
+    streamYesterday: 'Yesterday',
+    viewApproval: 'View approval',
+    attachmentsDropHint: 'Drop files here, or',
+    attachmentsChooseFile: 'choose a file',
+    attachmentActions: 'More for {{name}}',
     // objectstack#27055 — the record page v3.
     emptySections: '{{count}} empty sections',
     emptySections_one: '{{count}} empty section',

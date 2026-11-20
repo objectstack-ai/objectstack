@@ -1500,6 +1500,12 @@ const es = {
     timeline: "Actividad",
     relatedColumn: "Columna derecha",
     timelineComposer: "Escribe una nota… @ para mencionar",
+    streamToday: "Hoy",
+    streamYesterday: "Ayer",
+    viewApproval: "Ver aprobación",
+    attachmentsDropHint: "Suelta archivos aquí o",
+    attachmentsChooseFile: "elige un archivo",
+    attachmentActions: "Más para {{name}}",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} secciones vacías",
     emptySections_one: "{{count}} sección vacía",
