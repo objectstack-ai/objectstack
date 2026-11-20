@@ -79,6 +79,8 @@ const REPARENT_ADD = { picker: { object: CHILD, labelField: 'name' }, label: ADD
 
 function makeDS() {
   return {
+    // The picker's add is one transactional batch (objectstack#35601); a source without it offers no picker.
+    batchTransaction: vi.fn(async () => ({ results: [] })),
     find: vi.fn(async () => [{ id: 'row_1', permission_set_id: 'ps_1' }]),
     getObjectSchema: vi.fn(async (name: string) => ({ name, fields: {} })),
     create: vi.fn(async (_o: string, data: any) => data),

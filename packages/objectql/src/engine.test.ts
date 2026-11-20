@@ -1560,18 +1560,22 @@ describe('ObjectQL Engine', () => {
                 name: 'invoice',
                 // [#21613] `locked` is declared: the prior read the rule
                 // reads carries the declared fields only.
-                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' } },
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' }, memo: { type: 'text' } },
             } as any);
             vi.mocked(mockDriver.findOne).mockResolvedValue({ id: '1', locked: true, amount: 100 } as any);
 
             const events: any[] = [];
-            await engine.update('invoice', { id: '1', amount: 999 }, {
+            // `memo` survives the strip: an update whose every caller field is
+            // dropped writes nothing at all (pinned in
+            // engine-update-all-dropped-noop-34746.test.ts).
+            await engine.update('invoice', { id: '1', amount: 999, memo: 'm' }, {
                 onFieldsDropped: (e: any) => events.push(e),
             } as any);
 
             expect(events).toEqual([{ object: 'invoice', fields: ['amount'], reason: 'readonly_when' }]);
             const [, , data] = vi.mocked(mockDriver.update).mock.calls[0];
             expect(data).not.toHaveProperty('amount');
+            expect(data).toHaveProperty('memo', 'm');
         });
 
         it('reports bulk-path strips too (multi update — locked in ≥1 matched row)', async () => {
@@ -1579,7 +1583,7 @@ describe('ObjectQL Engine', () => {
                 name: 'invoice',
                 // [#21613] `locked` is declared: the prior read the rule
                 // reads carries the declared fields only.
-                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' } },
+                fields: { amount: { type: 'number', readonlyWhen: 'record.locked == true' }, locked: { type: 'boolean' }, memo: { type: 'text' } },
             } as any);
             vi.mocked(mockDriver.find).mockResolvedValue([
                 { id: 'a', locked: false, amount: 10 },
@@ -1587,7 +1591,8 @@ describe('ObjectQL Engine', () => {
             ] as any);
 
             const events: any[] = [];
-            await engine.update('invoice', { amount: 999 }, {
+            // `memo` survives the strip, as on the single-id case above.
+            await engine.update('invoice', { amount: 999, memo: 'm' }, {
                 where: { status: 'draft' }, multi: true,
                 onFieldsDropped: (e: any) => events.push(e),
             } as any);
@@ -1595,6 +1600,7 @@ describe('ObjectQL Engine', () => {
             expect(events).toEqual([{ object: 'invoice', fields: ['amount'], reason: 'readonly_when' }]);
             const [, , data] = (mockDriver as any).updateMany.mock.calls[0];
             expect(data).not.toHaveProperty('amount');
+            expect(data).toHaveProperty('memo', 'm');
         });
 
         it('does NOT report for a system-context update (the readonly strip is skipped)', async () => {
@@ -1622,7 +1628,8 @@ describe('ObjectQL Engine', () => {
         it('a throwing listener never breaks the write', async () => {
             vi.mocked(SchemaRegistry.getObject).mockReturnValue(docSchema);
             await expect(
-                engine.update('doc', { id: '1', created_by: 'x' }, {
+                // `title` survives the strip, so there is a write to break.
+                engine.update('doc', { id: '1', title: 't', created_by: 'x' }, {
                     onFieldsDropped: () => { throw new Error('listener bug'); },
                 } as any),
             ).resolves.not.toThrow();

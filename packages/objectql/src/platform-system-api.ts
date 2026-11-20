@@ -35,8 +35,8 @@
  * ⛔ For the platform's own rows only, never for a write the automation itself
  * asked for: an action body's or a hook's insert into those objects, through
  * its `ctx.api` or its `ctx.api.sudo()`, keeps the provenance and is judged.
- * That line holds on two of the apis the automation is handed, and on every
- * api derived from either:
+ * That line holds on three of the apis the automation is handed, and on every
+ * api derived from any of them:
  *
  *  - an app-authored hook's api (its handler's `ctx.api`,
  *    `APP_AUTHORED_HOOK_API`): the engine enforces it, and this answers
@@ -47,14 +47,16 @@
  *    the action door's own origin flag and answers this symbol member with
  *    the api's `sudo()`, so the `'action'` mark and any `flowRunId` stay. Not
  *    the engine's app-authored flag, which also refuses a permanent delete
- *    (ADR-0148 D3) that a host handler keeps.
+ *    (ADR-0148 D3) that a host handler keeps;
+ *  - the api `ObjectRepository.execute` hands the action it dispatches
+ *    (`ctx.api.object(o).execute(name)`, `engine-object-repository.ts`): it
+ *    carries the dispatched action's origin flag, which `derive` copies to
+ *    every api built from it, and this answers it with the api's `sudo()`, so
+ *    the `'action'` mark `execute` sets stays. Not the app-authored flag
+ *    either, for the same reason.
  *
  * So a handler handing its own api here gains nothing, and its writes to the
- * identity-assignment objects are judged as its own. ⚠️ Not covered: the api
- * `ObjectRepository.execute` hands the action it dispatches
- * (`ctx.api.object(o).execute(name)`, `engine-object-repository.ts`) is a bare
- * `ScopedContext` carrying the `'action'` mark and neither line's flag, so on
- * it this takes the mark off, as on the audit writer's hook api. The api the audit writer
+ * identity-assignment objects are judged as its own. The api the audit writer
  * holds is neither: `buildHookApi` builds a fresh `ScopedContext` over the
  * write's context, carrying the `'action'` mark when an action's write fired
  * the hook, and this takes it off there. Neither line is a security boundary:
