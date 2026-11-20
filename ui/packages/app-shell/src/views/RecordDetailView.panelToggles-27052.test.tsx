@@ -29,9 +29,13 @@
  *    crumb row is gone; a record drawn with no top bar of its own (a host's
  *    plain overlay) keeps it at the end of that row (objectstack#27241);
  *  - it is drawn only where the tier has a right column: both two-column
- *    tiers, the embedded record at those widths too, never the one column;
- *  - the chord is the topmost record view's: a drawer wide enough for its
- *    own right column flips its own switch, never the page's under it.
+ *    tiers, never the one column, and never an embedded record (a drawer or
+ *    pane draws no right rail, objectstack#35596);
+ *  - the chord is the topmost record view's: under a drawer it flips nothing,
+ *    the page's switch included.
+ *
+ * objectstack#35596 — the right column is the 概览 tab's rail; it is drawn
+ * while it has a card to show, so every child here answers two records.
  */
 
 import * as React from 'react';
@@ -134,7 +138,7 @@ let dialogRootWidth: number | null = null;
 
 function makeDataSource() {
   return {
-    find: vi.fn(async () => ({ data: [], total: 0 })),
+    find: vi.fn(async () => ({ data: [], total: 2 })),
     create: vi.fn(async (_o: string, row: unknown) => row),
     findOne: vi.fn(async (_o: string, recordId: string) => ({ id: recordId, name: `Record ${recordId}` })),
     update: vi.fn(async () => ({})),
@@ -245,11 +249,11 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
     await waitFor(() => expect(shown(container)).toBe('details'));
     expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('false');
     expect(container.querySelector('[data-record-column="right"]')).toBeNull();
-    expect(container.querySelector('[data-record-timeline-panel]')).toBeNull();
+    expect(container.querySelector('[data-record-summary-card]')).toBeNull();
 
     fireEvent.click(rightColumnSwitch());
     await waitFor(() => expect(shown(container)).toBe('details right'));
-    expect(container.querySelector('[data-record-column="right"] > [data-record-timeline-panel]')).not.toBeNull();
+    expect(container.querySelector('[data-record-column="right"] [data-record-summary-card]')).not.toBeNull();
   });
 
   it('the choice survives a remount and is per object', async () => {
@@ -274,13 +278,15 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
   it.each([
     ['an object that is not worked', PRODUCT],
     ['an object that is only another object\'s `master_detail` parent', PRICE_BOOK],
-  ])('%s opens with the right column too, 动态 last (objectstack#34590)', async (_name, object) => {
+  ])('%s opens with the right rail too; 动态 the last tab (objectstack#34590)', async (_name, object) => {
     const { container } = renderPage({ object });
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(shown(container)).toBe('details right');
+    await waitFor(() => expect(shown(container)).toBe('details right'));
     expect(rightColumnSwitch().getAttribute('aria-pressed')).toBe('true');
-    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
-    expect(container.querySelector('[data-record-column="right"]')?.lastElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
+    // objectstack#34590 — 动态 is the tab row's last tab (the rail itself
+    // orders 审批, 附件, 最近动态, then the lists: objectstack#35596).
+    const tabs = Array.from(container.querySelectorAll('[role="tab"][data-record-tab]'));
+    expect(tabs[tabs.length - 1]?.getAttribute('data-record-tab')).toBe('timeline');
   });
 
   it('⌘⇧, flips ⊟; with a text field focused it does nothing; ⌘⇧. is not the page\'s any more', async () => {
@@ -335,7 +341,7 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
     expect(rightColumnSwitch().getAttribute('aria-keyshortcuts')).toMatch(/^(Meta|Control)\+Shift\+,$/);
   });
 
-  it('not drawn in the one column, where there is no right column to hide; the shortcut does nothing there. The embedded record at 1440 px has one, and draws it', async () => {
+  it('not drawn in the one column, where there is no right column to hide; the shortcut does nothing there. The embedded record at 1440 px has none, and no rail (objectstack#35596)', async () => {
     const stacked = renderPage({ width: 700 });
     await waitFor(() => expect(stacked.container.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('stack'), { timeout: 5000 });
     expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
@@ -346,16 +352,17 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
     stacked.unmount();
 
     const embedded = renderPage({ width: 1440, embedded: true });
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(shown(embedded.container)).toBe('details right');
+    await waitFor(() => expect(embedded.container.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('wide'), { timeout: 5000 });
+    expect(shown(embedded.container)).toBe('details');
+    expect(embedded.container.querySelector('[data-record-column="right"]')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
   });
 
-  it('⌘⇧, flips the topmost record view\'s switch alone: a 1000 px drawer over a 1440 px page (objectstack#27524)', async () => {
+  it('⌘⇧, under a drawer flips nothing: the drawer draws no ⊟, and never writes the page\'s choice (objectstack#27524, objectstack#35596)', async () => {
     // A record page keeps its own tree mounted under the drawer its rows and
     // lookups open (`RecordPageDrawerHost`), and the drawer's sheet is
-    // portaled after it, to the end of the body. A drawer dragged to 1000 px
-    // has a right column of its own, so both views draw ⊟: the chord is the
-    // drawer's, and never writes the hidden page's stored choice.
+    // portaled after it, to the end of the body. The drawer draws no right
+    // rail at any width, so no ⊟: the chord is not the hidden page's either.
     dialogRootWidth = 1000;
     const page = renderPage();
     await waitFor(() => expect(shown(page.container)).toBe('details right'), { timeout: 5000 });
@@ -363,13 +370,13 @@ describe('RecordDetailView — the right-column switch ⊟ (objectstack#27052, o
     sheet.setAttribute('role', 'dialog');
     document.body.appendChild(sheet);
     const drawer = renderPage({ object: PRODUCT, embedded: true, container: sheet });
-    await waitFor(() => expect(shown(sheet)).toBe('details right'), { timeout: 5000 });
-    expect(sheet.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('two-column');
-    expect(within(sheet).queryByRole('group', { name: 'Panels' })).not.toBeNull();
+    await waitFor(() => expect(sheet.querySelector('[data-record-page-tier]')?.getAttribute('data-record-page-tier')).toBe('two-column'), { timeout: 5000 });
+    expect(shown(sheet)).toBe('details');
+    expect(within(sheet).queryByRole('group', { name: 'Panels' })).toBeNull();
 
     press('related');
-    await waitFor(() => expect(shown(sheet)).toBe('details'));
-    expect(window.localStorage.getItem(RIGHT_KEY(PRODUCT))).toContain('off');
+    expect(shown(sheet)).toBe('details');
+    expect(window.localStorage.getItem(RIGHT_KEY(PRODUCT))).toBeNull();
     expect(shown(page.container)).toBe('details right');
     expect(window.localStorage.getItem(RIGHT_KEY(LEAD))).toBeNull();
 

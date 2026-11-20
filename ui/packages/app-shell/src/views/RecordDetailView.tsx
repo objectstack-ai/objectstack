@@ -38,6 +38,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -83,6 +84,7 @@ import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
+import { ApprovalBandOnceScope } from '@object-ui/plugin-detail';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
@@ -2354,6 +2356,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     openApproval: openApprovalOf(approvals),
     recordStatus: (pageRecord as any)?.approval_status,
   });
+  // objectstack#35599 — the record page's EDIT STATE (`recordEditState.tsx`):
+  // on a page that draws master-detail body tables, Edit turns the overview
+  // into a form — the fields become inputs, the body tables editable lines —
+  // and one Save writes all of it in one batch. `recordEditEligible` is
+  // set where the page's body tables are known (below the early returns,
+  // where no hook may run, so as a state update during render) and read by
+  // the header's Edit.
+  const [recordEditState, setRecordEditState] = useState(false);
+  const [recordEditSaving, setRecordEditSaving] = useState(false);
+  const recordEditControlRef = useRef<RecordEditStateControl | null>(null);
+  const recordEditEnterRef = useRef<RecordEditStateEntry | null>(null);
+  const [recordEditEligible, setRecordEditEligible] = useState(false);
+  const exitRecordEditState = useCallback(() => setRecordEditState(false), []);
+  const enterRecordEditState = useCallback(() => setRecordEditState(true), []);
+  useEffect(() => {
+    setRecordEditState(false);
+  }, [objectName, pureRecordId]);
   // How far the pending node's tally has got (objectstack#4478). Multi-approver
   // nodes — `quorum`, `unanimous`, `per_group` — do not finalize on one
   // decision, so an approver standing on the record needs the count to know
@@ -4804,7 +4823,34 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#35593 — a record an approval locks draws no Edit at all: the
     // header's approval tag says why it cannot be changed. Every other reason
     // for "off" keeps Edit drawn and greyed, as below.
-    if (affordances.edit && !approvalLocked) {
+    // objectstack#35599 — in the edit state the Edit button's place holds the
+    // state's Cancel and Save, through the same system-action props.
+    if (affordances.edit && !approvalLocked && recordEditState) {
+      items.push({
+        name: 'sys_record_edit_cancel',
+        label: t('detail.cancel', { defaultValue: 'Cancel' }),
+        icon: 'x',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 99,
+        disabled: recordEditSaving,
+        onClick: () => recordEditControlRef.current?.cancel(),
+      } as any);
+      items.push({
+        name: 'sys_record_edit_save',
+        label: recordEditSaving
+          ? t('detail.saving', { defaultValue: 'Saving…' })
+          : t('detail.save', { defaultValue: 'Save' }),
+        icon: 'check',
+        type: 'script',
+        locations: ['record_header'],
+        order: 100,
+        disabled: recordEditSaving,
+        onClick: () => { void recordEditControlRef.current?.save(); },
+      } as any);
+    }
+    if (affordances.edit && !approvalLocked && !recordEditState) {
       const editOff = approvalLocked || editDisabledByPredicate || editLockedByState;
       // objectstack#35135 — the reason a predicate-disabled Edit gives. The
       // approval band and the state-lock badge explain their own locks, so
@@ -4837,7 +4883,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // the page:header renderer greys this CTA out so the classic form
         // can't be stacked on top of the draft (two competing edit sessions
         // with no reconciliation).
-        disableDuringInlineEdit: true,
+        //
+        // objectstack#35599, ruling B (「全部保留」) — on a page drawing body
+        // tables both modes stay: inline edit saves the record alone through
+        // the save bar, Edit → Save the record and its lines in one batch. So
+        // Edit stays pressable during an inline session there, and entering
+        // the edit state with unsaved inline changes asks first
+        // (`RecordEditStateController`'s discard confirm).
+        disableDuringInlineEdit: !recordEditEligible,
         // framework#3794 — an approval-LOCKED record refuses every write (the
         // server answers RECORD_LOCKED), so opening the form only to be
         // rejected on Save after filling a screen is wasted work. Disabled
@@ -4872,7 +4925,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The desktop row keeps it greyed in place for every reason, and an
         // Edit that is on is untouched.
         ...(phonePage && editOff ? { component: 'action:menu' } : {}),
-        onClick: () => onEdit({ id: pureRecordId }, objectName),
+        // objectstack#35599 — a page drawing body tables enters its edit state;
+        // every other page opens the record form, as before.
+        onClick: () => (recordEditEligible
+          ? (recordEditEnterRef.current ? recordEditEnterRef.current.requestEnter() : setRecordEditState(true))
+          : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
     // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
@@ -5148,15 +5205,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       ? authoredBodyTableIds(renderedPage, childRelations)
       : bodyTableIdsOf(renderedPage);
 
+  // objectstack#35599 — the edit state's two inputs read off the body tables:
+  // Edit enters it on a page that draws one (and is otherwise the record form),
+  // and each table is drawn as an editor only when one batch can carry it
+  // (item 5, `bodyTablesSaveTogether`). The page itself is not rewritten: the
+  // edit state's controller draws the editors in the body tables' places
+  // (`RecordBodyTableEditorSlotContext`).
+  // A state update during render (not an effect: no hook may run here), so
+  // the header's Edit never reads a stale verdict; React re-renders before
+  // committing, and the update is a no-op once the value agrees.
+  if (recordEditEligible !== bodyTableIds.size > 0) setRecordEditEligible(bodyTableIds.size > 0);
+  const bodyTablesEditable = bodyTablesSaveTogether(objectDef, objects, bodyTableIds);
+
   // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
   // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
   // group (the page's own bar below; a pane's bar through
   // `RecordPaneBarToggles`), only where the tier has a right column and the
-  // page has a panel for it — never in the stack.
+  // page has a panel for it — never in the stack, and never in a drawer or
+  // pane, which draws no right rail (objectstack#35596).
   const panelToggleItems: PanelToggleItem[] = [];
   if (
     pageColumns
     && pageHasRightColumn
+    && !embedded
     && (pageColumns.timeline.length > 0 || pageColumns.related.length > 0)
   ) {
     panelToggleItems.push({
@@ -5418,7 +5489,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       type="button"
       onClick={() => {
         const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
-        panel?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        if (panel) {
+          panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          return;
+        }
+        // objectstack#35595 — the approvals panel is the page's 审批 tab, not
+        // drawn on 概览: the tag opens that tab.
+        if (pageColumns) openEnlargedRelated('approvals');
+        else if (!hasApprovalsNode) handleTabChange('approvals');
       }}
       className={cn(
         'inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -5475,6 +5553,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     </>
   );
 
+  // objectstack#35595 — where a page drawn as written gets the panels it does
+  // not place: its tab strip's 审批 and 附件 tabs, not the page's foot.
+  const fallbackTabs = pageColumns
+    ? { page: renderedPage, approvals: false, attachments: false }
+    : withFallbackRecordTabs(renderedPage, {
+        approvals: pureRecordId && !hasApprovalsNode && approvals.requests.length > 0
+          ? { approvals: { available: approvals.available, requests: approvals.requests, pendingRequest: approvals.pendingRequest }, currentUserId: user?.id }
+          : null,
+        attachments: !!(filesEnabled && !hasAttachments && pureRecordId),
+      });
   const pageTree = (
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
@@ -5560,6 +5648,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           lockedReason={t('detail.lockedTooltip', {
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
+        >
+        <RecordEditStateController
+          active={recordEditState}
+          onExit={exitRecordEditState}
+          controlRef={recordEditControlRef}
+          enterRef={recordEditEnterRef}
+          onEnter={enterRecordEditState}
+          discardInlineTitle={t('form.discardTitle', { defaultValue: 'Discard changes?' })}
+          discardInlineMessage={t('detail.discardInlineEditsMessage', {
+            defaultValue: 'You have unsaved changes to this record\'s fields. Discard them to edit the whole record, or keep editing and save them first.',
+          })}
+          discardLabel={t('form.discard', { defaultValue: 'Discard' })}
+          keepEditingLabel={t('form.keepEditing', { defaultValue: 'Keep editing' })}
+          onSavingChange={setRecordEditSaving}
+          dataSource={dataSource}
+          objectName={objectName}
+          recordId={pureRecordId}
+          refresh={notifyRecordChanged}
+          bodyTableIds={bodyTableIds}
+          bodyTablesEditable={bodyTablesEditable}
+          bodyTablesReadOnly={bodyTableIds.size > 0 && !bodyTablesEditable}
+          readOnlyNotice={t('detail.bodyTablesReadOnlyBulk')}
+          unsavedMessage={t('form.unsavedChanges')}
         >
         <HighlightFieldsProvider>
         <DiscussionContextProvider
@@ -5726,6 +5837,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                    page cannot hold two answers to "is this record frozen". */
                 parentRecord={pageRecord}
                 parentObjectFields={predicateFields}
+                /* objectstack#35599, ruling A (「一起锁」) — while an approval
+                   locks this record, its master-detail children draw no New,
+                   Edit or Delete: the server refuses each RECORD_LOCKED. */
+                serve={approvalLocked
+                  ? (bridge) => withDetailWritesWithheld(bridge, (child, fk) => isMasterDetailChild(objects, objectName, child, fk))
+                  : undefined}
               >
                 {/* objectstack#26678 / objectstack#27524 — the synthesized
                     page's blocks laid out by its width; `?tab=` addresses a
@@ -5741,6 +5858,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     tier={recordPageTier}
                     columns={pageColumns}
                     rightColumn={relatedSwitch === 'on'}
+                    // objectstack#35596 — a drawer (or pane) draws no right rail:
+                    // its 审批, 附件 and 动态 are its tabs.
+                    rail={!embedded}
                     relatedArrangement={relatedArrangement}
                     onRelatedArrangementChange={setRelatedArrangement}
                     enlargedRelated={enlargedRelatedParam}
@@ -5763,12 +5883,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // (frameless sections, the highlight grid); an authored page
                   // keeps its own face. Every `record:details` body, authored
                   // or not, draws the empty-sections line (objectstack#35019).
+                  //
+                  // objectstack#35595 — the approval and the attachments a page
+                  // does not place go into its tab strip, as the 审批 and 附件
+                  // tabs (`withFallbackRecordTabs`), not the page's foot; and
+                  // however many details nodes it places, it draws ONE approval
+                  // band (`ApprovalBandOnceScope`, objectstack#35483,
+                  // objectstack#35484).
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
                       {/* A page drawn as its strip is drawn as written: the
                           reader's arrangement belongs to the right column and
                           the tab row (objectstack#27524). */}
-                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      <ApprovalBandOnceScope>
+                        <SchemaRenderer schema={withPageTabsUrlSync(fallbackTabs.page, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      </ApprovalBandOnceScope>
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
@@ -5780,7 +5909,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   AUTHORED pages that don't place the node, so the read-gated
                   approval story is never lost to a custom layout. Renders
                   nothing when the record has no requests. */}
-              {pureRecordId && !hasApprovalsNode && (
+              {pureRecordId && !hasApprovalsNode && !fallbackTabs.approvals && (
                 <RecordApprovalsPanel
                   className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   approvals={approvals}
@@ -5794,7 +5923,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   `record:attachments` node beside the discussion feed
                   (objectstack#4358), so this bottom append fires only for
                   authored pages that omit the panel. */}
-              {filesEnabled && !hasAttachments && pureRecordId && (
+              {filesEnabled && !hasAttachments && pureRecordId && !fallbackTabs.attachments && (
                 <div
                   className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   ref={setAttachmentsFallbackEl}
@@ -5835,7 +5964,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               {/* Record-level inline-edit Save/Cancel bar (objectui#2407 P2) —
                   commits the whole draft (highlights + body) in ONE atomic OCC
                   update; renders (sticky) only while editing. */}
-              <InlineEditSaveBar
+              {/* objectstack#35599 — the edit state saves through the header's
+                  Save (`RecordEditStateController`), so the bar stands down. */}
+              {!recordEditState && <InlineEditSaveBar
                 dataSource={dataSource}
                 objectName={objectName}
                 recordId={pureRecordId}
@@ -5846,7 +5977,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 lockedHint={t('detail.lockedTooltip', {
                   defaultValue: 'This record has a pending approval request; editing is locked',
                 })}
-              />
+              />}
             </div>
             <MetadataPanel
               open={showDebug}
@@ -5871,6 +6002,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
+        </RecordEditStateController>
         </InlineEditProvider>
       </RecordContextProvider>
 
@@ -5973,4 +6105,62 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {pageTree}
     </RecordPageDrawerHost>
   );
+}
+
+/**
+ * objectstack#35595 — a page drawn as written (an authored page, or a
+ * synthesized one whose strip cannot be laid out) that does not place the
+ * record's approval or attachments panel gets them as tabs of its FIRST
+ * `page:tabs` strip — 「附件」 then 「审批」, after its own tabs — instead of
+ * at the page's foot. A page with no strip keeps the foot (there is nowhere
+ * else to put them). Returns the page unchanged, by reference, when it adds
+ * nothing, and says which tab it added.
+ */
+export function withFallbackRecordTabs(
+  page: any,
+  add: { approvals: Record<string, unknown> | null; attachments: boolean },
+): { page: any; approvals: boolean; attachments: boolean } {
+  const none = { page, approvals: false, attachments: false };
+  if (!add.approvals && !add.attachments) return none;
+  const extra = (): any[] => [
+    ...(add.attachments
+      ? [{ label: 'Attachments', value: 'attachments', children: [{ type: 'record:attachments', properties: {} }] }]
+      : []),
+    ...(add.approvals
+      ? [{ label: 'Approvals', value: 'approvals', children: [{ type: 'record:approvals', properties: add.approvals }] }]
+      : []),
+  ];
+  let placed = false;
+  const visit = (node: any): any => {
+    if (placed || !node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) {
+      let changed = false;
+      const next = node.map((child) => {
+        const out = visit(child);
+        if (out !== child) changed = true;
+        return out;
+      });
+      return changed ? next : node;
+    }
+    if (node.type === 'page:tabs') {
+      const items = node.properties?.items ?? node.items;
+      if (!Array.isArray(items)) return node;
+      placed = true;
+      const nextItems = [...items, ...extra()];
+      return node.properties?.items
+        ? { ...node, properties: { ...node.properties, items: nextItems } }
+        : { ...node, items: nextItems };
+    }
+    let out = node;
+    for (const key of ['regions', 'components', 'children'] as const) {
+      const value = node[key];
+      if (value === undefined) continue;
+      const next = visit(value);
+      if (next !== value) out = { ...out, [key]: next };
+      if (placed) break;
+    }
+    return out;
+  };
+  const next = visit(page);
+  return placed ? { page: next, approvals: !!add.approvals, attachments: add.attachments } : none;
 }

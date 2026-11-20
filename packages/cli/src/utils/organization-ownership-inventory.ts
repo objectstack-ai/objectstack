@@ -860,6 +860,11 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   // organization's administrators author its own units; the platform ships no
   // row, and no parent row anchors a unit.
   { object: 'sys_unit', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // Working calendars (`@objectstack/platform-objects`, ADR-0157 D1): an
+  // organization's administrators author its calendars, and an exception's
+  // calendar carries the organization.
+  { object: 'sys_work_calendar', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_work_calendar_exception', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); the exception's calendar carries the organization`, anchors: [parent('calendar', 'sys_work_calendar')] },
   // The recycle bin (`@objectstack/platform-objects`, ADR-0148, #30237): the
   // engine writes each entry with the organization of the record it holds,
   // else the deleting context's. A NULL row comes only from a delete with

@@ -68,6 +68,7 @@ import {
   canServeApiOperation, isFileIdToken, referenceTargetOf, SINGLE_OPTION_TYPES, MULTI_OPTION_TYPES,
 } from '@objectstack/spec/data';
 import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/data';
+import { validateActionParams } from '@objectstack/spec/ui';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -6492,12 +6493,31 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * [#24753] A decision that ends the approval process tells the submitter its
    * outcome (`approval.approved` / `approval.rejected`,
    * {@link ApprovalService.notifyDecisionOutcome}).
+   *
+   * A reject carries its reason: a missing or blank `comment`, or one that is
+   * not a string, is refused before anything is read or written —
+   * `400 VALIDATION_ERROR` with the sentence the `approval_reject` action door
+   * answers, judged by the same rules (`validateActionParams` over the
+   * `textarea` param that action declares). Every human door reaches this
+   * member (the REST route, the SDK, the action door that forwards to the
+   * route, the action link with its fixed text). The SLA sweep's auto-reject
+   * calls `decideAndResume` and the revision-limit reject writes its own row,
+   * so neither passes through here. An approve keeps its comment optional.
    */
   async decide(
     requestId: string,
     input: ApprovalDecisionInput,
     context: ExecutionContext,
   ): Promise<ApprovalDecisionResult> {
+    if (input?.decision === 'reject') {
+      const issues = validateActionParams([{ name: 'comment', required: true, type: 'textarea' }], { comment: input.comment });
+      if (issues.length > 0) {
+        throw Object.assign(
+          new Error(`Invalid action params: ${issues.map((i) => i.message).join('; ')}`),
+          { status: 400, code: 'VALIDATION_ERROR' },
+        );
+      }
+    }
     return this.decideAndResume(requestId, input, context, 'outcome');
   }
 

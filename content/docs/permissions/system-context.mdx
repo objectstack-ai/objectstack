@@ -182,7 +182,7 @@ One of the largest consumers of the flag;
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Symbol |
 |:--|:---|:---|:---|:---|
-| 41 | **Approval record lock released** — a locked record is writable | plugin-approvals | Get: engine self-writes (the status mirror) pass. Lose: the lock that stops edits while an approval is live. Note there is deliberately **no admin exemption** here — only `isSystem` | `bindApprovalLockHook` |
+| 41 | **Approval record lock released** — a locked record, and its master-detail rows, are writable | plugin-approvals | Get: engine self-writes (the status mirror) pass, and so do system writes to a locked master's detail rows. Lose: the lock that stops edits to the record and its detail rows while an approval is live. Note there is deliberately **no admin exemption** here — only `isSystem` | `bindApprovalLockHook`, `bindDetailRowLockHook` |
 | 42 | Delegation write guard bypassed | plugin-approvals | Get: service / seed / import may write delegation rows naming another delegator | `bindDelegationWriteGuard` |
 | 43 | Approval actor / submitter / pending-approver checks bypassed (9 sites) | plugin-approvals | Get: approve, reject, recall, reassign without being a pending approver or the submitter, and a decision or comment that attaches files the actor did not upload (every other caller attaches only files it uploaded, in the request's organization) | `isOverrideActor`, `resolveActor`, `sendBack`, `resubmit`, `reassign`, `remind`, `requestInfo`, `comment`, `assertAttachmentsUploadedByCaller` |
 | 44 | Attachment access hooks return early (insert + update + delete, the referenced-file check on insert + update, and the read AST) | service-storage | Lose: attachment visibility scoping | `installAttachmentAccessHooks`, `installAttachmentFileReferenceGate`, `installAttachmentReadVisibility` |
@@ -579,6 +579,7 @@ and CI refuses one that differs from what the tree produces.
 | `packages/plugins/plugin-approvals/src/approval-service.ts#sendBack` | 1 | 43 |
 | `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindApprovalLockHook` | 1 | 41 |
 | `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindDelegationWriteGuard` | 1 | 42 |
+| `packages/plugins/plugin-approvals/src/lifecycle-hooks.ts#bindDetailRowLockHook` | 1 | 41 |
 | `packages/plugins/plugin-approvals/src/payload-predicate-guard.ts#bindSnapshotPredicateGuard` | 1 | 17 |
 | `packages/plugins/plugin-approvals/src/payload-redaction-middleware.ts#bindSnapshotRedactionMiddleware` | 1 | 17 |
 | `packages/plugins/plugin-approvals/src/reader-locale-labels-middleware.ts#bindReaderLocaleLabelsMiddleware` | 1 | 17 |

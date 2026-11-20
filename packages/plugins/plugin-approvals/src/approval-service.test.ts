@@ -1415,9 +1415,48 @@ describe('ApprovalService (node era)', () => {
 
   it('decide: finalizes even when no automation is attached (resumed=false)', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX);
-    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment: 'Over budget.' }, SYS);
     expect(out.finalized).toBe(true);
     expect(out.resumed).toBe(false);
+  });
+
+  // ── a reject carries its reason ─────────────────────────────────
+  //
+  // The `approval_reject` action door's refusal, at the member every human
+  // door reaches: the same code, status and sentence, nothing read or written.
+
+  it('decide: refuses a reject whose comment is missing, empty, blank, null or not a string, and leaves the request pending', async () => {
+    const resumed: any[] = [];
+    svc.attachAutomation({ async resume(runId) { resumed.push(runId); } });
+    const req: any = await svc.openNodeRequest(openInput(['u9']), CTX);
+    for (const comment of [undefined, '', '   ', null]) {
+      const err: any = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment } as any, SYS)
+        .then(() => undefined, (e) => e);
+      expect([err?.status, err?.code], String(comment)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(err.message).toBe('Invalid action params: Action param "comment" is required');
+    }
+    // Not a string is no reason either: the door's `textarea` value shape refuses it.
+    for (const [comment, received] of [[0, 'number'], [false, 'boolean'], [[], 'array'], [{}, 'object']] as const) {
+      const err: any = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment } as any, SYS)
+        .then(() => undefined, (e) => e);
+      expect([err?.status, err?.code], JSON.stringify(comment)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(err.message).toBe(
+        `Invalid action params: Action param "comment" (textarea): Invalid input: expected string, received ${received}`,
+      );
+    }
+    const [row] = await engine.find('sys_approval_request', { where: { id: req.id } });
+    expect(row.status).toBe('pending');
+    expect((engine._tables['sys_approval_action'] ?? []).filter((a: any) => a.request_id === req.id && a.action === 'reject')).toEqual([]);
+    expect(resumed).toEqual([]);
+  });
+
+  // An approve keeps its comment optional: the resume test above approves with none.
+  it('decide: CONTROL — a reject with its reason is recorded with it', async () => {
+    const req: any = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment: 'Over budget.' }, SYS);
+    expect([out.finalized, out.request.status]).toEqual([true, 'rejected']);
+    expect((engine._tables['sys_approval_action'] ?? []).find((a: any) => a.request_id === req.id && a.action === 'reject')?.comment)
+      .toBe('Over budget.');
   });
 
   // ── #4420: a REPORTED resume failure is a failure ────────────────
@@ -1726,7 +1765,7 @@ describe('ApprovalService (node era)', () => {
 
     it('reject: names the record, the way the inbox row\'s inline Reject does', async () => {
       const id = await openRequestId(openInput(['u9']), CTX);
-      const out = await svc.decide(id, { decision: 'reject', actorId: 'u9' }, SYS);
+      const out = await svc.decide(id, { decision: 'reject', comment: 'Over budget.', actorId: 'u9' }, SYS);
       expect(out.request.status).toBe('rejected');
       expect(named('approval_reject', out)).toBe('Rejected "Acme Renewal"');
     });
@@ -2799,7 +2838,7 @@ describe('ApprovalService — admin override (#3424)', () => {
 
   it('a platform admin can reject a stuck request', async () => {
     const req = await svc.openNodeRequest(stuckInput(), CTX);
-    const out = await svc.decide(req.id, { decision: 'reject', actorId: 'root' }, PLATFORM_ADMIN);
+    const out = await svc.decide(req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'root' }, PLATFORM_ADMIN);
     expect(out.finalized).toBe(true);
     expect(out.request.status).toBe('rejected');
   });
@@ -6603,7 +6642,7 @@ describe('in-band transitions finalise before they resume (#3456 invariant)', ()
 
   it('decide(reject) finalises before resuming', async () => {
     const req = await open();
-    await svc.decide(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
+    await svc.decide(req.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u9' }, SYS);
     expectCleanHandoffs();
   });
 

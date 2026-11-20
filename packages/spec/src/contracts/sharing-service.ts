@@ -58,6 +58,52 @@
  *      `sharing-service.test.ts` and the `exec-context-annotation.pin.ts`
  *      files in `plugin-sharing` / `plugin-approvals`.
  *
+ * ## The read scope's share arm becomes an engine-internal leaf (ADR-0155)
+ *
+ * Today the default implementation carries the read scope's share arm as a
+ * list, `{ id: { $in: [granted ids] } }`, read from `sys_record_share` before
+ * the query runs, at most 5,000 grants per read: past that cap a member
+ * silently loses access, which ADR-0155 removes. From plugin-sharing's switch
+ * on (ADR-0155 plan step 6) the arm is a `SharedRecordIds` leaf
+ * (`../data/shared-record-ids.ts`): a branded value the driver compiles as a
+ * subquery over `sys_record_share` inside the same statement, so every grant
+ * counts, at any count. The predicate-update scope the default implementation
+ * composes carries the leaf's write form the same way (ADR-0155 ③ ruled A).
+ * Until that switch nothing below applies: the arm stays the list. From it on,
+ * three things hold for anyone who reads this contract:
+ *
+ *   - **The answer is handed to the engine in process.** ⛔ Never serialise it
+ *     and never match it with a generic in-process matcher. A copy that crossed
+ *     JSON, a structured clone or a serializing wire arrives unbranded and is
+ *     refused `INVALID_FILTER` / 400, ⛔ never read as an empty list; a generic
+ *     matcher reads the leaf as an ordinary comparand, which ADR-0155 D5 forbids
+ *     every evaluator. An evaluator that cannot run the leaf refuses it loudly.
+ *   - **It is composed for `context`'s user.** The leaf names its recipient,
+ *     captured from `context`, and the engine's seam admits it only on an
+ *     operation that runs under that user's context, under a context acting on
+ *     that user's behalf (ADR-0090 D10), or under a system context; any other
+ *     is a composition fault, refused `INTERNAL_ERROR` / 500 (ADR-0155 D4). ⛔
+ *     Never hand the answer to a read made for another principal.
+ *   - **The share arm makes no engine read of `sys_record_share`**, so nothing
+ *     a host registers on the engine for that table's reads runs on it, and
+ *     the host is told so here (ADR-0155 D4, Q2's host row as ruled):
+ *       · A narrowing of reads of `sys_record_share` registered for that table
+ *         BY NAME — an object-scoped middleware, or a `beforeFind` /
+ *         `afterFind` hook, an opt-in of that table into plugin-audit's
+ *         record-view auditing included — is never read around. It gets the
+ *         answer ADR-0155 ② ruled for that class: R1 at boot, so the host does
+ *         not start until the registration is removed, with the seam's refusal
+ *         (`INTERNAL_ERROR` / 500) behind it for a registration made after
+ *         boot. No registration is exempt, one whose handler skips system reads
+ *         included: the engine reads a registration by the object it names, not
+ *         by what its handler does.
+ *       · A narrowing that names NO object — a middleware or a find hook
+ *         registered for no object, or for `'*'` — is not run on the share arm.
+ *         On a host where such a registration changes a system read of
+ *         `sys_record_share`, the share arm's rows can differ from today's, and
+ *         nothing refuses, reports or logs it: this paragraph is the telling
+ *         (ADR-0155 D4's boundary).
+ *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to
  * `/data/:object/:id/shares`.
@@ -258,6 +304,14 @@ export interface ISharingService {
    * Return a filter condition that restricts a `find` to rows the
    * principal in `context` can see for `object`. Return `null` when no
    * restriction applies (public object, system context, no userId).
+   *
+   * [ADR-0155] From plugin-sharing's switch on, the answer's share arm is a
+   * `SharedRecordIds` leaf composed for `context`'s user, not a list. Hand the
+   * answer to an engine read in process, under `context`, a context acting on
+   * that user's behalf, or a system context; ⛔ never serialise it and never
+   * match it with a generic matcher. "The read scope's share arm becomes an engine-internal
+   * leaf" above says why, and what a host that registers a narrowing of reads
+   * of `sys_record_share` is told.
    */
   buildReadFilter(
     object: string,

@@ -197,7 +197,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-async function boot(answers: Answers = {}) {
+async function boot(answers: Answers = {}, search = '') {
   const { fetch, held } = heldTransport(answers);
   vi.stubGlobal('fetch', fetch);
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch, autoReconnect: false });
@@ -209,7 +209,7 @@ async function boot(answers: Answers = {}) {
   } as never;
   const page = (id: string) => (
     <React.StrictMode>
-      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/c1`]}>
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/c1${search}`]}>
         <MetadataCtx.Provider value={metadata}>
           <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride={id} />
         </MetadataCtx.Provider>
@@ -230,6 +230,13 @@ const NO_COMMENTS = { comments: [], reactions: { records: [] } };
 const NO_ACTIVITY = { total: 0, records: [] };
 
 const peekOf = (c: HTMLElement) => c.querySelector('[data-record-timeline-peek]') as HTMLElement;
+/**
+ * objectstack#35595 / #35596 — the stream's whole face is the 动态 tab
+ * (`?related=timeline`). An empty stream draws no card on the 概览 rail, so
+ * its empty state is read there.
+ */
+const ON_TIMELINE = '?related=timeline';
+const faceOf = (c: HTMLElement) => c.querySelector('[data-related-enlarged="timeline"]') as HTMLElement;
 const failedSources = (c: HTMLElement) =>
   Array.from(c.querySelectorAll('[data-failed-source]')).map((e) => e.getAttribute('data-failed-source'));
 const retryButton = (c: HTMLElement) => c.querySelector('[data-feed-retry]') as HTMLButtonElement | null;
@@ -237,8 +244,8 @@ const retryButton = (c: HTMLElement) => c.querySelector('[data-feed-retry]') as 
 const timelineTab = (c: HTMLElement) =>
   Array.from(c.querySelectorAll('[role="tab"]')).find((t) => /^Activity/.test(t.textContent ?? ''))?.textContent;
 /** Open the record over an adapter that reads every stream on its own. */
-async function bootDirect(answers: Answers) {
-  const booted = await boot(answers);
+async function bootDirect(answers: Answers, search = '') {
+  const booted = await boot(answers, search);
   Object.assign(booted.ds, { getRecordPage: undefined, prefetchRecordPage: undefined });
   return booted;
 }
@@ -336,11 +343,11 @@ describe('objectstack#29188 — controls', () => {
   });
 
   it('an empty 200 on direct reads still shows the empty state, with no notice', async () => {
-    const { held, open } = await bootDirect({});
+    const { held, open } = await bootDirect({}, ON_TIMELINE);
     const view = open();
     await settle(held);
-    expect(peekOf(view.container).textContent).toContain(EMPTY_ACTIVITY);
-    expect(failedSources(peekOf(view.container))).toEqual([]);
+    expect(faceOf(view.container).textContent).toContain(EMPTY_ACTIVITY);
+    expect(failedSources(faceOf(view.container))).toEqual([]);
   });
 
   it('a refused (403) discussion part keeps the no-permission state and offers no Retry', async () => {
@@ -359,7 +366,8 @@ describe('objectstack#29188 — controls', () => {
 
 describe('objectstack#29188 — attachments (pin: main already shows the failure)', () => {
   it('a 500 attachments part shows the panel\'s load-failure state with a Retry, and no count', async () => {
-    const { held, open } = await boot({ attachments: FAIL });
+    // objectstack#35595 — the panel is the 附件 tab's face.
+    const { held, open } = await boot({ attachments: FAIL }, '?related=attachments');
     const view = open();
     await settle(held);
     expect(view.container.querySelector('[data-testid="record-attachments-unavailable"]')).not.toBeNull();
@@ -437,7 +445,7 @@ describe('objectstack#30145 — navigating away from a failed feed read does not
   });
 
   it('direct reads: A\'s sys_comment 500 settles after navigating to B, which stays clean', async () => {
-    const { held, open, navigate } = await bootDirect({ failGet: ['sys_comment@c1'] });
+    const { held, open, navigate } = await bootDirect({ failGet: ['sys_comment@c1'] }, ON_TIMELINE);
     const view = open();
     await idle();
     const aComment = readsOf(held, 'sys_comment').filter((h) => !h.released);
@@ -450,11 +458,11 @@ describe('objectstack#30145 — navigating away from a failed feed read does not
       if (pending.length === 0) break;
       await release(pending);
     }
-    expect(failedSources(peekOf(view.container))).toEqual([]);
+    expect(failedSources(faceOf(view.container))).toEqual([]);
 
     await release(aComment);
     await settle(held);
-    const peek = peekOf(view.container);
+    const peek = faceOf(view.container);
     expect(failedSources(peek)).toEqual([]);
     expect(retryButton(peek)).toBeNull();
     expect(peek.textContent).toContain(EMPTY_ACTIVITY);

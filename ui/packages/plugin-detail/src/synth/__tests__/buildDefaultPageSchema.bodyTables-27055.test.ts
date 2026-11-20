@@ -15,8 +15,9 @@
  * `relatedList: 'primary'`) is a table section of the Details tab, placed
  * BEFORE the field sections (objectstack#35597, 「关键字段下面」: under the header
  * strip, above the field groups; objectstack#27069 placed it after the FIRST
- * section); several stack in the order given; the sections follow. Every other list is a side card in the one
- * `Related` tab. A field group whose `relatedList` names a body table's
+ * section); several stack in the order given; the sections follow. Every other
+ * list is a tab of its own (objectstack#35595, which retired the one `Related`
+ * tab). A field group whose `relatedList` names a body table's
  * relationship places that table at the group's position instead
  * (objectstack#27069, objectstack#27241).
  */
@@ -52,16 +53,16 @@ const shape = (nodes: any[]) =>
   );
 
 describe('body tables sit in the Details tab before the field sections (objectstack#27055, objectstack#35597)', () => {
-  it('splits the details around the body tables; side lists stay in Related', () => {
+  it('splits the details around the body tables; each side list takes a tab of its own (objectstack#35595)', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [LINES, TASKS, SCHEDULE] });
-    // 动态 is last for every object (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
-    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
+    // 动态 is last for every object (objectstack#34590).
+    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related:task.quote', 'timeline']);
     expect(shape(items(tabs)[0].children)).toEqual([
       'table(quote_line_item)',
       'table(quote_schedule)',
       'details(Basic,Terms,Notes)',
     ]);
-    expect(tabOf(tabs, 'related').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
+    expect(tabOf(tabs, 'related:task.quote').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
   });
 
   it('a body table opens on a first page of ten rows unless its list names a limit', () => {
@@ -77,8 +78,8 @@ describe('body tables sit in the Details tab before the field sections (objectst
     expect(shape(items(asBody)[0].children)).toContain('table(task)');
     const asSide = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [{ ...primary, isBody: false }] });
     expect(shape(items(asSide)[0].children)).not.toContain('table(task)');
-    // Related is second now that 动态 closes the strip (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
-    expect(items(asSide)[1].value).toBe('related');
+    // A side list is a tab of its own, second after 概览 (objectstack#35595).
+    expect(items(asSide)[1].value).toBe('related:task.quote');
   });
 
   it('with one section the tables lead it', () => {
@@ -91,9 +92,12 @@ describe('body tables sit in the Details tab before the field sections (objectst
     expect(shape(items(tabs)[0].children)).toEqual(['details()', 'table(quote_line_item)', 'table(quote_schedule)']);
   });
 
-  it('emits no per-list tab any more — the strip is Details / Related / Timeline (objectstack#34590)', () => {
+  it('a body table takes no tab of its own: only the side lists do (objectstack#35595)', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [{ ...TASKS, isPrimary: true }, LINES] });
     expect(items(tabs).some((i: any) => String(i.value).startsWith('related:'))).toBe(false);
+    // CONTROL: the same list as a side list is a tab.
+    const side = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [TASKS, LINES] });
+    expect(items(side).map((i: any) => i.value)).toEqual(['details', 'related:task.quote', 'timeline']);
   });
 });
 
@@ -164,7 +168,7 @@ describe('a field group places a body table at its position (objectstack#27069, 
     // objectstack#27055); the renderer never second-guesses body-ness either.
     const tabs = buildDefaultTabs(placed('task'), { related: [LINES, TASKS] });
     expect(shape(items(tabs)[0].children)).toEqual(['table(quote_line_item)', 'details(basic,terms,notes)']);
-    expect(tabOf(tabs, 'related').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
+    expect(tabOf(tabs, 'related:task.quote').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
   });
 
   it('the host-passed sections place the same way (the `{ group }` sections RecordDetailView passes)', () => {
