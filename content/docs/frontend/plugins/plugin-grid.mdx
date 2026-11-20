@@ -111,6 +111,26 @@ is no top-level `sortable` switch.
 }
 ```
 
+A click on a sortable column header sorts by that column; another click on it
+changes the direction.
+
+**On an object's list page** the header opens a menu instead
+(objectstack#35876), which its host turns on (the `headerMenu` component
+prop, not a schema key): **Sort ascending**, **Sort descending** and **Hide
+column**. The header itself never changes the sort. Enter, Space or ArrowDown
+on the focused header opens the same menu; the arrows move through it, Enter
+chooses and Escape closes it without touching the sort.
+
+- With no sort, or a single level, the column picked in the menu replaces the
+  sort.
+- With two levels or more it becomes the first level and every other level
+  keeps its place after it; a column already in the sort moves up with the
+  picked direction. No level is dropped.
+- The ↑1 / ↓2 marks on the headers show each level's place.
+- A sort chip under the view bar opens every level in one panel (it does not
+  reverse the direction). Each level's handle reorders it: drag it to another
+  row, or press ArrowUp / ArrowDown on the focused handle.
+
 ### Filtering and search
 
 There is no per-column filter key and no top-level `filterable` switch. A grid
