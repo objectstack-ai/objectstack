@@ -85,7 +85,8 @@ describe('Options menu — the first level', () => {
       groupingConfig: { fields: [{ field: 'stage', order: 'asc' }] },
       showDensity: true,
       density: { mode: 'comfortable', cycle: () => {}, setMode: () => {} },
-      setRowNumbers: () => {},
+      showInlineEdit: true,
+      setInlineEdit: () => {},
     });
     expect(value('options-row-layout')).toBe('Grid');
     expect(value('options-row-fields')).toBe('3 shown');
@@ -284,7 +285,8 @@ describe('Options menu — words', () => {
       onReset: () => {},
       changedCount: 1,
       onRefresh: () => {},
-      setRowNumbers: () => {},
+      showInlineEdit: true,
+      setInlineEdit: () => {},
     }, 'zh');
     const named = (root: HTMLElement) => {
       for (const control of within(root).queryAllByRole('button').concat(within(root).queryAllByRole('textbox'))) {
