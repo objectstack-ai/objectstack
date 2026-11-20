@@ -334,7 +334,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
     // objectstack#27058 — on a phone the stack ends where the bottom action
     // bar starts: the header's actions are drawn there, after the body, and
-    // the header draws no action row. The split pane keeps the header's row.
+    // the header draws no action row. The split pane keeps the header's
+    // group, in the page's one top row (objectstack#35593).
     const bar = container.querySelector('[data-record-action-bar]');
     const header = container.querySelector('[data-record-page-root] header') as HTMLElement;
     if (name === 'a phone') {
@@ -343,7 +344,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
       expect(header.querySelector('[role="toolbar"]')).toBeNull();
     } else {
       expect(bar).toBeNull();
-      await waitFor(() => expect(header.querySelector('[role="toolbar"]')).toBeTruthy());
+      await waitFor(() => expect(container.querySelector('[data-record-top-bar-actions] [role="toolbar"]')).toBeTruthy());
     }
   });
 

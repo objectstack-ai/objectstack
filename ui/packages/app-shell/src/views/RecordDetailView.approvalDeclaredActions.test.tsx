@@ -34,6 +34,13 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+// The header stub reads the record header's state context. It is handed to the
+// stub through `headerHost.stateContext` at module top, never imported inside
+// the `@object-ui/react` mock factory: `@object-ui/components` imports
+// `@object-ui/react` itself, so importing it from that factory awaits the very
+// module the factory is building, and the file hangs at collection with no
+// test clock running.
+import { RecordHeaderStateContext } from '@object-ui/components';
 
 const authFetchSpy = vi.fn(async () =>
   new Response(JSON.stringify({ data: {} }), {
@@ -77,9 +84,13 @@ vi.mock('./ActionConfirmDialog', () => ({
     return null;
   },
 }));
+// The param sets the dialog was opened with, newest last — read by the
+// reject-reason pin (objectstack#35593).
+const paramDialogOpens = vi.hoisted(() => [] as Array<Array<{ name: string; required?: boolean }>>);
 vi.mock('./ActionParamDialog', () => ({
   ActionParamDialog: ({ state }: any) => {
     React.useEffect(() => {
+      if (state?.open) paramDialogOpens.push(state.params ?? []);
       if (state?.open) state.resolve?.({ comment: 'looks good', 'outputs.next_reviewer': 'u_plant_mgr' });
     }, [state]);
     return null;
@@ -103,12 +114,36 @@ vi.mock('../utils/consoleServerAction', () => ({
   createConsoleServerActionHandler: () => vi.fn(async () => ({ success: true })),
 }));
 
-// The page body is orthogonal — the decision bar is rendered by the view
-// itself, not through the schema tree.
+// The page body is orthogonal — the decision group is handed out by the view
+// itself (objectstack#35593), not built by the schema tree. With
+// `headerHost.on` the stub stands in for `page:header`: it reads the
+// record's header state and draws the tags and the ONE group the view hands
+// it, around a record row of its own. Without it no header draws, which is a
+// page whose layout has no `page:header`: the view keeps its fallback band.
+const headerHost = vi.hoisted(() => ({
+  on: false,
+  stateContext: null as React.Context<any> | null,
+}));
 vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/react')>();
-  return { ...actual, SchemaRenderer: () => null };
+  const HeaderStub = ({ schema }: any) => {
+    const state = React.useContext(headerHost.stateContext!);
+    if (!headerHost.on || schema?.type !== 'page:header') return null;
+    const recordRow = <span data-testid="stub-record-row" />;
+    const recordMenuItems = <div role="menuitem" data-testid="stub-record-menu-item">Delete</div>;
+    return (
+      <div data-testid="stub-page-header">
+        <span data-testid="stub-header-tags">{state?.tags}</span>
+        <span data-testid="stub-header-group">
+          {state?.group ? state.group({ recordRow, recordMenuItems, face: 'row' }) : recordRow}
+        </span>
+      </div>
+    );
+  };
+  return { ...actual, SchemaRenderer: HeaderStub };
 });
+
+headerHost.stateContext = RecordHeaderStateContext;
 
 import { MetadataCtx } from '@object-ui/react';
 import { RecordDetailView } from './RecordDetailView';
@@ -378,8 +413,11 @@ const APPROVER_FOLDED = ['approval_reassign', 'approval_send_back', 'approval_re
 beforeEach(() => {
   cleanup();
   authFetchSpy.mockClear();
+  headerHost.on = false;
 });
 
+// The describes below render no `page:header` (`headerHost.on` is false), so
+// they read the fallback band a header-less layout keeps (objectstack#35593).
 describe('record page decision actions — a GROUP approver (objectui#3055)', () => {
   /**
    * The acceptance case: the signed-in user holds the slot through a position,
@@ -523,6 +561,114 @@ describe('record page decision actions — gating is the SERVER\'s (objectui#305
     for (const name of APPROVER_DECISIONS) {
       expect(decisionButton(name), `${name} must fail closed without a viewer block`).toBeNull();
     }
+  });
+});
+
+/** Opens the record header's ONE `⋮` (objectstack#35593). */
+async function openHeaderMenu() {
+  const trigger = await screen.findByTestId('declared-actions-header-menu');
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  return screen.findByTestId('declared-actions-header-menu-content');
+}
+
+describe('record header — the approval is the ONE button group (objectstack#35593)', () => {
+  beforeEach(() => {
+    headerHost.on = true;
+  });
+
+  it('pending on me: 通过 is the only primary, 驳回 beside it, the other levers then the record ops in ⋮', async () => {
+    stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
+    renderRecordPage();
+
+    await waitFor(() => expect(decisionButton('approval_approve')).toBeTruthy());
+    expect(decisionButton('approval_approve')?.getAttribute('data-header-tone')).toBe('primary');
+    expect(decisionButton('approval_reject')?.getAttribute('data-header-tone')).toBe('secondary');
+    // The state's levers take the row: the record's own row is not drawn.
+    expect(screen.queryByTestId('stub-record-row')).toBeNull();
+    // …and there is no band of its own below the header.
+    expect(screen.queryByTestId('declared-actions-decision-menu')).toBeNull();
+
+    const menu = await openHeaderMenu();
+    for (const name of APPROVER_FOLDED) {
+      expect(decisionButton(name)?.getAttribute('role'), `${name} sits in the group's ⋮`).toBe('menuitem');
+    }
+    expect(screen.getByTestId('declared-actions-header-menu-separator')).toBeTruthy();
+    // The record's ops come last, after the separator.
+    const items = Array.from(menu.querySelectorAll('[data-testid]')).map((el) => el.getAttribute('data-testid'));
+    expect(items.indexOf('stub-record-menu-item')).toBeGreaterThan(items.indexOf('declared-actions-header-menu-separator'));
+  });
+
+  it('pending on me: the tag reads 待你审批 and opens the approval detail', async () => {
+    stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
+    renderRecordPage();
+
+    const tag = await screen.findByTestId('record-approval-tag');
+    expect(tag.textContent).toMatch(/awaiting your|待你/i);
+    expect(tag.tagName).toBe('BUTTON');
+  });
+
+  it('a reject from the record page requires its reason', async () => {
+    stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
+    renderRecordPage();
+    await waitFor(() => expect(decisionButton('approval_reject')).toBeTruthy());
+    authFetchSpy.mockClear();
+
+    paramDialogOpens.length = 0;
+    fireEvent.click(decisionButton('approval_reject')!);
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalled());
+    // The declaration keeps `comment` optional (the approvals list's reject is
+    // unchanged); the record page's dialog asks for it as required.
+    const comment = paramDialogOpens.at(-1)?.find((param) => param.name === 'comment');
+    expect(comment?.required).toBe(true);
+    expect(SYS_APPROVAL_REQUEST_DEF.actions.find((a) => a.name === 'approval_reject')!.params[0].required).toBe(false);
+    const [url, init] = authFetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('/api/v1/actions/sys_approval_request/approval_reject');
+    expect(JSON.parse(String(init.body)).recordId).toBe(REQUEST_ID);
+  });
+
+  it('my submission pending: 撤回 and 催办 lead, no decisions, ⋮ holds the record ops', async () => {
+    stubApprovalsApi(pendingRequest({ can_act: false, is_submitter: true, can_override: false }));
+    renderRecordPage();
+
+    await waitFor(() => expect(decisionButton('approval_recall')).toBeTruthy());
+    expect(decisionButton('approval_remind')).toBeTruthy();
+    expect(decisionButton('approval_recall')?.getAttribute('data-header-tone')).toBe('secondary');
+    expect(decisionButton('approval_approve')).toBeNull();
+    // Recall precedes remind in the row.
+    const row = screen.getByTestId('stub-header-group');
+    const order = Array.from(row.querySelectorAll('[data-testid^="declared-action-"]')).map((el) => el.getAttribute('data-testid'));
+    expect(order.indexOf('declared-action-approval_recall')).toBeLessThan(order.indexOf('declared-action-approval_remind'));
+    await openHeaderMenu();
+    expect(screen.getByTestId('stub-record-menu-item')).toBeTruthy();
+  });
+
+  it('an unrelated viewer gets the record row unchanged and the 审批中 tag', async () => {
+    stubApprovalsApi(pendingRequest({ can_act: false, is_submitter: false, can_override: false }));
+    renderRecordPage();
+
+    await waitFor(() => expect(screen.getByTestId('stub-record-row')).toBeTruthy());
+    const tag = await screen.findByTestId('record-approval-tag');
+    expect(tag.textContent).toMatch(/in approval|审批中/i);
+    for (const name of [...APPROVER_DECISIONS, 'approval_recall', 'approval_remind']) {
+      expect(decisionButton(name), `${name} must stay hidden`).toBeNull();
+    }
+  });
+
+  it('an override-only admin keeps the record row and the marked override menu', async () => {
+    stubApprovalsApi(pendingRequest({ can_act: false, is_submitter: false, can_override: true }));
+    renderRecordPage();
+
+    await screen.findByTestId('declared-actions-override-menu');
+    expect(screen.getByTestId('stub-record-row')).toBeTruthy();
+  });
+
+  it('no pending request: the record row, no tag', async () => {
+    approvalsFetch = vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) }) as any);
+    renderRecordPage();
+    await waitFor(() => expect(approvalsFetch).toHaveBeenCalled());
+
+    expect(screen.getByTestId('stub-record-row')).toBeTruthy();
+    expect(screen.queryByTestId('record-approval-tag')).toBeNull();
   });
 });
 
