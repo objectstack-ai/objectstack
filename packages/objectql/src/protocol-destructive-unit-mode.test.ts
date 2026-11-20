@@ -27,8 +27,9 @@ describe('ObjectStackProtocolImplementation - unit_mode_to_record and unit_mode_
     const register = (name: string, fields: Record<string, unknown>) => {
         registry.registerObject({ name, label: name, _provenance: 'org', fields } as any, 'pkg');
     };
+    /** The save under test. `sharingModel` set, so a save the detector admits is admitted for real. */
     const save = (name: string, fields: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-        protocol.saveMetaItem({ type: 'object', name, ...extra, item: { name, label: name, fields } } as any);
+        protocol.saveMetaItem({ type: 'object', name, ...extra, item: { name, label: name, sharingModel: 'private', fields } } as any);
     /** The finding codes a save raised: `[]` when it was admitted. */
     const findingsOf = async (p: Promise<unknown>): Promise<string[]> => p.then(
         () => [],
@@ -73,12 +74,15 @@ describe('ObjectStackProtocolImplementation - unit_mode_to_record and unit_mode_
 
     for (const object of ['mat_plain', 'mat_fixed']) {
         it(`refuses ${object}'s stored quantity switched to unitMode 'record' with 409 DESTRUCTIVE_CHANGE, naming the conversion run and reading no row`, async () => {
-            const err: any = await save(object, { weight: RECORD_WEIGHT, uom: { name: 'uom', type: 'text' } }).then(() => null, (e: unknown) => e);
+            // Every stored field kept, so the one finding is the declaration's.
+            const kept = object === 'mat_plain' ? { base_uom: { name: 'base_uom', type: 'text' } } : {};
+            const err: any = await save(object, { weight: RECORD_WEIGHT, uom: { name: 'uom', type: 'text' }, ...kept }).then(() => null, (e: unknown) => e);
             expect(err).toMatchObject({
                 code: 'DESTRUCTIVE_CHANGE',
                 status: 409,
                 issues: [expect.objectContaining({ code: 'unit_mode_to_record', field: 'weight' })],
             });
+            expect(err.issues).toHaveLength(1);
             const { message } = err.issues[0];
             expect(message).toContain("reads its unit from 'uom'");
             expect(message).toContain('is refused until the row holds a unit code');
@@ -95,6 +99,7 @@ describe('ObjectStackProtocolImplementation - unit_mode_to_record and unit_mode_
         const err: any = await save('mat_plain', { weight: { name: 'weight', type: 'number' }, uom: { name: 'uom', type: 'text' }, base_uom: CODE_UOM })
             .then(() => null, (e: unknown) => e);
         expect(err).toMatchObject({ code: 'DESTRUCTIVE_CHANGE', status: 409, issues: [expect.objectContaining({ code: 'unit_mode_to_code', field: 'base_uom' })] });
+        expect(err.issues).toHaveLength(1);
         expect(err.issues[0].message).toContain('rows already stored keep the text they were written with');
         expect(err.issues[0].message).toContain('`os migrate unit-codes --object mat_plain --field base_uom --map-file <mapping file>`');
     });
