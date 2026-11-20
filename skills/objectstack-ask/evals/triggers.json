@@ -1,0 +1,11 @@
+{
+  "skill_name": "objectstack-ask",
+  "evals": [
+    {"id": 1, "prompt": "I'm connected to an ObjectStack environment over MCP. In one call, how many deals were won per sales region this quarter, and what is the average amount per region?", "should_trigger": true, "files": []},
+    {"id": 2, "prompt": "Over the ObjectStack MCP connection to our CRM: how much revenue did we book last quarter, by region?", "should_trigger": true, "files": []},
+    {"id": 3, "prompt": "我通过 MCP 连着公司的 ObjectStack 环境：本月报销总额是多少？按部门排个名。", "should_trigger": true, "files": []},
+    {"id": 4, "prompt": "Using the ObjectStack MCP tools on our support app, list the ten customers with the most open tickets right now.", "should_trigger": true, "files": []},
+    {"id": 5, "prompt": "In an ObjectStack `beforeUpdate` hook on `deal`, write the ObjectQL aggregation that sums `amount` per `region` over closed-won deals.", "should_trigger": false, "files": []},
+    {"id": 6, "prompt": "Write the ObjectQL filter for a scheduled job in our ObjectStack project: invoices more than 30 days overdue whose billing country is in the EU.", "should_trigger": false, "files": []}
+  ]
+}
