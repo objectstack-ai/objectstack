@@ -345,16 +345,14 @@ InvoiceLine = {
 ### Detail-page related lists (the read-side mirror)
 
 You usually don't declare the **related list** on the parent's record detail page: every child relationship
-(`master_detail` and `lookup`) is shown **by default** — owned (`master_detail`)
-children first. The relationship
-flags exist to *refine* that:
+is shown **by default** — a `master_detail` child as a body table, a `lookup`
+child as a panel. `inlineEdit` plays no part: it governs entry in the parent's
+form only. The relationship flags *refine* that:
 
 ```typescript
 project: {
   type: 'master_detail',
-  reference: 'project',
-  inlineEdit: true,
-  relatedList: 'primary',           // read side: a body table
+  reference: 'project',             // no relatedList: a body table
   relatedListTitle: 'Tasks',
   relatedListColumns: ['title', 'status', 'priority', 'due_date'],
 },
@@ -365,10 +363,9 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 `relatedList` is tri-state — placement:
 
-- `'primary'` — a full-width table in the record's detail body. Default for a `master_detail` FK with `inlineEdit`.
+- `'primary'` — a full-width table in the record's detail body. Default for a `master_detail` FK.
 - `false` — the child object is not shown on the parent record page.
-- `true`, or omitted (except inline-edited `master_detail`) — an auxiliary
-  panel on the record page.
+- `true` — an auxiliary panel on the record page. Default for a `lookup` FK.
 - Order is the parent's: `relatedLists: ['task', 'event.related_to']` (child, or
   `object.field`) lists those first. A child in the stack with no inbound FK is
   refused everywhere; one that exists nowhere is refused by `os validate` /

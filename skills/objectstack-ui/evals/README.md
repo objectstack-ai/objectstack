@@ -12,7 +12,7 @@ view / page / dashboard / report metadata.
   for a Chinese brief, whose members carry Chinese `synonyms` and a
   one-sentence `description`.
 - `record-page.json` — the record page as the object declares it: a child
-  table placed first by `relatedList: 'primary'` (no page file),
+  table a `master_detail` field already places, ordered first (no page file),
   `navigation: { mode: 'page' }` on the list view with the reader's own
   open choice left out of metadata, and `placedActions: true` on a full
   page's `page:header` so packaged header actions draw without an id list.
