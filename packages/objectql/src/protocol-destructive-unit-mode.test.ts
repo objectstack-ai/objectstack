@@ -15,9 +15,12 @@ import { unitCodeSources } from './validation/unit-code-membership.js';
  * declaration made it one — a quantity, new or stored, whose `unitField` names
  * it, a `unitField` re-pointed at it, or its own `unitMode: 'code'` (Open item
  * 8). A field that already was one raises nothing. A stored quantity switched
- * to `unitMode: 'record'` over a field that already was one raises
- * `unit_mode_to_record` on the quantity, for the blank beside it. The save is
- * answered with the 409 `DESTRUCTIVE_CHANGE`, whose finding names the
+ * to `unitMode: 'record'` raises `unit_mode_to_record` on the quantity, for the
+ * blanks beside it, whatever its `unitField`'s history (already a unit code
+ * field, or new in the same save), unless the same save raises
+ * `unit_code_field_declared` on that `unitField`: that finding names the
+ * quantity, the blanks and the `""` entry, so each debt is reported once. The
+ * save is answered with the 409 `DESTRUCTIVE_CHANGE`, whose finding names the
  * conversion run, CLI and REST; `force: true` lifts it. It reads no row.
  */
 describe('ObjectStackProtocolImplementation - unit_code_field_declared and unit_mode_to_record', () => {
@@ -95,7 +98,7 @@ describe('ObjectStackProtocolImplementation - unit_code_field_declared and unit_
     });
 
     for (const object of ['mat_plain', 'mat_fixed']) {
-        it(`refuses ${object}'s stored quantity switched to unitMode 'record' over stored text with 409 DESTRUCTIVE_CHANGE, on the text field it makes a unit code field, reading no row`, async () => {
+        it(`refuses ${object}'s stored quantity switched to unitMode 'record' over stored text with 409 DESTRUCTIVE_CHANGE, once: on the text field it makes a unit code field, reading no row`, async () => {
             // Every stored field kept, so the one finding is the declaration's.
             const err = await refusalOf(save(object, { ...STORED[object], weight: RECORD('weight', 'uom') }));
             expect(err).toMatchObject({
@@ -107,7 +110,23 @@ describe('ObjectStackProtocolImplementation - unit_code_field_declared and unit_
             const { message } = err.issues[0];
             expect(message).toContain("Field 'uom' is now a unit code field (the unitField of 'weight')");
             expect(message).toContain('a quantity edited beside a value there that is free text or blank is refused until the row holds one');
+            // It carries the quantity's blank debt too, which is why unit_mode_to_record stands aside: reported once.
+            expect(message).toContain('write the blanks beside a quantity from a "" entry in the mapping');
             for (const part of remedyOf(object, 'uom')) expect(message).toContain(part);
+            readNoRow(object);
+        });
+
+        it(`[S2] ${object}'s stored quantity switched to unitMode 'record' over a unitField NEW in the same save raises unit_mode_to_record on the quantity, reading no row`, async () => {
+            // Every stored row now holds its quantity beside a blank 'weight_uom': no text to convert, but the blank debt is real.
+            const err = await refusalOf(save(object, { ...STORED[object], weight: RECORD('weight', 'weight_uom'), weight_uom: TEXT('weight_uom') }));
+            expect(err).toMatchObject({ code: 'DESTRUCTIVE_CHANGE', status: 409, issues: [expect.objectContaining({ code: 'unit_mode_to_record', field: 'weight' })] });
+            expect(err.issues).toHaveLength(1);
+            const { message } = err.issues[0];
+            expect(message).toContain("Field 'weight' switched to unitMode 'record'");
+            expect(message).toContain("'weight_uom' held no stored unit before this save (it is new, or was not stored)");
+            expect(message).toContain("every row already stored holds its quantity beside a blank 'weight_uom'");
+            expect(message).toContain('write those blanks from a "" entry in the mapping of');
+            for (const part of remedyOf(object, 'weight_uom')) expect(message).toContain(part);
             readNoRow(object);
         });
     }
@@ -198,7 +217,9 @@ describe('ObjectStackProtocolImplementation - unit_code_field_declared and unit_
         ['mat_pair', { ...STORED.mat_pair, gross: RECORD('gross', 'net_uom'), net: RECORD('net', 'uom') }],
         ['mat_pair', { ...STORED.mat_pair, net: NUMBER('net'), gross: RECORD('gross', 'net_uom') }],
         ['mat_bare', { ...STORED.mat_bare, title: CODE('title'), weight: RECORD('weight', 'uom'), uom: TEXT('uom') }],
-    ] as Array<[string, Record<string, unknown>]>)('on %s, the fields raised are those unitCodeSources newly names over a stored field (%#)', async (object, next) => {
+        ['mat_plain', { ...STORED.mat_plain, weight: RECORD('weight', 'weight_uom'), weight_uom: TEXT('weight_uom') }],
+        ['mat_fixed', { ...STORED.mat_fixed, weight: RECORD('weight', 'uom') }],
+    ] as Array<[string, Record<string, unknown>]>)('on %s, the fields raised are those unitCodeSources newly names over a stored field, and each switched quantity\'s blanks are named once (%#)', async (object, next) => {
         const before = new Set(unitCodeSources(STORED[object]).map((s) => s.codeField));
         const expected = unitCodeSources(next)
             .map((s) => s.codeField)
@@ -212,5 +233,15 @@ describe('ObjectStackProtocolImplementation - unit_code_field_declared and unit_
             .map((i) => i.field)
             .sort();
         expect(raised).toEqual(expected);
+        // Every stored quantity this save switches to unitMode 'record' has its blank debt named exactly once: by
+        // unit_mode_to_record on the quantity, or by unit_code_field_declared on its unitField, which names it.
+        const issues = (err?.issues ?? []) as Array<{ code: string; field: string; message: string }>;
+        for (const [name, field] of Object.entries(next) as Array<[string, any]>) {
+            const before = STORED[object][name] as any;
+            if (!before || before.unitConfig?.unitMode === 'record' || field?.unitConfig?.unitMode !== 'record') continue;
+            const named = issues.filter((i) => (i.code === 'unit_mode_to_record' && i.field === name)
+                || (i.code === 'unit_code_field_declared' && i.field === field.unitConfig.unitField && i.message.includes(`'${name}'`)));
+            expect(named.map((i) => i.code), name).toHaveLength(1);
+        }
     });
 });

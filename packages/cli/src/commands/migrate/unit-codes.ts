@@ -23,7 +23,7 @@ import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // Type-only, so the heavy engine package is still loaded lazily below.
-import type { UnitCodeBackfillEngine, UnitCodeMapping } from '@objectstack/objectql';
+import type { UnitCodeBackfillEngine, UnitCodeBackfillReport, UnitCodeMapping } from '@objectstack/objectql';
 
 /**
  * The `--map-file` mapping, read and judged before the occupancy probe, the
@@ -48,6 +48,16 @@ async function readMapping(file: string | undefined): Promise<UnitCodeMapping | 
   }
   const { unitCodeMappingOf } = await import('@objectstack/objectql');
   return unitCodeMappingOf(parsed);
+}
+
+/** The rows a run leaves holding no unit code the field admits, by kind; the report's ⚠ lines say what becomes of each. */
+function rowsLeftOf(report: UnitCodeBackfillReport): string {
+  const kinds = [
+    report.blankBesideQuantity > 0 ? `${report.blankBesideQuantity} blank unit(s) beside a quantity` : undefined,
+    report.skippedRetired > 0 ? `${report.skippedRetired} row(s) on a retired unit` : undefined,
+    report.skippedOtherDimension > 0 ? `${report.skippedOtherDimension} row(s) on a unit code of another dimension` : undefined,
+  ].filter((kind): kind is string => kind !== undefined);
+  return kinds.length > 1 ? `${kinds.slice(0, -1).join(', ')} and ${kinds[kinds.length - 1]}` : kinds[0] ?? 'rows';
 }
 
 async function confirm(question: string): Promise<boolean> {
@@ -237,7 +247,7 @@ export default class MigrateUnitCodes extends Command {
       }
       refuseUndeclaredObjects([flags.object], loadedObjects);
 
-      const { backfillUnitCodes, formatUnitCodeBackfillReport } = await import('@objectstack/objectql');
+      const { backfillUnitCodes, formatUnitCodeBackfillReport, unitCodeBackfillComplete } = await import('@objectstack/objectql');
       const logger = flags.json
         ? { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
         : { info: (m: string) => printInfo(m), warn: (m: string) => printWarning(m) };
@@ -266,14 +276,20 @@ export default class MigrateUnitCodes extends Command {
         printError(`${report.failures.length} row(s) could not be written — re-run to finish them.`);
       } else if (report.truncated) {
         printWarning(`Walk incomplete — ${report.scannedRecords} row(s) examined. Re-run without --max-records (or with a higher one) to finish.`);
-      } else if (apply && report.written > 0) {
-        printSuccess(`Wrote unit codes on ${report.written} row(s). Re-run any time — a row holding a unit code is never rewritten.`);
       } else if (report.unmatched > 0) {
         printInfo(`${report.unmatched} row(s) hold a value with no mapping entry: add each to --map-file, then re-run with --apply.`);
       } else if (!apply && report.mapped > 0) {
         printInfo(`Dry run only — ${report.mapped} row(s) would be rewritten. Re-run with --apply.`);
+      } else if (!unitCodeBackfillComplete(report)) {
+        // The engine's own rule for its ✓ line: a run that leaves a row holding no unit code the field admits closes
+        // with what is left, never with a success line.
+        const wrote = apply && report.written > 0 ? `Wrote unit codes on ${report.written} row(s), but not complete` : 'Not complete';
+        printWarning(`${wrote} — ${report.object}.${report.field} still has ${rowsLeftOf(report)}, holding no unit code the field ` +
+          'admits (see the ⚠ lines above).');
+      } else if (apply && report.written > 0) {
+        printSuccess(`Wrote unit codes on ${report.written} row(s). Re-run any time — a row holding a unit code is never rewritten.`);
       } else {
-        printSuccess(`Nothing to convert — every ${report.object}.${report.field} value is a unit code.`);
+        printSuccess(`Nothing to convert — every ${report.object}.${report.field} value is a unit code the field admits.`);
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');

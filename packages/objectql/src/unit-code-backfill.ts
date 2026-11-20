@@ -39,14 +39,16 @@
  *   the row's organization (the settlement's membership, "U1, or that
  *   organization's `sys_unit` rows"), a retired one included, since L1 keeps a
  *   resting row's code and its quantity is in that unit. A code of another
- *   dimension than `unitDimension` is a code too. Neither is free text, and the
- *   write check answers both at the row's next quantity edit; rewriting them
- *   from a mapping would change what the stored quantity means. So each is
- *   listed and counted apart from the codes the field admits (`retired`,
- *   `other-dimension`; `skippedRetired`, `skippedOtherDimension`), and so is a
- *   blank beside a quantity the mapping has no `""` entry for
- *   (`blankBesideQuantity`): each such row is still refused at its next
- *   quantity edit, and a run that leaves one is not complete
+ *   dimension than `unitDimension` is a code too. Neither is free text, and
+ *   rewriting them from a mapping would change what the stored quantity means.
+ *   Neither is a code the field admits either: beside a quantity, the write
+ *   check answers both at the row's next quantity edit; a standalone field has
+ *   no quantity, so the resting code is never judged at rest, and the next
+ *   write of the field must carry another code. So each is listed and counted
+ *   apart from the codes the field admits (`retired`, `other-dimension`;
+ *   `skippedRetired`, `skippedOtherDimension`), and so is a blank beside a
+ *   quantity the mapping has no `""` entry for (`blankBesideQuantity`, refused
+ *   at its next quantity edit). A run that leaves any of them is not complete
  *   (`unitCodeBackfillComplete`). A blank code with no quantity value beside
  *   it is left alone, owed nothing.
  * - Every distinct stored value is listed with its row count, so the operator
@@ -95,8 +97,9 @@ export interface UnitCodeBackfillValue {
    * `member`: a unit code the field admits, never rewritten. `retired`: a
    * retired unit of the row's organization, and `other-dimension`: a unit code
    * of another dimension than the field's `unitDimension` — each left as
-   * stored and refused at the row's next quantity edit. `mapped`: rewritten
-   * to `code`. `unmatched`: no entry.
+   * stored, and no code the field admits: refused at the row's next quantity
+   * edit, or, on a standalone field, replaced at the next write of the field.
+   * `mapped`: rewritten to `code`. `unmatched`: no entry.
    */
   disposition: 'member' | 'retired' | 'other-dimension' | 'mapped' | 'unmatched';
   code?: string;
@@ -501,11 +504,21 @@ function tallyValue(values: Map<string, UnitCodeBackfillValue>, value: string, d
   values.set(key, entry);
 }
 
+/**
+ * What becomes of a resting code the field does not admit (a retired unit, a
+ * code of another dimension). U5 judges a resting code only when a non-blank
+ * quantity is written beside it (`judgedOf`), so the row is refused at its next
+ * quantity edit only where a quantity names the field. A standalone field
+ * (Open item 8) has none: the code is never judged at rest, and the next write
+ * of the field, which judges the value written, must carry another code.
+ */
+const STANDALONE_RESTING = 'the field does not admit it, so the next write of the field must carry another code';
+
 /** What the listing says of each distinct value's rows. */
-const DISPOSITION_TEXT: Record<UnitCodeBackfillValue['disposition'], (v: UnitCodeBackfillValue) => string> = {
+const DISPOSITION_TEXT: Record<UnitCodeBackfillValue['disposition'], (v: UnitCodeBackfillValue, refusal: string) => string> = {
   member: () => 'already a unit code (never rewritten)',
-  retired: () => 'a retired unit, left as stored (refused at its next quantity edit)',
-  'other-dimension': () => 'a unit code of another dimension, left as stored (refused at its next quantity edit)',
+  retired: (_, refusal) => `a retired unit, left as stored (${refusal})`,
+  'other-dimension': (_, refusal) => `a unit code of another dimension, left as stored (${refusal})`,
   mapped: (v) => `→ ${v.code}`,
   unmatched: () => 'no mapping entry',
 };
@@ -522,12 +535,14 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
         (report.applied ? `, ${org.written} written` : ''));
     }
   }
+  const standalone = report.quantityFields.length === 0;
+  const restingClause = standalone ? STANDALONE_RESTING : 'refused at its next quantity edit';
   for (const v of report.values) {
     const shown = v.value === '' ? '(blank, beside a quantity)' : JSON.stringify(v.value);
-    lines.push(`  ${shown}: ${v.rows} row(s), ` + DISPOSITION_TEXT[v.disposition](v));
+    lines.push(`  ${shown}: ${v.rows} row(s), ` + DISPOSITION_TEXT[v.disposition](v, restingClause));
   }
-  // The rows this run leaves that the write check still refuses at their next quantity edit.
-  const refused = report.blankBesideQuantity + report.skippedRetired + report.skippedOtherDimension;
+  // The rows this run leaves holding no unit code the field admits.
+  const notAdmitted = report.blankBesideQuantity + report.skippedRetired + report.skippedOtherDimension;
   if (report.mapped > 0) {
     lines.push(report.applied
       ? `Wrote ${report.written} of ${report.mapped} row(s) the mapping rewrites.`
@@ -535,9 +550,9 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
   } else if (report.unmatched === 0) {
     lines.push(report.truncated
       ? `No ${report.object}.${report.field} value to rewrite among the ${report.scannedRecords} row(s) examined.`
-      : refused === 0
+      : notAdmitted === 0
         ? `✓ Every ${report.object}.${report.field} value is a unit code the field admits — nothing to convert.`
-        : `Nothing to rewrite from the mapping, but ${refused} row(s) of ${report.object}.${report.field} hold no unit code ` +
+        : `Nothing to rewrite from the mapping, but ${notAdmitted} row(s) of ${report.object}.${report.field} hold no unit code ` +
           'the field admits (below).');
   }
   lines.push(`· Skipped: ${report.skippedMember} row(s) already holding a unit code (never rewritten), ` +
@@ -548,11 +563,11 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
   }
   if (report.skippedRetired > 0) {
     lines.push(`⚠ ${report.skippedRetired} row(s) rest on a retired unit, left as stored (a unit code is never rewritten): ` +
-      'each is refused at its next quantity edit until the record is given a current unit.');
+      (standalone ? `${STANDALONE_RESTING}.` : 'each is refused at its next quantity edit until the record is given a current unit.'));
   }
   if (report.skippedOtherDimension > 0) {
     lines.push(`⚠ ${report.skippedOtherDimension} row(s) hold a unit code of another dimension than the field's unitDimension, ` +
-      'left as stored: each is refused at its next quantity edit until the record is corrected.');
+      (standalone ? `left as stored: ${STANDALONE_RESTING}.` : 'left as stored: each is refused at its next quantity edit until the record is corrected.'));
   }
   if (report.unmatched > 0) {
     lines.push(`✗ ${report.unmatched} row(s) hold a value with no mapping entry: an apply run is refused until each value is ` +
@@ -571,10 +586,13 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
 
 /**
  * Did this run leave every row of the field holding a unit code the field
- * admits, so no quantity edit is refused over a resting value? A blank beside
- * a quantity, a retired unit and a code of another dimension each still are,
- * so a run leaving any of them is not complete, nor is one with an unmatched
- * value, a failed row or an unexamined row.
+ * admits? A blank beside a quantity, a retired unit and a code of another
+ * dimension are none. Beside a quantity, each is refused at the row's next
+ * quantity edit. On a standalone field (no quantity) a retired unit or a code
+ * of another dimension is never judged at rest, but the field does not admit
+ * it, so the next write of the field must carry another code. A run leaving
+ * any of them is not complete, nor is one with an unmatched value, a failed
+ * row or an unexamined row.
  */
 export function unitCodeBackfillComplete(report: UnitCodeBackfillReport): boolean {
   return report.failures.length === 0 && !report.truncated && report.unmatched === 0

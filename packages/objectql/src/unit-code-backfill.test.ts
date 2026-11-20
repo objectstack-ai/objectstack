@@ -242,6 +242,26 @@ describe('backfillUnitCodes — free text stored before the field was a unit cod
     expect(d.storeFor('uom_material').get('s3')?.base_uom).toBe('');
   });
 
+  it('[Open item 8] a standalone field resting on a retired unit holds no code it admits: named without a quantity edit, and not complete', async () => {
+    stored('s1', { base_uom: 'SACK_50' }); // a unit org_a retired
+    stored('s2', { base_uom: 'H87' });
+    const report = await backfillUnitCodes(engine, quiet, { object: 'uom_material', field: 'base_uom' });
+    expect(report).toMatchObject({ field: 'base_uom', quantityFields: [], mapped: 0, written: 0, unmatched: 0, skippedMember: 1, skippedRetired: 1 });
+    expect(report.values).toEqual([
+      { value: 'H87', rows: 1, disposition: 'member' },
+      { value: 'SACK_50', rows: 1, disposition: 'retired' },
+    ]);
+    // No quantity names the field, so U5 never judges the resting code: only the next write of the field replaces it.
+    const lines = formatUnitCodeBackfillReport(report);
+    expect(lines).toContain('  "SACK_50": 1 row(s), a retired unit, left as stored (the field does not admit it, so the next write of ' +
+      'the field must carry another code)');
+    expect(lines).toContain('⚠ 1 row(s) rest on a retired unit, left as stored (a unit code is never rewritten): the field does not ' +
+      'admit it, so the next write of the field must carry another code.');
+    expect(lines).toContain('Nothing to rewrite from the mapping, but 1 row(s) of uom_material.base_uom hold no unit code the field admits (below).');
+    expect(lines.filter((l) => l.includes('quantity edit'))).toEqual([]);
+    expect(unitCodeBackfillComplete(report)).toBe(false);
+  });
+
   it.each([
     ['weight', "it is a quantity, whose unit code is stored in 'uom'; name that field"],
     ['title', 'no quantity names it in unitConfig.unitField'],

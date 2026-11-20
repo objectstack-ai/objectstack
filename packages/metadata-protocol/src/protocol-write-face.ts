@@ -192,7 +192,7 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
 
     const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
     const prevUnitCodeFields = unitCodeFieldsOf(prevFields);
-    const nextUnitCodeFields = unitCodeFieldsOf(nextFields);
+    const declaredUnitCodeFields = newlyDeclaredUnitCodeFieldsOf(prevFields, nextFields, prevUnitCodeFields, isStored);
 
     // Field type changes — narrowing or incompatible conversions.
     const TYPE_COMPATIBILITY: Record<string, Set<string>> = {
@@ -308,27 +308,35 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
             issues.push({ code: 'currency_field_repointed', field: fname, message });
         }
         // [ADR-0158 Open item 9 point 7] A stored quantity switched to
-        // `unitMode: 'record'` over a field that was ALREADY a unit code field:
-        // the code field's own text is under the write check already, so the
-        // debt this save adds is the quantity's — each stored row is read in
-        // the unit that field holds, and a quantity edited beside a blank there
-        // is refused. A code field this save newly declares is judged below, on
-        // the code field, and covers the blank too, so the two never fire for
-        // one debt. Lifted by the same `force`, reading no row.
+        // `unitMode: 'record'`: every stored row is now read in the unit its
+        // `unitField` holds, and a quantity edited beside a blank there is
+        // refused until the row holds a unit code — the twin of
+        // `currency_mode_to_record`, raised whatever the code field's history
+        // (already a unit code field, new in this save, or unstored before it).
+        // ONE rule keeps each debt reported once: when this save also raises
+        // `unit_code_field_declared` on that same `unitField` (a stored text
+        // field it newly makes a code field, below), that finding names this
+        // quantity among its declarers, the blanks beside it and the `""`
+        // entry, so this one is not raised. Lifted by the same `force`,
+        // reading no row.
         const unitField = recordUnitFieldOf(nextField);
         if (
             isStored(prevField)
             && unitField !== undefined
             && unitModeOf(prevField) !== 'record'
-            && prevUnitCodeFields.has(unitField)
+            && !declaredUnitCodeFields.has(unitField)
         ) {
+            const unitText = prevUnitCodeFields.has(unitField)
+                ? `every row already stored is read in the unit '${unitField}' holds, a unit code field already, and a quantity `
+                    + `edited beside a blank '${unitField}' is refused until the row holds a unit code`
+                : `'${unitField}' held no stored unit before this save (it is new, or was not stored), so every row already `
+                    + `stored holds its quantity beside a blank '${unitField}', and editing the quantity there is refused until `
+                    + 'the row holds a unit code';
             issues.push({
                 code: 'unit_mode_to_record',
                 field: fname,
-                message: `Field '${fname}' switched to unitMode 'record' — every row already stored is read in the unit '${unitField}' `
-                    + `holds, a unit code field already, and a quantity edited beside a blank '${unitField}' is refused until the `
-                    + 'row holds a unit code; once saved, write those blanks from a "" entry in the mapping of '
-                    + unitCodeBackfillRemedy(objectName, unitField),
+                message: `Field '${fname}' switched to unitMode 'record' — ${unitText}; once saved, write those blanks from a "" `
+                    + 'entry in the mapping of ' + unitCodeBackfillRemedy(objectName, unitField),
             });
         }
     }
@@ -342,12 +350,13 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
     // this save on every write of it must hold a unit code. A field that was a
     // unit code field before the save raises nothing, however it is declared
     // now, since nothing changes for its rows; a brand-new or unstored field
-    // holds no text. The sibling of `currency_mode_to_record`, on the same
-    // face, lifted by the same `force`, reading no row.
-    for (const [codeField, declared] of nextUnitCodeFields) {
-        if (prevUnitCodeFields.has(codeField)) continue;
-        const prevField = prevFields[codeField];
-        if (!prevField || !isStored(prevField) || !(codeField in nextFields)) continue;
+    // holds no text (a stored quantity switched to `record` over one raises
+    // `unit_mode_to_record` above instead). Where a quantity names the field,
+    // the message also names the blanks beside it and the `""` entry, which is
+    // why `unit_mode_to_record` stands aside for this field. The sibling of
+    // `currency_mode_to_record`, on the same face, lifted by the same `force`,
+    // reading no row.
+    for (const [codeField, declared] of declaredUnitCodeFields) {
         const how = [
             ...(declared.quantities.length > 0
                 ? [`the unitField of ${declared.quantities.map((q) => `'${q}'`).join(', ')}`]
@@ -360,9 +369,10 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
             message: `Field '${codeField}' is now a unit code field (${how}) — rows already stored keep the text they were written `
                 + 'with, which is no unit code until converted, and every later write of the field must hold a unit code'
                 + (declared.quantities.length > 0
-                    ? '; a quantity edited beside a value there that is free text or blank is refused until the row holds one'
-                    : '')
-                + '; once saved, convert the stored text with ' + unitCodeBackfillRemedy(objectName, codeField),
+                    ? '; a quantity edited beside a value there that is free text or blank is refused until the row holds one; '
+                        + 'once saved, convert the stored text, and write the blanks beside a quantity from a "" entry in the mapping, with '
+                    : '; once saved, convert the stored text with ')
+                + unitCodeBackfillRemedy(objectName, codeField),
         });
     }
     return issues;
@@ -401,6 +411,29 @@ function unitCodeFieldsOf(fields: Record<string, any>): Map<string, { quantities
         const pointer = recordUnitFieldOf(field);
         if (pointer !== undefined) entry(pointer).quantities.push(name);
         else if (field.type === 'text' && unitModeOf(field) === 'code') entry(name).marked = true;
+    }
+    return out;
+}
+
+/**
+ * [ADR-0158 Open item 9 point 7] The stored fields a save newly makes unit code
+ * fields, each with what declares it: a code field after the save that was
+ * none before, is stored on the previous definition, and is still declared.
+ * One predicate, read by both unit findings, so `unit_code_field_declared` and
+ * the `unit_mode_to_record` it stands in for cannot disagree on a field.
+ */
+function newlyDeclaredUnitCodeFieldsOf(
+    prevFields: Record<string, any>,
+    nextFields: Record<string, any>,
+    prevUnitCodeFields: Map<string, { quantities: string[]; marked: boolean }>,
+    isStored: (field: any) => boolean,
+): Map<string, { quantities: string[]; marked: boolean }> {
+    const out = new Map<string, { quantities: string[]; marked: boolean }>();
+    for (const [codeField, declared] of unitCodeFieldsOf(nextFields)) {
+        if (prevUnitCodeFields.has(codeField)) continue;
+        const prevField = prevFields[codeField];
+        if (!prevField || !isStored(prevField) || !(codeField in nextFields)) continue;
+        out.set(codeField, declared);
     }
     return out;
 }

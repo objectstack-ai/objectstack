@@ -66,6 +66,7 @@ vi.mock('@objectstack/objectql', async (importOriginal) => {
   return {
     backfillUnitCodes: vi.fn(),
     formatUnitCodeBackfillReport: real.formatUnitCodeBackfillReport,
+    unitCodeBackfillComplete: real.unitCodeBackfillComplete,
     unitCodeMappingOf: real.unitCodeMappingOf,
   };
 });
@@ -145,6 +146,13 @@ const unmatchedRefusal = async (): Promise<Error & Record<string, unknown>> => {
   return real.backfillUnitCodes(walked, { info() {}, warn() {} }, {
     object: 'material', field: 'uom', mapping: { kg: 'KGM' }, apply: true,
   }).then(() => { throw new Error('expected the apply run to be refused'); }, (e: unknown) => e as Error & Record<string, unknown>);
+};
+
+/** The real backfill's report over `rows`, so the command's closing line is judged against what the engine says. */
+const realReport = async (rows: Array<Record<string, unknown>>, options: Record<string, unknown> = {}) => {
+  const real = await vi.importActual<typeof import('@objectstack/objectql')>('@objectstack/objectql');
+  const walked = { ...engine, find: async (o: string, q: { where?: unknown }) => (o === 'material' && !q.where ? rows : []) };
+  return real.backfillUnitCodes(walked, { info() {}, warn() {} }, { object: 'material', field: 'uom', ...options });
 };
 
 describe('os migrate unit-codes', () => {
@@ -253,6 +261,45 @@ describe('os migrate unit-codes', () => {
         .catch((e: unknown) => e);
       expect(exitOf(err)).toBe(1);
       expect(printed()).toContain('Add each value to --map-file with its unit code');
+    }, RUN_TIMEOUT);
+  });
+
+  describe('the closing line follows unitCodeBackfillComplete, as the report\'s ✓ line does', () => {
+    it('a run that leaves a blank unit beside a quantity closes with what is left, never with a ✓', async () => {
+      vi.mocked(backfillUnitCodes).mockResolvedValue(await realReport([
+        { id: 'm1', uom: 'KGM', weight: 1 },
+        { id: 'm2', uom: null, weight: 2 },
+      ]) as any);
+      await MigrateUnitCodes.run(NAMING, { root: CLI_ROOT });
+      const text = printed();
+      expect(text).toContain('Nothing to rewrite from the mapping, but 1 row(s) of material.uom hold no unit code the field admits (below).');
+      expect(text).toContain('Not complete — material.uom still has 1 blank unit(s) beside a quantity, holding no unit code the field ' +
+        'admits (see the ⚠ lines above).');
+      expect(text).not.toContain('✓');
+    }, RUN_TIMEOUT);
+
+    it('an apply run that wrote rows but left a blank beside a quantity says so, never with a ✓', async () => {
+      vi.mocked(backfillUnitCodes).mockResolvedValue(await realReport([
+        { id: 'm1', uom: 'kg', weight: 1 },
+        { id: 'm2', uom: null, weight: 2 },
+      ], { mapping: { kg: 'KGM' }, apply: true }) as any);
+      await MigrateUnitCodes.run([...NAMING, '--apply', '--yes'], { root: CLI_ROOT });
+      const text = printed();
+      expect(text).toContain('Wrote unit codes on 1 row(s), but not complete — material.uom still has 1 blank unit(s) beside a ' +
+        'quantity, holding no unit code the field admits (see the ⚠ lines above).');
+      expect(text).not.toContain('✓');
+    }, RUN_TIMEOUT);
+
+    it('a run that leaves every row holding a code the field admits closes with the ✓ (the control)', async () => {
+      vi.mocked(backfillUnitCodes).mockResolvedValue(await realReport([
+        { id: 'm1', uom: 'KGM', weight: 1 },
+        { id: 'm2', uom: null, weight: null },
+      ]) as any);
+      await MigrateUnitCodes.run(NAMING, { root: CLI_ROOT });
+      const text = printed();
+      expect(text).toContain('✓ Every material.uom value is a unit code the field admits — nothing to convert.');
+      expect(text).toContain('✓ Nothing to convert — every material.uom value is a unit code the field admits.');
+      expect(text).not.toContain('Not complete');
     }, RUN_TIMEOUT);
   });
 
