@@ -43,8 +43,10 @@ export interface ObjectDefLike {
    *  linear flow — suppress stage detection entirely (#2065). */
   stageField?: string | false;
   stages?: Array<{ value: any; label: string }>;
-  /** Semantic role (ADR-0085): the object's most important fields —
-   *  drives the highlight strip (first {@link RECORD_HIGHLIGHTS_MAX}). */
+  /** Semantic role (ADR-0085): the object's most important fields — the
+   *  hover card, a related list's default columns, the record picker, and a
+   *  strip a page places itself (first {@link RECORD_HIGHLIGHTS_MAX}). The
+   *  default record page draws no strip (objectstack#35891). */
   highlightFields?: string[];
   /**
    * ACCEPTED BUT NEVER READ — do not "tidy" this away (objectui#7287).
@@ -140,10 +142,22 @@ export interface ObjectDefFieldLike {
 }
 
 export interface BuildPageOptions {
-  /** Override the auto-derived highlight field list. */
+  /**
+   * ACCEPTED BUT NEVER READ by {@link buildDefaultPageSchema} and
+   * {@link buildDefaultTabs} (objectstack#35891). The default page draws no
+   * highlight strip and no stage bar, and the Details body keeps every
+   * grouped field (objectstack#35849), so these three keys have nothing left
+   * to override there. Only {@link buildDefaultHighlights} reads them, for a
+   * page that places the strip itself.
+   *
+   * They stay declared because this interface ships in a published `.d.ts`,
+   * as `ObjectDefLike.primaryField` does (objectui#7287); removing them is
+   * objectstack#35943's change, not a rider here.
+   */
   highlightFields?: string[];
-  /** Override the auto-derived statusField / stages. */
+  /** Accepted but never read by the default page — see `highlightFields`. */
   statusField?: string;
+  /** Accepted but never read by the default page — see `highlightFields`. */
   stages?: Array<{ value: any; label: string }>;
   /** Override the auto-derived section grouping. The heading rides `label` —
    *  the one slot `@object-ui/types` declares (objectui#6190). */
@@ -265,9 +279,9 @@ export interface BuildPageOptions {
    * - `actions` — replaces `record:quick_actions`. The override fires
    *   even when `headerActions` is empty (i.e. the override lets you
    *   add a header bar where the synthesizer would have skipped one).
-   * - `highlights` — replaces the highlight strip (chips + chevron
-   *   path). The override fires even when neither auto-emission
-   *   condition is met.
+   * - `highlights` — places a highlight strip (chips, a chevron path)
+   *   between the header and the tabs. The default page draws none
+   *   (objectstack#35891), so this slot is the only way one appears there.
    * - `details` — replaces the Details tab body (the `record:details`
    *   node). Other tabs (Timeline / Related / Approvals) are unaffected.
    *   There is no `tabs` slot (objectstack#27053): the strip is composed
@@ -475,10 +489,9 @@ export { RECORD_HIGHLIGHTS_MAX };
  * and "what the H1 shows" cannot disagree (objectui#7287). Filtering before
  * the slice means the title never wastes a slot.
  *
- * The three readers of the strip — the default page
- * ({@link buildDefaultHighlights}, and the body's `hideFields` in
- * {@link buildDefaultTabs}), the phone record header and the record hover
- * card — all ask this one function.
+ * Its readers — {@link buildDefaultHighlights} (for a page that places the
+ * strip itself; the default page draws none, objectstack#35891), the phone
+ * record header and the record hover card — all ask this one function.
  *
  * `_statusField` is accepted and not read. It is part of the published
  * signature from when this function guessed and skipped the stage; a declared
@@ -539,6 +552,10 @@ export function buildDefaultActions(
  * Sub-builder: the highlight strip — `record:highlights` chips plus
  * `record:path` chevron (when a status field is configured).
  *
+ * The default record page no longer calls it (objectstack#35891): the stage
+ * moves from the header's status tag, and the highlight fields stay in their
+ * groups. It is kept, unchanged, for a slotted page's `highlights` slot.
+ *
  * Returns an array because the strip is conceptually one region with
  * two adjacent nodes.
  *
@@ -570,34 +587,6 @@ export function buildDefaultHighlights(
   if (statusField && stages && stages.length > 0) {
     out.push(componentNode('record:path', { statusField, stages, allowStageChange: true }));
   }
-  return out;
-}
-
-/**
- * The stage field of the `record:path` among a page's strip nodes, or `null`
- * when the strip draws no path. A node's props are read the way
- * {@link bodyTablePlacement} reads a related-list node's: the ADR-0089 D3a
- * `properties` bag over the node's own keys.
- */
-function drawnPathField(nodes: readonly any[]): string | null {
-  for (const node of nodes) {
-    if (node?.type !== 'record:path') continue;
-    const props = { ...node, ...(node?.properties ?? {}) };
-    if (typeof props.statusField === 'string' && props.statusField.length > 0) return props.statusField;
-  }
-  return null;
-}
-
-/**
- * The fields the Details body leaves out because the page's header already
- * draws them (objectstack#28868): the highlight strip's fields, as many as
- * the strip shows ({@link RECORD_HIGHLIGHTS_MAX} — a declared entry past the
- * sixth is drawn by the body, not dropped from both), and the stage field
- * when the page draws `record:path` for it, so the stage is shown once.
- */
-function headerDrawnFields(highlightFields: readonly string[], pathField: string | null): string[] {
-  const out = highlightFields.slice(0, RECORD_HIGHLIGHTS_MAX);
-  if (pathField !== null && !out.includes(pathField)) out.push(pathField);
   return out;
 }
 
@@ -977,24 +966,23 @@ export function buildDefaultTabs(
     timeline?: any[];
   } = {},
 ): any {
-  // The Details body leaves out what the default strip for these options
-  // draws: its highlights and the stage field of its `record:path`.
-  const highlightFields = options.highlightFields ?? deriveHighlightFields(def, null);
-  const strip = buildDefaultHighlights(def, { highlightFields, statusField: options.statusField });
-  return synthTabs(def, options, headerDrawnFields(highlightFields, drawnPathField(strip)));
+  return synthTabs(def, options);
 }
 
 type DefaultTabsOptions = NonNullable<Parameters<typeof buildDefaultTabs>[1]>;
 
 /**
- * {@link buildDefaultTabs}' body, given the fields the Details body leaves
- * out. `buildDefaultPageSchema` passes the ones the page it builds actually
- * draws in its header (an authored `highlights` slot included).
+ * {@link buildDefaultTabs}' body.
+ *
+ * The Details body draws every field the object's groups hold, the highlight
+ * fields and the stage field included (objectstack#35849): the groups an
+ * author configured read the same in view and in edit, and nothing the page
+ * draws elsewhere is taken out of them. A builder who does not want a field
+ * twice leaves it out of `highlightFields` or out of the group.
  */
 function synthTabs(
   def: ObjectDefLike | undefined,
   options: DefaultTabsOptions,
-  bodyHiddenFields: string[],
 ): any {
   // Every tab carries a STABLE, semantic `value` (objectui#2257): the active
   // tab is URL-addressable (`?tab=<value>`, ADR-0054 C3), so values must
@@ -1037,7 +1025,7 @@ function synthTabs(
     {
       label: 'Overview',
       value: 'details',
-      children: bodyTablePlacement(def, options.sections, bodyHiddenFields, bodies),
+      children: bodyTablePlacement(def, options.sections, undefined, bodies),
     },
   ];
   // objectstack#35595 — EVERY ordinary related list is a tab of its own, in
@@ -1123,7 +1111,7 @@ export function buildDefaultAttachments(): any {
  *
  * Shape:
  *   { type:'record', template:'default', regions:[ { name:'main',
- *     components: [page:header, record:highlights?, record:path?,
+ *     components: [page:header, <highlights slot>?,
  *     page:tabs, record:discussion?] } ] }
  *   For `enable.files: true` objects the tabs node carries a peer
  *   Attachments tab (`record:attachments` — objectstack#4358).
@@ -1174,23 +1162,15 @@ export function buildDefaultPageSchema(
     components.push(...toNodeArray(slots.alerts));
   }
 
-  // 3) Highlight strip (chips + chevron path).
-  const strip =
-    'highlights' in slots && slots.highlights !== undefined
-      ? toNodeArray(slots.highlights)
-      : buildDefaultHighlights(def, {
-          highlightFields: options.highlightFields,
-          statusField: options.statusField,
-          stages: options.stages,
-        });
-  components.push(...strip);
-  // What the Details body leaves out (objectstack#28868): the strip's
-  // highlights, and the stage field when THIS page draws `record:path` for it
-  // — the default strip's path, or one an authored `highlights` slot places.
-  const bodyHidden = headerDrawnFields(
-    options.highlightFields ?? deriveHighlightFields(def, null),
-    drawnPathField(strip),
-  );
+  // 3) Highlights slot. The default page draws no strip (objectstack#35891,
+  //    the maintainer's 2026-11-20 「把阶段条和关键字段条去掉」): the stage is
+  //    the header's status tag, which opens a menu to move it, and the
+  //    highlight fields stay in their groups (objectstack#35849).
+  //    `buildDefaultHighlights` and the two blocks are kept, so an authored
+  //    `highlights` slot, or an authored page, still places a strip and a path.
+  if ('highlights' in slots && slots.highlights !== undefined) {
+    components.push(...toNodeArray(slots.highlights));
+  }
 
   // The timeline stream's content (objectstack#27055): an authored
   // `discussion` slot replaces it; `hideDiscussion` drops it.
@@ -1210,12 +1190,10 @@ export function buildDefaultPageSchema(
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
-      highlightFields: options.highlightFields,
-      statusField: options.statusField,
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
-    }, bodyHidden);
+    });
     // Replace the first tab's children (Details) with the override. The items
     // live in the node's `properties` bag — the canonical carrier per
     // ADR-0089 D3a (see `componentNode`).
@@ -1229,12 +1207,10 @@ export function buildDefaultPageSchema(
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
-      highlightFields: options.highlightFields,
-      statusField: options.statusField,
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
-    }, bodyHidden));
+    }));
   }
 
   // ADR-0085 (objectstack#27055): the synthesized page has ONE region. The

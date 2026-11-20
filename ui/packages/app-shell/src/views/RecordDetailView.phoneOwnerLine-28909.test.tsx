@@ -12,10 +12,11 @@
  * harness), with `owner_id` declared 5th in `highlightFields`, behind four
  * non-text highlights (so the phone subtitle takes none of them):
  *
- *  - at 390 px the phone header draws four highlights after its subtitle, so
- *    the owner is not in the strip and the meta line names it;
- *  - at 1440 px the strip draws all five, the owner among them, and the meta
- *    line leaves it out (objectstack#28868, the owner once).
+ *  - until objectstack#35891 the phone header drew four highlights (the
+ *    owner past them, so the meta line named it) and the desktop strip all
+ *    five (the strip named the owner, the meta line did not);
+ *  - the default page draws no strip now, so at 390 px and at 1440 px the
+ *    meta line names the owner.
  */
 
 import * as React from 'react';
@@ -138,17 +139,15 @@ function mountPage() {
   );
 }
 
-/** The strip and the meta line, once both are drawn. */
-async function stripAndMetaLine(): Promise<{ strip: HTMLElement; metaLine: HTMLElement }> {
+/** The meta line, once the record has loaded. */
+async function metaLineLoaded(): Promise<HTMLElement> {
   return waitFor(
     () => {
-      const strip = document.querySelector('[data-highlights-face]') as HTMLElement | null;
       const metaLine = document.querySelector('[data-testid="record-meta-footer"]') as HTMLElement | null;
-      expect(strip).toBeTruthy();
       expect(metaLine).toBeTruthy();
-      // The record has loaded: the strip shows its values.
-      expect(strip!.textContent).toContain('mira@atlas.test');
-      return { strip: strip!, metaLine: metaLine! };
+      // The record has loaded: its values are on the page.
+      expect(document.body.textContent).toContain('mira@atlas.test');
+      return metaLine!;
     },
     { timeout: 5000 },
   );
@@ -180,24 +179,22 @@ afterEach(() => {
 });
 
 describe('the owner at every width, once (objectstack#28909)', () => {
-  it('on a phone: owner_id declared 5th is past the header\'s four, so the meta line names the owner', async () => {
+  // Until objectstack#35891 the default page drew a strip of the declared
+  // highlights: four on a phone (the owner past them, so the meta line named
+  // it) and all five on a desktop (the strip named the owner, the meta line
+  // did not). The default page draws no strip now, at any width, so the meta
+  // line names the owner at both.
+  it.each([
+    ['a phone', 390],
+    ['a desktop', 1440],
+  ])('on %s: no strip, and the meta line names the owner', async (_face, width) => {
+    setWidth(width);
     mountPage();
-    const { strip, metaLine } = await stripAndMetaLine();
-    // The phone header: four highlights, the owner not among them.
-    expect(strip.children).toHaveLength(4);
-    expect(strip.textContent).not.toContain('Ada Admin');
+    const metaLine = await metaLineLoaded();
+    expect(document.querySelector('[data-highlights-face]')).toBeNull();
     const owner = ownerEntry(metaLine);
     expect(owner).toBeTruthy();
     expect(owner!.textContent).toContain('Ada Admin');
-  });
-
-  it('on a desktop: the strip names the owner and the meta line does not', async () => {
-    setWidth(1440);
-    mountPage();
-    const { strip, metaLine } = await stripAndMetaLine();
-    expect(strip.children).toHaveLength(5);
-    expect(strip.textContent).toContain('Ada Admin');
-    expect(ownerEntry(metaLine)).toBeNull();
     // The rest of the meta line is still drawn.
     expect(metaLine.querySelector('[data-record-meta-id]')!.textContent).toBe('r-1');
   });

@@ -40,7 +40,7 @@ import * as React from 'react';
 import { HighlightFieldsProvider, RecordContextProvider } from '@object-ui/react';
 import { RecordDetailsRenderer } from '../record-details';
 import { RecordHighlightsRenderer } from '../record-highlights';
-import { buildDefaultPageSchema } from '../../synth/buildDefaultPageSchema';
+import { buildDefaultHighlights, buildDefaultPageSchema } from '../../synth/buildDefaultPageSchema';
 
 const OBJECT = 'recheck_gate';
 const GATE = "record.kind == 'pro'";
@@ -95,7 +95,9 @@ function nodeOfType(node: any, type: string): any {
 
 function renderSynthesizedPage(objectSchema: any, data: Record<string, unknown>) {
   const page = buildDefaultPageSchema(objectSchema);
-  const strip = nodeOfType(page, 'record:highlights');
+  // The strip the sub-builder emits for a page that places one (the default
+  // page draws none since objectstack#35891).
+  const strip = nodeOfType(buildDefaultHighlights(objectSchema), 'record:highlights');
   const details = nodeOfType(page, 'record:details');
   if (!strip || !details) throw new Error('HARNESS DEAD: the synthesized page lost a node');
   const dataSource = { getObjectSchema: async () => objectSchema };
