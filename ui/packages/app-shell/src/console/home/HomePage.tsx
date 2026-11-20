@@ -40,6 +40,8 @@ import { useAgents, isAskAgent, agentHasCapability } from '@object-ui/plugin-cha
 // unknown→fail-open) lives with the hook.
 import { useCanAuthorMetadata, useCanReadPendingDrafts } from '../../hooks/useCanAuthorMetadata.js';
 import { HomeAppsStrip } from './HomeAppsStrip.js';
+import { PhoneAppList } from '../../layout/PhoneAppList.js';
+import { appAddressSegment } from '../../utils/appRoute.js';
 import { appSegmentOf, lastOpenedByApp } from './appLastOpened.js';
 import { recentItemObject, recentItemTypeLabel } from './recentItemTypeLabel.js';
 import { RecoveryPasswordReminder } from './RecoveryPasswordReminder.js';
@@ -672,6 +674,26 @@ export function HomePage({ checklist }: HomePageProps = {}) {
     return (
       <div className="flex flex-1 items-center justify-center py-20">
         <div className="text-muted-foreground">{t('home.loading', { defaultValue: 'Loading…' })}</div>
+      </div>
+    );
+  }
+
+  // objectstack#35881 — on a phone, Home is the list of apps and nothing else:
+  // where a first sign-in with several apps lands, to pick one. It is the
+  // list the app pill's sheet shows inside an app, drawn as the whole page.
+  // The greeting, the templates, My work (the bottom bar's Notifications and
+  // Approvals carry it inside an app), the assistant card, Continue and the
+  // activity column are a desktop's (objectstack#34596's checklist with them).
+  if (phone && launcher.apps.length > 0) {
+    return (
+      <div data-testid="home-phone-app-list" className="flex min-h-full flex-col bg-background pt-3">
+        <h1 className="px-5 pb-2 text-[17px] font-semibold">
+          {t('layout.appSwitcher.chooseApp', { defaultValue: 'Choose an app' })}
+        </h1>
+        <PhoneAppList
+          variant="page"
+          onPick={(app) => navigate(`/apps/${appAddressSegment(apps, app) ?? app.name}`)}
+        />
       </div>
     );
   }

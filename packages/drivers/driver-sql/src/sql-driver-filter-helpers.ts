@@ -39,12 +39,13 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import { isComposedReadableIds, resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { isComposedReadableIds, isFixedReadLeaf, resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
-import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseFixedReadLeafOnce, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
 import type { JsonColumnFieldClass } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { emitBalancedGroup } from './sql-driver-balanced-group.js';
+import { findMisplacedFixedReadLeaf, misplacedFixedReadLeafMessage } from './fixed-read-leaf-compile.js';
 import { presentStoredBoolean, sqliteBooleanBinding } from './sql-driver-sqlite-serialisation.js';
 import type { Knex } from 'knex';
 import {
@@ -101,6 +102,8 @@ export interface FilterHelpersHost {
   readonly dateFieldsOnInstantColumn: SqlDriver['dateFieldsOnInstantColumn'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   filterColumnExpr: SqlDriver['filterColumnExpr'];
+  readonly fixedReadLeafRefusalLog: SqlDriver['fixedReadLeafRefusalLog'];
+  fixedReadLeafSubquery: SqlDriver['fixedReadLeafSubquery'];
   isJsonColumn: SqlDriver['isJsonColumn'];
   readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
@@ -524,13 +527,20 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#applyFilters`; the method's docblock there is its contract. */
-  static applyFilters(this: Pick<FilterHelpersHost, 'compileFilters' | 'logger' | 'readableIdsDriverName' | 'readableIdsRefusalLog' | 'resolveWithheldFilterRefusal'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+  static applyFilters(this: Pick<FilterHelpersHost, 'compileFilters' | 'fixedReadLeafRefusalLog' | 'logger' | 'readableIdsDriverName' | 'readableIdsRefusalLog' | 'resolveWithheldFilterRefusal'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     // [ADR-0139 D3] A `ReadableIds` leaf this compiler will not evaluate — an
     // UNCOMPOSED one anywhere, a composed one outside a `$in` comparand — is
     // refused before anything compiles: INTERNAL_ERROR / 500, logged at
     // `error` once per driver. ⛔ Never evaluated as "no restriction".
     const misplaced = findMisplacedReadableIds(filters, true);
     if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
+    // [ADR-0155 D1, D4] Likewise a fixed-read leaf anywhere but as a field's
+    // `$in` comparand, the one position `applyFilterCondition` compiles it in:
+    // the same envelope, logged once per driver on its own flag.
+    const misplacedLeaf = findMisplacedFixedReadLeaf(filters);
+    if (misplacedLeaf) {
+      throw refuseFixedReadLeafOnce(this.readableIdsDriverName, misplacedFixedReadLeafMessage(misplacedLeaf), this.logger, this.fixedReadLeafRefusalLog);
+    }
     try {
       this.compileFilters(builder, filters, options);
     } catch (err) {
@@ -697,7 +707,7 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
-  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'oracleRawUuidFieldsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'oracleRawUuidFieldsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog' | 'fixedReadLeafSubquery'>,
     builder: Knex.QueryBuilder,
     condition: any,
     logicalOp: 'and' | 'or' = 'and',
@@ -843,6 +853,16 @@ export class FilterHelpersFacet {
           if (rawOp === '$in' && isComposedReadableIds(opValue)) {
             const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
             (builder as any)[mIn](field, this.readableIdsSubquery(opValue, options));
+            continue;
+          }
+          // [ADR-0155 D2, D4] A fixed-read leaf, the other non-list a `$in` may
+          // hold, compiles to its fixed inner read in the list's own position,
+          // `field IN (SELECT …)` (`SqlDriver#fixedReadLeafSubquery`), under the
+          // outer statement's own wall and nothing else. `applyFilters` refused
+          // it at every other position.
+          if (rawOp === '$in' && isFixedReadLeaf(opValue)) {
+            const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
+            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue));
             continue;
           }
           // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar

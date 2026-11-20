@@ -2792,10 +2792,12 @@ const ko = {
       launcherLabel: "앱 런처",
       menuLabel: "앱 탐색",
       menuEmpty: "이 앱에는 열 수 있는 탐색 항목이 없습니다.",
-      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      // objectstack#35882 — the phone's bottom bar: Home, Notifications, Approvals, search.
       phoneBarLabel: "앱 메뉴 바",
-      searchMenu: "메뉴 검색",
-      phoneBarHint: "별표를 누르면 항목이 하단 바에 고정됩니다. 하단 바에는 처음 4개가 표시됩니다.",
+      phoneHome: "홈",
+      phoneNotifications: "알림",
+      phoneApprovals: "승인",
+      phoneSearch: "검색",
       itemMenu: "{{name}} 더 많은 작업",
       openInNewTab: "새 탭에서 열기",
       copyLink: "링크 복사",
@@ -3446,6 +3448,13 @@ const ko = {
     },
     appSwitcher: {
       switchApplication: "애플리케이션 전환",
+      currentApp: "현재 앱",
+      otherApps: "다른 앱",
+      yourApps: "내 앱",
+      searchApps: "앱 검색…",
+      noAppsMatch: "일치하는 앱이 없습니다",
+      chooseApp: "앱 선택",
+      backToAppHome: "앱 메뉴로 돌아가기",
       appsAvailable: "사용 가능한 앱 {{count}}개",
       allApps: "모든 앱",
       editAppInStudio: "Studio에서 {{app}} 편집",
@@ -4988,6 +4997,7 @@ const ko = {
     newestFirst: "최신 순",
     addSort: "정렬 추가",
     removeSort: "정렬 삭제",
+    reorder: '드래그하여 순서 변경',
   },
   collaboration: {
     commentCount: "댓글 {{count}}개",

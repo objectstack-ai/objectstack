@@ -237,7 +237,11 @@ export type {
 // the two sealing contexts, and `os audit verify` runs the live check (D9),
 // writes its proof bundle, and checks one offline. The `os migrate audit-*`
 // rewrites hold the audit seal lock for their whole `--apply` run (D3 as
-// amended by seat ruling 6885005594).
+// amended by seat ruling 6885005594). A checkpoint sink off the host (D11)
+// rebuilds a stored checkpoint or amendment row into the exact body it was
+// handed, so it can re-deliver what a failed call missed
+// (`checkpointBodyFromRow`, `amendmentBodyFromRow`, and the two body types
+// they answer).
 // The rest of the pure core (`./audit-seal/`) is reached by path inside this
 // package.
 export {
@@ -246,7 +250,9 @@ export {
   AUDIT_SEAL_LOCK_NAME,
   AUDIT_SEAL_LOCK_WAIT_MS,
   AUDIT_SEAL_SECRET_HOLDERS,
+  amendmentBodyFromRow,
   AuditProofBundleError,
+  checkpointBodyFromRow,
   checkpointSeedContext,
   holdAuditSealLock,
   isAuditSealSecretCoordinate,
@@ -255,10 +261,12 @@ export {
   verifyAuditProofBundle,
 } from './audit-seal/index.js';
 export type {
+  AmendmentSignedBody,
   AuditProofBundle,
   AuditRowVerdict,
   AuditSealLockEngine,
   AuditSealLockFinish,
   AuditSealLockHold,
   AuditVerifyReport,
+  CheckpointSignedBody,
 } from './audit-seal/index.js';

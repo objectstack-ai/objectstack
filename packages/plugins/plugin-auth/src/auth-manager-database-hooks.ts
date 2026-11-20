@@ -62,6 +62,7 @@ import { holdPrincipalSessionExpiry } from './principal-session-mint.js';
 import { canonicalClientAddress } from './client-address-canonical.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
+import { orderActiveOrganizationCandidates, readActiveOrganizationCandidates } from './session-organization-candidates.js';
 import { readSessionUserRow, refuseAgentAccountCredential } from './service-account-identity.js';
 import { refuseInactiveUserSession, SESSION_ADMISSION_ROW_FIELDS } from './user-session-admission.js';
 import { LOCKED_ACCOUNT_ROW_FIELDS, refuseLockedAccountSession } from './auth-manager-sign-in-lockout.js';
@@ -306,8 +307,17 @@ export function composeDatabaseHooks(
             if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
               draft = (hostResult as any).data;
             }
+            // [#35829] The host's ordered fallbacks ride beside `data`, to the
+            // scoping judgement in `sessionBefore` below
+            // (`session-organization-candidates.ts`). A host that names
+            // candidates has chosen, so the framework's default stays out.
+            const candidates = hostResult && typeof hostResult === 'object' && 'activeOrganizationCandidates' in hostResult
+              ? { activeOrganizationCandidates: (hostResult as any).activeOrganizationCandidates }
+              : undefined;
             // The host hook fully handled it → keep its result shape.
-            if (draft?.activeOrganizationId) return { data: draft };
+            if (draft?.activeOrganizationId || readActiveOrganizationCandidates(candidates)) {
+              return { data: draft, ...candidates };
+            }
           }
           return (await defaultActiveOrg(draft, ctx)) ?? (draft === session ? undefined : { data: draft });
         }
@@ -366,6 +376,22 @@ export function composeDatabaseHooks(
     const { APIError } = await import('better-auth/api');
     throw new APIError('FORBIDDEN', { code: SESSION_SCOPING_REFUSAL.code, message: SESSION_SCOPING_REFUSAL.message });
   };
+  // [#35829] Of the host's ordered candidates (`session-organization-candidates.ts`),
+  // the first the creation's scoping admits — judged by the same judge, from
+  // the same established address, under the same conditions as
+  // `refuseUnadmittedScoping` above, so a candidate chosen here is one that
+  // refusal admits. None admitted, or no request through the HTTP door to
+  // judge ⇒ the first candidate, which the refusal then judges as the single
+  // choice it would have been: refused (with its audit row) or, unjudged,
+  // kept as before.
+  const firstAdmittedOrganization = async (userId: unknown, ordered: readonly string[], ctx: any) => {
+    if (!ctx?.request || typeof userId !== 'string' || !userId || ordered.length < 2) return ordered[0];
+    const address = await readRequestClientAddress();
+    for (const organizationId of ordered) {
+      if ((await this.judgeSessionScoping(userId, organizationId, address)) === 'admitted') return organizationId;
+    }
+    return ordered[0];
+  };
   // [ADR-0151 D2] An AI service account never holds a session. Asked FIRST,
   // before the host's hook and every step below, so no sign-in method,
   // impersonation or minted session gets a session for one, whatever runs
@@ -393,11 +419,18 @@ export function composeDatabaseHooks(
     const captured = await captureSessionAddress(session);
     const result = sessionActiveOrgBefore ? await sessionActiveOrgBefore(captured, ctx) : undefined;
     if (result === false) return false;
-    const final = result && typeof result === 'object' && 'data' in result
-      ? { ...captured, ...(result as any).data }
-      : captured;
+    const hasData = !!result && typeof result === 'object' && 'data' in result;
+    let final = hasData ? { ...captured, ...(result as any).data } : captured;
+    // [#35829] The host's ordered candidates: the session is scoped to the
+    // first one the scoping admits, and only when none is does the refusal
+    // below run — against the host's first choice, as with no list at all.
+    const candidates = readActiveOrganizationCandidates(result);
+    if (candidates) {
+      const ordered = orderActiveOrganizationCandidates(final?.activeOrganizationId, candidates);
+      final = { ...final, activeOrganizationId: await firstAdmittedOrganization(final?.userId, ordered, ctx) };
+    }
     await refuseUnadmittedScoping(final?.userId, final?.activeOrganizationId, ctx, final);
-    if (result && typeof result === 'object' && 'data' in result) return { data: final };
+    if (hasData || candidates) return { data: final };
     return captured === session ? result : { data: captured };
   };
 
