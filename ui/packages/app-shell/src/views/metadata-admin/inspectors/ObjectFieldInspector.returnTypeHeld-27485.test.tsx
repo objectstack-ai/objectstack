@@ -19,7 +19,7 @@
 import '@testing-library/jest-dom/vitest';
 // The source loads these lazily; pay that load at collection, not inside a
 // case's clocked window.
-import '@objectstack/formula';
+import { inferFormulaReturn } from '@objectstack/formula';
 import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -47,9 +47,12 @@ afterEach(() => {
 /** The card's repro shape: a source left open on a bracket or an operator. */
 const BROKEN = /[*+\-/&|=<>(]\s*$/;
 
-function stubEngine() {
+function stubEngine({ money = false }: { money?: boolean } = {}) {
   __setCelFormulaLoader(() =>
     Promise.resolve({
+      // objectstack#35631 — the money verdict is the engine's own, unstubbed;
+      // left out, the engine gives none (an engine without the export).
+      ...(money ? { inferFormulaReturn } : {}),
       validateExpression: (_role: string, input: unknown) => {
         const src = typeof input === 'string' ? input : String((input as { source?: string })?.source ?? '');
         return BROKEN.test(src)
@@ -73,10 +76,20 @@ function stubEngine() {
   );
 }
 
-function Harness({ onDef, returnType = 'number' }: { onDef: (def: Record<string, unknown>) => void; returnType?: string }) {
+function Harness({
+  onDef,
+  returnType = 'number',
+  extra = {},
+}: {
+  onDef: (def: Record<string, unknown>) => void;
+  returnType?: string;
+  extra?: Record<string, unknown>;
+}) {
   const [fields, setFields] = React.useState<Record<string, Record<string, unknown>>>({
     est_hours: { type: 'number' },
-    f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType },
+    budget: { type: 'number' },
+    amount: { type: 'currency', currencyConfig: USD },
+    f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType, ...extra },
   });
   React.useEffect(() => {
     onDef(fields.f_total);
@@ -97,10 +110,12 @@ function Harness({ onDef, returnType = 'number' }: { onDef: (def: Record<string,
   );
 }
 
-function renderFormula(returnType?: string) {
-  stubEngine();
+const USD = { currencyMode: 'fixed', defaultCurrency: 'USD' } as const;
+
+function renderFormula(returnType?: string, { money = false, extra }: { money?: boolean; extra?: Record<string, unknown> } = {}) {
+  stubEngine({ money });
   const defs: Array<Record<string, unknown>> = [];
-  render(<Harness onDef={(def) => defs.push(def)} returnType={returnType} />);
+  render(<Harness onDef={(def) => defs.push(def)} returnType={returnType} extra={extra} />);
   const box = screen.getByText('Formula (CEL)').parentElement!.querySelector('[role="combobox"]') as HTMLTextAreaElement;
   const latest = () => defs.at(-1)!;
   return { box, latest };
@@ -176,7 +191,7 @@ describe('ObjectFieldInspector — a declared percent or currency survives an un
     expect(latest().returnType).toBe('currency');
   });
 
-  it('a `number` verdict keeps a declared `currency` too', async () => {
+  it('with no money verdict from the engine, a `number` verdict keeps a declared `currency` too', async () => {
     const { box, latest } = renderFormula('currency');
     fireEvent.change(box, { target: { value: 'record.est_hours / 40' } });
     await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
@@ -194,5 +209,59 @@ describe('ObjectFieldInspector — a declared percent or currency survives an un
     const { box, latest } = renderFormula();
     fireEvent.change(box, { target: { value: RATIO } });
     await waitFor(() => expect(latest().returnType).toBeUndefined(), { timeout: 3000 });
+  });
+});
+
+describe('ObjectFieldInspector — the money verdict proves or withdraws a declared currency (objectstack#35631)', () => {
+  const MONEY = 'record.amount * 0.1';
+  const COUNT = 'record.est_hours * 2';
+  const asCurrency = (money = true) => renderFormula('currency', { money, extra: { expression: MONEY, currencyConfig: USD } });
+
+  it("the card's repro: an edit from a money expression to a count drops `currency` and its `currencyConfig`", async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: COUNT } });
+    await waitFor(() => expect(latest().returnType).toBe('number'), { timeout: 3000 });
+    expect(latest().expression).toBe(COUNT);
+    expect('currencyConfig' in latest()).toBe(false);
+  });
+
+  it('an edit that still proves money keeps `currency` and the currency it proves', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.amount * 0.2' } });
+    await waitFor(() => expect(latest().expression).toBe('record.amount * 0.2'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('a `number` formula edited into money is stamped `currency`, with the source amount\'s currency', async () => {
+    const { box, latest } = renderFormula('number', { money: true });
+    fireEvent.change(box, { target: { value: MONEY } });
+    await waitFor(() => expect(latest().returnType).toBe('currency'), { timeout: 3000 });
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('an unproven verdict (a field-over-field quotient) still keeps a declared `currency`', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.est_hours / record.budget' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / record.budget'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('CONTROL — a declared `percent` is still kept under a `number` verdict', async () => {
+    const { box, latest } = renderFormula('percent', { money: true });
+    fireEvent.change(box, { target: { value: COUNT } });
+    await waitFor(() => expect(latest().expression).toBe(COUNT), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+  });
+
+  it('CONTROL — a verdict that proves text, boolean or date still stamps over a declared `currency`', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.amount > 40' } });
+    await waitFor(() => expect(latest().returnType).toBe('boolean'), { timeout: 3000 });
+    expect('currencyConfig' in latest()).toBe(false);
   });
 });
