@@ -238,7 +238,7 @@ export function useLookupValueNames(
       const field = fields.find((f) => f.value === fieldName);
       const answer = field?.referenceTo ? byTarget?.get(field.referenceTo) : undefined;
       const record = answer?.records.get(id);
-      return record ? referencedRecordTitle(answer.def, record, field?.displayField) : undefined;
+      return answer && record ? referencedRecordTitle(answer.def, record, field?.displayField) : undefined;
     },
     [byTarget, fields],
   );
