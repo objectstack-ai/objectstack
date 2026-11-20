@@ -133,6 +133,7 @@
 
 import {
   classifyFilterToken,
+  isFixedReadLeaf,
   isPeriodKeyToken,
   isReadableIds,
   isRecordContextToken,
@@ -556,9 +557,9 @@ export function resolveFilterToken(
 function hasFilterToken(node: unknown): boolean {
   if (typeof node === 'string') return classifyFilterToken(node) !== null;
   if (Array.isArray(node)) return node.some(hasFilterToken);
-  // A `ReadableIds` leaf is a comparand value: its `object` names a table and
-  // is never a placeholder (see `resolveFilterTokens`).
-  if (isReadableIds(node)) return false;
+  // An engine-internal leaf is a comparand value: its inputs name a table and
+  // a principal and are never a placeholder (see `resolveFilterTokens`).
+  if (isEngineInternalLeaf(node)) return false;
   if (node && typeof node === 'object' && !(node instanceof Date)) {
     // [#25808] An unresolved `$now` anchor is a placeholder by construction.
     if (isUnresolvedNowAnchor(node)) return true;
@@ -628,10 +629,20 @@ function isRecordReference(node: unknown): node is Record<string, unknown> {
     && Object.prototype.hasOwnProperty.call(node, '$record');
 }
 
-/** A plain filter object (not a `Date`, not a branded `ReadableIds` leaf). */
+/**
+ * [ADR-0139 D1, ADR-0155 D1] A branded engine-internal comparand: a
+ * `ReadableIds` leaf or a fixed-read leaf (`SharedRecordIds`). Each is frozen,
+ * holds no placeholder, and keeps its meaning only while it keeps its
+ * non-enumerable brand, so every walk here hands it back by reference.
+ */
+function isEngineInternalLeaf(node: unknown): boolean {
+  return isReadableIds(node) || isFixedReadLeaf(node);
+}
+
+/** A plain filter object (not a `Date`, not a branded engine-internal leaf). */
 function isFilterObject(node: unknown): node is Record<string, unknown> {
   return !!node && typeof node === 'object' && !Array.isArray(node)
-    && !(node instanceof Date) && !isReadableIds(node);
+    && !(node instanceof Date) && !isEngineInternalLeaf(node);
 }
 
 /** An operator object: a field's value carrying at least one `$` key. */
@@ -798,6 +809,12 @@ function resolveNowAnchor(node: { $now: true; addDays?: unknown }, now: Date): R
  * placeholder would then reach the engine's executor boundary as a plain
  * object in a `$in` comparand, which the engine cannot compose. The leaf holds
  * no placeholder and is frozen, so returning it unchanged is exact.
+ *
+ * [ADR-0155 D1] A fixed-read leaf (`isFixedReadLeaf`, `SharedRecordIds`
+ * today) is returned by reference for the same reason: rebuilt, it would
+ * arrive unbranded and be refused at the comparand door as a non-list
+ * (`INVALID_FILTER` / 400), so a read scope carrying a placeholder beside the
+ * leaf would fail every read it scopes.
  */
 export function resolveFilterTokens<T>(
   filter: T,
@@ -826,8 +843,8 @@ export function resolveFilterTokens<T>(
       return resolved;
     }
     if (Array.isArray(node)) return node.map(walk);
-    // [ADR-0139 D1] The leaf by reference, brand intact (see above).
-    if (isReadableIds(node)) return node;
+    // [ADR-0139 D1, ADR-0155 D1] The leaf by reference, brand intact (see above).
+    if (isEngineInternalLeaf(node)) return node;
     if (node && typeof node === 'object') {
       // Dates and other class instances are comparands, not filter structure.
       if (node instanceof Date) return node;
