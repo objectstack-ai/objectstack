@@ -351,7 +351,7 @@ async function judgeCalendar(
       field: 'is_default',
       code: 'invalid_value',
       message:
-        'This calendar is created in an organization other than the one you are working in, so it cannot be marked ' +
+        'This calendar names an organization this write does not run in, so it cannot be marked ' +
         'the default here. Create it while working in that organization, or create it without Default and set ' +
         'Default afterwards by editing it.',
       value: true,
