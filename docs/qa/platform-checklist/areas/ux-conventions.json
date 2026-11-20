@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -32,7 +32,7 @@
       },
       "variants": [
         "record create — New form save on showcase_task",
-        "record inline edit — on the task object's Grid view (the named view `grid`, labelled 'Grid': the one task list that declares inlineEdit: true, examples/app-showcase/src/ui/views/task.view.ts; the default All Tasks list declares none), double-click a Priority cell (the grid has no 'Edit inline' button), change it, then Save row or Save All",
+        "record inline edit — on any task list (since #35684 a list is editable in place wherever its reader may edit and its view declares no userActions.editInline: false; there is no 'Edit inline' toggle), double-click a Priority cell (a single click only selects it), change it, then Save row or Save All",
         "bulk delete — select two rows → Delete in the selection bar → confirm",
         "kanban move — drag a card Backlog → To Do (direct manipulation: the card in its new column IS the success feedback; a move the transition rule blocks never leaves the client — its lane is dimmed, data-kanban-drop-blocked, and the drop sends nothing, #25933)",
         "declared record action — Mark Done on a task record (declared successMessage `{{ record.title | default:'Task' }} marked done.`, which names the task, examples/app-showcase/src/ui/actions/index.ts#MarkDoneAction). The action patches only done and progress, so the record's Status still reads its old value (e.g. 'To Do') beside the toast: that is the declaration, not a failed write (QA run #33861)",
@@ -183,6 +183,12 @@
           "date": "2026-11-15",
           "change": "steps[1], [2], [5] and variants[4], [6], [8] and [11] re-pointed: the update-mode import's inline result is its feedback (no toast); the settings PUT is outside /api/v1; the import Undo answers with the row's 'Undone' label; Mark Done leaves Status unchanged by declaration; the record title opens the subject record's page, where Approve also sits; Studio autosave needs a record and the column's 'Edit field properties'; and the stock currency is locked (QA run #33861, comment 6894395705, and QA run #33914, comment 6895723718; ledger 6896511848 of #33761 rows 182, 229, 230 and 231). The clauses are unchanged. Read at base 895783a1",
           "ref": "#33981"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-20",
+          "change": "variants[1] follows #35684: every task list is editable in place, not only the Grid view that declares inlineEdit: true, and a single click selects a cell while a double-click edits it. The clauses are unchanged. Read at base 238661f4",
+          "ref": "#35684"
         }
       ]
     },

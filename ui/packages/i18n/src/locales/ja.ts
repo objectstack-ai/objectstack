@@ -512,8 +512,21 @@ const ja = {
     openRecord: "レコードを開く",
     cancelChanges: "変更を取り消す",
     saveRow: "行を保存",
+    cellReadOnly: "このセルはここでは編集できません。",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "このフィールドは読み取り専用です。",
+      computed: "この値は計算で求められるため、編集できません。",
+      notInline: "このフィールドは一覧では編集できません。レコードを開いて変更してください。",
+      noFieldPermission: "このフィールドを編集する権限がありません。",
+      viewOff: "このビューでは一覧での編集がオフになっています。",
+      objectReadOnly: "これらのレコードはここでは編集できません。",
+      noPermission: "これらのレコードを編集する権限がありません。",
+      approvalLocked: "このレコードは承認中のためロックされています。",
+      noRecordPermission: "このレコードを編集する権限がありません。",
+    },
     bulkSelected: "{{count}} 件を選択中",
     bulkSelected_one: "{{count}} 件を選択中",
     bulkSelected_other: "{{count}} 件を選択中",
@@ -949,7 +962,6 @@ const ja = {
     draftOnlyQueryDropped: "{{fields}} での絞り込みと並べ替えは行われていません。下書きにのみ存在し、公開後に有効になります。",
     withheldFieldsLeftOut: "{{fields}} は表示、絞り込み、並べ替え、グループ化されていません。この項目を追加するパッケージが無効になっています。パッケージを有効にすると戻ります。",
     inlineEditShort: "インライン編集",
-    inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'ビュー名',

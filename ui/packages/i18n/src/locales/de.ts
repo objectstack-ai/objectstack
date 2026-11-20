@@ -512,8 +512,21 @@ const de = {
     openRecord: "Datensatz öffnen",
     cancelChanges: "Änderungen verwerfen",
     saveRow: "Zeile speichern",
+    cellReadOnly: "Diese Zelle kann hier nicht bearbeitet werden.",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "Dieses Feld ist schreibgeschützt.",
+      computed: "Dieser Wert wird berechnet und kann nicht bearbeitet werden.",
+      notInline: "Dieses Feld kann in einer Liste nicht bearbeitet werden. Öffnen Sie den Datensatz, um es zu ändern.",
+      noFieldPermission: "Sie haben keine Berechtigung, dieses Feld zu bearbeiten.",
+      viewOff: "Das Bearbeiten in der Liste ist für diese Ansicht ausgeschaltet.",
+      objectReadOnly: "Diese Datensätze können hier nicht bearbeitet werden.",
+      noPermission: "Sie haben keine Berechtigung, diese Datensätze zu bearbeiten.",
+      approvalLocked: "Dieser Datensatz ist während der Genehmigung gesperrt.",
+      noRecordPermission: "Sie haben keine Berechtigung, diesen Datensatz zu bearbeiten.",
+    },
     bulkSelected: "{{count}} ausgewählt",
     bulkSelected_one: "{{count}} ausgewählt",
     bulkSelected_other: "{{count}} ausgewählt",
@@ -949,7 +962,6 @@ const de = {
     draftOnlyQueryDropped: "Nicht nach {{fields}} gefiltert oder sortiert: Das Feld existiert bis zur Veröffentlichung nur im Entwurf.",
     withheldFieldsLeftOut: "Nicht angezeigt, gefiltert, sortiert oder gruppiert nach {{fields}}: Das Paket, das das Feld hinzufügt, ist deaktiviert. Es kehrt zurück, sobald das Paket aktiviert wird.",
     inlineEditShort: "Inline bearbeiten",
-    inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'Ansichtsname',

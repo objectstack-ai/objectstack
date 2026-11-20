@@ -26,14 +26,16 @@ export function isImeKey(e: { nativeEvent: KeyboardEvent; keyCode?: number }): b
 
 /**
  * A press on a control a cell draws (a record link, a phone or mail link, a
- * button, a checkbox) keeps its own click: it is not a press on the cell.
+ * button, a checkbox) keeps its own click: it is not a press on the cell. A
+ * disabled control (a read face's checkbox) has no click of its own.
  */
 export function isCellWidgetTarget(target: EventTarget | null, cell: Element): boolean {
   if (!(target instanceof Element) || !cell.contains(target)) return false;
   const widget = target.closest(
     'a[href], button, input, select, textarea, label, [role="link"], [role="button"], [role="checkbox"], [role="switch"], [contenteditable]:not([contenteditable="false"])',
   );
-  return widget !== null && widget !== cell && cell.contains(widget) && !widget.matches('[data-slot="cell-type-catcher"]');
+  return widget !== null && widget !== cell && cell.contains(widget)
+    && !widget.matches('[data-slot="cell-type-catcher"], :disabled, [aria-disabled="true"]');
 }
 
 /** A printable key with no command modifier — what typing on a selected cell is. */

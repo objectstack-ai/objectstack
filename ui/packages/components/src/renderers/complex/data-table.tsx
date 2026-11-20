@@ -3230,7 +3230,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       attemptEdit(rowIndex, colIndex);
       return;
     }
-    const converted = facts?.fromText?.(text);
+    const converted = facts?.fromText ? facts.fromText(text) : defaultValueFromText(col, text);
     attemptEdit(rowIndex, colIndex, { value: converted !== undefined ? converted : text });
   };
 

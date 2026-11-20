@@ -615,7 +615,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -650,7 +650,7 @@
         "quick-search 'huaning' on Accounts (or '张' on Contacts); capture the `search` request and the hits (pinyin + CJK recall, ADR-0061)",
         "open the tabular saved view (sort [{field: 'estimate_hours', order: 'desc'}] — the array form: #17053 retired the bare string clause 'estimate_hours desc' platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock); confirm it renders and the request carries the sort as sort=-estimate_hours",
         "load a list past its first window. No stock list holds more rows than the 50-row window (the largest seeded task and contact lists are under it), so stage one first: POST /api/v1/data/showcase_inquiry/createMany with a bare JSON array of 55 rows (name + email + message each — showcase_inquiry requires `message` too, and a name + email body answers 400 \"Message is required\", QA run #24616). A list view that declares no `pagination` (the stock Inquiries list) draws NO pager since #35554: it loads as it scrolls, so scroll the Inquiries list to its end and capture `top`/`skip` on every data request (top=50, then top=50&skip=50); the count beside the view name reads the server total. Then page a view that DECLARES `pagination` (stage one: PUT a view with pagination: {pageSize: 50} on showcase_inquiry) past page 1 and capture the same; confirm no unpaged full fetch on either",
-        "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
+        "in the grid saved view, double-click one cell (a single click only selects it, #35684), edit it in place; save; capture the PATCH; re-read the row via API",
         "on in_progress, with the export grant from fixtures.requires[3] bound, open the view bar's Options (选项) popover — the Display popover, a text trigger since objectstack#35548 — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
         "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the selection actions the page bar shows (since #35554 the list page has no bottom bulk bar), or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
@@ -812,6 +812,12 @@
           "date": "2026-11-19",
           "change": "steps[4] and acceptance[3] (clause and verify) follow #35554: a list view that declares no `pagination` has no pager and loads its next window as it scrolls (top=50, then top=50&skip=50), and only a view that declares `pagination` pages; the paging variant now walks both. steps[8] names where the bulk actions are offered now — the page bar, while rows are selected — instead of the retired bottom bulk bar. Read at base e01b8bed (after #35548)",
           "ref": "#35554"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-20",
+          "change": "steps[5] follows #35684: a cell is edited by a double-click (or Enter, or typing on the selected cell), a single click selects it, and the list has no inline-edit toggle. The clauses are unchanged. Read at base 238661f4",
+          "ref": "#35684"
         }
       ]
     },

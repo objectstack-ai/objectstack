@@ -518,8 +518,21 @@ const fr = {
     openRecord: "Ouvrir l'enregistrement",
     cancelChanges: "Annuler les modifications",
     saveRow: "Enregistrer la ligne",
+    cellReadOnly: "Cette cellule ne peut pas être modifiée ici.",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "Ce champ est en lecture seule.",
+      computed: "Cette valeur est calculée et ne peut pas être modifiée.",
+      notInline: "Ce champ ne peut pas être modifié dans une liste. Ouvrez l'enregistrement pour le changer.",
+      noFieldPermission: "Vous n'avez pas l'autorisation de modifier ce champ.",
+      viewOff: "La modification dans la liste est désactivée pour cette vue.",
+      objectReadOnly: "Ces enregistrements ne peuvent pas être modifiés ici.",
+      noPermission: "Vous n'avez pas l'autorisation de modifier ces enregistrements.",
+      approvalLocked: "Cet enregistrement est verrouillé pendant son approbation.",
+      noRecordPermission: "Vous n'avez pas l'autorisation de modifier cet enregistrement.",
+    },
     bulkSelected: "{{count}} sélectionné(s)",
     bulkSelected_one: "{{count}} sélectionné",
     bulkSelected_many: "{{count}} sélectionnés",
@@ -976,7 +989,6 @@ const fr = {
     draftOnlyQueryDropped: "Non filtré ni trié par {{fields}} : ce champ n’existe que dans le brouillon jusqu’à la publication.",
     withheldFieldsLeftOut: "Non affiché, filtré, trié ni groupé par {{fields}} : le paquet qui ajoute ce champ est désactivé. Il revient lorsque le paquet est réactivé.",
     inlineEditShort: "Édition en ligne",
-    inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'Nom de la vue',

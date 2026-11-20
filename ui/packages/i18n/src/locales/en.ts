@@ -775,8 +775,21 @@ const en = {
     openRecord: 'Open record',
     cancelChanges: 'Cancel changes',
     saveRow: 'Save row',
+    cellReadOnly: 'This cell can\'t be edited here.',
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: 'This field is read-only.',
+      computed: 'This value is calculated, so it can\'t be edited.',
+      notInline: 'This field can\'t be edited in a list. Open the record to change it.',
+      noFieldPermission: 'You don\'t have permission to edit this field.',
+      viewOff: 'Editing in the list is turned off for this view.',
+      objectReadOnly: 'These records can\'t be edited here.',
+      noPermission: 'You don\'t have permission to edit these records.',
+      approvalLocked: 'This record is locked while it\'s in approval.',
+      noRecordPermission: 'You don\'t have permission to edit this record.',
+    },
     actions: 'Actions',
     edit: 'Edit',
     delete: 'Delete',
@@ -1238,7 +1251,6 @@ const en = {
     draftOnlyQueryDropped: 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
     withheldFieldsLeftOut: 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
     inlineEditShort: 'Edit inline',
-    inlineEditLabel: 'Edit records inline (click a cell to edit)',
     // The list's Options menu.
     optionsMenu: {
       viewName: 'View name',

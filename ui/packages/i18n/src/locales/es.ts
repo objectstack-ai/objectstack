@@ -523,8 +523,21 @@ const es = {
     openRecord: "Abrir registro",
     cancelChanges: "Descartar cambios",
     saveRow: "Guardar fila",
+    cellReadOnly: "Esta celda no se puede editar aquí.",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "Este campo es de solo lectura.",
+      computed: "Este valor se calcula, así que no se puede editar.",
+      notInline: "Este campo no se puede editar en una lista. Abra el registro para cambiarlo.",
+      noFieldPermission: "No tiene permiso para editar este campo.",
+      viewOff: "La edición en la lista está desactivada para esta vista.",
+      objectReadOnly: "Estos registros no se pueden editar aquí.",
+      noPermission: "No tiene permiso para editar estos registros.",
+      approvalLocked: "Este registro está bloqueado mientras está en aprobación.",
+      noRecordPermission: "No tiene permiso para editar este registro.",
+    },
     bulkSelected: "{{count}} seleccionados",
     bulkSelected_one: "{{count}} seleccionado",
     bulkSelected_many: "{{count}} seleccionados",
@@ -981,7 +994,6 @@ const es = {
     draftOnlyQueryDropped: "Sin filtrar ni ordenar por {{fields}}: solo existe en el borrador hasta que publiques.",
     withheldFieldsLeftOut: "Sin mostrar, filtrar, ordenar ni agrupar por {{fields}}: el paquete que lo añade está desactivado. Vuelve cuando se activa el paquete.",
     inlineEditShort: "Edición en línea",
-    inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'Nombre de la vista',

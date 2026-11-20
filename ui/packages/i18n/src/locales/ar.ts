@@ -542,8 +542,21 @@ const ar = {
     openRecord: "فتح السجل",
     cancelChanges: "إلغاء التغييرات",
     saveRow: "حفظ الصف",
+    cellReadOnly: "لا يمكن تحرير هذه الخلية هنا.",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "هذا الحقل للقراءة فقط.",
+      computed: "هذه القيمة محسوبة، لذا لا يمكن تحريرها.",
+      notInline: "لا يمكن تحرير هذا الحقل في قائمة. افتح السجل لتغييره.",
+      noFieldPermission: "ليس لديك إذن بتحرير هذا الحقل.",
+      viewOff: "التحرير في القائمة متوقف لهذا العرض.",
+      objectReadOnly: "لا يمكن تحرير هذه السجلات هنا.",
+      noPermission: "ليس لديك إذن بتحرير هذه السجلات.",
+      approvalLocked: "هذا السجل مقفل أثناء الموافقة عليه.",
+      noRecordPermission: "ليس لديك إذن بتحرير هذا السجل.",
+    },
     bulkSelected: "تم تحديد {{count}}",
     bulkSelected_zero: "تم تحديد {{count}}",
     bulkSelected_one: "تم تحديد {{count}}",
@@ -1066,7 +1079,6 @@ const ar = {
     draftOnlyQueryDropped: "لم تتم التصفية أو الفرز حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى النشر.",
     withheldFieldsLeftOut: "لا يتم العرض أو التصفية أو الفرز أو التجميع حسب {{fields}}: الحزمة التي تضيف هذا الحقل معطلة. سيعود عند تفعيل الحزمة.",
     inlineEditShort: "تحرير مضمّن",
-    inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'اسم العرض',

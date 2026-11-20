@@ -47,6 +47,7 @@ import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // to reach them as an object and the compiler could not say so.
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { stateMachineNextValues } from './inline-edit-options';
+import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
   legacyRecordDrawerWidthKey, recordOverlayWidthStorageKey,
@@ -57,8 +58,10 @@ import {
   HorizontalOverflowBox,
   toast,
   cn,
+  GridCellSelectionProvider,
+  type GridCellSelection,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -73,6 +76,7 @@ import { useRowColor } from './useRowColor';
 import { GroupRow } from './GroupRow';
 import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
+import { useRowApprovalLocks } from './hooks/useRowApprovalLocks';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
@@ -334,6 +338,18 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * key reaches it.
    */
   rowOpensRecord?: boolean;
+  /**
+   * [objectstack#35684] The select-first cell model, as the HOST that owns
+   * the page asks for it (the list page does). `true` ⇒ a click selects a
+   * cell and never edits it or opens the record; double-click, Enter, F2 or
+   * typing edits; Space opens the record; a cell that opens no editor says
+   * why (`describeCell`, `./objectGridCellFacts`). Absent ⇒ the table keeps
+   * its click-to-edit / click-to-open behaviour, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  cellSelection?: boolean;
   /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
@@ -695,6 +711,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
+  cellSelection: hostCellSelection,
   onBulkDelete,
   onRowSelect,
   onRowClick,
@@ -1131,6 +1148,39 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
     updateOnMount: inlineEditable,
   });
+
+  // objectstack#35684 — what the select-first table asks about a cell when
+  // the reader acts on it: why it opens no editor (the field, the grid, the
+  // object, an approval lock, the record — `cellReadOnlyKind`), what typing
+  // does there and what pasted text stands for. `null` without the host's
+  // ask, so every other grid keeps the table it had.
+  const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  const gridCellSelection: GridCellSelection | null = hostCellSelection
+    ? {
+        describeCell: (row, columnKey) => {
+          const fieldDef = objectFields?.[columnKey];
+          const recordId = rowRecordId(row);
+          const kind = cellReadOnlyKind({
+            fieldDef,
+            fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
+            gridEditable: schema.editable ?? false,
+            objectEditable: objectInlineEditable,
+            canUpdate: !objectName || perms.can(objectName, 'update'),
+            approvalLocked: approvalLocks.isLocked(recordId, row),
+            recordUpdate: recordVerdict(recordId, 'update'),
+          });
+          const fromText = choiceFromText(fieldDef);
+          const type = fieldDef?.type;
+          return {
+            readOnlyReason: kind ? readOnlyReasonText(kind, t) : null,
+            typing: inlineTyping(type),
+            ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
+            ...(fromText ? { fromText } : {}),
+          };
+        },
+        onCellSelect: (row) => approvalLocks.probe(rowRecordId(row)),
+      }
+    : null;
 
   // The projection keys and the filter, sort, search and server-paging state,
   // read here in hook order (`./objectGridQueryInputs`).
@@ -4242,7 +4292,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {gridDescription}
       {groupingDraftOnlyNote}
       {gridToolbar}
-      {renderedGridContent}
+      <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>
       {isGrouped && onRowGroupsChange && (
         <RowGroupsReport groups={shownRowGroups} onChange={onRowGroupsChange} />
       )}

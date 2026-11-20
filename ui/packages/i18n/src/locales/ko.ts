@@ -512,8 +512,21 @@ const ko = {
     openRecord: "레코드 열기",
     cancelChanges: "변경 취소",
     saveRow: "행 저장",
+    cellReadOnly: "이 셀은 여기에서 편집할 수 없습니다.",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "이 필드는 읽기 전용입니다.",
+      computed: "이 값은 계산된 값이라 편집할 수 없습니다.",
+      notInline: "이 필드는 목록에서 편집할 수 없습니다. 레코드를 열어 변경하세요.",
+      noFieldPermission: "이 필드를 편집할 권한이 없습니다.",
+      viewOff: "이 보기에서는 목록 편집이 꺼져 있습니다.",
+      objectReadOnly: "이 레코드는 여기에서 편집할 수 없습니다.",
+      noPermission: "이 레코드를 편집할 권한이 없습니다.",
+      approvalLocked: "이 레코드는 승인 중이라 잠겨 있습니다.",
+      noRecordPermission: "이 레코드를 편집할 권한이 없습니다.",
+    },
     bulkSelected: "{{count}}건 선택됨",
     bulkSelected_one: "{{count}}건 선택됨",
     bulkSelected_other: "{{count}}건 선택됨",
@@ -949,7 +962,6 @@ const ko = {
     draftOnlyQueryDropped: "{{fields}} 기준 필터와 정렬이 적용되지 않았습니다. 초안에만 있으며 게시 후 적용됩니다.",
     withheldFieldsLeftOut: "{{fields}} 기준 표시, 필터, 정렬, 그룹화가 적용되지 않았습니다. 이 필드를 추가하는 패키지가 비활성화되어 있습니다. 패키지를 활성화하면 다시 나타납니다.",
     inlineEditShort: "인라인 편집",
-    inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
     // The list's Options menu.
     optionsMenu: {
       viewName: '보기 이름',
