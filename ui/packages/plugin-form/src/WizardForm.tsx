@@ -486,7 +486,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
   const { userId: currentUserId } = perms;
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   const { t } = useWizardTranslation();
   // Upload-in-flight gate (objectui#10166). Scoped to the FINAL commit, not to
   // step navigation: moving between steps writes nothing, and blocking Next
@@ -662,7 +662,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           // Declared static defaults are this wizard's opening values (#4047)
           // — see `schemaDefaults` for the create-only boundary and for why
           // runtime defaults are left to the server.
-          setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
+          setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone })));
           seededRef.current = true;
         }
         // Not a read, so no earlier record read's failure describes the form.
@@ -1155,7 +1155,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
               // Back to a fresh step 1 for the next entry — "fresh" means the
               // same opening values the wizard had, defaults included (#4047),
               // not a blank object the first entry never started from.
-              setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
+              setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone })));
               setCompletedSteps(new Set());
               setCurrentStep(0);
               setResetNonce((n) => n + 1);
@@ -1212,7 +1212,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           if (schema.resetOnSuccess && schema.mode === 'create') {
             // Back to a fresh step 1 for the next entry — same opening values
             // as the first entry, defaults included (#4047).
-            setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
+            setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone })));
             setCompletedSteps(new Set());
             setCurrentStep(0);
             setResetNonce((n) => n + 1);

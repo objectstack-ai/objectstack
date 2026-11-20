@@ -86,33 +86,58 @@ test('the timeline stream\'s Changes chip shows display values (localized dates,
   await changesChip.waitFor({ state: 'visible', timeout: 15_000 });
   await changesChip.click();
   await expect(changesChip).toHaveAttribute('aria-pressed', 'true');
+  // The three UPDATE entries are consecutive field changes by one person on
+  // one day, so the stream folds them into ONE collapsed row
+  // (`foldStreamChanges`, plugin-detail `RecordActivityTimeline.tsx`;
+  // #35602). Pin that grouping, then expand it: the reads below are of the
+  // change lines themselves, never of the fold's summary.
+  const fold = stream.getByTestId('activity-fold');
+  await expect(fold, 'the updates are one fold row').toHaveCount(1, { timeout: 15_000 });
+  const expand = fold.locator('button[aria-expanded]');
+  await expect(expand, 'the fold starts collapsed').toHaveAttribute('aria-expanded', 'false');
+  await expand.click();
+  await expect(expand).toHaveAttribute('aria-expanded', 'true');
+  const foldEntries = fold.getByTestId('activity-fold-entries');
   // The three UPDATE entries render as change lines; wait for the latest one.
-  await expect(stream.locator('[data-stream-change]', { hasText: 'Owner' }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(foldEntries.locator('[data-stream-change]', { hasText: 'Owner' }).first()).toBeVisible({ timeout: 15_000 });
+  // The fold counts the rows it expands to, and holds all three updates. (The
+  // Changes chip also draws the creation's own audit entry as a change line,
+  // which folds in beside them when it is stamped the same day, so the count
+  // is not pinned to exactly three.)
+  const foldRow = foldEntries.locator('[data-stream-row]');
+  await expect(foldRow.filter({ hasText: 'Customer Since', hasNotText: 'Lifecycle' }), 'the date update').toHaveCount(1);
+  await expect(foldRow.filter({ hasText: 'Finance' }), 'the lifecycle and industry update').toHaveCount(1);
+  await expect(foldRow.filter({ hasText: other.name }), 'the owner update').toHaveCount(1);
+  await expect(fold).toHaveAttribute('data-fold-count', String(await foldRow.count()));
   const text = (await stream.innerText()).replace(/\s+/g, ' ');
+  // What the change lines say, without the fold row's summary (which names
+  // fields, not values): every positive read below is of a real line, and
+  // every absence is read over the whole stream.
+  const lines = (await foldEntries.innerText()).replace(/\s+/g, ' ');
 
   // 3) Actor attribution: the audit user resolves to a display name —
   //    never the raw id, never the unknown-user fallback (`detail.unknownUser`).
-  expect(text).toContain(actor.name);
+  expect(lines).toContain(actor.name);
   expect(text).not.toContain(actor.id);
   expect(text).not.toMatch(/\bUnknown\b|未知用户/);
 
   // 4) Select values render as option labels, not raw stored values.
-  expect(text).toMatch(/Prospect/);
-  expect(text).toMatch(/Active/);
-  expect(text).toMatch(/Technology/);
-  expect(text).toMatch(/Finance/);
+  expect(lines).toMatch(/Prospect/);
+  expect(lines).toMatch(/Active/);
+  expect(lines).toMatch(/Technology/);
+  expect(lines).toMatch(/Finance/);
   expect(text).not.toMatch(/\bprospect\b|\bactive\b|\btechnology\b|\bfinance\b/);
 
   // 5) Dates are localized — no raw ISO payloads anywhere, neither a datetime
   //    nor the stored YYYY-MM-DD of the date field. The date's diff line is
   //    there to read, so the absence below is not vacuous.
-  expect(text).toMatch(/Customer Since/);
+  expect(lines).toMatch(/Customer Since/);
   expect(text).not.toMatch(/T\d{2}:\d{2}:\d{2}\.\d{3}Z/);
   expect(text).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
 
   // 6) The owner lookup resolves to the users' names on the diff line, never
   //    to their ids.
-  expect(text).toMatch(/Owner/);
-  expect(text).toContain(other.name);
+  expect(lines).toMatch(/Owner/);
+  expect(lines).toContain(other.name);
   expect(text).not.toContain(other.id);
 });

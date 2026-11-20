@@ -376,11 +376,31 @@ function summaryValueType(column: { currencyConfig?: unknown; scale?: number | n
   return resolveFieldScale(column) === undefined ? 'summary' : 'number';
 }
 
+/**
+ * The return types the spec reads AS a field type: `currency` is "an amount of
+ * money … as a currency field declares it", and `percent` is "read and
+ * displayed as a `percent` field reads its stored value". The list cell draws
+ * them through the currency and percent cells (`FormulaCellRenderer`).
+ */
+const FIELD_TYPED_FORMULA_RETURNS: ReadonlySet<string> = new Set(['currency', 'percent']);
+
+/**
+ * The arm a `formula` column's total is formatted by: its declared
+ * `returnType` when the spec reads that return type as a field type, so a
+ * percent-returning formula's total reads as a percentage under cells that
+ * read as percentages, and a currency-returning one's as money. Any other
+ * formula keeps the plain arm it always took.
+ */
+function formulaValueType(column: { returnType?: unknown }): string {
+  const declared = column.returnType;
+  return typeof declared === 'string' && FIELD_TYPED_FORMULA_RETURNS.has(declared) ? declared : 'formula';
+}
+
 function formatSummaryLabel(
   type: string,
   value: number | null,
   t: SummaryTranslate,
-  column: { type?: string; currency?: string; defaultCurrency?: string; currencyConfig?: { defaultCurrency?: string }; precision?: number | null; scale?: number | null; max?: number } | undefined,
+  column: { type?: string; returnType?: string; currency?: string; defaultCurrency?: string; currencyConfig?: { defaultCurrency?: string }; precision?: number | null; scale?: number | null; max?: number } | undefined,
   tenantDefault: string | undefined,
   // The BCP-47 tag from `useDisplayLocale()` — tenant locale, then UI
   // language, then a concrete `'en'`, never `undefined`.
@@ -419,7 +439,9 @@ function formatSummaryLabel(
     return join(value.toLocaleString(displayLocale));
   }
 
-  const colType = column?.type === 'summary' ? summaryValueType(column) : column?.type;
+  const colType = column?.type === 'summary'
+    ? summaryValueType(column)
+    : column?.type === 'formula' ? formulaValueType(column) : column?.type;
   let formatted: string;
   if (colType === 'currency') {
     // objectui#10221 — a currency's decimal places are the currency's, not a
@@ -500,7 +522,17 @@ function formatSummaryLabel(
     // over the field's `max`), the answer the cell above reads. The shared
     // scaling used to guess from the magnitude, so a fraction-stored column
     // summing to `1` (100%) read `Sum: 1%` under cells reading the same rows.
-    const decimals = resolveFieldScale(column);
+    //
+    // A percent-returning `formula` reaches this arm too, and is read as the
+    // `percent` field it reads like, as the list cell hands it on
+    // (`FormulaCellRenderer`): `resolveFieldScale` keys its absent-`scale` row
+    // on the type, and a formula's own type has none, so an undeclared width
+    // takes the platform's percent width rather than `formatPercent`'s own
+    // parameter default. Every column that reaches this arm is a percent, so
+    // the type below changes for the formula alone. Its storage is read off
+    // the column as is: `percentCellScale` reads the declared `max`, and the
+    // formula declares it as a percent field does.
+    const decimals = resolveFieldScale({ ...column, type: 'percent' });
     formatted = formatPercent(value, percentCellScale(column), decimals, displayLocale);
   } else if (colType === 'number') {
     // objectstack#19628, ruled A′ and carried to this footer by objectui#9843:
@@ -531,7 +563,7 @@ function formatSummaryLabel(
 }
 
 /** The `objectSchema.fields` slice the footer formats with. */
-type SummaryFieldMetadata = Record<string, { type?: string; format?: string | null; widget?: string | null; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; precision?: number | null; scale?: number | null; max?: number }>;
+type SummaryFieldMetadata = Record<string, { type?: string; returnType?: string; format?: string | null; widget?: string | null; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; precision?: number | null; scale?: number | null; max?: number }>;
 
 /**
  * Which rows the footer's figures describe (objectui#12081 item 3).
@@ -724,6 +756,9 @@ export function useScopedColumnSummary(
         // objectui#11475 — a percent field's declared `max`, its STORAGE
         // statement (`percentScaleOf`: a fraction unless `max` is above 1).
         max: meta?.max,
+        // A `formula`'s declared value type: a `percent` or `currency` one is
+        // totalled in that type's arm (`formulaValueType`).
+        returnType: meta?.returnType,
       };
 
       // The widest decimal count among the numeric values this aggregation
