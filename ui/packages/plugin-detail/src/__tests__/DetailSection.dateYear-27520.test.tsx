@@ -139,6 +139,30 @@ describe('a record page writes a business date as the date (objectstack#35745)',
     expect(screen.getByText(days.past.phrase)).toBeTruthy();
   });
 
+  // #35745 names 日期时间 too. A `datetime` field with no declared `format`
+  // already paints the compact absolute face everywhere (`DateTimeCellRenderer`
+  // defaults to `'compact'`), so the record page needs no prop for it; this
+  // pins that it reads as the date (the compact face, `10/29/2026`), never as
+  // the relative phrase.
+  it('a `datetime` field in the relative window reads as its date, in a section row and the highlights strip', () => {
+    const at = '2026-10-29T12:00:00';
+    const schema = { fields: { starts_at: { name: 'starts_at', type: 'datetime', label: 'Starts At' } } };
+    const section = { title: 'Meeting', fields: [{ name: 'starts_at', label: 'Starts At', type: 'datetime' }] } as unknown as DetailViewSection;
+    const { unmount } = render(<DetailSection section={section} data={{ starts_at: at }} objectSchema={schema} />);
+    expect(screen.getByText('10/29/2026')).toBeTruthy();
+    expect(screen.queryByText(/days? ago/)).toBeNull();
+    unmount();
+    render(
+      <HeaderHighlight
+        fields={[{ name: 'starts_at', label: 'Starts At' }] satisfies HighlightField[]}
+        data={{ starts_at: at }}
+        objectSchema={schema}
+      />,
+    );
+    expect(screen.getByText('10/29/2026')).toBeTruthy();
+    expect(screen.queryByText(/days? ago/)).toBeNull();
+  });
+
   it('CONTROL: the shared date cell without the record page keeps the relative default', () => {
     const DateCell = getCellRenderer('date');
     const field: DateFieldMetadata = { name: 'meeting_date', label: 'Meeting Date', type: 'date' };

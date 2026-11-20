@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { UploadProvider } from './UploadProvider';
 import { formatDate, formatDateTime } from '@object-ui/core';
-import { GridField, LineItemsField, sumColumn, lookupAutofillPatch } from './GridField';
+import { GridField, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow } from './GridField';
 
 const columns = [
   { name: 'description', label: 'Description', type: 'text' as const },
@@ -795,10 +795,38 @@ describe('GridField — a new line starts on its defaults and waits to read red 
       <GridField value={[]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />,
     );
     fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
-    expect(onChange).toHaveBeenLastCalledWith([{ name: null, status: 'pending' }]);
+    expect(onChange).toHaveBeenLastCalledWith([{ name: null, status: 'pending', [UNTOUCHED_NEW_ROW]: true }]);
     const entryName = container.querySelector('[data-cell="0-0"]') as HTMLInputElement;
     fireEvent.change(entryName, { target: { value: 'Book the room' } });
     expect(onChange).toHaveBeenLastCalledWith([{ name: 'Book the room', status: 'pending' }]);
+  });
+
+  it('a line Add started is marked untouched until its first edit, even an edit back to its default', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <GridField value={[]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
+    const added = onChange.mock.lastCall![0] as Record<string, unknown>[];
+    expect(isUntouchedNewRow(added[0])).toBe(true);
+    // The mark is a symbol key: no write payload or key walk sees it.
+    expect(Object.keys(added[0])).toEqual(['name', 'status']);
+    expect(JSON.stringify(added[0])).toBe('{"name":null,"status":"pending"}');
+    rerender(<GridField value={added} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />);
+    const status = screen.getAllByDisplayValue('pending')[0] as HTMLInputElement;
+    fireEvent.change(status, { target: { value: 'done' } });
+    rerender(<GridField value={onChange.mock.lastCall![0]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />);
+    fireEvent.change(screen.getAllByDisplayValue('done')[0], { target: { value: 'pending' } });
+    const edited = onChange.mock.lastCall![0] as Record<string, unknown>[];
+    expect(edited[0]).toMatchObject({ status: 'pending' });
+    expect(isUntouchedNewRow(edited[0])).toBe(false);
+  });
+
+  it('CONTROL: with no `newRowValues` an added line carries no mark, as before', () => {
+    const onChange = vi.fn();
+    render(<GridField value={[]} onChange={onChange} field={taskColumns} />);
+    fireEvent.click(screen.getByRole('button', { name: /Add line/i }));
+    expect(isUntouchedNewRow(onChange.mock.lastCall![0][0])).toBe(false);
   });
 
   it('a new line\'s empty required cell is not flagged until the host says so; a stored line is', () => {

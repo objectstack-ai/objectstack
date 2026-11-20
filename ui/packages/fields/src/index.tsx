@@ -5417,7 +5417,7 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField } from './widgets/GridField.js';
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow } from './widgets/GridField.js';
 export type { ColumnCurrencies } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';

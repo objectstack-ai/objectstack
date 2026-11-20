@@ -763,6 +763,30 @@ function RetiredGridFieldKeys({ message, keys }: { message: string; keys: readon
   );
 }
 
+/**
+ * objectstack#35816 — marks a line that `Add` started on the host's
+ * `newRowValues` and that nobody has edited since. Such a line holds only its
+ * defaults, and a host may skip it at save like a blank one; any edit to the
+ * line takes the mark off, so a value the user typed counts as input even when
+ * it equals the default. A symbol key: `Object.keys`/`Object.entries` and
+ * `JSON.stringify` (so every write payload) skip it, while the spread copies a
+ * host or a renumbering makes keep it. Set only when the host passes
+ * `newRowValues`, so a host that passes none sees rows exactly as before.
+ */
+export const UNTOUCHED_NEW_ROW: unique symbol = Symbol.for('@object-ui/fields.untouchedNewRow');
+
+/** True for a line `Add` started on its defaults and nobody has edited ({@link UNTOUCHED_NEW_ROW}). */
+export function isUntouchedNewRow(row: unknown): boolean {
+  return row != null && typeof row === 'object' && (row as Record<symbol, unknown>)[UNTOUCHED_NEW_ROW] === true;
+}
+
+/** The row without its {@link UNTOUCHED_NEW_ROW} mark: an edit makes it input. */
+function touched(row: Row): Row {
+  if (!isUntouchedNewRow(row)) return row;
+  const { [UNTOUCHED_NEW_ROW]: _untouched, ...rest } = row as Row & { [UNTOUCHED_NEW_ROW]?: true };
+  return rest;
+}
+
 /** A line the server already stores carries its id (`id`, `_id` or `recordId`). */
 function rowHasId(row: Row): boolean {
   return [row.id, row._id, row.recordId].some((v) => v != null && v !== '');
@@ -971,7 +995,7 @@ function GridFieldBody({
         emit([...rows, computeRow(columns, { ...blankRow(), ...patch }, tenantCurrency, columnCurrencies)]);
         return;
       }
-      emit(rows.map((r, i) => (i === rowIdx ? computeRow(columns, { ...r, ...patch }, tenantCurrency, columnCurrencies) : r)), false);
+      emit(rows.map((r, i) => (i === rowIdx ? computeRow(columns, { ...touched(r), ...patch }, tenantCurrency, columnCurrencies) : r)), false);
     },
     [rows, columns, maxRows, blankRow, emit, tenantCurrency, columnCurrencies],
   );
@@ -1026,8 +1050,10 @@ function GridFieldBody({
 
   const addRow = useCallback(() => {
     if (maxRows != null && rows.length >= maxRows) return;
-    emit([...rows, blankRow()]);
-  }, [rows, blankRow, maxRows, emit]);
+    // objectstack#35816 — a line Add starts on the host's defaults is marked
+    // untouched until its first edit (`UNTOUCHED_NEW_ROW`).
+    emit([...rows, newRowValues ? { ...blankRow(), [UNTOUCHED_NEW_ROW]: true } : blankRow()]);
+  }, [rows, blankRow, maxRows, emit, newRowValues]);
 
   // Keyboard navigation across cells (spreadsheet-style): the table is a focus
   // grid. Enter / ArrowUp / ArrowDown move between rows in the same column;
@@ -1072,7 +1098,8 @@ function GridFieldBody({
       if (!src) return;
       const { id: _i, _id: _i2, recordId: _i3, ...copy } = src as any;
       const next = [...rows];
-      next.splice(rowIdx + 1, 0, { ...copy });
+      // A copy is a line the user made, so it is not an untouched one.
+      next.splice(rowIdx + 1, 0, touched({ ...copy }));
       emit(next);
     },
     [rows, maxRows, emit],

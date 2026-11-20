@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { UNTOUCHED_NEW_ROW } from '@object-ui/fields';
 import { attributeRecordEditRefusal, buildRecordEditBatch } from './RecordBodyTableEditor';
 
 const childSchema = {
@@ -79,7 +80,7 @@ describe('buildRecordEditBatch — one batch for the record and all its body tab
   });
 });
 
-describe('buildRecordEditBatch — a new line that kept the defaults it started on (objectstack#35816)', () => {
+describe('buildRecordEditBatch — a new line nobody edited since Add started it on its defaults (objectstack#35816)', () => {
   const tasks = {
     id: 'meeting_task.meeting',
     childObject: 'meeting_task',
@@ -92,13 +93,12 @@ describe('buildRecordEditBatch — a new line that kept the defaults it started 
         meeting: { type: 'master_detail' },
       },
     },
-    newRowValues: { status: 'pending' },
     original: [],
     rows: [
-      { name: null, status: 'pending' }, // added, left as it came: no op
+      { name: null, status: 'pending', [UNTOUCHED_NEW_ROW]: true }, // added, left as it came: no op
       { name: 'Book the room', status: 'pending' }, // typed a name: created with the default
       { name: null, status: 'done' }, // changed the default: that is input
-    ],
+    ] as Record<string, any>[],
   };
 
   it('is skipped like a blank line; a line with input is created, its default included, traced to its position', () => {
@@ -116,9 +116,19 @@ describe('buildRecordEditBatch — a new line that kept the defaults it started 
     ]);
   });
 
-  it('CONTROL: without the start values the same untouched line is input and is created', () => {
-    const { ops } = buildRecordEditBatch('meeting', 'm1', {}, [{ ...tasks, newRowValues: undefined }]);
-    expect(ops.filter((o) => o.action === 'create')).toHaveLength(3);
+  it('a line the user edited back to exactly its defaults is input, and is created', () => {
+    // Same values as the untouched line above, but an edit took the mark off.
+    const { ops } = buildRecordEditBatch('meeting', 'm1', {}, [{ ...tasks, rows: [{ name: null, status: 'pending' }] }]);
+    expect(ops.map((o) => [o.object, o.action])).toEqual([
+      ['meeting', 'update'],
+      ['meeting_task', 'create'],
+    ]);
+    expect(ops[1].data).toMatchObject({ status: 'pending', meeting: 'm1' });
+  });
+
+  it('the mark never reaches a write payload', () => {
+    const { ops } = buildRecordEditBatch('meeting', 'm1', {}, [tasks]);
+    for (const op of ops) expect(Object.getOwnPropertySymbols(op.data ?? {})).toEqual([]);
   });
 });
 

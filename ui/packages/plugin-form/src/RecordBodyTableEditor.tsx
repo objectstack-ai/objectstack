@@ -67,8 +67,6 @@ export interface BodyTableSnapshot {
   rows: Record<string, any>[];
   original: Record<string, any>[];
   childSchema: ChildSchema;
-  /** The values a new line starts on: the child object's static defaults. */
-  newRowValues?: Record<string, unknown>;
 }
 
 /** One body-table editor, as the host's session sees it. */
@@ -117,7 +115,7 @@ export function buildRecordEditBatch(
     // skipping blank rows; then updates; then deletes.
     const createRows = t.rows
       .map((r, i) => ({ r, i }))
-      .filter(({ r }) => !idOf(r) && !isBlankRow({ ...r, [t.relationshipField]: parentId }, t.relationshipField, t.newRowValues));
+      .filter(({ r }) => !idOf(r) && !isBlankRow({ ...r, [t.relationshipField]: parentId }, t.relationshipField));
     let createCursor = 0;
     for (const op of tableOps) {
       let row = -1;
@@ -281,7 +279,7 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
 
   const snapshotRef = useRef<BodyTableSnapshot | null>(null);
   snapshotRef.current = rows && derived
-    ? { childObject: objectName, relationshipField, rows, original, childSchema, newRowValues }
+    ? { childObject: objectName, relationshipField, rows, original, childSchema }
     : null;
 
   const register = session?.register;
