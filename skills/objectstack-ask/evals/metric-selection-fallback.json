@@ -188,7 +188,17 @@
       "files": [],
       "assertions": {
         "must_contain": ["list_datasets", "ARR"],
-        "must_not_contain": ["describe_object(", "aggregate_records(", "非指标口径"]
+        "must_not_contain": ["list_objects(", "describe_object(", "aggregate_records(", "非指标口径"]
+      }
+    },
+    {
+      "id": 20,
+      "prompt": "用户问:「各仓库的营收是多少?」 You called `list_datasets({ terms: ['营收', '仓库'] })`. The answer lists one dataset, `sales_analysis` (label 销售分析, `object: 'sales_order'`), with `matches: [{ term: '营收', member: 'measures.revenue', matchedOn: 'label' }]`; its dimensions are `industry`, labelled 行业, and `close_quarter`, labelled 成交季度. 「仓库」 matched nothing in any dataset, and the answer has no `candidates`. `list_objects` shows `sales_order`. The answer's `nextStep` has `decision: 'one_measure'`, `terms: ['营收']` and this `note`: \"营收\" equals one measure: 营收 (dataset: 销售分析), queried as datasetName \"sales_analysis\", measure \"revenue\". Answer with query_dataset using that measure, and cite the answer's sourceLine as its source. \"仓库\" equals no measure and has no possible reading. For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them. What do you do next, and how do you write the answer?",
+      "expected_output": "营收 matches exactly one measure, so the governed metric answers it: `query_dataset` with `datasetName: 'sales_analysis'` and a `selection` whose `measures` is `['revenue']`, with no dimension, because 仓库 is no member of the dataset and the figure is not grouped by 行业 or 成交季度 in its place. 仓库 matched nothing and has no candidates, so the user is not asked about it, no listed dimension is offered as a reading of it, and it does not stop the matched measure: as the `note` says, the breakdown by warehouse comes from the object tools. Calls `describe_object({ objectName: 'sales_order' })` and reads the fields, then `aggregate_records` once for the sum grouped by the warehouse field, instead of paging `query_records`. The reply carries no question back. It is written in Chinese and keeps the two sources apart: the total cites the governed metric's source from the tool's answer (its `sourceLine`), and the figures per warehouse come under one line saying they are not from a governed metric (非指标口径), naming the object and fields they were computed from. Because `sales_order` is the `object` of the listed dataset 销售分析, it adds one line naming that dataset and its measure (营收), so the user can ask for the governed figure.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["query_dataset", "describe_object", "aggregate_records", "非指标口径"],
+        "must_not_contain": ["您是指", "你是指", "您指的是", "你指的是", "do you mean", "Do you mean"]
       }
     }
   ]
