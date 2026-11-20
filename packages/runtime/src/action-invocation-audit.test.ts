@@ -20,6 +20,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+// Paid at collection, not inside a case's clocked window: the dispatcher's
+// reach loads `@objectstack/metadata` lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import { API_FORWARD_MARK_HEADER } from './action-execution.js';
