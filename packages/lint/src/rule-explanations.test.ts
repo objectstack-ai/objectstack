@@ -16,11 +16,13 @@ import {
   FUNCTIONAL_COMPLETENESS_RULES,
   MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH,
 } from '@objectstack/spec/kernel';
+import { FieldSchema } from '@objectstack/spec/data';
 
 import * as indexBarrel from './index.js';
 import { RULE_EXPLANATIONS, explainRule } from './rule-explanations.js';
 import { CARRIER_ROOTS, CONSUMER_ROOTS, FIELD_NO_CONSUMERS } from './validate-field-consumers.js';
 import { NAMESPACE_NO_CUSTOMIZATION_PAIR } from './validate-customization-namespace.js';
+import { DIMENSION_VIRTUAL_FIELD_REFUSED } from './validate-dataset-measure-aggregates.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -110,6 +112,18 @@ describe('rule explanations (#22161)', () => {
         `so a namespace of ${max + 1} characters or more has no pair namespace`,
     );
     expect(text).toContain(`to ${max} characters or fewer`);
+  });
+
+  // The module imports nothing, so the formula return types the stored copy
+  // may take are written out in the text; held here to the spec's own enum,
+  // so a return type the spec adds cannot be missing from the prescription.
+  it('the dimension-virtual-field-refused prescription names every formula return type', () => {
+    const text = explainRule(DIMENSION_VIRTUAL_FIELD_REFUSED)!.paragraphs.join('\n');
+    const listed = /of the formula's `returnType` \(([^)]*)\)/.exec(text)?.[1];
+    expect(listed).toBeDefined();
+    const named = [...listed!.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]).sort();
+    const members = (FieldSchema.shape.returnType.unwrap().options as readonly string[]).slice().sort();
+    expect(named).toEqual(members);
   });
 
   it('explainRule is an exact-id lookup: no prefix, case or prototype match', () => {

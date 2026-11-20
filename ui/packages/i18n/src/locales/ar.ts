@@ -542,8 +542,21 @@ const ar = {
     openRecord: "فتح السجل",
     cancelChanges: "إلغاء التغييرات",
     saveRow: "حفظ الصف",
+    cellReadOnly: "لا يمكن تحرير هذه الخلية هنا.",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "هذا الحقل للقراءة فقط.",
+      computed: "هذه القيمة محسوبة، لذا لا يمكن تحريرها.",
+      notInline: "لا يمكن تحرير هذا الحقل في قائمة. افتح السجل لتغييره.",
+      noFieldPermission: "ليس لديك إذن بتحرير هذا الحقل.",
+      viewOff: "التحرير في القائمة متوقف لهذا العرض.",
+      objectReadOnly: "لا يمكن تحرير هذه السجلات هنا.",
+      noPermission: "ليس لديك إذن بتحرير هذه السجلات.",
+      approvalLocked: "هذا السجل مقفل أثناء الموافقة عليه.",
+      noRecordPermission: "ليس لديك إذن بتحرير هذا السجل.",
+    },
     bulkSelected: "تم تحديد {{count}}",
     bulkSelected_zero: "تم تحديد {{count}}",
     bulkSelected_one: "تم تحديد {{count}}",
@@ -1706,6 +1719,9 @@ const ar = {
     relatedShowHidden: "إظهار",
     recordTabs: "علامات تبويب السجل",
     recordTabOverview: "نظرة عامة",
+    // objectstack#35783 — before / after in the row; an RTL row runs right to left, so before is to the right.
+    recordTabMoveBefore: "نقل إلى اليمين",
+    recordTabMoveAfter: "نقل إلى اليسار",
     recordTabsMore: "علامات تبويب أخرى: {{count}}",
     recordTabsMore_zero: "علامات تبويب أخرى: {{count}}",
     recordTabsMore_one: "علامات تبويب أخرى: {{count}}",

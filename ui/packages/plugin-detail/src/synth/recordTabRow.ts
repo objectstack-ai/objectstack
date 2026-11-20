@@ -41,8 +41,9 @@ export interface RecordTabRowLayoutInput {
   /** The active tab's index into `widths`. */
   activeIndex: number;
   /**
-   * Tabs that are never on the row — the hidden panels', which sit at the end
-   * of the dropdown. Any makes the dropdown exist, whatever fits.
+   * Entries that are never on the row — the hidden panels' tabs, and the
+   * reset entry (objectstack#35783), which sit at the end of the dropdown.
+   * Any makes the dropdown exist, whatever fits.
    */
   alwaysInDropdown: number;
 }

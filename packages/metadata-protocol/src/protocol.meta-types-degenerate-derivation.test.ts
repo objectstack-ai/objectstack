@@ -395,8 +395,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // sentences written into records in the organization's language.
     // [#34655] `flow` 23 → 24: `defaultActive`, the default of the
     // packaged-flow switch (a package ships the flow switched off).
+    // [#35489] `field` 83 → 84: `unitConfig`, the unit a quantity is in or
+    // that a text field holds a unit code (ADR-0158 U4, Open item 8).
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 24,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 84, flow: 24,
         hook: 24, object: 50, page: 28, position: 14, report: 24, skill: 17, tool: 14,
     };
 

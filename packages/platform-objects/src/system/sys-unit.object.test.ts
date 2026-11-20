@@ -106,7 +106,7 @@ describe('sys_unit — declaration (ADR-0158 U3)', () => {
   });
 
   describe('who writes (Open item 2)', () => {
-    it('stays reachable by the organization admin wildcard grant: not private, no extra capability gate', () => {
+    it('stays reachable by organization_admin\'s explicit sys_unit line (no delete bit): not private, no extra capability gate', () => {
       expect((SysUnit as any).access?.default).not.toBe('private');
       expect((SysUnit as any).requiredPermissions).toBeUndefined();
       expect(SysUnit.managedBy).toBe('system-data');

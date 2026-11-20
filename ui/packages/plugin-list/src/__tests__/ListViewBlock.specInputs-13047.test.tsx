@@ -282,13 +282,13 @@ describe('objectui#13047 — the toolbar and chrome keys, drawn by `ListView` it
     expect(screen.queryByTestId('toolbar-filter-trigger')).not.toBeNull();
   });
 
-  it('`compactToolbar: false` puts the inline-edit toggle back on the toolbar; the default keeps it in the Display form', async () => {
-    const control = mount({ inlineEdit: false });
+  it('`compactToolbar: false` puts the wide buttons back on the toolbar; the default keeps them in the Display form', async () => {
+    const control = mount({});
     await loaded(control.dataSource);
     const compactButtons = control.container.querySelectorAll('[data-print-hide] button').length;
     cleanup();
 
-    const { dataSource, container } = mount({ inlineEdit: false, compactToolbar: false });
+    const { dataSource, container } = mount({ compactToolbar: false });
     await loaded(dataSource);
     expect(container.querySelectorAll('[data-print-hide] button').length).toBeGreaterThan(compactButtons);
   });
@@ -586,9 +586,10 @@ describe('objectui#13047 — the grid keys, handed to the `object-grid` node `Li
     expect((await gridFor({ conditionalFormatting: rules })).conditionalFormatting).toEqual(rules);
   });
 
-  it('`inlineEdit: true` renders the grid editable', async () => {
-    expect((await controlGrid()).editable).toBe(false);
+  it('`inlineEdit` folds into the editable grid: absent and `true` edit, `false` does not (objectstack#35684)', async () => {
+    expect((await controlGrid()).editable).toBe(true);
     expect((await gridFor({ inlineEdit: true })).editable).toBe(true);
+    expect((await gridFor({ inlineEdit: false })).editable).toBe(false);
   });
 
   it('`navigation.mode: \'drawer\'` opens the record in a drawer titled by the list\'s `label` when a row is clicked', async () => {

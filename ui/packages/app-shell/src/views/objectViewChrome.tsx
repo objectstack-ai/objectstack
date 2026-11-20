@@ -43,29 +43,6 @@ export function ObjectNotFoundState({ objectName, packageDisabled = false }: { o
 }
 
 /**
- * The list toolbar's inline-edit toggle, as this page wires it: it writes
- * nothing (objectui#5144, triage's ruling E).
- *
- * The view's `inlineEdit` and `userActions.editInline` are the AUTHOR's
- * permission keys, and `normalizeListViewSchema` folds the first into the
- * second. `editInline` is on by default since the v18 ruling (objectstack#22605,
- * objectui#12086), so a view that declares neither key offers the toggle, and
- * `editInline: false` withdraws it. This toggle used to persist a USER's edit
- * mode into `inlineEdit` through `persistViewPatch`. After the fold, switching
- * it off stored `inlineEdit: false`, which reads as "not offered", so the
- * toggle was gone from the next load and nothing in the console could bring it
- * back.
- *
- * The edit mode is now session state. `ListView` keeps it, and seeds it from
- * the view's `inlineEdit` on each load. The callback stays wired because
- * `ListView` offers the wide toolbar toggle only to a host that wires one.
- *
- * Recorded costs: the edit mode is not remembered across loads, and an overlay
- * that already stores `inlineEdit: false` still reads off. That is existing
- * data, and the maintainer's ruling rejects migrating it. Declaring
- * `userActions.editInline: true` on such a view brings the toggle back.
- */
-/**
  * Tailwind's `sm` breakpoint (px): from here up the list page draws its page
  * header, whose title is the view switcher (objectstack#27594); below it the
  * header is hidden and the same switcher leads the list's toolbar row instead
@@ -95,8 +72,4 @@ export function useViewTabsFit(): boolean {
         return () => mql.removeEventListener('change', onChange);
     }, []);
     return fits;
-}
-
-export function keepInlineEditModeForTheSession(): void {
-    // Deliberately empty: see the docblock.
 }

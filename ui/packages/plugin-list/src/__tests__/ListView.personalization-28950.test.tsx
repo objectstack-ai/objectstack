@@ -160,18 +160,19 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
     await waitFor(() => expect(reported()).toEqual(['hiddenFields', 'density']));
   });
 
-  it('a Display-only change is reported as the reader makes it, and the report follows it back', async () => {
+  it('a Display menu change is reported as the reader makes it, and the report follows it back', async () => {
+    // The row height: the menu's switches, Row numbers and Edit inline, went
+    // with objectstack#35663 and objectstack#35684.
     const { reported } = mount({});
     const content = await openDisplay();
     await waitFor(() => expect(reported()).toEqual([]));
-    // Edit inline sits on the Display menu's More level.
-    fireEvent.click(within(content).getByTestId('options-row-more'));
-    await within(content).findByTestId('options-page-more');
+    fireEvent.click(within(content).getByTestId('options-row-row-height'));
 
-    fireEvent.click(within(content).getByTestId('toolbar-inline-edit-toggle'));
-    await waitFor(() => expect(reported()).toEqual(['inlineEdit']));
+    fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
+    await waitFor(() => expect(reported()).toEqual(['density']));
 
-    fireEvent.click(within(content).getByTestId('toolbar-inline-edit-toggle'));
+    // The view's `medium` is the menu's Comfortable.
+    fireEvent.click(within(content).getByTestId('options-row-height-comfortable'));
     await waitFor(() => expect(reported()).toEqual([]));
   });
 

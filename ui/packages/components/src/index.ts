@@ -171,6 +171,15 @@ export {
   type GridFieldAuthoring,
 } from './context/gridFieldAuthoring';
 
+// The select-first cell model (objectstack#35684): a host opts a data-table
+// into it by wrapping the table in the provider.
+export {
+  GridCellSelectionProvider,
+  useGridCellSelection,
+  type GridCellSelection,
+  type GridCellFacts,
+} from './context/gridCellSelection';
+
 // Export raw Shadcn UI components
 export * from './ui';
 export * from './custom';
