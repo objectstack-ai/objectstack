@@ -420,7 +420,8 @@ export function isTokenRefusal(error: string | undefined): boolean {
 
 /** The slice of the engine the triggers need. */
 export interface SlackTriggerEngine {
-    registerHook(event: string, handler: (ctx: any) => Promise<void>, opts: { object: string; packageId: string }): void;
+    registerHook?(event: string, handler: (ctx: any) => Promise<void>, opts: { object: string; packageId: string }): void;
+    unregisterHooksByPackage?(packageId: string): number;
 }
 
 const TRIGGER_PACKAGE = 'com.objectstack.service.messaging.slack-links';
@@ -431,7 +432,13 @@ const TRIGGER_PACKAGE = 'com.objectstack.service.messaging.slack-links';
  * `error`, because the person keeps a link that should be gone while
  * everything looks normal.
  */
-export function bindSlackLinkRemovalTriggers(engine: SlackTriggerEngine, store: SlackLinkStore, logger: { error(...args: unknown[]): void }): void {
+export function bindSlackLinkRemovalTriggers(
+    engine: SlackTriggerEngine | null | undefined,
+    store: SlackLinkStore,
+    logger: { error(...args: unknown[]): void },
+): boolean {
+    if (!engine || typeof engine.registerHook !== 'function') return false;
+    const register = engine.registerHook.bind(engine);
     const remove = async (userId: string | undefined, organizationId: string | undefined, actor: string | undefined, why: string) => {
         if (!userId) return;
         try {
@@ -443,17 +450,23 @@ export function bindSlackLinkRemovalTriggers(engine: SlackTriggerEngine, store: 
             );
         }
     };
-    engine.registerHook('afterDelete', async (ctx) => {
+    register('afterDelete', async (ctx) => {
         await remove(str(ctx?.previous?.user_id), str(ctx?.previous?.organization_id), str(ctx?.session?.userId), 'left an organization');
     }, { object: MEMBER_OBJECT, packageId: TRIGGER_PACKAGE });
-    engine.registerHook('afterUpdate', async (ctx) => {
+    register('afterUpdate', async (ctx) => {
         const data = ctx?.input?.data;
         const before = str(ctx?.previous?.organization_id);
         if (!data || !('organization_id' in data) || !before || before === str(data.organization_id)) return;
         await remove(str(ctx?.previous?.user_id), before, str(ctx?.session?.userId), 'left an organization');
     }, { object: MEMBER_OBJECT, packageId: TRIGGER_PACKAGE });
-    engine.registerHook('afterUpdate', async (ctx) => {
+    register('afterUpdate', async (ctx) => {
         if (ctx?.input?.data?.banned !== true) return;
         await remove(str(ctx?.input?.id) ?? str(ctx?.previous?.id), undefined, str(ctx?.session?.userId), 'was banned');
     }, { object: USER_OBJECT, packageId: TRIGGER_PACKAGE });
+    return true;
+}
+
+/** Unbind {@link bindSlackLinkRemovalTriggers} (plugin teardown). */
+export function unbindSlackLinkRemovalTriggers(engine: SlackTriggerEngine | null | undefined): void {
+    engine?.unregisterHooksByPackage?.(TRIGGER_PACKAGE);
 }

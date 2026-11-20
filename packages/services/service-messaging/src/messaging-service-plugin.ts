@@ -20,6 +20,15 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { createPushChannel } from './push-channel.js';
+import { createSlackChannel } from './slack-channel.js';
+import {
+    SlackLinkStore,
+    bindSlackLinkRemovalTriggers,
+    unbindSlackLinkRemovalTriggers,
+    type SlackClientSurface,
+    type SlackTriggerEngine,
+} from './slack-links.js';
+import { SLACK_ACCOUNT_ROUTE, SLACK_LINK_ROUTE, registerSlackLinkRoutes } from './slack-link-routes.js';
 import {
     NotificationTemplateStore,
     TEMPLATE_BUILTINS,
@@ -42,6 +51,8 @@ import {
     NotificationTemplate,
     HttpDelivery,
     UserDevice,
+    ChannelAccount,
+    ChannelUserLink,
 } from './objects/index.js';
 // The L2 event this service writes on every `emit()`. It is OWNED by
 // platform-objects (it is in `PLATFORM_OBJECTS_BY_PACKAGE`), and — like
@@ -243,6 +254,8 @@ export class MessagingServicePlugin implements Plugin {
     private httpDispatcher?: HttpDispatcher;
     /** The engine the template placement hooks are bound to — unbound on teardown. */
     private placementEngine?: PlacementHookEngine;
+    /** The engine the Slack link removal triggers are bound to — unbound on teardown. */
+    private slackTriggerEngine?: SlackTriggerEngine;
 
     constructor(options: MessagingServicePluginOptions = {}) {
         const { egressPolicy, ...rest } = options;
@@ -365,6 +378,26 @@ export class MessagingServicePlugin implements Plugin {
 
         ctx.registerService('messaging', service);
 
+        // [#34730 step 2] The Slack link store: the organization's install
+        // (`sys_channel_account`) and each person's link to their own Slack
+        // user (`sys_channel_user_link`). Slack is reached through
+        // connector-slack's `slack` client service, probed per call like
+        // `email` above, so a composition without ConnectorSlackPlugin has no
+        // Slack channel and its link doors answer 503.
+        const getSlack = (): SlackClientSurface | undefined => {
+            try {
+                return ctx.getService<SlackClientSurface>('slack');
+            } catch {
+                return undefined;
+            }
+        };
+        const slackLinks = new SlackLinkStore({
+            getData,
+            getSlack,
+            notify: (input) => service.emit(input),
+            logger: ctx.logger,
+        });
+
         // ADR-0030: the messaging service also backs the `notification` core
         // service slot — it owns the in-app inbox + receipts, so it answers the
         // `/api/v1/notifications` REST surface (list / mark-read / mark-all-read)
@@ -399,6 +432,10 @@ export class MessagingServicePlugin implements Plugin {
                 // The push device registry (ADR-0012 §6): the
                 // `notification` slot's device members write it.
                 UserDevice,
+                // The Slack install and the per-person links (#34730 step 2):
+                // the Slack link doors write them through the link store.
+                ChannelAccount,
+                ChannelUserLink,
             ],
             navigationContributions: [
                 {
@@ -431,6 +468,17 @@ export class MessagingServicePlugin implements Plugin {
             ctx.logger.warn(
                 '[messaging] no ObjectQL engine with a hook registry — a sys_notification_template save is NOT judged '
                 + 'for where its body places a hole',
+            );
+        }
+        // [ruling 7024100939, rider 3] A person's Slack links go when they
+        // leave the organization or are banned (their deletion cascades by
+        // the object's own declaration). See slack-links.ts.
+        if (bindSlackLinkRemovalTriggers(engine as SlackTriggerEngine | undefined, slackLinks, ctx.logger)) {
+            this.slackTriggerEngine = engine as SlackTriggerEngine;
+        } else {
+            ctx.logger.warn(
+                '[messaging] no ObjectQL engine with a hook registry — a person who leaves an organization or is banned '
+                + 'keeps their Slack link there until an administrator removes it',
             );
         }
 
@@ -584,6 +632,19 @@ export class MessagingServicePlugin implements Plugin {
                     logger: ctx.logger,
                 }));
             });
+
+            // Slack channel (#34730 step 2): same pattern — mounted while
+            // connector-slack's `slack` client service is resolvable. It sends
+            // a DM to a recipient's confirmed link with their organization's
+            // own install token (sys_channel_account).
+            ctx.hook('kernel:ready', async () => {
+                service.registerChannelProvider('slack', lazyChannelMount({
+                    resolveTransport: getSlack,
+                    create: () => createSlackChannel({ store: slackLinks }),
+                    announce: '[messaging] slack channel registered (a DM to the recipient\'s confirmed sys_channel_user_link, with their organization\'s sys_channel_account token)',
+                    logger: ctx.logger,
+                }));
+            });
         }
 
         // [#30208 row 6, ruling E on #30527] The preference options door
@@ -596,7 +657,7 @@ export class MessagingServicePlugin implements Plugin {
         // when the HTTP server is registered; everything they read is read
         // per request.
         if (typeof ctx.hook === 'function') {
-            ctx.hook('kernel:ready', async () => this.mountHttpDoors(ctx, service, getData));
+            ctx.hook('kernel:ready', async () => this.mountHttpDoors(ctx, service, getData, slackLinks));
         }
 
         // Reliable delivery (P1): wire the outbox + dispatcher once the engine
@@ -677,17 +738,19 @@ export class MessagingServicePlugin implements Plugin {
     }
 
     /**
-     * Mount the package's two HTTP doors on the kernel's HTTP server:
-     * `GET /api/v1/messaging/preference-options` and
-     * `POST /api/v1/messaging/in-app-messages`. A kernel with no HTTP server
-     * says so once and mounts neither: the preference fields stay plain text
-     * boxes, the Setup action "Send in-app message" has nothing to call, and
-     * the in-process service is unchanged.
+     * Mount the package's HTTP doors on the kernel's HTTP server:
+     * `GET /api/v1/messaging/preference-options`, the caller's own
+     * preferences, `POST /api/v1/messaging/in-app-messages` and the Slack
+     * link doors. A kernel with no HTTP server says so once and mounts none:
+     * the preference fields stay plain text boxes, the Setup action "Send
+     * in-app message" has nothing to call, nobody can connect Slack, and the
+     * in-process service is unchanged.
      */
     private mountHttpDoors(
         ctx: PluginContext,
         service: MessagingService,
         getData: () => IDataEngine | undefined,
+        slackLinks: SlackLinkStore,
     ): void {
         const optional = <T>(name: string): T | undefined => {
             try {
@@ -700,9 +763,10 @@ export class MessagingServicePlugin implements Plugin {
         if (!http) {
             ctx.logger.warn(
                 `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}), ` +
-                    `the caller's own preferences (GET ${MY_PREFERENCES_ROUTE}) nor the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) ` +
-                    'is mounted: the console draws notification topic and channel as plain text boxes, the Account page Notification ' +
-                    'Settings has nothing to read, and the Setup action "Send in-app message" has nothing to call.',
+                    `the caller's own preferences (GET ${MY_PREFERENCES_ROUTE}), the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) ` +
+                    `nor the Slack link doors (${SLACK_LINK_ROUTE}, ${SLACK_ACCOUNT_ROUTE}) is mounted: the console draws notification ` +
+                    'topic and channel as plain text boxes, the Account page Notification Settings has nothing to read, the Setup ' +
+                    'action "Send in-app message" has nothing to call, and nobody can install Slack or connect to it.',
             );
             return;
         }
@@ -743,6 +807,11 @@ export class MessagingServicePlugin implements Plugin {
             getData,
         });
         ctx.logger.info(`[messaging] in-app message door mounted at POST ${IN_APP_MESSAGE_ROUTE}`);
+        registerSlackLinkRoutes(http, {
+            resolveCaller: (req) => resolveMessagingCaller(req, callerSources),
+            getStore: () => slackLinks,
+        });
+        ctx.logger.info(`[messaging] Slack link doors mounted at ${SLACK_LINK_ROUTE} and ${SLACK_ACCOUNT_ROUTE}`);
     }
 
     /**
@@ -773,7 +842,8 @@ export class MessagingServicePlugin implements Plugin {
      * cold-start budget) and says once, at `info`, what it did not provision and
      * why. Not `warn`: nothing is degraded, because the operator declared this.
      * `os migrate apply`, the documented path, was measured to create all eight
-     * tables (before `sys_user_device` joined them as the ninth). `syncObjectSchema` itself stays ungated, because it is also how a
+     * tables (before `sys_user_device` joined them as the ninth, and the two
+     * Slack link objects as the tenth and eleventh). `syncObjectSchema` itself stays ungated, because it is also how a
      * runtime publish gives a new object its table.
      */
     private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
@@ -791,6 +861,8 @@ export class MessagingServicePlugin implements Plugin {
             NotificationTemplate,
             HttpDelivery,
             UserDevice,
+            ChannelAccount,
+            ChannelUserLink,
         ];
         // [#22984] FIRST: see the docblock. One line, naming every skipped object.
         if (bootSchemaSyncSkipped(engine)) {
@@ -863,6 +935,8 @@ export class MessagingServicePlugin implements Plugin {
     async destroy(): Promise<void> {
         unbindTemplateHolePlacement(this.placementEngine);
         this.placementEngine = undefined;
+        unbindSlackLinkRemovalTriggers(this.slackTriggerEngine);
+        this.slackTriggerEngine = undefined;
         await this.dispatcher?.stop();
         this.dispatcher = undefined;
         await this.httpDispatcher?.stop();

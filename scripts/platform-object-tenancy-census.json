@@ -26,8 +26,8 @@
   "predicate": "resolveTenantFieldName(registered schema) !== null, where the registered schema is the authored schema plus the columns resolveInjectedSystemColumns says the registration injects (the applySystemFields pass). Both functions are loaded from source and executed; neither is re-spelled here.",
   "population": "every object registered by a tracked packages/**/*.object.ts module whose name carries a platform prefix (sys_ / cloud_ / ai_). The cloud repository's own cloud_ objects are not in this tree and so not in this census.",
   "totals": {
-    "registered": 104,
-    "inReach": 53,
+    "registered": 106,
+    "inReach": 55,
     "outOfReach": 51
   },
   "reasonTotals": {
@@ -179,6 +179,20 @@
     {
       "name": "sys_business_unit_member",
       "file": "packages/platform-objects/src/identity/sys-business-unit-member.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_channel_account",
+      "file": "packages/services/service-messaging/src/objects/channel-account.object.ts",
+      "reach": "in",
+      "tenantField": "organization_id",
+      "reasons": []
+    },
+    {
+      "name": "sys_channel_user_link",
+      "file": "packages/services/service-messaging/src/objects/channel-user-link.object.ts",
       "reach": "in",
       "tenantField": "organization_id",
       "reasons": []

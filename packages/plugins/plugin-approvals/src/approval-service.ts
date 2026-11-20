@@ -2490,8 +2490,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           severity: 'info', ...event, payload, keyedText: part.keyedText, audience: part.audience,
           // [#30509] The approval lifecycle's own notices also go by e-mail;
           // every other approval topic stays inbox-only. Preferences filter as
-          // for any channel.
-          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { channels: [...APPROVAL_EMAIL_CHANNELS] } : {}),
+          // for any channel. [#34730] A request also goes by Slack DM to an
+          // approver who connected Slack; anyone else is skipped, not failed.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic)
+            ? { channels: [...APPROVAL_EMAIL_CHANNELS, ...(event.topic === 'approval.requested' ? ['slack'] : [])] }
+            : {}),
           ...(dedupKey ? { dedupKey } : {}),
           ...(person ? { actorId: person } : {}),
           ...(organization ? { organizationId: organization } : {}),

@@ -3,8 +3,9 @@
 /**
  * Messaging route ledger — the audited disposition of every HTTP route
  * `registerPreferenceOptionsRoutes` (`preference-options-routes.ts`),
- * `registerMyPreferencesRoutes` (`my-preferences-routes.ts`) and
- * `registerInAppMessageRoutes` (`in-app-message-routes.ts`) mount.
+ * `registerMyPreferencesRoutes` (`my-preferences-routes.ts`),
+ * `registerInAppMessageRoutes` (`in-app-message-routes.ts`) and
+ * `registerSlackLinkRoutes` (`slack-link-routes.ts`) mount.
  *
  * WHY THIS EXISTS. `MessagingServicePlugin` reaches for the `http-server`
  * service and registers straight on `IHttpServer`, so neither the dispatcher
@@ -18,7 +19,8 @@
  *
  * NOT SDK SURFACE. `@objectstack/client` expresses no method for any: the
  * consumers are the console's notification preference and template forms, the
- * Account app's Notification Settings page, and
+ * Account app's Notification Settings page (and its Slack link), the Setup
+ * screen of the organization's Slack install, and
  * the Setup action "Send in-app message" (a same-origin `type: 'api'` action,
  * which the action doors also forward for an agent), over plain HTTP. That is
  * a `server-only` disposition.
@@ -60,4 +62,24 @@ export const MESSAGING_ROUTE_LEDGER: readonly MessagingRouteLedgerEntry[] = [
         note: 'the signed-in person\'s own effective notification preferences (topic x channel, digest, quiet hours, each with its source), for the Account app\'s Notification Settings page; any signed-in person, about themselves only, read-only' },
     { route: 'POST /api/v1/messaging/in-app-messages', family: 'messaging', disposition: 'server-only',
         note: 'an organization administrator\'s in-app message to everyone in, or picked members of, their current organization; the target of the Setup action send_in_app_message on sys_notification' },
+    // [#34730 step 2] The Slack link doors: the person about themselves, then
+    // the organization administrator (`setup.write` in the current organization).
+    { route: 'GET /api/v1/messaging/me/slack-link', family: 'messaging', disposition: 'server-only',
+        note: 'the signed-in person\'s Slack link in their current organization, and the install\'s workspace, for the Account app\'s Notification Settings page; about themselves only' },
+    { route: 'POST /api/v1/messaging/me/slack-link/proposal', family: 'messaging', disposition: 'server-only',
+        note: 'propose a Slack link by the person\'s own email (Slack users.lookupByEmail); the proposal delivers nothing until confirmed' },
+    { route: 'POST /api/v1/messaging/me/slack-link/confirm', family: 'messaging', disposition: 'server-only',
+        note: 'the person confirms their own proposed Slack link; from then on notifications may reach them by Slack DM' },
+    { route: 'DELETE /api/v1/messaging/me/slack-link', family: 'messaging', disposition: 'server-only',
+        note: 'the person removes their own Slack link' },
+    { route: 'GET /api/v1/messaging/slack/account', family: 'messaging', disposition: 'server-only',
+        note: 'an organization administrator reads their organization\'s Slack install (never its token)' },
+    { route: 'PUT /api/v1/messaging/slack/account', family: 'messaging', disposition: 'server-only',
+        note: 'an organization administrator installs Slack or sets its bot token again; Slack proves the token before it is stored, encrypted' },
+    { route: 'DELETE /api/v1/messaging/slack/account', family: 'messaging', disposition: 'server-only',
+        note: 'an organization administrator removes the Slack install and every link to it; each linked person is told' },
+    { route: 'GET /api/v1/messaging/slack/links', family: 'messaging', disposition: 'server-only',
+        note: 'an organization administrator lists every Slack link in their organization' },
+    { route: 'DELETE /api/v1/messaging/slack/links/:id', family: 'messaging', disposition: 'server-only',
+        note: 'an organization administrator removes one person\'s Slack link; the person is told by inbox and email' },
 ];
