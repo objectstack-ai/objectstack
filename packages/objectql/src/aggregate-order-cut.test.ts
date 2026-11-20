@@ -234,16 +234,16 @@ describe('[aggregate order and cut] engine.aggregate — refused on every driver
   });
 });
 
-describe('[aggregate order and cut] a declinable request is DECLINED where it cannot be served — nothing read, no refusal', () => {
+describe('[aggregate order and cut] a declinable request is DECLINED where it cannot be served — nothing read, no refusal, no outcome', () => {
   const declinable = (): AggregateOrderCutRequest => ({ ...TOP_TWO(), declinable: true });
 
   for (const name of ['com.objectstack.driver.memory', 'com.objectstack.driver.mongodb', 'com.objectstack.driver.odata']) {
-    it(`${name}: answers [] with the outcome declined, the driver never asked`, async () => {
+    it(`${name}: answers [] with its decline recorded, the driver never asked`, async () => {
       const { engine, rec } = await makeEngine(name);
       const request = declinable();
       expect(await engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(request))).toEqual([]);
-      expect(request.outcome?.kind).toBe('declined');
-      expect(request.outcome?.kind === 'declined' && request.outcome.reason).toContain(`'${name}'`);
+      expect(request.outcome).toBeUndefined();
+      expect(request.declined?.reason).toContain(`'${name}'`);
       expect(rec.calls).toEqual([]);
     });
   }
@@ -252,14 +252,14 @@ describe('[aggregate order and cut] a declinable request is DECLINED where it ca
     const { engine, rec } = await makeEngine('com.objectstack.driver.sql');
     const having = declinable();
     expect(await engine.aggregate(ORDER, { ...BY_CUSTOMER, having: { revenue: { $gt: 10 } } }, withCut(having))).toEqual([]);
-    expect(having.outcome?.kind === 'declined' && having.outcome.reason).toMatch(/having/);
+    expect(having.declined?.reason).toMatch(/having/);
     const zoned: AggregateOrderCutRequest = { orderBy: [{ field: 'n', order: 'desc' }], limit: 3, declinable: true };
     expect(await engine.aggregate(ORDER, {
       groupBy: [{ field: 'closed_on', dateGranularity: 'month' }],
       aggregations: [{ function: 'count', alias: 'n' }],
       timezone: 'Asia/Shanghai',
     }, withCut(zoned))).toEqual([]);
-    expect(zoned.outcome?.kind === 'declined' && zoned.outcome.reason).toMatch(/computed in the application/);
+    expect(zoned.declined?.reason).toMatch(/computed in the application/);
     expect(rec.calls).toEqual([]);
   });
 
@@ -269,6 +269,7 @@ describe('[aggregate order and cut] a declinable request is DECLINED where it ca
     const request = declinable();
     expect(await engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(request))).toEqual([{ customer: 'c9', area: 'west', revenue: 90, n: 3 }]);
     expect(request.outcome).toEqual({ kind: 'served', totalGroups: 4 });
+    expect(request.declined).toBeUndefined();
   });
 
   it('a request the caller built wrong is still refused: an order key naming no column of the row is INVALID_SORT', async () => {

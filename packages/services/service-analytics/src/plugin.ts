@@ -533,7 +533,8 @@ export class AnalyticsServicePlugin implements Plugin {
       executeOrderCutAggregate = async (objectName, input, cut) => {
         const request: {
           orderBy: typeof cut.orderBy; limit: number; declinable: true;
-          outcome?: { kind?: unknown; totalGroups?: unknown; reason?: unknown };
+          outcome?: { kind?: unknown; totalGroups?: unknown };
+          declined?: { reason?: unknown };
         } = { orderBy: cut.orderBy, limit: cut.limit, declinable: true };
         const engine = requireDataEngine();
         const aggregate = engine.aggregate as unknown as (
@@ -546,7 +547,7 @@ export class AnalyticsServicePlugin implements Plugin {
         if (request.outcome?.kind === 'served' && typeof totalGroups === 'number') {
           return { served: true, rows: rows as Record<string, unknown>[], totalGroups };
         }
-        const reason = request.outcome?.reason;
+        const reason = request.declined?.reason;
         return { served: false, reason: typeof reason === 'string' ? reason : 'the "data" engine did not order and cut the groups' };
       };
       autoBridged = true;

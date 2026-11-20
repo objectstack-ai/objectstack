@@ -64,9 +64,9 @@
  * (the analytics `query_dataset` face, which orders and windows the groups it
  * is handed) sets {@link AggregateOrderCutRequest.declinable}: the request is
  * then DECLINED instead, exactly as the relation group join declines — nothing
- * is read, the read answers `[]`, which is not an answer, and the reason is on
- * the request's outcome — and the caller reads the groups the way it always
- * has. A request the caller built wrong (an order key naming no column of the
+ * is read, the read answers `[]`, which is not an answer, the reason is on
+ * the request's `declined` slot and its `outcome` stays unset — and the
+ * caller reads the groups the way it always has. A request the caller built wrong (an order key naming no column of the
  * row) is refused either way.
  */
 
@@ -121,19 +121,21 @@ export interface AggregateOrderKey {
   readonly rank?: ReadonlyArray<string | number>;
 }
 
+/** What the engine did with an {@link AggregateOrderCutRequest}: set only once the driver answered it. */
+export interface AggregateOrderCutOutcome {
+  readonly kind: 'served';
+  /** How many groups the statement formed before the cut. */
+  readonly totalGroups: number;
+}
+
 /**
- * What the engine did with an {@link AggregateOrderCutRequest}: `served` once
- * the driver answered it; `declined` — only for a
- * {@link AggregateOrderCutRequest.declinable} request — when it could not be
- * served, before anything was read (the read's `[]` is then no answer).
+ * Why the engine declined a {@link AggregateOrderCutRequest.declinable}
+ * request: set instead of {@link AggregateOrderCutOutcome}, before anything
+ * was read — the read's `[]` is no answer.
  */
-export type AggregateOrderCutOutcome =
-  | {
-    readonly kind: 'served';
-    /** How many groups the statement formed before the cut. */
-    readonly totalGroups: number;
-  }
-  | { readonly kind: 'declined'; readonly reason: string };
+export interface AggregateOrderCutDecline {
+  readonly reason: string;
+}
 
 /**
  * The request: the order of the groups, how many to answer, and the slot the
@@ -148,11 +150,14 @@ export interface AggregateOrderCutRequest {
   /**
    * Decline rather than refuse where the cut cannot be served
    * ({@link aggregateOrderCutRefusal}): nothing is read, the read answers
-   * `[]`, and the outcome is `declined` with the refusal's reason. Opt-in —
-   * absent, the request is refused `INVALID_QUERY` / 400 as before.
+   * `[]`, `outcome` stays unset and {@link declined} carries the refusal's
+   * reason. Opt-in — absent, the request is refused `INVALID_QUERY` / 400 as
+   * before.
    */
   readonly declinable?: boolean;
   outcome?: AggregateOrderCutOutcome;
+  /** Set by the engine when it declined a {@link declinable} request. */
+  declined?: AggregateOrderCutDecline;
 }
 
 /** What the driver is handed, on the AST under {@link AGGREGATE_ORDER_CUT_DIRECTIVE}. */
@@ -346,7 +351,7 @@ export function aggregateOrderCutRefusal(
  * is not an answer. Nothing has been read.
  */
 export function declineAggregateOrderCut(request: AggregateOrderCutRequest, refusal: Error): Record<string, unknown>[] {
-  request.outcome = { kind: 'declined', reason: refusal.message };
+  request.declined = { reason: refusal.message };
   return [];
 }
 
