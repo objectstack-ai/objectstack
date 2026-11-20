@@ -20,8 +20,7 @@
  * to release `.claude/**`. This file is what reads it, and nothing else:
  *
  *   locateReviewOfRecord     the record on this head, on the PR thread or its card
- *   deliveredCardNumber      which card thread a pull request's record may sit on
- *   deliveredCardsAtStrongest every card a pull request delivers at its strongest grade, for a reader that reads them all
+ *   deliveredCardNumber      which card thread a pull request's record may sit on — and `deliveredCardsAtStrongest` every card a tie holds, for a reader that reads them all
  *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it — at the tier its face maps to
  *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
