@@ -249,11 +249,17 @@ const columnsGrid = (container: HTMLElement) =>
 /** The details' field grid, by the classes it draws (container queries). */
 const detailsGrid = (container: HTMLElement) =>
   column(container, 'details')?.querySelector('[data-detail-section-face="frameless"] .grid')?.getAttribute('class') ?? '';
-/** The right column's panels, in order: `timeline` for 动态, else the related card's id. */
+/**
+ * The right rail's cards on screen, in order (objectstack#35596): 审批, 附件,
+ * 最近动态 (`timeline`), then each related list with records. A card with
+ * nothing to show is not drawn (the 动态 card waits `hidden` for its count).
+ */
 const rightPanels = (container: HTMLElement) =>
-  Array.from(column(container, 'right')?.querySelectorAll('[data-record-timeline-panel], [data-related-card-id]') ?? []).map(
-    (el) => (el.hasAttribute('data-record-timeline-panel') ? 'timeline' : el.getAttribute('data-related-card-id')),
+  Array.from(column(container, 'right')?.querySelectorAll('[data-record-summary-card]:not([hidden])') ?? []).map((el) =>
+    el.getAttribute('data-record-summary-card'),
   );
+/** objectstack#35596 — this record's stream is empty, so the rail holds its two lists with records. */
+const RAIL = ['showcase_task.project', 'showcase_note.project'];
 
 /**
  * The page's only tablist is its tab row (objectstack#27524, Target 8): the
@@ -277,7 +283,7 @@ const expectTabRowOnly = async (active = 'overview') => {
 };
 
 describe('RecordDetailView — one record page, laid out by its width (objectstack#26678, objectstack#27524)', () => {
-  it('1440 px: details beside the right column at 380 px, the details grid at three columns; 动态 last (objectstack#34590); History is read at open', async () => {
+  it('1440 px: details beside the right rail at 380 px, the details grid at three columns; 动态 the last tab (objectstack#34590); History is read at open', async () => {
     const { container } = renderPage({ width: 1440 });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('wide');
@@ -286,8 +292,9 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     // Container breakpoints of the dense label-left rows (objectstack#35602).
     expect(detailsGrid(container)).toContain('@4xl:grid-cols-3');
     await expectTabRowOnly();
-    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
-    expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
+    // objectstack#35596 — the rail's order: 审批, 附件, 最近动态, then the lists
+    // with records (supersedes objectstack#34590's 动态-last right column).
+    await waitFor(() => expect(rightPanels(container)).toEqual(RAIL));
     // No resident timeline column and no rail: the two columns are all.
     expect(column(container, 'timeline')).toBeNull();
     expect(column(container, 'related')).toBeNull();
@@ -311,8 +318,9 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(detailsGrid(container)).toContain('@xl:grid-cols-2');
     expect(detailsGrid(container)).not.toContain('@4xl:grid-cols-3');
     // The same panels as the wide tier — no rail to open first.
-    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
-    expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
+    // objectstack#35596 — the rail's order: 审批, 附件, 最近动态, then the lists
+    // with records (supersedes objectstack#34590's 动态-last right column).
+    await waitFor(() => expect(rightPanels(container)).toEqual(RAIL));
     expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
     await expectTabRowOnly();
   });
@@ -320,7 +328,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
   it.each([
     ['the split pane', 720, 1440],
     ['a phone', 390, 390],
-  ])('%s (%i px): one column — the details, then the 动态 panel and the related panels; the tab row; History is read at open', async (name, width, windowWidth) => {
+  ])('%s (%i px): one column — the details, then the right rail; the tab row; History is read at open', async (name, width, windowWidth) => {
     const { container } = renderPage({ width, windowWidth });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('stack');
@@ -331,8 +339,9 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     const details = column(container, 'details')!;
     const right = column(container, 'right')!;
     expect(details.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
-    expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
+    // objectstack#35596 — the rail's order: 审批, 附件, 最近动态, then the lists
+    // with records (supersedes objectstack#34590's 动态-last right column).
+    await waitFor(() => expect(rightPanels(container)).toEqual(RAIL));
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
     // objectstack#27058 — on a phone the stack ends where the bottom action
     // bar starts: the header's actions are drawn there, after the body, and
@@ -350,11 +359,12 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     }
   });
 
-  it('embedded (drawer / split pane): the same rule — two columns at 1440 px, one at 720 px', async () => {
+  it('embedded (drawer / split pane): the same tiers, and no right rail (objectstack#35596)', async () => {
     const wide = renderPage({ width: 1440, embedded: true });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(wide.container)).toBe('wide');
-    expect(shown(wide.container)).toBe('details right');
+    expect(shown(wide.container)).toBe('details');
+    expect(column(wide.container, 'right')).toBeNull();
     wide.unmount();
 
     const { container } = renderPage({ width: 720, embedded: true });

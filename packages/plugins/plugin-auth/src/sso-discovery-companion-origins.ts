@@ -49,11 +49,15 @@
  * and its endpoint validation admits any public host on its own, so it reads
  * none of them.
  *
- * That trust covers origin verdicts only. SSO discovery fetches only hosts
- * that resolve to public addresses: the host a registration's discovery reads
- * is resolved before the vendor's register endpoint runs, and the body-named
- * origins are handed to it only after that check, for an actor the register
- * gates admitted ({@link refuseSsoDiscoveryHostNotPublic}).
+ * That trust covers origin verdicts only. SSO discovery connects only to
+ * addresses that are public at connect time: every read it makes is sent
+ * through the outbound-request guard, which judges the addresses the
+ * connection itself resolves (`sso-discovery-egress.ts`). The host a
+ * registration's discovery reads is also judged before the vendor's register
+ * endpoint runs, so a host that is not public is refused on the member that
+ * names it, and the body-named origins are handed to the vendor only after
+ * that check, for an actor the register gates admitted
+ * ({@link refuseSsoDiscoveryHostNotPublic}).
  *
  * ⛔ An origin a fetched discovery document names is never trusted because the
  * document names it: an unknown issuer whose discovery points at a foreign
@@ -146,20 +150,16 @@ export function trustingBodyNamedOrigins(
   };
 }
 
-// ── The host a registration's discovery reads resolves to public addresses ──
+// ── The host a registration's discovery reads is public ─────────────────────
 
-/** A name resolver: every address a host name resolves to. */
-export type SsoHostResolver = (hostname: string) => Promise<ReadonlyArray<{ address: string }>>;
-
-/** `node:dns/promises` `lookup` for every address, read when called; none on a runtime without it. */
-async function systemResolver(): Promise<SsoHostResolver | undefined> {
-  try {
-    const dns = await import('node:dns/promises');
-    return (hostname) => dns.lookup(hostname, { all: true });
-  } catch {
-    return undefined;
-  }
-}
+/**
+ * Judges, without sending anything, whether SSO discovery may read a URL: its
+ * host is resolved and every address judged by the rule the connection
+ * applies (`judgeSsoDiscoveryUrl` in `sso-discovery-egress.ts`). `unresolved`
+ * marks a name that did not resolve, answered allowed: the connection itself
+ * refuses it.
+ */
+export type SsoDiscoveryJudge = (url: string) => Promise<{ allow: boolean; unresolved?: boolean }>;
 
 /** The body member naming the URL a registration's discovery reads. */
 export type SsoDiscoveryReadMember = 'issuer' | 'oidcConfig.discoveryEndpoint';
@@ -201,31 +201,54 @@ export interface SsoDiscoveryHostRefusal {
 }
 
 /**
- * SSO discovery fetches only hosts that resolve to public addresses.
+ * The refusal of a registration whose discovery host is not public, on the
+ * member that names it. The same answer whether the host was judged before the
+ * vendor's register endpoint ran ({@link refuseSsoDiscoveryHostNotPublic}) or
+ * when its read connected (`explainSsoDiscoveryConnectRefusal`). It names the
+ * host and the rule, never the address the host resolved to.
+ */
+export function ssoDiscoveryHostRefusal(member: SsoDiscoveryReadMember, url: URL): SsoDiscoveryHostRefusal {
+  return {
+    status: 'BAD_REQUEST',
+    code: 'VALIDATION_FAILED',
+    field: member,
+    message:
+      `The host "${url.hostname}" that ${member} names for this provider's discovery document resolves to an address that is not public, `
+      + 'so the document was not read and the provider was not registered. SSO discovery connects only to addresses that are public '
+      + 'at connect time; an identity provider on an internal network registers once the deployment\'s trusted origins '
+      + `(OS_TRUSTED_ORIGINS) list its origin, ${url.origin}.`,
+  };
+}
+
+/**
+ * SSO discovery connects only to addresses that are public at connect time;
+ * this is the registration's early answer.
  *
  * The host whose discovery document a `/sso/register` body has the server
- * read ({@link ssoRegisterDiscoveryRead}) is resolved here, before the
- * vendor's register endpoint runs, and every address it resolves to must be
- * public (`isPublicRoutableHost`, the predicate the vendor's own checks
- * apply). The origins the body names are trusted for the origin verdicts of
- * that registration's discovery (`ssoDiscoveryCompanionContext`); that trust
- * never stands in for this check. The deployment's configured trusted origins
- * stay the one way to register an identity provider on an internal network:
- * a discovery URL they trust is not resolved here, as the vendor resolves none.
+ * read ({@link ssoRegisterDiscoveryRead}) is judged here, before the vendor's
+ * register endpoint runs, by the rule its read is judged by when it connects
+ * (`judge`): every address the host resolves to must be public, by the
+ * platform's address classes (`classifyAddress`: loopback, private,
+ * link-local, cloud metadata and host-platform addresses, and every other
+ * non-public range), an address literal included. The origins the body names
+ * are trusted for the origin verdicts of that registration's discovery
+ * (`ssoDiscoveryCompanionContext`); that trust never stands in for this check.
+ * The deployment's configured trusted origins stay the one way to register an
+ * identity provider on an internal network: a discovery URL they trust is not
+ * judged here, nor when it connects.
  *
- * Judged as the vendor judges its own resolution: an address literal is left
- * to the vendor's synchronous host check, a name that looks non-public
- * (`localhost`, a metadata name) to its refusal of an untrusted or private
- * host, and a name that does not resolve, or a runtime with no
- * `node:dns/promises`, to the read itself. Answers the refusal, or
- * `undefined` when the registration may go on; it reads `body` only.
+ * A host the vendor's own synchronous check refuses (`localhost`, a private
+ * literal, a metadata name: not `isPublicRoutableHost`) is left to that
+ * refusal. A name that does not resolve is left to the read, whose connection
+ * refuses it and sends nothing. Answers the refusal, or `undefined` when the
+ * registration may go on; it reads `body` only.
  */
 export async function refuseSsoDiscoveryHostNotPublic(input: {
   body: unknown;
   /** The deployment's configured trusted-origin predicate (the request's, before any body-named origin joins it). */
   isConfiguredTrusted: (url: string) => boolean;
-  /** Name resolution; `node:dns/promises` when absent. */
-  resolve?: SsoHostResolver;
+  /** The judgement the connection applies (`judgeSsoDiscoveryUrl`). */
+  judge: SsoDiscoveryJudge;
 }): Promise<SsoDiscoveryHostRefusal | undefined> {
   const { computeDiscoveryUrl } = await import('@better-auth/sso');
   const read = ssoRegisterDiscoveryRead(input.body, computeDiscoveryUrl);
@@ -237,28 +260,12 @@ export async function refuseSsoDiscoveryHostNotPublic(input: {
     return undefined;
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
-  const { classifyHost, isPublicRoutableHost } = await import('@better-auth/core/utils/host');
-  const host = url.hostname;
-  if (classifyHost(host).literal !== 'fqdn' || !isPublicRoutableHost(host)) return undefined;
+  const { isPublicRoutableHost } = await import('@better-auth/core/utils/host');
+  if (!isPublicRoutableHost(url.hostname)) return undefined;
   if (input.isConfiguredTrusted(url.href)) return undefined;
-  const resolve = input.resolve ?? (await systemResolver());
-  if (!resolve) return undefined;
-  let addresses: ReadonlyArray<{ address: string }>;
-  try {
-    addresses = await resolve(host);
-  } catch {
-    return undefined;
-  }
-  if (addresses.every(({ address }) => isPublicRoutableHost(address))) return undefined;
-  return {
-    status: 'BAD_REQUEST',
-    code: 'VALIDATION_FAILED',
-    field: read.member,
-    message:
-      `The host "${host}" that ${read.member} names for this provider's discovery document resolves to an address that is not public, `
-      + 'so the document was not read and the provider was not registered. SSO discovery reads only hosts that resolve to public addresses; '
-      + `an identity provider on an internal network registers once the deployment's trusted origins (OS_TRUSTED_ORIGINS) list its origin, ${url.origin}.`,
-  };
+  const verdict = await input.judge(url.href);
+  if (verdict.allow) return undefined;
+  return ssoDiscoveryHostRefusal(read.member, url);
 }
 
 // ── The refusal: name the endpoint, and say how to name it explicitly ───────

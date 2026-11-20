@@ -332,8 +332,8 @@ function PaneHost({ dataSource }: { dataSource: unknown }) {
   );
 }
 
-describe('the pane\'s top bar holds the record\'s ⊟ and names it (objectstack#27524)', () => {
-  it('the record\'s header names it in the pane\'s bar, and its ⊟ sits in the pane\'s bar, not the header', async () => {
+describe('the pane\'s top bar names the record (objectstack#27524)', () => {
+  it('the record\'s header names it in the pane\'s bar; a pane draws no right rail, so no ⊟ (objectstack#35596)', async () => {
     const dataSource = makeDataSource();
     render(
       <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}?recordId=r-1`]}>
@@ -347,10 +347,9 @@ describe('the pane\'s top bar holds the record\'s ⊟ and names it (objectstack#
     const paneTitle = () => document.querySelector('[data-record-bar-title] h1')?.textContent;
     await waitFor(() => expect(paneTitle()).toBe('Record r-1'), { timeout: 5000 });
     expect(screen.queryByTestId('record-drawer-crumb')).toBeNull();
-    const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(group.closest('[data-record-pane-toggles]')).not.toBeNull();
-    expect(group.closest('[data-record-top-bar]')).not.toBeNull();
-    expect(group.closest('[data-record-page-root]')).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-record-page-tier]')).not.toBeNull(), { timeout: 5000 });
+    expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
+    expect(document.querySelector('[data-record-column="right"]')).toBeNull();
     expect(document.querySelector('[data-page-header-trailing]')).toBeNull();
     // The pane draws its own bar; the record inside draws none.
     expect(document.querySelectorAll('[data-record-top-bar]')).toHaveLength(1);

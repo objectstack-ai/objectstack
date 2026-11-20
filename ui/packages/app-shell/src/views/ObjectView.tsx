@@ -47,7 +47,6 @@ const CreateViewDialog = lazy(() =>
 import {
   usePreviewDrafts,
 } from '../preview/PreviewModeContext.js';
-import { isSetupAppSegment } from '../console/setupApp.js';
 import { IDENTITY_IMPORT_WRITE_MODES } from './identityImport.js';
 import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields } from './IdentityImportPanels.js';
 import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
@@ -198,10 +197,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // publishing `recordHref` uses (`documentHref`, objectui#12233).
     const routerRootHref = useHref('/');
     const { appName, objectName, viewId } = useParams();
-    // objectui#12606 — inside the Setup app the list drops its `#` row
-    // numbers (see the `ListView` below). Read off
-    // the route's own `:appName`, the one signal the page header reads too.
-    const inSetup = isSetupAppSegment(appName);
     const [searchParams, setSearchParamsNow] = useSearchParams();
     // The router's setter is a new function whenever the search changes, and
     // every list handler built on it (the URL state write-backs, the row
@@ -1044,7 +1039,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // `renderListView` moved to `./objectViewListRenderer.tsx`.
     const { renderListView } = useObjectViewListRenderer({
         objectName,
-        inSetup,
         t,
         viewEmptyState,
         localizeActionTexts,

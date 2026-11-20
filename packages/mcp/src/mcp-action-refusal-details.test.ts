@@ -270,7 +270,7 @@ describe('run_action / resume_run over HTTP /mcp: a failed flow run names the re
     });
   }
 
-  it('the run_action and resume_run descriptions teach the same read order', async () => {
+  it('the run_action and resume_run descriptions point at the second text block', async () => {
     const body = { jsonrpc: '2.0', id: nextId++, method: 'tools/list', params: {} };
     const runtime = new MCPServerRuntime({ name: 'pin', version: '0.0.0' });
     const res = await runtime.handleHttpRequest(
@@ -283,10 +283,9 @@ describe('run_action / resume_run over HTTP /mcp: a failed flow run names the re
     );
     const tools = (JSON.parse(await res.text()) as { result: { tools: Array<{ name: string; description: string }> } })
       .result.tools;
-    const runAction = tools.find((t) => t.name === 'run_action')!.description;
-    const order = ['details.errorMessage', 'userMessage', 'details.innerRefusal.message'].map((m) => runAction.indexOf(m));
-    expect(order.every((i) => i >= 0), runAction).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // [#34689] The read order is the answer's: the second block carries the
+    // reason already chosen (pinned above), so each description only points at it.
+    expect(tools.find((t) => t.name === 'run_action')!.description).toContain('second text block');
     expect(tools.find((t) => t.name === 'resume_run')!.description).toContain('second text block');
   });
 });

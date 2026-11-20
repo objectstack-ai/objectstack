@@ -16,14 +16,14 @@
  * on the grid's host channel (React props on `SchemaRenderer`, the ones
  * `plugin-list`'s `ListView` hands the same grid), its own pager stays the one
  * pager, and a row action the grid dispatches goes back to the host's
- * `onRowAction`. The count shows once.
+ * `onRowAction`. The count shows once: in the tab title (objectstack#35601).
  */
 
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
-import { cleanup, render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { FilterScopeProvider } from '@object-ui/react';
+import { FilterScopeProvider, RecordContextProvider, RecordPagePreferencesProvider } from '@object-ui/react';
 import { RelatedList } from '../RelatedList';
 import { RelatedListEnlargedContext } from '../relatedListCompact';
 
@@ -170,33 +170,58 @@ describe('the enlarged related tab on a desktop is the child object list face (o
     expect(screen.getByText('Previous')).toBeInTheDocument();
   });
 
-  it('DEVIATION, pinned: while the filter box has text the grid still gets this list’s sort on the host channel', async () => {
-    // The list sorts its in-memory rows itself in this state (it read them
-    // all). Handed as a HOST sort, the grid's manual-sort rule applies: it
-    // offers no header sort on a relational column (`owner_id` here), whose
-    // stored value is an id. The data-table this face drew before sorted that
-    // column by its label in this one state.
+  // objectstack#35601 retired the tab's filter box and chips, and with them
+  // the in-memory sort state the DEVIATION pin above them described: every
+  // sort is now the server's.
+  it('the count is not repeated under the grid: the line keeps only the page (the count lives in the tab title)', async () => {
     renderList();
     await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Deal 1' } });
-    await waitFor(() => expect(h.props.rowCount).toBe(11));
-    expect(h.props.manualPagination).toBe(true);
-    expect(h.props.onSortChange).toEqual(expect.any(Function));
-    expect(h.schema.data.items.every((row: any) => row.name.startsWith('Deal 1'))).toBe(true);
-  });
-
-  it('the count shows once: on the 全部 chip, not again on the line under the toolbar', async () => {
-    renderList();
-    await waitFor(() => expect(document.querySelector('[data-related-chip="all"]')?.textContent).toBe(`All${TOTAL}`));
-    // The line keeps only the page; it no longer repeats the 30.
     expect(document.querySelector('[data-related-enlarged-status]')?.textContent).toBe('Page 1 of 2');
+    expect(document.querySelector('[data-related-chip]')).toBeNull();
+    expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
-  it('a chip that narrows keeps its own count on the line, a different number from 全部’s', async () => {
+  it('column widths and order are the reader\'s: read from and written to the record-page preference (objectstack#35601)', async () => {
+    const stored = { order: ['amount', 'name', 'owner_id'], widths: { name: 260 } };
+    const store = {
+      get: vi.fn(() => ({ relatedLists: { 'opportunity.account': { columnState: stored } } })),
+      update: vi.fn(),
+    };
+    render(
+      <RecordPagePreferencesProvider value={store}>
+        <RecordContextProvider objectName="account" recordId="A-1">
+          <FilterScopeProvider currentUserId="u-1">
+            <RelatedListEnlargedContext.Provider value>
+              <RelatedList
+                title="Opportunities"
+                type="table"
+                api="opportunity"
+                objectName="opportunity"
+                referenceField="account"
+                parentId="A-1"
+                pageSize={25}
+                columns={[{ field: 'name', label: 'Name' }, { field: 'amount', label: 'Amount' }]}
+                dataSource={dataSourceFor() as never}
+              />
+            </RelatedListEnlargedContext.Provider>
+          </FilterScopeProvider>
+        </RecordContextProvider>
+      </RecordPagePreferencesProvider>,
+    );
+    await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
+    expect(h.schema.columnState).toEqual(stored);
+    expect(h.schema.id).toBe('related-opportunity.account');
+    act(() => h.props.onColumnStateChange({ widths: { name: 300 } }));
+    expect(store.update).toHaveBeenCalledWith('account', {
+      relatedLists: { 'opportunity.account': { columnState: { widths: { name: 300 } } } },
+    });
+  });
+
+  it('CONTROL: with no preference store the grid gets no column state and no writer', async () => {
     renderList();
-    await waitFor(() => expect(document.querySelector('[data-related-chip="all"]')?.textContent).toBe(`All${TOTAL}`));
-    fireEvent.click(document.querySelector('[data-related-chip="mine"]')!);
-    await waitFor(() => expect(document.querySelector('[data-related-enlarged-status]')?.textContent).toMatch(/^1 row/));
+    await waitFor(() => expect(h.props?.rowCount).toBe(TOTAL));
+    expect(h.schema).not.toHaveProperty('columnState');
+    expect(h.props).not.toHaveProperty('onColumnStateChange');
   });
 
   it('row actions: the host’s defs ride to the grid, and a dispatch from the grid reaches onRowAction with the row', async () => {

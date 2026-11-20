@@ -55,6 +55,7 @@ import { noPendingDraftError } from './protocol-authoring-refusals.js';
 import { memberOption } from './protocol-bundle-members.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import { withDisabledExtensionsFolded } from './metadata-diagnostics.js';
+import { unresolvedConnectorSteps, type ProbeAutomation } from './build-probes.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
@@ -726,7 +727,14 @@ function packagedRuleCopyRefusalOf(
 }
 
 /** The members {@link draftPublishJudgement} and {@link draftPublishVerdict} read. */
-type DraftVerdictHost = RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation'>;
+type DraftVerdictHost = RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation'> & {
+    /**
+     * [#35256] The protocol's services registry reader, read per call and
+     * recorded nowhere: {@link draftConnectorAdvisories} asks its `automation`
+     * service, as {@link sealedFlowNodeTypeVocabulary} does.
+     */
+    servicesRegistry: () => (() => Map<string, any>) | undefined;
+};
 
 /**
  * [#34818] What publishing a stored draft would answer: the refusal's issues
@@ -734,6 +742,12 @@ type DraftVerdictHost = RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatch
  * ADVISORIES — the findings a publish that passes returns on its 2xx, which the
  * console otherwise sees only after the publish, in a toast. One judgement, so
  * the two halves come from the same run of the same rules.
+ *
+ * [#35256] A flow draft's `advisories` also carry one member that is not the
+ * gate's: the build probe's `flow_connector_action_unresolved` finding
+ * ({@link draftConnectorAdvisories}), which a publish reports as a build-probe
+ * finding (`PublishPackageDraftsResponse.probes.issues[]`) rather than under
+ * `advisories`, and which stays a warning.
  */
 export interface DraftPublishJudgement {
     refusals: RuntimeAuthoringIssue[];
@@ -757,6 +771,12 @@ export async function draftPublishVerdict(
  * publish checks before Publish is pressed. One run of the same rules;
  * `userTextLocales` picks the language of the advisories' user sentences and
  * nothing else.
+ *
+ * [#35256] For a flow draft, `advisories` also carry the build probe's
+ * `flow_connector_action_unresolved` finding ({@link draftConnectorAdvisories}):
+ * a publish reports it as a build-probe finding
+ * (`PublishPackageDraftsResponse.probes.issues[]`), never under `advisories`,
+ * and it stays a warning.
  *
  * [#34766] The class method is PUBLIC: it is the publish verdict a door that
  * cannot publish answers with (the open MCP draft door's save and its draft
@@ -828,13 +848,14 @@ export async function draftPublishJudgement(
     // The promotion's restored-credential read: the stored draft holds no
     // credential the write-only channel holds, so the gate is told where one is.
     const channel = this.credentialChannelFor(singular);
+    // [#29557] The body the promotion judges: a flow draft in its
+    // D2-converted spelling, every other draft as stored.
+    const judged = storedFlowVerdictBody(singular, body);
     const verdict = await judgeRuntimeAuthoringRules.call(this, {
         type: singular,
         name: draft.name,
         state: 'active',
-        // [#29557] The body the promotion judges: a flow draft in its
-        // D2-converted spelling, every other draft as stored.
-        body: storedFlowVerdictBody(singular, body),
+        body: judged,
         packageId: draft.packageId,
         ...(pending !== undefined ? { pending } : {}),
         ...(channel
@@ -877,7 +898,57 @@ export async function draftPublishJudgement(
             severity: 'error',
         });
     }
-    return { refusals: told.length > 0 ? [...told, ...issues] : issues, advisories: verdict.advisories };
+    const connectorAdvisories = singular === 'flow'
+        ? draftConnectorAdvisories(this, draft.name, judged, draft.packageId, draft.userTextLocales)
+        : [];
+    return {
+        refusals: told.length > 0 ? [...told, ...issues] : issues,
+        advisories: connectorAdvisories.length > 0 ? [...verdict.advisories, ...connectorAdvisories] : verdict.advisories,
+    };
+}
+
+/**
+ * [#35256] What the publish's build probe `flow_connector_action_unresolved`
+ * will report for this flow draft, said on the draft verdict first: one
+ * ADVISORY per `connector_action` step no connector this environment serves
+ * can dispatch, in the gate-issue shape Studio's draft read and the MCP draft
+ * tools read (`verdict.advisories`). Never a refusal: the probe never fails a
+ * publish, so the draft verdict does not either.
+ *
+ * One judgement, {@link unresolvedConnectorSteps}, the probe's own: the same
+ * lookups for the draft's package, the same `message`, the probe's `fix` as
+ * the `hint` and its user sentence in the read's locales; the rule id is the
+ * probe's code. Only the draft door asks it: the publish's gate
+ * (`assertRuntimeAuthoringRules`) does not, since its probe reports it. The
+ * lookups are in-memory registry reads with no storage read, so a draft list
+ * judging many drafts pays no per-pass cache. No automation service, or one
+ * without the lookups, judges nothing, as the probe does.
+ */
+function draftConnectorAdvisories(
+    host: Pick<DraftVerdictHost, 'servicesRegistry'>,
+    name: string,
+    body: unknown,
+    packageId: string | null,
+    userTextLocales: readonly (string | undefined)[] | undefined,
+): RuntimeAuthoringIssue[] {
+    let automation: unknown;
+    try {
+        automation = host.servicesRegistry()?.().get('automation');
+    } catch {
+        return [];
+    }
+    if (!automation || typeof (automation as ProbeAutomation).resolveConnectorAction !== 'function') return [];
+    return unresolvedConnectorSteps(name, body, automation as ProbeAutomation, packageId, userTextLocales ?? [])
+        .map((step) => ({
+            rule: 'flow_connector_action_unresolved',
+            // A flow write is the sole member of its snapshot collection, so `flows[0]` IS this draft.
+            path: `flows[0].${step.path}.connectorConfig`,
+            where: `flow "${name}" · node "${step.nodeId}"`,
+            message: step.message,
+            hint: step.fix,
+            severity: 'warning' as const,
+            userMessage: step.userMessage,
+        }));
 }
 
 /**

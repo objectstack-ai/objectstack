@@ -45,6 +45,7 @@ import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
 import { FindOneHookResultNotRecordError, isFindOneResultShape } from './verb-hook-result-shape.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
+import { atFixedReadLeafDoor } from './fixed-read-leaf-seam.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { PLATFORM_PROVISIONED_COLUMNS, declaredColumnSet, rowsWithDeclaredColumnsOnly, rowsWithSelectedColumnsAnswered, selectedStoredColumns, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import {
@@ -436,7 +437,7 @@ export class FindFacet {
     rejectUnknownEngineOptions(object, 'find', query, ENGINE_FIND_OPTION_KEYS);
     // [#27008] An empty projection is refused, never read as every column.
     assertProjectionNamesAField(object, 'find', query);
-    query = lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object), this.relatedSchemaOf);
+    query = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object), this.relatedSchemaOf));
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
     // [latest per group] The engine-internal request for one row per group
@@ -805,7 +806,7 @@ export class FindFacet {
     rejectUnknownEngineOptions(objectName, 'findOne', query, ENGINE_FIND_OPTION_KEYS);
     // [#27008] Same refusal as find().
     assertProjectionNamesAField(objectName, 'findOne', query);
-    query = lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName), this.relatedSchemaOf);
+    query = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName), this.relatedSchemaOf));
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`

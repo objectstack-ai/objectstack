@@ -151,4 +151,6 @@ export const ruGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_user._actions.remove_sso_user.label": "27e40f055ed9dc98",
   "objects.sys_user._actions.remove_sso_user.successMessage": "45facf16a8b5ebc7",
   "objects.sys_user.fields.source.options.idp_pending": "3751093c5b65b072",
+  "objects.sys_work_calendar.fields.id.label": "00b0385c9c152888",
+  "objects.sys_work_calendar_exception.fields.id.label": "00b0385c9c152888",
 };

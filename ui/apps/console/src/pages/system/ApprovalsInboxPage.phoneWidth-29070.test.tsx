@@ -200,7 +200,7 @@ describe('the inline confirmation does not re-render the rows (objectstack#29070
 
     fireEvent.click(within(card).getByRole('button', { name: 'Reject' }));
     const dialog = await screen.findByRole('alertdialog');
-    const box = within(dialog).getByRole('textbox', { name: 'Comment (optional)' });
+    const box = within(dialog).getByRole('textbox', { name: 'Comment' });
     for (const value of ['O', 'Ov', 'Ove', 'Over the cap']) fireEvent.change(box, { target: { value } });
     expect(box).toHaveValue('Over the cap');
     expect(rowReads.count, 'opening the confirmation or typing the reason re-rendered the rows').toBe(before);

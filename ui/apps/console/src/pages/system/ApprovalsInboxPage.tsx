@@ -428,14 +428,16 @@ function RequestCell({ r, tr }: { r: ApprovalRequestRow; tr: Translate }) {
 
 /**
  * The `comment` member of a decision body: the trimmed reason, or nothing when
- * the approver left it empty, so an unexplained decision sends what it always did.
+ * there is none. A reject always has one — its confirmation stays disabled
+ * until the reason is non-blank, and the approvals door refuses a reject
+ * without it; an approve may leave it out.
  */
 function decisionComment(comment: string | undefined): { comment?: string } {
   const text = (comment ?? '').trim();
   return text ? { comment: text } : {};
 }
 
-/** The optional reason box a Reject confirmation carries. */
+/** The reason box a Reject confirmation carries; the reject waits on it. */
 function RejectCommentField({ id, label, value, onChange }: {
   id: string;
   label: string;
@@ -445,7 +447,7 @@ function RejectCommentField({ id, label, value, onChange }: {
   return (
     <div className="space-y-1.5">
       <label htmlFor={id} className="text-sm font-medium">{label}</label>
-      <Textarea id={id} rows={3} value={value} onChange={(e) => onChange(e.target.value)} />
+      <Textarea id={id} rows={3} required value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }
@@ -480,9 +482,9 @@ function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
 }) {
   const [approveTarget, setApproveTarget] = useState<ApprovalRequestRow | null>(null);
   const [rejectTarget, setRejectTarget] = useState<ApprovalRequestRow | null>(null);
-  // The optional reason a Reject confirmation collects, sent as the reject
-  // call's `comment` (the approvals door records it on the timeline). Each
-  // dialog starts empty: closing one clears what it held.
+  // The reason a Reject confirmation collects, sent as the reject call's
+  // `comment` (the approvals door requires it and records it on the
+  // timeline). Each dialog starts empty: closing one clears what it held.
   const [rejectComment, setRejectComment] = useState('');
   useImperativeHandle(ref, () => ({ openApprove: setApproveTarget, openReject: setRejectTarget }), []);
   // The size alone (`variant: null`): each button keeps its own variant.
@@ -532,13 +534,14 @@ function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
           </AlertDialogHeader>
           <RejectCommentField
             id="approvals-reject-comment"
-            label={tr('comment', 'Comment (optional)')}
+            label={tr('comment', 'Comment')}
             value={rejectComment}
             onChange={setRejectComment}
           />
           <AlertDialogFooter>
             <AlertDialogCancel className={footerButton}>{tr('cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction
+              disabled={!rejectComment.trim()}
               onClick={() => {
                 const r = rejectTarget;
                 const comment = rejectComment;
@@ -1924,13 +1927,14 @@ function ApprovalsQueue() {
                     </AlertDialogHeader>
                     <RejectCommentField
                       id="approvals-bulk-reject-comment"
-                      label={tr('comment', 'Comment (optional)')}
+                      label={tr('comment', 'Comment')}
                       value={bulkRejectComment}
                       onChange={setBulkRejectComment}
                     />
                     <AlertDialogFooter>
                       <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
                       <AlertDialogAction
+                        disabled={!bulkRejectComment.trim()}
                         onClick={() => runBulk('reject', bulkRejectComment)}
                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       >

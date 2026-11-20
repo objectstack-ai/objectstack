@@ -4495,5 +4495,128 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         message: "A retired unit cannot be brought back. Create a unit with a new code instead."
       }
     }
+  },
+  sys_work_calendar: {
+    label: "Arbeitskalender",
+    pluralLabel: "Arbeitskalender",
+    description: "Arbeitskalender: die wöchentlichen Arbeitszeiten, die Zeitzone, in der sie gelten, und bis wann die Feiertage gepflegt sind. Fälligkeitsdaten, die in Arbeitszeit gezählt werden, lesen sie.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "Maschinencode, mit dem Formeln, Genehmigungseskalationen und Pakete diesen Kalender benennen, z. B. cn_standard: Kleinbuchstaben, Ziffern und Unterstriche."
+      },
+      name: {
+        label: "Name"
+      },
+      timezone: {
+        label: "Zeitzone",
+        help: "IANA-Zeitzone, in der die Arbeitszeiten gelten, z. B. Asia/Shanghai. Das Formular zum Anlegen öffnet sich mit der Zeitzone der Organisation (Einstellungen → Lokalisierung), und ein Anlegen ohne Angabe erhält dieselbe Zeitzone."
+      },
+      is_default: {
+        label: "Standard",
+        help: "Der Kalender, den ein Fälligkeitsdatum verwendet, wenn es keinen nennt. Einer pro Organisation."
+      },
+      maintained_from: {
+        label: "Gepflegt ab",
+        help: "Erstes Datum, ab dem Feiertage und Ersatzarbeitstage erfasst sind. Eine Berechnung, die ein früheres Datum braucht, wird abgelehnt."
+      },
+      maintained_through: {
+        label: "Gepflegt bis",
+        help: "Letztes Datum, bis zu dem Feiertage und Ersatzarbeitstage erfasst sind. Eine Berechnung, die ein späteres Datum braucht, wird abgelehnt: Erfassen Sie die Feiertage des nächsten Jahres und verschieben Sie dann dieses Datum."
+      },
+      monday_periods: {
+        label: "Montag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      tuesday_periods: {
+        label: "Dienstag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      wednesday_periods: {
+        label: "Mittwoch",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      thursday_periods: {
+        label: "Donnerstag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      friday_periods: {
+        label: "Freitag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      saturday_periods: {
+        label: "Samstag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      sunday_periods: {
+        label: "Sonntag",
+        help: "Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Alle",
+        emptyState: {
+          title: "Noch keine Arbeitskalender",
+          message: "Fügen Sie einen Kalender mit seinen wöchentlichen Arbeitszeiten hinzu, markieren Sie einen als Standard und erfassen Sie dann seine Feiertage und Ersatzarbeitstage."
+        }
+      },
+      needs_maintenance: {
+        label: "Pflege erforderlich",
+        emptyState: {
+          title: "Alle Kalender sind vorausschauend gepflegt",
+          message: "Ein Kalender erscheint hier, wenn seine Feiertage innerhalb der nächsten 60 Tage enden; Fälligkeitsdaten nach diesem Datum werden abgelehnt."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "Der Code muss mit einem Kleinbuchstaben beginnen und darf nur Kleinbuchstaben, Ziffern und Unterstriche enthalten, z. B. cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Kalenderausnahme",
+    pluralLabel: "Kalenderausnahmen",
+    description: "Datierte Abweichungen von einem Arbeitskalender: Feiertage, Ersatzarbeitstage und Betriebsruhen. Ein Arbeitstag trägt seine vollständigen Arbeitszeiten.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Kalender"
+      },
+      date: {
+        label: "Datum"
+      },
+      kind: {
+        label: "Art",
+        help: "Frei: Der ganze Tag ist frei. Arbeitstag: An dem Datum wird mit den Zeiträumen unten gearbeitet, z. B. an einem Ersatzarbeitstag.",
+        options: {
+          off: "Frei",
+          on: "Arbeitstag"
+        }
+      },
+      periods: {
+        label: "Zeiträume",
+        help: "Für einen Arbeitstag alle Stunden dieses Datums; sie werden nie vom Wochentag übernommen. Arbeitszeiten an diesem Tag in der Zeitzone des Kalenders, HH:mm-HH:mm durch Kommas getrennt, z. B. 09:00-12:00, 13:00-18:00. Ein Zeitraum endet am selben Tag später, als er beginnt; 24:00 ist das späteste Ende. Für einen freien Tag leer lassen."
+      },
+      note: {
+        label: "Notiz",
+        help: "Was das Datum ist, z. B. Nationalfeiertag oder ein Ersatzarbeitstag zum Frühlingsfest."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Alle",
+        emptyState: {
+          title: "Noch keine Kalenderausnahmen",
+          message: "Fügen Sie pro Feiertag oder Ersatzarbeitstag eine Zeile hinzu oder importieren Sie ein Jahr davon aus einer Datei."
+        }
+      }
+    }
   }
 };

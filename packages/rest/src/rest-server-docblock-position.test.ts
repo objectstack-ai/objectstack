@@ -259,6 +259,9 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     // paging declaration's, the restore receipt's, the thrown-error answer's,
     // the function's, and the field-reading helper's inside it.
     'recycle-bin-routes.ts': 11,
+    // [ADR-0158 U7 R1] The module header, the capability's, the body keys', the
+    // host interface's, the body reader's and the function's.
+    'meta-unit-code-backfill-route.ts': 6,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -322,6 +325,7 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
         // [#30237] 108 + 11 = 119: `recycle-bin-routes.ts`, a new registrar.
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(119);
+        // [ADR-0158 U7 R1] 119 + 6 = 125: `meta-unit-code-backfill-route.ts`, a new registrar.
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(125);
     });
 });
