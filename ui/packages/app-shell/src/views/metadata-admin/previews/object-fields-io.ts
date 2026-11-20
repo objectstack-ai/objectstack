@@ -324,8 +324,9 @@ export function toFieldNameLoose(raw: string): string {
 
 /**
  * A declared field group (a.k.a. "section"). Lives at the object's top level as
- * `draft.fieldGroups`; individual fields opt into a group via
- * `Field.group === ObjectFieldGroup.key`.
+ * `draft.fieldGroups`; a group lists its members in display order in its own
+ * `fields`, or else fields opt into it via the older
+ * `Field.group === ObjectFieldGroup.key` (see {@link groupMembership}).
  *
  * Named `ObjectFieldGroup`, which is the spec's own name for this shape
  * (`@objectstack/spec/data`, the `ObjectFieldGroupSchema` family), and
@@ -359,7 +360,128 @@ export function toFieldNameLoose(raw: string): string {
 export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
 
 import type { z } from 'zod';
-import type { ObjectFieldGroupSchema } from '@objectstack/spec/data';
+import { readFieldGroupMembership, type FieldGroupMembership, type ObjectFieldGroupSchema } from '@objectstack/spec/data';
+
+/**
+ * Who belongs to which declared group, in display order — the spec's own
+ * resolution (`readFieldGroupMembership`, the one `deriveFieldGroupLayout`
+ * places sections from): a group's `fields` list first, then fields whose
+ * older `group` names it. Every editor here reads membership through this, so
+ * the designer and the rendered record page agree.
+ */
+export function groupMembership(view: FieldsView, fieldGroups: unknown): FieldGroupMembership {
+  return readFieldGroupMembership({ fieldGroups, fields: viewFieldMap(view) });
+}
+
+function viewFieldMap(view: FieldsView): Record<string, Record<string, unknown>> {
+  // `Object.fromEntries` defines own properties, so a `__proto__` name stays a
+  // plain key (objectui#9237).
+  return Object.fromEntries(view.entries.map((e) => [e.name, e.def]));
+}
+
+/**
+ * Write a new grouped layout back to the draft, the way `fieldGroups[].fields`
+ * intends: membership and in-group order live on the GROUP, so moving a field
+ * inside or between groups changes those groups' `fields` lists and never the
+ * object's field declaration order.
+ *
+ * `layout` maps each container to the field names it now shows, in order: a
+ * declared group key, or `null` for the trailing ungrouped bucket. Fields the
+ * caller does not show (system / kept-off-layout ones) are absent from it and
+ * keep their membership: a group's list keeps them after the shown members.
+ *
+ * - A group whose shown members (set and order) did not change is left exactly
+ *   as it was, list or no list.
+ * - A group that changed gets a `fields` list (written even when it had none,
+ *   because the older spelling cannot hold an order).
+ * - A field that moved: its own `group` is dropped when it would contradict
+ *   the list it now sits in, or when it moved to the ungrouped bucket.
+ * - The ungrouped bucket has no list to hold an order, so reordering it
+ *   permutes the ungrouped fields among the declaration slots they already
+ *   occupy; no grouped field moves. A caller whose bucket order is not plain
+ *   declaration order (one that pins fields first) passes
+ *   `reorderUngrouped: false` when the bucket's order did not change.
+ *
+ * Returns only the keys that changed (`{}` = nothing to write).
+ */
+export function writeGroupLayout(
+  view: FieldsView,
+  groups: ObjectFieldGroup[],
+  layout: ReadonlyMap<string | null, readonly string[]>,
+  opts?: { reorderUngrouped?: boolean },
+): { fields?: ReturnType<typeof writeFields>; fieldGroups?: ObjectFieldGroup[] } {
+  const membership = groupMembership(view, groups);
+  const shown = new Set<string>();
+  for (const names of layout.values()) for (const n of names) shown.add(n);
+  const containerOf = new Map<string, string | null>();
+  for (const [key, names] of layout) for (const n of names) containerOf.set(n, key);
+
+  let groupsChanged = false;
+  const nextGroups = groups.map((g) => {
+    if (!layout.has(g.key)) return g;
+    const current = membership.members.get(g.key) ?? [];
+    const before = current.filter((n) => shown.has(n));
+    const after = layout.get(g.key)!;
+    if (before.length === after.length && before.every((n, i) => n === after[i])) return g;
+    groupsChanged = true;
+    const keptOff = current.filter((n) => !shown.has(n));
+    return { ...g, fields: [...after, ...keptOff] } as ObjectFieldGroup;
+  });
+
+  let fieldsChanged = false;
+  let entries = view.entries.map((e) => {
+    if (!containerOf.has(e.name)) return e;
+    const target = containerOf.get(e.name) ?? null;
+    const own = typeof e.def.group === 'string' ? e.def.group : undefined;
+    if (own === undefined || own === target) return e;
+    // In a group under another key: that group holds the field by its list,
+    // which the older `group` would contradict. Moved to the ungrouped bucket
+    // out of a group: `group` would pull it back. (A `group` naming no declared
+    // group on a field that stays ungrouped says nothing and is kept.)
+    if (target === null && !membership.groupOf.has(e.name)) return e;
+    fieldsChanged = true;
+    const def = { ...e.def };
+    delete def.group;
+    return { name: e.name, def };
+  });
+
+  const ungroupedOrder = opts?.reorderUngrouped === false ? undefined : layout.get(null);
+  if (ungroupedOrder) {
+    const slots: number[] = [];
+    entries.forEach((e, i) => { if (containerOf.get(e.name) === null) slots.push(i); });
+    const inOrder = ungroupedOrder.filter((n) => containerOf.get(n) === null);
+    if (slots.some((slot, i) => entries[slot].name !== inOrder[i])) {
+      const byName = new Map(entries.map((e) => [e.name, e]));
+      const next = entries.slice();
+      slots.forEach((slot, i) => { next[slot] = byName.get(inOrder[i])!; });
+      entries = next;
+      fieldsChanged = true;
+    }
+  }
+
+  return {
+    ...(fieldsChanged ? { fields: writeFields({ shape: view.shape, entries }) } : {}),
+    ...(groupsChanged ? { fieldGroups: nextGroups } : {}),
+  };
+}
+
+/**
+ * The current grouped layout as {@link writeGroupLayout} takes it: every
+ * declared group's members and the ungrouped bucket, in display order, over the
+ * fields `isShown` admits (all of them by default).
+ */
+export function currentGroupLayout(
+  view: FieldsView,
+  groups: ObjectFieldGroup[],
+  isShown: (entry: FieldEntry) => boolean = () => true,
+): Map<string | null, string[]> {
+  const membership = groupMembership(view, groups);
+  const shownNames = new Set(view.entries.filter(isShown).map((e) => e.name));
+  const layout = new Map<string | null, string[]>();
+  for (const g of groups) layout.set(g.key, (membership.members.get(g.key) ?? []).filter((n) => shownNames.has(n)));
+  layout.set(null, view.entries.filter((e) => shownNames.has(e.name) && !membership.groupOf.has(e.name)).map((e) => e.name));
+  return layout;
+}
 
 /**
  * Read `draft.fieldGroups` into a normalized, well-typed list. Unknown/extra
@@ -461,9 +583,9 @@ export function moveArray<T>(arr: T[], from: number, to: number): T[] {
 }
 
 /**
- * Group entries by their `group` property, in `fieldGroups[]` order.
- * Fields with no group (or a group not declared in fieldGroups) land
- * in a trailing "Ungrouped" bucket.
+ * Group entries by membership ({@link groupMembership}), in `fieldGroups[]`
+ * order, members in display order. Fields no group holds land in a trailing
+ * "Ungrouped" bucket.
  *
  * By default empty *declared* groups are dropped to avoid chrome noise
  * (read-only / preview). Pass `includeEmptyDeclared` while editing so a
@@ -485,15 +607,16 @@ export function groupEntries(
   for (const g of declared) {
     buckets.set(g.key!, { key: g.key!, label: String(g.label ?? g.key), entries: [] });
   }
-  const declaredKeys = new Set(declared.map((g) => g.key as string));
+  const membership = groupMembership(view, declared);
+  const byName = new Map(view.entries.map((e) => [e.name, e]));
+  for (const [key, names] of membership.members) {
+    const bucket = buckets.get(key);
+    if (bucket) bucket.entries = names.map((n) => byName.get(n)!).filter(Boolean);
+  }
   for (const e of view.entries) {
-    const g = typeof e.def.group === 'string' ? (e.def.group as string) : null;
-    if (g && declaredKeys.has(g)) {
-      buckets.get(g)!.entries.push(e);
-    } else {
-      if (!buckets.has(null)) buckets.set(null, { key: null, label: 'Ungrouped', entries: [] });
-      buckets.get(null)!.entries.push(e);
-    }
+    if (membership.groupOf.has(e.name)) continue;
+    if (!buckets.has(null)) buckets.set(null, { key: null, label: 'Ungrouped', entries: [] });
+    buckets.get(null)!.entries.push(e);
   }
   const includeEmpty = !!opts?.includeEmptyDeclared;
   // Drop empty declared buckets unless asked to keep them (edit mode).
