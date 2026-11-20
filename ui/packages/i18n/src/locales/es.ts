@@ -1013,6 +1013,8 @@ const es = {
       rowHeightSpacious: 'Amplio',
       more: 'Más',
       restoreDefaults: 'Restaurar valores predeterminados',
+      shownColumns: 'Columnas mostradas',
+      addColumn: 'Añadir columna',
       recordOpenAlwaysPage: 'Los registros siempre se abren a página completa',
     },
   },

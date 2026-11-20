@@ -1101,6 +1101,8 @@ const ar = {
       rowHeightSpacious: 'واسع',
       more: 'المزيد',
       restoreDefaults: 'استعادة الافتراضي',
+      shownColumns: 'الأعمدة المعروضة',
+      addColumn: 'إضافة عمود',
       recordOpenAlwaysPage: 'تُفتح السجلات دائمًا في صفحة كاملة',
     },
   },

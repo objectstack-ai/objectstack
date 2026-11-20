@@ -191,7 +191,7 @@ const callsTo = (url: string) => fetchSpy.mock.calls.filter(([u]) => String(u).i
 
 /** The page header, once its toolbar has drawn the control action. */
 async function header(): Promise<HTMLElement> {
-  const el = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+  const el = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
   await within(el).findByRole('button', { name: /Export Tasks/ }, { timeout: 5000 });
   return el;
 }

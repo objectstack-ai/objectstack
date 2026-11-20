@@ -243,9 +243,10 @@ export function ObjectViewBarObjectName({
             <span className="flex shrink-0 items-center text-muted-foreground" aria-hidden="true">
                 {createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
             </span>
-            <span className="min-w-0 truncate text-[13px] font-medium leading-5 text-muted-foreground" data-testid="list-view-bar-object-name">
+            {/* The page's heading: the page bar that held the `h1` is not drawn. */}
+            <h1 className="min-w-0 truncate text-[13px] font-medium leading-5 text-muted-foreground" data-testid="list-view-bar-object-name">
                 {objectPluralLabel(objectDef)}
-            </span>
+            </h1>
             <ManagedByBadge managedBy={(objectDef as any)?.managedBy} />
             <span aria-hidden="true" className="shrink-0 text-muted-foreground/60">/</span>
         </span>
@@ -287,14 +288,14 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
                 data-testid="list-selection-page-bar"
                 aria-hidden={pageBar.selecting ? undefined : true}
             />
-            {!pageBar.selecting && (
-                <>
-                    {tools}
-                    <span className="hidden items-center gap-1 pl-1 sm:flex" data-testid="list-view-bar-actions">
-                        <ObjectViewPageBarActions {...props} />
-                    </span>
-                </>
-            )}
+            {/* Hidden, not unmounted, while rows are selected: the search keeps
+                its term and the header acts keep following the selection. */}
+            <div className={pageBar.selecting ? 'hidden' : 'flex items-center gap-0.5'} data-testid="list-view-bar-tools">
+                {tools}
+                <span className="hidden items-center gap-1 pl-1 sm:flex" data-testid="list-view-bar-actions">
+                    <ObjectViewPageBarActions {...props} />
+                </span>
+            </div>
         </div>
     );
 }

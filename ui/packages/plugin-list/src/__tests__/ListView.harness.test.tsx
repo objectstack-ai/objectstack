@@ -289,7 +289,9 @@ describe('ListView.hostDrawnConditions-35727', () => {
     expect(JSON.stringify(recordReads(ds).at(-1)![1])).toContain('acc_1');
     expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
     expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
-    expect(slot()).toBeEmptyDOMElement();
+    // The row is resident (objectstack#35878): no chip, only the dashed
+    // 「Sort」 and 「Filter」 buttons.
+    expect(within(slot()).getByTestId('condition-add-filter')).toHaveAttribute('data-empty', 'true');
   });
 
   it.each([
@@ -2246,7 +2248,7 @@ describe('ListView.draftOnlyColumn-34807', () => {
     await mountList({ draft: true }, { sort: [{ field: 'title', order: 'asc' }] }, {
       initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'title', operator: 'contains', value: 'a' }] },
     });
-    const filterOptions = await popoverFirstComboboxOptions(/^filter/i);
+    const filterOptions = await popoverFirstComboboxOptions(/^(add )?filter$/i);
     expect(filterOptions).toContain('Title');
     expect(filterOptions).not.toContain('Priority (draft)');
     const sortOptions = await popoverFirstComboboxOptions(/^sort/i);
@@ -2282,7 +2284,7 @@ describe('ListView.draftOnlyColumn-34807', () => {
     expect(lastParams().$orderby).toEqual([{ field: 'priority', order: 'desc' }]);
     expect(JSON.stringify(lastParams().$filter)).toContain('"priority"');
     expect(notice()).toBeNull();
-    const filterOptions = await popoverFirstComboboxOptions(/^filter/i);
+    const filterOptions = await popoverFirstComboboxOptions(/^(add )?filter$/i);
     expect(filterOptions).toContain('Priority');
   });
 });

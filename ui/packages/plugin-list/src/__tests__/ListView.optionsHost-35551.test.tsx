@@ -92,7 +92,7 @@ describe('Options — Fields writes the column order (objectstack#35551)', () =>
     );
     await screen.findByTestId('object-grid-stub');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
-    fireEvent.click(await screen.findByTestId('options-row-fields'));
+    fireEvent.click(await screen.findByTestId('options-add-column'));
     const shown = Array.from(document.querySelectorAll('[data-testid^="options-fields-move-"]'))
       .map((el) => el.getAttribute('data-testid')!.replace('options-fields-move-', ''));
     expect(shown).toEqual(['amount', 'name', 'stage']);
@@ -104,7 +104,7 @@ describe('Options — Fields writes the column order (objectstack#35551)', () =>
     mount({});
     await screen.findByTestId('object-grid-stub');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
-    fireEvent.click(await screen.findByTestId('options-row-fields'));
+    fireEvent.click(await screen.findByTestId('options-add-column'));
     expect(screen.queryByTestId('options-fields-move-name')).toBeNull();
   });
 
@@ -112,7 +112,7 @@ describe('Options — Fields writes the column order (objectstack#35551)', () =>
     mount({});
     await screen.findByTestId('object-grid-stub');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
-    fireEvent.click(await screen.findByTestId('options-row-fields'));
+    fireEvent.click(await screen.findByTestId('options-add-column'));
     expect(screen.getByTestId('options-fields-item-amount').getAttribute('data-field-type')).toBe('number');
     expect(screen.getByTestId('options-fields-item-name').getAttribute('data-field-type')).toBe('text');
   });

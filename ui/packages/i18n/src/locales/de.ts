@@ -980,6 +980,8 @@ const de = {
       rowHeightSpacious: 'Großzügig',
       more: 'Mehr',
       restoreDefaults: 'Standard wiederherstellen',
+      shownColumns: 'Angezeigte Spalten',
+      addColumn: 'Spalte hinzufügen',
       recordOpenAlwaysPage: 'Datensätze öffnen sich immer als ganze Seite',
     },
   },

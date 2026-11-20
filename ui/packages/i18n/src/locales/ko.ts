@@ -980,6 +980,8 @@ const ko = {
       rowHeightSpacious: '넓게',
       more: '더 보기',
       restoreDefaults: '기본값 복원',
+      shownColumns: '표시된 열',
+      addColumn: '열 추가',
       recordOpenAlwaysPage: '레코드는 항상 전체 페이지로 열립니다',
     },
   },

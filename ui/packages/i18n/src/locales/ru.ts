@@ -1042,6 +1042,8 @@ const ru = {
       rowHeightSpacious: 'Просторная',
       more: 'Ещё',
       restoreDefaults: 'Восстановить по умолчанию',
+      shownColumns: 'Показанные столбцы',
+      addColumn: 'Добавить столбец',
       recordOpenAlwaysPage: 'Записи всегда открываются на всю страницу',
     },
   },

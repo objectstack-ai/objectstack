@@ -2924,7 +2924,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2943,7 +2943,7 @@
       },
       "steps": [
         "sign in as admin; open showcase_task and switch to the in_progress saved view (stored filter status=in_progress); screenshot",
-        "open the toolbar's Filter (a text trigger from sm up, data-testid toolbar-filter-trigger, whose accessible name gains the badge count once a condition is active; Sort is the trigger beside it, ui/packages/plugin-list/src/ListView.tsx). Since objectstack#35549 / #35550 each opens the shared field list (the fields the view shows first, a search box, a type icon per row): Filter → a field → its values applies at once, with no Apply, and each condition shows as a chip in the condition row under the view bar; Sort → the direction on top → a field adds a level, shown as a sort chip before the filter chips. The full builders are one click further, behind the field list's footer: 「Advanced filter」 opens the FilterBuilder (no 「Where」 label any more) and 「All sort levels」 the SortBuilder. Add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
+        "open Filter in the condition row under the view bar (since objectstack#35878 the bar has no Filter or Sort button: the row is always there, with a dashed 「Filter」 button while no filter of the reader's own is set and a 「+」 after the filter chips once one is, both data-testid condition-add-filter; Sort is the row's first control, the dashed 「Sort」 button or, once sorted, the one sort chip 「Sorted by X +N」, data-testid condition-sort, ui/packages/plugin-list/src/conditions/ListConditionControls.tsx). Since objectstack#35549 / #35550 each opens the shared field list (the fields the view shows first, a search box, a type icon per row): Filter → a field → its values applies at once, with no Apply, and each condition shows as a chip in the condition row under the view bar; Sort → the direction on top → a field adds a level, the sort chip before the filter chips counting it as 「+N」. The full builders are one click further, behind the field list's footer: 「Advanced filter」 opens the FilterBuilder (no 「Where」 label any more) and 「All sort levels」 the SortBuilder. Add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
         "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the toolbar filter + sort restored",
         "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
@@ -3071,6 +3071,12 @@
           "date": "2026-11-19",
           "change": "steps[1] and acceptance[2].verify re-pointed to the list redo (objectstack#35549 filter, objectstack#35550 sort): Filter and Sort open the shared field list, conditions show as chips in the condition row under the view bar, and the FilterBuilder / SortBuilder sit behind the field list's 「Advanced filter」 / 「All sort levels」 footers; the FilterBuilder's 「Where」 label is gone. The clauses are unchanged: the merge, the sort param, the restore and the user scope read the same state",
           "ref": "#35549"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-20",
+          "change": "steps[1] re-pointed to the two-row list toolbar (objectstack#35878): the view bar has no Filter or Sort button; Filter is the condition row's dashed 「Filter」 button or its 「+」 (condition-add-filter) and Sort its dashed 「Sort」 button or its one sort chip (condition-sort).",
+          "ref": "#35878"
         }
       ]
     },

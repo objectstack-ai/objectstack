@@ -219,8 +219,11 @@ function fieldsLevelLabels(scope: HTMLElement): string[] {
  * Display panel is a menu whose rows open a second level, so Group, Row
  * color and the field list sit one click below the panel.
  */
+/** The entry that opens a level: Fields is behind 「+ Add column」 since objectstack#35878. */
+const levelEntry = (row: string) => (row === 'fields' ? 'options-add-column' : `options-row-${row}`);
+
 async function optionsLevel<T>(content: HTMLElement, row: string, read: (level: HTMLElement) => Promise<T> | T): Promise<T> {
-  fireEvent.click(within(content).getByTestId(`options-row-${row}`));
+  fireEvent.click(within(content).getByTestId(levelEntry(row)));
   const level = await within(content).findByTestId(`options-page-${row}`);
   try {
     return await read(level);
@@ -258,7 +261,9 @@ const FIELD_LIST_TRIGGERS: Record<'wide' | 'compact', string[]> = {
   // The compact toolbar folds Group, Row color and Hide fields into Display
   // (objectui#12423; "View settings" before it), which reads `allFields` for
   // all three.
-  compact: ['Filter', 'Options', 'Sort'], // Display reads Options since objectstack#35548
+  // Display reads View settings since objectstack#35878 (Options since
+  // objectstack#35548); Filter and Sort are the condition row's.
+  compact: ['Filter', 'Sort', 'View settings'],
 };
 
 interface Sweep {
@@ -273,11 +278,18 @@ async function sweepToolbar(): Promise<Sweep> {
   const toolbar = cluster?.parentElement;
   if (!toolbar) throw new Error('no toolbar around the tool cluster');
   const offered = new Map<string, string[]>();
-  for (const trigger of Array.from(toolbar.querySelectorAll<HTMLElement>('[aria-haspopup]'))) {
+  // Since objectstack#35878 Filter and Sort open from the condition row under
+  // the bar: its triggers are swept too.
+  const conditionRow = document.querySelector('[data-testid="list-condition-row"]');
+  const triggers = [
+    ...Array.from(toolbar.querySelectorAll<HTMLElement>('[aria-haspopup]')),
+    ...Array.from(conditionRow?.querySelectorAll<HTMLElement>('[aria-haspopup]') ?? []),
+  ];
+  for (const trigger of triggers) {
     // Keyed by the label: a count badge's digits are dropped, and so is the
     // ", 1 active" the Filter trigger's name carries while a filter is held
     // (objectui#12500).
-    const name = (trigger.getAttribute('aria-label') ?? text(trigger)).split(',')[0].replace(/\d+/g, '').trim();
+    const name = (trigger.getAttribute('aria-label') ?? text(trigger)).split(',')[0].replace(/\d+/g, '').trim().replace(/^Add filter$/, 'Filter').replace(/^Sorted by .*$/, 'Sort');
     const content = await openPopover(trigger);
     const items = [
       ...Array.from(content.querySelectorAll('option')).map(text),
@@ -292,7 +304,7 @@ async function sweepToolbar(): Promise<Sweep> {
     // The Options menu draws its field lists one level down: walk each level.
     if (within(content).queryByTestId('options-menu')) {
       for (const row of FIELD_LEVELS) {
-        if (!within(content).queryByTestId(`options-row-${row}`)) continue;
+        if (!within(content).queryByTestId(levelEntry(row))) continue;
         items.push(...(await optionsLevel(content, row, async (level) => {
           const found = [
             ...Array.from(level.querySelectorAll('option')).map(text),
@@ -366,12 +378,12 @@ const POSITIONS: Position[] = [
   {
     name: 'the Filter panel (objectui#11925)',
     props: HELD_FILTER,
-    read: () => inPopover(toolbarButton(/^filter/i), fieldListLabels),
+    read: () => inPopover(toolbarButton(/^(add )?filter$/i), fieldListLabels),
   },
   {
     name: 'the Filter panel, advanced step',
     props: HELD_FILTER,
-    read: () => inPopover(toolbarButton(/^filter/i), (c) => advancedFieldOptions(c, 'filter')),
+    read: () => inPopover(toolbarButton(/^(add )?filter$/i), (c) => advancedFieldOptions(c, 'filter')),
   },
   {
     name: 'the Sort picker (objectui#11943)',

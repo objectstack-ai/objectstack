@@ -88,22 +88,20 @@ describe('ViewSettingsPopover — every export entry stays inside the panel (obj
 
     const footer = within(panel).getByTestId('display-footer');
     const group = within(panel).getByTestId('display-export-group');
-    const refresh = within(panel).getByTestId('refresh-button');
     const reset = within(panel).getByTestId('display-reset-button');
 
     // The cause of the clipping was Refresh and the exports sharing one
     // non-wrapping group: the export row now holds export entries only.
-    expect(group).not.toContainElement(refresh);
+    // Refresh is gone from the panel (objectstack#35878).
+    expect(within(panel).queryByTestId('refresh-button')).toBeNull();
     expect(group).not.toContainElement(reset);
     expect(within(group).getAllByRole('button')).toHaveLength(FORMATS.length);
-    expect(refresh.parentElement).toBe(footer);
     expect(reset.parentElement).toBe(footer);
   });
 
   it('draws no export row when the view offers no format', () => {
     const panel = openPopover({ onRefresh: vi.fn(), exportFormats: [], onExport: vi.fn() });
 
-    expect(within(panel).getByTestId('refresh-button')).toBeInTheDocument();
     expect(within(panel).queryByTestId('display-export-group')).not.toBeInTheDocument();
   });
 });

@@ -24,7 +24,6 @@ import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue, sortD
 import {
   addSortLevel,
   chipsAreIndependent,
-  moveSortItem,
   quickFilterFamily,
   readViewConditions,
   type ConditionField,
@@ -463,11 +462,6 @@ describe('ConditionChipRow — the row under the view bar', () => {
     );
   }
 
-  it('CONTROL: draws nothing at all with no sort, no view condition and no filter', () => {
-    const { container } = render(<div data-testid="slot"><Row onReset={() => {}} /></div>);
-    expect(screen.getByTestId('slot').childElementCount).toBe(0);
-    expect(container.textContent).toBe('');
-  });
 
   it('a filter chip names the field and its values; × removes it', () => {
     const onFiltersChange = vi.fn();
@@ -503,37 +497,7 @@ describe('ConditionChipRow — the row under the view bar', () => {
     expect(chips[2].textContent).toContain(' or ');
   });
 
-  it('sort chips come before filter chips, name field and direction, and flip on click', () => {
-    const onSortChange = vi.fn();
-    render(<Row sort={[{ id: 's1', field: 'amount', order: 'asc' }]} filters={twoStages} onSortChange={onSortChange} />);
-    const row = screen.getByTestId('condition-chips');
-    const order = Array.from(row.querySelectorAll('[data-testid^="sort-chip-"], [data-testid^="filter-chip-"]'))
-      .map((el) => el.getAttribute('data-testid'))
-      .filter((id) => id === 'sort-chip-amount' || id === 'filter-chip-stage');
-    expect(order).toEqual(['sort-chip-amount', 'filter-chip-stage']);
-    const toggle = screen.getByTestId('sort-chip-toggle-amount');
-    expect(toggle.textContent).toBe('Amount');
-    expect(toggle.getAttribute('title')).toBe('Low → High');
-    fireEvent.click(toggle);
-    expect(onSortChange).toHaveBeenCalledWith([{ id: 's1', field: 'amount', order: 'desc' }]);
-  });
 
-  it('two sort levels: dragging the second chip onto the first changes the priority', () => {
-    const onSortChange = vi.fn();
-    const sort: SortItem[] = [
-      { id: 's1', field: 'stage', order: 'asc' },
-      { id: 's2', field: 'amount', order: 'desc' },
-    ];
-    render(<Row sort={sort} onSortChange={onSortChange} />);
-    const first = screen.getByTestId('sort-chip-stage');
-    const second = screen.getByTestId('sort-chip-amount');
-    expect(second.getAttribute('draggable')).toBe('true');
-    fireEvent.dragStart(second);
-    fireEvent.dragOver(first);
-    fireEvent.drop(first);
-    expect(onSortChange.mock.calls[0][0].map((s: SortItem) => s.field)).toEqual(['amount', 'stage']);
-    expect(moveSortItem(sort, 0, 1).map((s) => s.field)).toEqual(['amount', 'stage']);
-  });
 
   it('「Reset」 calls the host, and is not drawn at all while the host passes none (objectstack#35727)', () => {
     const onReset = vi.fn();
@@ -567,10 +531,6 @@ describe('ConditionChipRow — the row under the view bar', () => {
       expect(screen.getAllByTestId('view-condition-chip').map((c) => c.getAttribute('data-field'))).toEqual(['account', 'amount']);
     });
 
-    it('when every view condition is the host\'s and the reader has none, the row draws nothing', () => {
-      render(<div data-testid="slot"><Row viewFilter={[['account', '=', 'a1']]} hostDrawnFields={['account']} /></div>);
-      expect(screen.getByTestId('slot').childElementCount).toBe(0);
-    });
 
     it('a locked lookup chip names the record it points at, read through the data source', async () => {
       const ds = lookupSource(async () => ({ data: [{ id: 'a1', title: 'Globex' }] }));
@@ -621,14 +581,6 @@ describe('ConditionChipRow — the row under the view bar', () => {
     expect(screen.getByTestId('advanced-builder')).toBeTruthy();
   });
 
-  it('an unfinished row draws no chip', () => {
-    const { container } = render(
-      <div data-testid="slot">
-        <Row filters={{ id: 'root', logic: 'and', conditions: [{ id: 'x', field: 'stage', operator: 'in', value: [] }] }} />
-      </div>,
-    );
-    expect(container.querySelector('[data-testid="condition-chips"]')).toBeNull();
-  });
 });
 
 describe('condition model', () => {
@@ -656,5 +608,93 @@ describe('condition model', () => {
     expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never)).toBe('≥ 100');
     expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never)).toBe('Today');
     expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never)).toBe('is empty');
+  });
+});
+
+describe('ConditionChipRow — the resident row of the two-row toolbar (objectstack#35878)', () => {
+  const sortPanel = (close: () => void) => (
+    <button type="button" data-testid="sort-panel-stand-in" onClick={close}>panel</button>
+  );
+  function TwoRow(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={FIELDS}
+        onSortChange={() => {}}
+        filters={EMPTY}
+        filterFields={FIELDS}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div data-testid="advanced-builder" />}
+        renderSortPanel={sortPanel}
+        {...props}
+      />
+    );
+  }
+  const stageFilter: FilterBuilderRowGroup = {
+    id: 'root',
+    logic: 'and',
+    conditions: [{ id: 'c1', field: 'stage', operator: 'in', value: ['negotiation'] }],
+  };
+
+  it('with nothing set it is there, with the dashed 「Sort」 and 「Filter」 buttons and nothing else', () => {
+    render(<TwoRow />);
+    expect(screen.getByTestId('condition-sort')).toHaveTextContent('Sort');
+    expect(screen.getByTestId('condition-sort')).toHaveAttribute('data-levels', '0');
+    expect(screen.getByTestId('condition-add-filter')).toHaveTextContent('Filter');
+    expect(screen.getByTestId('condition-add-filter')).toHaveAttribute('data-empty', 'true');
+    expect(screen.getByTestId('condition-sort').className).toContain('border-dashed');
+    expect(screen.queryByTestId('condition-reset')).toBeNull();
+  });
+
+  it('a sort of any number of levels is ONE chip, 「Sorted by X」 with 「+N」, and it opens the sort panel', () => {
+    const sort: SortItem[] = [
+      { id: 's1', field: 'amount', order: 'desc' },
+      { id: 's2', field: 'name', order: 'asc' },
+      { id: 's3', field: 'stage', order: 'asc' },
+    ];
+    render(<TwoRow sort={sort} />);
+    const chips = screen.getAllByTestId('condition-sort');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toHaveTextContent('Sorted by Amount');
+    expect(screen.getByTestId('sort-chip-more')).toHaveTextContent('+2');
+    fireEvent.click(chips[0]);
+    expect(screen.getByTestId('sort-panel-stand-in')).toBeInTheDocument();
+    // The panel's close closes the popover.
+    fireEvent.click(screen.getByTestId('sort-panel-stand-in'));
+    expect(screen.queryByTestId('sort-panel-stand-in')).toBeNull();
+  });
+
+  it('CONTROL: one level reads no 「+N」', () => {
+    render(<TwoRow sort={[{ id: 's1', field: 'name', order: 'asc' }]} />);
+    expect(screen.getByTestId('condition-sort')).toHaveTextContent('Sorted by Name');
+    expect(screen.queryByTestId('sort-chip-more')).toBeNull();
+  });
+
+  it('with a filter of the reader\'s own: its chip, then 「+」, which opens the field list', () => {
+    render(<TwoRow filters={stageFilter} />);
+    expect(screen.getByTestId('filter-chip-stage')).toBeInTheDocument();
+    const add = screen.getByTestId('condition-add-filter');
+    expect(add).not.toHaveAttribute('data-empty');
+    expect(add).toHaveAccessibleName('Add filter');
+    expect(add.compareDocumentPosition(screen.getByTestId('filter-chip-stage')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    fireEvent.click(add);
+    expect(screen.getByTestId('filter-panel-fields')).toBeInTheDocument();
+  });
+
+  it('the host\'s end takes the place of the row\'s own Reset', () => {
+    render(<TwoRow filters={stageFilter} onReset={() => {}} end={<span data-testid="host-end">Personalized</span>} />);
+    expect(screen.getByTestId('condition-row-end')).toContainElement(screen.getByTestId('host-end'));
+    expect(screen.queryByTestId('condition-reset')).toBeNull();
+  });
+
+  it('without a sort panel or a filter to offer, and nothing set, the row draws nothing', () => {
+    const { container } = render(<TwoRow renderSortPanel={undefined} filterOffered={false} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('one line: what does not fit scrolls sideways', () => {
+    render(<TwoRow filters={stageFilter} />);
+    const row = screen.getByTestId('condition-chips');
+    expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-nowrap', 'overflow-x-auto']));
   });
 });

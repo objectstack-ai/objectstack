@@ -1007,6 +1007,8 @@ const zhHant = {
       rowHeightSpacious: '寬鬆',
       more: '更多',
       restoreDefaults: '恢復預設',
+      shownColumns: '顯示的列',
+      addColumn: '新增列',
       recordOpenAlwaysPage: '記錄總是整頁開啟',
     },
   },

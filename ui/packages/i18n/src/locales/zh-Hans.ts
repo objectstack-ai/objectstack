@@ -1007,6 +1007,8 @@ const zh = {
       rowHeightSpacious: '宽松',
       more: '更多',
       restoreDefaults: '恢复默认',
+      shownColumns: '显示的列',
+      addColumn: '添加列',
       recordOpenAlwaysPage: '记录总是整页打开',
     },
   },

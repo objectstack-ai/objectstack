@@ -255,7 +255,7 @@ async function mount(page: Page): Promise<void> {
   );
   await page.goto('http://localhost/list-condition-row');
   await page.addScriptTag({ content: bundle, type: 'module' });
-  await page.getByTestId('toolbar-filter-trigger').waitFor({ state: 'attached', timeout: 30_000 });
+  await page.getByTestId('condition-add-filter').waitFor({ state: 'attached', timeout: 30_000 });
   await page.getByTestId('record-count-bar').waitFor({ state: 'attached', timeout: 30_000 });
   await style(page);
 }
@@ -291,7 +291,7 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     test.setTimeout(120_000);
     await mount(page);
     await expect.poll(() => count(page)).toBe('12');
-    await click(page, 'toolbar-filter-trigger');
+    await click(page, 'condition-add-filter');
     await click(page, 'filter-panel-fields-item-stage');
     await page.getByTestId('filter-panel-values-option-negotiation').getByRole('checkbox').click();
     await style(page);
@@ -322,18 +322,18 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     test.setTimeout(120_000);
     await mount(page);
     await expect.poll(() => count(page)).toBe('12');
-    await click(page, 'toolbar-sort-trigger');
+    await click(page, 'condition-sort');
     await click(page, 'sort-panel-order-desc');
     await click(page, 'sort-panel-fields-item-amount');
     expect(await sortNow(page)).toEqual(['amount:desc']);
     await expect(page.getByTestId('sort-chip-toggle-amount')).toHaveText('Amount');
     await expect(page.getByTestId('sort-chip-toggle-amount')).toHaveAttribute('title', 'High → Low');
     // a second level
-    await click(page, 'toolbar-sort-trigger');
+    await click(page, 'condition-sort');
     await click(page, 'sort-panel-fields-item-stage');
     expect(await sortNow(page)).toEqual(['amount:desc', 'stage:asc']);
     // a filter chip joins after the sort chips
-    await click(page, 'toolbar-filter-trigger');
+    await click(page, 'condition-add-filter');
     await click(page, 'filter-panel-fields-item-stage');
     await page.getByTestId('filter-panel-values-option-proposal').getByRole('checkbox').click();
     await page.keyboard.press('Escape');

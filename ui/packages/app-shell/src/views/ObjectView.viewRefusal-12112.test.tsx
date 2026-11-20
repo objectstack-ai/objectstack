@@ -72,7 +72,13 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
   ListView: (props: any) => {
     // objectstack#35548 — the view switcher leads the list's view bar: draw the slot.
     const lead = props.toolbarLeading;
-    return typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null;
+    // objectstack#35878 — the condition row's end (the 「Personalized」 marker) draws too.
+    return (
+      <>
+        {typeof lead === 'function' ? lead({ recordCount: null, layout: 'grid' }) : lead ?? null}
+        {props.conditionRowEnd ?? null}
+      </>
+    );
   },
 }));
 // The list area, reduced to the view it was handed.

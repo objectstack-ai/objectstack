@@ -1008,6 +1008,8 @@ const pt = {
       rowHeightSpacious: 'Espaçosa',
       more: 'Mais',
       restoreDefaults: 'Restaurar padrões',
+      shownColumns: 'Colunas exibidas',
+      addColumn: 'Adicionar coluna',
       recordOpenAlwaysPage: 'Os registros sempre abrem em página inteira',
     },
   },

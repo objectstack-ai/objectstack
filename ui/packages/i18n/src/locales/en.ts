@@ -1269,6 +1269,8 @@ const en = {
       rowHeightSpacious: 'Spacious',
       more: 'More',
       restoreDefaults: 'Restore defaults',
+      shownColumns: 'Shown columns',
+      addColumn: 'Add column',
       recordOpenAlwaysPage: 'Records always open as a full page',
     },
   },

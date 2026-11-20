@@ -89,10 +89,12 @@ describe('Options menu — the first level', () => {
       setInlineEdit: () => {},
     });
     expect(value('options-row-layout')).toBe('Grid');
-    expect(value('options-row-fields')).toBe('3 shown');
+    // objectstack#35878: the shown columns are in place on this level.
+    expect(screen.getByTestId('options-columns-list')).toBeInTheDocument();
     expect(value('options-row-group')).toBe('Stage');
     expect(value('options-row-row-height')).toBe('Standard');
-    expect(screen.getByTestId('options-row-more')).toBeTruthy();
+    // objectstack#35878: no More level on this panel.
+    expect(screen.queryByTestId('options-row-more')).toBeNull();
   });
 
   it('opens a second level per row, and its back control returns to the menu', () => {
@@ -220,14 +222,14 @@ describe('Options menu — Fields', () => {
     const updateHiddenFields = vi.fn();
     openMenu({ updateHiddenFields });
     // 1 = the trigger (openMenu), 2 = Fields, 3 = the eye.
-    fireEvent.click(screen.getByTestId('options-row-fields'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     fireEvent.click(screen.getByTestId('options-fields-hide-probability'));
     expect([...updateHiddenFields.mock.calls[0][0]]).toEqual(['probability']);
     cleanup();
 
     const show = vi.fn();
     openMenu({ hiddenFields: new Set(['probability']), updateHiddenFields: show });
-    fireEvent.click(screen.getByTestId('options-row-fields'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     fireEvent.click(screen.getByTestId('options-fields-item-probability'));
     expect([...show.mock.calls[0][0]]).toEqual([]);
   });
@@ -235,7 +237,7 @@ describe('Options menu — Fields', () => {
   it('search narrows both lists; an addable field is added with one click', () => {
     const onAddField = vi.fn();
     openMenu({ addableFields: [{ name: 'close_date', label: 'Close date' }], onAddField });
-    fireEvent.click(screen.getByTestId('options-row-fields'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     fireEvent.change(screen.getByTestId('options-fields-search'), { target: { value: 'clo' } });
     expect(screen.queryByTestId('options-fields-shown')).toBeNull();
     fireEvent.click(screen.getByTestId('options-fields-item-close_date'));
@@ -247,7 +249,7 @@ describe('Options menu — Fields', () => {
   it('dragging a shown field writes the whole order, a hidden field keeping its relative place', () => {
     const onFieldOrderChange = vi.fn();
     openMenu({ hiddenFields: new Set(['stage']), onFieldOrderChange, fieldOrder: ['name', 'stage', 'amount', 'probability'] });
-    fireEvent.click(screen.getByTestId('options-row-fields'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     const dataTransfer = { setData: vi.fn(), getData: vi.fn(() => 'probability'), effectAllowed: '', dropEffect: '' };
     fireEvent.dragStart(screen.getByTestId('options-fields-row-probability'), { dataTransfer });
     fireEvent.dragOver(screen.getByTestId('options-fields-row-name'), { dataTransfer });
@@ -258,18 +260,18 @@ describe('Options menu — Fields', () => {
   it('the handle moves a field with the arrow keys', () => {
     const onFieldOrderChange = vi.fn();
     openMenu({ onFieldOrderChange });
-    fireEvent.click(screen.getByTestId('options-row-fields'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     fireEvent.keyDown(screen.getByTestId('options-fields-move-name'), { key: 'ArrowDown' });
     expect(onFieldOrderChange).toHaveBeenCalledWith(['stage', 'name', 'amount', 'probability']);
   });
 
   it('offers no drag without a host to write the order, and none while searching', () => {
     openMenu({ onFieldOrderChange: undefined });
-    fireEvent.click(screen.getByTestId('options-row-fields'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     expect(screen.queryByTestId('options-fields-move-name')).toBeNull();
     cleanup();
     openMenu({ onFieldOrderChange: () => {} });
-    fireEvent.click(screen.getByTestId('options-row-fields'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     expect(screen.getByTestId('options-fields-move-name')).toBeTruthy();
     fireEvent.change(screen.getByTestId('options-fields-search'), { target: { value: 'a' } });
     expect(screen.queryByTestId('options-fields-move-name')).toBeNull();
@@ -296,27 +298,10 @@ describe('Options menu — words', () => {
     };
     named(screen.getByTestId('view-settings-content'));
     expect(screen.getByTestId('display-reset-button').textContent).toBe(zhPack.list.optionsMenu.restoreDefaults);
-    expect(screen.getByTestId('refresh-button').textContent).toBe(zhPack.list.refresh);
-    fireEvent.click(screen.getByTestId('options-row-fields'));
-    named(screen.getByTestId('view-settings-content'));
-    fireEvent.click(screen.getByTestId('options-back'));
-    fireEvent.click(screen.getByTestId('options-row-more'));
+    fireEvent.click(screen.getByTestId('options-add-column'));
     named(screen.getByTestId('view-settings-content'));
   });
 
-  it('speaks no developer wording on the Open records level', () => {
-    openMenu({ recordOpen: { resolvedMode: 'drawer', preference: 'drawer', setPreference: () => {} } }, 'zh');
-    fireEvent.click(screen.getByTestId('options-row-more'));
-    const text = screen.getByTestId('view-settings-content').textContent ?? '';
-    // The note the menu dropped (its key is gone from every pack).
-    expect(text).not.toContain('个人偏好');
-    expect(text).not.toContain('对象声明');
-    cleanup();
-    openMenu({ recordOpen: { resolvedMode: 'page', preference: 'drawer', setPreference: () => {} } }, 'zh');
-    fireEvent.click(screen.getByTestId('options-row-more'));
-    expect(screen.getByTestId('display-record-open-declared').textContent).toBe(zhPack.list.optionsMenu.recordOpenAlwaysPage);
-    expect(screen.getByTestId('view-settings-content').textContent).not.toContain('对象声明');
-  });
 
   it('every new key is in the en pack', () => {
     expect(Object.keys(en.list.optionsMenu).sort()).toEqual(Object.keys(zhPack.list.optionsMenu).sort());

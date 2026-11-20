@@ -115,7 +115,7 @@ const PHONE_TOUCH_TARGET = constant(read(TOUCH_FILE), TOUCH_FILE, 'PHONE_TOUCH_T
 // The Filter / Sort / Options triggers draw from one constant (objectstack#35548);
 // below `sm` they are icons, their text labels `hidden sm:inline`.
 const TEXT_TRIGGER = constant(rowSrc, ROW_FILE, 'TOOLBAR_TEXT_TRIGGER');
-if (!/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,\s*PHONE_TOUCH_TARGET,[\s\S]{0,200}data-testid="toolbar-filter-trigger"/.test(listSrc)) {
+if (!/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,\s*PHONE_TOUCH_TARGET,[\s\S]{0,200}data-testid="condition-add-filter"/.test(listSrc)) {
   throw new Error(`${LIST_FILE}: the Filter trigger no longer draws from TOOLBAR_TEXT_TRIGGER + PHONE_TOUCH_TARGET`);
 }
 const ICON_BUTTON = `${BUTTON_BASE} ${TEXT_TRIGGER} ${PHONE_TOUCH_TARGET}`;

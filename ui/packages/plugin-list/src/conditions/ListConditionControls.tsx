@@ -455,7 +455,11 @@ export function SortPanel({
 export interface ConditionChipRowProps {
   sort: ReadonlyArray<SortItem>;
   sortFields: ReadonlyArray<ConditionField>;
-  onSortChange: (next: SortItem[]) => void;
+  /**
+   * Kept for hosts that pass it; the row writes no sort itself since
+   * objectstack#35878 — its one sort chip opens `renderSortPanel`, which writes.
+   */
+  onSortChange?: (next: SortItem[]) => void;
   filters: FilterBuilderRowGroup;
   filterFields: ReadonlyArray<ConditionField>;
   onFiltersChange: (next: FilterBuilderRowGroup) => void;
@@ -498,14 +502,20 @@ export interface ConditionChipRowProps {
 const CHIP_CLASS =
   'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-full border px-2 text-[13px] leading-none';
 
+/**
+ * A control of the condition row below `sm`: 44 px on both sides (WCAG 2.5.5),
+ * as the bar's Filter and Sort triggers were before they moved here
+ * (objectstack#35878).
+ */
+const ROW_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
+
 /** 「Sort」, 「Filter」 and 「+」 before anything is set: dashed, so they do not read as a condition in force. */
 const EMPTY_BUTTON_CLASS =
-  'inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 export function ConditionChipRow({
   sort,
   sortFields,
-  onSortChange,
   filters,
   filterFields,
   onFiltersChange,
@@ -555,7 +565,9 @@ export function ConditionChipRow({
           onChange={onFiltersChange}
           renderAdvanced={renderAdvanced}
           conditionId={conditionId}
-          testId={`condition-panel-${key}`}
+          // The add-a-filter panel is the list's Filter panel (it was the
+          // bar's Filter popover before objectstack#35878): its own id.
+          testId={key === 'add' ? undefined : `condition-panel-${key}`}
         />
       </PopoverContent>
     </Popover>
@@ -579,8 +591,8 @@ export function ConditionChipRow({
             {sort.length > 0 ? (
               <button
                 type="button"
-                className={cn(CHIP_CLASS, 'border-primary/30 bg-primary/5 text-foreground hover:bg-primary/10')}
-                data-testid="sort-chip"
+                className={cn(CHIP_CLASS, ROW_TOUCH_TARGET, 'border-primary/30 bg-primary/5 text-foreground hover:bg-primary/10')}
+                data-testid="condition-sort"
                 data-levels={sort.length}
               >
                 <ArrowUpDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -596,7 +608,7 @@ export function ConditionChipRow({
                 )}
               </button>
             ) : (
-              <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-sort-button">
+              <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-sort" data-levels={0}>
                 <ArrowUpDown className="h-3 w-3 shrink-0" aria-hidden="true" />
                 {t('listConditions.chips.sort')}
               </button>
@@ -684,7 +696,7 @@ export function ConditionChipRow({
       {filterOffered && filterPopover(
         'add',
         appliedRows.length === 0 ? (
-          <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-filter-button">
+          <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-add-filter" data-empty="true">
             <ListFilter className="h-3 w-3 shrink-0" aria-hidden="true" />
             {t('listConditions.chips.filter')}
           </button>

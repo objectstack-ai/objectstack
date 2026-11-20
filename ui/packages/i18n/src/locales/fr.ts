@@ -1008,6 +1008,8 @@ const fr = {
       rowHeightSpacious: 'Spacieuse',
       more: 'Plus',
       restoreDefaults: 'Rétablir les valeurs par défaut',
+      shownColumns: 'Colonnes affichées',
+      addColumn: 'Ajouter une colonne',
       recordOpenAlwaysPage: 'Les enregistrements s’ouvrent toujours en pleine page',
     },
   },

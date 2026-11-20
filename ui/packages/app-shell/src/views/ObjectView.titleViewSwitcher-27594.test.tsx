@@ -154,7 +154,7 @@ function mountLeads(entry = '/apps/crm/crm_lead/view/v1') {
 
 /** The list's toolbar has drawn: its Filter control is on screen. */
 const listToolbar = () =>
-  waitFor(() => expect(screen.getByTestId('toolbar-filter-trigger')).toBeInTheDocument(), { timeout: 5000 });
+  waitFor(() => expect(screen.getByTestId('condition-add-filter')).toBeInTheDocument(), { timeout: 5000 });
 
 /** The reader's pinned view of `crm_lead`, as the workspace preference keeps it. */
 const PIN_KEY = 'os:pref:list.view.pinned@object:crm_lead';

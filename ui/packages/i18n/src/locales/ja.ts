@@ -980,6 +980,8 @@ const ja = {
       rowHeightSpacious: 'ゆったり',
       more: 'その他',
       restoreDefaults: 'デフォルトに戻す',
+      shownColumns: '表示中の列',
+      addColumn: '列を追加',
       recordOpenAlwaysPage: 'レコードは常にページ全体で開きます',
     },
   },
