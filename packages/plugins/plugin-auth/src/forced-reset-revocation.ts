@@ -50,11 +50,22 @@
  *   registry; the operator's reset, which runs with no auth server, hands the
  *   project database's stores ({@link storedOAuthGrants}). No `opts.oauth`,
  *   no grant is read.
+ * - Every OAuth application the user registered is disabled and every SCIM
+ *   connection credential the user minted is revoked, as a completed
+ *   self-service reset does, through the same arm
+ *   (`password-reset-ends-added-access.ts` {@link endWhatTheAccountRegistered}),
+ *   read and written through this engine by the rows' own `user_id`: an app
+ *   another account registered and a credential another administrator minted
+ *   are never touched. A platform administrator may enable a disabled app
+ *   again; a revoked credential stays revoked, and its connection's
+ *   provisioning waits for a new one.
  *
  * Unlike the posture refusal (ruling item 4, "the refusal is not a
  * revocation"), this IS a revocation: a revoked key stays revoked after the
  * password change, and the owner mints a replacement; an unlinked provider is
- * linked again by its owner; an app is authorized again by its owner.
+ * linked again by its owner; an app is authorized again by its owner; a
+ * disabled application is enabled again by a platform administrator; a
+ * revoked SCIM credential is replaced by a newly minted one.
  *
  * ## The outcome is the CALLER's, and it is never silent
  *
@@ -67,7 +78,14 @@
  */
 
 import { SystemObjectName } from '@objectstack/spec/system';
-import { endOAuthGrants, type EndedOAuthGrants, type MountedOAuthGrants } from './password-reset-ends-added-access.js';
+import {
+  endOAuthGrants,
+  endWhatTheAccountRegistered,
+  type EndedOAuthGrants,
+  type EndedRegistrations,
+  type MountedOAuthGrants,
+  type RegistrationStore,
+} from './password-reset-ends-added-access.js';
 
 /**
  * The reason an administrator's forced reset records: `sys_session.revoke_reason`
@@ -87,6 +105,7 @@ const CREDENTIAL_PROVIDER_ID = 'credential';
 /** The slice of the data engine this module uses. */
 export interface ForcedResetRevocationEngine {
   find?(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
+  findOne?(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
   update(object: string, doc: Record<string, unknown>, opts?: unknown): Promise<unknown>;
   delete?(object: string, options?: unknown): Promise<unknown>;
 }
@@ -105,11 +124,16 @@ export interface ForcedResetRevocationOutcome {
    * ended with them; a grant that could not be ended counts in `failed`.
    */
   authorizedApps: number;
+  /** OAuth applications the user registered that were disabled. */
+  ownedApps: number;
+  /** SCIM connection credentials the user minted that were revoked. */
+  scimCredentials: number;
   /** Rows the revocation meant to write and could not (read or write refused). */
   failed: number;
   /**
    * `true` only when every live session, every unrevoked key, every linked
-   * sign-in account and every OAuth grant the user had was ended. `false`
+   * sign-in account, every OAuth grant, every enabled OAuth application the
+   * user registered and every active SCIM credential it minted was ended. `false`
    * whenever a read or a write did not land, or the
    * engine offers no read surface at all — a revocation that cannot be
    * measured is never reported as complete.
@@ -145,6 +169,36 @@ async function endAuthorizedApps(
   outcome.authorizedApps = ended.authorizedApps;
 }
 
+/**
+ * The self-service reset's own arm for the OAuth applications the user
+ * registered and the SCIM credentials it minted; it throws on a read or a
+ * write that does not land, which the outcome counts in `failed` instead. What
+ * it ended before the failure is counted all the same: the arm names each row
+ * as it ends it. An engine with no single-row read is read through `find`.
+ */
+async function endRegistrations(
+  outcome: ForcedResetRevocationOutcome,
+  engine: ForcedResetRevocationEngine & { find(object: string, query?: unknown, opts?: unknown): Promise<unknown> },
+  userId: string,
+): Promise<void> {
+  const store: RegistrationStore = {
+    find: (object, query, opts) => engine.find(object, query, opts),
+    findOne: async (object, query, opts) =>
+      (engine.findOne
+        ? ((await engine.findOne(object, query, opts)) as Record<string, unknown> | null)
+        : (rowsOf(await engine.find(object, { ...query, limit: 1 }, opts))[0] ?? null)),
+    update: (object, data, opts) => engine.update(object, data, opts),
+  };
+  const ended: EndedRegistrations = { ownedApps: [], scimCredentials: [] };
+  try {
+    await endWhatTheAccountRegistered(store, userId, ended);
+  } catch {
+    outcome.failed += 1;
+  }
+  outcome.ownedApps = ended.ownedApps.length;
+  outcome.scimCredentials = ended.scimCredentials.length;
+}
+
 function isLiveSession(row: Record<string, any>, now: number): boolean {
   if (row.revoked_at) return false;
   if (row.expires_at && new Date(row.expires_at).getTime() <= now) return false;
@@ -152,9 +206,10 @@ function isLiveSession(row: Record<string, any>, now: number): boolean {
 }
 
 /**
- * Revoke every live session and every unrevoked API key of `userId`, and
- * unlink every sign-in account linked to it other than its password. Never
- * throws; the outcome says what landed.
+ * Revoke every live session and every unrevoked API key of `userId`, unlink
+ * every sign-in account linked to it other than its password, end its OAuth
+ * grants, disable the OAuth applications it registered and revoke the SCIM
+ * credentials it minted. Never throws; the outcome says what landed.
  */
 export async function revokeSessionsAndApiKeys(
   engine: ForcedResetRevocationEngine | undefined,
@@ -166,13 +221,15 @@ export async function revokeSessionsAndApiKeys(
     apiKeys: 0,
     signInAccounts: 0,
     authorizedApps: 0,
+    ownedApps: 0,
+    scimCredentials: 0,
     failed: 0,
     complete: false,
   };
   if (!engine || typeof engine.find !== 'function' || !userId) {
     opts.logger?.warn(
-      '[AuthPlugin] forced reset: the user\'s sessions, API keys and linked sign-in accounts were NOT '
-        + 'revoked — the data '
+      '[AuthPlugin] forced reset: the user\'s sessions, API keys, linked sign-in accounts, registered OAuth '
+        + 'applications and minted SCIM credentials were NOT revoked — the data '
         + 'engine offers no read surface, so they could not be found. The password reset itself landed. '
         + 'Remedy: wire the ObjectQL engine into the auth plugin.',
     );
@@ -276,17 +333,24 @@ export async function revokeSessionsAndApiKeys(
   // ── Authorized apps and device sign-ins ────────────────────────────────
   await endAuthorizedApps(outcome, opts.oauth, userId);
 
+  // ── Registered OAuth applications and minted SCIM credentials ──────────
+  await endRegistrations(outcome, engine as Parameters<typeof endRegistrations>[1], userId);
+
   outcome.complete = !incomplete && outcome.failed === 0;
   if (!outcome.complete) {
     opts.logger?.warn(
       `[AuthPlugin] forced reset for user ${userId}: revocation INCOMPLETE — ${outcome.sessions} session(s) `
         + `and ${outcome.apiKeys} API key(s) revoked, ${outcome.signInAccounts} linked sign-in account(s) `
-        + `unlinked, ${outcome.authorizedApps} authorized app(s) ended, ${outcome.failed} write(s) refused`
+        + `unlinked, ${outcome.authorizedApps} authorized app(s) ended, ${outcome.ownedApps} registered OAuth `
+        + `application(s) disabled, ${outcome.scimCredentials} minted SCIM credential(s) revoked, `
+        + `${outcome.failed} write(s) refused`
         + (incomplete ? ', and a read did not finish or more rows exist than were scanned' : '')
         + '. The password reset itself landed; credentials that were not revoked still work. '
         + 'Remedy: revoke the remaining sessions and keys, unlink the remaining sign-in accounts and '
-        + 'withdraw the remaining authorized apps by hand, and check write access on sys_session / '
-        + 'sys_api_key / sys_account / the OAuth and device stores.',
+        + 'withdraw the remaining authorized apps, disable the remaining OAuth applications the user registered '
+        + 'and revoke the remaining SCIM credentials it minted by hand, and check write access on sys_session / '
+        + 'sys_api_key / sys_account / the OAuth and device stores / sys_oauth_application / '
+        + 'sys_scim_connection_credential.',
     );
   }
   return outcome;

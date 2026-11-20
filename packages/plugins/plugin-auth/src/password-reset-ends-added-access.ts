@@ -36,32 +36,73 @@
  *  - **every device sign-in approved for it and not yet collected**
  *    (`sys_device_code` rows that name it), where device authorization is
  *    mounted: the device's next poll finds no code;
+ *  - **every OAuth application it registered** (`sys_oauth_application` rows
+ *    whose `user_id` is the account) that is not disabled — a `disabled`
+ *    flag false, or null, which the provider reads as enabled — is written
+ *    `disabled: true`, the flag the provider and the MCP door refuse, as the
+ *    platform administrator's Disable action writes it: the provider issues
+ *    the app no token, answers its tokens inactive at introspection, and the
+ *    MCP door refuses every token it holds, whoever authorized it
+ *    (`mcp-token-revocation.ts`). Disabling is reversible: a platform
+ *    administrator enables the app again (`/admin/oauth2/toggle-disabled`);
+ *    its owner cannot. An app another account registered, and one
+ *    registered with no owner, is not touched;
+ *  - **every SCIM provisioning credential it minted**
+ *    (`sys_scim_connection_credential` rows whose `user_id` is the account)
+ *    that is still active is revoked through the one revoke a platform
+ *    administrator uses (`revokeScimConnectionCredential`): its bearer is
+ *    refused from the next SCIM request on, and a revoke is one-way, so
+ *    provisioning through that connection pauses until a platform
+ *    administrator mints a new credential. A credential another
+ *    administrator minted for the same connection is not touched;
  *  - **passkeys: none to end.** The plugin's `passkeys` flag is wired to no
  *    plugin and no passkey store is mounted (`invitation-mailbox-proof.ts`,
  *    `USER_KEYED_STORES`). A passkey store mounted later belongs in this list.
  *
  * The OAuth and device stores are named by {@link OAUTH_GRANT_STORES}, each
  * one of the stores `USER_KEYED_STORES` keys by the account. A deployment that
- * mounts neither plugin reads none of them.
+ * mounts neither plugin reads none of them. The registered apps and the
+ * minted credentials are read and written through the data engine, the store
+ * the Disable action and the credential door write them through, by their
+ * object and its `user_id` column ({@link endWhatTheAccountRegistered}): a
+ * row is the account's whether or not its plugin is mounted now, and an
+ * object the deployment does not hold, or a table it never created, holds
+ * none (`isObjectAbsentError`, asked with the object read).
+ *
+ * Two things the account set up are KEPT: the single sign-on providers it
+ * registered (`sys_sso_provider.user_id`) and its second-factor enrolment
+ * (`sys_two_factor`, `sys_user.two_factor_enabled`). A reset names them to the
+ * account instead, so their owner can check them ({@link whatAResetKeeps}).
  *
  * The account's sessions are ended by the reset doors themselves, before and
  * again after the password write (`credential-change-ends-prior-access.ts`).
+ * Once it has ended these, a completed self-service reset mails the account
+ * `auth.password_reset_notice`: what it ended, each app it disabled and each
+ * credential it revoked by name, and the single sign-on providers and the
+ * second factor it kept. The notice is best-effort, like the change reminder
+ * below: one that cannot be read or sent never fails the reset.
  *
  * A password CHANGE (`/change-password`, which proves the current password)
  * ends none of these. It reminds instead: when the account still holds an API
  * key the seam would admit (not revoked, its own expiry not passed), a linked
- * sign-in account or an authorized app once its password has changed, the
- * account's address is sent `auth.password_changed_notice`, listing them,
- * through the mail service every auth notice goes through. The reminder is
- * best-effort, like the email-change notice: a reminder that cannot be read
- * or sent never fails the change.
+ * sign-in account, an authorized app, an enabled OAuth application it
+ * registered or an active SCIM credential it minted once its password has
+ * changed, the account's address is sent `auth.password_changed_notice`,
+ * listing them, through the mail service every auth notice goes through. The
+ * reminder is best-effort, like the email-change notice: a reminder that
+ * cannot be read or sent never fails the change.
  *
  * An administrator's forced reset (`/admin/set-user-password` with its
  * revocation switch on, the default) and the operator's reset
- * (`os user set-password`) end the keys, the linked sign-in accounts and the
- * authorized apps and device sign-ins beside the sessions they end, through
- * `forced-reset-revocation.ts`, which ends the last two with this module's
- * {@link endOAuthGrants}. An
+ * (`os user set-password`) end the keys, the linked sign-in accounts, the
+ * authorized apps and device sign-ins, the registered apps and the minted
+ * credentials beside the sessions they end, through
+ * `forced-reset-revocation.ts`, which ends the grants with this module's
+ * {@link endOAuthGrants} and the registrations with
+ * {@link endWhatTheAccountRegistered}. They send no notice: each answers its
+ * requester what it ended (the response's `revoked` and the ledger row; the
+ * command's outcome), and the operator's command runs with no server and no
+ * mail service. An
  * administrator who turns the switch off (`revokeSessionsAndKeys: false`)
  * asks for a routine reset, and nothing is ended: the switch is the reason
  * that reset is not treated as a self-service one. The one-step invitation
@@ -77,15 +118,17 @@
  * nothing. A completed reset whose account cannot be named, and a read or a
  * write that fails, are not swallowed: the error reaches the requester, and
  * the next completed reset ends what remains. Without a data engine the
- * deployment holds no `sys_api_key` store, so there is no key to end; the
- * sign-in accounts and the OAuth grants are read through the vendor's
- * adapter either way.
+ * deployment holds no `sys_api_key`, `sys_oauth_application` or
+ * `sys_scim_connection_credential` store, so there is no key, registered app
+ * or minted credential to end; the sign-in accounts and the OAuth grants are
+ * read through the vendor's adapter either way.
  */
 
 import { isExpired } from '@objectstack/core';
 import { SystemObjectName } from '@objectstack/spec/system';
-import { isMissingTableError } from '@objectstack/types';
+import { isMissingTableError, isObjectAbsentError } from '@objectstack/types';
 import type { USER_KEYED_STORES } from './invitation-mailbox-proof.js';
+import { SCIM_CREDENTIAL_OBJECT, revokeScimConnectionCredential } from './scim-connection-service.js';
 
 /** The provider id of the account's local password row. */
 const CREDENTIAL_PROVIDER_ID = 'credential';
@@ -95,6 +138,12 @@ const API_KEY_PAGE = 500;
 
 /** How many consents one read of the reminder asks for; it reads on while a page comes back full. */
 const OAUTH_CONSENT_PAGE = 100;
+
+/** How many registered apps, minted credentials or kept providers one read asks for. */
+const REGISTRATION_PAGE = 500;
+
+/** The single sign-on providers an account registered, which a reset keeps. */
+const SSO_PROVIDER_OBJECT = 'sys_sso_provider';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -138,11 +187,23 @@ export interface MountedOAuthGrants {
   mounted(pluginId: string): boolean;
 }
 
+/**
+ * The slice of the data engine the OAuth applications an account registered
+ * and the SCIM credentials it minted are read and written through: the reads,
+ * the `disabled` write, and the credential revoke's own read and write
+ * (`revokeScimConnectionCredential`).
+ */
+export type RegistrationStore = Parameters<typeof revokeScimConnectionCredential>[0] & {
+  find(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
+};
+
 /** The stores a completed reset reads and writes. */
 export interface ResetStores {
   accounts: SignInAccountStore;
   apiKeys: ApiKeyStore | undefined;
   oauth?: MountedOAuthGrants;
+  /** The data engine the registered apps and minted credentials live in; absent ⇒ none to end. */
+  registrations?: RegistrationStore | undefined;
 }
 
 /** What a completed reset ended: counts of rows really written. */
@@ -155,6 +216,21 @@ export interface ResetEndedAccess {
   oauthTokens: number;
   /** Device sign-ins approved and not yet collected. */
   deviceCodes: number;
+  /** The OAuth applications the account registered, now disabled: each by its name ({@link EndedRegistrations}). */
+  ownedApps: string[];
+  /** The SCIM connection credentials the account minted, now revoked: each by its connection ({@link EndedRegistrations}). */
+  scimCredentials: string[];
+}
+
+/** What {@link endWhatTheAccountRegistered} disabled and revoked, each named as it was ended. */
+export type EndedRegistrations = Pick<ResetEndedAccess, 'ownedApps' | 'scimCredentials'>;
+
+/** What a reset keeps of what the account set up, named so its owner can check each ({@link whatAResetKeeps}). */
+export interface WhatAResetKeeps {
+  /** The single sign-on providers the account registered, by provider id. */
+  ssoProviders: string[];
+  /** Whether the account is enrolled in a second factor (`sys_user.two_factor_enabled`). */
+  twoFactor: boolean;
 }
 
 /**
@@ -174,7 +250,7 @@ export const OAUTH_GRANT_STORES = [
   store: keyof typeof USER_KEYED_STORES;
   model: string;
   plugin: string;
-  counts: Exclude<keyof ResetEndedAccess, 'apiKeys' | 'signInAccounts'>;
+  counts: keyof EndedOAuthGrants;
 }>;
 
 /** What a password change leaves active, for its reminder. */
@@ -185,6 +261,10 @@ export interface AccessAPasswordChangeKeeps {
   signInAccounts: string[];
   /** Each app the account authorized (a stored consent), by its client's name (its client id when it has none). */
   authorizedApps: string[];
+  /** Each OAuth application the account registered that is not disabled, by its name (its client id when it has none). */
+  ownedApps: string[];
+  /** Each SCIM credential the account minted that is still active, by its connection (and label). */
+  scimCredentials: string[];
 }
 
 function rowsOf(result: unknown): Array<Record<string, unknown>> {
@@ -344,14 +424,180 @@ export function storedOAuthGrants(engine: OAuthGrantEngine): MountedOAuthGrants 
 }
 
 /**
+ * The rows of `object` a `query` answers, read as the system; an object the
+ * deployment does not hold, or whose table it never created, holds none. Any
+ * other failure is thrown.
+ */
+async function rowsOrNone(engine: Pick<RegistrationStore, 'find'>, object: string, query: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+  try {
+    return rowsOf(await engine.find(object, query, { context: SYSTEM_CTX }));
+  } catch (error) {
+    if (isObjectAbsentError(error, object)) return [];
+    throw error;
+  }
+}
+
+/** Whether a stored boolean flag is on: `true`, or the `1` a SQLite column hands back. */
+function isOn(value: unknown): boolean {
+  return value === true || value === 1;
+}
+
+/** An OAuth application row by its name, else its client id, else its id. */
+function nameOfApp(row: Record<string, unknown>): string {
+  for (const value of [row.name, row.client_id, row.id]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+/** A SCIM credential row by its connection, and its label when it has one. */
+function nameOfCredential(row: Record<string, unknown>): string {
+  const connection = typeof row.connection_id === 'string' && row.connection_id ? row.connection_id : String(row.id ?? '');
+  const label = typeof row.label === 'string' && row.label.trim() ? row.label.trim() : undefined;
+  return label ? `${connection} (${label})` : connection;
+}
+
+/**
+ * The `where` of the OAuth applications `userId` registered that the provider
+ * would serve as far as their flag goes: `disabled` false, or null (better-auth
+ * writes the column only when it is set, and the provider refuses only a
+ * truthy one).
+ */
+function enabledAppsOf(userId: string): Record<string, unknown> {
+  return { user_id: userId, $or: [{ disabled: false }, { disabled: null }] };
+}
+
+/** The OAuth applications `userId` registered that are not disabled: one page, or the page at `offset` in id order. */
+async function enabledOwnedApps(engine: Pick<RegistrationStore, 'find'>, userId: string, offset?: number): Promise<Array<Record<string, unknown>>> {
+  const page = await rowsOrNone(engine, SystemObjectName.OAUTH_APPLICATION, {
+    where: enabledAppsOf(userId),
+    fields: ['id', 'name', 'client_id', 'disabled'],
+    limit: REGISTRATION_PAGE,
+    ...(offset === undefined ? {} : { orderBy: [{ field: 'id', order: 'asc' }], offset }),
+  });
+  return page.filter((row) => !isOn(row.disabled));
+}
+
+/** The SCIM credentials `userId` minted that are still active: one page, or the page at `offset` in id order. */
+async function activeMintedCredentials(engine: Pick<RegistrationStore, 'find'>, userId: string, offset?: number): Promise<Array<Record<string, unknown>>> {
+  const page = await rowsOrNone(engine, SCIM_CREDENTIAL_OBJECT, {
+    where: { user_id: userId, active: true },
+    fields: ['id', 'connection_id', 'label', 'active'],
+    limit: REGISTRATION_PAGE,
+    ...(offset === undefined ? {} : { orderBy: [{ field: 'id', order: 'asc' }], offset }),
+  });
+  return page.filter((row) => isOn(row.active));
+}
+
+/**
+ * Disable every OAuth application `userId` registered and revoke every SCIM
+ * connection credential it minted (module header): the arm every reset
+ * shares, the self-service reset, the administrator's forced reset and the
+ * operator's (`forced-reset-revocation.ts`). Each is read through the data
+ * engine by its `user_id`, so an app another account registered and a
+ * credential another administrator minted are never read.
+ *
+ * An app is written `disabled: true`, with the whole-second `updated_at` the
+ * Disable action writes beside it (`/admin/oauth2/toggle-disabled`); a
+ * credential is revoked by `revokeScimConnectionCredential`, the
+ * administrator's own revoke. Each read repeats until it answers none, and
+ * each row is named into `ended` as it is ended, so a caller that hands its
+ * own tally still holds what was ended when a later write fails. A row a pass
+ * ended and the next read still answers was not ended, which is a failure,
+ * never a loop. No engine, nothing to end. Throws when a read or a write
+ * fails.
+ */
+export async function endWhatTheAccountRegistered(
+  engine: RegistrationStore | undefined,
+  userId: string,
+  ended: EndedRegistrations = { ownedApps: [], scimCredentials: [] },
+): Promise<EndedRegistrations> {
+  if (!engine) return ended;
+  const disabled = new Set<string>();
+  for (;;) {
+    const page = await enabledOwnedApps(engine, userId);
+    if (page.length === 0) break;
+    for (const row of page) {
+      const id = row.id;
+      if (typeof id !== 'string' || id.length === 0) throw new Error('an OAuth application row carries no id');
+      if (disabled.has(id)) throw new Error(`OAuth application ${id} still reads enabled after it was disabled`);
+      await engine.update(
+        SystemObjectName.OAUTH_APPLICATION,
+        { id, disabled: true, updated_at: new Date(Math.floor(Date.now() / 1000) * 1000) },
+        { context: SYSTEM_CTX },
+      );
+      disabled.add(id);
+      ended.ownedApps.push(nameOfApp(row));
+    }
+  }
+  const revoked = new Set<string>();
+  for (;;) {
+    const page = await activeMintedCredentials(engine, userId);
+    if (page.length === 0) return ended;
+    for (const row of page) {
+      const id = row.id;
+      if (typeof id !== 'string' || id.length === 0) throw new Error('a SCIM connection credential row carries no id');
+      if (revoked.has(id)) throw new Error(`SCIM connection credential ${id} still reads active after it was revoked`);
+      const outcome = await revokeScimConnectionCredential(engine, id);
+      revoked.add(id);
+      // A credential revoked or removed between the read and the revoke is
+      // not this reset's to count.
+      if (outcome.outcome === 'revoked') ended.scimCredentials.push(nameOfCredential(row));
+    }
+  }
+}
+
+/**
+ * What a reset keeps of what `userId` set up, for its notice: the single
+ * sign-on providers it registered (`sys_sso_provider.user_id`, by provider
+ * id) and whether it is enrolled in a second factor
+ * (`sys_user.two_factor_enabled`). Read through the data engine; an object
+ * the deployment does not hold holds none. No engine, none. Throws when a
+ * read fails.
+ */
+export async function whatAResetKeeps(engine: Pick<RegistrationStore, 'find'> | undefined, userId: string): Promise<WhatAResetKeeps> {
+  if (!engine) return { ssoProviders: [], twoFactor: false };
+  const ssoProviders: string[] = [];
+  for (let offset = 0; ; offset += REGISTRATION_PAGE) {
+    const page = await rowsOrNone(engine, SSO_PROVIDER_OBJECT, {
+      where: { user_id: userId },
+      fields: ['id', 'provider_id', 'domain'],
+      limit: REGISTRATION_PAGE,
+      orderBy: [{ field: 'id', order: 'asc' }],
+      offset,
+    });
+    for (const row of page) {
+      const providerId = typeof row.provider_id === 'string' && row.provider_id ? row.provider_id : String(row.id ?? '');
+      if (providerId) ssoProviders.push(providerId);
+    }
+    if (page.length < REGISTRATION_PAGE) break;
+  }
+  const [user] = await rowsOrNone(engine, SystemObjectName.USER, {
+    where: { id: userId },
+    fields: ['id', 'two_factor_enabled'],
+    limit: 1,
+  });
+  return { ssoProviders, twoFactor: isOn(user?.two_factor_enabled) };
+}
+
+/**
  * End what a completed self-service reset ends for `userId` (module header):
- * every linked sign-in account other than the password, every API key, and,
- * where their plugins are mounted, every OAuth grant and approved device
- * sign-in. Throws when a read or a write fails, or a row survives its
+ * every linked sign-in account other than the password, where their plugins
+ * are mounted every OAuth grant and approved device sign-in, every OAuth
+ * application it registered and every SCIM credential it minted, and every
+ * API key. Throws when a read or a write fails, or a row survives its
  * delete, so the requester is told.
  */
 export async function endWhatTheAccountAddedBeforeAReset(stores: ResetStores, userId: string): Promise<ResetEndedAccess> {
-  const ended: ResetEndedAccess = { apiKeys: 0, signInAccounts: 0, authorizedApps: 0, oauthTokens: 0, deviceCodes: 0 };
+  const ended: ResetEndedAccess = {
+    apiKeys: 0,
+    signInAccounts: 0,
+    authorizedApps: 0,
+    oauthTokens: 0,
+    deviceCodes: 0,
+    ownedApps: [],
+    scimCredentials: [],
+  };
   // Each pass deletes what the read answered; a link a delete hook kept
   // reads again, which is a failure.
   const unlinked = new Set<string>();
@@ -366,6 +612,7 @@ export async function endWhatTheAccountAddedBeforeAReset(stores: ResetStores, us
   }
   ended.signInAccounts = unlinked.size;
   await endOAuthGrants(stores.oauth, userId, ended);
+  await endWhatTheAccountRegistered(stores.registrations, userId, ended);
   const engine: ApiKeyStore | undefined = stores.apiKeys;
   if (!engine) return ended;
   // Each pass revokes what the read answered, and the next read no longer
@@ -414,8 +661,10 @@ async function authorizedApps(store: OAuthGrantRows, userId: string): Promise<st
 /**
  * What a password change leaves active for `userId`: its API keys the
  * admission seam would admit (not revoked, its own expiry not passed), its
- * linked sign-in accounts, and the apps it authorized where the OAuth
- * provider is mounted, for the reminder. Throws when a read fails.
+ * linked sign-in accounts, the apps it authorized where the OAuth provider is
+ * mounted, and the OAuth applications it registered that are not disabled
+ * and the SCIM credentials it minted that are still active, for the
+ * reminder. Throws when a read fails.
  */
 export async function accessAPasswordChangeKeeps(stores: ResetStores, userId: string): Promise<AccessAPasswordChangeKeeps> {
   const signInAccounts = (await linkedSignInAccounts(stores.accounts, userId)).map((a) => a.providerId);
@@ -435,5 +684,20 @@ export async function accessAPasswordChangeKeeps(stores: ResetStores, userId: st
   }
   const oauth = stores.oauth;
   const apps = oauth?.store && oauth.mounted('oauth-provider') ? await authorizedApps(oauth.store, userId) : [];
-  return { apiKeys, signInAccounts, authorizedApps: apps };
+  const ownedApps: string[] = [];
+  const scimCredentials: string[] = [];
+  const engine = stores.registrations;
+  if (engine) {
+    for (let offset = 0; ; offset += REGISTRATION_PAGE) {
+      const page = await enabledOwnedApps(engine, userId, offset);
+      ownedApps.push(...page.map(nameOfApp));
+      if (page.length < REGISTRATION_PAGE) break;
+    }
+    for (let offset = 0; ; offset += REGISTRATION_PAGE) {
+      const page = await activeMintedCredentials(engine, userId, offset);
+      scimCredentials.push(...page.map(nameOfCredential));
+      if (page.length < REGISTRATION_PAGE) break;
+    }
+  }
+  return { apiKeys, signInAccounts, authorizedApps: apps, ownedApps, scimCredentials };
 }
