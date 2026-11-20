@@ -16,7 +16,7 @@ one tab per panel with its count) enlarges a panel at `?related=object.field`.
 
 **2 · Relationship flags shape the related column.** On the CHILD object's
 reference field: `relatedList: 'primary'` draws the child as a full-width body
-table in the details above the field sections (the default for a
+table in the details after the open field sections (the default for a
 `master_detail`); `true` (a `lookup`'s default) is a panel in the right
 column; `false` leaves the child off the page. `relatedListTitle` /
 `relatedListColumns` (child field names) replace the derived title / columns;

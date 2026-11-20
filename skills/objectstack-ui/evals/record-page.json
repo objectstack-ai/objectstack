@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "On the lead record page, put the tasks first: our reps want the open tasks table before anything else when they open a lead. The `task` object already has a `lead` master_detail field.",
-      "expected_output": "No page file and no placement flag: `task.lead` is a `master_detail` with no `relatedList`, so it is already a full-width body table above the lead's field sections. `relatedListFilter: { status: { $ne: 'done' } }` on `task.lead` keeps it to open tasks, and the lead's `relatedLists: ['task', ...]` puts it before the other tables. Not `inlineEdit` (form entry, not the page), not a `definePage` with `kind: 'full'`, and never a `slots.tabs`.",
+      "expected_output": "No page file and no placement flag: `task.lead` is a `master_detail` with no `relatedList`, so it is already a full-width body table, drawn after the lead's open field sections. `relatedListFilter: { status: { $ne: 'done' } }` on `task.lead` keeps it to open tasks, and the lead's `relatedLists: ['task', ...]` puts it first among the tables, directly under those field sections. Not `inlineEdit` (form entry, not the page), not a `definePage` with `kind: 'full'`, and never a `slots.tabs`.",
       "files": [],
       "assertions": {
         "must_contain": [
