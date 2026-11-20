@@ -12,16 +12,17 @@
  *  - the driver's door, called directly (a plugin or a migration that writes
  *    past the engine);
  *  - a `beforeInsert` hook that assigns the string: the engine's rewrite runs
- *    before the hooks, so the assignment reaches the driver as sent.
+ *    before the hooks, so the assignment reaches the driver as sent, and the
+ *    driver's door is the one that stores it.
  *
- * The last two landed as TEXT. SQLite compares that TEXT with an INTEGER as
- * unequal, so `restricted != true` and its negative siblings selected those
- * rows for a member whose policy names them as the rows to withhold, on
- * `find`, `count`, `findOne`, the REST list and get, and the REST delete. The
- * driver's write door now binds every accepted spelling as the boolean it spells,
- * so each row is answered as written. Every read below happens on the boot that
- * wrote the rows: the local face's boot convergence would rewrite a TEXT cell
- * on the next boot, and the remote face has none.
+ * The driver's write door binds every accepted spelling as the boolean it
+ * spells, so all three land as a boolean, and a row-level `using` written in
+ * negative form (`restricted != true` and its siblings) answers each row by
+ * the boolean it was written as, on `find`, `count`, `findOne`, the REST list
+ * and get, and the REST delete. Every read below happens on the boot that
+ * wrote the rows: the local face's boot convergence rewrites a TEXT cell on
+ * the next boot, and the remote face has none, so a later boot would not tell
+ * the faces' write doors apart.
  *
  * Both faces run over an embedded libSQL file: the local face by `file:` URL,
  * the remote face through a real `@libsql/client` handed in as its client.
