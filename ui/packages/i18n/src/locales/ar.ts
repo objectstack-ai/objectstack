@@ -543,6 +543,10 @@ const ar = {
     cancelChanges: "إلغاء التغييرات",
     saveRow: "حفظ الصف",
     cellReadOnly: "لا يمكن تحرير هذه الخلية هنا.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "جارٍ الحفظ…",
+    cellSaved: "تم الحفظ",
+    openRecordToFinish: "افتح السجل لإكمال التغيير",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

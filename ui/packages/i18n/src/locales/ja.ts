@@ -513,6 +513,10 @@ const ja = {
     cancelChanges: "変更を取り消す",
     saveRow: "行を保存",
     cellReadOnly: "このセルはここでは編集できません。",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "保存中…",
+    cellSaved: "保存しました",
+    openRecordToFinish: "レコードを開いて変更を完了してください",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

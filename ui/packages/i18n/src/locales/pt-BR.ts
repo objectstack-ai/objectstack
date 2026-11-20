@@ -519,6 +519,10 @@ const pt = {
     cancelChanges: "Descartar alterações",
     saveRow: "Salvar linha",
     cellReadOnly: "Esta célula não pode ser editada aqui.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "Salvando…",
+    cellSaved: "Salvo",
+    openRecordToFinish: "Abra o registro para concluir a alteração",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

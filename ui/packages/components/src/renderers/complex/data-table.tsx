@@ -64,6 +64,8 @@ import {
   Plus,
   MoreHorizontal,
   AlertCircle,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -342,6 +344,11 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // objectstack#35684 — a selected cell that opens no editor, when its host
   // gives no reason of its own.
   'table.cellReadOnly': 'This cell can\'t be edited here.',
+  // objectstack#35685 — a list cell's own save state, and the way out of a
+  // rule the list cannot complete.
+  'table.cellSaving': 'Saving…',
+  'table.cellSaved': 'Saved',
+  'table.openRecordToFinish': 'Open the record to finish this change',
   'common.actions': 'Actions',
   // objectui#10625 — the inline date editors' notice for a stored value
   // written on a day that does not exist. The SAME keys `DateField` /
@@ -1386,6 +1393,70 @@ function CellNotice({ text, onDismiss }: { text: string; onDismiss: () => void }
   );
 }
 
+/**
+ * objectstack#35685 — why a list cell's save was refused, said on that cell:
+ * the server's reasons, one line each, and, when the refusal names a field the
+ * list cannot edit, the way to the record where it can be finished.
+ */
+function CellSaveFailure({
+  lines,
+  title,
+  openRecordLabel,
+  onOpenRecord,
+  onDismiss,
+}: {
+  lines: readonly string[];
+  title: string;
+  openRecordLabel: string;
+  onOpenRecord?: (e: React.MouseEvent) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <Popover open onOpenChange={(open) => { if (!open) onDismiss(); }}>
+      <PopoverAnchor asChild>
+        <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-0" />
+      </PopoverAnchor>
+      <PopoverContent
+        role="alert"
+        data-testid="cell-save-failure"
+        side="bottom"
+        align="start"
+        sideOffset={2}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        className="w-auto max-w-xs space-y-1 px-2.5 py-1.5 text-xs"
+      >
+        <div className="flex items-start gap-1.5 text-destructive">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
+          {lines.length === 1 ? (
+            <span className="min-w-0 break-words">{title}: {lines[0]}</span>
+          ) : (
+            <div className="min-w-0 break-words">
+              <span>{title}:</span>
+              <ul className="list-disc pl-4">
+                {lines.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+        {onOpenRecord && (
+          <button
+            type="button"
+            data-testid="cell-save-open-record"
+            className="text-primary underline-offset-2 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenRecord(e);
+            }}
+          >
+            {openRecordLabel}
+          </button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const {
     caption,
@@ -1438,10 +1509,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   // objectstack#35684 — the select-first cell model, when a host mounted one
   // (`GridCellSelection`): a click selects a cell, an editor opens on
-  // double-click, Enter, F2 or typing, Space opens the record. It needs the
+  // double-click, Enter, F2 or typing (Space too), and each committed cell
+  // saves at once (objectstack#35685). It needs the
   // arrow keys, so it turns the roving-cell navigation on.
   const cellSelection = useGridCellSelection();
   const selectFirst = cellSelection !== null;
+  // objectstack#35685 — the per-cell save needs a per-row save to call. A
+  // select-first table wired with `onBatchSave` alone keeps the staged save
+  // bar, so an edit is never held where nothing can send it.
+  const autosaves = selectFirst && typeof schema.onRowSave === 'function';
   const keyboardNavigation = keyboardNavigationProp || selectFirst;
 
   // 'single' caps the selection at one row (replace-on-select) and drops the
@@ -1946,6 +2022,33 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // kept under (objectui#12310) — tinted destructive so the author sees exactly
   // which rows didn't persist (no silent "phantom save").
   const [erroredRows, setErroredRows] = useState<Set<PendingRowKey>>(new Set());
+  // ── Per-cell autosave (objectstack#35685), the select-first model's save ──
+  // A committed cell sends its record's update at once; nothing waits for a
+  // save bar. A refused update keeps its edits pending, so the row's next
+  // commit sends them again together with the new cell, as one update.
+  //
+  // The refusal of a row's last save: its lines, and whether it named a field
+  // the list cannot edit (the record is where that change can be finished).
+  const [rowRefusals, setRowRefusals] = useState<Map<PendingRowKey, { lines: string[]; needsRecord: boolean }>>(new Map());
+  // Each cell's save state while it shows: in flight, or just saved.
+  const [cellSaveStates, setCellSaveStates] = useState<Map<PendingRowKey, Record<string, 'saving' | 'saved'>>>(new Map());
+  // The refused cell whose reason opens on its own as the refusal lands.
+  const [failureNotice, setFailureNotice] = useState<{ rowKey: PendingRowKey; columnKey: string } | null>(null);
+  // The rows a save updated in place since the rows last loaded, each as it
+  // sorted and filtered before that save: a client-side sort or search keeps
+  // reading these, so a saved row stays where it is until the next load.
+  const [sortBasis, setSortBasis] = useState<Map<PendingRowKey, any>>(new Map());
+  // The records whose save is running, those committed again meanwhile, and
+  // those whose commit is waiting for the render that holds it.
+  const runningSavesRef = useRef<Set<PendingRowKey>>(new Set());
+  const saveAgainRef = useRef<Set<PendingRowKey>>(new Set());
+  const autosaveDueRef = useRef<Set<PendingRowKey>>(new Set());
+  const [autosaveTick, setAutosaveTick] = useState(0);
+  const savedTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  useEffect(() => () => {
+    for (const timer of savedTimersRef.current) clearTimeout(timer);
+    savedTimersRef.current.clear();
+  }, []);
   // Column header context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; columnKey: string } | null>(null);
   // objectstack#28434 — the row context menu: which row it is open on, where,
@@ -2064,6 +2167,26 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // filter path, so leaving both active would not even be redundant: the client
   // pass would narrow the server's answer to whichever of its rows happen to
   // contain the term as rendered text.
+  // objectstack#35685 — a row a save updated in place is sorted and searched
+  // as it was before that save, until the rows load again (`sortBasis`).
+  const sortRowOf = (row: any): any => (sortBasis.size > 0 ? sortBasis.get(pendingRowKeyOf(row)) ?? row : row);
+  // A load is any held row that changed without a save of ours updating it:
+  // the basis then has nothing left to stand for.
+  const lastHeldRowsRef = useRef<Map<PendingRowKey, any> | null>(null);
+  useEffect(() => {
+    const held = new Map<PendingRowKey, any>();
+    for (const row of data) held.set(pendingRowKeyOf(row), row);
+    const before = lastHeldRowsRef.current;
+    lastHeldRowsRef.current = held;
+    if (sortBasis.size === 0 || before === null) return;
+    const loaded = held.size !== before.size
+      || Array.from(held).some(([key, row]) => before.get(key) !== row && !sortBasis.has(key));
+    if (loaded) setSortBasis(new Map());
+  }, [data]);
+  useEffect(() => {
+    setSortBasis((prev) => (prev.size === 0 ? prev : new Map()));
+  }, [sortColumn, sortDirection, searchQuery]);
+
   const filteredData = useMemo(() => {
     if (manualSearch) return data;
     if (!searchQuery) return data;
@@ -2074,11 +2197,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const searchedColumns = columns.filter((col) => !isMaskedColumnKey(rawColumns, col.accessorKey));
     return data.filter((row) =>
       searchedColumns.some((col) => {
-        const value = row[col.accessorKey];
+        const value = sortRowOf(row)[col.accessorKey];
         return value?.toString().toLowerCase().includes(searchQuery.toLowerCase());
       })
     );
-  }, [data, searchQuery, columns, rawColumns, manualSearch]);
+  }, [data, searchQuery, columns, rawColumns, manualSearch, sortBasis]);
 
   // Sorting — client-side, over the rows this table was handed.
   //
@@ -2104,14 +2227,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // the reader how it compares with every other row's.
     if (isMaskedColumnKey(rawColumns, sortColumn)) return filteredData;
 
-    const keyed = filteredData.map((row) => ({ row, key: getSortValue(row[sortColumn]) }));
+    const keyed = filteredData.map((row) => ({ row, key: getSortValue(sortRowOf(row)[sortColumn]) }));
     // Array#sort is stable, so rows with equal keys keep their incoming order.
     keyed.sort((a, b) => {
       const comparison = compareSortValues(a.key, b.key);
       return sortDirection === 'asc' ? comparison : -comparison;
     });
     return keyed.map((entry) => entry.row);
-  }, [filteredData, sortColumn, sortDirection, manualSorting, rawColumns]);
+  }, [filteredData, sortColumn, sortDirection, manualSorting, rawColumns, sortBasis]);
 
   // objectui#12620 — a grouped table keeps every row in its own band. The
   // sorted rows are partitioned back into their groups, in group order; the
@@ -2656,6 +2779,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const inFlight = inFlightRef.current.get(rowKey);
     setPendingChanges((prev) => stageCellChange(prev, rowKey, row, columnKey, valueToStage, inFlight));
     clearCellError(rowKey, columnKey);
+    // objectstack#35685 — the select-first model saves the commit at once.
+    requestAutosave(rowKey);
 
     // Call the legacy onCellChange callback if provided
     if (schema.onCellChange) {
@@ -2709,7 +2834,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const active = editingCellRef.current;
     const snap = editRevertRef.current;
     editRevertRef.current = null;
-    if (revert && active && snap) {
+    if (revert && active && autosaves && !runningSavesRef.current.has(active.rowKey)) {
+      // objectstack#35685 — Esc goes back to the stored value, a kept
+      // (refused) edit of this cell included. While the row's save is on the
+      // wire it only takes back this edit (below), as Esc on the selected cell
+      // leaves a sent value alone.
+      discardCellChange(active.rowKey, active.columnKey);
+    } else if (revert && active && snap) {
       const { rowKey, columnKey } = active;
       setPendingChanges((prev) => {
         const cur = prev.get(rowKey);
@@ -2956,6 +3087,148 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setSaveError(null);
   };
 
+  // ── Per-cell autosave (objectstack#35685) ────────────────────────────────
+  const setCellSaveState = (rowKey: PendingRowKey, columnKeys: readonly string[], state: 'saving' | 'saved' | null) => {
+    setCellSaveStates((prev) => {
+      const next = new Map(prev);
+      const cells = { ...(prev.get(rowKey) ?? {}) };
+      for (const key of columnKeys) {
+        if (state) cells[key] = state;
+        else delete cells[key];
+      }
+      if (Object.keys(cells).length > 0) next.set(rowKey, cells);
+      else next.delete(rowKey);
+      return next;
+    });
+  };
+  /** A just-saved cell says so for a moment, then goes quiet. */
+  const flashSaved = (rowKey: PendingRowKey, columnKeys: readonly string[]) => {
+    setCellSaveState(rowKey, columnKeys, 'saved');
+    const timer = setTimeout(() => {
+      savedTimersRef.current.delete(timer);
+      setCellSaveStates((prev) => {
+        const cells = prev.get(rowKey);
+        if (!cells || !columnKeys.some((key) => cells[key] === 'saved')) return prev;
+        const rest = { ...cells };
+        for (const key of columnKeys) if (rest[key] === 'saved') delete rest[key];
+        const next = new Map(prev);
+        if (Object.keys(rest).length > 0) next.set(rowKey, rest);
+        else next.delete(rowKey);
+        return next;
+      });
+    }, 1500);
+    savedTimersRef.current.add(timer);
+  };
+
+  /** Ask for a record's autosave; it runs once the render holding the commit lands. */
+  const requestAutosave = (rowKey: PendingRowKey) => {
+    if (!autosaves) return;
+    autosaveDueRef.current.add(rowKey);
+    setAutosaveTick((tick) => tick + 1);
+  };
+
+  /**
+   * Send one record's pending edits as one update. Every edit the record still
+   * holds goes, so a cell a refusal kept travels with the next commit on its
+   * row. A commit made while the record's save runs waits for it, and then
+   * sends what is left.
+   */
+  const autosaveRow = async (rowKey: PendingRowKey, pending: PendingRow | undefined) => {
+    if (!pending || Object.keys(pending.changes).length === 0 || !schema.onRowSave) return;
+    if (runningSavesRef.current.has(rowKey)) {
+      saveAgainRef.current.add(rowKey);
+      return;
+    }
+    runningSavesRef.current.add(rowKey);
+    const sentChanges = pending.changes;
+    const sentKeys = Object.keys(sentChanges);
+    const sent = new Map([[rowKey, sentChanges]]);
+    const row = heldRowOf(rowKey) ?? pending.row;
+    // The row sorts as it does now until the next load, whatever the save writes.
+    setSortBasis((prev) => (prev.has(rowKey) ? prev : new Map(prev).set(rowKey, row)));
+    setCellSaveState(rowKey, sentKeys, 'saving');
+    try {
+      await whileInFlight(sent, async () => {
+        await schema.onRowSave?.(rowIndexOf(rowKey), sentChanges, row);
+      });
+      setPendingChanges((prev) => removeSentEdits(prev, sent));
+      setRowCellErrors(rowKey, null);
+      setRowRefusals((prev) => {
+        if (!prev.has(rowKey)) return prev;
+        const next = new Map(prev);
+        next.delete(rowKey);
+        return next;
+      });
+      setFailureNotice((prev) => (prev?.rowKey === rowKey ? null : prev));
+      flashSaved(rowKey, sentKeys);
+    } catch (error) {
+      // The edits stay pending and the cells keep what was typed. Each cell the
+      // refusal names shows its own reason; a cell it does not name shows them
+      // all. A named field the list cannot edit sends the reader to the record.
+      console.error('Failed to save row:', error);
+      setCellSaveState(rowKey, sentKeys, null);
+      const lines = saveRefusalLines([error]);
+      const named = refusedCellsOf(error) ?? {};
+      const editableHere = (field: string) => {
+        const col = columns.find((c) => c.accessorKey === field);
+        return !!col && col.editable !== false && !col.masked;
+      };
+      const cells: Record<string, string> = {};
+      for (const [field, message] of Object.entries(named)) {
+        if (columns.some((c) => c.accessorKey === field)) cells[field] = message;
+      }
+      for (const key of sentKeys) if (!(key in cells)) cells[key] = lines.join(' ');
+      setRowCellErrors(rowKey, cells);
+      setRowRefusals((prev) => new Map(prev).set(rowKey, {
+        lines,
+        needsRecord: Object.keys(named).some((field) => !editableHere(field)),
+      }));
+      setFailureNotice({ rowKey, columnKey: sentKeys[0] });
+    } finally {
+      runningSavesRef.current.delete(rowKey);
+      if (saveAgainRef.current.delete(rowKey)) requestAutosave(rowKey);
+    }
+  };
+
+  useEffect(() => {
+    if (!autosaves || autosaveDueRef.current.size === 0) return;
+    const due = Array.from(autosaveDueRef.current);
+    autosaveDueRef.current.clear();
+    for (const rowKey of due) void autosaveRow(rowKey, pendingChanges.get(rowKey));
+  }, [autosaveTick, pendingChanges]);
+
+  /**
+   * Esc on a cell whose edit is kept: the edit is dropped and the cell shows
+   * the stored value again. The rest of the row's kept edits stay.
+   */
+  const discardCellChange = (rowKey: PendingRowKey, columnKey: string) => {
+    setPendingChanges((prev) => {
+      const cur = prev.get(rowKey);
+      if (!cur || !(columnKey in cur.changes)) return prev;
+      const next = new Map(prev);
+      const rest = { ...cur.changes };
+      delete rest[columnKey];
+      if (Object.keys(rest).length > 0) next.set(rowKey, { row: cur.row, changes: rest });
+      else next.delete(rowKey);
+      return next;
+    });
+    const kept = pendingChanges.get(rowKey)?.changes;
+    if (!kept || Object.keys(kept).every((key) => key === columnKey)) {
+      // Nothing of the row is kept any more, so nothing of its refusal stands.
+      setRowCellErrors(rowKey, null);
+      setRowRefusals((prev) => {
+        if (!prev.has(rowKey)) return prev;
+        const next = new Map(prev);
+        next.delete(rowKey);
+        return next;
+      });
+      setFailureNotice((prev) => (prev?.rowKey === rowKey ? null : prev));
+    } else {
+      clearCellError(rowKey, columnKey);
+      setFailureNotice((prev) => (prev?.rowKey === rowKey && prev?.columnKey === columnKey ? null : prev));
+    }
+  };
+
   // ── Keyboard navigation (objectui#11068) ──────────────────────────────────
   //
   // Arrow-key cell navigation on the WAI-ARIA grid pattern, behind
@@ -3175,6 +3448,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const col = columns[colIndex];
     if (row === undefined || col === undefined) return;
     setCellNotice(null);
+    // objectstack#35685 — a selected cell whose edit a refusal kept says why.
+    const rowKey = pendingRowKeyOf(row);
+    setFailureNotice(cellErrors.get(rowKey)?.[col.accessorKey] !== undefined ? { rowKey, columnKey: col.accessorKey } : null);
     rove(rowIndex, colIndex);
     if (selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex) {
       // Selected already, so no render follows to move the focus: a click on
@@ -3220,6 +3496,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setPendingChanges((prev) => stageCellChange(prev, rowKey, held, columnKey, value, inFlight));
     clearCellError(rowKey, columnKey);
     schema.onCellChange?.(rowIndexOf(rowKey), columnKey, value, held);
+    requestAutosave(rowKey);
   };
 
   /** What a cell does with a value it is handed rather than edited: a toggle or a paste. */
@@ -3281,8 +3558,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     if (row === undefined || col === undefined) return;
     const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
     if (e.key === 'Escape') {
+      const rowKey = pendingRowKeyOf(row);
       if (cellNotice) setCellNotice(null);
-      else if (selectedPos) {
+      else if (autosaves && pendingChanges.get(rowKey)?.changes && col.accessorKey in pendingChanges.get(rowKey)!.changes && !runningSavesRef.current.has(rowKey)) {
+        // objectstack#35685 — a kept (refused) edit: Esc drops it.
+        e.preventDefault();
+        discardCellChange(rowKey, col.accessorKey);
+      } else if (selectedPos) {
         e.preventDefault();
         focusGridCell(rowIndex, colIndex);
         setSelectedCell(null);
@@ -3316,10 +3598,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     if ((e.key === 'Enter' || e.key === 'F2') && bare && !e.shiftKey) {
       e.preventDefault();
       attemptEdit(rowIndex, colIndex);
-    } else if (e.key === ' ' && bare) {
+    } else if (e.key === ' ' && bare && togglesCell(row, col)) {
+      // A two-state cell flips; on any other cell Space is typed like any key
+      // and opens the editor (the catcher reads it).
       e.preventDefault();
-      if (togglesCell(row, col)) toggleCell(rowIndex, colIndex);
-      else schema.onRowClick?.(row, e);
+      toggleCell(rowIndex, colIndex);
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && bare) {
       // An empty editor; nothing is written until it commits.
       e.preventDefault();
@@ -3599,10 +3882,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     (Array.isArray(schema.rowActionDefs) && schema.rowActionDefs.length > 0 && schema.onRowActionDef)
   );
   const rowActionsColumnIsEditOnly = editable && !!(schema.onRowSave || schema.onBatchSave) && !rowMenuDeclared;
-  // objectstack#35684, until objectstack#35685 retires it: in the select-first
-  // model the edit-only column shows only while a row has pending changes, so a
-  // list at rest ends on its last data column (objectstack#35554).
-  const drawRowActionsColumn = rowActions && !(selectFirst && rowActionsColumnIsEditOnly && !hasPendingChanges);
+  // objectstack#35685 — a table that saves each cell as it is committed never
+  // draws the edit-only column: a list ends on its last data column
+  // (objectstack#35554). A select-first table that stages (no `onRowSave`)
+  // shows it only while a row has pending changes, as objectstack#35684 did.
+  const drawRowActionsColumn = rowActions
+    && !(autosaves && rowActionsColumnIsEditOnly)
+    && !(selectFirst && !autosaves && rowActionsColumnIsEditOnly && !hasPendingChanges);
 
   /**
    * objectstack#28434 — the items ONE row's context menu opens with, or `null`
@@ -3727,7 +4013,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           </div>
           
           <div className="flex flex-wrap items-center gap-2">
-            {hasPendingChanges && (
+            {/* objectstack#35685 — the select-first model saves each cell, so it draws no save bar. */}
+            {hasPendingChanges && !autosaves && (
               <>
                 <div className="text-sm text-muted-foreground">
                   {t('table.modified', { count: pendingChanges.size })}
@@ -3775,7 +4062,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           {/* The last save's refusal, on a line of its own and said whole —
               one line per reason (objectstack-ai/objectstack#27520). The
               cells it names are marked in the table below. */}
-          {hasPendingChanges && saveError && (
+          {hasPendingChanges && !autosaves && saveError && (
             <div
               role="alert"
               data-testid="table-save-refusal"
@@ -4217,8 +4504,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         "data-[active-record]:bg-primary/10 data-[active-record]:[--os-row-tint:color-mix(in_oklab,var(--color-primary)_10%,transparent)]",
                         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
                         !selectFirst && schema.onRowClick && "cursor-pointer",
-                        rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
-                        rowErrored && "bg-destructive/10 dark:bg-destructive/15 ring-1 ring-inset ring-destructive/40",
+                        // objectstack#35685 — the select-first model marks the cell, never the row.
+                        !autosaves && rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
+                        !autosaves && rowErrored && "bg-destructive/10 dark:bg-destructive/15 ring-1 ring-inset ring-destructive/40",
                         rowClassName && rowClassName(row, rowIndex)
                       )}
                       style={rowStyle ? rowStyle(row, rowIndex) : undefined}
@@ -4457,7 +4745,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // A ring that moves no layout (outline, not border).
                               isSelectedCell && "outline-2 -outline-offset-2 outline-primary",
                               selectFirst && !isFrozen && "relative",
-                              hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
+                              !autosaves && hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
                               isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
@@ -4582,6 +4870,40 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             {cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex && (
                               <CellNotice text={cellNotice.text} onDismiss={() => setCellNotice(null)} />
                             )}
+                            {selectFirst && !isEditing && cellError !== undefined
+                              && failureNotice?.rowKey === rowKey && failureNotice?.columnKey === col.accessorKey
+                              && !(cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex) && (() => {
+                                // objectstack#35685 — the refusal, on the cell it kept.
+                                const refusal = rowRefusals.get(rowKey);
+                                const lines = refusal && cellError === refusal.lines.join(' ') ? refusal.lines : [cellError];
+                                return (
+                                  <CellSaveFailure
+                                    lines={lines}
+                                    title={t('table.saveFailed')}
+                                    openRecordLabel={t('table.openRecordToFinish')}
+                                    onOpenRecord={refusal?.needsRecord && schema.onRowClick ? (e) => schema.onRowClick?.(row, e) : undefined}
+                                    onDismiss={() => setFailureNotice(null)}
+                                  />
+                                );
+                              })()}
+                            {selectFirst && !isEditing && cellSaveStates.get(rowKey)?.[col.accessorKey] && (() => {
+                              // objectstack#35685 — the cell's own save state, drawn over its
+                              // edge so nothing moves.
+                              const state = cellSaveStates.get(rowKey)?.[col.accessorKey];
+                              return (
+                                <span
+                                  data-slot="cell-save-state"
+                                  data-state={state}
+                                  role="status"
+                                  aria-label={t(state === 'saving' ? 'table.cellSaving' : 'table.cellSaved')}
+                                  className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
+                                >
+                                  {state === 'saving'
+                                    ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                    : <Check className="h-3 w-3 text-primary" aria-hidden="true" />}
+                                </span>
+                              );
+                            })()}
                             {isEditing ? (
                               (() => {
                                 // Type-aware inline editor. `col.type` is forwarded
@@ -4829,7 +5151,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       {drawRowActionsColumn && (
                         <TableCell className={cn("text-right", cellClassName)}>
                           <div className="flex items-center justify-end gap-1">
-                            {rowHasChanges && (schema.onRowSave || schema.onBatchSave) ? (
+                            {rowHasChanges && !autosaves && (schema.onRowSave || schema.onBatchSave) ? (
                               <>
                                 <Button
                                   variant="ghost"

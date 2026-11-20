@@ -513,6 +513,10 @@ const ko = {
     cancelChanges: "변경 취소",
     saveRow: "행 저장",
     cellReadOnly: "이 셀은 여기에서 편집할 수 없습니다.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "저장 중…",
+    cellSaved: "저장됨",
+    openRecordToFinish: "레코드를 열어 변경을 완료하세요",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

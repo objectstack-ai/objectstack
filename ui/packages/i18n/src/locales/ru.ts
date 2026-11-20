@@ -528,6 +528,10 @@ const ru = {
     cancelChanges: "Отменить изменения",
     saveRow: "Сохранить строку",
     cellReadOnly: "Эту ячейку нельзя изменить здесь.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "Сохранение…",
+    cellSaved: "Сохранено",
+    openRecordToFinish: "Откройте запись, чтобы завершить изменение",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

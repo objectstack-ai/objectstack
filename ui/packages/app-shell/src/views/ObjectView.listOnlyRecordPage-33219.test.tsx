@@ -234,7 +234,7 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
   it('a row click opens nothing: no `?recordId=`, no drawer, the list stays', async () => {
     await mountList(LIST_ONLY_OPERATIONS);
     fireEvent.click(screen.getByText('okta-staging'));
-    openWithSpace('scim_ab12');
+    openWithTap('scim_ab12');
     await settle();
     expect(search()).toBe('');
     expect(pathname()).toBe(LIST_PATH);
@@ -290,12 +290,14 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
 
 /**
  * objectstack#35684 — the list's other way to open a row: a click on a data
- * cell selects it (and opens nothing), and Space on the selected cell opens
- * its record, as the row's click used to.
+ * cell selects it (and opens nothing), and a touch tap on a cell opens its
+ * record, as the row's click used to. (It was Space on the selected cell until
+ * objectstack#35685 made Space type into the cell, per the maintainer.)
  */
-function openWithSpace(text: string): void {
-  fireEvent.click(screen.getByText(text).closest('td') as HTMLElement);
-  fireEvent.keyDown(document.activeElement as HTMLElement, { key: ' ' });
+function openWithTap(text: string): void {
+  const cell = screen.getByText(text).closest('td') as HTMLElement;
+  fireEvent.pointerDown(cell.closest('tr') as HTMLElement, { pointerType: 'touch' });
+  fireEvent.click(cell);
 }
 
 async function mountDataPage(apiOperations: string[] | undefined, search = '') {
@@ -333,7 +335,7 @@ describe('objectstack#33219 — the bare data page opens no record of a list-onl
     await mountDataPage(LIST_ONLY_OPERATIONS);
     fireEvent.click(screen.getByText('scim_ab12'));
     fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
-    openWithSpace('scim_ab12');
+    openWithTap('scim_ab12');
     await settle();
     expect(search()).toBe('');
     expect(openSpy).not.toHaveBeenCalled();
@@ -348,9 +350,9 @@ describe('objectstack#33219 — the bare data page opens no record of a list-onl
     expect(findOne).not.toHaveBeenCalled();
   });
 
-  it('CONTROL — the same object served with no restriction: Space on a selected cell opens the drawer', async () => {
+  it('CONTROL — the same object served with no restriction: a touch tap on a cell opens the drawer', async () => {
     await mountDataPage(undefined);
-    openWithSpace('scim_ab12');
+    openWithTap('scim_ab12');
     await waitFor(() => expect(search()).toBe('?recordId=c1'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
   });
