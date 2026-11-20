@@ -59,7 +59,7 @@ import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
 import type { ListViewProps } from '@object-ui/plugin-list';
-import { defaultListViewId, viewRowId } from '../utils/viewIdentity.js';
+import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -1120,7 +1120,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 ? undefined
                 : activeIsPersonal
                     ? (canUpdatePersonalView ? handlePickPersonalViewSummary : undefined)
-                    : isAdmin ? handlePickSharedViewSummary : undefined,
+                    // Only a view the metadata door stores: a package view
+                    // (a qualified, dotted name) or a saved one, never the
+                    // fallback tab an object with no views is drawn with.
+                    : isAdmin && (String(activeView.id).includes('.') || isSavedViewId(savedViews, String(activeView.id)))
+                        ? handlePickSharedViewSummary
+                        : undefined,
         },
     });
 
