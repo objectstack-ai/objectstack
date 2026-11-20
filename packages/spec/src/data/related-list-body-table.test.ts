@@ -110,7 +110,7 @@ describe('fieldGroups[i].relatedList describes the body-table rule it enforces',
   const text = root.properties?.relatedList?.description ?? '';
 
   it('says it names a body table only, and that any other list is refused with the remedy', () => {
-    expect(text).toContain("It names a body table only (a FK declaring relatedList: 'primary', or a master_detail FK that declares no relatedList, which is a tab unless a group places it; placed, it is drawn here and carried by the entry form at the same position)");
+    expect(text).toContain("It names a body table only (a FK declaring relatedList: 'primary', or a master_detail FK that declares no relatedList, which is a tab unless a group places it; placed, it is drawn here, and the parent's entry form inlines it below the record's fields until the form places it at the group as well)");
     expect(text).toContain('a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused');
     expect(text).toContain("set relatedList: 'primary' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group's relatedList");
   });

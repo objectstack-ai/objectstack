@@ -17,9 +17,11 @@
  *    除非我通过 fieldGroup 强制指定」, superseding #35597's "body table by
  *    default"). It becomes a body table only when one of the PARENT's field
  *    groups names it (`ObjectFieldGroupSchema.relatedList`): then it is drawn
- *    at that group's position, and the forms and the record page's edit state
- *    carry it there. `inlineEdit` takes no part: it is the WRITE side (the
- *    parent's entry form, ADR-0035 §3);
+ *    at that group's position, the record page's edit state carries it, and
+ *    the parent's entry form inlines it (below the record's fields until the
+ *    form places it at the group). `inlineEdit` takes no part in placement:
+ *    since ruling B on #35889 it only picks the form factor of a child a group
+ *    places (ADR-0035 as amended);
  *  - anything else is a tab (`true`, or a `lookup` with no `relatedList`), or
  *    hidden (`false`). `relatedList: true` on a `master_detail` keeps it a tab,
  *    which a group cannot override. A `lookup` child is a body table only by

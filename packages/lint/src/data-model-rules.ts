@@ -1202,14 +1202,18 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         // R5 — line-item children are usually entered inline with the parent.
         // A field group of the parent that places them satisfies it
         // (objectstack#35889: that, not the FK's `inlineEdit`, inlines a child
-        // in the parent's form and its record page's body).
-        if (isLineItemName(obj.name) && !formInlines(obj.name, fieldName, def, parent)) {
+        // in the parent's form and its record page's body). Only a FK a group
+        // MAY place is asked: one declaring `relatedList: true` / `false` would
+        // have its group refused (`related-list-group-not-body`), so the
+        // author chose a tab, or no list, on purpose.
+        if (isLineItemName(obj.name) && isGroupPlaceableRelationship(def) && !formInlines(obj.name, fieldName, def, parent)) {
+          const groupLabel = String(typeof obj.label === 'string' && obj.label ? obj.label : obj.name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
           issues.push({
             severity: 'suggestion',
             rule: 'relationship/line-items-inline-edit',
             message: `"${obj.name}" looks like line items of ${parent}; consider a field group on ${parent} with relatedList: '${obj.name}' so its rows are entered inline within the ${parent} form and drawn in its record page`,
             path: `${fieldPath}`,
-            fix: `add { key: '${obj.name}', relatedList: '${obj.name}' } to ${parent}.fieldGroups`,
+            fix: `add { key: '${obj.name}', label: '${groupLabel}', relatedList: '${obj.name}' } to ${parent}.fieldGroups`,
           });
         }
       }

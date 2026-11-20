@@ -150,17 +150,24 @@ a self-referential FK surfaces a "children" list.
 > group's position, the parent's create and edit forms inline it, and the
 > record page's Edit saves the record fields and its rows in one batch
 > (#35599); its tab stays on the tab row. `relatedList: 'primary'` on the FK
-> still makes a body table with no group, `true` keeps a tab that no group can
+> still makes a body table with no group (and no tab, positioned by a group or not), `true` keeps a tab that no group can
 > place, and `false` hides it. The set a field group may name is unchanged
 > (`isGroupPlaceableRelationship`, read by the refusal at `defineStack` and at
 > the publish door); `isBodyTableRelationship` is still the one body-table
 > judgement, now told whether a parent group places the list. The WRITE side
 > follows the same group (maintainer ruling B on #35889,
 > 「明细表应该改成指看分组的定义了」): "Only `inlineEdit` children are inlined"
-> (Decision → Derivation rules) no longer holds. The parent's form inlines a
-> child exactly where a parent field group names it; `inlineEdit` on the FK no
-> longer inlines a child by itself and only picks the form factor of a placed
-> one (`'grid'`, `'form'`, or the shape-picked default).
+> (Decision → Derivation rules) no longer holds. The parent's form, as derived
+> from its relationships, inlines a child exactly where a parent field group
+> names it (a form view that declares its own subforms still inlines what it
+> declares); `inlineEdit` on the FK no longer inlines a child by itself and
+> only picks the form factor of a placed one (`'grid'`, `'form'`, or the
+> shape-picked default), placed in the form below the record's fields until
+> the form places it at the group. A group may name only a list it can place,
+> so an `inlineEdit` child on a `lookup` FK, or on a FK declaring
+> `relatedList: true`, needs `relatedList: 'primary'` on its FK as well as the
+> group (a `master_detail` FK may instead drop `relatedList: true`); a group
+> naming a list its FK hides (`false`) is refused.
 
 The derivation is a pure function — `deriveRelatedLists(objectDef, objects)` in
 `@object-ui/app-shell` (`utils/deriveRelatedLists.ts`) — the read-side analogue

@@ -53,7 +53,6 @@ import {
   COMPUTED_VALUE_TYPES,
   FieldSchema,
   isAggregateCompatibleWithFieldType,
-  isBodyTableRelationship,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
   SelectOptionSchema,
@@ -3029,23 +3028,15 @@ function DeleteBehaviorField({
 type RelatedListMode = 'shown' | 'hidden' | 'primary';
 
 /**
- * The stored `relatedList` as one of the control's three states. `true` reads
- * as `shown`. ABSENT reads as the relationship's default, which the record
- * page's own predicate decides (`@objectstack/spec`'s `isBodyTableRelationship`,
- * objectstack#27069 / objectstack#27478), read with no field group placing it:
- * since objectstack#35889 every FK is `shown` by default, a `master_detail` one
- * included (a field group of the parent may still make that one a body table;
- * the field inspector does not see the parent's groups). Without `field` an
- * absent value reads as `shown`.
+ * The stored `relatedList` as one of the control's three states. `true` and
+ * ABSENT read as `shown`: since objectstack#35889 every FK with no
+ * `relatedList` is a tab by default, a `master_detail` one included (a field
+ * group of the parent may still make that one a body table; the field
+ * inspector does not see the parent's groups).
  */
-export function readRelatedListMode(
-  value: unknown,
-  field?: { type?: unknown; inlineEdit?: unknown },
-): RelatedListMode {
+export function readRelatedListMode(value: unknown): RelatedListMode {
   if (value === false) return 'hidden';
   if (value === 'primary') return 'primary';
-  if (value === undefined && field && typeof field.type === 'string'
-    && isBodyTableRelationship({ type: field.type, inlineEdit: field.inlineEdit })) return 'primary';
   return 'shown';
 }
 
@@ -3087,11 +3078,11 @@ function RelatedListFields({
   locale?: string;
 }) {
   const tr = (key: string) => t(key, locale);
-  const mode = readRelatedListMode(def.relatedList, def);
+  const mode = readRelatedListMode(def.relatedList);
   // The state an absent key already means here. Picking it clears the key;
   // picking another writes it. "Show" leaves a `master_detail` FK's key absent,
   // so a field group of the parent can still place it (objectstack#35889).
-  const defaultMode = readRelatedListMode(undefined, def);
+  const defaultMode = readRelatedListMode(undefined);
   const reference = typeof def.reference === 'string' && def.reference ? (def.reference as string) : '';
   const setMode = (next: RelatedListMode) => {
     if (next === mode) return;

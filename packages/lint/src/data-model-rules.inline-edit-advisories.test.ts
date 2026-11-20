@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { ObjectFieldGroupSchema } from '@objectstack/spec/data';
 import { lintDataModel } from './data-model-rules.js';
 
 const R5 = 'relationship/line-items-inline-edit';
@@ -57,7 +58,22 @@ describe('R5 relationship/line-items-inline-edit — reads the parent field grou
     expect(rest).toEqual([]);
     expect(issue?.severity).toBe('suggestion');
     expect(issue?.path).toBe('objects[1].fields.order');
-    expect(issue?.fix).toBe("add { key: 'order_line', relatedList: 'order_line' } to order.fieldGroups");
+    expect(issue?.fix).toBe("add { key: 'order_line', label: 'order_line', relatedList: 'order_line' } to order.fieldGroups");
+  });
+
+  it('the printed group parses: a parent carrying it is placed and R5 goes silent', () => {
+    const [parent, child] = stack('order_line', undefined, false);
+    const printed = { key: 'order_line', label: 'order_line', relatedList: 'order_line' };
+    expect(ObjectFieldGroupSchema.safeParse(printed).success).toBe(true);
+    // CONTROL: the snippet R5 printed before, with no label, does not parse.
+    expect(ObjectFieldGroupSchema.safeParse({ key: 'order_line', relatedList: 'order_line' }).success).toBe(false);
+    expect(hits([{ ...parent, fieldGroups: [printed] }, child], R5)).toEqual([]);
+  });
+
+  it.each([true, false])('is silent on a FK declaring relatedList: %s, which no group may place', (relatedList) => {
+    const [parent, child] = stack('order_line', undefined, false);
+    const fk = { ...child.fields.order, relatedList };
+    expect(hits([parent, { ...child, fields: { order: fk } }], R5)).toEqual([]);
   });
 });
 

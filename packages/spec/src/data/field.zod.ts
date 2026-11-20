@@ -2335,9 +2335,11 @@ export const FieldSchema = lazySchema(() => {
    * the parent's record DETAIL page. Owned children (`master_detail`) and
    * `lookup` children are shown by default (derived from the relationship);
    * set `relatedList: false` to suppress a child from the detail page (e.g.
-   * noisy audit/association links you don't want surfaced). Where `inlineEdit`
-   * pulls a child INTO the parent's entry form (write side), `relatedList`
-   * controls its appearance on the parent's detail page (read side). The intent
+   * noisy audit/association links you don't want surfaced). `relatedList`
+   * controls the child's appearance on the parent's detail page (read side);
+   * whether the parent's entry form inlines it is the parent's field group's
+   * to say (#35889, ruling B), and `inlineEdit` only picks the form factor of
+   * a child a group places. The intent
    * lives here in the data model; the detail page derives the UI.
    *
    * Tri-state (ADR-0085 semantic-role style — a statement about the
@@ -2362,8 +2364,9 @@ export const FieldSchema = lazySchema(() => {
    * of the record page) by default, like a `lookup` (#35889, superseding
    * #35597's `'primary'` default): it joins the record's main content only
    * when a field group of the PARENT names it (`ObjectFieldGroupSchema.relatedList`),
-   * which draws its table at the group's position and carries it in the
-   * parent's entry form and the record page's edit state at the same place.
+   * which draws its table at the group's position in the record page and its
+   * edit state, and inlines it in the parent's entry form (below the record's
+   * fields until the form places it at the group too).
    * Write `relatedList: true` to keep it a tab even from a group (a group
    * naming it is refused), `'primary'` to make it a body table with no group,
    * or `false` to hide it.

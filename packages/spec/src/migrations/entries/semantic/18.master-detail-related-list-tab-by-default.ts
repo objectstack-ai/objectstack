@@ -34,9 +34,14 @@ export const entry: SemanticMigration = {
     + 'points at the parent more than once) — in the `fieldGroups` order where the table should sit; such a '
     + 'group holds no fields. The table is then also inlined in the parent\'s create and edit forms, and the '
     + 'record page\'s Edit saves the record and its rows together. The same group is what keeps a child that '
-    + 'sets `inlineEdit` inlined in the parent\'s form: `inlineEdit` alone no longer does, and now only picks '
-    + 'the form factor (`\'grid\'`, `\'form\'`, or `true` / absent for the shape-picked default) of a child a '
-    + 'group places. To keep a table in the overview with no group, write `relatedList: \'primary\'` on the '
+    + 'sets `inlineEdit` inlined in the parent\'s form derived from its relationships: `inlineEdit` alone no '
+    + 'longer does, and now only picks the form factor (`\'grid\'`, `\'form\'`, or `true` / absent for the '
+    + 'shape-picked default) of a child a group places. A group may name only a list it can place, so for an '
+    + '`inlineEdit` child that is not a plain master_detail the FK changes too: on a lookup FK, or a FK declaring '
+    + '`relatedList: true`, write `relatedList: \'primary\'` and add the group (a master_detail FK may instead '
+    + 'drop `relatedList: true`); a FK declaring `relatedList: false` hides the list, and a group naming it is '
+    + 'refused (`related-list-group-not-body`). A form view that declares its own subforms still inlines what it '
+    + 'declares. To keep a table in the overview with no group, write `relatedList: \'primary\'` on the '
     + 'child\'s FK instead (that does not inline it in the form).',
   reason:
     'The maintainer ruled that a master-detail child should not be put into the overview by its relationship '
