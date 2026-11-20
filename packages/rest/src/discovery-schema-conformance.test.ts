@@ -25,6 +25,10 @@ import {
 } from '@objectstack/spec/api';
 import * as specApi from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { RestrictionProfileNodeType, RestrictionProfileSchema } from '@objectstack/spec/system';
+import { createRequire } from 'node:module';
+// Paid during collection (`check:test-source-alias`): `rest-server.ts` reaches it lazily.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
 
@@ -413,5 +417,52 @@ describe('[#4828] the REST /discovery live shape conforms to DiscoverySchema', (
       expect(body.version).toBe(direct.version);
       expect(body.version).not.toBe('v9');
     });
+  });
+});
+
+/**
+ * [#34774] `GET {basePath}/discovery/restriction-profile`, the route
+ * `os validate --target <url>` reads: its URL reader takes a 2xx JSON body in
+ * the `{ success: true, data }` envelope, and parses `data` with
+ * `RestrictionProfileSchema`, as here.
+ */
+describe('[#34774] the open runtime serves the restriction profile the CLI reads', () => {
+  const SPEC_VERSION = (createRequire(import.meta.url)('@objectstack/spec/package.json') as { version: string }).version;
+
+  async function served(scoped: boolean, req: any = {}) {
+    const rest = new RestServer(createMockServer() as any, {} as any, {
+      api: { requireAuth: false, ...(scoped ? { enableProjectScoping: true, projectResolution: 'auto' } : {}) },
+    } as any);
+    rest.registerRoutes();
+    const path = `/api/v1${scoped ? '/environments/:environmentId' : ''}/discovery/restriction-profile`;
+    const handler = rest.getRouteManager().get('GET', path)!.handler as (req: any, res: any) => Promise<void>;
+    let body: any;
+    let status = 200;
+    const res: any = { json: (b: any) => { body = b; }, status: (s: number) => { status = s; return res; } };
+    await handler(req, res);
+    return { status, body };
+  }
+
+  it('answers { success: true, data } on both mounts, data a profile that restricts nothing and names the versions run', async () => {
+    for (const scoped of [false, true]) {
+      const { status, body } = await served(scoped, { params: { environmentId: 'env_alpha' } });
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      const parsed = RestrictionProfileSchema.safeParse(body.data);
+      expect(parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`)).toEqual([]);
+      expect(body.data).toEqual({
+        allowCode: true,
+        allowSandboxedJs: true,
+        allowScheduledAutomation: true,
+        allowedFlowNodeTypes: [...RestrictionProfileNodeType.options],
+        versions: { spec: SPEC_VERSION, skills: SPEC_VERSION },
+      });
+    }
+  });
+
+  it('reads no query parameter: an unknown one is refused 400 VALIDATION_ERROR', async () => {
+    const { status, body } = await served(false, { query: { environment: 'prod' } });
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('VALIDATION_ERROR');
   });
 });
