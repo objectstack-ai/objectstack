@@ -101,6 +101,8 @@ export function useObjectViewListRenderer({
     openAsPage,
     rowOpensRecord,
     phoneTitle,
+    viewBarTrailing,
+    conditionRowEnd,
     handleListPersonalizationChange,
     urlFilters,
     initialUfSelections,
@@ -148,6 +150,15 @@ export function useObjectViewListRenderer({
      * `null` with no view to switch.
      */
     phoneTitle: ReactNode;
+    /**
+     * objectstack#35878 — the right end of the view bar, given the list's own
+     * tools there (its search): the page's create button and ⋮ More after
+     * them. `null` ⇒ the list's search alone. Called afresh on every render
+     * of the page, read through a store like the lead.
+     */
+    viewBarTrailing: ((tools: ReactNode) => ReactNode) | null;
+    /** objectstack#35878 — the condition row's right end: the 「Personalized · Reset」 marker, or `null`. */
+    conditionRowEnd: ReactNode;
     /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
     handleListPersonalizationChange: ReturnType<typeof useObjectViewListUrlState>['handleListPersonalizationChange'];
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
@@ -191,6 +202,15 @@ export function useObjectViewListRenderer({
         leadStore.set(phoneTitle);
     });
     const hasPhoneTitle = phoneTitle != null;
+    // objectstack#35878 — the view bar's right end and the condition row's,
+    // read through stores the same way, so a change in them redraws only them.
+    const [trailStore] = useState(() => createLeadStore<((tools: ReactNode) => ReactNode) | null>(viewBarTrailing));
+    const [rowEndStore] = useState(() => createLeadStore<ReactNode>(conditionRowEnd));
+    useLayoutEffect(() => {
+        trailStore.set(viewBarTrailing);
+        rowEndStore.set(conditionRowEnd);
+    });
+    const hasViewBarTrailing = viewBarTrailing != null;
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -373,8 +393,10 @@ export function useObjectViewListRenderer({
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
                     {hasPhoneTitle && (
-                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center min-w-0 bg-background">
+                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center justify-between gap-2 min-w-0 bg-background">
                             <ViewBarLead store={leadStore} />
+                            {/* objectstack#35878 — the page's acts end this bar too. */}
+                            {hasViewBarTrailing && <ViewBarTrailing store={trailStore} tools={null} />}
                         </div>
                     )}
                     {chartFace}
@@ -1140,22 +1162,26 @@ export function useObjectViewListRenderer({
                         <ViewBarLead store={leadStore} />
                     </ListRecordCountContext.Provider>
                 ) : null}
+                // objectstack#35878 — the bar's right end: the search, then
+                // the page's acts; and the condition row's right end.
+                toolbarTrailing={hasViewBarTrailing ? (tools) => <ViewBarTrailing store={trailStore} tools={tools} /> : undefined}
+                conditionRowEnd={hasPhoneTitle ? <ViewBarLead store={rowEndStore} /> : undefined}
                 dataSource={ds}
             />
         );
-    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }
 
-/** The page's current view-bar lead (the switcher), read by `ViewBarLead`. */
-interface LeadStore {
-    get: () => ReactNode;
-    set: (next: ReactNode) => void;
+/** The page's current view-bar lead (the switcher), read by `ViewBarLead`; also its right ends. */
+interface LeadStore<T = ReactNode> {
+    get: () => T;
+    set: (next: T) => void;
     subscribe: (listener: () => void) => () => void;
 }
 
-function createLeadStore(initial: ReactNode): LeadStore {
+function createLeadStore<T = ReactNode>(initial: T): LeadStore<T> {
     let current = initial;
     const listeners = new Set<() => void>();
     return {
@@ -1175,4 +1201,10 @@ function createLeadStore(initial: ReactNode): LeadStore {
 /** Draws the store's lead, re-rendering on its own when the page hands a new one. */
 function ViewBarLead({ store }: { store: LeadStore }) {
     return <>{useSyncExternalStore(store.subscribe, store.get, store.get)}</>;
+}
+
+/** Draws the view bar's right end from the store, around the list's own `tools`. */
+function ViewBarTrailing({ store, tools }: { store: LeadStore<((tools: ReactNode) => ReactNode) | null>; tools: ReactNode }) {
+    const render = useSyncExternalStore(store.subscribe, store.get, store.get);
+    return <>{render ? render(tools) : tools}</>;
 }

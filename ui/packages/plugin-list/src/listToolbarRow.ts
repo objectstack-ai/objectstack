@@ -51,8 +51,11 @@ export const TOOLBAR_LEFT_GROUP = 'flex items-center gap-2 overflow-x-auto min-w
 export const TOOLBAR_LEFT_GROUP_LEADING =
   'flex flex-1 items-center gap-2 overflow-x-auto min-w-0 max-sm:contents';
 
-/** The wrapper of the host's leading node. */
-export const TOOLBAR_LEADING = 'flex min-w-0 flex-1 items-center max-sm:basis-auto';
+/**
+ * The wrapper of the host's leading node. It shrinks but does not grow
+ * (objectstack#35878): 视图设置 follows it directly, beside the view's name.
+ */
+export const TOOLBAR_LEADING = 'flex min-w-0 shrink items-center max-sm:basis-auto';
 
 /** The user-filter chips. */
 export const TOOLBAR_USER_FILTERS = 'shrink-0 min-w-0 overflow-x-auto';

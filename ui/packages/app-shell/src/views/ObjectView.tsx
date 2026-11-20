@@ -9,7 +9,7 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
-import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
@@ -83,7 +83,14 @@ import { useObjectViewListUrlState, useObjectViewUrlFilters } from './objectView
 import { useObjectViewTitleSwitcher } from './objectViewTitleSwitcher.js';
 import { useObjectViewPluginSchema } from './objectViewPluginSchema.js';
 import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
-import { ObjectViewPageHeader } from './objectViewPageHeader.js';
+import {
+    ListViewBarHostContext,
+    OBJECT_VIEW_PAGE_COLUMN_ATTR,
+    ObjectViewBarObjectName,
+    ObjectViewBarTrailing,
+    ObjectViewPageHeader,
+    type ObjectViewPageBarProps,
+} from './objectViewPageHeader.js';
 import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListPersonalizedMarker } from './ListPersonalizedMarker.js';
@@ -1035,6 +1042,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onDeletePersonalView: personalViewsReady ? (id: string) => { void handleDeletePersonalView(id); } : undefined,
     });
 
+    // objectstack#35878 — the page bar's props, for the view bar's right end
+    // (`viewBarTrailing` below). Filled on every render once the header chrome
+    // is known; the end reads it when it draws, after this render.
+    const pageBarPropsRef = useRef<ObjectViewPageBarProps | null>(null);
+    // Whether a list's view bar draws the page's name and acts: then the page
+    // bar above it is not drawn (`ListViewBarHostContext`).
+    const [listBarHosted, setListBarHosted] = useState(false);
+
     // objectstack#25992 slice 11a: the column-declaration flags, the held list refs and
     // `renderListView` moved to `./objectViewListRenderer.tsx`.
     const { renderListView } = useObjectViewListRenderer({
@@ -1071,12 +1086,23 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // objectstack#35548 — the view switcher leads the list's view bar at
         // every width (on a phone since objectstack#27058); the page bar only
         // names the object.
+        // objectstack#35878 — and from `sm` up the object's name leads it,
+        // 「Object / View ▾」: the page draws no page bar of its own above the
+        // list. The 「Personalized · Reset」 marker ends the condition row.
         phoneTitle: titleSwitcher ? (
             <span className="flex min-w-0 max-w-full items-center gap-1.5 max-sm:text-base max-sm:font-semibold" data-testid="list-phone-title">
+                <ObjectViewBarObjectName objectDef={objectDef} objectPluralLabel={listTitleOf} />
                 <span className="flex min-w-0">{titleSwitcher}</span>
-                {personalizedMarker}
             </span>
         ) : null,
+        // The page's acts, after the list's search: read from the ref the page
+        // fills once its header chrome is known (below).
+        viewBarTrailing: titleSwitcher
+            ? (tools: ReactNode) => (pageBarPropsRef.current
+                ? <ObjectViewBarTrailing tools={tools} {...pageBarPropsRef.current} />
+                : tools)
+            : null,
+        conditionRowEnd: personalizedMarker,
         handleListPersonalizationChange,
         urlFilters,
         initialUfSelections,
@@ -1145,6 +1171,25 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         titleSwitcher,
     });
 
+    const pageBarProps: ObjectViewPageBarProps = {
+        objectDef,
+        objectPluralLabel: listTitleOf,
+        objectDesc,
+        createButton,
+        importShown,
+        setShowImport,
+        importDisabled,
+        t,
+        listActions,
+        isEnvironmentList,
+        headerToolbarActions,
+        environmentEntitlements,
+        toolbarBar,
+        listFavorite,
+        foldedHeaderActions,
+    };
+    pageBarPropsRef.current = pageBarProps;
+
     // The list itself: one element whether or not a record is open
     // (objectstack#27545), so a `?recordId=` change — a row click, a step —
     // hands React the same element and re-renders none of the list. Memoised
@@ -1179,7 +1224,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // The page column — header, list, panels — that the record drawer draws
     // over (objectstack#27545); it keeps its full width (objectstack#28915).
     const pageColumn = (
-        <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden">
+        <ListViewBarHostContext.Provider value={setListBarHosted}>
+        <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden" {...{ [OBJECT_VIEW_PAGE_COLUMN_ATTR]: '' }}>
              {/* 1. Header with breadcrumb + description.
                  The managed-by badge sits inline with the title so the
                  lifecycle bucket (system / config / append-only /
@@ -1199,23 +1245,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  toolbar row, beside its filter / sort / display tools
                  (objectstack#27058). */}
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
-             <ObjectViewPageHeader
-                 objectDef={objectDef}
-                 objectPluralLabel={listTitleOf}
-                 objectDesc={objectDesc}
-                 createButton={createButton}
-                 importShown={importShown}
-                 setShowImport={setShowImport}
-                 importDisabled={importDisabled}
-                 t={t}
-                 listActions={listActions}
-                 isEnvironmentList={isEnvironmentList}
-                 headerToolbarActions={headerToolbarActions}
-                 environmentEntitlements={environmentEntitlements}
-                 toolbarBar={toolbarBar}
-                 listFavorite={listFavorite}
-                 foldedHeaderActions={foldedHeaderActions}
-             />
+             {/* objectstack#35878 — not drawn while the list's view bar
+                 names the object and carries its acts. */}
+             {!listBarHosted && <ObjectViewPageHeader {...pageBarProps} />}
 
              {/* Floating "+" action button — phone-only counterpart to the
                  PageHeader's primary create action we just hid. Positioned
@@ -1394,6 +1426,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 />
              </div>
         </div>
+        </ListViewBarHostContext.Provider>
     );
 
     return (
