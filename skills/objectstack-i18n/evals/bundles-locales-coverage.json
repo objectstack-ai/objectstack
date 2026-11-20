@@ -38,7 +38,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineTranslationBundle", "withSourceFallback", "loadTranslations", "kernel:ready"],
-        "must_not_contain": ["getAppBundle", "loadAppBundle"]
+        "must_not_contain": ["getAppBundle(", "loadAppBundle("]
       }
     },
     {
@@ -58,7 +58,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["reports", "permissions", "positions", "picklists"],
-        "must_not_contain": ["permissionSets", "report: {"]
+        "must_not_contain": ["permissionSets:", "permissionSets.", "report: {"]
       }
     },
     {

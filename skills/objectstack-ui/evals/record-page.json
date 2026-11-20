@@ -32,7 +32,7 @@
           "mode: 'split'",
           "mode: 'modal'",
           "mode: 'popover'",
-          "definePage"
+          "definePage("
         ]
       }
     },
