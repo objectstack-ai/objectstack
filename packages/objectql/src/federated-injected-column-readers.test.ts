@@ -575,12 +575,13 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'names the column in refusal text',
   },
-  // ADR-0157 D2: the calendar update hook judges a move to another organization.
-  'work-calendar-service.ts#installWorkCalendarHooks :: organization_id': {
+  // ADR-0157 D2: a calendar or exception update may not change the row's organization.
+  'work-calendar-service.ts#refuseOrganizationChange :: organization_id': {
     disposition: 'row-value',
     why:
-      'asks whether the update payload in hand carries the column, to judge a calendar move; it reads no storage, ' +
-      'and its object, sys_work_calendar, is a platform object, never federated',
+      'compares the update payload in hand with the stored row the engine passed the hook, and names the column ' +
+      'in the refusal; it reads no storage, and its objects, sys_work_calendar and sys_work_calendar_exception, ' +
+      'are platform objects, never federated',
   },
   'federated-object.ts#isFederatedUnprovisionedInjectedColumn :: isFederatedObject()': {
     disposition: 'definition',

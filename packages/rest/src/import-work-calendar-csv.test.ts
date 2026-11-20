@@ -18,11 +18,13 @@
  * - an edit to a calendar is judged in the organization of the stored row:
  *   its one read for "one default per organization" runs there, whatever
  *   organization the session or the payload names;
- * - moving a calendar to another organization while it stays the default is
- *   refused before any read; a move without a default lands.
+ * - a calendar, and each of its exception dates, stays in its organization:
+ *   an update that changes `organization_id` is refused before any read,
+ *   system writes included, while an edit that keeps it lands.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectQL, WorkCalendarService, installWorkCalendarHooks } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -270,34 +272,69 @@ describe('an edit is judged in the organization of the stored row (ADR-0157 D2)'
   });
 });
 
-describe('moving a calendar to another organization (ADR-0157 D2)', () => {
-  // A system writer in the row's own organization, the one writer whose
-  // payload reaches the hooks with `organization_id` in it.
+describe('a calendar and its exceptions stay in their organization (ADR-0157 D2)', () => {
+  // A system writer in the row's own organization: its payload reaches the
+  // hooks with `organization_id` in it, as sent.
   const asSystem = { context: { userId: 'calendar-admin', tenantId: 'org_b', isSystem: true } as any };
+  const CALENDAR_STAYS = 'A calendar stays in the organization it was created in; create it in the other organization instead.';
+  const EXCEPTION_STAYS = "An exception date stays in its calendar's organization.";
 
-  it('refuses moving a calendar that stays the default, before any read', async () => {
-    const { ctx, storedDefault, reads } = await seed('isolated');
-    const err = await refusalOf(ctx.engine.update('sys_work_calendar', { id: storedDefault, organization_id: 'org_a' }, asSystem));
+  /** The refusal's status, code and field, and whether its message carries the fixed reason. */
+  const refused = (err: any, reason: string) => ({
+    http: (({ status, code }) => ({ status, code }))(resolveThrownHttpError(err)),
+    fields: err?.fields?.map((f: any) => [f.field, f.code]),
+    reason: String(err?.message).includes(reason),
+  });
+  const REFUSED = { http: { status: 400, code: 'VALIDATION_FAILED' }, fields: [['organization_id', 'invalid_value']], reason: true };
 
-    expect(err?.code).toBe('VALIDATION_FAILED');
-    expect(err?.fields?.map((f: any) => [f.field, f.code])).toEqual([['is_default', 'invalid_value']]);
+  const organizationOf = async (ctx: Booted, object: string, id: string) =>
+    ((await ctx.engine.findOne(object, { where: { id }, context: { isSystem: true } as any })) as any)?.organization_id;
+
+  it('refuses moving a calendar, with or without Default, before any read', async () => {
+    const { ctx, stored, storedDefault, reads } = await seed('isolated');
+    for (const data of [
+      { id: storedDefault, organization_id: 'org_a' }, // stays the default
+      { id: stored, is_default: true, organization_id: 'org_a' }, // sets the default
+      { id: stored, organization_id: 'org_a' }, // no default at all
+      { id: stored, organization_id: null }, // clears the organization
+    ]) {
+      const err = await refusalOf(ctx.engine.update('sys_work_calendar', data, asSystem));
+      expect(refused(err, CALENDAR_STAYS)).toEqual(REFUSED);
+    }
     expect(reads).toEqual([]);
+    expect([await organizationOf(ctx, 'sys_work_calendar', storedDefault), await organizationOf(ctx, 'sys_work_calendar', stored)]).toEqual(['org_b', 'org_b']);
   });
 
-  it('refuses a move that sets the default, before any read', async () => {
-    const { ctx, stored, reads } = await seed('isolated');
-    const err = await refusalOf(ctx.engine.update('sys_work_calendar', { id: stored, is_default: true, organization_id: 'org_a' }, asSystem));
-
-    expect(err?.code).toBe('VALIDATION_FAILED');
-    expect(err?.fields?.map((f: any) => [f.field, f.code])).toEqual([['is_default', 'invalid_value']]);
-    expect(reads).toEqual([]);
-  });
-
-  it('CONTROL: a move without a default lands', async () => {
+  it('refuses moving an exception date to another organization', async () => {
     const { ctx, stored } = await seed('isolated');
-    expect(await refusalOf(ctx.engine.update('sys_work_calendar', { id: stored, organization_id: 'org_a' }, asSystem))).toBeUndefined();
+    const day = String(((await ctx.engine.insert('sys_work_calendar_exception', { calendar: stored, date: '2026-10-01', kind: 'off' }, asSystem)) as any).id);
+    const err = await refusalOf(ctx.engine.update('sys_work_calendar_exception', { id: day, organization_id: 'org_a' }, asSystem));
 
-    const moved: any = await ctx.engine.findOne('sys_work_calendar', { where: { id: stored }, context: { isSystem: true } as any });
-    expect(moved).toMatchObject({ organization_id: 'org_a', is_default: false });
+    expect(refused(err, EXCEPTION_STAYS)).toEqual(REFUSED);
+    expect(await organizationOf(ctx, 'sys_work_calendar_exception', day)).toBe('org_b');
+  });
+
+  it('refuses a predicate update that would change a matched row\'s organization, on either object', async () => {
+    const { ctx, stored, reads } = await seed('isolated');
+    await ctx.engine.insert('sys_work_calendar_exception', { calendar: stored, date: '2026-10-01', kind: 'off' }, asSystem);
+    const where = { multi: true, where: { name: 'b_alt' }, ...asSystem } as any;
+    expect(refused(await refusalOf(ctx.engine.update('sys_work_calendar', { organization_id: 'org_a' }, where)), CALENDAR_STAYS)).toEqual(REFUSED);
+    const days = { multi: true, where: { kind: 'off' }, ...asSystem } as any;
+    expect(refused(await refusalOf(ctx.engine.update('sys_work_calendar_exception', { organization_id: 'org_a' }, days)), EXCEPTION_STAYS)).toEqual(REFUSED);
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: an edit that keeps the organization lands, whether it leaves organization_id out or repeats it', async () => {
+    const { ctx, stored } = await seed('isolated');
+    const day = String(((await ctx.engine.insert('sys_work_calendar_exception', { calendar: stored, date: '2026-10-01', kind: 'off' }, asSystem)) as any).id);
+    for (const data of [{ id: stored, name: 'B Alt' }, { id: stored, name: 'B Alternate', organization_id: 'org_b' }]) {
+      expect(await refusalOf(ctx.engine.update('sys_work_calendar', data, asSystem))).toBeUndefined();
+    }
+    for (const data of [{ id: day, note: 'National Day' }, { id: day, note: 'National Day holiday', organization_id: 'org_b' }]) {
+      expect(await refusalOf(ctx.engine.update('sys_work_calendar_exception', data, asSystem))).toBeUndefined();
+    }
+    const calendarRow: any = await ctx.engine.findOne('sys_work_calendar', { where: { id: stored }, context: { isSystem: true } as any });
+    const dayRow: any = await ctx.engine.findOne('sys_work_calendar_exception', { where: { id: day }, context: { isSystem: true } as any });
+    expect([calendarRow.name, calendarRow.organization_id, dayRow.note, dayRow.organization_id]).toEqual(['B Alternate', 'org_b', 'National Day holiday', 'org_b']);
   });
 });
