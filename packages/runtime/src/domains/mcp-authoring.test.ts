@@ -43,8 +43,10 @@ import { z } from 'zod';
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { handleMcpRequest } from './mcp.js';
 import {
+  CONTRACT_REPLY_BYTE_CAP,
   OPEN_AUTHORING_READ_TOOL_NAMES,
   OPEN_AUTHORING_WRITE_TOOL_NAMES,
+  contractReplyBytes,
   createOpenAuthoringRegistry,
   resolveOpenAuthoringInjection,
   type OpenAuthoringInjection,
@@ -626,7 +628,54 @@ describe('[#35761] list_metadata_items with contract: true answers the type\'s c
     const read = await call(authoring, 'list_metadata_items', { type: 'flows', contract: true });
     expect(read.isError).toBe(false);
     expect(read.body.items).toEqual(plain.body.items);
-    expect(read.body.contract).toEqual({ schema: FLOW_SCHEMA, createSeed: { name: 'new_flow' } });
+    // The default is the lean form, a projection of the entry's schema; the root pointer drills to it whole.
+    expect(read.body.contract).toEqual({
+      form: 'lean',
+      schema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+      createSeed: { name: 'new_flow' },
+    });
+    const whole = await call(authoring, 'list_metadata_items', { type: 'flow', contract: true, contractPath: '' });
+    expect(whole.body.contract).toEqual({ form: 'full', path: '', schema: FLOW_SCHEMA });
+  });
+
+  it('contractPath is refused without contract: true, as a non-pointer, and on a type with no schema, before any listing is read', async () => {
+    const { authoring, calls } = await withEntries();
+    for (const input of [
+      { type: 'flow', contractPath: '/properties/name' },
+      { type: 'flow', contract: false, contractPath: '/properties/name' },
+      { type: 'flow', contract: true, contractPath: 'properties/name' },
+      { type: 'flow', contract: true, contractPath: 7 },
+    ]) {
+      calls.length = 0;
+      const refused = await call(authoring, 'list_metadata_items', input);
+      expect(refused.body.error, JSON.stringify(input)).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      expect(refused.body.error.message, JSON.stringify(input)).toContain('contractPath');
+      expect(calls, JSON.stringify(input)).toEqual([]);
+    }
+    const noSchema = await call(authoring, 'list_metadata_items', { type: 'job', contract: true, contractPath: '/properties/name' });
+    expect(noSchema.body.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(noSchema.body.error.message).toContain('/properties/name');
+    expect(noSchema.body.contract).toBeUndefined();
+  });
+
+  it('no contract reply exceeds the cap: descriptions go first, then the lean form says it is over and names a narrower path', async () => {
+    const wide = (count: number) => ({
+      type: 'object',
+      properties: Object.fromEntries(Array.from({ length: count }, (_, i) => [`key_${i}`, { type: 'string', description: 'd'.repeat(150) }])),
+    });
+    for (const [count, expected] of [[300, 'omitted'], [3000, 'null']] as const) {
+      const { protocol } = fakeProtocol();
+      protocol.getMetaTypes = async () => ({ types: ['flow'], entries: [{ type: 'flow', schema: wide(count) }] }) as any;
+      const served = await serve(await oauthEnvelope(['metadata:write'], ADMIN), { protocol, systemPermissions: ADMIN });
+      const { contract } = (await call(served.authoring!, 'list_metadata_items', { type: 'flow', contract: true })).body;
+      expect(contractReplyBytes(contract), `${count} keys`).toBeLessThanOrEqual(CONTRACT_REPLY_BYTE_CAP);
+      if (expected === 'omitted') {
+        expect(contract).toMatchObject({ form: 'lean', truncated: true });
+        expect(contract.schema.properties.key_0).toEqual({ type: 'string' });
+      } else {
+        expect(contract).toEqual({ schema: null, reason: expect.stringContaining('over the reply cap') });
+      }
+    }
   });
 
   it('a type with no schema is answered schema: null with the reason, never {}', async () => {
@@ -1043,10 +1092,62 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(read.body.count, JSON.stringify(read.body)).toBe(0);
     const { contract } = read.body;
     const entry = (await protocol.getMetaTypes!()).entries!.find((e) => e.type === 'flow') as any;
-    expect(contract.schema).toEqual(entry.schema);
+    // The lean form projects the served schema: its top-level keys and required list, and the full schema one drill away.
+    expect(contract.form).toBe('lean');
+    expect(Object.keys(contract.schema.properties)).toEqual(Object.keys(entry.schema.properties));
+    expect(contract.schema.required).toEqual(entry.schema.required);
     const reference = z.toJSONSchema(getMetadataTypeSchema('flow')!, { unrepresentable: 'any' }) as { required?: string[] };
     expect([...contract.schema.required].sort()).toEqual([...reference.required!].sort());
     expect(contract.createSeed).toEqual(getMetadataCreateSeed('flow'));
+    const whole = await call(authoring, 'list_metadata_items', { type: 'flow', contract: true, contractPath: '' });
+    expect(whole.body.contract).toEqual({ form: 'full', path: '', schema: entry.schema });
+  });
+
+  /** A protocol whose type listing is the one the metadata plugin sets at boot. */
+  async function servedTypes() {
+    const metadata = new MetadataManager({} as never);
+    metadata.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
+    const protocol = await realProtocol(new Map([['metadata', metadata]]));
+    const { authoring } = await authorThroughDomain({ protocol });
+    const entries = (await protocol.getMetaTypes!()).entries! as any[];
+    return { authoring, served: (type: string) => entries.find((e) => e.type === type).schema };
+  }
+
+  it('[#35761] the lean contract of the largest skill-table types fits under the reply cap, and names every top-level key', async () => {
+    const { authoring, served } = await servedTypes();
+    for (const type of ['object', 'view', 'page', 'app']) {
+      const { contract } = (await call(authoring, 'list_metadata_items', { type, contract: true })).body;
+      expect(contract.form, type).toBe('lean');
+      expect(contractReplyBytes(contract), type).toBeLessThanOrEqual(CONTRACT_REPLY_BYTE_CAP);
+      // The full served schema is what would not fit.
+      expect(contractReplyBytes({ schema: served(type) }), type).toBeGreaterThan(CONTRACT_REPLY_BYTE_CAP);
+      const full = served(type);
+      expect(Object.keys(contract.schema.properties ?? {}), type).toEqual(Object.keys(full.properties ?? {}));
+      expect((contract.schema.anyOf ?? []).length, type).toBe((full.anyOf ?? []).length);
+    }
+  });
+
+  it('[#35761] contractPath drills the served object schema under the cap; a key that fits answers whole; a missing path is refused naming the keys', async () => {
+    const { authoring, served } = await servedTypes();
+    const object = served('object');
+    const fields = (await call(authoring, 'list_metadata_items', { type: 'object', contract: true, contractPath: '/properties/fields' })).body.contract;
+    expect(contractReplyBytes(fields)).toBeLessThanOrEqual(CONTRACT_REPLY_BYTE_CAP);
+    expect(fields).toMatchObject({ form: 'lean', path: '/properties/fields', truncated: true });
+    // Its drill pointer is the next contractPath, and resolves in the same served schema.
+    const next = fields.schema.additionalProperties.drill;
+    expect(next).toBe('/properties/fields/additionalProperties');
+    const field = (await call(authoring, 'list_metadata_items', { type: 'object', contract: true, contractPath: next })).body.contract;
+    expect(contractReplyBytes(field)).toBeLessThanOrEqual(CONTRACT_REPLY_BYTE_CAP);
+    expect(Object.keys(field.schema.properties)).toEqual(Object.keys(object.properties.fields.additionalProperties.properties));
+
+    const label = (await call(authoring, 'list_metadata_items', { type: 'object', contract: true, contractPath: '/properties/label' })).body.contract;
+    expect(label).toEqual({ form: 'full', path: '/properties/label', schema: object.properties.label });
+
+    const missing = await call(authoring, 'list_metadata_items', { type: 'object', contract: true, contractPath: '/properties/no_such_key' });
+    expect(missing.body.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(missing.body.error.message).toContain('/properties/no_such_key');
+    expect(missing.body.error.message).toContain('fields');
+    expect(missing.body.contract).toBeUndefined();
   });
 
   it('an inherited member\'s name as `type`, which the fold keeps as sent, is refused and writes nothing', async () => {
