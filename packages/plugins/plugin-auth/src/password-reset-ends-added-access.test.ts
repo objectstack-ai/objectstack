@@ -363,7 +363,7 @@ describe('a completed self-service password reset ends what the account added be
   }, 60_000);
 });
 
-describe('where the OAuth provider is mounted, a completed reset ends the apps authorized to the account', () => {
+describe('where the OAuth provider is mounted, a completed reset and a forced reset end the apps authorized to the account', () => {
   const ENV_KEYS = ['OS_OIDC_PROVIDER_ENABLED', 'OS_MCP_SERVER_ENABLED'] as const;
   const saved: Record<string, string | undefined> = {};
   beforeEach(() => {
@@ -453,8 +453,12 @@ describe('where the OAuth provider is mounted, a completed reset ends the apps a
     expect(notices[0].data).toMatchObject({ authorizedAppCount: 1, authorizedApps: 'Desk Assistant', apiKeyCount: 0, signInAccountCount: 0 });
   }, 60_000);
 
-  it('the control: where neither plugin is mounted, a reset reads none of those stores', async () => {
-    // The provider is on by default (it follows the MCP server), so it is turned off here.
+  /**
+   * A stage on which neither plugin is mounted (the provider is on by default,
+   * since it follows the MCP server, so it is turned off), its grant rows
+   * written straight to the stores, as an earlier mount would have left them.
+   */
+  async function unmountedStage() {
     const s = await stage({ plugins: { oidcProvider: false } });
     expect(s.auth.getPlugin('oauth-provider'), 'the provider is not mounted').toBeFalsy();
     for (const [object, row] of [
@@ -465,9 +469,72 @@ describe('where the OAuth provider is mounted, a completed reset ends the apps a
     ] as const) {
       await s.engine.insert(object, row as never, SYS);
     }
+    return s;
+  }
+
+  it('the control: where neither plugin is mounted, a reset reads none of those stores', async () => {
+    const s = await unmountedStage();
 
     expect(await s.reset(SECOND)).toEqual({ status: 200 });
 
+    expect(await grantsOf(s, s.userId)).toEqual(ALL);
+  }, 60_000);
+
+  it("an administrator's forced reset ends them too and reports the apps; with revocation off it ends none", async () => {
+    const s = await stage({ plugins: { oidcProvider: true, deviceAuthorization: true } });
+    await registerClient(s);
+    await authorize(s, s.userId, 'user');
+    await authorize(s, s.adminUserId, 'admin');
+    const issuedAt = Math.floor(Date.now() / 1000) + 1;
+    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt);
+
+    const routine = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: SECOND, mustChangePassword: false, revokeSessionsAndKeys: false },
+      s.bearer(s.adminBearer),
+    );
+    expect(routine.status, await routine.clone().text()).toBe(200);
+    expect(await grantsOf(s, s.userId), 'a routine reset ends nothing').toEqual(ALL);
+    expect(await grantStands()).toBe(true);
+
+    const forced = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: FIRST, mustChangePassword: false },
+      s.bearer(s.adminBearer),
+    );
+    expect(forced.status, await forced.clone().text()).toBe(200);
+    const body = (await forced.json()) as { data?: { revoked?: Record<string, unknown> } };
+    expect(body.data?.revoked).toMatchObject({ authorizedApps: 1, failed: 0, complete: true });
+    expect(await grantsOf(s, s.userId)).toEqual(NONE);
+    expect(await grantStands(), 'the MCP door refuses a token of the grant after it').toBe(false);
+    // The control: the administrator's own grants stay.
+    expect(await grantsOf(s, s.adminUserId)).toEqual(ALL);
+  }, 60_000);
+
+  it("the operator's reset ends them too, as the project database holds them", async () => {
+    const s = await stage({ plugins: { oidcProvider: true, deviceAuthorization: true } });
+    await registerClient(s);
+    await authorize(s, s.userId, 'user');
+    await authorize(s, s.adminUserId, 'admin');
+
+    const outcome = await setOperatorPassword(s.engine as never, { email: EMAIL, password: SECOND });
+
+    expect(outcome).toMatchObject({ outcome: 'set', authorizedAppsEnded: 1, revocationComplete: true });
+    expect(await grantsOf(s, s.userId)).toEqual(NONE);
+    expect(await grantsOf(s, s.adminUserId)).toEqual(ALL);
+  }, 60_000);
+
+  it("the control: where neither plugin is mounted, the administrator's forced reset reads none of those stores", async () => {
+    const s = await unmountedStage();
+
+    const forced = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: SECOND, mustChangePassword: false },
+      s.bearer(s.adminBearer),
+    );
+    expect(forced.status, await forced.clone().text()).toBe(200);
+    const body = (await forced.json()) as { data?: { revoked?: Record<string, unknown> } };
+    expect(body.data?.revoked).toMatchObject({ authorizedApps: 0, failed: 0, complete: true });
     expect(await grantsOf(s, s.userId)).toEqual(ALL);
   }, 60_000);
 });

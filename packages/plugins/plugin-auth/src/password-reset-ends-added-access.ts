@@ -58,8 +58,10 @@
  *
  * An administrator's forced reset (`/admin/set-user-password` with its
  * revocation switch on, the default) and the operator's reset
- * (`os user set-password`) end the keys and the linked sign-in accounts beside
- * the sessions they end, through `forced-reset-revocation.ts`. An
+ * (`os user set-password`) end the keys, the linked sign-in accounts and the
+ * authorized apps and device sign-ins beside the sessions they end, through
+ * `forced-reset-revocation.ts`, which ends the last two with this module's
+ * {@link endOAuthGrants}. An
  * administrator who turns the switch off (`revokeSessionsAndKeys: false`)
  * asks for a routine reset, and nothing is ended: the switch is the reason
  * that reset is not treated as a self-service one. The one-step invitation
@@ -82,6 +84,7 @@
 
 import { isExpired } from '@objectstack/core';
 import { SystemObjectName } from '@objectstack/spec/system';
+import { isMissingTableError } from '@objectstack/types';
 import type { USER_KEYED_STORES } from './invitation-mailbox-proof.js';
 
 /** The provider id of the account's local password row. */
@@ -117,6 +120,9 @@ export interface OAuthGrantRows {
   findOne(query: { model: string; where: Array<{ field: string; value: unknown }> }): Promise<unknown>;
   delete(query: { model: string; where: Array<{ field: string; value: unknown }> }): Promise<unknown>;
 }
+
+/** The OAuth grants {@link endOAuthGrants} ended: counts of rows really deleted. */
+export type EndedOAuthGrants = Pick<ResetEndedAccess, 'authorizedApps' | 'oauthTokens' | 'deviceCodes'>;
 
 /**
  * Where the account's OAuth grants are kept: the vendor's storage adapter,
@@ -256,6 +262,81 @@ async function endGrantRows(store: OAuthGrantRows, model: string, userId: string
 }
 
 /**
+ * End every OAuth grant and approved device sign-in of `userId`, in
+ * {@link OAUTH_GRANT_STORES} order, in each store whose plugin `oauth` says is
+ * mounted; no `oauth`, nothing. The arm a completed self-service reset and the
+ * forced resets (`forced-reset-revocation.ts`) share. Throws when a read or a
+ * delete fails, a mounted plugin's store cannot be reached, or a row survives
+ * its delete.
+ */
+export async function endOAuthGrants(oauth: MountedOAuthGrants | undefined, userId: string): Promise<EndedOAuthGrants> {
+  const ended: EndedOAuthGrants = { authorizedApps: 0, oauthTokens: 0, deviceCodes: 0 };
+  for (const grant of OAUTH_GRANT_STORES) {
+    if (!oauth?.mounted(grant.plugin)) continue;
+    const store = oauth.store;
+    if (!store) throw new Error(`the ${grant.model} store of a mounted ${grant.plugin} cannot be reached`);
+    ended[grant.counts] += await endGrantRows(store, grant.model, userId);
+  }
+  return ended;
+}
+
+/** The slice of the data engine {@link storedOAuthGrants} reads and deletes the grant stores through. */
+export interface OAuthGrantEngine {
+  find(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
+  delete?(object: string, options?: unknown): Promise<unknown>;
+}
+
+/**
+ * The account's OAuth grants as the project database holds them, for a reset
+ * run with no auth server in reach (the operator's `os user set-password`):
+ * each {@link OAUTH_GRANT_STORES} store read and deleted through the data
+ * engine, by its object and its user column (the `store` key). With no
+ * plugin registry to ask, every store counts as mounted: a grant row is the
+ * account's whether or not its plugin is mounted now, and a store whose table
+ * the database does not hold has no row to end.
+ */
+export function storedOAuthGrants(engine: OAuthGrantEngine): MountedOAuthGrants {
+  const placeOf = (model: string): { object: string; column: string } => {
+    const grant = OAUTH_GRANT_STORES.find((g) => g.model === model);
+    if (!grant) throw new Error(`${model} is not an OAuth grant store`);
+    const [object, column] = grant.store.split('.') as [string, string];
+    return { object, column };
+  };
+  const valueOf = (where: Array<{ field: string; value: unknown }>, field: string): unknown =>
+    where.find((clause) => clause.field === field)?.value;
+  return {
+    mounted: () => true,
+    store: {
+      async findMany({ model, where, limit }) {
+        const { object, column } = placeOf(model);
+        try {
+          return rowsOf(
+            await engine.find(
+              object,
+              { where: { [column]: valueOf(where, 'userId') }, fields: ['id'], limit: limit ?? API_KEY_PAGE },
+              { context: SYSTEM_CTX },
+            ),
+          );
+        } catch (error) {
+          if (isMissingTableError(error)) return [];
+          throw error;
+        }
+      },
+      async findOne({ model, where }) {
+        const { object } = placeOf(model);
+        const rows = rowsOf(await engine.find(object, { where: { id: valueOf(where, 'id') }, fields: ['id'], limit: 1 }, { context: SYSTEM_CTX }));
+        return rows[0] ?? null;
+      },
+      async delete({ model, where }) {
+        const { object } = placeOf(model);
+        if (typeof engine.delete !== 'function') throw new Error(`the data engine cannot delete ${object} rows`);
+        return engine.delete(object, { where: { id: valueOf(where, 'id') }, context: SYSTEM_CTX });
+      },
+    },
+  };
+}
+
+/**
  * End what a completed self-service reset ends for `userId` (module header):
  * every linked sign-in account other than the password, every API key, and,
  * where their plugins are mounted, every OAuth grant and approved device
@@ -277,12 +358,7 @@ export async function endWhatTheAccountAddedBeforeAReset(stores: ResetStores, us
     }
   }
   ended.signInAccounts = unlinked.size;
-  for (const grant of OAUTH_GRANT_STORES) {
-    if (!stores.oauth?.mounted(grant.plugin)) continue;
-    const store = stores.oauth.store;
-    if (!store) throw new Error(`the ${grant.model} store of a mounted ${grant.plugin} cannot be reached`);
-    ended[grant.counts] += await endGrantRows(store, grant.model, userId);
-  }
+  Object.assign(ended, await endOAuthGrants(stores.oauth, userId));
   const engine: ApiKeyStore | undefined = stores.apiKeys;
   if (!engine) return ended;
   // Each pass revokes what the read answered, and the next read no longer

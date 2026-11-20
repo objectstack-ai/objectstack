@@ -25,8 +25,8 @@ import { composeProviderForDeclarations } from '../../utils/schema-migration-plu
  * refusal names this command. The reset itself is plugin-auth's
  * `setOperatorPassword`: it writes the account's password credential with
  * better-auth's own hash, clears the development seed stamp and a sign-in
- * lock, and ends every session, API key and linked sign-in account of the
- * account.
+ * lock, and ends every session, API key, linked sign-in account and
+ * authorized app of the account.
  *
  * - **The password never travels on the command line**, where a shell history
  *   and the process table keep it: it is asked for twice, unechoed, on a
@@ -37,8 +37,8 @@ import { composeProviderForDeclarations } from '../../utils/schema-migration-plu
  */
 export default class UserSetPassword extends Command {
   static override description =
-    'Set a user\'s password in the project database, ending the account\'s sessions, API keys and linked '
-    + 'sign-in accounts. '
+    'Set a user\'s password in the project database, ending the account\'s sessions, API keys, linked '
+    + 'sign-in accounts and authorized apps. '
     + 'The reset a server outside development mode names when it refuses a development seed credential.';
 
   static override examples = [
@@ -107,13 +107,14 @@ export default class UserSetPassword extends Command {
           } else {
             printSuccess(`The password of ${args.email.trim()} is set.`);
             printInfo(
-              `${outcome.sessionsEnded} session(s) ended, ${outcome.apiKeysRevoked} API key(s) revoked and `
-                + `${outcome.signInAccountsUnlinked} linked sign-in account(s) unlinked; `
+              `${outcome.sessionsEnded} session(s) ended, ${outcome.apiKeysRevoked} API key(s) revoked, `
+                + `${outcome.signInAccountsUnlinked} linked sign-in account(s) unlinked and `
+                + `${outcome.authorizedAppsEnded} authorized app(s) ended; `
                 + 'the account signs in with the new password.',
             );
             if (!outcome.revocationComplete) {
               printWarning(
-                'Not every session, API key or linked sign-in account could be ended: end the rest by hand.',
+                'Not every session, API key, linked sign-in account or authorized app could be ended: end the rest by hand.',
               );
             }
           }

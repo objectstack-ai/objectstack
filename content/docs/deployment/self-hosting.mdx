@@ -628,7 +628,7 @@ first; the refusal names that command.
 What this release refuses is the seed password and every new session for a
 seeded account still on it. Sessions and API keys a seeded account was issued
 before the server left development mode are ended by `os user set-password`
-(with any sign-in account linked to it), so
+(with any sign-in account linked to it and any app authorized to it), so
 run it on each seeded account before serving the database; ending them at boot
 is follow-up #35184.
 

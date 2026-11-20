@@ -886,11 +886,13 @@ What one run does:
   development seed mark and a sign-in lock, and records the change time.
 - **It deletes the account's outstanding password-reset links and codes from the project
   database** before the new password lands.
-- **It ends every session, revokes every API key and unlinks every linked sign-in account
-  of the account** (a social, OAuth or single sign-on link; the password itself stays), as
-  an administrator's forced reset does: the sessions, keys and links the account held
-  under the old password do not outlive it. It asks for no password change at the next
-  sign-in.
+- **It ends every session, revokes every API key, unlinks every linked sign-in account
+  and ends every authorized app and approved device sign-in of the account** (a link is a
+  social, OAuth or single sign-on link; the password itself stays; an app's consents,
+  refresh tokens and stored access tokens are deleted, so it asks to be authorized again),
+  as an administrator's forced reset does: the sessions, keys, links and grants the
+  account held under the old password do not outlive it. It asks for no password change
+  at the next sign-in.
 - **It writes the project database only.** A secondary storage the host configures for the
   auth service (a cache that can hold reset links and sessions) is out of its reach, for the
   reset links and the sessions alike. With one configured, run the command with the server

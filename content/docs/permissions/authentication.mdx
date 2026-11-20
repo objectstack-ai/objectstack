@@ -406,8 +406,9 @@ sent never fails the change. It is a built-in auth template, overridable like
 the others.
 
 An administrator's forced reset with `revokeSessionsAndKeys` on and the
-operator's `os user set-password` end the API keys and the linked sign-in
-accounts, as [Set / Reset a Password](#set--reset-a-password) describes.
+operator's `os user set-password` end the API keys, the linked sign-in
+accounts, the authorized apps and the device sign-ins, as
+[Set / Reset a Password](#set--reset-a-password) describes.
 
 #### Setting a first local password
 
@@ -1339,14 +1340,19 @@ SSO-onboarded users who never had a local password.
 
 The forced reset also carries `revokeSessionsAndKeys`, **on by default**: it
 ends every session of the user, revokes every API key they own that is not
-revoked (its `revoked` flag false or unset) and unlinks
-every sign-in account linked to the user other than the password, so a
-suspected compromise leaves no live credential behind. Pass
-`revokeSessionsAndKeys: false` for a routine reset, which ends none of these.
-The response reports what was ended
-(`revoked: { sessions, apiKeys, signInAccounts, failed, complete }`), and
-revoked keys stay revoked after the password change. The operator's
-`os user set-password` ends the same three.
+revoked (its `revoked` flag false or unset), unlinks
+every sign-in account linked to the user other than the password, and, where
+the OAuth provider is enabled, ends every app authorized to the user (its
+consents, refresh tokens and stored access tokens are deleted, so the app asks
+to be authorized again and an MCP access token is refused on its next request)
+and, where device authorization is enabled, every device sign-in approved for
+the user and not yet collected. A suspected compromise leaves no live
+credential behind. Pass `revokeSessionsAndKeys: false` for a routine reset,
+which ends none of these. The response reports what was ended
+(`revoked: { sessions, apiKeys, signInAccounts, authorizedApps, failed, complete }`),
+and revoked keys stay revoked after the password change. The operator's
+`os user set-password` ends the same, reading the authorized apps and device
+sign-ins the project database holds.
 
 #### Bulk Import Users
 
