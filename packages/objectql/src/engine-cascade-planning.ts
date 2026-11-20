@@ -56,6 +56,7 @@ import {
 } from './engine-top-level.js';
 import type { ReferentialClearOption } from './engine-top-level.js';
 import { isExternalDriverFloor } from './external-driver-floor.js';
+import { ORGANIZATION_UNIT_OBJECT } from './validation/unit-code-membership.js';
 import { forgetCollectedProbes, takeCollectedProbe } from './engine-delete-cascade.js';
 import type { CascadeDeleteSet } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
@@ -1213,6 +1214,13 @@ export class CascadePlanningFacet {
         }
       }
     }
+    // [ruling 7035627429, option B] An organization's delete removes its units,
+    // the one exemption from the `sys_unit` delete refusal. Last, once
+    // `refuseOrganizationDeleteWhileOwned` above has admitted the delete and
+    // every relation has been judged, so a refused delete removes no unit.
+    if (object === ORGANIZATION_OBJECT) {
+      for (const id of ids) await removeOrganizationUnits(this, id, context, objects, cascadeSet);
+    }
   }
 
   /**
@@ -1348,7 +1356,9 @@ export class CascadePlanningFacet {
   /**
    * [#24948] The engine half of organization delete: refuse while any row
    * outside the cascade set still names the organization in its tenant column,
-   * a row that outlives the organization excepted ({@link outlivesOrganization}).
+   * a row that outlives the organization excepted ({@link outlivesOrganization}),
+   * and so is a unit of measure, which the walk removes with the organization
+   * once this admits the delete (`removeOrganizationUnits`).
    *
    * Runs before the walk touches the first relation, and reads every tenant
    * relation before it throws, so the one refusal names every table that holds
@@ -1373,6 +1383,9 @@ export class CascadePlanningFacet {
       const fields = (child as any)?.fields as Record<string, any> | undefined;
       // An append-only or engine-owned object's rows outlive the organization: not counted, kept as they are.
       if (!childName || !fields || ObjectQL.outlivesOrganization(child)) continue;
+      // [ruling 7035627429, option B] The organization's units are not counted:
+      // the walk removes them with it (`removeOrganizationUnits`).
+      if (childName === ORGANIZATION_UNIT_OBJECT) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
         const behavior = this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, fieldName, fdef);
         if (!this.isTenantColumnSetNull(ORGANIZATION_OBJECT, child, fieldName, behavior)) continue;
@@ -1415,6 +1428,8 @@ export class CascadePlanningFacet {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
       if (!childName || !fields || exclude.has(childName) || ObjectQL.outlivesOrganization(child)) continue;
+      // [ruling 7035627429, option B] The organization's units go with its delete, as in the engine's refusal.
+      if (childName === ORGANIZATION_UNIT_OBJECT) continue;
       const tenantField = resolveTenantFieldName(child);
       if (!tenantField || !fields[tenantField]) continue;
       const fdef = fields[tenantField];
@@ -1514,6 +1529,79 @@ async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIs
         () => host.delete(childName, { where: { id: depId }, context } as any),
       );
     }
+  }
+}
+
+/**
+ * The tokens {@link removeOrganizationUnits} issued, and no other: the
+ * provenance `delete()` reads ({@link isOrganizationUnitRemoval}) to admit an
+ * organization's unit delete. Module-private, so nothing outside this module
+ * can enter a token into it, a holder of the engine's own `cascadeIssuedDeletes`
+ * store included.
+ */
+const organizationUnitRemovals = new WeakSet<object>();
+
+/**
+ * [ruling 7035627429, option B] Is `token`, the cascade token a `delete()` has
+ * just claimed, one an organization's delete issued to remove one of its
+ * units? The one exemption from `refuseOrganizationUnitDelete`
+ * (`validation/unit-code-membership.ts`): `delete()` asks it only for the token
+ * it claimed itself, so the answer reaches that one delete and no other.
+ */
+export function isOrganizationUnitRemoval(token: unknown): boolean {
+  return typeof token === 'object' && token !== null && organizationUnitRemovals.has(token);
+}
+
+/**
+ * [ruling 7035627429, option B; ADR-0158 Open item 11] Remove the units of
+ * the organization `organizationId`, whose delete {@link
+ * CascadePlanningFacet.walkReferencingRelations} has admitted: a deleted
+ * organization can never create a code again, so its units, retired ones
+ * included, go with it and no `sys_unit` row is left naming it.
+ *
+ * The organization is named explicitly, twice, as the unit-code membership
+ * read names it (`organizationUnitRowsOf`): the read's predicate on the tenant
+ * column, and the `tenantId` of the context both the read and the deletes run
+ * under. That context is `sudo()`-shaped ({@link
+ * CascadePlanningFacet.referenceCheckContext}): the caller's transaction and
+ * user ride along, so the deletes join the organization delete's unit of work
+ * and the audit ledger records who triggered them, and system identity
+ * authorizes them, because no permission set grants a unit delete to anyone.
+ * The read is filed as a reference-check elevation, as the refusal's counts
+ * are.
+ *
+ * Each unit goes through the public `delete()` by id, inside a cascade token
+ * naming exactly that unit (as {@link deleteCascadedChildren} issues one per
+ * child), so its hooks run with `referentialCascadeDelete` set and its audit
+ * and events are a cascade child's. The token is recorded in
+ * {@link organizationUnitRemovals}, which is what admits the delete past the
+ * `sys_unit` refusal; a delete that does not claim it (a hook's own, another
+ * request's) is refused. A table never provisioned holds no unit.
+ */
+async function removeOrganizationUnits(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'fileReferenceCheckElevation' | 'find'>, organizationId: string | number, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
+  const unit = objects.find((o) => (o as { name?: unknown })?.name === ORGANIZATION_UNIT_OBJECT);
+  const tenantField = unit ? resolveTenantFieldName(unit) : null;
+  if (!unit || !tenantField) return;
+  host.fileReferenceCheckElevation(cascadeSet, ORGANIZATION_OBJECT, organizationId, ORGANIZATION_UNIT_OBJECT, tenantField, context);
+  const unitContext = { ...ObjectQL.referenceCheckContext(context), tenantId: String(organizationId) } as ExecutionContext;
+  let rows: unknown;
+  try {
+    rows = await host.find(ORGANIZATION_UNIT_OBJECT, {
+      where: { [tenantField]: organizationId },
+      fields: ['id'],
+      context: unitContext,
+    });
+  } catch (error) {
+    if (isMissingTableError(error, ORGANIZATION_UNIT_OBJECT)) return;
+    throw error;
+  }
+  for (const row of Array.isArray(rows) ? (rows as Array<{ id?: unknown }>) : []) {
+    const token = { object: ORGANIZATION_UNIT_OBJECT, id: String(row.id), claimed: false };
+    organizationUnitRemovals.add(token);
+    await host.cascadeIssuedDeletes.run(
+      token,
+      () => host.delete(ORGANIZATION_UNIT_OBJECT, { where: { id: row.id }, context: unitContext } as any),
+    );
   }
 }
 

@@ -90,10 +90,12 @@ const DIMENSION_LABELS: Record<(typeof UNIT_DIMENSIONS)[number], string> = {
  *   a retired row keeps its code, so the code can never be created again with
  *   another dimension, ratio or label, and resting quantities never take a
  *   stranger's meaning. A hard delete is not served (`apiMethods` has no
- *   `delete`) and the engine refuses one in every context, a system writer's
- *   and an automation run's included (`ERR_UNIT_DELETE_REFUSED`); a retired
- *   unit cannot be brought back, and a new save with a retired code is
- *   refused (`ERR_UNIT_CODE_RETIRED`).
+ *   `delete`) and the engine refuses a direct one in every context, a system
+ *   writer's and an automation run's included (`ERR_UNIT_DELETE_REFUSED`). The
+ *   one exemption is the organization's own delete, whose cascade removes
+ *   every unit of that organization (#35812). A retired unit cannot be
+ *   brought back, and a new save with a retired code is refused
+ *   (`ERR_UNIT_CODE_RETIRED`).
  * - **Tenancy** — no tenancy opt-out, so `organization_id` is injected and the
  *   Layer 0 tenant wall (ADR-0095 D1) scopes every read and write.
  * - **Who reads, who writes** — every member READS it (`member_default` names
