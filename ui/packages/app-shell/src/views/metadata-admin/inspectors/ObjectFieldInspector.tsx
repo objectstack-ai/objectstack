@@ -1131,7 +1131,10 @@ export function ObjectFieldInspector({
   /** objectstack#35631 — writes the settled verdicts as the formula's declared result (`returnType` + `currencyConfig`). */
   const stampFormulaType = (settled: typeof formulaVerdictRef.current, declared: FormulaReturnVerdict | null) => {
     // The draft moved to another field or another source since: that one settles itself.
-    if (settled.field !== entry.name || settled.source !== readPredicate(def.expression ?? def.formula)) return;
+    // (`settled.field` is the verdict record's field NAME, not a column identity.)
+    const sameField = settled.field === entry.name;
+    if (!sameField) return;
+    if (settled.source !== readPredicate(def.expression ?? def.formula)) return;
     // Spec: `returnType` carries only a PROVEN concrete type —
     // an ambiguous (`unknown`) or unavailable verdict clears it.
     const proven = settled.inferred && settled.inferred !== 'unknown' ? settled.inferred : undefined;
