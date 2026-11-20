@@ -36,6 +36,35 @@ import { ScopedContext } from './engine.js';
 import type { ObjectRepository } from './engine.js';
 
 /**
+ * The dispatched action's origin flag: the api {@link ObjectRepositoryFacet.execute}
+ * hands the action it dispatches, and every api `ScopedContext`'s `derive`
+ * builds from one (`engine-scoped-context.ts`). On a flagged api the platform's
+ * own system api (`platformSystemApi`, `platform-system-api.ts`) is the api's
+ * `sudo()`: the `'action'` mark `execute` sets, and any `flowRunId`, stay, so the
+ * dispatched handler's writes to the identity-assignment objects through it are
+ * judged as an action body's (plugin-security).
+ *
+ * A flag of its own, and ⛔ not the engine's app-authored one: that one also
+ * refuses a permanent delete (ADR-0148 D3), which a dispatched host handler
+ * keeps. Keyed by instance and held here, beside the one place that sets it, so
+ * the facade (`engine.ts`) carries no field for it. Every reader reaches it
+ * through the instance's own members, so the flag and its reader are always the
+ * same copy of this package.
+ */
+const DISPATCHED_ACTION_APIS = new WeakSet<ScopedContext>();
+
+/** Flag `api` as the api a dispatched action is handed, or as one derived from it (see {@link DISPATCHED_ACTION_APIS}). */
+export function markDispatchedActionApi(api: ScopedContext): ScopedContext {
+  DISPATCHED_ACTION_APIS.add(api);
+  return api;
+}
+
+/** Is `api` the api a dispatched action is handed, or one derived from it (see {@link DISPATCHED_ACTION_APIS})? */
+export function isDispatchedActionApi(api: ScopedContext): boolean {
+  return DISPATCHED_ACTION_APIS.has(api);
+}
+
+/**
  * The `ObjectRepository` members the bodies of {@link ObjectRepositoryFacet}
  * read — every one of them, and no other. Each is typed AS the class member (an
  * indexed access on the class), so a change to a member's signature on the
@@ -134,6 +163,9 @@ export class ObjectRepositoryFacet {
       // (runtime) gives the REST and MCP doors' action bodies: the action this
       // reaches is app-authored automation running elevated, so its writes to
       // the four identity-assignment objects are refused (plugin-security).
+      // The api carries the dispatched action's origin flag, so
+      // `platformSystemApi` on it, and on every api derived from it, keeps
+      // the mark ({@link DISPATCHED_ACTION_APIS}).
       const executionContext: ExecutionContext = markAppAutomationElevation(
         { ...this.context, isSystem: true },
         'action',
@@ -144,7 +176,7 @@ export class ObjectRepositoryFacet {
         tenantId: this.context.tenantId,
         roles: this.context.positions,
         executionContext,
-        api: new ScopedContext(executionContext, this.engine),
+        api: markDispatchedActionApi(new ScopedContext(executionContext, this.engine)),
       });
     }
     throw new Error(`Actions not supported by engine`);
