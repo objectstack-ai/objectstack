@@ -7,19 +7,21 @@
  */
 
 /**
- * objectstack#26681 — opening a record from the console list, and the name
- * cell's ↗ that opens it as the full page.
+ * objectstack#26681 — the console object page's Display menu writes the
+ * reader's record-open preference, and the name cell's ↗ opens the record as
+ * the full page.
  *
  * End to end through `ObjectView`, the host that resolves the mode and keeps
  * the preference (`utils/recordOpenPreference.ts`):
  *
- *   - a drawer object with no choice made, or a stored `split`
- *     (objectstack#28915: the split pane retired): the row opens the drawer;
- *   - the list toolbar draws no Open records section since objectstack#35878
- *     (its 视图设置 panel has no More level; objectstack#35854 retires the
- *     preference itself), so the cases that chose Drawer / Full page there
- *     are void;
- *   - a view that declares `page`: no ↗ (its rows already open the page);
+ *   - a drawer object: the Open records section draws Drawer | Full page
+ *     only (objectstack#28915: the split pane retired); with no choice made
+ *     the row opens the drawer over the list, choosing Full page keeps `page`
+ *     under `os:record-open-mode` and makes the next row click land on the
+ *     record page, and choosing Drawer again keeps `drawer` — no reload, no
+ *     remount;
+ *   - a view that declares `page`: the read-only line, no segments, and no ↗
+ *     (its rows already open the page);
  *   - the ↗ beside a drawer row's record link is a real anchor to the record route,
  *     and a plain click on it lands there, leaving the preference as it was.
  *
@@ -32,7 +34,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
-import { render, cleanup, screen, fireEvent } from '@testing-library/react';
+import { render, cleanup, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
@@ -168,11 +170,26 @@ async function openList(objects: ReturnType<typeof objectsWith>) {
   await screen.findByTestId('primary-field-link', undefined, { timeout: 5000 });
 }
 
-// objectstack#35878: the list's 视图设置 panel has no More level, so it no
-// longer draws the Open records section (the setting itself is retired by
-// objectstack#35854). What stays pinned here is the host's reading of the
-// stored preference and the ↗ anchor.
-describe('objectstack#26681 — record open from the list', () => {
+/**
+ * Open records is drawn last on the 视图设置 panel's first level
+ * (objectstack#35878 retired the More level it sat on).
+ */
+async function openDisplay() {
+  fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+  await screen.findByTestId('view-settings-content');
+}
+
+describe('objectstack#26681 — Open records in the Display menu', () => {
+  it('objectstack#28915 — a drawer object: the section offers Drawer and Full page only', async () => {
+    await openList(objectsWith());
+    await openDisplay();
+    const drawerSegment = await screen.findByRole('radio', { name: 'Drawer' });
+    expect(drawerSegment.getAttribute('aria-checked')).toBe('true');
+    const segments = within(screen.getByTestId('display-record-open')).getAllByRole('radio');
+    expect(segments.map((el) => el.textContent)).toEqual(['Drawer', 'Full page']);
+    expect(screen.queryByRole('radio', { name: 'Split' })).toBeNull();
+  });
+
   it('objectstack#28915 — a drawer object with no choice made: the row opens the drawer over the list', async () => {
     await openList(objectsWith());
     fireEvent.click(screen.getByTestId('primary-field-link'));
@@ -181,25 +198,54 @@ describe('objectstack#26681 — record open from the list', () => {
     expect(screen.queryByTestId('record-count-footer')).toBeNull();
   });
 
-  it('objectstack#28915 — a stored `split`: the row opens the drawer', async () => {
+  it('objectstack#28915 — a stored `split`: the section reads Drawer, and the row opens the drawer', async () => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
     await openList(objectsWith());
+    await openDisplay();
+    expect((await screen.findByRole('radio', { name: 'Drawer' })).getAttribute('aria-checked')).toBe('true');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     fireEvent.click(screen.getByTestId('primary-field-link'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
   });
 
-  it('the list toolbar offers no Open records section', async () => {
+  it('a reader who prefers the page chooses Drawer: the preference is kept, and the next row click opens the drawer', async () => {
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'page');
     await openList(objectsWith());
-    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
-    await screen.findByTestId('view-settings-content');
-    expect(screen.queryByTestId('options-row-more')).toBeNull();
-    expect(screen.queryByTestId('display-record-open')).toBeNull();
+    await openDisplay();
+    const pageSegment = await screen.findByRole('radio', { name: 'Full page' });
+    expect(pageSegment.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('radio', { name: 'Drawer' }));
+
+    expect(window.localStorage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('drawer');
+    // The section reads the live value back: no reload, no remount.
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: 'Drawer' }).getAttribute('aria-checked')).toBe('true'),
+    );
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('primary-field-link'));
+    expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
+    expect(screen.queryByTestId('record-page-route')).toBeNull();
   });
 
-  it('a view that declares `page`: no ↗', async () => {
+  it('objectstack#27545 — choosing Full page: the next row click lands on the record page', async () => {
+    await openList(objectsWith());
+    await openDisplay();
+    fireEvent.click(await screen.findByRole('radio', { name: 'Full page' }));
+    expect(window.localStorage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('page');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('primary-field-link'));
+    expect(await screen.findByTestId('record-page-route', undefined, { timeout: 5000 })).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a view that declares `page`: the read-only line, no segments, and no ↗', async () => {
     window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'drawer');
     await openList(objectsWith({ mode: 'page' }));
     expect(screen.queryByTestId('record-open-as-page')).toBeNull();
+    await openDisplay();
+    expect(await screen.findByTestId('display-record-open-declared')).toBeTruthy();
+    expect(within(screen.getByTestId('display-record-open')).queryByRole('radio')).toBeNull();
   });
 
   it('the ↗ beside a drawer row is an anchor to the record route, and a click lands there without changing the preference', async () => {

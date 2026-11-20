@@ -298,6 +298,18 @@ describe('Options menu — words', () => {
   });
 
 
+  it('speaks no developer wording in the Open records section', () => {
+    openMenu({ recordOpen: { resolvedMode: 'drawer', preference: 'drawer', setPreference: () => {} } }, 'zh');
+    const text = screen.getByTestId('view-settings-content').textContent ?? '';
+    // The note the menu dropped (its key is gone from every pack).
+    expect(text).not.toContain('个人偏好');
+    expect(text).not.toContain('对象声明');
+    cleanup();
+    openMenu({ recordOpen: { resolvedMode: 'page', preference: 'drawer', setPreference: () => {} } }, 'zh');
+    expect(screen.getByTestId('display-record-open-declared').textContent).toBe(zhPack.list.optionsMenu.recordOpenAlwaysPage);
+    expect(screen.getByTestId('view-settings-content').textContent).not.toContain('对象声明');
+  });
+
   it('every new key is in the en pack', () => {
     expect(Object.keys(en.list.optionsMenu).sort()).toEqual(Object.keys(zhPack.list.optionsMenu).sort());
   });

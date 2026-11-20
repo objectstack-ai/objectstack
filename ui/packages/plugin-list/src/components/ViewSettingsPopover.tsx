@@ -37,6 +37,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@object-ui/components';
 import {
   SlidersHorizontal,
@@ -209,6 +211,16 @@ export interface ViewSettingsPopoverProps {
    * draws.
    */
   layout?: (closeMenu: () => void) => React.ReactNode;
+
+  /**
+   * The Open records section (objectstack#26681), drawn last on the panel's
+   * first level (objectstack#35878 retired the More level it sat on). A host
+   * prop: the console passes it; any other host draws no section. It is not a
+   * setting of the view, so it neither counts in `changedCount` nor returns
+   * under Reset. objectstack#35854 retires the preference and this section
+   * with it.
+   */
+  recordOpen?: ViewSettingsRecordOpen;
 
   showGroup?: boolean;
   groupingConfig?: any;
@@ -527,6 +539,65 @@ function FieldsPage({
 }
 
 /**
+ * The Open records section — see {@link ViewSettingsRecordOpen}. `null` for a
+ * mode it draws nothing for.
+ */
+function RecordOpenSection({
+  t,
+  recordOpen,
+}: {
+  t: ViewSettingsPopoverProps['t'];
+  recordOpen: ViewSettingsRecordOpen;
+}) {
+  const { resolvedMode, preference, setPreference } = recordOpen;
+  if (resolvedMode !== 'drawer' && resolvedMode !== 'page') return null;
+  const title = t('list.recordOpen', { defaultValue: 'Open records' });
+  return (
+    <div className="border-t px-3 py-2" data-testid="display-record-open">
+      <div className="flex items-center justify-between gap-3">
+        <span className="shrink-0 whitespace-nowrap text-xs font-medium text-foreground/80">{title}</span>
+        {resolvedMode === 'drawer' ? (
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            value={preference}
+            // Radix hands back '' when the pressed segment is pressed again:
+            // one segment is always the choice, so that writes nothing.
+            onValueChange={(next) => {
+              if (next === preference) return;
+              if (next === 'drawer' || next === 'page') setPreference(next);
+            }}
+            aria-label={title}
+            className="gap-0"
+            data-testid="display-record-open-choice"
+          >
+            <ToggleGroupItem
+              value="drawer"
+              className="h-7 rounded-r-none px-2.5 text-xs"
+              data-testid="display-record-open-drawer"
+            >
+              {t('list.recordOpenDrawer', { defaultValue: 'Drawer' })}
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="page"
+              className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
+              data-testid="display-record-open-page"
+            >
+              {t('list.recordOpenPage', { defaultValue: 'Full page' })}
+            </ToggleGroupItem>
+          </ToggleGroup>
+        ) : (
+          <span className="min-w-0 text-right text-xs text-muted-foreground" data-testid="display-record-open-declared">
+            {t('list.optionsMenu.recordOpenAlwaysPage', { defaultValue: 'Records always open as a full page' })}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The 视图设置 panel's content (objectstack#35878), apart from what holds it:
  * the desktop popover below is one container, and a phone's bottom sheet can
  * be another. It reads every value from its props and hands every change back
@@ -542,6 +613,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     onFieldOrderChange,
     fieldType,
     layout,
+    recordOpen,
     showGroup,
     groupingConfig,
     setGroupingConfig,
@@ -686,6 +758,7 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
           />
         )}
       </div>
+      {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
     </div>
   );
 

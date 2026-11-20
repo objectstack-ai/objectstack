@@ -679,10 +679,9 @@ export interface ListViewProps {
    *
    * A HOST prop, never a schema key: the preference is the reader's, kept by
    * the host, and the setter is a function value no document can carry.
-   *
-   * Drawn nowhere since objectstack#35878: the 视图设置 panel has no More
-   * level. objectstack#35854 retires the preference itself and this prop with
-   * it; until then a host may still pass it, and it changes nothing.
+   * Absent ⇒ the panel draws no such section, exactly as before. Drawn last
+   * on the 视图设置 panel's first level since objectstack#35878 retired the
+   * More level; objectstack#35854 retires the preference and this prop.
    */
   recordOpen?: ViewSettingsRecordOpen;
   /**
@@ -2149,6 +2148,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onRenameView,
   onSaveView,
   onResetView,
+  recordOpen,
   page,
   onPageChange,
   hostDrawnConditionFields,
@@ -7033,6 +7033,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   }}
                 />
               ) : undefined}
+              recordOpen={recordOpen}
               showGroup={toolbarFlags.showGroup}
               groupingConfig={chosenGroupingConfig}
               setGroupingConfig={changeGrouping}
