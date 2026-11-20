@@ -1259,82 +1259,141 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
 
     // ── Flows: a connector step must name a connector and action this kernel has ──
     //
-    // [#35146] A `connector_action` step dispatches to whatever the engine
-    // resolves for its connector, named from the flow's package, then its
-    // action. The flow publishes whichever connector it names; one this
-    // environment does not serve fails every run that reaches the step. The
-    // probe asks the engine the same questions the step's executor asks, in
-    // the same order, with nothing dispatched. An engine without the lookups
-    // is not probed.
+    // [#35146] The judgement is {@link unresolvedConnectorSteps}, shared with
+    // the draft verdict (#35256); this plane only reads the published body.
     const automation = opts.automation;
-    const callerPackageId = opts.packageId ?? null;
     if (automation && typeof automation.resolveConnectorAction === 'function') {
         for (const p of published.filter((x) => x.type === 'flow')) {
             const body = asRec(await readItem('flow', p.name));
             if (!body) continue;
-            let graphs: ReturnType<typeof collectFlowGraphs>;
-            try {
-                graphs = collectFlowGraphs(body as Parameters<typeof collectFlowGraphs>[0]);
-            } catch {
-                continue;
-            }
-            for (const node of graphs.flatMap((g) => g.nodes as readonly unknown[]).map(asRec)) {
-                if (!node || node.type !== 'connector_action') continue;
-                const cfg = asRec(node.connectorConfig);
-                const connectorId = typeof cfg?.connectorId === 'string' ? cfg.connectorId : undefined;
-                const actionId = typeof cfg?.actionId === 'string' ? cfg.actionId : undefined;
-                if (!connectorId || !actionId) continue; // the schema's refusal, not a probe's
-                const nodeId = typeof node.id === 'string' ? node.id : 'connector_action';
-                let cause: 'refused' | 'no-action' | 'degraded' | undefined;
-                let why = '';
-                try {
-                    const instance = typeof automation.resolveConnectorInstanceFor === 'function'
-                        ? automation.resolveConnectorInstanceFor(connectorId, callerPackageId)
-                        : ({ status: 'instance', packageId: callerPackageId } as const);
-                    if (instance.status === 'refused') {
-                        cause = 'refused';
-                        why = instance.refusal.message;
-                    } else {
-                        const packageId = instance.status === 'instance' ? instance.packageId : undefined;
-                        const handler = packageId === undefined ? undefined : automation.resolveConnectorAction(connectorId, actionId, packageId);
-                        if (!handler) {
-                            const degraded = packageId === undefined ? undefined : automation.getConnectorDegradedReason?.(connectorId, packageId);
-                            cause = degraded ? 'degraded' : 'no-action';
-                            why = degraded
-                                ? `connector "${connectorId}" is degraded — ${degraded.replace(/\.\s*$/, '')}`
-                                : `no connector on this environment serves "${connectorId}.${actionId}"`;
-                        }
-                    }
-                } catch {
-                    continue; // a lookup that threw judges nothing
-                }
-                if (!cause) continue;
+            for (const step of unresolvedConnectorSteps(p.name, body, automation, opts.packageId ?? null, userTextLocales)) {
                 issues.push({
                     layer: 'runtime',
                     severity: 'warning',
                     artifact: { type: 'flow', name: p.name },
-                    ref: { type: 'connector', name: connectorId, member: actionId },
+                    ref: { type: 'connector', name: step.connectorId, member: step.actionId },
                     code: 'flow_connector_action_unresolved',
-                    message:
-                        `Flow "${p.name}" step "${nodeId}" (connector_action) dispatches "${connectorId}.${actionId}", but ${why} — ` +
-                        'every run that reaches the step fails.',
-                    fix: cause === 'degraded'
-                        ? `Resolve what keeps connector "${connectorId}" degraded (its upstream or its credential), then re-run the flow.`
-                        : cause === 'refused'
-                        ? `Make "${connectorId}" name one connector from this flow's package (declare the dependency, or hold the connector in the package), then republish.`
-                        : `Point the step's connectorConfig at a connector and action this environment has, or install the package or plugin that provides "${connectorId}".`,
-                    userMessage: say('flow_connector_action_unresolved', {
-                        flow: labelIn(body, p.name),
-                        step: labelIn(node, nodeId),
-                        connector: connectorId,
-                        cause,
-                    }),
+                    message: step.message,
+                    fix: step.fix,
+                    userMessage: step.userMessage,
                 });
             }
         }
     }
 
     return { issues, checked };
+}
+
+/** One `connector_action` step the runtime cannot dispatch ({@link unresolvedConnectorSteps}). */
+export interface UnresolvedConnectorStep {
+    /** The step's position in the flow body (`nodes[1]`, `nodes[0].config.body.nodes[2]`). */
+    path: string;
+    nodeId: string;
+    connectorId: string;
+    actionId: string;
+    cause: 'refused' | 'no-action' | 'degraded';
+    /** The finding's developer sentence, fix and user sentence, as the build probe reports them. */
+    message: string;
+    fix: string;
+    userMessage: string;
+}
+
+/**
+ * [#35146, #35256] The connector steps of one flow body that no connector
+ * this environment serves can dispatch. A `connector_action` step dispatches
+ * to whatever the engine resolves for its connector, named from the flow's
+ * package, then its action; one this environment does not serve fails every
+ * run that reaches the step. This asks the engine the same questions the
+ * step's executor asks, in the same order, with nothing dispatched.
+ *
+ * One judgement for two doors: the publish's build probe
+ * (`flow_connector_action_unresolved`) and the draft verdict's advisory of
+ * the same rule (`draftPublishJudgement`). It reads no landed data, only the
+ * body and the engine's in-memory lookups, so a draft can be judged too. An
+ * engine without `resolveConnectorAction` is not asked; a lookup that throws
+ * judges that step nothing.
+ */
+export function unresolvedConnectorSteps(
+    flowName: string,
+    body: unknown,
+    automation: ProbeAutomation,
+    callerPackageId: string | null,
+    userTextLocales: readonly (string | null | undefined)[],
+): UnresolvedConnectorStep[] {
+    const steps: UnresolvedConnectorStep[] = [];
+    const flow = asRec(body);
+    if (!flow || typeof automation.resolveConnectorAction !== 'function') return steps;
+    let graphs: ReturnType<typeof collectFlowGraphs>;
+    try {
+        graphs = collectFlowGraphs(flow as Parameters<typeof collectFlowGraphs>[0]);
+    } catch {
+        return steps;
+    }
+    const userTextLocale = buildProbeUserTextLocale(userTextLocales);
+    const labelIn = (rec: Rec | undefined, name: string): string => {
+        const label = resolveI18nLabel(rec?.label as I18nLabel | undefined, userTextLocale);
+        return typeof label === 'string' && label.trim() ? label : name;
+    };
+    for (const graph of graphs) {
+        // The graph's own list, as written: an index is where the author put the step.
+        const written: unknown = graph.path.reduce<unknown>((at, key) => asRec(at)?.[key] ?? asArr(at)[key as number], flow);
+        const listed = asArr(asRec(written)?.nodes);
+        const base = graph.path.map((key) => (typeof key === 'number' ? `[${key}]` : `.${key}`)).join('').replace(/^\./, '');
+        for (const node of (graph.nodes as readonly unknown[]).map(asRec)) {
+            if (!node || node.type !== 'connector_action') continue;
+            const cfg = asRec(node.connectorConfig);
+            const connectorId = typeof cfg?.connectorId === 'string' ? cfg.connectorId : undefined;
+            const actionId = typeof cfg?.actionId === 'string' ? cfg.actionId : undefined;
+            if (!connectorId || !actionId) continue; // the schema's refusal, not a probe's
+            const nodeId = typeof node.id === 'string' ? node.id : 'connector_action';
+            let cause: UnresolvedConnectorStep['cause'] | undefined;
+            let why = '';
+            try {
+                const instance = typeof automation.resolveConnectorInstanceFor === 'function'
+                    ? automation.resolveConnectorInstanceFor(connectorId, callerPackageId)
+                    : ({ status: 'instance', packageId: callerPackageId } as const);
+                if (instance.status === 'refused') {
+                    cause = 'refused';
+                    why = instance.refusal.message;
+                } else {
+                    const packageId = instance.status === 'instance' ? instance.packageId : undefined;
+                    const handler = packageId === undefined ? undefined : automation.resolveConnectorAction(connectorId, actionId, packageId);
+                    if (!handler) {
+                        const degraded = packageId === undefined ? undefined : automation.getConnectorDegradedReason?.(connectorId, packageId);
+                        cause = degraded ? 'degraded' : 'no-action';
+                        why = degraded
+                            ? `connector "${connectorId}" is degraded — ${degraded.replace(/\.\s*$/, '')}`
+                            : `no connector on this environment serves "${connectorId}.${actionId}"`;
+                    }
+                }
+            } catch {
+                continue; // a lookup that threw judges nothing
+            }
+            if (!cause) continue;
+            steps.push({
+                path: `${base ? `${base}.` : ''}nodes[${listed.indexOf(node)}]`,
+                nodeId,
+                connectorId,
+                actionId,
+                cause,
+                message:
+                    `Flow "${flowName}" step "${nodeId}" (connector_action) dispatches "${connectorId}.${actionId}", but ${why} — ` +
+                    'every run that reaches the step fails.',
+                fix: cause === 'degraded'
+                    ? `Resolve what keeps connector "${connectorId}" degraded (its upstream or its credential), then re-run the flow.`
+                    : cause === 'refused'
+                    ? `Make "${connectorId}" name one connector from this flow's package (declare the dependency, or hold the connector in the package), then republish.`
+                    : `Point the step's connectorConfig at a connector and action this environment has, or install the package or plugin that provides "${connectorId}".`,
+                userMessage: buildProbeUserMessage('flow_connector_action_unresolved', {
+                    flow: labelIn(flow, flowName),
+                    step: labelIn(node, nodeId),
+                    connector: connectorId,
+                    cause,
+                }, userTextLocales),
+            });
+        }
+    }
+    return steps;
 }
 
 /**

@@ -524,6 +524,10 @@ const es = {
     cancelChanges: "Descartar cambios",
     saveRow: "Guardar fila",
     cellReadOnly: "Esta celda no se puede editar aquí.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "Guardando…",
+    cellSaved: "Guardado",
+    openRecordToFinish: "Abre el registro para completar el cambio",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
@@ -4648,6 +4652,7 @@ const es = {
     statusRejected: 'Rechazada',
     statusRecalled: 'Retirada',
     statusReturned: 'Devuelto para revisión',
+    statusCancelled: 'Cancelada',
     sendBackBtn: 'Devolver',
     sendBackTitle: '¿Devolver esta solicitud para revisión?',
     sendBackBody: 'Esta ronda termina y el registro se desbloquea para que el solicitante corrija los datos. Al volver a enviarla, se abre una nueva ronda de aprobación para todos los aprobadores.',

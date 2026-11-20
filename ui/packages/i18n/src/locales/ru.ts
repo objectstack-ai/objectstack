@@ -528,6 +528,10 @@ const ru = {
     cancelChanges: "Отменить изменения",
     saveRow: "Сохранить строку",
     cellReadOnly: "Эту ячейку нельзя изменить здесь.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "Сохранение…",
+    cellSaved: "Сохранено",
+    openRecordToFinish: "Откройте запись, чтобы завершить изменение",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
@@ -4764,6 +4768,7 @@ const ru = {
     statusRejected: 'Отклонён',
     statusRecalled: 'Отозван',
     statusReturned: 'Возвращено на доработку',
+    statusCancelled: 'Отменён',
     sendBackBtn: 'Вернуть',
     sendBackTitle: 'Вернуть этот запрос на доработку?',
     sendBackBody: 'Этот раунд завершается, запись разблокируется, и заявитель может исправить данные. После повторной отправки откроется новый раунд согласования для всех согласующих.',

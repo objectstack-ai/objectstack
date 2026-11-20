@@ -88,11 +88,26 @@ export interface FixedInnerRead {
 /** The brand of every fixed-read leaf declared in this package. ADR-0147's leaf adds its own. */
 export type FixedReadLeafBrand = typeof SHARED_RECORD_IDS_BRAND;
 
+/**
+ * [ADR-0155 D4, O1 as ruled] The name of every fixed-read leaf declared in
+ * this package, by its factory's name: what a driver lists in
+ * `DriverCapabilities.fixedReadLeaves` (`./driver.zod.ts`) to say that it
+ * evaluates the leaf. ADR-0147's leaf adds its own.
+ *
+ * A name and not the brand, because a capability is declared data and a
+ * `unique symbol` cannot be a value of a schema; {@link fixedReadLeafNameOf}
+ * is the one mapping from a leaf, and so from its brand, to its name.
+ */
+export const FIXED_READ_LEAF_NAMES = Object.freeze(['SharedRecordIds'] as const);
+
+/** One of {@link FIXED_READ_LEAF_NAMES}. */
+export type FixedReadLeafName = (typeof FIXED_READ_LEAF_NAMES)[number];
+
 /** Every fixed-read leaf declared in this package. ADR-0147's leaf adds its own. */
 export type FixedReadLeaf = SharedRecordIds;
 
 /**
- * One row per fixed-read leaf: its brand, its guard and its description.
+ * One row per fixed-read leaf: its brand, its name, its guard and its description.
  *
  * Each guard refuses a value that carries any symbol-keyed property besides its
  * own brand, so the guards are disjoint and at most one row answers for any
@@ -101,10 +116,16 @@ export type FixedReadLeaf = SharedRecordIds;
  */
 const FIXED_READ_LEAVES: readonly {
   readonly brand: FixedReadLeafBrand;
+  readonly name: FixedReadLeafName;
   readonly is: (value: unknown) => boolean;
   readonly innerRead: (leaf: FixedReadLeaf) => FixedInnerRead;
 }[] = Object.freeze([
-  Object.freeze({ brand: SHARED_RECORD_IDS_BRAND, is: isSharedRecordIds, innerRead: SharedRecordIds.innerRead }),
+  Object.freeze({
+    brand: SHARED_RECORD_IDS_BRAND,
+    name: 'SharedRecordIds',
+    is: isSharedRecordIds,
+    innerRead: SharedRecordIds.innerRead,
+  }),
 ]);
 
 /**
@@ -113,6 +134,15 @@ const FIXED_READ_LEAVES: readonly {
  */
 export function fixedReadLeafBrandOf(value: unknown): FixedReadLeafBrand | undefined {
   return FIXED_READ_LEAVES.find((row) => row.is(value))?.brand;
+}
+
+/**
+ * The name of the fixed-read leaf `value` is ({@link FIXED_READ_LEAF_NAMES}),
+ * or `undefined` when it is none, exactly where {@link fixedReadLeafBrandOf}
+ * answers `undefined`. What an evaluator's declaration is matched against.
+ */
+export function fixedReadLeafNameOf(value: unknown): FixedReadLeafName | undefined {
+  return FIXED_READ_LEAVES.find((row) => row.is(value))?.name;
 }
 
 /**

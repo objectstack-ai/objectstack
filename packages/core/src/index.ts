@@ -209,6 +209,9 @@ export * from './utils/blank-storage-form.js';
 // above gives.
 export * from './utils/json-column-operator-refusal.js';
 export * from './utils/readable-ids-driver-refusal.js';
+// [ADR-0155 D4] …and the fixed-read leaves' refusal, on the same floor for the
+// same reason: the engine's seam answers it now, each evaluator on its own card.
+export * from './utils/fixed-read-leaf-refusal.js';
 
 // [#12350 / ADR-0126 §4] THE activation-ledger row contract, parameterized by
 // `metadata_type`. Same reason as the two entries above: its consumers —

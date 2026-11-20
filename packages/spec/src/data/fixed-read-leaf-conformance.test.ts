@@ -196,15 +196,23 @@ function seamVerdict(c: FixedReadLeafSeamCase, reading: SeamReading): 'admits' |
       || (reading !== 'no-verb-rule' && !verbOk)
       || (reading !== 'no-recipient-rule' && !recipientOk)) refused = true;
   };
+  // A leaf anywhere but a `$in` comparand of a field of the where is out of position.
+  const misplaced = () => {
+    if (reading !== 'no-position-rule') refused = true;
+  };
   const walk = (node: unknown, object: string, nested: boolean): void => {
     if (node === null || typeof node !== 'object') return;
+    if (isSharedRecordIds(node)) return misplaced();
     for (const [key, value] of Object.entries(node)) {
       if (key === '$and' || key === '$or') (value as unknown[]).forEach((child) => walk(child, object, nested));
       else if (key === '$not') walk(value, object, nested);
+      else if (isSharedRecordIds(value)) misplaced();
       else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
         for (const [op, comparand] of Object.entries(value)) {
-          if (isSharedRecordIds(comparand)) judge(comparand, op, key, object, nested);
-          else if (isComposedReadableIds(comparand) && reading !== 'no-descent') walk(comparand.scope, comparand.object, true);
+          if (op === '$in' && isSharedRecordIds(comparand)) judge(comparand, op, key, object, nested);
+          else if (op === '$in' && isComposedReadableIds(comparand)) {
+            if (reading !== 'no-descent') walk(comparand.scope, comparand.object, true);
+          } else if (holdsLeaf(comparand)) misplaced();
         }
       }
     }

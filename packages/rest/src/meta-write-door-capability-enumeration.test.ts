@@ -195,6 +195,12 @@ const DATA_DOORS: readonly DataDoor[] = [
         capability: 'setup.write',
         body: { object: 'deal', field: 'currency_code', code: 'USD' },
     },
+    {
+        label: 'POST /meta/_migrate-unit-codes — unit code backfill [ADR-0158 U7 R1]',
+        method: 'POST', path: `${META}/_migrate-unit-codes`,
+        capability: 'setup.write',
+        body: { object: 'material', field: 'uom', mapping: { kg: 'KGM' } },
+    },
 ];
 
 /** Every protocol method any door reaches — all present, so 501 is never the answer. */

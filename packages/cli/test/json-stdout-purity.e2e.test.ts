@@ -192,6 +192,11 @@ const FAMILY: Record<string, string[]> = {
   // which the composed host config registers. No database file exists, so the
   // face driven here is its empty-work answer for a table not there yet.
   'migrate unmapped-columns': ['--object', 'jp_ticket'],
+  // [ADR-0158 U7 R1] `record-currency-codes`'s shape: `--object` and `--field`
+  // are required, the dry run is the default (no `--map-file`: it lists the
+  // stored values), and the face driven here is the same "No app objects are
+  // loaded" refusal after the read-only boot.
+  'migrate unit-codes': ['--object', 'jp_ticket', '--field', 'title'],
   'migrate value-shapes': [],
   // It boots only to read the trusted key a SIGNED artifact names (through
   // `utils/plugin-trust-read.ts`, which is why the discovery follows utils),

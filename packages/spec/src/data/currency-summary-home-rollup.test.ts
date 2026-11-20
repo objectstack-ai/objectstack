@@ -354,4 +354,18 @@ describe('case (d) is worded once', () => {
       ));
     }
   });
+
+  it('a `currency` child that is neither `dynamic` nor a well-formed `record` / `fixed` is named by what its `currencyConfig` lacks', () => {
+    // A stored row the object door never parsed: `fixed` with no code, or a mode outside the three.
+    const rollup = { object: 'crm_probe_project', field: 'home_expense_total', fn: 'sum', childObject: 'crm_probe_expense', childField: 'note_amount' };
+    for (const [config, names] of [
+      [{ currencyMode: 'fixed' }, '`fixed` mode with no `defaultCurrency` code'],
+      [{ currencyMode: 'euro' }, "`currencyMode` 'euro' is none of `dynamic`, `fixed` and `record`"],
+    ] as const) {
+      const child = { type: 'currency', label: 'Plain', currencyConfig: config };
+      const message = recordCurrencyDynamicRollupNotHomeError(rollup, { ...(expense().fields as Record<string, unknown>), note_amount: child }, child);
+      expect(message, names).toContain(`'crm_probe_expense.note_amount' is a 'currency' field `);
+      expect(message, names).toContain(names);
+    }
+  });
 });

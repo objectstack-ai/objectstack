@@ -287,12 +287,14 @@ const OPEN_ITEMS = ['row-context-open', 'row-context-open-new-tab'];
 
 /**
  * objectstack#35684 — the list's other way to open a row: a click on a data
- * cell selects it (and opens nothing), and Space on the selected cell opens
- * its record, as the row's click used to.
+ * cell selects it (and opens nothing), and a touch tap on a cell opens its
+ * record, as the row's click used to. (It was Space on the selected cell until
+ * objectstack#35685 made Space type into the cell, per the maintainer.)
  */
-function openWithSpace(text: string): void {
-  fireEvent.click(screen.getByText(text).closest('td') as HTMLElement);
-  fireEvent.keyDown(document.activeElement as HTMLElement, { key: ' ' });
+function openWithTap(text: string): void {
+  const cell = screen.getByText(text).closest('td') as HTMLElement;
+  fireEvent.pointerDown(cell.closest('tr') as HTMLElement, { pointerType: 'touch' });
+  fireEvent.click(cell);
 }
 
 describe('objectstack#33317 — the console object list: a row that opens nothing does not look clickable', () => {
@@ -313,7 +315,7 @@ describe('objectstack#33317 — the console object list: a row that opens nothin
     fireEvent.click(screen.getByText('scim_ab12'), { button: 1 });
     // The name cell, no longer a link of its own, hands its click to the row too.
     fireEvent.click(screen.getByText('okta-staging'), { metaKey: true });
-    openWithSpace('scim_ab12');
+    openWithTap('scim_ab12');
     expect(openSpy).not.toHaveBeenCalled();
     expect(screen.queryByTestId('left-the-list')).toBeNull();
   });
@@ -385,7 +387,7 @@ describe('objectstack#33549 — the console object list: `navigation.preventNavi
     await mountList({ navigation: PREVENTED_DRAWER });
     fireEvent.click(screen.getByText('scim_ab12'));
     fireEvent.click(screen.getByText('okta-staging'));
-    openWithSpace('scim_ab12');
+    openWithTap('scim_ab12');
     expect(drawerRecordId()).toBeNull();
     expect(screen.queryByTestId('left-the-list')).toBeNull();
     expect(openSpy).not.toHaveBeenCalled();
@@ -412,16 +414,16 @@ describe('objectstack#33549 — the console object list: `navigation.preventNavi
   it('a `page` view with `preventNavigation: true` draws no link face either', async () => {
     await mountList({ navigation: { mode: 'page', preventNavigation: true } });
     expect(looksLikeALink('okta-staging')).toBe(false);
-    openWithSpace('scim_ab12');
+    openWithTap('scim_ab12');
     expect(screen.queryByTestId('left-the-list')).toBeNull();
   });
 
   // objectstack#35854: a row that opens, opens the record's page (the
   // deprecated `drawer` mode no longer picks the side panel).
-  it('CONTROL — the same `drawer` view with `preventNavigation: false`: Space on a selected cell opens the record, and the name cell is the record link', async () => {
+  it('CONTROL — the same `drawer` view with `preventNavigation: false`: a touch tap on a cell opens the record, and the name cell is the record link', async () => {
     await mountList({ navigation: { mode: 'drawer', preventNavigation: false } });
     expect(looksLikeALink('okta-staging')).toBe(true);
-    openWithSpace('scim_ab12');
+    openWithTap('scim_ab12');
     await waitFor(() => expect(screen.getByTestId('left-the-list')).toBeTruthy());
   });
 

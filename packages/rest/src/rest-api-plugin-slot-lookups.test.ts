@@ -61,8 +61,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 // The real `RestServer` this file extends reaches `@objectstack/objectql` only
-// through a dynamic import inside two route handlers (`meta-object-state-routes.ts`,
-// `meta-record-currency-backfill-route.ts`). A module-top import pays that load
+// through a dynamic import inside three route handlers (`meta-object-state-routes.ts`,
+// `meta-record-currency-backfill-route.ts`, `meta-unit-code-backfill-route.ts`). A module-top import pays that load
 // during COLLECTION, which vitest clocks against nothing, so no case's timeout
 // window can ever hold it (`scripts/check-test-source-alias.mjs`, "The source
 // reach"). The source keeps its dynamic import; this only decides where the

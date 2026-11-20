@@ -32,7 +32,7 @@
  *   `currencyMode: 'dynamic'` roll-up over a child field that is not such an
  *   amount.
  *
- * Messages only and two predicates: each door decides when a pair is judged.
+ * Messages only and three predicates: each door decides when a pair is judged.
  */
 
 import { VALUE_DOMAIN_FIELD_TYPES } from './field.zod';
@@ -258,6 +258,16 @@ export function recordCurrencyDynamicRollupNotHomeError(
     : undefined;
   const amounts = tenantCurrencyAmountsOf(childFields);
   const kind = isRecord(childDef) && typeof childDef.type === 'string' ? `a '${childDef.type}' field` : 'not a field';
+  // A `currency` child reaches this arm only with a mode that is neither
+  // `dynamic` nor a well-formed `record` / `fixed`, so the words name what its
+  // `currencyConfig` lacks rather than its type alone.
+  const mode = config?.currencyMode;
+  const defect = !isRecord(childDef) || childDef.type !== 'currency'
+    ? kind
+    : mode === 'fixed'
+      ? 'a \'currency\' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)'
+      : `a 'currency' field whose \`currencyMode\` ${typeof mode === 'string' ? `'${mode}'` : String(mode)} is none of `
+        + '`dynamic`, `fixed` and `record`';
   const why = config?.currencyMode === 'record'
     ? `${named} is an amount in ${typeof config.currencyField === 'string' && config.currencyField.includes('.') ? 'its parent\'s' : 'each record\'s own'} `
       + `currency (\`currencyMode: 'record'\`), not the home currency. `
@@ -269,7 +279,7 @@ export function recordCurrencyDynamicRollupNotHomeError(
     : config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string'
       ? `${named} is fixed to ${config.defaultCurrency}. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: `
         + `'${config.defaultCurrency}' }\` on the summary instead.`
-      : `${named} is ${kind}, not a \`currency\` field in \`dynamic\` mode, so its rows are not known to be in the home currency. `
+      : `${named} is ${defect}, not a \`currency\` field in \`dynamic\` mode, so its rows are not known to be in the home currency. `
         + (amounts.length > 0
           ? `The amounts of '${rollup.childObject}' in the home currency are ${amounts.map((h) => `'${h}'`).join(', ')}; `
             + 'roll up one of them, '

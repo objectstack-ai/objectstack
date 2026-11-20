@@ -46,7 +46,7 @@ import {
   type CalendarVisibleRange,
   type CalendarWindow,
 } from './calendarWindow';
-import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, isPermissionError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
+import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, isPermissionError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote, OwnWritesContext, createOwnWrites } from '@object-ui/react';
 import type { LoadErrorKind, AnsweredLoadFailure } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
@@ -2553,15 +2553,21 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // `refreshTrigger` is provided is required, not redundant. Form/delete flows
   // also bump refreshTrigger; the extra refetch that produces is harmless
   // because find() coalesces concurrent identical reads into one round-trip.
+  //
+  // objectstack#35685 — except a cell save the select-first grid makes and
+  // redraws from its own answer: it holds its record in `ownWrites` (provided
+  // to the grid below) for the length of the write, so that write re-reads no
+  // row here or on the bus, and the edited row keeps its place.
+  const ownWrites = React.useMemo(createOwnWrites, []);
   React.useEffect(() => {
     if (!dataSource?.onMutation || !schema.objectName) return;
     const unsub = dataSource.onMutation((event: any) => {
-      if (event.resource === schema.objectName) {
-        setRefreshKey(k => k + 1);
-      }
+      if (event.resource !== schema.objectName) return;
+      if (ownWrites.absorbs({ objectName: event.resource, recordId: event.id != null ? String(event.id) : undefined })) return;
+      setRefreshKey(k => k + 1);
     });
     return unsub;
-  }, [dataSource, schema.objectName]);
+  }, [dataSource, schema.objectName, ownWrites]);
 
   // Dynamic page size state (wired from pageSizeOptions selector)
   const [dynamicPageSize, setDynamicPageSize] = React.useState<number | undefined>(undefined);
@@ -3671,7 +3677,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // this effect's query.
   const listFetchesForItself =
     !Array.isArray(schema.data) && (schema.data as any)?.provider !== 'value';
-  const invalidationNonce = useDataInvalidation(listFetchesForItself ? schema.objectName || undefined : undefined);
+  // objectstack#35685 — nor a cell save the grid holds in `ownWrites` (above).
+  const invalidationNonce = useDataInvalidation(listFetchesForItself ? schema.objectName || undefined : undefined, undefined, ownWrites);
 
   /**
    * The calendar's date bindings, for the fetch effect's window
@@ -6912,6 +6919,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
 
   return (
+    <OwnWritesContext.Provider value={ownWrites}>
     <div
       ref={pullRef}
       className={cn('flex flex-col h-full bg-background relative min-w-0 overflow-hidden', className)}
@@ -8412,6 +8420,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         </NavigationOverlay>
       )}
     </div>
+    </OwnWritesContext.Provider>
   );
 });
 
