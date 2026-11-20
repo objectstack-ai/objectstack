@@ -23,6 +23,9 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *     strip; CONTROL, back on 概览 both are drawn again.
  *   - A rail card's title opens its tab; CONTROL, the 概览 tab returns.
  *   - A card measures radius 8, a 13 px title with a grey count, 26 px rows.
+ *   - objectstack#35783: an open list's tab is its menu — 「左移」 / 「右移」
+ *     move it, 「隐藏」 sends it to 「更多」 — and 「更多」's 「恢复默认顺序」
+ *     brings the default back. Order only: no width is read.
  *
  * ⚠️ A Playwright spec and not a vitest test: jsdom lays nothing out, so a
  * width read there is 0 and the row's fold — which reads the row's own width
@@ -587,5 +590,60 @@ test.describe('the record page\'s tabs and 概览 rail, zh-CN (objectstack#35595
     await expect(page.locator('[data-record-summary-card="quote.account_id"]')).toHaveCount(1);
     await page.locator('[data-record-summary-card="approvals"] [data-record-summary-card-title]').click();
     await expect(page.locator('[data-record-tab="approvals"]')).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
+test.describe('a related tab\'s menu moves and hides it, and 「更多」 restores the default (objectstack#35783)', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'one engine is enough for an interaction pin');
+
+  test.beforeAll(async () => {
+    test.setTimeout(240_000);
+    if (!bundle) bundle = await bundlePage();
+  });
+
+  /** The related lists' tabs on the row, in order. */
+  const listTabs = (page: Page) =>
+    page.evaluate((all) => {
+      const lists = new Set(all.slice(1, 9));
+      return [...document.querySelectorAll('[data-record-tab-row] [role="tab"]')]
+        .map((el) => el.getAttribute('data-record-tab') ?? '')
+        .filter((id) => lists.has(id));
+    }, ALL_TABS);
+  /** Open a list's tab, then its menu (a second click), and choose an entry. */
+  async function arrange(page: Page, id: string, entry: string) {
+    const tab = page.locator(`[role="tab"][data-record-tab="${id}"]`);
+    if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+    await tab.click();
+    await page.getByRole('menuitem', { name: entry }).click();
+  }
+
+  test('左移 / 右移 move the open list, 隐藏 sends it to 「更多」, 恢复默认顺序 brings the default back', async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    const lists = ALL_TABS.slice(1, 9);
+    await mount(page, { name: 'arrange1184', viewport: 1440, frame: PAGE_1440 });
+    expect(await listTabs(page)).toEqual(lists);
+    await arrange(page, 'contact.account_id', '右移');
+    const moved = await listTabs(page);
+    expect(moved.slice(0, 2)).toEqual(['opportunity.account_id', 'contact.account_id']);
+    await arrange(page, 'contact.account_id', '左移');
+    expect(await listTabs(page)).toEqual(lists);
+    // CONTROL: 概览 opens no menu.
+    await page.locator('[role="tab"][data-record-tab="overview"]').click();
+    await page.locator('[role="tab"][data-record-tab="overview"]').click();
+    await expect(page.locator('[data-record-tab-arrange-menu]')).toHaveCount(0);
+    await arrange(page, 'quote.account_id', '右移');
+    await arrange(page, 'opportunity.account_id', '隐藏');
+    await expect(page.locator('[role="tab"][data-record-tab="overview"]')).toHaveAttribute('aria-selected', 'true');
+    const arranged = await listTabs(page);
+    report(testInfo, 'arranged', arranged);
+    expect(arranged).not.toContain('opportunity.account_id');
+    expect(arranged.indexOf('invoice.account_id')).toBeLessThan(arranged.indexOf('quote.account_id'));
+    await page.locator('[data-record-tab-more]').click();
+    await expect(page.locator('[data-record-tab-hidden][data-record-tab-menu-item="opportunity.account_id"]')).toHaveCount(1);
+    await page.getByRole('menuitem', { name: '恢复默认顺序' }).click();
+    await expect.poll(() => listTabs(page)).toEqual(lists);
+    // CONTROL: the default arrangement offers nothing to restore, and the row that fits draws no 「更多」.
+    await expect(page.locator('[data-record-tab-more]')).toHaveCount(0);
   });
 });

@@ -1575,6 +1575,8 @@ const pt = {
     relatedShowHidden: "Mostrar",
     recordTabs: "Abas do registro",
     recordTabOverview: "Visão geral",
+    recordTabMoveBefore: "Mover para a esquerda",
+    recordTabMoveAfter: "Mover para a direita",
     recordTabsMore: "{{count}} abas a mais",
     recordTabsMore_one: "{{count}} aba a mais",
     recordTabsMore_many: "{{count}} abas a mais",
