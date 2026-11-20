@@ -114,7 +114,8 @@ describe("kind:'html' page — <list-view> renders data columns (#6598)", () => 
 
     await waitFor(() => expect(headersOf(container).length).toBeGreaterThan(1));
     const headers = headersOf(container);
-    expect(headers).toEqual(['#', 'Opportunity Name', 'Amount']);
+    // No `#` column ahead of them: the list draws no row numbers (objectstack#35663).
+    expect(headers).toEqual(['Opportunity Name', 'Amount']);
     expect(headers).not.toContain('Stage');
   });
 });

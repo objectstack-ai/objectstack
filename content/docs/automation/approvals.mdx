@@ -934,7 +934,10 @@ renders and executes them wherever the object is surfaced — the **Approvals
 inbox** included — so a decision (comment, a file-upload for `attachments`, the
 reassign user-picker) is collected by the generic action dialog with **no
 per-action UI code**. New decision capabilities ship as backend metadata, not
-hand-written buttons.
+hand-written buttons. A reject through `approval_reject` carries its reason: the
+action declares its `comment` param required, so the action door, MCP `run_action` and the
+dialog refuse a reject whose `comment` is missing or blank (`400`, the declared
+param contract's `required` refusal).
 
 On the record itself, a record with approval requests grows an **Approvals** tab
 beside Details and Related, with a request-count badge: the current step, decision

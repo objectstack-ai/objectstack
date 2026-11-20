@@ -149,6 +149,7 @@ import {
 } from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
+import { validateHookAndJobBodyCompiles } from './validate-hook-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { validateActionObjectBinding } from './validate-action-object-binding.js';
@@ -2964,6 +2965,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['action', 'object'],
     run: (stack) => validateActionBodyCompiles(stack),
+  },
+  // The same compile check over an L2 hook body and an L2 job body, in the
+  // wrapper the runtime runs both in (`(async (ctx) => { SOURCE })`, built from
+  // the same function the rule compiles inside). Gating for the action rule's
+  // reason: the body never starts. Same severity split, read through the one
+  // `judgeBodyCompile`; two ids (`hook-body-does-not-compile`,
+  // `job-body-does-not-compile`). Across the runtime publish gate for `hook`
+  // writes only: a hook is runtime-creatable, a job is not
+  // (`allowRuntimeCreate: false`), so no door publishes a job body, and no
+  // object write carries a hook (`hooks` is not an ObjectSchema key). The rule
+  // loads no dependency: compiling goes through the host's `node:vm`.
+  {
+    name: 'validateHookAndJobBodyCompiles',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-hook-body-compiles.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['hook'],
+    run: (stack, ctx) => validateHookAndJobBodyCompiles(stack, ctx),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
   // NOT close: under `strict: false` a MISSPELLED format name (`emial`) is

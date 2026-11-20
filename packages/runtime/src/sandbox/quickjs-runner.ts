@@ -41,7 +41,7 @@ import {
 import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import { isUnlandedWriteRefusal } from '@objectstack/objectql';
-import { actionBodyFunctionExpression } from '@objectstack/lint/runtime';
+import { actionBodyFunctionExpression, hookBodyFunctionExpression } from '@objectstack/lint/runtime';
 import type {
   ScriptContext,
   ScriptOrigin,
@@ -415,10 +415,13 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
       // the whole surface. Only an action body is `(input, ctx)`.
       //
-      // The action wrapper is `actionBodyFunctionExpression` from
-      // `@objectstack/lint/runtime`, the expression the author-time rule
-      // `action-body-does-not-compile` compiles a body inside, so the two
-      // cannot disagree about it. ⛔ Never spell it inline here again.
+      // Both wrappers come from `@objectstack/lint/runtime`:
+      // `hookBodyFunctionExpression` (hooks, jobs) and
+      // `actionBodyFunctionExpression`, the expressions the author-time rules
+      // `hook-body-does-not-compile` / `job-body-does-not-compile` and
+      // `action-body-does-not-compile` compile a body inside, so the check and
+      // the run cannot disagree about a wrapper. ⛔ Never spell either inline
+      // here again.
       //
       // [#23702] `SETTLE` attaches the same two handlers the bare `.then(…)`
       // did and hands back the BODY's own promise as the script's completion
@@ -429,7 +432,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
       const SETTLE = '((p, onOk, onErr) => (p.then(onOk, onErr), p))';
       const wrapped = args.origin.kind !== 'action'
         ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined; globalThis.__errorFromHost = undefined;
-            ${SETTLE}((async (ctx) => { ${args.source} })(globalThis.__ctx),
+            ${SETTLE}(${hookBodyFunctionExpression(args.source)}(globalThis.__ctx),
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
             );`

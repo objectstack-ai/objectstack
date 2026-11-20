@@ -1487,6 +1487,47 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/** Shared by the hook and job compile rules: the two bodies run in one wrapper. */
+const CTX_BODY_COMPILE: readonly string[] = [
+  'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
+    'with this host\'s JavaScript engine and without running it, and reads the failure the way ' +
+    '`action-body-does-not-compile` does: a regular-expression pattern the host refuses is a warning, ' +
+    'because the runtime\'s QuickJS accepts some patterns the host does not; every other compile failure, ' +
+    'a literal that never closes or whose flags are not a flag set included, is refused. Syntax the host ' +
+    'accepts and QuickJS does not is not caught here.',
+];
+
+const HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body-does-not-compile',
+  covers: 'the wrapper a hook body is compiled in',
+  paragraphs: [
+    'A hook body is not a script of its own. The runtime pastes `body.source` into the body of ' +
+      '`(async (ctx) => { … })` and calls it with the hook\'s context, so the statements share a scope with ' +
+      'a parameter the author never wrote. A source that is valid on its own can fail to compile there, and ' +
+      'then every run of the hook fails before any statement runs.',
+    'The common cases are declaring the parameter again (`const ctx = …`, `let ctx`), declaring any name ' +
+      'twice with `let` / `const`, and grammar errors. Use `ctx` as it is, or give the local another name ' +
+      '(`const input = ctx.input || {}`).',
+    ...CTX_BODY_COMPILE,
+    'The parse check on the same body (`hook-body-source-unparseable`) uses a parser, which reports no ' +
+      'redeclaration and no other early error, so it passes most bodies this rule refuses.',
+  ],
+};
+
+const JOB_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'job-body-does-not-compile',
+  covers: 'the wrapper a job body is compiled in',
+  paragraphs: [
+    'A job body runs in the hook\'s wrapper, `(async (ctx) => { … })`: a job has no input to hand in, so ' +
+      '`ctx` is its whole surface. A source that is valid on its own can fail to compile there, and then ' +
+      'every scheduled run of the job fails before any statement runs.',
+    'The common cases are declaring the parameter again (`const ctx = …`, `let ctx`), declaring any name ' +
+      'twice with `let` / `const`, and grammar errors. Use `ctx` as it is, or give the local another name ' +
+      '(`const api = ctx.api`).',
+    ...CTX_BODY_COMPILE,
+  ],
+};
+
 const ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
   rule: 'action-body-write-unprovisioned-anchor',
   covers: 'why a write to an unprovisioned anchor never lands',
@@ -6421,6 +6462,8 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
   [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
   [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
+  [HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION,
+  [JOB_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: JOB_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
