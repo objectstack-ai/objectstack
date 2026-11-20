@@ -1649,7 +1649,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
 
   function renderDetail(dataSource: any) {
     return render(
-      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
+      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
           <RecordDetailView
             dataSource={dataSource}
@@ -1907,10 +1907,11 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
     );
   }
 
+  // objectstack#35595 — every side list is a tab of its own, in this order.
   const cardOrder = (container: HTMLElement) =>
-    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
-      el.getAttribute('data-related-card-id'),
-    );
+    Array.from(container.querySelectorAll('[role="tab"][data-record-tab]'))
+      .map((el) => el.getAttribute('data-record-tab'))
+      .filter((id): id is string => !!id && id.includes('.'));
 
   beforeEach(() => {
     cleanup();
@@ -1934,7 +1935,7 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
     vi.restoreAllMocks();
   });
 
-  describe('RecordDetailView — the related cards follow the object\'s relatedLists (objectstack#27069)', () => {
+  describe('RecordDetailView — the related lists\' tabs follow the object\'s relatedLists (objectstack#27069, objectstack#35595)', () => {
     it('without relatedLists: the derived order — the owned child first, then the lookups in declaration order', async () => {
       const { container } = renderPage(objectsWith());
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
@@ -2043,10 +2044,11 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
     );
   }
 
+  // objectstack#35595 — every side list is a tab of its own, in this order.
   const cardOrder = (container: HTMLElement) =>
-    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
-      el.getAttribute('data-related-card-id'),
-    );
+    Array.from(container.querySelectorAll('[role="tab"][data-record-tab]'))
+      .map((el) => el.getAttribute('data-record-tab'))
+      .filter((id): id is string => !!id && id.includes('.'));
 
   beforeEach(() => {
     cleanup();
@@ -2121,19 +2123,16 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
 // ── RecordDetailView.relatedCountsFirst-27056 ───────────────────────────────
 
 /**
- * objectstack#27056 — the record page's related panels load counts first,
- * then the first rows of only the cards in view, and never blocks the details.
- *
- * The REAL page, at a desktop width (the column tiers), over a data source
- * that holds every related read until the test answers it. The record has six
- * related lists. Measured:
+ * objectstack#27056, as objectstack#35595/#35596 lay the page out — the related
+ * lists load counts first and never block the details. Every list is a tab;
+ * the 概览 tab's right rail lists, under 「其他相关」, the lists that have
+ * records, with their first three rows. Measured:
  *
  *  - the details draw from the record read alone, while every related read is
- *    still out, and the right column shows one placeholder per card;
+ *    still out, with every list's tab drawn (no number yet) and no rail card;
  *  - the six counts go out as ONE request set, before any of them answers;
- *  - once they answer, rows are read for the two counted cards in view only,
- *    three rows each — never for a card counted at 0 (in view too), never for
- *    the cards below the fold.
+ *  - once they answer, rows are read for the lists counted above 0 only, three
+ *    rows each — never for a list counted at 0.
  */
 
 describe('RecordDetailView.relatedCountsFirst-27056', () => {
@@ -2262,7 +2261,6 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
   }
 
   const isCount = (r: HeldRead) => r.query.$count === true && r.query.$skip === undefined;
-  const isRows = (r: HeldRead) => r.query.$skip !== undefined;
   const column = (container: HTMLElement, name: string) =>
     container.querySelector(`[data-record-column="${name}"]`) as HTMLElement | null;
 
@@ -2290,8 +2288,12 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
     vi.restoreAllMocks();
   });
 
-  describe('RecordDetailView — the related column loads counts first (objectstack#27056)', () => {
-    it('draws the details before any related read answers, with one placeholder per card', async () => {
+  describe('RecordDetailView — the related lists load counts first (objectstack#27056, objectstack#35596)', () => {
+    const tabIds = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll('[role="tab"][data-record-tab]')).map((el) => el.getAttribute('data-record-tab'));
+    const isRowRead = (r: HeldRead) => r.query.$count !== true;
+
+    it('draws the details and every list\'s tab before any related read answers', async () => {
       const { container } = renderPage();
       await idle();
       expect(reads.length).toBeGreaterThan(0);
@@ -2301,46 +2303,47 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
       expect(container.textContent).toContain('Acme');
       expect(container.textContent).toContain('Retail');
       expect(column(container, 'details')?.textContent).toContain(RECORD_ID);
-      const related = column(container, 'right')!;
-      expect(related.querySelectorAll('[data-related-card-pending]')).toHaveLength(CHILDREN.length);
-      expect(related.querySelector('[data-related-card-row]')).toBeNull();
+      // Every list has its tab already, with no number yet.
+      expect(tabIds(container).filter((id) => id?.includes('.'))).toEqual(CHILDREN.map((c) => `${c}.account`));
+      for (const c of CHILDREN) {
+        expect(container.querySelector(`[data-record-tab="${c}.account"] [data-record-tab-count]`)).toBeNull();
+      }
+      // No rail card for a list before its count says it has records.
+      expect(container.querySelector('[data-record-summary-other]')).toBeNull();
     });
 
-    it('asks the six counts as one request set, then the rows of the two counted cards in view only', async () => {
+    it('asks the six counts as one request set, then three rows of each list counted above 0 only', async () => {
       const { container } = renderPage();
       await idle();
       // One request set: every list's count, all out before any answered, and
       // nothing else of theirs.
       expect(reads.filter(isCount).map((r) => r.object).sort()).toEqual([...CHILDREN].sort());
-      expect(reads.filter(isRows)).toEqual([]);
+      expect(reads.filter(isRowRead)).toEqual([]);
       expect(reads.filter(isCount).every((r) => r.query.$top === 1)).toBe(true);
 
       await act(async () => {
         for (const r of reads.filter((read) => !read.answered)) r.answer();
       });
       await idle();
-      const rowReads = reads.filter(isRows);
-      // The counted cards in view: the first and the third. The second is in
-      // view but counted at 0; the last three are below the fold.
-      expect(rowReads.map((r) => r.object).sort()).toEqual([C1, C3].sort());
-      for (const r of rowReads) {
-        expect(r.query.$top).toBe(3);
-        expect(r.query.$select).toEqual(['id', 'name', 'status']);
-      }
-      // Two round trips in all: the counts, then the rows.
-      expect(reads).toHaveLength(CHILDREN.length + 2);
+      const rowReads = reads.filter(isRowRead);
+      // Every list counted above 0; never the second, counted at 0.
+      const withRecords = CHILDREN.filter((c) => TOTALS[c] > 0);
+      expect(rowReads.map((r) => r.object).sort()).toEqual([...withRecords].sort());
+      for (const r of rowReads) expect(r.query.$top).toBe(3);
+      expect(reads.some((r) => r.object === C2 && isRowRead(r))).toBe(false);
 
       await act(async () => {
         for (const r of reads.filter((read) => !read.answered)) r.answer();
       });
       await idle();
-      const related = column(container, 'right')!;
-      expect(related.querySelector(`[data-related-card-id="${C1}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(3);
-      expect(related.querySelector(`[data-related-card-id="${C3}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(2);
-      expect(related.querySelector('[data-related-card-pending]')).toBeNull();
-      // Still nothing for the empty card, nor for the cards out of view.
-      expect(reads.filter(isRows).map((r) => r.object).sort()).toEqual([C1, C3].sort());
-      expect(reads.some((r) => r.object === C2 && isRows(r))).toBe(false);
+      const rail = column(container, 'right')!;
+      const rowsOf = (c: string) =>
+        rail.querySelector(`[data-record-summary-card="${c}.account"]`)?.querySelectorAll('[data-record-summary-row]') ?? [];
+      expect(rowsOf(C1)).toHaveLength(3);
+      expect(rowsOf(C3)).toHaveLength(2);
+      // CONTROL: the list counted at 0 has no rail card at all, but keeps its tab.
+      expect(rail.querySelector(`[data-record-summary-card="${C2}.account"]`)).toBeNull();
+      expect(container.querySelector(`[data-record-tab="${C2}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(true);
     });
   });
 });

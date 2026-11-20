@@ -1516,6 +1516,17 @@ const de = {
     recordTabsMore: "{{count}} weitere Tabs",
     recordTabsMore_one: "{{count}} weiterer Tab",
     recordTabsMore_other: "{{count}} weitere Tabs",
+    // objectstack#35595 — the tab row's one fold, 「更多 N ▾」: the number of tabs it holds.
+    recordTabsMoreTrigger: "Mehr {{count}}",
+    recordTabsMoreTrigger_one: "Mehr {{count}}",
+    recordTabsMoreTrigger_other: "Mehr {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail.
+    summaryApprovalDone: "Genehmigt",
+    summaryApprovalMine: "Wartet auf Sie",
+    summaryApprovalWaitingOn: "Wartet auf {{name}}",
+    summaryApprovalWaiting: "Ausstehend",
+    summaryRecentActivity: "Letzte Aktivität",
+    summaryOtherRelated: "Weitere verknüpfte",
     recordTabsHidden: "Ausgeblendet",
     bodyTableTotals: "Summen (diese Seite)",
     streamAll: "Alle",

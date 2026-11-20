@@ -1563,6 +1563,18 @@ const pt = {
     recordTabsMore_one: "{{count}} aba a mais",
     recordTabsMore_many: "{{count}} abas a mais",
     recordTabsMore_other: "{{count}} abas a mais",
+    // objectstack#35595 — the tab row's one fold, 「更多 N ▾」: the number of tabs it holds.
+    recordTabsMoreTrigger: "Mais {{count}}",
+    recordTabsMoreTrigger_one: "Mais {{count}}",
+    recordTabsMoreTrigger_many: "Mais {{count}}",
+    recordTabsMoreTrigger_other: "Mais {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail.
+    summaryApprovalDone: "Aprovado",
+    summaryApprovalMine: "Aguardando você",
+    summaryApprovalWaitingOn: "Aguardando {{name}}",
+    summaryApprovalWaiting: "Pendente",
+    summaryRecentActivity: "Atividade recente",
+    summaryOtherRelated: "Outros relacionados",
     recordTabsHidden: "Ocultas",
     bodyTableTotals: "Totais (esta página)",
     streamAll: "Tudo",

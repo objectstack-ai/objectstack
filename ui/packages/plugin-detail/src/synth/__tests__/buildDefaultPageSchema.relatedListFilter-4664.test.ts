@@ -36,7 +36,8 @@ const def: ObjectDefLike = {
 
 const relatedNodeOf = (rel: Record<string, any>) => {
   const tabs = buildDefaultTabs(def, { related: [rel as any] });
-  const relatedTab = tabItems(tabs).find((t: any) => t.label === 'Related');
+  // objectstack#35595 — a side list is a tab of its own, `related:<object>.<field>`.
+  const relatedTab = tabItems(tabs).find((t: any) => t.value === `related:${rel.objectName}.${rel.relationshipField}`);
   return relatedTab.children[0];
 };
 

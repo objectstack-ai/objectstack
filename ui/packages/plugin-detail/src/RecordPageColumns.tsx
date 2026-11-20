@@ -17,18 +17,25 @@ import {
   type RecordPageTier,
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
-import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext, RelatedListEnlargedContext } from './relatedListCompact';
+import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListEnlargedContext } from './relatedListCompact';
 import { ApprovalBandContext, DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
-import { RelatedCardStack } from './RelatedCardStack';
-import { RecordTimelinePanel } from './RecordTimelinePanel';
+import { RelatedDefaultChangedHint, RelatedFootLine } from './RelatedCardStack';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab } from './RecordTabRow';
-import { partitionRecordTabsByRecords } from './synth/recordTabRow';
-import { RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordTimelineCountContext } from './recordTimelineStream';
+import {
+  RECORD_SUMMARY_APPROVALS,
+  RECORD_SUMMARY_ATTACHMENTS,
+  RecordSummaryRail,
+  approvalSummaryRows,
+  useRecordAttachmentCount,
+} from './RecordSummaryRail';
+import { RecordTimelineCountContext } from './recordTimelineStream';
 import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
+  editRelatedArrangement,
   relatedCardId,
   resolveRelatedArrangement,
   type RelatedArrangement,
+  type RelatedArrangementEdit,
   type RelatedCardId,
 } from './synth/relatedArrangement';
 import { relatedCountTargetOf, useRelatedCounts, type RelatedCountTarget } from './useRelatedCounts';
@@ -51,6 +58,11 @@ export interface RecordPageColumnsProps {
    * details — so it does not read the switch. Absent: on.
    */
   rightColumn?: boolean;
+  /**
+   * Whether the 概览 tab draws its right rail at all (objectstack#35596: a
+   * drawer draws none). Absent: it does.
+   */
+  rail?: boolean;
   /**
    * The reader's arrangement of the related panels (objectstack#27055,
    * Targets 7 and 10) — order, hidden — from the host's workspace preference
@@ -86,6 +98,10 @@ export interface RecordPageColumnsProps {
 
 /** Rows per page of an enlarged related list whose block names no `limit`. */
 const ENLARGED_PAGE_SIZE = 25;
+
+/** A node's props: the ADR-0089 D3a `properties` bag over its own keys. */
+const nodeProps = (node: any): Record<string, any> =>
+  node && typeof node === 'object' ? { ...node, ...(node.properties ?? {}) } : {};
 
 /** The relationship id of a related-list node, or `null`. */
 function relatedNodeId(node: any): RelatedCardId | null {
@@ -245,19 +261,24 @@ const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)
 /**
  * The synthesized default record page, laid out by the width it has
  * (objectstack#26678; one rule since objectstack#27524, Target 6): one record
- * header, then the details and the right column — the related panels in the
- * reader's arrangement (attachments and approvals close them), then the 动态
- * panel, last (objectstack#34590, which supersedes objectstack#27524 Targets
- * 5 and 8's 动态-first for the right column, the stack and the tab row).
+ * header, the record's tab row (objectstack#35595: 概览, one tab per related
+ * list in the reader's arrangement, 附件, 审批, then 动态 last — every tab
+ * there at first paint, an empty list muted with no number, the width the
+ * row's only fold), then the open tab's face.
  *
- *  - `two-column` / `wide`: details | the right column (320 / 380 px). The
- *    wide tier lets a details section take three field columns (two
- *    otherwise, `DetailsColumnCapContext`) and the 动态 panel five entries
- *    (three otherwise). The reader's ⊟ (`rightColumn`) takes the right
- *    column out; the details then take the row.
- *  - `stack`: ONE column — the details, then the right column's panels in
- *    their order. No tabs, no rail: the stack is what a narrow container
- *    (the split pane, a phone) draws.
+ * 概览 draws the strip (`record:path`, `record:highlights`) across the whole
+ * width, then the details and the right rail — the summary of the other tabs
+ * (`RecordSummaryRail`, objectstack#35596: 审批, 附件, 最近动态, then the
+ * lists with records; a card with nothing to show is not drawn, and a rail
+ * known to have none folds away). Every other tab draws its block in full in
+ * place of all three.
+ *
+ *  - `two-column` / `wide`: details | the rail (320 / 380 px). The wide tier
+ *    lets a details section take three field columns (two otherwise,
+ *    `DetailsColumnCapContext`). The reader's ⊟ (`rightColumn`) takes the
+ *    rail out; the details then take the row. A host that draws no rail (a
+ *    drawer, `rail={false}`) draws the details alone.
+ *  - `stack`: ONE column — the details, then the rail.
  *
  * The frame mirrors the record page frame `PageRenderer` draws (its padding
  * and background, the header nodes 16 px apart), so the header sits where an
@@ -272,6 +293,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   columns,
   footer,
   rightColumn = true,
+  rail = true,
   relatedArrangement,
   onRelatedArrangementChange,
   onEnlargeRelated,
@@ -284,32 +306,34 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const ctx = useRecordContext();
   const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
   const hasTimeline = columns.timeline.length > 0;
-  const hasPanels = hasTimeline || columns.related.length > 0;
   const wide = tier === 'wide';
   const besideDetails = tier !== 'stack';
-  const drawsPanels = hasPanels && (!besideDetails || rightColumn);
-  const viewAllTimeline = React.useCallback(
-    () => onEnlargeRelated?.(RECORD_PAGE_TIMELINE_PANEL),
-    [onEnlargeRelated],
-  );
 
-  // ── The reader's arrangement, read once for the panels and the tab row ──
-  // A host without a preference store keeps the reader's choices here, for
-  // this view, so the stack and the row read the same one.
-  const [localArrangement, setLocalArrangement] = React.useState<RelatedArrangement | undefined>(undefined);
-  const arrangement = onRelatedArrangementChange ? relatedArrangement : localArrangement;
-  const onArrangementChange = onRelatedArrangementChange ?? setLocalArrangement;
+  // ── The right column's blocks: the related lists, 附件 and 审批 ──
+  const approvalsNode = columns.related.find((node) => node?.type === 'record:approvals');
+  const attachmentsNode = columns.related.find((node) => node?.type === 'record:attachments');
   const panelNodes = new Map<RelatedCardId, any>();
   for (const node of columns.related) {
     const id = relatedNodeId(node);
     if (id && !panelNodes.has(id)) panelNodes.set(id, node);
   }
-  const [now] = React.useState(() => Date.now());
-  const resolved = resolveRelatedArrangement(Array.from(panelNodes.keys()), arrangement, now);
+  const hasPanels = hasTimeline || columns.related.length > 0;
+  // objectstack#35596 — the rail is the 概览 tab's, and a drawer draws none.
+  const drawsPanels = rail && hasPanels && (!besideDetails || rightColumn);
 
-  // ── The panels' counts, one set for the panels and their tabs ──
-  // The hidden panels are counted too: their tabs sit in the row's dropdown
-  // with their counts (Target 8).
+  // ── The reader's arrangement of the related lists, read for the tab row ──
+  // A host without a preference store keeps the reader's choices here, for
+  // this view.
+  const [localArrangement, setLocalArrangement] = React.useState<RelatedArrangement | undefined>(undefined);
+  const arrangement = onRelatedArrangementChange ? relatedArrangement : localArrangement;
+  const onArrangementChange = onRelatedArrangementChange ?? setLocalArrangement;
+  const [now] = React.useState(() => Date.now());
+  const defaultOrder = Array.from(panelNodes.keys());
+  const resolved = resolveRelatedArrangement(defaultOrder, arrangement, now);
+
+  // ── The related lists' counts, one set for the tabs and the rail ──
+  // The hidden lists are counted too: their tabs sit in the row's dropdown
+  // with their counts.
   const countTargets: RelatedCountTarget[] = [];
   for (const id of [...resolved.order, ...resolved.hidden]) {
     const target = relatedCountTargetOf(panelNodes.get(id));
@@ -324,8 +348,12 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     const state = counts.stateOf(id);
     return state.kind === 'counted' ? state.count : null;
   };
+  // objectstack#35595 — 附件 counts the record's files; 审批 carries a dot
+  // while an approval waits.
+  const attachmentCount = useRecordAttachmentCount(!!attachmentsNode);
+  const approvalPending = !!approvalsNode && approvalSummaryRows(nodeProps(approvalsNode).approvals, undefined) !== null;
 
-  // ── The 动态 stream's size, for its panel and its tab ──
+  // ── The 动态 stream's size, for its card and its tab ──
   // Held per record, so a pane stepping to the next record never shows the
   // last one's number; kept while neither face that reports it is drawn.
   const recordKey = ctx?.recordId === undefined || ctx?.recordId === null ? '' : String(ctx.recordId);
@@ -342,11 +370,19 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const streamCount = timelineCount.record === recordKey ? timelineCount.count : null;
 
   // ── The active tab: the open face ──
-  // The 动态 stream in full, or a related list — body tables (in the details)
-  // open in place too (their ⤢), and take a tab of their own while open.
+  // A related list, 附件, 审批 or the 动态 stream in full — body tables (in the
+  // details) open in place too (their ⤢), and take a tab of their own while
+  // open.
   let enlarged: React.ReactNode = null;
   let activeTab = RECORD_TAB_OVERVIEW;
   let openBodyTable: RecordTab | null = null;
+  const attachmentsTitle = t('detail.attachments', { defaultValue: 'Attachments' });
+  const approvalsTitle = t('detail.approvalsPanelTitle', { defaultValue: 'Approvals' });
+  const blockFace = (id: string, title: string, node: any) => (
+    <EnlargedFace id={id} title={title} onClose={onCloseEnlargedRelated}>
+      <SchemaRenderer schema={toRenderableSchema(node)} />
+    </EnlargedFace>
+  );
   if (enlargedRelated === RECORD_PAGE_TIMELINE_PANEL && hasTimeline) {
     activeTab = RECORD_PAGE_TIMELINE_PANEL;
     enlarged = (
@@ -360,6 +396,12 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         </RecordTimelineCountContext.Provider>
       </EnlargedFace>
     );
+  } else if (enlargedRelated === RECORD_SUMMARY_ATTACHMENTS && attachmentsNode) {
+    activeTab = RECORD_SUMMARY_ATTACHMENTS;
+    enlarged = blockFace(RECORD_SUMMARY_ATTACHMENTS, attachmentsTitle, attachmentsNode);
+  } else if (enlargedRelated === RECORD_SUMMARY_APPROVALS && approvalsNode) {
+    activeTab = RECORD_SUMMARY_APPROVALS;
+    enlarged = blockFace(RECORD_SUMMARY_APPROVALS, approvalsTitle, approvalsNode);
   } else if (enlargedRelated) {
     const node = [...columns.related, ...columns.details].find((n) => relatedNodeId(n) === enlargedRelated);
     if (node) {
@@ -373,35 +415,22 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     }
   }
 
-  // ── The tab row (Target 8): 概览, the panels in the reader's order, 动态 ──
-  // The panels with records first and the empty ones in the dropdown
-  // (objectstack#28469), as the right column folds its empty panels. 动态 is
-  // the row's last tab, as it is the right column's last panel
-  // (objectstack#34590, superseding objectstack#27524 Target 8's 动态-second).
+  // ── The tab row (objectstack#35595): 概览, every related list, 附件, 审批, 动态 ──
+  // Every related list has its tab whether or not it has records — muted and
+  // without a number at 0 — so no tab moves when the counts land; the width
+  // is the row's only fold (「更多 N ▾」, `RecordTabRow`). 动态 is the row's
+  // last tab (objectstack#34590).
   const panelTab = (id: RelatedCardId): RecordTab => ({
     id,
     label: relatedNodeTitle(panelNodes.get(id)),
     count: countOf(id),
   });
   const tabs: RecordTab[] = [{ id: RECORD_TAB_OVERVIEW, label: t('detail.recordTabOverview', { defaultValue: 'Overview' }) }];
-  // While the panels' first count set is still out (the right column draws its
-  // count skeletons meanwhile) their tabs wait off the row, so a tab that turns
-  // out empty never draws on the row and then leaves it: the tabs appear once,
-  // already in place. The active tab is always drawn; a list that is never
-  // counted (no source, a refused read) keeps its place in the arrangement.
-  const panelTabs = partitionRecordTabsByRecords(
-    resolved.order.filter((id) => id === activeTab || counts.stateOf(id).kind !== 'pending').map(panelTab),
-  );
-  tabs.push(...panelTabs.withRecords);
+  tabs.push(...resolved.order.map(panelTab));
   if (openBodyTable) tabs.push(openBodyTable);
-  // 动态 comes after the panels' tabs, so it too waits off the row while their
-  // first set is out (every panel still pending): drawn at once, it would move
-  // when they land in front of it — the move the rule above keeps out
-  // (objectstack#28469, Target 2). Drawn when it is the active tab.
-  const firstPanelSetOut =
-    resolved.order.length > 0 && resolved.order.every((id) => counts.stateOf(id).kind === 'pending');
-  const timelineHeld = hasTimeline && firstPanelSetOut && activeTab !== RECORD_PAGE_TIMELINE_PANEL;
-  if (hasTimeline && !timelineHeld) {
+  if (attachmentsNode) tabs.push({ id: RECORD_SUMMARY_ATTACHMENTS, label: attachmentsTitle, count: attachmentCount });
+  if (approvalsNode) tabs.push({ id: RECORD_SUMMARY_APPROVALS, label: approvalsTitle, dot: approvalPending });
+  if (hasTimeline) {
     tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
   }
   const hiddenTabs = resolved.hidden.map(panelTab);
@@ -409,18 +438,9 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     if (id === RECORD_TAB_OVERVIEW) onCloseEnlargedRelated?.();
     else onEnlargeRelated?.(id);
   };
-  // A held 动态 tab still counts toward drawing the row, so the row is there
-  // from the first paint (概览 alone while the set is out) and the page below
-  // it does not shift when the tabs land.
   const tabRow =
-    onEnlargeRelated && tabs.length + (timelineHeld ? 1 : 0) + panelTabs.empty.length + hiddenTabs.length > 1 ? (
-      <RecordTabRow
-        tabs={tabs}
-        emptyTabs={panelTabs.empty}
-        hiddenTabs={hiddenTabs}
-        activeId={activeTab}
-        onSelect={selectTab}
-      />
+    onEnlargeRelated && tabs.length + hiddenTabs.length > 1 ? (
+      <RecordTabRow tabs={tabs} hiddenTabs={hiddenTabs} activeId={activeTab} onSelect={selectTab} />
     ) : null;
 
   // The provenance line closes the details column in every tier
@@ -431,41 +451,81 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       {footer}
     </div>
   );
-  const rightPanels = drawsPanels ? (
+  const editArrangement = (edit: RelatedArrangementEdit) =>
+    onArrangementChange(editRelatedArrangement(defaultOrder, arrangement, edit, now));
+  // objectstack#35596 — a rail with nothing to show takes no column: once
+  // every card is KNOWN to be absent (no approval waiting, no files, a
+  // counted stream with no entries, every list counted with no records — a
+  // refused count draws no card either — and nothing at the foot), the
+  // details take the row. While a count is still out the column stays, so a
+  // page whose cards land does not shift. A slotted chatter stream reports
+  // no count, so its card always draws.
+  const streamCounted = columns.timeline.some((node) => node?.type === 'record:activity');
+  const railKnownEmpty =
+    !approvalPending
+    && (!attachmentsNode || attachmentCount === 0)
+    && (!hasTimeline || (streamCounted && streamCount === 0))
+    && resolved.order.every((id) => {
+      const state = counts.stateOf(id);
+      return state.kind !== 'pending' && !(state.kind === 'counted' && state.count > 0);
+    })
+    && resolved.hidden.length === 0
+    && !resolved.rearranged
+    && !resolved.defaultChanged;
+  const drawsRail = drawsPanels && !railKnownEmpty;
+  const rightPanels = drawsRail ? (
     <aside
       className={COLUMN_STACK}
       data-record-column="right"
       aria-label={t('detail.relatedColumn', { defaultValue: 'Right column' })}
     >
-      {/* The related panels, in the reader's arrangement (objectstack#27055),
-          then the 动态 panel, last (objectstack#34590: 「「动态」在最后」). */}
-      <RelatedListCompactContext.Provider value>
-        <RelatedCardStack
-          nodes={columns.related}
-          arrangement={arrangement}
-          onArrangementChange={onArrangementChange}
-          onEnlarge={onEnlargeRelated}
-          fieldsOf={relatedFieldsOf}
-          counts={counts}
-        />
-      </RelatedListCompactContext.Provider>
-      {hasTimeline && (
-        <RecordTimelinePanel
-          nodes={columns.timeline}
-          entries={wide ? RECORD_TIMELINE_PANEL_MAX_ENTRIES : 3}
-          onViewAll={onEnlargeRelated ? viewAllTimeline : undefined}
-          count={streamCount}
-          onCount={reportTimelineCount}
-        />
-      )}
+      {/* objectstack#35596 — the 概览 tab's summary of the other tabs: 审批,
+          附件, 最近动态, then 「其他相关」 (the lists with records), each card
+          absent while it has nothing to show. The foot line keeps a reader's
+          hidden lists one click from coming back. */}
+      <RecordSummaryRail
+        related={resolved.order.map((id) => ({ id, node: panelNodes.get(id), count: countOf(id) }))}
+        approvals={approvalsNode}
+        attachments={attachmentsNode ? { count: attachmentCount } : null}
+        timeline={columns.timeline}
+        timelineCount={streamCount}
+        onTimelineCount={reportTimelineCount}
+        onOpen={onEnlargeRelated ? selectTab : undefined}
+        fieldsOf={relatedFieldsOf}
+        footer={
+          <>
+            {resolved.defaultChanged && (
+              <RelatedDefaultChangedHint onRestore={() => editArrangement({ kind: 'restore-default-order' })} />
+            )}
+            <RelatedFootLine
+              hiddenCount={resolved.hidden.length}
+              onShowHidden={() => editArrangement({ kind: 'show-hidden' })}
+              rearranged={resolved.rearranged}
+              onRestoreDefault={() => editArrangement({ kind: 'restore-default-arrangement' })}
+            />
+          </>
+        }
+      />
     </aside>
   ) : null;
-  // A face with neither the 动态 panel nor its tab drawn — another tab open,
-  // or the right column switched off — still names the stream's count on the
-  // 动态 tab (objectstack#27524): counted from the feed the host holds.
-  const probesTimelineCount = hasTimeline && !!tabRow && activeTab !== RECORD_PAGE_TIMELINE_PANEL
-    && (enlarged !== null || !drawsPanels);
-  const sideBySide = besideDetails && drawsPanels;
+  // A face with no 动态 card drawn — another tab open, the right column
+  // switched off, or a drawer — still names the stream's count on the 动态
+  // tab (objectstack#27524): counted from the feed the host holds.
+  // A rail folded away for want of cards still learns of a new entry: the
+  // probe counts for it, and the rail comes back with its 最近动态 card.
+  const probesTimelineCount = hasTimeline && activeTab !== RECORD_PAGE_TIMELINE_PANEL
+    && ((!!tabRow && (enlarged !== null || !drawsPanels)) || (enlarged === null && drawsPanels && !drawsRail));
+  // Folded away, the rail keeps the size its card last read: a probe that
+  // cannot count (no feed held by the host — the stream reads its own) says
+  // nothing rather than unknown, so the rail does not come back empty.
+  const railFolded = enlarged === null && drawsPanels && !drawsRail;
+  const reportProbedCount = React.useCallback(
+    (count: number | null) => {
+      if (count !== null) reportTimelineCount(count);
+    },
+    [reportTimelineCount],
+  );
+  const sideBySide = besideDetails && drawsRail;
   const template = sideBySide ? (wide ? GRID_TEMPLATE.wide : GRID_TEMPLATE.twoColumn) : GRID_TEMPLATE.oneColumn;
 
   return (
@@ -481,16 +541,28 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         <div className="flex flex-col gap-4">
           {drawNodes(columns.header)}
           {tabRow}
-          {probesTimelineCount && <RecordTimelineCountProbe nodes={columns.timeline} onCount={reportTimelineCount} />}
+          {probesTimelineCount && (
+            <RecordTimelineCountProbe nodes={columns.timeline} onCount={railFolded ? reportProbedCount : reportTimelineCount} />
+          )}
           {enlarged ?? (
-            <div
-              className={cn('grid items-start gap-6', template)}
-              data-record-columns=""
-              data-record-columns-shown={sideBySide ? 'details right' : 'details'}
-            >
-              {detailsColumn}
-              {rightPanels}
-            </div>
+            <>
+              {/* objectstack#35595 — the stage path and the key fields are the
+                  概览 tab's top, across the whole width (both columns), and
+                  no other tab's. */}
+              {columns.strip.length > 0 && (
+                <div className="flex min-w-0 flex-col gap-4" data-record-overview-strip="">
+                  {drawNodes(columns.strip)}
+                </div>
+              )}
+              <div
+                className={cn('grid items-start gap-6', template)}
+                data-record-columns=""
+                data-record-columns-shown={sideBySide ? 'details right' : 'details'}
+              >
+                {detailsColumn}
+                {rightPanels}
+              </div>
+            </>
           )}
         </div>
       </div>

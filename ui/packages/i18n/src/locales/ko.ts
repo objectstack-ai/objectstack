@@ -1516,6 +1516,17 @@ const ko = {
     recordTabsMore: "탭 {{count}}개 더",
     recordTabsMore_one: "탭 {{count}}개 더",
     recordTabsMore_other: "탭 {{count}}개 더",
+    // objectstack#35595 — the tab row's one fold, 「更多 N ▾」: the number of tabs it holds.
+    recordTabsMoreTrigger: "더보기 {{count}}",
+    recordTabsMoreTrigger_one: "더보기 {{count}}",
+    recordTabsMoreTrigger_other: "더보기 {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail.
+    summaryApprovalDone: "승인됨",
+    summaryApprovalMine: "내 승인 대기",
+    summaryApprovalWaitingOn: "{{name}} 승인 대기",
+    summaryApprovalWaiting: "대기 중",
+    summaryRecentActivity: "최근 활동",
+    summaryOtherRelated: "기타 관련",
     recordTabsHidden: "숨김",
     bodyTableTotals: "합계(이 페이지)",
     streamAll: "전체",

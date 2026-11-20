@@ -264,6 +264,8 @@ const KNOWN_LABEL_DICT: Record<string, Record<string, string>> = {
  */
 const KNOWN_LABEL_KEYS: Record<string, string> = {
   Details: 'detail.details',
+  // The synthesized record page's first tab, 「概览」 (objectstack#35595).
+  Overview: 'detail.recordTabOverview',
   Related: 'detail.related',
   Activity: 'detail.activity',
   History: 'detail.history',
@@ -547,8 +549,9 @@ interface CollectedRelatedList {
 /**
  * Walk a tab's children (depth-first) and collect every `record:related_list`
  * schema node. Used to auto-derive a count for the tab badge when the spec
- * author didn't supply one explicitly. Multiple lists are summed (Salesforce
- * "Related" tab convention).
+ * author didn't supply one explicitly. A tab holding more than one list
+ * merges tables and carries no count (objectstack#35595: one table, one
+ * count).
  *
  * The gate is the node-level `visibleWhen`, the one key the spec declares for
  * it: `PageComponentSchema` declares `visibleWhen` on the node, and the
@@ -742,6 +745,30 @@ function useStickyTopInset<T extends HTMLElement>(
 
   return [setNode, inset];
 }
+
+/**
+ * Whether a tab's subtree holds a `record:approvals` block whose host handed it
+ * a pending request (`approvals.pendingRequest`, objectstack#35595): the 审批
+ * tab's dot. A block that reads its approvals itself is not known here.
+ */
+const containsPendingApproval = (nodes: any): boolean => {
+  if (!nodes) return false;
+  const list = Array.isArray(nodes) ? nodes : [nodes];
+  for (const n of list) {
+    if (!n || typeof n !== 'object') continue;
+    if (n.type === 'record:approvals') {
+      const approvals = n.properties?.approvals ?? n.approvals;
+      if (approvals?.pendingRequest) return true;
+      continue;
+    }
+    // `body` stays — same ground as `collectRelatedLists` above.
+    const candidates = [n.children, n.properties?.children, n.properties?.items, n.body, n.items];
+    for (const c of candidates) {
+      if (c && containsPendingApproval(c)) return true;
+    }
+  }
+  return false;
+};
 
 /**
  * Whether a tab's subtree holds a `list-view` block, the block that reports its
@@ -1144,8 +1171,15 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // useRelatedCountVersion above subscribed us to changes, so any store update —
   // whether from this effect or from an external invalidate — re-renders.
   // objectstack#26613 — plus what the tab's list blocks reported.
+  //
+  // objectstack#35595 — one table, one count: a record tab whose badge would
+  // add up several related tables (two related lists, a list and the
+  // attachments) merges tables, which only an authored page does, and its
+  // title carries no number — the platform does not total them for it. A tab
+  // of list blocks (an app page's, objectstack#26613) still sums its reports.
   const computeCount = (idx: number, value: string): number | undefined => {
     const probes = probeTargets.get(idx) ?? [];
+    if (probes.length > 1 || shownListsByItem[idx].length > 1) return undefined;
     let sum = 0;
     let seenAny = false;
     for (const p of probes) {
@@ -1180,6 +1214,9 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
       labelStr: translateLabel(pickLocalized(it.label, language), language, ttLabel),
       // Explicit spec count wins; otherwise fall back to the derived probe.
       count: authoredCount ? it.count : computeCount(idx, value),
+      // objectstack#35595 — the 审批 tab carries a dot while the approval its
+      // `record:approvals` block was handed is pending.
+      approvalPending: containsPendingApproval((it as any).children),
       // objectstack#26613 — a tab whose badge its list blocks answer is
       // mounted while inactive, so they run their queries; an authored count
       // needs none of that, and leaves the tab mounted on open only.
@@ -1319,7 +1356,15 @@ const PageTabsRenderer: React.FC<any> = ({ schema, className, ...props }) => {
                   aria-hidden
                 />
               )}
-              <span>{item.labelStr}</span>
+              <span
+                className={cn(item.count !== undefined && item.count !== null && item.count !== '' && Number(item.count) === 0 && 'opacity-70')}
+                data-page-tab-empty={item.count !== undefined && item.count !== null && item.count !== '' && Number(item.count) === 0 ? '' : undefined}
+              >
+                {item.labelStr}
+              </span>
+              {item.approvalPending && (
+                <span className="ml-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden data-page-tab-dot="" />
+              )}
               {item.count !== undefined && item.count !== null && item.count !== '' && Number(item.count) > 0 && (
                 <span
                   className="ml-1.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium leading-none text-muted-foreground"
