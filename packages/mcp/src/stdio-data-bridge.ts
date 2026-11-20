@@ -66,7 +66,9 @@
  * maintainer ruling of 2026-09-03 — option C, #14147 — the static `readonly`
  * strip runs inside `engine.insert` for every non-system caller and the
  * ingress copy is deleted, so on that point the two transports no longer
- * differ.) None of those is the authorization boundary
+ * differ. The receipts' `droppedFields` member is answered here too, from the
+ * same engine listener that layer wires, on `create` and `update`.) None of
+ * those is the authorization boundary
  * — every call here still passes the engine's CRUD/FLS/RLS — but the two
  * transports should not differ at all, and unifying them behind one
  * transport-neutral data seam is filed as follow-up work rather than forked
@@ -117,7 +119,7 @@ import {
   DATA_ACTION_TO_API_OPERATION,
   type EnableLike,
 } from '@objectstack/spec/data';
-import type { EngineDeleteOptions } from '@objectstack/spec/data';
+import type { DroppedFieldsEvent, EngineDeleteOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 // [#21207] The stored-metadata-body family's ONE projection and its object set,
 // from where every other surface of the family takes them (the data door, the
@@ -1320,6 +1322,32 @@ function describedFieldNames(described: Record<string, unknown>): string[] {
 }
 
 /**
+ * The caller's write payload without the keys the engine reported dropped
+ * (`onFieldsDropped`), for the `create` and `update` answers: a dropped key
+ * echoed from the payload would answer a value the write never stored. A
+ * `stored_expression` key is dropped here too; the write result carries the
+ * value the engine stored in its place.
+ */
+function withoutDroppedKeys(
+  data: Record<string, unknown>,
+  dropped: readonly DroppedFieldsEvent[],
+): Record<string, unknown> {
+  if (dropped.length === 0) return data;
+  const out = { ...data };
+  for (const event of dropped) for (const field of event.fields) delete out[field];
+  return out;
+}
+
+/**
+ * The `droppedFields` member of a write answer, as the protocol's `createData`
+ * and `updateData` answer it behind the HTTP bridge (`CreateDataResponseSchema`,
+ * `UpdateDataResponseSchema`): present only when the engine dropped a key.
+ */
+function droppedFieldsMember(dropped: DroppedFieldsEvent[]): { droppedFields?: DroppedFieldsEvent[] } {
+  return dropped.length > 0 ? { droppedFields: dropped } : {};
+}
+
+/**
  * Build the stdio transport's principal-bound data bridge.
  *
  * `aggregate` is attached only when the engine implements it, so a partial
@@ -1594,13 +1622,24 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // the `create_record` tool answers the create it is.
       let stale: SummaryRecomputeRefusal | undefined;
       let written: Record<string, unknown> | undefined;
+      // The engine's verdict on the caller's keys it did not store (a
+      // `readonly` column, a roll-up `summary`, a formula…), answered as
+      // `droppedFields` through the listener the protocol's `createData` wires
+      // behind the HTTP bridge, so both transports say the same thing.
+      const dropped: DroppedFieldsEvent[] = [];
       try {
-        written = (await engine.insert(object, data, { context })) as Record<string, unknown> | undefined;
+        written = (await engine.insert(object, data, {
+          context,
+          onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+        })) as Record<string, unknown> | undefined;
       } catch (e) {
         stale = staleSummaryRefusalOrThrow(e);
         written = stale.written as Record<string, unknown> | undefined;
       }
-      const record = { ...data, ...(written ?? {}) };
+      // The caller's payload fills keys the write result omits, minus every key
+      // the engine dropped: echoed, a dropped value would read as stored (a
+      // `readonly` column with no default, a `min` roll-up seeded empty).
+      const record = { ...withoutDroppedKeys(data, dropped), ...(written ?? {}) };
       // [#8497] `written` is the engine's WRITE result, which since #7823 keeps
       // the stored row whole — flagged columns included. This is a generic data
       // mouth answering an external caller, so it owns the response-body half
@@ -1611,7 +1650,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // is absent for a package's boot-registered object on an `environmentId`
       // kernel, and with no schema the helper masks and omits nothing.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      const answer = { object, id: record.id, record };
+      const answer = { object, id: record.id, record, ...droppedFieldsMember(dropped) };
       if (stale) throw withEarnedAnswer(stale, answer);
       return answer;
     },
@@ -1639,12 +1678,21 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // attached to the refusal by #28781's carrier as `create` does; every
       // other throw, a refusal before the write among them, propagates as is.
       let stale: SummaryRecomputeRefusal | undefined;
+      // The engine's verdict on the patch keys it did not store, answered as
+      // `droppedFields` as the protocol's `updateData` answers it (see `create`).
+      const dropped: DroppedFieldsEvent[] = [];
       try {
-        await engine.update(object, data, { where: { id }, context });
+        await engine.update(object, data, {
+          where: { id },
+          context,
+          onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+        });
       } catch (e) {
         stale = staleSummaryRefusalOrThrow(e);
       }
-      const record = { ...(existing as Record<string, unknown>), ...data };
+      // The read-path row under the caller's patch, minus every key the engine
+      // dropped: the stored value of such a field is the one that stands.
+      const record = { ...(existing as Record<string, unknown>), ...withoutDroppedKeys(data, dropped) };
       // [#8497] The engine's update RESULT is deliberately discarded here (this
       // arm echoes the read-path row plus the caller's own patch), so no STORED
       // flagged value can reach this line. The strip still runs, for the one
@@ -1655,7 +1703,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // property literally true on every verb of this bridge rather than true-
       // by-argument on one.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      const answer = { object, id, record };
+      const answer = { object, id, record, ...droppedFieldsMember(dropped) };
       if (stale) throw withEarnedAnswer(stale, answer);
       return answer;
     },
