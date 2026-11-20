@@ -16,10 +16,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * side, when the Slack channel or the link door calls Slack. ADR-0013 §4's
  * `credentials_ref` into a vault stays Draft and enterprise.
  *
- * Engine-owned: written only by the Slack link door
- * (`../slack-link-routes.ts`) through the link store (`../slack-links.ts`),
- * under a system context naming the administrator. ⛔ The generic data API
- * neither reads nor writes it, and it is outside the wildcard grant.
+ * Engine-owned: written only through the link store (`../slack-links.ts`) —
+ * by the Slack link door (`../slack-link-routes.ts`) under a system context
+ * naming the administrator, and by the Slack channel marking a token Slack
+ * refused as revoked. ⛔ The generic data API
+ * neither reads nor writes it (`apiEnabled: false`), and `access: private`
+ * keeps a plain `'*'` wildcard grant off it (ADR-0066 D2).
  */
 export const ChannelAccount = ObjectSchema.create({
     name: 'sys_channel_account',
