@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectSchema } from './object.zod';
-import { ObjectStackDefinitionSchema } from '../stack.zod';
+import { ObjectStackDefinitionSchema, defineStack } from '../stack.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +128,34 @@ describe('lifecycle.seal with no chainField — the doors that parse ObjectSchem
 
   it('the stack definition `os validate` and `os build` parse', () => {
     const parsed = ObjectStackDefinitionSchema.safeParse({ objects: [unchainable()] });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues.filter((i) => LEAD.test(i.message)).map((i) => i.path)).toEqual([['objects', 0, 'lifecycle', 'seal']]);
+  });
+
+  const thrown = (fn: () => unknown): { code?: unknown; issues?: Array<{ path: PropertyKey[]; message: string }> } => {
+    try {
+      fn();
+    } catch (e) {
+      return e as never;
+    }
+    throw new Error('expected a throw');
+  };
+
+  it('ObjectSchema.create(), the authoring factory a config module calls, throws the located issue', () => {
+    const e = thrown(() => ObjectSchema.create(unchainable() as never));
+    expect((e.issues ?? []).filter((i) => LEAD.test(i.message)).map((i) => i.path)).toEqual([['lifecycle', 'seal']]);
+  });
+
+  it('defineStack(), strict by default, throws STACK_SCHEMA_INVALID when a config module carrying the object is evaluated', () => {
+    const e = thrown(() => defineStack({ objects: [unchainable()] } as never));
+    expect(e.code).toBe('STACK_SCHEMA_INVALID');
+    expect((e.issues ?? []).filter((i) => LEAD.test(i.message)).map((i) => i.path)).toEqual([['objects', 0, 'lifecycle', 'seal']]);
+  });
+
+  it('counts only the object\'s own fields: a tenant_id contributed by objectExtensions alone is still refused', () => {
+    const extension = { extend: 'ai_audit_probe', fields: { tenant_id: { type: 'text', label: 'Organization' } } };
+    const parsed = ObjectStackDefinitionSchema.safeParse({ objects: [unchainable()], objectExtensions: [extension] });
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
     expect(parsed.error.issues.filter((i) => LEAD.test(i.message)).map((i) => i.path)).toEqual([['objects', 0, 'lifecycle', 'seal']]);

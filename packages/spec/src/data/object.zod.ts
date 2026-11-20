@@ -3229,6 +3229,14 @@ type SealChainColumnFault =
  * ({@link refuseUnknownSealChainField}): a column the object does not have
  * stops the judgement, and so does a leaf-order column; a `valueFields` member
  * and a column whose value is not one text on every store are each a fault.
+ *
+ * "Has" means the AUTHORED field map plus the injected plan, as the
+ * `valueFields` check reads it. A column contributed only by an
+ * `objectExtensions` entry is not counted, so a sealed object whose chain
+ * column (named, or the default `tenant_id`) reaches it only that way is
+ * refused here, although the sealer, which reads the registry's folded field
+ * map, would seal it. That false refusal is accepted: the fix is to declare
+ * the column on the object itself.
  */
 function sealChainColumnFaults(
   object: { fields?: unknown },
