@@ -151,6 +151,16 @@ describe('[ADR-0155 Q2] the explainer resolves the share-grant leaf at the recor
     });
   }
 
+  it('nothing of the leaf crosses the wire, granted or not, single or batch: a pin of its own', async () => {
+    const { explain } = await makeStack();
+    for (const operation of ['read', 'update'] as const) {
+      for (const recordId of [SHARED, UNSHARED]) expectNoLeafOnTheWire(await explain(operation, { recordId }));
+    }
+    const batch = JSON.stringify(await explain('read', { recordIds: [SHARED, UNSHARED] }));
+    expect(batch).not.toContain('"recipient"');
+    expect(batch).not.toContain('sharedRecordIds');
+  });
+
   it('the batch form reads the leaf once, keyed by every id it judges, and answers each record its own shape', async () => {
     const { engine, explain } = await makeStack();
     const decision = await explain('read', { recordIds: [SHARED, UNSHARED, SHARED] });

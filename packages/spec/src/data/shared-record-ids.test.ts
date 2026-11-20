@@ -361,9 +361,13 @@ describe('the comparand-shape door admits the leaf only for a caller that names 
       expect(err.message, at).toContain(`find('account'): ${at} holds a SharedRecordIds leaf, a fixed read of 'sys_record_share'`);
       expect(err.message, at).not.toContain('u-secret-42');
     }
-    // The unbranded copy keeps the author's refusal: that one is a request's.
+  });
+
+  it('an unbranded copy of the array form keeps the author\'s INVALID_FILTER / 400: plan step 5 moved only the branded leaf', () => {
+    // That refusal is a request's: a copy that crossed JSON is no leaf.
     const wire = refusalOf(() => parseFilterAST(JSON.parse(JSON.stringify([['id', 'in', read]]))));
     expect(envelopeOf(wire)).toEqual(ENVELOPE);
+    expect(wire.message).toMatch(/Operator "\$in" on field "id" requires an ARRAY of values/);
   });
 
   it('the schema doors never admit it, and no operator spells it', () => {

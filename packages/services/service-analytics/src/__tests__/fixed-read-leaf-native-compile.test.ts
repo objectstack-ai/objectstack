@@ -261,30 +261,34 @@ describe('[ADR-0155 Q2] the share-grant leaf on the analytics faces, live on SQL
       }
     });
 
-    it('a leaf in the caller\'s where, any spelling, is refused before either strategy runs (compile surface 2)', async () => {
-      // The read scope is the only door a leaf enters analytics by. Before plan
-      // step 5 the where face answered 400 printing the recipient for `$in`, and
-      // read a bare value or an array-form `=` as a relation condition on `id`.
-      const secret = SharedRecordIds.read('srid_doc', 'u-secret-42');
-      const wheres = [
-        { id: { $in: secret } },
-        { id: secret },
-        { $or: [{ owner: 'u1' }, { id: { $eq: secret } }] },
-        [['id', 'in', secret]],
-        [['id', '=', secret]],
-      ];
-      for (const native of [true, false]) {
-        for (const where of wheres) {
+    // Compile surface 2. The read scope is the only door a leaf enters analytics
+    // by. Before plan step 5 the where face answered 400 printing the recipient
+    // for `$in`, and read a bare value or an array-form `=` as a relation
+    // condition on `id`. Each spelling is its own pin, and each names the where
+    // face's evaluator: the array-form `in` is refused by `parseFilterAST` too,
+    // so only the evaluator tells the two refusals apart.
+    const secret = SharedRecordIds.read('srid_doc', 'u-secret-42');
+    const WHERES: ReadonlyArray<readonly [string, unknown]> = [
+      ['{ id: { $in: leaf } }', { id: { $in: secret } }],
+      ['a bare { id: leaf }', { id: secret }],
+      ['$eq under $or', { $or: [{ owner: 'u1' }, { id: { $eq: secret } }] }],
+      ['the array form in', [['id', 'in', secret]]],
+      ['the array form =', [['id', '=', secret]]],
+    ];
+    for (const [spelling, where] of WHERES) {
+      it(`a leaf in the caller's where, ${spelling}, is refused by the where face before either strategy runs`, async () => {
+        for (const native of [true, false]) {
           readScope = null;
           const { svc, rawSql } = service({ native, classOf: 'seam' });
           const err = await svc.query({ ...QUERY, where } as AnalyticsQuery, CONTEXT).then(() => null, (e: any) => e);
-          expect({ code: err?.code, status: err?.status }, JSON.stringify({ native, where })).toEqual(REFUSED);
+          expect({ code: err?.code, status: err?.status }, JSON.stringify({ native, spelling })).toEqual(REFUSED);
+          expect(err?.message).toContain('[service-analytics where]');
           expect(err?.message).toContain('holds a SharedRecordIds leaf, a fixed read of \'sys_record_share\'');
           expect(err?.message).not.toContain('u-secret-42');
           expect(rawSql).not.toHaveBeenCalled();
         }
-      }
-    });
+      });
+    }
 
     it('the /analytics/sql echo prints the subquery the statement runs', async () => {
       readScope = READ_SCOPE.where();
