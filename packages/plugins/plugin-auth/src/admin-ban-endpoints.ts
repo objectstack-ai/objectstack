@@ -90,6 +90,15 @@
  * false, … }` on the answer. The event names the administrator, the one at
  * the keyboard on an impersonation session, and their cloud user id read
  * from their linked `objectstack-cloud` account, never from the request.
+ *
+ * ── The admin audit row ─────────────────────────────────────────────────────
+ *
+ * A ban or an unban that committed writes the sibling doors' admin audit row
+ * (`writeAdminAudit`, action `update`, event `user.admin_banned` /
+ * `user.admin_unbanned`); a refused one writes none. plugin-audit's mirror row
+ * for the column write does not stand in for it: without the admin plugin the
+ * engine writer carries no attributed user, so that row names no
+ * administrator, and on neither path does it carry the event or `hostNotified`.
  */
 
 import {
@@ -98,7 +107,7 @@ import {
   LAST_LOCAL_CREDENTIAL_MESSAGE,
   type CredentialAccountAdapter,
 } from './last-local-credential.js';
-import type { AdminActor, EndpointResult } from './admin-user-endpoints.js';
+import { writeAdminAudit, type AdminActor, type EndpointResult } from './admin-user-endpoints.js';
 import { applyUserBan, applyUserUnban, type UserBanWriter } from './user-ban-write.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { readUserSource } from './sso-only-local-password.js';
@@ -194,6 +203,19 @@ const HOST_UNANSWERED_DEACTIVATION: EndpointResult = {
     },
   },
 };
+
+/** The admin audit row for a ban or an unban that committed; never fails the answer. */
+const auditBan = (
+  deps: AdminBanEndpointDeps,
+  actor: AdminActor,
+  userId: string,
+  event: 'user.admin_banned' | 'user.admin_unbanned',
+  host: EnvironmentUserHostOutcome | undefined,
+): Promise<void> =>
+  writeAdminAudit(
+    { getDataEngine: () => deps.getDataEngine?.(), logger: deps.logger },
+    { action: 'update', actor, recordId: userId, metadata: { event, hostNotified: host?.notified === true } },
+  );
 
 const isRefused = (outcome: unknown): outcome is EnvironmentUserHostRefused =>
   !!outcome && typeof outcome === 'object' && 'refused' in outcome;
@@ -291,6 +313,7 @@ export async function runAdminBanUser(
   });
   // Sign the banned user out everywhere, exactly as the vendor handler does.
   await ctx.internalAdapter.deleteUserSessions(userId);
+  await auditBan(deps, actor, userId, 'user.admin_banned', host);
 
   return {
     status: 200,
@@ -327,6 +350,7 @@ export async function runAdminUnbanUser(
   if (isRefused(host)) return hostRefusal(host);
 
   await applyUserUnban(await banWriterFor(deps, ctx), userId);
+  await auditBan(deps, actor, userId, 'user.admin_unbanned', host);
 
   return { status: 200, body: { success: true, data: { userId, banned: false, ...(host ? { host } : {}) } } };
 }

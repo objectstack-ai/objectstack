@@ -1573,6 +1573,49 @@ describe('[#34404] admin/remove-sso-user writes an admin audit row for a removal
 // password refused while the lock holds, then judges and drives the DECLARED
 // action against the door and signs in again.
 
+/** The admin audit rows a ban or an unban writes (`writeAdminAudit`, action `update`). */
+const banAuditRows = (s: Awaited<ReturnType<typeof stage>>): any[] =>
+  ((s.engine.tables.get('sys_audit_log') ?? []) as any[]).filter((r) => r.action === 'update');
+
+describe('[#35440] admin/ban-user and admin/unban-user write an admin audit row for a change that committed', () => {
+  for (const adminPlugin of [false, true]) {
+    it(`a ban and its lifting each write one update row naming the admin and the event (admin plugin ${adminPlugin ? 'on' : 'off'})`, async () => {
+      const s = await stage({ adminPlugin });
+
+      expect((await s.fire('/admin/ban-user', { userId: s.ids.member, banReason: 'left' }, s.bearers.admin)).status).toBe(200);
+      expect((await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+
+      const rows = banAuditRows(s);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row).toMatchObject({ user_id: s.ids.admin, actor: s.ids.admin, object_name: 'sys_user', record_id: s.ids.member });
+      }
+      expect(rows.map((r) => JSON.parse(r.metadata))).toEqual([
+        { event: 'user.admin_banned', hostNotified: true },
+        { event: 'user.admin_unbanned', hostNotified: true },
+      ]);
+    });
+  }
+
+  it('with no host wired the rows carry hostNotified false', async () => {
+    const s = await stage({ host: 'none' });
+    expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+    expect(banAuditRows(s).map((r) => JSON.parse(r.metadata))).toEqual([{ event: 'user.admin_banned', hostNotified: false }]);
+  });
+
+  it('CONTROL: a refused ban and a refused unban write no row', async () => {
+    const banRefused = await stage({ host: refusingHost(OWNER_CONFLICT, { deactivated: true }).host });
+    expect((await banRefused.fire('/admin/ban-user', { userId: banRefused.ids.member }, banRefused.bearers.admin)).status).toBe(409);
+    expect((await banRefused.fire('/admin/ban-user', { userId: banRefused.ids.admin }, banRefused.bearers.admin)).status).toBe(400);
+    expect(banRefused.engine.tables.get('sys_audit_log') ?? []).toEqual([]);
+
+    const unbanRefused = await stage({ host: refusingHost(MEMBER_CAP, { reactivated: true }).host });
+    expect((await unbanRefused.fire('/admin/ban-user', { userId: unbanRefused.ids.member }, unbanRefused.bearers.admin)).status).toBe(200);
+    expect((await unbanRefused.fire('/admin/unban-user', { userId: unbanRefused.ids.member }, unbanRefused.bearers.admin)).status).toBe(403);
+    expect(banAuditRows(unbanRefused).map((r) => JSON.parse(r.metadata).event)).toEqual(['user.admin_banned']);
+  });
+});
+
 describe('[#34010] Unlock is offered and works without the admin plugin', () => {
   const LOCKOUT = { lockoutThreshold: 3, lockoutDurationMinutes: 15 };
   const WRONG_PASSWORD = 'Wr0ng!Guess-34010';
