@@ -217,8 +217,8 @@ export function describeUnresolvedColumns(columns: unknown, address: GridColumnA
   const authored = Array.isArray(columns) ? columns.length : 0;
   const count = partition.unresolved.length;
   const headline = partition.resolved === 0
-    ? `${count} of ${authored} authored columns resolve to nothing, so this grid renders its `
-      + 'row-number column and NO data columns'
+    ? `${count} of ${authored} authored columns resolve to nothing, so this grid renders `
+      + 'NO data columns'
     : `${count} of ${authored} authored columns resolve to nothing and are dropped `
       + `(${partition.resolved} still render)`;
 

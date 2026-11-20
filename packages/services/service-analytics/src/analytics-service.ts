@@ -1363,6 +1363,14 @@ export interface AnalyticsServiceConfig {
    * nothing serves every cross-object dimension by the FK-expand, as before.
    */
   executeRelationGroupAggregate?: DatasetScopedStrategyContext['executeRelationGroupAggregate'];
+  /**
+   * The data engine's aggregate ordered and cut by the database. See
+   * `DatasetScopedStrategyContext.executeOrderCutAggregate`
+   * (`strategies/types.ts`). `AnalyticsServicePlugin` wires it only when it
+   * bridges `executeAggregate` itself; a host that wires nothing cuts every
+   * top-N in memory, as before.
+   */
+  executeOrderCutAggregate?: DatasetScopedStrategyContext['executeOrderCutAggregate'];
   /** Pre-defined datasets to compile + register at construction (ADR-0021). */
   datasets?: Dataset[];
   /**
@@ -1776,6 +1784,9 @@ export class AnalyticsService implements IAnalyticsService {
       // The engine's relation group join, passed through untouched; absent,
       // `ObjectQLStrategy` serves a cross-object dimension by its FK-expand.
       executeRelationGroupAggregate: config.executeRelationGroupAggregate,
+      // The engine's order and cut, passed through untouched; absent,
+      // `ObjectQLStrategy` cuts every top-N in memory.
+      executeOrderCutAggregate: config.executeOrderCutAggregate,
     };
     // [#21080] …and a host that wires raw SQL without that answer is told so,
     // once: the native path then serves every object, gated ones included.

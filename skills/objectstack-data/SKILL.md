@@ -1,16 +1,12 @@
 ---
 name: objectstack-data
 description: >
-  Design ObjectStack data schemas — objects, fields, relationships,
-  validations, indexes, hooks, security, seeds and datasources. Use when the
-  user is creating or modifying `*.object.ts` files or `src/data/*.ts` seed
-  modules, picking field types, modelling relationships, writing
-  `beforeInsert`/`afterUpdate` hooks, configuring per-object access control,
-  pointing an object at an existing external database, or authoring bootstrap
-  / demo data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules
-  that belong on fields. Do not use for querying data (see objectstack-query)
-  or for plugin / kernel hooks (see objectstack-platform). CEL expressions:
-  load objectstack-formula alongside.
+  Design or change an ObjectStack data model, in a project or through MCP:
+  objects, fields, relationships, validation rules, indexes, record hooks,
+  permissions, seed / demo data, external datasources, and field `visibleWhen` /
+  `requiredWhen` rules. Use when modelling records or editing `*.object.ts` /
+  `src/data/*.ts`. Not for querying records (objectstack-query), flows or
+  approvals (objectstack-automation), or plugin hooks (objectstack-platform).
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:

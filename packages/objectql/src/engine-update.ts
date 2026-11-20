@@ -83,6 +83,14 @@ import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 
 /**
+ * [#34746] The columns the platform stamps on every update, and nothing a
+ * caller asked to change: the builtin `sys_stamp_audit_update` `beforeUpdate`
+ * hook (`plugin.ts`) writes them because a write is happening. A payload the
+ * strips leave holding only these is an update that changes nothing.
+ */
+const UPDATE_STAMP_COLUMNS: ReadonlySet<string> = new Set(['updated_at', 'updated_by']);
+
+/**
  * The `ObjectQL` members the bodies of {@link UpdateFacet} read — every one of
  * them, and no other. Each is typed AS the class member (an indexed access on
  * the class), so a change to a member's signature on the class is a change
@@ -426,18 +434,51 @@ export class UpdateFacet {
        id !== undefined && id !== null
        && Object.prototype.hasOwnProperty.call(suppliedValues, 'id')
        && Object.is(suppliedValues.id, id);
+     // [#34746] Every key a strip took on this call, recorded whether or not
+     // anyone listens: `everyCallerKeyDropped` below asks it of every write.
+     const engineDroppedKeys = new Set<string>();
      const reportDroppedFields = (
        before: Record<string, unknown> | null | undefined,
        after: Record<string, unknown> | null | undefined,
        reason: DroppedFieldsEvent['reason'],
      ): void => {
-       if ((!onFieldsDropped && !strictReadonlyWrites) || before === after || !before) return;
+       if (before === after || !before) return;
        const afterObj = (after ?? {}) as Record<string, unknown>;
        const fields = Object.keys(before).filter(
          // [#8093] The address the caller wrote to is not a field it lost.
          (k) => !(k in afterObj) && !(idAddressesThisRow && k === 'id'),
        );
+       for (const k of fields) engineDroppedKeys.add(k);
+       if (!onFieldsDropped && !strictReadonlyWrites) return;
        emitDrop(fields, reason);
+     };
+     /**
+      * [#34746] Whether the strips took EVERY key the caller supplied, so the
+      * update is a no-op: no driver write, no stamps, no `afterUpdate`, and the
+      * answer is the current record (by-id) or zero written rows (predicate),
+      * with the drops reported as always. Asked once per branch, of the payload
+      * both read-only strips leave. True only when all three hold:
+      *
+      *  - the caller supplied at least one key, the row's own address aside
+      *    (ADDRESSING IS NOT PAYLOAD, #8093) — an empty payload is not this;
+      *  - every one of them was taken by a strip on this call (read-only,
+      *    `readonlyWhen`, computed, primary key) — a key a hook deleted is not;
+      *  - the payload left holds nothing but the platform's update stamps
+      *    ({@link UPDATE_STAMP_COLUMNS}) and, by-id, the address. A key a
+      *    `beforeUpdate` hook wrote survives, and the write goes ahead as before.
+      *
+      * Strict mode is untouched: it refuses any drop before the driver call, so
+      * this verdict never reaches a write there. An engine precondition
+      * (ADR-0142 D4) keeps its conditional write and its conflict answer.
+      */
+     const everyCallerKeyDropped = (payload: Record<string, unknown> | null | undefined): boolean => {
+       if (opCtx.writePrecondition && Object.keys(opCtx.writePrecondition).length > 0) return false;
+       const callerKeys = Object.keys(suppliedValues).filter((k) => !(idAddressesThisRow && k === 'id'));
+       if (callerKeys.length === 0 || !callerKeys.every((k) => engineDroppedKeys.has(k))) return false;
+       const left = (payload ?? {}) as Record<string, unknown>;
+       return Object.keys(left).every(
+         (k) => UPDATE_STAMP_COLUMNS.has(k) || (k === 'id' && id !== undefined && id !== null && Object.is(left[k], id)),
+       );
      };
      /** One drop to the channel this write reports through: the strict refusal, or the listener. */
      const emitDrop = (fields: string[], reason: DroppedFieldsEvent['reason']): void => {
@@ -1179,6 +1220,10 @@ export class UpdateFacet {
            // as the write leaves it (`next`). `null` when no roll-up aggregates
            // this object, and on the by-id branch, which passes its own row.
            let summaryRows: { previous: Record<string, unknown>[]; next: Record<string, unknown>[] } | null = null;
+           // [#34746] Set by each branch right after its read-only strips
+           // (`everyCallerKeyDropped`); true skips the driver write, the
+           // `afterUpdate` dispatch, the roll-up recompute and the change event.
+           let noOpUpdate = false;
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
            const valueShapeStrict = await this.valueShapeStrictFor(updateSchema);
            const updateMsgCtx = this.validationMessageContext(object, opCtx.context);
@@ -1517,6 +1562,9 @@ export class UpdateFacet {
                    hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, judgedSupplied, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys, referentialClear }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // [#34746] Both strips are done: did they take everything the
+               // caller sent? Asked here, before any later pass adds a key.
+               noOpUpdate = everyCallerKeyDropped(hookContext.input.data as Record<string, unknown>);
                // Both strips are done: wrap and judge what is left.
                judgeStrippedPayload(hookContext.input.data as Record<string, unknown>);
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -1691,7 +1739,12 @@ export class UpdateFacet {
                    // conditional update plus a readback — see
                    // `OperationContext.writePrecondition`.
                    const precondition = opCtx.writePrecondition;
-                   result = precondition && Object.keys(precondition).length > 0
+                   // [#34746] A no-op answers the current record: the prior
+                   // row read above under the not-found gate, never a second
+                   // fetch. Nothing reaches the driver, so no stamp lands.
+                   result = noOpUpdate
+                     ? { ...priorRecord }
+                     : precondition && Object.keys(precondition).length > 0
                      ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, driverOptions)
                      : await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, driverOptions);
                } catch (driverError) {
@@ -1909,6 +1962,8 @@ export class UpdateFacet {
                    hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRoMulti, judgedSuppliedMulti, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // [#34746] The by-id branch's question, at the same point.
+               noOpUpdate = everyCallerKeyDropped(hookContext.input.data as Record<string, unknown>);
                // Both strips are done: wrap and judge what is left, as on the
                // by-id branch.
                judgeStrippedPayload(hookContext.input.data as Record<string, unknown>);
@@ -2183,7 +2238,7 @@ export class UpdateFacet {
                // read serves instead when a consumer above already made it. An
                // object no roll-up aggregates reads nothing here.
                const summaryKeyColumns = this.summaryForeignKeyColumns(object);
-               if (summaryKeyColumns.length > 0) {
+               if (summaryKeyColumns.length > 0 && !noOpUpdate) {
                    const previous = priorRowsRead
                      ? ((await readPriorRows()) ?? [])
                      : (((await driver.find(object, { ...ast, fields: summaryKeyColumns }, driverOptions)) ?? []) as Record<string, unknown>[]);
@@ -2204,7 +2259,11 @@ export class UpdateFacet {
                // Only the rows the payload still names, as on the by-id branch.
                await this.persistSecretRows(sealedSecretsNamedBy(sealedSecrets, hookContext.input.data as Record<string, unknown>), writtenSecrets);
                try {
-                   result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, driverOptions);
+                   // [#34746] A no-op writes no row: zero, the count this
+                   // branch answers.
+                   result = noOpUpdate
+                     ? 0
+                     : await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, driverOptions);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
@@ -2242,7 +2301,10 @@ export class UpdateFacet {
              ? result.map((r) => coerceBooleanFields(updateSchema as any, r as any))
              : coerceBooleanFields(updateSchema as any, result as any);
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any);
-           if (bulkPerRowRows) {
+           // [#34746] A no-op changed no record, so no `afterUpdate` runs.
+           if (noOpUpdate) {
+             // Nothing to dispatch.
+           } else if (bulkPerRowRows) {
              // [#5038] N record changes ⇒ N `afterUpdate` dispatches, each on a
              // single-record-shaped context (see `buildPerRowAfterContexts`).
              // The batch `hookContext` still carries the affected COUNT as
@@ -2292,7 +2354,10 @@ export class UpdateFacet {
            // Roll-up: recompute parent summaries; pass priorRecord too so a child
            // that moved to a different parent updates BOTH old and new parent.
            // [#26950] A predicate write passes its matched rows, old and new.
-           const summaryFailures = summaryRows
+           // [#34746] A no-op moved no roll-up.
+           const summaryFailures = noOpUpdate
+             ? []
+             : summaryRows
              ? await this.recomputeSummaries(object, summaryRows.next, summaryRows.previous, opCtx.context)
              : await this.recomputeSummaries(object, result, priorRecord, opCtx.context);
 
@@ -2300,7 +2365,8 @@ export class UpdateFacet {
            // honour: per-record `data.record.updated` (#4626), or the aggregate
            // `data.records.updated` for a predicate write, whose driver call
            // returns an affected count and names no row (#4639).
-           if (this.realtimeService) {
+           // [#34746] A no-op changed nothing, so it publishes nothing.
+           if (this.realtimeService && !noOpUpdate) {
              if (isPredicateWrite) {
                await this.publishBulkDataEvent('updated', object, {
                  matched: result,

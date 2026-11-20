@@ -1,6 +1,6 @@
 # ADR-0013: Bidirectional Messaging — Conversational Channels, Slack First
 
-**Status**: Draft (2026-05-26)
+**Status**: Draft (2026-05-26) · **Amended** (2026-11-19, rulings `7023437637`, `7023709522` and `7024100939` on #34730) — the "Addendum (2026-11-19): Slack DM delivery of notifications" at the end is accepted: install model and its open/enterprise line, per-person binding by a confirmed email match and who may remove it, DM only. Everything else here stays Draft.
 **Authors**: Platform team
 **Consumers**: `@objectstack/spec` (extensions to the `messaging/` domain introduced by ADR-0012), `@objectstack/service-messaging` (gains a receiver sub-system), `@objectstack/plugin-messaging-slack` (new, first reference implementation), future `plugin-messaging-lark` / `plugin-messaging-telegram` / `plugin-messaging-wecom` / `plugin-messaging-dingtalk`, the flow engine (new `messaging.inbound` trigger), ADR-0011 (Actions as AI Tools — inbound messages may become tool calls)
 **Sibling**: [ADR-0012 — Messaging Platform (Outbound)](./0012-notification-platform.md)
@@ -734,3 +734,86 @@ Adopt the design above. Specifically:
 * **Multi-tenant by construction** — every read scoped by `environment_id`; cross-env account access impossible.
 
 This delivers "chat with ObjectOS from Slack" without forking openclaw, without sacrificing the durability and metadata-driven model that ADR-0012 owns, and without re-architecting in a future ADR. The seams ADR-0012 reserved make this a non-breaking add.
+
+---
+
+## Addendum (2026-11-19): Slack DM delivery of notifications — install model, person binding, DM only
+
+> Status of this addendum: **accepted** — maintainer ruling of record `7023437637` on #34730
+> (2026-11-19, 「按推荐三点定(推荐)」; the options are in `7022838733`), and for the tier line in point 1
+> ruling of record `7023709522` (2026-11-19, 「社区版可用」), and for unlinking in point 2 ruling of
+> record `7024100939` (2026-11-19). Only this addendum is accepted.
+> The rest of this ADR stays **Draft**, and nothing above it is accepted by implication.
+
+**Scope.** Outbound delivery of platform notifications to one person over Slack, inside the pipeline
+ADR-0030 accepted (single ingress, L3 preferences, L5 channel delivery) and the layering ADR-0022
+accepted (a Slack `MessagingChannel` whose `send()` delegates to `connector-slack`). Inbound messages,
+the receiver, sessions and threads, target resolvers and AI dispatch are not in scope; they stay
+Draft as written above.
+
+1. **Install model.** Hosted: one Slack app provided by ObjectOS, which each organization installs
+   into its own workspace. Self-hosted: each organization creates and installs its own Slack app.
+   One organization's install is one `sys_channel_account` row (§4). §9's two shapes map onto this
+   directly: "one Slack app per workspace" is the self-hosted case, "one Slack app, N workspaces
+   installed" the hosted case.
+   **Tier** (ruling `7023709522`, beside `7023437637`): the self-hosted install is **open** — the
+   organization creates its own Slack app and supplies its token, one `sys_channel_account` row per
+   organization, as ADR-0012 already puts a default row in the open baseline — and so is the
+   confirm-once `sys_channel_user_link` binding of point 2. The enterprise tier keeps the hosted
+   one-click ObjectOS app, managed credentials and the vault, account health, and the managed
+   multi-workspace lifecycle (ADR-0022 §4's "multi-tenant `sys_channel_account` lifecycle", which
+   ADR-0143 left in place).
+2. **Person binding.** The link between a platform user and their Slack user is a
+   `sys_channel_user_link` row (§8, §13); `sys_channel_account` is the organization's install, never a
+   person. A link is **proposed** by matching the person's email to the Slack user's email and takes
+   effect only once the person **confirms** it, once; a proposal nobody confirmed delivers nothing.
+   For this scope that replaces §8 item 2's "auto-create the link row": an email match proposes, it
+   never links; the one-time audit row §8 item 2 required on creation is kept for a confirmed link.
+   A link may be removed by the person and by an organization administrator (ruling `7024100939`,
+   「本人和管理员都可」). A person with no confirmed link receives nothing on Slack; their other
+   channels are unchanged.
+3. **Destination.** Direct messages to the linked person only. Posting to Slack channels is not in
+   this scope; a flow that must post to a channel keeps using `connector_action` on the Slack
+   connector (ADR-0022 §2).
+
+**What `main` holds** (objectstack-ai/objectstack at `5dd856f4`). Neither `sys_channel_account` nor
+`sys_channel_user_link` is declared in code (`git grep` outside `docs/adr/` finds the first nowhere and
+the second only in `docs/handoff/adr-0030-notification-convergence.md`); ADR-0012's "seam reserved"
+for the account table was never built. `NotificationChannelSchema` lists `slack`, but
+`service-messaging` registers only the inbox, email, sms and push channels. `connector-slack` carries
+static bot-token auth and is composed only by `examples/app-showcase`.
+
+**Seams the following steps build** — named here, designed in their own changes:
+
+- a `slack` `MessagingChannel` in `@objectstack/service-messaging`, beside the channels that register
+  there today, that honours preferences, digest and quiet hours (ADR-0030 P3b) and delegates its
+  transport to `connector-slack` (ADR-0022 §3);
+- the binding store: the install (`sys_channel_account`), the person link (`sys_channel_user_link`)
+  and the propose-then-confirm flow between them;
+- step 2, the first consumer: who requests the `slack` channel (the producers' channel lists, or fan-out).
+  On `main` no producer does — `emit` defaults to `['inbox']` when a producer names no channels,
+  plugin-approvals asks for `['inbox', 'email']`, and preferences only filter the requested
+  channels — so with every other seam built an approval notice still never reaches Slack;
+- step 2, a per-recipient skip for a person with no confirmed link that is not a dead-lettered delivery
+  (`MessagingChannel.isAvailable` answers per organization only);
+- on the person's notification settings page: confirming a proposal (that is what "connect"
+  means here) and disconnecting;
+- the hosted half — the ObjectOS app's credentials and OAuth redirect — as a cloud card.
+
+**Step 2 owes, with the binding store** — the riders of ruling `7024100939`, quoted, named here and
+designed there:
+
+> 1. Every removal writes an audit row (ADR-0013 §8 already requires one for link creation).
+> 2. When an admin removes a person's link, the person is told by inbox/email.
+> 3. The link is removed automatically on user deletion (`deleteBehavior: 'cascade'`, as
+>    `sys_user_device`), and on ban or loss of org membership.
+> 4. An admin removal does not block the person from confirming a new link.
+> 5. "Org admin" is not defined today (existing admin actions gate on `isPlatformAdmin`); step 2
+>    names the permission it checks.
+
+Step 2 also says where the open tier keeps an organization's supplied token at rest: §4's
+`credentials_ref` into `service-secrets` is Draft and the vault stays enterprise; ADR-0143 and
+ADR-0100 give the open connector credential path.
+
+**Open — not ruled:** what a person's email that matches more than one Slack user proposes (§8
+risk 4 is Draft); and a manual connect for a person whose email matches no Slack user.
