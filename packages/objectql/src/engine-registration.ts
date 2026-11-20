@@ -89,6 +89,13 @@ export interface RegistrationHost {
  * on), so only the last entry's fields register. The ruling keeps that outcome
  * for a body built before authoring refused it — the line reports the loss and
  * the fix, and the body is neither refused nor merged.
+ *
+ * Quiet when every entry for the target is EQUAL BY VALUE: then the last one
+ * registers exactly what each of the others declared, so nothing is lost and
+ * there is nothing to merge. That is the shape authoring accepts on purpose —
+ * one built sub-stack passed to a composition twice carries one entry object
+ * twice, and a build's serialisation turns the two references into two equal
+ * entries, so identity cannot tell them apart here and value is compared.
  */
 function logSameTargetObjectExtensions(
   logger: ObjectQL['logger'],
@@ -103,6 +110,8 @@ function logSameTargetObjectExtensions(
   }
   for (const [target, indices] of indicesByTarget) {
     if (indices.length < 2) continue;
+    const first = extensions[indices[0]!];
+    if (indices.every((i) => equalByValue(extensions[i], first))) continue;
     const positions = indices.map((i) => `objectExtensions[${i}]`);
     const named = `${positions.slice(0, -1).join(', ')} and ${positions[positions.length - 1]}`;
     logger.error(
@@ -114,6 +123,22 @@ function logSameTargetObjectExtensions(
       { package: packageId, target, entries: indices },
     );
   }
+}
+
+/** Structural equality of two JSON-shaped values: same primitives, same arrays in order, same keys with equal values. */
+function equalByValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const other = b as unknown[];
+    return a.length === other.length && a.every((value, i) => equalByValue(value, other[i]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left).filter((key) => left[key] !== undefined);
+  const otherKeys = Object.keys(right).filter((key) => right[key] !== undefined);
+  return keys.length === otherKeys.length && keys.every((key) => equalByValue(left[key], right[key]));
 }
 
 /** The bodies of the "Package, app, plugin, driver and datasource registration" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
@@ -359,12 +384,15 @@ export class RegistrationFacet {
           // package: each entry below REPLACES the package's earlier
           // contribution to its target (the registry's extend splice, which a
           // reload depends on), so a body carrying two entries for one target
-          // registers only the last one's fields. Authoring refuses that body
-          // now (`stack.zod.ts`, the #22934 identity check at every door); one
-          // built before that still loads, as the ruling keeps it, and says
-          // what it lost — at `error`, because the boot looks healthy while
-          // the earlier entries' fields are absent. Once per (package, target).
-          // Neither refused nor merged: the outcome is unchanged.
+          // registers only the last one's fields. Authoring refuses two
+          // DIFFERENT entries for one target in one package now (`stack.zod.ts`,
+          // the #22934 identity check at every door); a body built before that
+          // still loads, as the ruling keeps it, and says what it lost — at
+          // `error`, because the boot looks healthy while the earlier entries'
+          // fields are absent. Once per (package, target), and not for entries
+          // equal by value (one sub-stack composed twice, which authoring
+          // accepts): those lose nothing. Neither refused nor merged: the
+          // outcome is unchanged.
           logSameTargetObjectExtensions(this.logger, id, manifest.objectExtensions);
           for (const ext of manifest.objectExtensions) {
               const targetFqn = ext.extend;

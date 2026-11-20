@@ -147,6 +147,108 @@ describe('#35228 — two objectExtensions entries for one target in one package 
   });
 });
 
+describe('#35228 review S2 — the residual package under `preserve` is judged as one package', () => {
+  const page = (label: string) => ({ name: 'home', label, type: 'app' as const, regions: [] });
+
+  it('two manifest-less inputs each declaring page `home`: refused, naming both', () => {
+    const r = refusalOf(() =>
+      composeStacks(
+        [
+          defineStack({ manifest: sales, objects: [line] }),
+          defineStack({ pages: [page('A')] }),
+          defineStack({ pages: [page('B')] }),
+        ],
+        { manifest: 'preserve' },
+      ),
+    );
+    expectEnvelope(r, 'composeStacks artifact cross-reference validation failed');
+    expect(r.issues![0]).toBe(
+      "Page 'home' is declared twice in `pages`: stack #1 pages[0] and stack #2 pages[0]. The runtime registers " +
+        'pages by name, so only the last of these entries is kept and the others are silently dropped. Rename one ' +
+        'of them, or merge them into a single entry.',
+    );
+  });
+
+  it('two manifest-less inputs each extending one target: refused, naming both', () => {
+    const r = refusalOf(() =>
+      composeStacks(
+        [
+          defineStack({ manifest: sales, objects: [line] }),
+          defineStack({ objectExtensions: [extension('cb_account')] }),
+          defineStack({ objectExtensions: [extension('cb_other')] }),
+        ],
+        { manifest: 'preserve' },
+      ),
+    );
+    expectEnvelope(r, 'composeStacks artifact cross-reference validation failed');
+    expect(r.issues![0]).toBe(
+      "Object extension of 'crm_line' is declared twice in `objectExtensions`: stack #1 objectExtensions[0] and " +
+        `stack #2 objectExtensions[0]. ${CONSEQUENCE_AND_REMEDY}`,
+    );
+  });
+
+  it('CONTROL: a manifest-less input beside a body that declares the same name is the body\'s slot, not a residual pair', () => {
+    expect(refusalOf(() =>
+      composeStacks(
+        [
+          defineStack({ manifest: sales, objects: [line], pages: [page('A')] }),
+          defineStack({ pages: [page('B')] }),
+        ],
+        { manifest: 'preserve' },
+      ),
+    )).toBeNull();
+  });
+});
+
+describe('#35228 review S1 — a nested artifact\'s flattened copies of its bodies are not one package', () => {
+  it('a preserve artifact with two packages each extending one target, nested in a flat composition: accepted', () => {
+    // A manifest-less input keeps the flattened top level (its page has no
+    // body to carry it), so the nested artifact carries both packages'
+    // extensions side by side at its top level as well as in their bodies.
+    const nested = composeStacks(
+      [
+        defineStack({ manifest: sales, objects: [line] }),
+        defineStack({ manifest: billing, objectExtensions: [extension('cb_account')] }),
+        defineStack({ manifest: ops, objectExtensions: [extension('cb_other')] }),
+        defineStack({ pages: [{ name: 'crm_home', label: 'Home', type: 'app', regions: [] }] }),
+      ],
+      { manifest: 'preserve' },
+    );
+    expect((nested as unknown as { objectExtensions?: unknown[] }).objectExtensions, 'anti-vacuity: the flattened copy is there').toHaveLength(2);
+    for (const pick of ['last', 'preserve'] as const) {
+      expect(
+        refusalOf(() => composeStacks([nested, defineStack({ pages: [{ name: 'crm_other', label: 'Other', type: 'app', regions: [] }] })], { manifest: pick }))?.message ?? null,
+        pick,
+      ).toBeNull();
+    }
+  });
+
+  it('…while the nested artifact\'s own residual pair is still refused', () => {
+    const nested = composeStacks(
+      [
+        defineStack({ manifest: sales, objects: [line] }),
+        defineStack({ manifest: billing, objectExtensions: [extension('cb_account')] }),
+        defineStack({ pages: [{ name: 'crm_home', label: 'Home', type: 'app', regions: [] }] }),
+      ],
+      { manifest: 'preserve' },
+    );
+    const r = refusalOf(() =>
+      composeStacks([nested, defineStack({ pages: [{ name: 'crm_home', label: 'Second', type: 'app', regions: [] }] })]),
+    );
+    expect(r?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(r?.issues?.[0]).toMatch(/^Page 'crm_home' is declared twice in `pages`: '[a-z.]+' \(stack #0\) pages\[0\] and stack #1 pages\[0\]\. /);
+  });
+});
+
+describe('#35228 review S3 — one entry reached twice', () => {
+  it('a hook reached twice is refused: a built artifact binds each copy', () => {
+    const sub = defineStack({ hooks: [{ name: 'crm_line_touch', object: 'crm_line', events: ['beforeInsert'], handler: () => {} }] });
+    const r = refusalOf(() => composeStacks([defineStack({ manifest: sales, objects: [line] }), sub, sub]));
+    expect(r?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(r?.issues?.[0]).toContain("Hook 'crm_line_touch' is declared twice in `hooks`: stack #1 hooks[0] and stack #2 hooks[0]. ");
+  });
+});
+
 describe('#35228 — CONTROL: what stays accepted', () => {
   it('two packages under `preserve`, each extending one target once: composed, each body carrying its own entry', () => {
     const artifact = composeStacks(

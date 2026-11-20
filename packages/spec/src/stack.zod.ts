@@ -3264,10 +3264,11 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * Same-stack duplicate entries in the named collections (#22934) — one refusal
  * line per (collection, identity) collision, naming the collection, the
  * identity and every index. The sibling of the action-key and `functions`
- * checks above, for the 27 collections whose entries the runtime registers
- * under one identity each.
+ * checks above, for the 29 collections whose entries the runtime registers
+ * under one identity each (the 27 of #22934, then `queues` and
+ * `assignmentRules`).
  *
- * Measured on main `246edf5b3` with every collection below carrying two entries
+ * Measured on main `246edf5b3`, for those 27, with every collection below carrying two entries
  * under one identity, on a source boot (`os serve`, no build) and through
  * `os build` → an artifact-backed boot: `defineStack` and `os validate`
  * accepted every pair (exit 0, `valid: true`, no finding naming it), and the
@@ -3283,7 +3284,7 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * - `docs`: `os validate` and `os build` refused the pair (`docs/duplicate-name`)
  *   while a source boot kept the last.
  *
- * The identity is the string the registrars key an entry by: `name` for 24
+ * The identity is the string the registrars key an entry by: `name` for 26
  * collections, the `(name, locale)` pair for `emailTemplates` (an i18n bundle
  * is one name across several locales), the extended object (`extend`) for
  * `objectExtensions`, and for `views` the slot every registrar files the entry
@@ -3314,11 +3315,13 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * [#35228 ruling A] One package, every door. The table is read wherever one
  * package's collections are assembled, with one wording: a stack's top level
  * (`stack.KEY[i]`), each `packages[i]` body of a stack
- * (`stack.packages[i].manifest.KEY[j]`), the one package a flat
- * {@link composeStacks} makes of its inputs (each entry labelled with the input
- * it came from), and every package body a composition carries. Two sub-stacks
- * of one package that each declare one entry under one identity used to
- * compose with both and lose one at the boot.
+ * (`stack.packages[i].manifest.KEY[j]`), the residual package a
+ * {@link composeStacks} result registers under its `manifest.id` — all of it
+ * for a flat composition, the top-level entries no body claims when it carries
+ * `packages[]`, under every manifest strategy (each entry labelled with the
+ * input it came from) — and every package body a composition carries. Two
+ * sub-stacks of one package that each declare one entry under one identity
+ * used to compose with both and lose one at the boot.
  */
 interface SameStackEntryIdentity {
   /** The identity the registrars key this collection's entries by, or `undefined` when an entry has none. */
@@ -3540,23 +3543,50 @@ function collectPackageBodyDuplicateEntryErrors(
 }
 
 /**
- * The composition door for the ONE package a flat composition makes (every
- * manifest strategy but `'preserve'`): {@link duplicateEntryFindings} over the
- * inputs' entries together, in the order the concat pass carries them, each
- * labelled with the input it came from. Each input passed the one-stack door on
- * its own; the pair they bring together lands in one package, where the boot
- * keeps one and drops the other in silence, so it is refused here with the
- * one-stack wording. `objects` is skipped: two inputs declaring one object name
- * is the `objectConflict` strategy's to refuse or fold, and what that step
- * composed holds each name once. An input whose collection is not an array is
- * skipped too: the concat pass refuses it by its own rule.
+ * The composition door for the RESIDUAL package (S1/S2 of the contract review
+ * on #35228): {@link duplicateEntryFindings} over the top-level entries of the
+ * composed artifact that the boot registers as ONE package, under every
+ * manifest strategy, each labelled with the input it came from and its index
+ * there. Which entries those are is the boot's own reading of the artifact
+ * ({@link residualEntryPredicate}):
+ *
+ * - an artifact that carries no `packages[]` (a flat composition of inputs
+ *   that carry none) IS its one package, so every input's entries count, in
+ *   the order the concat pass carries them;
+ * - an artifact that carries `packages[]` (any `'preserve'` composition with
+ *   an input that has a manifest, or an input that is itself a multi-package
+ *   artifact) registers each body under its own id and, under `manifest.id`,
+ *   only the top-level entries no body claims (`unclaimedTopLevel`,
+ *   `@objectstack/metadata`). So the flattened copies of a nested artifact's
+ *   bodies, and an input's entries assembled into its own body, are never read
+ *   here: two packages each extending one object stay cross-package reuse
+ *   (ADR-0048 §3.4). What is left — a manifest-less input's entries, and the
+ *   own collections of an input that carries `packages[]` — is one package,
+ *   and two of its entries under one identity are refused with the one-stack
+ *   wording.
+ *
+ * `objects` is skipped: two inputs declaring one object name is the
+ * `objectConflict` strategy's to refuse or fold, and what that step composed
+ * holds each name once. An input whose collection is not an array is skipped
+ * too: the concat pass refuses it by its own rule.
  *
  * One entry OBJECT reached through two inputs (the same built stack passed
  * twice, or a shared base inside two nested compositions) is one declaration,
- * counted once: nothing differs between the copies, so the boot loses nothing.
- * Two distinct entries count however alike they are, as in a single stack.
+ * counted once: the two copies are equal, so whichever the boot keeps is that
+ * declaration, and the registrar's error line for two same-target
+ * `objectExtensions` entries stays quiet for equal ones. The one exception is
+ * `hooks`: the source boot folds a hook object reached twice
+ * (`collectBundleHooks` collects by identity), but a built artifact carries two
+ * equal hook entries, and the table's `hooks` line records that every entry's
+ * handler is bound and runs — so a hook reached twice is counted twice and
+ * refused. Two distinct entries count however alike they are, as in a single
+ * stack.
  */
-function collectComposedDuplicateEntryErrors(stacks: readonly ObjectStackDefinition[]): string[] {
+function collectComposedResidualDuplicateEntryErrors(
+  stacks: readonly ObjectStackDefinition[],
+  composedPackages: unknown,
+): string[] {
+  const isResidual = residualEntryPredicate(composedPackages);
   return duplicateEntryFindings(
     (key) => {
       const entries: PackageCollectionEntry[] = [];
@@ -3567,7 +3597,8 @@ function collectComposedDuplicateEntryErrors(stacks: readonly ObjectStackDefinit
         if (labelled === undefined) continue;
         declared = true;
         for (const item of labelled) {
-          if (item.entry !== null && typeof item.entry === 'object') {
+          if (!isResidual(key, item.entry)) continue;
+          if (key !== 'hooks' && item.entry !== null && typeof item.entry === 'object') {
             if (seen.has(item.entry)) continue;
             seen.add(item.entry);
           }
@@ -3578,6 +3609,49 @@ function collectComposedDuplicateEntryErrors(stacks: readonly ObjectStackDefinit
     },
     new Set(['objects']),
   );
+}
+
+/**
+ * Whether a top-level entry of a composed artifact is in the package the boot
+ * registers under the artifact's `manifest.id`. With no `packages[]` (or an
+ * empty one) every entry is. With bodies, the boot's residual rule decides
+ * ({@link isResidualTopLevelItem}, the mirror of `unclaimedTopLevel`), for the
+ * collections that rule walks by slot. The two table collections it does not
+ * walk by a slot of its own — `datasources` and `objectExtensions` (an
+ * extension is keyed by `extend`) — count an entry as claimed when a body
+ * carries one under the same identity ({@link SAME_STACK_ENTRY_IDENTITY}), so
+ * a body's flattened copy is never read as a second entry of the residual.
+ */
+function residualEntryPredicate(composedPackages: unknown): (key: string, entry: unknown) => boolean {
+  const bodies: Record<string, unknown>[] = Array.isArray(composedPackages)
+    ? composedPackages.flatMap((p: unknown) => (isRecord(p) && isRecord(p.manifest) ? [p.manifest] : []))
+    : [];
+  if (bodies.length === 0) return () => true;
+  const bySlot = isResidualTopLevelItem(bodies);
+  const walkedBySlot: ReadonlySet<string> = new Set(OWNER_STAMP_JUDGED_COLLECTIONS);
+  const claimedByIdentity = new Map<string, Set<string>>();
+  const claimed = (key: keyof typeof SAME_STACK_ENTRY_IDENTITY): Set<string> => {
+    let set = claimedByIdentity.get(key);
+    if (set) return set;
+    set = new Set<string>();
+    for (const body of bodies) {
+      const items = body[key];
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        const identity = SAME_STACK_ENTRY_IDENTITY[key].identity(item);
+        if (identity !== undefined) set.add(identity);
+      }
+    }
+    claimedByIdentity.set(key, set);
+    return set;
+  };
+  return (key, entry) => {
+    if (walkedBySlot.has(key)) return bySlot(key, entry);
+    if (!(key in SAME_STACK_ENTRY_IDENTITY)) return true;
+    const typed = key as keyof typeof SAME_STACK_ENTRY_IDENTITY;
+    const identity = SAME_STACK_ENTRY_IDENTITY[typed].identity(entry);
+    return identity === undefined || !claimed(typed).has(identity);
+  };
 }
 
 /**
@@ -9492,10 +9566,11 @@ function composeBuiltStacks(
   //     [#25514] …and every flow target an input resolved only through
   //     `artifactFlows`: see {@link collectArtifactFlowClaimErrors}.
   //     [#35228 ruling A] …and two entries under one identity in one package
-  //     of the result, in a #22934 collection: the inputs' entries together
-  //     when the composition is ONE package (every manifest strategy but
-  //     `'preserve'`), and every package body the artifact carries, each on its
-  //     own — see {@link collectComposedDuplicateEntryErrors} and
+  //     of the result, in a #22934 collection: the residual package the boot
+  //     registers under `manifest.id` (every entry when the artifact carries no
+  //     `packages[]`, else the top-level entries no body claims), under every
+  //     manifest strategy, and every package body the artifact carries, each on
+  //     its own — see {@link collectComposedResidualDuplicateEntryErrors} and
   //     {@link collectComposedPackageBodyDuplicateEntryErrors}.
   const artifactCrossRefErrors = [
     ...collectArtifactCrossReferenceErrors(
@@ -9507,7 +9582,7 @@ function composeBuiltStacks(
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
     ...collectComposedDatasourceConnectorErrors(stacks, opts.manifest === 'preserve'),
     ...collectArtifactFlowClaimErrors(stacks),
-    ...(opts.manifest === 'preserve' ? [] : collectComposedDuplicateEntryErrors(stacks)),
+    ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages),
     ...collectComposedPackageBodyDuplicateEntryErrors(stacks, opts.manifest === 'preserve'),
   ];
   if (artifactCrossRefErrors.length > 0) {

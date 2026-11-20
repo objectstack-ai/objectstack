@@ -408,9 +408,16 @@ describe('composeStacks judges external.connector against the connectors of ever
       const withInstance = mixed(instance(), 'com.acme.kit', 'com.acme.toolkit');
       const pair = reversed ? [withInstance, withDescriptor] : [withDescriptor, withInstance];
       const refused = composeRefusal([...pair, looseBorrower()], { manifest: 'preserve' });
-      expectComposedFinding(
+      expectOneFinding(
         refused,
         'which more than one input declares at the top level of a composed artifact that carries package bodies, and they disagree',
+      );
+      // [#35228 review S2] Both top-level entries are the residual the boot
+      // registers under the artifact's one `manifest.id`, so the pair is also
+      // that package's duplicate, the second finding of the same envelope.
+      expect(refused?.issues).toHaveLength(2);
+      expect(String(refused?.issues?.[1])).toMatch(
+        /^Connector 'sap_s4' is declared twice in `connectors`: 'com\.acme\.[a-z]+' \(stack #0\) connectors\[0\] and 'com\.acme\.[a-z]+' \(stack #1\) connectors\[0\]\. /,
       );
       const finding = String(refused?.issues?.[0]);
       expect(finding).toContain("'com.acme.kit' (stack #");

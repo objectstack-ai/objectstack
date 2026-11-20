@@ -16,6 +16,7 @@
  * registration seam serves.
  */
 import { describe, it, expect } from 'vitest';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { ObjectQL } from './engine';
 
 interface ErrorLine { msg: string; meta: Record<string, unknown> | undefined }
@@ -111,6 +112,31 @@ describe('[#35228 A1] two objectExtensions entries for one target in one package
     engine.registerApp({ ...extender([extension('cb_other')]), id: 'com.example.ops', name: 'ops' });
     expect(sameTargetLines(errors)).toEqual([]);
     expect(servedFields(engine)).toEqual(expect.arrayContaining(['cb_account', 'cb_other']));
+  });
+
+  it('[review S3] the accepted twice-passed sub-stack composition, registered, logs no error — and neither does its built JSON', () => {
+    const sub = defineStack({ objectExtensions: [extension('cb_account')] } as never);
+    const manifestOnly = defineStack({ manifest: { id: EXTENDER, name: 'billing', version: '1.0.0', type: 'module', namespace: 'crm' } } as never);
+    const composed = composeStacks([manifestOnly, sub, sub]) as unknown as { objectExtensions: unknown[] };
+    expect(composed.objectExtensions, 'anti-vacuity: the composition carries the entry twice').toHaveLength(2);
+
+    for (const [label, objectExtensions] of [
+      ['as composed (one object, two references)', composed.objectExtensions],
+      ['as built (serialised: two equal objects)', JSON.parse(JSON.stringify(composed.objectExtensions))],
+    ] as const) {
+      const { engine, errors } = engineRecordingErrors();
+      engine.registerApp(owner);
+      engine.registerApp(extender(objectExtensions as unknown[]));
+      expect(sameTargetLines(errors), label).toEqual([]);
+      expect(servedFields(engine), label).toContain('cb_account');
+    }
+  });
+
+  it('[review S3] equal entries beside one that differs still log, naming every entry', () => {
+    const { engine, errors } = engineRecordingErrors();
+    engine.registerApp(owner);
+    engine.registerApp(extender([extension('cb_account'), extension('cb_account'), extension('cb_other')]));
+    expect(sameTargetLines(errors).map((line) => line.meta)).toEqual([{ package: EXTENDER, target: TARGET, entries: [0, 1, 2] }]);
   });
 
   it('reload: re-registering the package with a renamed field serves the new name and not the old', () => {

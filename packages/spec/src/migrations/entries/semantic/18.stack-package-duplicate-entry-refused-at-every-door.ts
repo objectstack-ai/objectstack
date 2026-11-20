@@ -14,16 +14,19 @@ export const entry: SemanticMigration = {
   id: 'stack-package-duplicate-entry-refused-at-every-door',
   surface:
     'composeStacks inputs of one package, and every packages[i].manifest body — two or more entries under '
-    + 'one identity in one of the named collections stack-collection-duplicate-entry-refused lists (objects, '
-    + 'datasources, pages, … , queues, assignmentRules, apps and objectExtensions), e.g. two sub-stacks of one '
-    + "package that each declare objectExtensions: [{ extend: 'crm_line', fields: { ... } }]",
+    + 'one identity in one of the named collections stack-collection-duplicate-entry-refused lists (datasources, '
+    + 'pages, … , queues, assignmentRules, apps and objectExtensions; objects too inside a package body), e.g. '
+    + "two sub-stacks of one package that each declare objectExtensions: [{ extend: 'crm_line', fields: { ... } }]. "
+    + 'Two composed inputs declaring one object name stay with the objectConflict option, as before.',
   replacement:
-    'One entry per identity per package, wherever the package is assembled: in one stack, across the '
-    + 'sub-stacks a composition folds into one package (every manifest strategy except preserve), and inside '
-    + 'each packages[i] body. Merge the two entries into one (for objectExtensions: one entry per target '
-    + 'object carrying all the fields), or rename one of them. Two packages reusing one name, under '
-    + 'manifest preserve or as two package bodies, are unchanged, as is the same built sub-stack passed to '
-    + 'a composition twice.',
+    'One entry per identity per package, wherever the package is assembled: in one stack, in the package a '
+    + 'composition registers under its own manifest id (every input of a flat composition; under manifest '
+    + 'preserve, the inputs without a manifest and any other top-level entry no package body claims), and '
+    + 'inside each packages[i] body. Merge the two entries into one (for objectExtensions: one entry per '
+    + 'target object carrying all the fields), or rename one of them. Two packages reusing one name, under '
+    + 'manifest preserve or as two package bodies, are unchanged, as is the same built sub-stack passed to a '
+    + 'composition twice, except for its hooks: a hook reached twice is refused, because a built artifact '
+    + 'binds each copy.',
   reason:
     'The runtime keeps one entry per identity per package. For objectExtensions a later entry of one '
     + 'package replaces the earlier one for its target, so only the last entry\'s fields register; for the '
@@ -39,8 +42,11 @@ export const entry: SemanticMigration = {
     + 'entries until it is rebuilt.',
   acceptanceCriteria:
     'objectstack validate and objectstack build load the composed stack without a STACK_CROSS_REFERENCE_INVALID '
-    + 'finding of the form "X is declared twice in KEY: …", and the boot log carries no error saying a package '
-    + 'declares several objectExtensions entries for one object. After merging, check that every field of '
-    + 'every former entry is served on the target object (the boot used to serve only the last entry\'s '
-    + 'fields), and for the other collections that the entry you kept is the one the runtime now serves.',
+    + 'finding of the form "X is declared twice in KEY: …". Two inputs declaring one app name answer that '
+    + 'finding now, where they answered STACK_SINGLE_APP_VIOLATION before. The boot log carries no error saying '
+    + 'a package declares several objectExtensions entries for one object; that error names only entries that '
+    + 'differ, so a package whose same-target entries are all equal (one sub-stack composed twice) logs none. '
+    + 'After merging, check that every field of every former entry is served on the target object (the boot '
+    + 'used to serve only the last entry\'s fields), and for the other collections that the entry you kept is '
+    + 'the one the runtime now serves.',
 };
