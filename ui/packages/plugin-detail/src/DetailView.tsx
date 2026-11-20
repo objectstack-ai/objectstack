@@ -1838,6 +1838,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
         <div className="flex flex-col items-end gap-1">
           {isPending && (
             <div className="flex items-center justify-end gap-2">
+              {/* objectstack#35593 — a host whose header names the approval
+                  (its 「待你审批」 / 「审批中」 tag) has said why the record is
+                  locked; an APPROVAL lock draws no second badge here. */}
+              {!(isLocked && inline?.approvalTagDrawnByHost) && (
               <span
                 role="status"
                 className={
@@ -1852,6 +1856,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 {isLocked ? <Lock className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
                 <span>{t(pendingLabelKey)}</span>
               </span>
+              )}
               {/* Recall belongs to the approval, not to the lock: an editable
                   pending approval is just as recallable as a locked one.
 

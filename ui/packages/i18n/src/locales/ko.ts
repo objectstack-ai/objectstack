@@ -1206,6 +1206,8 @@ const ko = {
     manageViewsDescription: "이 객체의 모든 보기를 재정렬, 이름 변경, 고정 또는 삭제합니다.",
     searchViews: "보기 검색",
     addNewView: "새 보기 추가",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "이 앱의 사용자 지정 패키지를 여기서 사용할 수 없어 이 보기는 앱 외부에 초안으로 저장되었습니다. 이 앱의 초안 표시줄은 이 보기를 집계하거나 게시하지 않습니다. 홈에서 게시하세요.",
     done: "완료",
     noViewsFound: "검색과 일치하는 보기가 없습니다.",
     // objectstack#27594 — the list title's view switcher.
@@ -4833,7 +4835,6 @@ const ko = {
   filterBuilder: {
     currency: '통화',
     currencyNeedsAnd: '통화 금액은 모든 조건을 충족해야 할 때(AND)에만 선택한 통화로 비교됩니다.',
-    where: "조건",
     and: "그리고",
     or: "또는",
     clearAll: "모두 지우기",
@@ -4924,6 +4925,7 @@ const ko = {
       after: '이후',
     },
     sort: {
+      advanced: '모든 정렬 단계',
       direction: '방향',
       ascending: '오름차순',
       descending: '내림차순',

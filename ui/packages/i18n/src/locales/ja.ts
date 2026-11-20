@@ -1206,6 +1206,8 @@ const ja = {
     manageViewsDescription: "このオブジェクトのすべてのビューを並べ替え、名前変更、固定、削除できます。",
     searchViews: "ビューを検索",
     addNewView: "新しいビューを追加",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "このビューは、このアプリのカスタマイズパッケージをここでは使用できないため、アプリの外に下書きとして保存されました。このアプリの下書きバーでは集計も公開もされません。ホームから公開してください。",
     done: "完了",
     noViewsFound: "検索に一致するビューはありません。",
     // objectstack#27594 — the list title's view switcher.
@@ -4836,7 +4838,6 @@ const ja = {
   filterBuilder: {
     currency: '通貨',
     currencyNeedsAnd: '通貨金額は、すべての条件を満たす必要がある場合（AND）にのみ、選択した通貨で比較されます。',
-    where: "条件",
     and: "かつ",
     or: "または",
     clearAll: "すべてクリア",
@@ -4927,6 +4928,7 @@ const ja = {
       after: 'より後',
     },
     sort: {
+      advanced: 'すべての並べ替えレベル',
       direction: '方向',
       ascending: '昇順',
       descending: '降順',

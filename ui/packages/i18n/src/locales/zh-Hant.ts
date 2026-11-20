@@ -1233,6 +1233,8 @@ const zhHant = {
     manageViewsDescription: '對該物件的所有檢視進行重新排序、重新命名、固定或刪除。',
     searchViews: '搜尋檢視',
     addNewView: '新建檢視',
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: '此檢視已作為草稿儲存在本應用之外，因為此處無法使用本應用的定製包。本應用的草稿條不會計入或釋出它：請在首頁釋出。',
     done: '完成',
     noViewsFound: '沒有匹配的檢視。',
     // objectstack#27594 — the list title's view switcher.
@@ -4893,7 +4895,6 @@ const zhHant = {
   filterBuilder: {
     currency: '幣種',
     currencyNeedsAnd: '只有在「全部條件都滿足（AND）」時，幣種金額才按所選幣種比較。',
-    where: '其中',
     and: '且',
     or: '或',
     clearAll: '清除全部',
@@ -4984,6 +4985,7 @@ const zhHant = {
       after: '晚於',
     },
     sort: {
+      advanced: '全部排序級別',
       direction: '方向',
       ascending: '升序',
       descending: '降序',

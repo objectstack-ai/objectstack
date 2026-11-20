@@ -914,10 +914,15 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             const rateLimitMiddleware = createInboundRateLimitMiddleware({
                 ...(config.rateLimit?.budget ? { budget: config.rateLimit.budget } : {}),
                 trustProxy: config.rateLimit?.trustProxy === true,
+                // The read goes through the request's session-read carrier, with
+                // the engine the auth service reads through: the route's own
+                // identity step is answered by this read, so a request reads
+                // its session once with the limiter armed.
                 resolvePrincipalId: (headers) =>
                     resolveSessionPrincipalId(
                         safeGetService<IAuthService>(ctx, 'auth'),
                         headers as Record<string, unknown>,
+                        safeGetService<unknown>(ctx, 'objectql'),
                     ),
                 resolveCache: () => resolveKernelCache(ctx),
                 logger: ctx.logger,

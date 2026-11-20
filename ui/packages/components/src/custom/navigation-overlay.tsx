@@ -279,6 +279,17 @@ export interface NavigationOverlayProps {
    * host's to decide.
    */
   toggles?: React.ReactNode;
+  /**
+   * The record header's one-row bar (objectstack#35593): handed the bar's
+   * element the record's button group is drawn into, after the step pair.
+   */
+  actionSlotRef?: React.Ref<HTMLSpanElement>;
+  /**
+   * Keep the step keys (`↑` / `↓` / `k` / `j`) but draw no counter and no
+   * `↓` `↑` pair (objectstack#35593): a drawer over its list shows the list
+   * beside it, so its header names neither the place nor the neighbours.
+   */
+  stepperHidden?: boolean;
 }
 
 /**
@@ -497,6 +508,8 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   trail,
   stepper,
   toggles,
+  actionSlotRef,
+  stepperHidden = false,
 }) => {
   // Every chrome string below is locale-driven (objectstack#5430 for the two
   // close affordances, objectstack#5506 for the rest). Must stay above the
@@ -609,7 +622,8 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
           {trail}
         </>
       }
-      stepper={stepper}
+      stepper={stepperHidden ? undefined : stepper}
+      actionSlotRef={actionSlotRef}
       toggles={toggles}
       frame={
         <>

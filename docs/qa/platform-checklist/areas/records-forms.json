@@ -2884,7 +2884,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2903,7 +2903,7 @@
       },
       "steps": [
         "sign in as admin; open showcase_task and switch to the in_progress saved view (stored filter status=in_progress); screenshot",
-        "open the FilterBuilder toolbar (an icon button, aria-label 'Filter', data-testid toolbar-filter-trigger, whose accessible name gains the badge count once a condition is active; the SortBuilder is the 'Sort' icon button beside it, ui/packages/plugin-list/src/ListView.tsx); add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
+        "open the toolbar's Filter (a text trigger from sm up, data-testid toolbar-filter-trigger, whose accessible name gains the badge count once a condition is active; Sort is the trigger beside it, ui/packages/plugin-list/src/ListView.tsx). Since objectstack#35549 / #35550 each opens the shared field list (the fields the view shows first, a search box, a type icon per row): Filter → a field → its values applies at once, with no Apply, and each condition shows as a chip in the condition row under the view bar; Sort → the direction on top → a field adds a level, shown as a sort chip before the filter chips. The full builders are one click further, behind the field list's footer: 「Advanced filter」 opens the FilterBuilder (no 「Where」 label any more) and 「All sort levels」 the SortBuilder. Add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
         "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the toolbar filter + sort restored",
         "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
@@ -2927,7 +2927,7 @@
         {
           "clause": "the toolbar filter + search survive a FULL in-app navigation away and back — restored from the user's own list preference (sys_user_preference ui.list.<object>, cached in localStorage list-state:<user>:<object>; URL params alone are lost on an in-app nav link that carries no query string, which is what the preference bridges)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered, the FilterBuilder shows the two conditions, the SortBuilder the sort and the quick search box the term (kept under list-filters:<userId>:showcase_task:<viewId>, steps[4]); the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
+          "verify": "after a screenshot confirms the list rendered, the condition row under the view bar shows the two conditions as filter chips and the sort as a sort chip (objectstack#35549 / #35550; the same rows also show in the FilterBuilder and SortBuilder behind the field list's footers), and the quick search box shows the term (kept under list-filters:<userId>:showcase_task:<viewId>, steps[4]); the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
           "evidence": "before/after screenshots + the re-issued request"
         },
         {
@@ -3025,6 +3025,12 @@
           "date": "2026-11-14",
           "change": "steps[1], steps[3] and steps[5] re-pointed to the console as QA run #33048 met it (comment 6846028996): the FilterBuilder / SortBuilder are icon buttons (toolbar-filter-trigger, ui/packages/plugin-list/src/ListView.tsx); the sidebar's In-Progress Tasks link is a Data Slices surface, so the return to the saved view goes through Tasks and the view switcher; and Log out sweeps the signed-out user's list-state / list-filters keys (ui/packages/auth/src/ActiveOrganizationStorage.ts purgeSignedOutUserClientState), so a runner should not expect the first account's keys beside the second's. No clause changed. Read at base 87330e89",
           "ref": "#33329"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-19",
+          "change": "steps[1] and acceptance[2].verify re-pointed to the list redo (objectstack#35549 filter, objectstack#35550 sort): Filter and Sort open the shared field list, conditions show as chips in the condition row under the view bar, and the FilterBuilder / SortBuilder sit behind the field list's 「Advanced filter」 / 「All sort levels」 footers; the FilterBuilder's 「Where」 label is gone. The clauses are unchanged: the merge, the sort param, the restore and the user scope read the same state",
+          "ref": "#35549"
         }
       ]
     },
@@ -7144,6 +7150,99 @@
           "date": "2026-11-10",
           "change": "initial — a list link's filter judged whole (#31869). Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
           "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.master-detail-body-tables",
+      "title": "A master_detail child is a table in the record overview by default: above the field sections, drawn when empty, capped with show-all, totalled by the server, and never a tab or a side card",
+      "since": "v18.6",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "showcase_task.project is a master_detail FK to showcase_project with no relatedList and no inlineEdit, relatedListTitle 'Tasks' (examples/app-showcase/src/data/objects/task.object.ts); the seed gives 'Website Relaunch' five tasks",
+          "a project with no task: create one ('QA Empty Project') before step 3"
+        ]
+      },
+      "steps": [
+        "open the 'Website Relaunch' project's full record page at a column-tier width (1440×900) and screenshot the overview",
+        "read the tab row and the right column",
+        "open 'QA Empty Project' the same way and screenshot the Tasks table",
+        "on 'Website Relaunch', click the Tasks table's ↗ button; read the address bar and the list",
+        "open 'Website Relaunch' from the project list in the record drawer and screenshot it"
+      ],
+      "acceptance": [
+        {
+          "clause": "the Tasks table is drawn in the overview's left column, under the header strip's stage bar and key fields and above the first field section",
+          "oracle": "dom",
+          "verify": "in the details column the record:related_list node for showcase_task precedes the first record:details node (ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement)",
+          "evidence": "the overview screenshot"
+        },
+        {
+          "clause": "the body table has no tab of its own and no card in the right column",
+          "oracle": "dom",
+          "verify": "the tab row names no 'Tasks' tab (also not in its '+N' dropdown) and the right column holds no Tasks card",
+          "evidence": "the overview screenshot"
+        },
+        {
+          "clause": "an empty body table still draws its column headers and one empty row with an add entry",
+          "oracle": "dom",
+          "verify": "the Tasks table on 'QA Empty Project' shows its headers and one row [data-body-table-empty-row] reading 'No related records found' with a New button; clicking New opens a task create form with Project filled",
+          "evidence": "the empty-project screenshot"
+        },
+        {
+          "clause": "↗ opens the child list filtered to this parent",
+          "oracle": "dom",
+          "verify": "the showcase_task list opens holding exactly the five Website Relaunch tasks",
+          "evidence": "the list screenshot and the URL"
+        },
+        {
+          "clause": "the drawer draws the same overview: the Tasks table above the field sections",
+          "oracle": "dom",
+          "verify": "the drawer's overview shows the Tasks table before the first field section",
+          "evidence": "the drawer screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the default cap of 10 with 'Show all N' expanding in place, the total read from the parent's summary field or a server aggregate over every child row (never a sum of the rows shown), the rule cells (no relatedList → body; false → hidden; true → side; lookup → side), and an authored page's master_detail list getting the body treatment",
+          "oracle": "test",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx, ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts and ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx from ui/ with vitest, and packages/spec/src/data/related-list-body-table.test.ts with the spec vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a Tasks tab on the tab row, or a Tasks card in the right column, is a FAIL: a body table is drawn once, in the overview",
+        "an empty Tasks table collapsing to a one-line sentence with no headers is a FAIL",
+        "a total that changes when 'Show all' is clicked is a FAIL: the total is over every child row, never the rows shown"
+      ],
+      "traps": [
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx (cap, show-all, ↗, empty row, server totals), ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts (placement), ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx (the relation type decides, objectstack#35597), packages/spec/src/data/related-list-body-table.test.ts (the rule cells); no live spec opens the overview"
+      },
+      "source": [
+        "packages/spec/src/data/related-list-body-table.ts#isBodyTableRelationship",
+        "ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement",
+        "ui/packages/plugin-detail/src/RelatedList.tsx#useBodyTableTotals",
+        "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#authoredBodyTableIds",
+        "docs/adr/0035-config-driven-master-detail.md (Amended 2026-11-19)",
+        "#35597"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-19",
+          "change": "initial — master_detail children are overview body tables by default (#35597, epic #35590), read from source on the PR branch; no live run made",
+          "ref": "#35597"
         }
       ]
     }

@@ -1274,6 +1274,8 @@ const ru = {
     manageViewsDescription: "Переупорядочьте, переименуйте, закрепите или удалите все представления этого объекта.",
     searchViews: "Поиск представлений",
     addNewView: "Добавить новое представление",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Это представление сохранено как черновик вне этого приложения, потому что пакет настройки приложения здесь недоступен. Панель черновиков этого приложения не учитывает и не публикует его: опубликуйте его с главной страницы.",
     done: "Готово",
     noViewsFound: "Представления не найдены.",
     // objectstack#27594 — the list title's view switcher.
@@ -5135,7 +5137,6 @@ const ru = {
   filterBuilder: {
     currency: 'Валюта',
     currencyNeedsAnd: 'Денежная сумма сравнивается в выбранной валюте, только когда должны выполняться все условия (И).',
-    where: "Где",
     and: "И",
     or: "ИЛИ",
     clearAll: "Очистить всё",
@@ -5226,6 +5227,7 @@ const ru = {
       after: 'после',
     },
     sort: {
+      advanced: 'Все уровни сортировки',
       direction: 'Направление',
       ascending: 'По возрастанию',
       descending: 'По убыванию',

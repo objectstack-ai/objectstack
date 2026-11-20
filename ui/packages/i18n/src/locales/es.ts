@@ -1242,6 +1242,8 @@ const es = {
     manageViewsDescription: "Reordenar, renombrar, fijar o eliminar todas las vistas de este objeto.",
     searchViews: "Buscar vistas",
     addNewView: "Agregar nueva vista",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Esta vista se guardó como borrador fuera de esta aplicación, porque aquí no se puede usar el paquete de personalización de la aplicación. La barra de borradores de esta aplicación no la cuenta ni la publica: publícala desde Inicio.",
     done: "Listo",
     noViewsFound: "Ninguna vista coincide con su búsqueda.",
     // objectstack#27594 — the list title's view switcher.
@@ -4980,7 +4982,6 @@ const es = {
   filterBuilder: {
     currency: 'Moneda',
     currencyNeedsAnd: 'Un importe en moneda solo se compara en la moneda elegida cuando deben cumplirse todas las condiciones (Y).',
-    where: "Donde",
     and: "Y",
     or: "O",
     clearAll: "Borrar todo",
@@ -5071,6 +5072,7 @@ const es = {
       after: 'después de',
     },
     sort: {
+      advanced: 'Todos los niveles de orden',
       direction: 'Dirección',
       ascending: 'Ascendente',
       descending: 'Descendente',
