@@ -426,7 +426,7 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     await authorize(s, s.userId, 'user');
     await authorize(s, s.adminUserId, 'admin');
     const issuedAt = Math.floor(Date.now() / 1000) + 1;
-    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt);
+    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
     expect(await grantsOf(s, s.userId)).toEqual(ALL);
     expect(await grantStands(), 'the MCP door admits a token of the grant before the reset').toBe(true);
 
@@ -486,7 +486,7 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     await authorize(s, s.userId, 'user');
     await authorize(s, s.adminUserId, 'admin');
     const issuedAt = Math.floor(Date.now() / 1000) + 1;
-    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt);
+    const grantStands = () => mcpConsentAdmits(s.auth.adapter, { clientId: CLIENT_ID, userId: s.userId }, issuedAt, s.auth.internalAdapter);
 
     const routine = await s.fire(
       '/admin/set-user-password',
@@ -536,6 +536,130 @@ describe('where the OAuth provider is mounted, a completed reset and a forced re
     const body = (await forced.json()) as { data?: { revoked?: Record<string, unknown> } };
     expect(body.data?.revoked).toMatchObject({ authorizedApps: 0, failed: 0, complete: true });
     expect(await grantsOf(s, s.userId)).toEqual(ALL);
+  }, 60_000);
+
+  it("a forced reset reports the apps it ended though a later grant store fails; the failure keeps it incomplete", async () => {
+    const s = await stage({ plugins: { oidcProvider: true, deviceAuthorization: true } });
+    await registerClient(s);
+    await authorize(s, s.userId, 'user');
+    const deleteRow = s.auth.adapter.delete.bind(s.auth.adapter);
+    vi.spyOn(s.auth.adapter, 'delete').mockImplementation((async (query: { model: string }) => {
+      if (query.model === 'oauthRefreshToken') throw new Error('the refresh token store refused the delete');
+      return deleteRow(query);
+    }) as never);
+
+    const forced = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: SECOND, mustChangePassword: false },
+      s.bearer(s.adminBearer),
+    );
+    expect(forced.status, await forced.clone().text()).toBe(200);
+    const body = (await forced.json()) as { data?: { revoked?: Record<string, unknown> } };
+    expect(body.data?.revoked).toMatchObject({ authorizedApps: 1, failed: 1, complete: false });
+    expect(await grantsOf(s, s.userId)).toMatchObject({ consents: 0, refreshTokens: 1 });
+  }, 60_000);
+});
+
+describe('an MCP access token issued before the account\'s password changed is refused, whatever its grant', () => {
+  const ENV_KEYS = ['OS_OIDC_PROVIDER_ENABLED', 'OS_MCP_SERVER_ENABLED'] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const key of ENV_KEYS) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const key of ENV_KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  /**
+   * Move the wall clock two seconds on, as `credential-change-ends-prior-access.test.ts`
+   * does: past the window in which the sign-up's password row is still its
+   * creation, so the write that follows reads as a change.
+   */
+  const advanceTheClock = () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 2_000);
+  };
+
+  const CONSENTED_CLIENT = 'consented-assistant';
+  const SERVER_CLIENT = 'server-assistant';
+  /** Two apps: one the account consented to, and a server-only one the provider never asks consent for. */
+  async function apps(s: Awaited<ReturnType<typeof stage>>) {
+    for (const [id, clientId, skip] of [['app_consented', CONSENTED_CLIENT, false], ['app_server', SERVER_CLIENT, true]] as const) {
+      await s.engine.insert(
+        'sys_oauth_application',
+        { id, client_id: clientId, name: clientId, redirect_uris: JSON.stringify(['http://localhost:56789/cb']), skip_consent: skip },
+        SYS,
+      );
+    }
+    const now = new Date();
+    await s.auth.adapter.create({
+      model: 'oauthConsent',
+      data: { clientId: CONSENTED_CLIENT, userId: s.userId, scopes: ['openid'], createdAt: now, updatedAt: now },
+    });
+  }
+  /** The MCP door's grant read for a token of `clientId` issued at `iat` (whole seconds). */
+  const admits = (s: Awaited<ReturnType<typeof stage>>, clientId: string, iat: number) =>
+    mcpConsentAdmits(s.auth.adapter, { clientId, userId: s.userId }, iat, s.auth.internalAdapter);
+  const nowS = () => Math.floor(Date.now() / 1000);
+
+  it('a completed self-service reset: a token issued before it is refused; one issued a second after admits', async () => {
+    const s = await stage({ plugins: { oidcProvider: true } });
+    await apps(s);
+    const before = nowS();
+    expect(await admits(s, SERVER_CLIENT, before), 'admitted before the reset').toBe(true);
+    advanceTheClock();
+
+    expect(await s.reset(SECOND)).toEqual({ status: 200 });
+
+    expect(await admits(s, SERVER_CLIENT, before), 'refused after it').toBe(false);
+    // The control: a token the app is issued after the reset admits.
+    expect(await admits(s, SERVER_CLIENT, nowS() + 1)).toBe(true);
+  }, 60_000);
+
+  it("an administrator's forced reset: a token issued before it is refused; one issued a second after admits", async () => {
+    const s = await stage({ plugins: { oidcProvider: true } });
+    await apps(s);
+    const before = nowS();
+    expect(await admits(s, SERVER_CLIENT, before), 'admitted before the reset').toBe(true);
+    advanceTheClock();
+
+    const forced = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: SECOND, mustChangePassword: false },
+      s.bearer(s.adminBearer),
+    );
+    expect(forced.status, await forced.clone().text()).toBe(200);
+
+    expect(await admits(s, SERVER_CLIENT, before), 'refused after it').toBe(false);
+    expect(await admits(s, SERVER_CLIENT, nowS() + 1)).toBe(true);
+  }, 60_000);
+
+  it('a password change keeps the grant: a token issued before it is refused, and the one the app is issued after admits', async () => {
+    const s = await stage({ plugins: { oidcProvider: true } });
+    await apps(s);
+    const before = nowS();
+    expect(await admits(s, CONSENTED_CLIENT, before)).toBe(true);
+    expect(await admits(s, SERVER_CLIENT, before)).toBe(true);
+    const user = await s.signIn(EMAIL, FIRST);
+    advanceTheClock();
+
+    const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, s.bearer(user.bearer!));
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    const consents = (await s.engine.find('sys_oauth_consent', { where: { user_id: s.userId }, context: { isSystem: true } } as never)) as unknown[];
+    expect(consents, 'the change keeps the consent').toHaveLength(1);
+    expect(await admits(s, CONSENTED_CLIENT, before)).toBe(false);
+    expect(await admits(s, SERVER_CLIENT, before)).toBe(false);
+    const after = nowS() + 1;
+    expect(await admits(s, CONSENTED_CLIENT, after)).toBe(true);
+    expect(await admits(s, SERVER_CLIENT, after)).toBe(true);
   }, 60_000);
 });
 

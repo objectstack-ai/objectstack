@@ -343,7 +343,12 @@ A change to a user's password also ends the following, issued before it:
   `POST /api/v1/auth/phone-number/verify` (`400 OTP_NOT_FOUND`) and opens no
   session;
 - a second-factor challenge opened by a password sign-in answers what a
-  challenge that was never opened answers.
+  challenge that was never opened answers;
+- an MCP access token is refused at the MCP endpoint. Where the app's
+  authorization still stands — a password change, or an administrator's
+  `set-user-password` with `revokeSessionsAndKeys: false` — the app gets a new
+  token with its refresh token, as it does when a token expires; a reset ends
+  the authorization itself (below).
 
 The person asks for a new link, code or challenge, which works as usual. A
 door that ends the account's sessions — a completed reset, `change-password`
@@ -363,7 +368,8 @@ one-step invitation acceptance that creates the account, however long the
 steps between the two take. A password created outside such a request (written
 straight to the store), or before this release, counts as a change at its
 creation. An email-change or verification link carries its issue time in whole
-seconds, so one minted in the same second as the change is refused as well.
+seconds, so one minted in the same second as the change is refused as well;
+so does an MCP access token.
 
 #### What a password reset ends, and what a change keeps
 
@@ -384,7 +390,8 @@ beside the account's sessions, what the account added before it:
   refresh tokens and stored access tokens are deleted, so the app asks the
   person to authorize it again. An MCP access token, which is signed rather
   than stored, is refused on its next request, because the MCP endpoint reads
-  the consent on every request.
+  on every request the authorization it was issued under and when the
+  account's password last changed.
 - **Device sign-ins.** Where device authorization is enabled, a device sign-in
   approved for the account and not yet collected by its device is ended.
 - **Passkeys.** This build offers no passkey sign-in, so there are none to end.
@@ -397,7 +404,9 @@ stands, and its change time and password history are recorded all the same;
 resetting again ends what remains.
 
 A password change through `POST /api/v1/auth/change-password`, which proves
-the current password, ends none of these. When the account still holds an API
+the current password, ends none of these: an authorized app keeps its
+authorization and gets a new MCP access token with its refresh token, issued
+after the change. When the account still holds an API
 key that is neither revoked nor past its own expiry, a linked sign-in account
 or an authorized app after the change, the account's address is sent
 `auth.password_changed_notice`, naming each one, through the email service
@@ -1348,7 +1357,8 @@ to be authorized again and an MCP access token is refused on its next request)
 and, where device authorization is enabled, every device sign-in approved for
 the user and not yet collected. A suspected compromise leaves no live
 credential behind. Pass `revokeSessionsAndKeys: false` for a routine reset,
-which ends none of these. The response reports what was ended
+which ends none of these; as after any password change, an MCP access token
+issued before it is refused and the app gets a new one with its refresh token. The response reports what was ended
 (`revoked: { sessions, apiKeys, signInAccounts, authorizedApps, failed, complete }`),
 and revoked keys stay revoked after the password change. The operator's
 `os user set-password` ends the same, reading the authorized apps and device

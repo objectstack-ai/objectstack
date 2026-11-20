@@ -116,8 +116,12 @@ export interface ApiKeyStore {
  * field names (as `mcp-token-revocation.ts` reads them).
  */
 export interface OAuthGrantRows {
-  findMany(query: { model: string; where: Array<{ field: string; value: unknown }>; limit?: number; offset?: number }): Promise<unknown[]>;
-  findOne(query: { model: string; where: Array<{ field: string; value: unknown }> }): Promise<unknown>;
+  findMany(query: {
+    model: string;
+    where: Array<{ field: string; value: unknown; operator?: 'in' }>;
+    limit?: number;
+    offset?: number;
+  }): Promise<unknown[]>;
   delete(query: { model: string; where: Array<{ field: string; value: unknown }> }): Promise<unknown>;
 }
 
@@ -242,21 +246,22 @@ async function unrevokedApiKeys(engine: ApiKeyStore, userId: string, offset?: nu
 
 /**
  * Delete every `model` row that names `userId` through the vendor's adapter,
- * reading again until a read answers none; answers how many were deleted. A
- * row a pass deleted and the next read still answers was not deleted, which
- * is a failure, never a loop.
+ * reading again until a read answers none; `deleted` is called once for each
+ * row deleted, as it is deleted. A row a pass deleted and the next read still
+ * answers was not deleted, which is a failure, never a loop.
  */
-async function endGrantRows(store: OAuthGrantRows, model: string, userId: string): Promise<number> {
-  const deleted = new Set<string>();
+async function endGrantRows(store: OAuthGrantRows, model: string, userId: string, deleted: () => void): Promise<void> {
+  const ids = new Set<string>();
   for (;;) {
     const rows = (await store.findMany({ model, where: [{ field: 'userId', value: userId }] })) ?? [];
-    if (rows.length === 0) return deleted.size;
+    if (rows.length === 0) return;
     for (const row of rows) {
       const id: unknown = (row as { id?: unknown } | null)?.id;
       if (typeof id !== 'string' || id.length === 0) throw new Error(`a ${model} row carries no id`);
-      if (deleted.has(id)) throw new Error(`${model} row ${id} still reads after it was deleted`);
+      if (ids.has(id)) throw new Error(`${model} row ${id} still reads after it was deleted`);
       await store.delete({ model, where: [{ field: 'id', value: id }] });
-      deleted.add(id);
+      ids.add(id);
+      deleted();
     }
   }
 }
@@ -265,17 +270,24 @@ async function endGrantRows(store: OAuthGrantRows, model: string, userId: string
  * End every OAuth grant and approved device sign-in of `userId`, in
  * {@link OAUTH_GRANT_STORES} order, in each store whose plugin `oauth` says is
  * mounted; no `oauth`, nothing. The arm a completed self-service reset and the
- * forced resets (`forced-reset-revocation.ts`) share. Throws when a read or a
- * delete fails, a mounted plugin's store cannot be reached, or a row survives
- * its delete.
+ * forced resets (`forced-reset-revocation.ts`) share. Counts each row into
+ * `ended` as it is deleted, so a caller that hands its own tally still holds
+ * what was ended when a later store fails. Throws when a read or a delete
+ * fails, a mounted plugin's store cannot be reached, or a row survives its
+ * delete.
  */
-export async function endOAuthGrants(oauth: MountedOAuthGrants | undefined, userId: string): Promise<EndedOAuthGrants> {
-  const ended: EndedOAuthGrants = { authorizedApps: 0, oauthTokens: 0, deviceCodes: 0 };
+export async function endOAuthGrants(
+  oauth: MountedOAuthGrants | undefined,
+  userId: string,
+  ended: EndedOAuthGrants = { authorizedApps: 0, oauthTokens: 0, deviceCodes: 0 },
+): Promise<EndedOAuthGrants> {
   for (const grant of OAUTH_GRANT_STORES) {
     if (!oauth?.mounted(grant.plugin)) continue;
     const store = oauth.store;
     if (!store) throw new Error(`the ${grant.model} store of a mounted ${grant.plugin} cannot be reached`);
-    ended[grant.counts] += await endGrantRows(store, grant.model, userId);
+    await endGrantRows(store, grant.model, userId, () => {
+      ended[grant.counts] += 1;
+    });
   }
   return ended;
 }
@@ -322,11 +334,6 @@ export function storedOAuthGrants(engine: OAuthGrantEngine): MountedOAuthGrants 
           throw error;
         }
       },
-      async findOne({ model, where }) {
-        const { object } = placeOf(model);
-        const rows = rowsOf(await engine.find(object, { where: { id: valueOf(where, 'id') }, fields: ['id'], limit: 1 }, { context: SYSTEM_CTX }));
-        return rows[0] ?? null;
-      },
       async delete({ model, where }) {
         const { object } = placeOf(model);
         if (typeof engine.delete !== 'function') throw new Error(`the data engine cannot delete ${object} rows`);
@@ -358,7 +365,7 @@ export async function endWhatTheAccountAddedBeforeAReset(stores: ResetStores, us
     }
   }
   ended.signInAccounts = unlinked.size;
-  Object.assign(ended, await endOAuthGrants(stores.oauth, userId));
+  await endOAuthGrants(stores.oauth, userId, ended);
   const engine: ApiKeyStore | undefined = stores.apiKeys;
   if (!engine) return ended;
   // Each pass revokes what the read answered, and the next read no longer
@@ -390,12 +397,18 @@ async function authorizedApps(store: OAuthGrantRows, userId: string): Promise<st
     }
     if (page.length < OAUTH_CONSENT_PAGE) break;
   }
-  const names: string[] = [];
-  for (const clientId of clientIds) {
-    const client = (await store.findOne({ model: 'oauthClient', where: [{ field: 'clientId', value: clientId }] })) as { name?: unknown } | null;
-    names.push(typeof client?.name === 'string' && client.name.trim() ? client.name.trim() : clientId);
+  // The clients' names, one read per page of client ids (`in`, as
+  // `mcp-token-revocation.ts` reads a refresh family), not one per app.
+  const nameOf = new Map<string, string>();
+  for (let start = 0; start < clientIds.length; start += OAUTH_CONSENT_PAGE) {
+    const page = clientIds.slice(start, start + OAUTH_CONSENT_PAGE);
+    const clients = (await store.findMany({ model: 'oauthClient', where: [{ field: 'clientId', operator: 'in', value: page }], limit: page.length })) ?? [];
+    for (const client of clients) {
+      const { clientId, name } = (client ?? {}) as { clientId?: unknown; name?: unknown };
+      if (typeof clientId === 'string' && typeof name === 'string' && name.trim()) nameOf.set(clientId, name.trim());
+    }
   }
-  return names;
+  return clientIds.map((clientId) => nameOf.get(clientId) ?? clientId);
 }
 
 /**

@@ -423,6 +423,38 @@ describe('[ruling A, step 5] a server-only `skip_consent` client', () => {
   }, 60_000);
 });
 
+describe("an MCP access token issued before the account's password changed", () => {
+  it('is refused at the MCP door whatever its grant, and the token the app refreshes into admits', async () => {
+    const r = await rig();
+    // A client the person consented to, and a server-only one.
+    const { clientId, cookie, access_token, refresh_token } = await r.connect();
+    const serverOnly = await r.registerClient();
+    const [app] = (await r.rowsAtRest('sys_oauth_application')).filter((row) => row.client_id === serverOnly);
+    await (r.engine as any).update('sys_oauth_application', { id: app!.id, skip_consent: true }, SYS);
+    const { code } = await r.authorize(serverOnly, cookie);
+    const server = await r.exchange(serverOnly, code);
+    expect(await r.manager.verifyMcpAccessToken(access_token)).toMatchObject({ clientId });
+    expect(await r.manager.verifyMcpAccessToken(server.access_token)).toMatchObject({ clientId: serverOnly });
+
+    // Two seconds on, past the sign-up's own write of the password, the person changes it.
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+    vi.setSystemTime(Date.now() + 2_000);
+    const changed = await r.postJson('/change-password', { currentPassword: PASSWORD, newPassword: `${PASSWORD}-changed` }, cookie);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    expect(await r.manager.verifyMcpAccessToken(access_token), 'issued before the change').toBeNull();
+    expect(await r.manager.verifyMcpAccessToken(server.access_token), 'issued before the change').toBeNull();
+
+    // The change keeps the grants: each app refreshes into a token issued after it.
+    vi.setSystemTime(Date.now() + 1_000);
+    for (const [client, refreshToken] of [[clientId, refresh_token], [serverOnly, server.refresh_token]] as const) {
+      const refreshed = await r.refresh(client, refreshToken);
+      expect(refreshed.status, JSON.stringify(refreshed.body)).toBe(200);
+      expect(await r.manager.verifyMcpAccessToken(refreshed.body.access_token)).toMatchObject({ clientId: client });
+    }
+  }, 60_000);
+});
+
 describe('a grant is revoked in its own organization only', () => {
   /** One person, one client: consents in organizations A and B, and the tokens each earned. */
   async function twoOrganizations() {

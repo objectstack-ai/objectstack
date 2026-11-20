@@ -249,6 +249,11 @@ async function signUp(auth: any) {
       body: JSON.stringify({ email: 'dev@acme.example.com', password: 'password-12345', name: 'Dev' }),
     }),
   );
+  // This raw server's sign-up writes the password without the platform's
+  // first-password mark, so the MCP door's credential clock reads that write
+  // as a password change, and a token minted in its second is refused. A
+  // person's app is issued its token later: wait for the next second.
+  await new Promise<void>((resolve) => setTimeout(resolve, 1_005 - (Date.now() % 1_000)));
   const cookie = String(res.headers.get('set-cookie') ?? '')
     .split(',')
     .map((c: string) => c.split(';')[0]!.trim())

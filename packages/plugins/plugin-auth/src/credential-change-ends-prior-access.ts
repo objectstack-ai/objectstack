@@ -35,7 +35,11 @@
  *    (`invitation-mailbox-proof.ts`, ahead of the session it opens);
  *  - a password sign-in is refused when the account's password changed while
  *    it ran: the session it opened is ended and it answers what a wrong
- *    password answers at that door.
+ *    password answers at that door;
+ *  - an MCP access token is refused at the MCP door, whatever grant it was
+ *    minted under. Where the grant stands (a change, an administrator's
+ *    routine set), the app's refresh token gets it a new one; a reset ends
+ *    the grant as well (`password-reset-ends-added-access.ts`).
  *
  * Access issued after the change is untouched.
  *
@@ -109,6 +113,8 @@
  *    (`auth-manager-after-hook.ts`), which runs ahead of every plugin's own
  *    after-hook, so a refused sign-in opens no second-factor challenge.
  *  - The one-step invitation door: in the door, before the session it opens.
+ *  - The MCP door: the grant read it makes on every request
+ *    (`mcp-token-revocation.ts` `mcpConsentAdmits`), on the token's `iat`.
  *
  * Each session ended here is ended through better-auth's internal adapter, so
  * every session-delete hook runs, and a reset door's records the reason a

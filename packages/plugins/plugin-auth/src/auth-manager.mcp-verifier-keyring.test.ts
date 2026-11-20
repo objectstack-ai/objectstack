@@ -271,6 +271,8 @@ describe('[#24186] the bound on the fresh read an unknown key earns', () => {
     const consent = { clientId: CLIENT, userId: USER, referenceId: null, createdAt: new Date(Date.now() - 60_000) };
     vi.spyOn(manager, 'getAuthContext').mockResolvedValue({
       adapter: { findMany: async () => [{ ...consent }], findOne: async () => ({ clientId: CLIENT, disabled: false }) },
+      // The password's clock the same read consults: no password row, never changed.
+      internalAdapter: { findCredentialAccount: async () => null },
     });
     const token = (privateKey: CryptoKey, kid: string) => {
       const now = Math.floor(Date.now() / 1000);

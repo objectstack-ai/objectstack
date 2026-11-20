@@ -5532,7 +5532,9 @@ export class AuthManager {
    * (`mcp-token-revocation.ts` `mcpConsentAdmits`). A token is refused when
    * its consent is gone, when the consent was created after the token was
    * issued (revoked, then granted again), when it carries no `azp` to key the
-   * read, and when the read fails (fail closed). So revocation takes effect
+   * read, when it was issued before its subject's password last changed (the
+   * credential clock, `credential-change-ends-prior-access.ts`), and when the
+   * read fails (fail closed). So revocation takes effect
    * on the next request: `/oauth2/revoke` deletes the consent and the
    * client's refresh family for that user (`answerOAuthTokenRevocation`), and
    * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same

@@ -67,7 +67,7 @@
  */
 
 import { SystemObjectName } from '@objectstack/spec/system';
-import { endOAuthGrants, type MountedOAuthGrants } from './password-reset-ends-added-access.js';
+import { endOAuthGrants, type EndedOAuthGrants, type MountedOAuthGrants } from './password-reset-ends-added-access.js';
 
 /**
  * The reason an administrator's forced reset records: `sys_session.revoke_reason`
@@ -128,18 +128,21 @@ function rowsOf(result: unknown): Array<Record<string, any>> {
 /**
  * The self-service reset's own arm for the OAuth grants and device sign-ins;
  * it throws on a read or a delete that does not land, which the outcome
- * counts in `failed` instead.
+ * counts in `failed` instead. The apps whose consent was deleted before the
+ * failure are counted all the same: the arm counts each row as it deletes it.
  */
 async function endAuthorizedApps(
   outcome: ForcedResetRevocationOutcome,
   oauth: MountedOAuthGrants | undefined,
   userId: string,
 ): Promise<void> {
+  const ended: EndedOAuthGrants = { authorizedApps: 0, oauthTokens: 0, deviceCodes: 0 };
   try {
-    outcome.authorizedApps = (await endOAuthGrants(oauth, userId)).authorizedApps;
+    await endOAuthGrants(oauth, userId, ended);
   } catch {
     outcome.failed += 1;
   }
+  outcome.authorizedApps = ended.authorizedApps;
 }
 
 function isLiveSession(row: Record<string, any>, now: number): boolean {
