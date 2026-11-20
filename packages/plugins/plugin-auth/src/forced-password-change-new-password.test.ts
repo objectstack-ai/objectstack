@@ -49,6 +49,9 @@ import { sqliteEnginePool } from './__tests__/sqlite-engine-pool.testkit';
 import 'better-auth';
 import 'better-auth/api';
 import 'better-auth/plugins';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here too, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;

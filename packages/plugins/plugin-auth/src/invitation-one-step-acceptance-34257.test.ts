@@ -36,6 +36,10 @@ import { authIdentityManifest } from './manifest';
 import { BREACH_CHECK_VENDOR_DEFAULT_PATHS } from './auth-manager-plugin-list';
 import { INTERACTIVE_REVOKE_REASON } from './session-tombstone';
 import { readCredentialChangedAt } from './credential-change-ends-prior-access';
+// The SSO discovery egress guard the source loads with a dynamic import: its
+// first module load is paid here, during collection, not inside the first case
+// (AGENTS.md, Build & Test: clocked windows measure behaviour).
+import '@objectstack/core/egress';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
