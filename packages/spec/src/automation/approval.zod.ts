@@ -876,14 +876,14 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
   // move every open deadline. "Calendar hours" is deliberately not a value
   // name: it read as wall-clock hours before a working calendar existed.
   clock: z.enum(['wall_clock', 'working_time']).default('wall_clock')
-    .describe("How the timeout's hours count. 'wall_clock' (the default) counts every hour, nights, weekends and holidays included. 'working_time' counts only the working periods of the organization's working calendar, skipping its holidays and counting its make-up workdays; when the calendar cannot count the deadline (no such calendar, or not maintained that far) the request does not escalate and shows why, until the calendar is fixed"),
+    .describe("How the timeout's hours count: every hour, or only working hours. Wall-clock hours ('wall_clock', the default) count nights, weekends and holidays. Working hours ('working_time') count only the working periods of the organization's working calendar, skipping its holidays and counting its make-up workdays; when the calendar cannot count the deadline (no such calendar, or not maintained that far) the request does not escalate and shows why, until the calendar is fixed"),
   // ADR-0157 D2: the explicit code, else the organization's default calendar,
   // else a refusal — never wall-clock time. Read only under `working_time`; the
   // approval lint refuses it beside `wall_clock`, where nothing reads it
   // (`approval-escalation-calendar-without-working-time`). Whether the calendar
   // exists is runtime data per organization, never a publish-time check (D9).
   calendar: z.string().regex(new RegExp(WORK_CALENDAR_CODE_PATTERN)).optional()
-    .describe("The code of the working calendar that counts the hours when the clock is 'working_time'. Leave it empty to use the organization's default calendar"),
+    .describe("Which working calendar counts the hours under working time, by its code. Leave it empty to use the organization's default calendar"),
   action: z.enum(['reassign', 'auto_approve', 'auto_reject', 'notify']).default('notify')
     .describe('What happens when the deadline passes: hand the request to someone else, approve it, reject it, or notify someone (the default)'),
   // Escalation hands the request to a position (the common case — e.g. an
