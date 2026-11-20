@@ -5141,6 +5141,7 @@ const fr = {
     newestFirst: "Plus récent → Plus ancien",
     addSort: "Ajouter un tri",
     removeSort: "Supprimer le tri",
+    reorder: 'Faire glisser pour réorganiser',
   },
   collaboration: {
     commentCount: "{{count}} commentaires",

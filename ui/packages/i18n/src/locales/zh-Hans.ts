@@ -5057,6 +5057,7 @@ const zh = {
     newestFirst: '最新 → 最早',
     addSort: '添加排序',
     removeSort: '删除排序',
+    reorder: '拖动以调整先后',
   },
   collaboration: {
     commentCount: '{{count}} 条评论',

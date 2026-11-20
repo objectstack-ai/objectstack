@@ -5301,6 +5301,7 @@ const ru = {
     newestFirst: "Сначала новые",
     addSort: "Добавить сортировку",
     removeSort: "Удалить сортировку",
+    reorder: 'Перетащите, чтобы изменить порядок',
   },
   collaboration: {
     commentCount: "Комментариев: {{count}}",

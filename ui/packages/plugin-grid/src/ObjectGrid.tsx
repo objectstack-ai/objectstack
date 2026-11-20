@@ -59,6 +59,7 @@ import {
   toast,
   cn,
   GridCellSelectionProvider,
+  GridHeaderMenuProvider,
   type GridCellSelection,
 } from '@object-ui/components';
 import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
@@ -353,6 +354,16 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * key reaches it.
    */
   cellSelection?: boolean;
+  /**
+   * [objectstack#35876] The column header opens the column menu (sort
+   * ascending, sort descending, hide) instead of sorting on a click, as the
+   * HOST that owns the page asks for it (the list page does). Absent ⇒ a
+   * header click sorts, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  headerMenu?: boolean;
   /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
@@ -715,6 +726,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   recordLinkAdornment,
   rowOpensRecord,
   cellSelection: hostCellSelection,
+  headerMenu: hostHeaderMenu,
   onBulkDelete,
   onRowSelect,
   onRowClick,
@@ -4491,7 +4503,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {gridDescription}
       {groupingDraftOnlyNote}
       {gridToolbar}
-      <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>
+      <GridHeaderMenuProvider value={hostHeaderMenu === true}>
+        <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>
+      </GridHeaderMenuProvider>
       {isGrouped && onRowGroupsChange && (
         <RowGroupsReport groups={shownRowGroups} onChange={onRowGroupsChange} />
       )}

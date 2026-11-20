@@ -128,8 +128,8 @@ describe('ListView condition row and panels (objectstack#35549, objectstack#3555
       },
     );
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    fireEvent.click(await within(slot()).findByTestId('sort-chip-toggle-name'));
-    await waitFor(() => expect(onSortChange.mock.calls.at(-1)?.[0]?.[0]?.order).toBe('desc'));
+    fireEvent.click(await within(slot()).findByTestId('sort-chip-remove-name'));
+    await waitFor(() => expect(onSortChange.mock.calls.at(-1)?.[0]).toEqual([]));
     const reset = within(slot()).getByTestId('condition-reset');
     expect(reset).toBeEnabled();
     await act(async () => fireEvent.click(reset));
