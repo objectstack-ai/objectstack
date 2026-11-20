@@ -346,10 +346,24 @@ describe('the comparand-shape door admits the leaf only for a caller that names 
     expect(err.message).toMatch(/^Operator "\$nin" on field "id" requires an ARRAY of values/);
   });
 
-  it('the authoring lowering refuses the leaf: parseFilterAST is a door that names no brand', () => {
-    const err = refusalOf(() => parseFilterAST([['id', 'in', read]]));
-    expect(envelopeOf(err)).toEqual(ENVELOPE);
-    expect(err.message).toMatch(/Operator "\$in" on field "id" requires an ARRAY of values/);
+  it('the authoring lowering refuses the leaf in D4\'s envelope: parseFilterAST names no brand (plan step 5, the array-form decision)', () => {
+    // Was the shape door's INVALID_FILTER / 400 until plan step 5, and that
+    // message printed the leaf's inputs. A leaf here is the code that wrote it.
+    const secret = SharedRecordIds.read('account', 'u-secret-42');
+    const shapes = [
+      [['id', 'in', secret], 'where.id.$in'],
+      [['id', 'nin', secret], 'where.id.$nin'],
+      [['and', ['owner_id', '=', 'u1'], ['id', 'in', SharedRecordIds.write('account', 'u-secret-42', ['edit'])]], 'where.$and[1].id.$in'],
+    ] as const;
+    for (const [filter, at] of shapes) {
+      const err = refusalOf(() => parseFilterAST(filter, "find('account')"));
+      expect(envelopeOf(err), at).toEqual({ code: StandardErrorCode.enum.INTERNAL_ERROR, status: 500 });
+      expect(err.message, at).toContain(`find('account'): ${at} holds a SharedRecordIds leaf, a fixed read of 'sys_record_share'`);
+      expect(err.message, at).not.toContain('u-secret-42');
+    }
+    // The unbranded copy keeps the author's refusal: that one is a request's.
+    const wire = refusalOf(() => parseFilterAST(JSON.parse(JSON.stringify([['id', 'in', read]]))));
+    expect(envelopeOf(wire)).toEqual(ENVELOPE);
   });
 
   it('the schema doors never admit it, and no operator spells it', () => {

@@ -84,7 +84,12 @@ import {
 } from './unresolved-posture.js';
 import { grantSetNameOf } from './grant-permission-set-name.js';
 import { holdsExternalPosition, humanBaselineFor } from './external-baseline.js';
-import { isExternalAudienceContext } from '@objectstack/core';
+import { isExternalAudienceContext, type ReadableIdsRefusalLog } from '@objectstack/core';
+import {
+  batchedFixedReadLeafResolver,
+  resolveFixedReadLeavesAtRecord,
+  type FixedReadLeafRecordResolver,
+} from './explain-fixed-read-leaf.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -463,6 +468,19 @@ export interface ExplainEngineDeps {
   fetchRecord?: (object: string, recordId: string, engineOperation: string) => Promise<Record<string, unknown> | null>;
   /** The sharing service's own read-filter contribution for the object (owner-match OR granted-ids), same as enforcement AND-s in. */
   sharingReadFilter?: (object: string, context: any) => Promise<unknown | null>;
+  /**
+   * [ADR-0155 D4, Q2 as ruled] Of the record ids the record pass judges, the
+   * ones a fixed-read leaf (`SharedRecordIds`) in {@link sharingReadFilter}
+   * holds: one indexed read under the leaf's own fixed predicate, keyed by the
+   * ids, the read `checkEdit` makes for one. The pass resolves the leaf at the
+   * record with it (`explain-fixed-read-leaf.ts`), so the matcher and the
+   * published `rowFilter` see the record's id or no share arm, ⛔ never the
+   * leaf. Absent, a filter that carries a leaf is refused in ADR-0139 D3's
+   * envelope; a rejection is the read filter failing.
+   */
+  resolveFixedReadLeaf?: FixedReadLeafRecordResolver;
+  /** [ADR-0155 D4] Where the record pass logs its refusal of a fixed-read leaf, once per log. */
+  fixedReadLeafRefusalLog?: ReadableIdsRefusalLog;
   /**
    * [#26188 · ADR-0057] Is a hierarchy resolver mounted (the
    * `hierarchy-scope-resolver` service the enterprise `hierarchy-security`
@@ -2127,9 +2145,18 @@ async function applyRecordAttribution(
   }
   // A rejected read filter is not a `null` one: the matcher reads `null` as
   // "no filter" and admits the row, while the find it explains fails.
-  const sharingFilterOrFault = deps.sharingReadFilter && recordExists
+  const sharingFilterRead = deps.sharingReadFilter && recordExists
     ? await settle(deps.sharingReadFilter(object, context))
     : undefined;
+  // [ADR-0155 D4, Q2 as ruled] A share-grant leaf in the filter is resolved at
+  // this record before anything matches or publishes it: the record's id when
+  // a grant admits it, no share arm otherwise. A leaf the pass does not
+  // resolve throws D4's refusal here; the read's rejection is the filter's.
+  const sharingFilterOrFault = sharingFilterRead === undefined || sharingFilterRead === DEPENDENCY_FAULT
+    ? sharingFilterRead
+    : await settle(resolveFixedReadLeavesAtRecord(
+        sharingFilterRead, object, recordId, deps.resolveFixedReadLeaf, deps.fixedReadLeafRefusalLog,
+      ));
   const readFilterFault = sharingFilterOrFault === DEPENDENCY_FAULT;
   const sharingFilter = sharingFilterOrFault === DEPENDENCY_FAULT ? undefined : sharingFilterOrFault;
   const sharingMatches = sharingFilter === undefined ? undefined : matches(sharingFilter);
@@ -2760,6 +2787,9 @@ export async function explainRecordsForAsker(
       return answer;
     };
   const verdictById = new Map<string, NonNullable<ExplainDecision['record']>>();
+  // [ADR-0155 D4] …and so a share-grant leaf in it is the same leaf for every
+  // record of the batch: it is read once, keyed by every id the batch judges.
+  const batchedLeafRead = batchedFixedReadLeafResolver(recordIds);
   for (const recordId of new Set(recordIds)) {
     const recordDeps = depsForRecord(recordId);
     const askerOnce = askedOncePerRecord(asker);
@@ -2768,6 +2798,7 @@ export async function explainRecordsForAsker(
         ...recordDeps,
         recordAbsentToCaller: askedOnce(recordDeps.recordAbsentToCaller),
         ...(recordDeps.sharingReadFilter ? { sharingReadFilter: sharedReadFilter(recordDeps.sharingReadFilter) } : {}),
+        ...(recordDeps.resolveFixedReadLeaf ? { resolveFixedReadLeaf: batchedLeafRead(recordDeps.resolveFixedReadLeaf) } : {}),
       },
       { ...pass, layers: structuredClone(pass.layers) },
       recordId,

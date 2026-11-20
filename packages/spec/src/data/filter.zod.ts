@@ -3,6 +3,8 @@
 import { z } from 'zod';
 import { closedObject } from '../shared/strict-object';
 import { assertListComparandShapes } from './filter-comparand-shape';
+import { fixedInnerReadOf, fixedReadLeafNameOf, isFixedReadLeaf } from './fixed-read-leaf';
+import { isComposedReadableIds } from './readable-ids';
 // [#19889] The equality-slot refusal's words, shared with the comparand-shape
 // face so the save door and the query door print one sentence (ruling A,
 // record 5805248669: "one constant, two doors").
@@ -3064,8 +3066,66 @@ export function parseFilterAST(filter: unknown, context?: string): FilterConditi
   // through rather than minted here so the engine's array branch keeps the
   // exact message it has pinned since #6209, now that the shape gate refuses
   // one step earlier than the engine's own call to it.
-  assertListComparandShapes(lowered, context);
+  try {
+    assertListComparandShapes(lowered, context);
+  } catch (refused) {
+    // [ADR-0155 D4, plan step 5] A condition carrying a fixed-read leaf is
+    // refused in D4's envelope instead; see {@link refuseFixedReadLeafAtParse}.
+    refuseFixedReadLeafAtParse(lowered, context);
+    throw refused;
+  }
   return normalizeFilterComparandTypes(lowered, context);
+}
+
+/**
+ * [ADR-0155 D4, plan step 5: the array-form `in` / `nin` decision] When the
+ * shape door refuses what {@link parseFilterAST} lowered and the condition
+ * carries a fixed-read leaf (`SharedRecordIds`), the refusal is ADR-0139 D3's
+ * envelope, `INTERNAL_ERROR` / 500, naming the first leaf, ⛔ not the shape
+ * door's `INVALID_FILTER` / 400. That is the leaf as an array-form `in` / `nin`
+ * comparand or list member, the shapes the door reads as a non-list.
+ *
+ * No request can spell the leaf (its brand is a symbol no JSON carries) and its
+ * one producer places it in the object form at the engine's seam, never in the
+ * array form this door lowers, so a leaf here is the in-process code that
+ * wrote it: D4's reason for the envelope. The 400 was also the wrong answer to
+ * relay: a 4xx message reaches the caller, and the shape door's printed the
+ * leaf's inputs, a principal's id among them. This message names the leaf by
+ * its name and table only. A leaf the shape door does not refuse (an array-form
+ * `=`) is lowered by reference and refused at the engine's seam, as before.
+ */
+function refuseFixedReadLeafAtParse(condition: unknown, context: string | undefined): void {
+  const onPath = new Set<object>();
+  const find = (value: unknown, at: string): { at: string; leaf: unknown } | null => {
+    if (isFixedReadLeaf(value)) return { at, leaf: value };
+    if (isComposedReadableIds(value)) return find(value.scope, `${at}.scope`);
+    if (value === null || typeof value !== 'object' || onPath.has(value)) return null;
+    onPath.add(value);
+    try {
+      const entries: [string, unknown][] = Array.isArray(value)
+        ? value.map((item, i) => [`${at}[${i}]`, item])
+        : Object.keys(value).map((key) => [`${at}.${key}`, (value as Record<string, unknown>)[key]]);
+      for (const [path, item] of entries) {
+        const found = find(item, path);
+        if (found) return found;
+      }
+      return null;
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  const found = find(condition, 'where');
+  if (found === null || !isFixedReadLeaf(found.leaf)) return;
+  const err = new Error(
+    `${context ? `${context}: ` : ''}${found.at} holds a ${fixedReadLeafNameOf(found.leaf)} leaf, a fixed read of ` +
+      `'${fixedInnerReadOf(found.leaf).table}', which parseFilterAST admits in no position: the engine's seam places ` +
+      'such a leaf, in the object form { id: { $in: leaf } } (ADR-0155 D1, D4). Refused rather than read as a ' +
+      'comparand; write the leaf into the object-form where the engine is handed.',
+  ) as Error & { code: 'INTERNAL_ERROR'; status: 500; httpStatus: 500 };
+  err.code = 'INTERNAL_ERROR';
+  err.status = 500;
+  err.httpStatus = 500;
+  throw err;
 }
 
 /**

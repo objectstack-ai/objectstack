@@ -56,8 +56,9 @@
  *
  * ⛔ No boot refusal and no producer here: the class-② boot check and R2's
  * share-arm answer land with the producer (ADR-0155 plan step 6), and until
- * then nothing on main writes the leaf. `index.ts` re-exports nothing from
- * this module.
+ * then nothing on main writes the leaf. `index.ts` re-exports two readers
+ * from this module and nothing else (plan step 5): {@link fixedReadLeafClassOfEngine}
+ * and {@link driverEvaluatesFixedReadLeaf}.
  */
 
 import { fixedInnerReadOf, fixedReadLeafNameOf, type FixedReadLeaf, type FixedReadLeafName } from '@objectstack/spec/data';
@@ -72,6 +73,8 @@ import {
   isFixedReadLeafSeamRefusal,
 } from './fixed-read-leaf-position.js';
 import { driverNameOf } from './relation-semi-join.js';
+import { securityResolversHost } from './engine-facet-hosts.js';
+import type { ObjectQL } from './engine.js';
 
 /** The hook events whose registration for the inner table BY NAME is D4's second class. */
 const FIND_HOOK_EVENTS = Object.freeze(['beforeFind', 'afterFind'] as const);
@@ -137,6 +140,21 @@ export function fixedReadLeafClassOf(host: FixedReadLeafSeamHost, leaf: FixedRea
     }
   }
   return undefined;
+}
+
+/**
+ * [ADR-0155 D4, plan step 5] The public face of {@link fixedReadLeafClassOf}
+ * for one engine: which of D4's two classes `leaf` falls in on `engine`, or
+ * `undefined` when neither. The recognition is the seam's own, run over the
+ * host the executor boundary reads (`securityResolversHost`), so a caller that
+ * must decline before it compiles (the analytics native compiler, ADR-0155 Q2
+ * as ruled) asks it here and ⛔ restates neither class.
+ *
+ * Read-only: it reads the engine's datasource bindings, its object-scoped
+ * middlewares and its find hooks, and calls no driver and logs nothing.
+ */
+export function fixedReadLeafClassOfEngine(engine: ObjectQL, leaf: FixedReadLeaf): FixedReadLeafClass | undefined {
+  return fixedReadLeafClassOf(securityResolversHost.of(engine), leaf);
 }
 
 /** The once-per-evaluator log's flags: one per engine for the seam's faults, one per driver for a declaration it lacks. */

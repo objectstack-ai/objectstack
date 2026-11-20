@@ -7,7 +7,7 @@ import type {
   CubeMeta,
   DatasetSelection,
 } from '@objectstack/spec/contracts';
-import { percentScaleOf, AggregationFunction, type Cube, type FilterCondition } from '@objectstack/spec/data';
+import { percentScaleOf, AggregationFunction, type Cube, type FilterCondition, type FixedReadLeaf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { Dataset } from '@objectstack/spec/ui';
 // [#6761] The ONE shared `I18nLabel → string` resolver (#6765, maintainer
@@ -90,7 +90,8 @@ import { measureResultType } from './measure-result-type.js';
 // compile.
 import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
 import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
-import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, ReadScopeFilterJudge } from './strategies/types.js';
+import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, FixedReadLeafClassAnswer, ReadScopeFilterJudge } from './strategies/types.js';
+import { fixedReadLeafRefusalSinkOf } from './read-scope-sql.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy, aggregateGroupKeys, aggregateObjectOf, resolveCubeFieldName } from './strategies/objectql-strategy.js';
 import { declaredCubeMemberKey } from './cube-member-key.js';
@@ -1355,6 +1356,20 @@ export interface AnalyticsServiceConfig {
    */
   hasObjectMiddleware?: (objectName: string) => boolean | undefined;
   /**
+   * [ADR-0155 D4, plan step 5] The engine seam's recognition of D4's two
+   * classes for a fixed-read leaf a read scope carries: the class, `null` for
+   * neither, `undefined` when this host cannot say. See
+   * `DatasetScopedStrategyContext.fixedReadLeafClassOf`.
+   *
+   * `NativeSQLStrategy` compiles the leaf (ADR-0155 Q2 as ruled) only where
+   * this answers `null`, and declines the query to the ObjectQL strategy on
+   * every other answer, so a host that wires nothing keeps the right rows and
+   * loses only the native path for scopes that carry the leaf. A host that
+   * holds the engine fills it from `@objectstack/objectql`'s
+   * `fixedReadLeafClassOfEngine(engine, leaf) ?? null`.
+   */
+  fixedReadLeafClassOf?: (leaf: FixedReadLeaf) => FixedReadLeafClassAnswer;
+  /**
    * The data engine's aggregate grouped also by related records' attributes,
    * which a SQL driver answers as one `LEFT JOIN … GROUP BY`. See
    * `DatasetScopedStrategyContext.executeRelationGroupAggregate`
@@ -1781,6 +1796,12 @@ export class AnalyticsService implements IAnalyticsService {
       // `NativeSQLStrategy` declines on `true` and on `undefined`, so the
       // engine path serves the object and its middlewares run.
       hasObjectMiddleware: config.hasObjectMiddleware,
+      // [ADR-0155 D4] The engine seam's recognition of D4's two classes,
+      // passed through untouched: `NativeSQLStrategy` compiles a fixed-read
+      // leaf only on a `null` answer and declines on every other one.
+      fixedReadLeafClassOf: config.fixedReadLeafClassOf,
+      // [ADR-0155 D4] This service's half of "logged once per evaluator".
+      fixedReadLeafRefusal: fixedReadLeafRefusalSinkOf(this.logger),
       // The engine's relation group join, passed through untouched; absent,
       // `ObjectQLStrategy` serves a cross-object dimension by its FK-expand.
       executeRelationGroupAggregate: config.executeRelationGroupAggregate,

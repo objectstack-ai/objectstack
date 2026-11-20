@@ -27,6 +27,7 @@ import {
   assertReadScopeAdmittedByEngine,
   assertReadScopeCannotVacate,
   assertReadScopeComparandsRunnable,
+  READ_SCOPE_FIXED_READ_LEAF_BRANDS,
   assertReadScopePlaceholdersResolvable,
   compileScopedFilterToSql,
 } from '../read-scope-sql.js';
@@ -1237,7 +1238,13 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // prints the `$empty` arm the executed native statement runs.
       // [#21505] …and the same temporal coercion pair, so the echo prints
       // the storage-form comparand and column the executed statement binds.
+      // [ADR-0155 D2, Q2 as ruled] …and the object and the refusal sink, so a
+      // scope carrying the share-grant leaf prints the subquery the executed
+      // statement runs (the native statement compiles it; the engine's driver
+      // compiles the same subquery), and refuses a leaf neither runs.
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
+        object: tableName,
+        fixedReadLeafRefusal: (ctx as DatasetScopedStrategyContext).fixedReadLeafRefusal,
         nonTextColumn: nonTextColumnResolver(ctx, tableName),
         dialect: sqlDialectFor(ctx, tableName),
         context: ctx.context,
@@ -1365,7 +1372,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the leaf from the security service exactly as a find does. The option
     // is this merge's and the engine's; `compileScopedFilterToSql` keeps
     // refusing the leaf, and the caller's own `where` never carries one.
-    assertReadScopeComparandsRunnable(scope, objectName, { admitReadableIds: true });
+    // [ADR-0155 D4, Q2 as ruled] …and the fixed-read leaf brands admitted
+    // too: the engine's seam passes such a leaf through to a driver that
+    // declares it, or refuses it in D4's envelope. A leaf out of position or
+    // in its write form is refused here, in that envelope, before the engine.
+    assertReadScopeComparandsRunnable(scope, objectName, {
+      admitReadableIds: true,
+      admitFixedReadLeaves: READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+      fixedReadLeafRefusal: (ctx as DatasetScopedStrategyContext).fixedReadLeafRefusal,
+      object: objectName,
+    });
     // [#19995] …and the placeholder half. The engine resolves `{…}` values on
     // the COMPOSED `where`, so a placeholder in the scope it cannot resolve
     // came back as its `FILTER_TOKEN_*` / 400 with the token relayed. Judged
@@ -2115,7 +2131,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // [ADR-0139 D6] The engine's `ReadableIds` leaf admitted, as at
     // `withReadScope`: this is an engine-bound merge, and the engine composes
     // the leaf at its boundary.
-    if (scope != null) assertReadScopeComparandsRunnable(scope, refObject, { admitReadableIds: true });
+    // [ADR-0155 D4] …and the fixed-read leaf brands, as at `withReadScope`.
+    if (scope != null) {
+      assertReadScopeComparandsRunnable(scope, refObject, {
+        admitReadableIds: true,
+        admitFixedReadLeaves: READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+        fixedReadLeafRefusal: (ctx as DatasetScopedStrategyContext).fixedReadLeafRefusal,
+        object: refObject,
+      });
+    }
     // [#19995] …and the placeholder half, as at `withReadScope`, with the
     // context forwarded to `executeAggregate` below.
     if (scope != null) assertReadScopePlaceholdersResolvable(scope, refObject, ctx.context);

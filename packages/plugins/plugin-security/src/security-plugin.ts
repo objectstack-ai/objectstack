@@ -2615,7 +2615,8 @@ export class SecurityPlugin implements Plugin {
     const readQl = () => this.ql;
     const readResolveKernelService = () => this.resolveKernelService;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
+    const readLogger = () => this.logger;
+    const host: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'logger' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'> = {
       baselinePermissionSets: this.baselinePermissionSets,
       checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
       collectRLSPolicies: (...a) => this.collectRLSPolicies(...a),
@@ -2625,6 +2626,7 @@ export class SecurityPlugin implements Plugin {
       get delegatedAdminGate() { return readDelegatedAdminGate(); },
       foldFieldRequiredPermissions: (...a) => this.foldFieldRequiredPermissions(...a),
       getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
+      get logger() { return readLogger(); },
       get permissionEvaluator() { return readPermissionEvaluator(); },
       get ql() { return readQl(); },
       readRowById: (...a) => this.readRowById(...a),
