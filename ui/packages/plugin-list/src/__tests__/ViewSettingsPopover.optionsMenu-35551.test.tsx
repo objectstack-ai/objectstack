@@ -85,8 +85,6 @@ describe('Options menu — the first level', () => {
       groupingConfig: { fields: [{ field: 'stage', order: 'asc' }] },
       showDensity: true,
       density: { mode: 'comfortable', cycle: () => {}, setMode: () => {} },
-      showInlineEdit: true,
-      setInlineEdit: () => {},
     });
     expect(value('options-row-layout')).toBe('Grid');
     // objectstack#35878: the shown columns are in place on this level.
@@ -286,9 +284,6 @@ describe('Options menu — words', () => {
       hiddenFields: new Set(['amount']),
       onReset: () => {},
       changedCount: 1,
-      onRefresh: () => {},
-      showInlineEdit: true,
-      setInlineEdit: () => {},
     }, 'zh');
     const named = (root: HTMLElement) => {
       for (const control of within(root).queryAllByRole('button').concat(within(root).queryAllByRole('textbox'))) {

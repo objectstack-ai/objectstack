@@ -57,7 +57,6 @@ describe('ViewSettingsPopover — every export entry stays inside the panel (obj
     const panel = openPopover({
       changedCount: 1,
       onReset: vi.fn(),
-      onRefresh: vi.fn(),
       exportFormats: FORMATS,
       onExport,
     });
@@ -81,7 +80,6 @@ describe('ViewSettingsPopover — every export entry stays inside the panel (obj
     const panel = openPopover({
       changedCount: 1,
       onReset: vi.fn(),
-      onRefresh: vi.fn(),
       exportFormats: FORMATS,
       onExport: vi.fn(),
     });
@@ -100,7 +98,7 @@ describe('ViewSettingsPopover — every export entry stays inside the panel (obj
   });
 
   it('draws no export row when the view offers no format', () => {
-    const panel = openPopover({ onRefresh: vi.fn(), exportFormats: [], onExport: vi.fn() });
+    const panel = openPopover({ exportFormats: [], onExport: vi.fn() });
 
     expect(within(panel).queryByTestId('display-export-group')).not.toBeInTheDocument();
   });
