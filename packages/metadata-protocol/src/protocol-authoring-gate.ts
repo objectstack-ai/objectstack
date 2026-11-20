@@ -729,11 +729,11 @@ function packagedRuleCopyRefusalOf(
 /** The members {@link draftPublishJudgement} and {@link draftPublishVerdict} read. */
 type DraftVerdictHost = RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation'> & {
     /**
-     * [#35256] The registered `automation` service, read per call and recorded
-     * nowhere (as {@link sealedFlowNodeTypeVocabulary} reads it): the engine
-     * whose connector lookups {@link draftConnectorAdvisories} asks.
+     * [#35256] The protocol's services registry reader, read per call and
+     * recorded nowhere: {@link draftConnectorAdvisories} asks its `automation`
+     * service, as {@link sealedFlowNodeTypeVocabulary} does.
      */
-    automationService: () => unknown;
+    servicesRegistry: () => (() => Map<string, any>) | undefined;
 };
 
 /**
@@ -913,7 +913,7 @@ export async function draftPublishJudgement(
  * without the lookups, judges nothing, as the probe does.
  */
 function draftConnectorAdvisories(
-    host: Pick<DraftVerdictHost, 'automationService'>,
+    host: Pick<DraftVerdictHost, 'servicesRegistry'>,
     name: string,
     body: unknown,
     packageId: string | null,
@@ -921,7 +921,7 @@ function draftConnectorAdvisories(
 ): RuntimeAuthoringIssue[] {
     let automation: unknown;
     try {
-        automation = host.automationService();
+        automation = host.servicesRegistry()?.().get('automation');
     } catch {
         return [];
     }

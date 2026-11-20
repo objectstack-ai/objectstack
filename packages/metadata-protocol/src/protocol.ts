@@ -1912,8 +1912,7 @@ export class ObjectStackProtocolImplementation implements
 
     /** The host both draft verdict bodies read: the promotion's own collaborators. */
     private draftVerdictHost(): ThisParameterType<typeof draftPublishJudgement> {
-        const readAuthoringChannel = () => this.authoringChannel;
-        const readEngine = () => this.engine;
+        const readAuthoringChannel = () => this.authoringChannel, readEngine = () => this.engine;
         const host: ThisParameterType<typeof draftPublishJudgement> = {
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
@@ -1930,8 +1929,7 @@ export class ObjectStackProtocolImplementation implements
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
-            // [#35256] Read per call, recorded nowhere: the connector lookups the draft verdict asks.
-            automationService: () => this.getServicesRegistry?.().get('automation'),
+            servicesRegistry: () => this.getServicesRegistry,
         };
         return host;
     }
