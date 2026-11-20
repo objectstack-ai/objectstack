@@ -505,7 +505,7 @@ async function activeMintedCredentials(engine: Pick<RegistrationStore, 'find'>, 
  * own tally still holds what was ended when a later write fails. A row a pass
  * ended and the next read still answers was not ended, which is a failure,
  * never a loop. No engine, nothing to end. Throws when a read or a write
- * fails.
+ * fails, once both the apps and the credentials have been tried.
  */
 export async function endWhatTheAccountRegistered(
   engine: RegistrationStore | undefined,
@@ -513,10 +513,29 @@ export async function endWhatTheAccountRegistered(
   ended: EndedRegistrations = { ownedApps: [], scimCredentials: [] },
 ): Promise<EndedRegistrations> {
   if (!engine) return ended;
+  // The credentials are revoked though an app could not be disabled, and the
+  // first failure is thrown once both have run: a failure ends no less.
+  let failure: { error: unknown } | undefined;
+  try {
+    await disableOwnedApps(engine, userId, ended);
+  } catch (error) {
+    failure = { error };
+  }
+  try {
+    await revokeMintedCredentials(engine, userId, ended);
+  } catch (error) {
+    failure ??= { error };
+  }
+  if (failure) throw failure.error;
+  return ended;
+}
+
+/** {@link endWhatTheAccountRegistered}'s apps: each read repeats until it answers none. */
+async function disableOwnedApps(engine: RegistrationStore, userId: string, ended: EndedRegistrations): Promise<void> {
   const disabled = new Set<string>();
   for (;;) {
     const page = await enabledOwnedApps(engine, userId);
-    if (page.length === 0) break;
+    if (page.length === 0) return;
     for (const row of page) {
       const id = row.id;
       if (typeof id !== 'string' || id.length === 0) throw new Error('an OAuth application row carries no id');
@@ -530,10 +549,14 @@ export async function endWhatTheAccountRegistered(
       ended.ownedApps.push(nameOfApp(row));
     }
   }
+}
+
+/** {@link endWhatTheAccountRegistered}'s credentials: each read repeats until it answers none. */
+async function revokeMintedCredentials(engine: RegistrationStore, userId: string, ended: EndedRegistrations): Promise<void> {
   const revoked = new Set<string>();
   for (;;) {
     const page = await activeMintedCredentials(engine, userId);
-    if (page.length === 0) return ended;
+    if (page.length === 0) return;
     for (const row of page) {
       const id = row.id;
       if (typeof id !== 'string' || id.length === 0) throw new Error('a SCIM connection credential row carries no id');
