@@ -23,7 +23,9 @@
  *      re-reads the grid.
  *   5. Undo (slice S2): the save toast's Undo button and Ctrl+Z / Cmd+Z on a
  *      cell take a save back as a NEW guarded update of the prior value,
- *      newest first, each once; an open editor keeps Ctrl+Z for its text.
+ *      newest first, each once, guarded by the version the grid's own write
+ *      answered (a later change by someone else answers 409); an open editor
+ *      keeps Ctrl+Z for its text.
  *   6. A grid without `cellSelection` inside a list's own-writes registry
  *      (the related list in that list's record drawer) still re-reads on a
  *      write the outer grid holds.
@@ -326,6 +328,44 @@ describe('ObjectGrid autosave — Undo takes a save back as a new guarded update
     expect(ds.update.mock.calls[2].slice(1)).toEqual(['d1', { amount: 10 }, { ifMatch: '2026-11-20T11:00:02.000Z' }]);
     await screen.findByText('10');
     expect(screen.getByText('A2')).toBeInTheDocument();
+  });
+
+  it("someone else's later change answers 409 on the undo, even after a re-read: Cancel keeps their value", async () => {
+    const ds = makeDataSource();
+    // The server refuses a write whose If-Match is not the record's version.
+    const land = ds.update.getMockImplementation();
+    ds.update.mockImplementation(async (object: string, id: string, changes: Record<string, any>, opts?: any) => {
+      if (opts?.ifMatch && opts.ifMatch !== ds.store[id].updated_at) {
+        throw Object.assign(new Error('Record changed since you read it'), {
+          code: 'CONCURRENT_UPDATE',
+          currentVersion: ds.store[id].updated_at,
+          currentRecord: { ...ds.store[id] },
+        });
+      }
+      return land(object, id, changes, opts);
+    });
+    const { container } = renderGrid(ds, true);
+    await screen.findByText('beta');
+    await editSelectFirst(container, dataCell(container, 0, '10'), '11');
+    await screen.findByText('11');
+    // Another user sets the amount; a change naming no record makes the grid read again.
+    ds.store.d1 = { ...ds.store.d1, amount: 50, updated_at: '2026-11-20T12:00:00.000Z' };
+    notifyDataChanged({ objectName: OBJECT });
+    await screen.findByText('50');
+    undoOfToast(0)!.onClick();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    // Guarded by the version this grid's own save answered, not the re-read's.
+    expect(ds.update.mock.calls[1][3]).toEqual({ ifMatch: '2026-11-20T11:00:01.000Z' });
+    fireEvent.click(await screen.findByRole('button', { name: /^Cancel$/ }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(2);
+    expect(ds.store.d1.amount).toBe(50);
+    expect(screen.getByText('50')).toBeInTheDocument();
+    expect(toasts.success).not.toHaveBeenCalledWith('Change undone');
+    // The cancelled undo is spent: the key has nothing left to send.
+    pressUndo(container);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.update).toHaveBeenCalledTimes(2);
   });
 
   it('an open editor keeps Ctrl+Z for its own text: no undo is sent', async () => {

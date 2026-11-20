@@ -16,8 +16,12 @@
 
 /** One landed cell save that Undo can still take back. */
 export interface CellSaveUndo {
+  /** The object the save wrote, so a grid pointed elsewhere never aims it at another. */
+  objectName: string;
   /** The record the save wrote. */
   id: string;
+  /** The version the save's write answered: what Undo's `If-Match` falls back to. */
+  version: string | undefined;
   /** What Undo sends: each written field's value before the save, as stored. */
   restore: Record<string, unknown>;
   /** What Undo draws: each written field as the row showed it before the save. */

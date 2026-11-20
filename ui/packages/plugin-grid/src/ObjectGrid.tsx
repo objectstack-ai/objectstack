@@ -2546,16 +2546,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     else writtenVersionsRef.current.delete(id);
   };
 
-  /** One row's guarded write. Rejects with whatever the data source threw. */
+  /**
+   * One row's guarded write. Rejects with whatever the data source threw.
+   * `guard` is the version to send in place of the one the row implies (an
+   * undo's: the version this grid's own write answered).
+   */
   const writeRowGuarded = async (
     ds: DataSource,
     resource: string,
     id: string,
     changes: Record<string, any>,
     row: any,
+    guard?: string,
   ): Promise<unknown> => {
     const readVersion = rowVersionOf(row);
-    const ifMatch = rowVersionToSend(writtenVersionsRef.current.get(id), readVersion);
+    const ifMatch = guard ?? rowVersionToSend(writtenVersionsRef.current.get(id), readVersion);
     const result = await ds.update(resource, id, changes, ifMatch ? { ifMatch } : undefined);
     rememberRowWrite(id, readVersion, result);
     return result;
@@ -2625,7 +2630,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    * again and a sorted or grouped row keeps its place until the next load.
    * `shown` is what the row draws for the written fields when it is not
    * `changes` itself (an undo draws a relation as the row read it, and sends
-   * its id). Resolves the write's answer, or `reloaded` when nothing was
+   * its id), and `guard` the `If-Match` to send in place of the one the row
+   * implies. Resolves the write's answer, or `reloaded` when nothing was
    * written. Rejects as the write does.
    */
   const writeRowInPlace = async (
@@ -2633,12 +2639,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     changes: Record<string, any>,
     row: any,
     shown: Record<string, any> = changes,
+    guard?: string,
   ): Promise<{ outcome: 'saved'; result: unknown } | { outcome: 'reloaded' }> => {
     const releaseOwnWrite = ownWrites.hold(objectName!, id);
     try {
       let answer: unknown;
       try {
-        answer = await writeRowGuarded(dataSource!, objectName!, id, changes, row);
+        answer = await writeRowGuarded(dataSource!, objectName!, id, changes, row, guard);
       } catch (err) {
         if (!isConcurrentUpdateError(err)) throw err;
         const resolved = await resolveRowConflict(dataSource!, objectName!, id, changes, row, err, releaseOwnWrite);
@@ -2658,10 +2665,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   };
 
   /**
-   * objectstack#35685 — the row an undo of record `id` writes over: the row
-   * the grid draws for it now (a later save's patch over the row it read), so
-   * its `If-Match` is the newest version this grid knows. `fallback` is the
-   * row the save left, for a record no longer among the rows in hand.
+   * objectstack#35685 — the row an undo of record `id` is drawn over: the row
+   * the grid draws for it now (a later save's patch over the row it read, or
+   * the row a later load brought). `fallback` is the row the save left, for a
+   * record no longer among the rows in hand.
    */
   const currentRowOf = (id: string, fallback: any): any => {
     const { data: rows, pages } = loadedRowsRef.current;
@@ -2679,15 +2686,22 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   /**
    * objectstack#35685 — take back one landed cell save: a new guarded update
    * writing what the record held before it, drawn in place like the save
-   * (one more write, so one more audit entry). An entry already taken back,
-   * by its toast or by Ctrl+Z, does nothing. A refusal is said on a toast;
-   * a 409 the user cancels writes nothing and says nothing more.
+   * (one more write, so one more audit entry). Its `If-Match` is the version
+   * this grid's own newest write of the record answered, never a version a
+   * later load read: a change someone else made since then answers 409 and
+   * opens the conflict dialog instead of being overwritten. An entry already
+   * taken back, by its toast or by Ctrl+Z, does nothing, and one of another
+   * object (the grid was pointed elsewhere) is dropped unsent. A refusal is
+   * said on a toast; a 409 the user cancels writes nothing and says nothing
+   * more. Either way the entry is spent.
    */
   const undoCellSave = async (entry: CellSaveUndo, fallbackRow: any): Promise<void> => {
     if (!dataSource || !objectName || !cellUndoRef.current.take(entry)) return;
+    if (entry.objectName !== objectName) return;
     const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id: entry.id });
     try {
-      const written = await writeRowInPlace(entry.id, entry.restore, currentRowOf(entry.id, fallbackRow), entry.shown);
+      const guard = writtenVersionsRef.current.get(entry.id)?.version ?? entry.version;
+      const written = await writeRowInPlace(entry.id, entry.restore, currentRowOf(entry.id, fallbackRow), entry.shown, guard);
       if (written.outcome === 'saved') toastRecordSave(toast, t('actions.undone'), claim.take(undefined));
     } catch (err) {
       if (isConcurrentUpdateError(err)) return;
@@ -2746,7 +2760,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           return;
         }
         const entry: CellSaveUndo = {
+          objectName,
           id: key,
+          version: rowVersionOf(written.result),
           restore,
           shown: Object.fromEntries(Object.keys(changes).map((field) => [field, row[field]])),
         };
