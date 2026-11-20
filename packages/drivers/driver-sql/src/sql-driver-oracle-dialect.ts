@@ -204,6 +204,33 @@ export function oracleUuidRawBinding(
   throw err;
 }
 
+/**
+ * [ADR-0155 O2, ruling A on Oracle] {@link oracleUuidRawBinding}'s conversion
+ * written over a text COLUMN instead of a bound value: the projection of a
+ * fixed-read leaf's inner read (`record_id`, `VARCHAR2`) when the outer column
+ * it is compared with is a `RAW(16)` uuid column, as the catalog reports it
+ * (`SqlDriver#primeOracleRawUuidColumns`, the prime the list's binding reads).
+ *
+ * ```sql
+ * "ID" IN (SELECT HEXTORAW(REPLACE("record_id", '-', '')) FROM "sys_record_share" WHERE …)
+ * ```
+ *
+ * Without it Oracle compares the two by converting the `RAW` column to its
+ * upper-case hex text, which no dashed (or lower-case) uuid grant equals: the
+ * leaf answers no row and its negation every row, with no error (measured on
+ * Oracle Free 23ai). With it each grant is the same 16 bytes the list binds
+ * for the same uuid text, dashed or not, either case.
+ *
+ * What the list refuses before any statement (`INVALID_FILTER` / 400, a
+ * grant that is not uuid text) has no refusal here: the grant is a stored
+ * row, not a comparand. A grant that is not hex fails the statement
+ * (ORA-01465, `DATABASE_ERROR` / 500); hex of another length is 16 bytes of
+ * nothing and matches no row.
+ */
+export function oracleUuidRawProjection(knexInstance: Knex, column: string): Knex.Raw {
+  return knexInstance.raw(`HEXTORAW(REPLACE(??, '-', ''))`, [column]);
+}
+
 /** Whether `value` is uuid text a `RAW(16)` column can be bound to — see {@link UUID_TEXT}. */
 export function isOracleUuidText(value: unknown): value is string {
   return typeof value === 'string' && UUID_TEXT.test(value);

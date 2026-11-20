@@ -72,8 +72,9 @@
  * old type until restart.
  *
  * Every other dialect is untouched: SQLite compares by column affinity (the
- * same rows, measured on step 3), and MySQL, SQL Server and Oracle are named
- * as left in the O2 card's report.
+ * same rows, measured on step 3), MySQL and SQL Server are named as left in
+ * the O2 card's report, and Oracle converts a `RAW(16)` uuid key's grants
+ * itself (`oracleUuidRawProjection`, `sql-driver-oracle-dialect.ts`).
  */
 
 import type { Knex } from 'knex';
