@@ -95,9 +95,12 @@ async function boot() {
 }
 
 const O = 'blank_id_task';
-const missingId = (action: 'update' | 'delete') => ({
+// [#35726] The refusal names the op it is for (`failedOperation`): its index in
+// `operations` and its object.
+const missingId = (action: 'update' | 'delete', index = 0) => ({
   error: `Operation '${action}' on '${O}' requires an id`,
   code: 'VALIDATION_FAILED',
+  failedOperation: { index, object: O },
 });
 
 /** Every op here names no row the engine could address; the arm is the op's own. */
@@ -131,7 +134,7 @@ describe('POST /api/v1/batch: an update or delete op that names no row answers t
       { object: O, action: 'create', data: { id: 'row-2', title: 'New' } },
       { object: O, action: 'update', id: '', data: { title: 'Changed' } },
     ]);
-    expect({ status: res.status, body: res.body }).toEqual({ status: 400, body: missingId('update') });
+    expect({ status: res.status, body: res.body }).toEqual({ status: 400, body: missingId('update', 1) });
     expect(ctx.transaction).not.toHaveBeenCalled();
     expect(await ctx.row('row-2')).toBeFalsy();
   });
