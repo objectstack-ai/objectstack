@@ -1930,6 +1930,8 @@ export class ObjectStackProtocolImplementation implements
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
+            // [#35256] Read per call, recorded nowhere: the connector lookups the draft verdict asks.
+            automationService: () => this.getServicesRegistry?.().get('automation'),
         };
         return host;
     }
