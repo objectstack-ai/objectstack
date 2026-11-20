@@ -103,7 +103,8 @@ afterEach(async () => {
 
 async function boot() {
     const ql = new ObjectQL({ logger: silent });
-    ql.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+    ql.registerDriver(driver, true);
     await ql.init();
     for (const def of [SYS_ORGANIZATION, SYS_USER, SysMember, SysSecret, ChannelAccount, ChannelUserLink]) {
         ql.registry.registerObject(def as any, '@objectstack/service-messaging');
@@ -148,7 +149,7 @@ async function boot() {
         await call('POST', `${SLACK_LINK_ROUTE}/proposal`, bearer);
         return call('POST', `${SLACK_LINK_ROUTE}/confirm`, bearer);
     };
-    return { ql, store, call, links, install, connect, calls, notices, audit };
+    return { ql, driver, store, call, links, install, connect, calls, notices, audit };
 }
 
 describe('the Slack install — an administrator\'s token, at rest', () => {
@@ -161,7 +162,8 @@ describe('the Slack install — an administrator\'s token, at rest', () => {
         expect(JSON.stringify(put.body)).not.toContain(GOOD);
         expect(JSON.stringify((await t.call('GET', SLACK_ACCOUNT_ROUTE, 'admin_a')).body)).not.toContain(GOOD);
 
-        const raw = await t.ql.getDriver(CHANNEL_ACCOUNT_OBJECT).find(CHANNEL_ACCOUNT_OBJECT, { where: {} }, {} as any);
+        // The stored row, read below the engine: the column holds a reference, never the token.
+        const raw = await t.driver.find(CHANNEL_ACCOUNT_OBJECT, { where: {} } as never);
         expect(raw).toHaveLength(1);
         expect(JSON.stringify(raw)).not.toContain(GOOD);
         const id = String((raw as any[])[0].id);

@@ -1845,6 +1845,9 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/connector-slack':
+        specifier: workspace:*
+        version: link:../../connectors/connector-slack
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql

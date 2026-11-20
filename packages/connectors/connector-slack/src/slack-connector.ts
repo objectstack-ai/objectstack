@@ -209,13 +209,21 @@ export function createSlackConnector(opts: SlackConnectorOptions): SlackConnecto
  * client it builds; a static `token` among them is never used here.
  */
 export interface SlackClientService {
-    /** A client for `token`: the action handlers of {@link createSlackConnector}. */
-    client(token: string): SlackConnectorBundle['handlers'];
+    /**
+     * A client for `token`: the connector's `call` action — any Web API
+     * method, `{ method, params }`, answered `{ ok, status, body, error }`.
+     */
+    client(token: string): { call(input: Record<string, unknown>): Promise<Record<string, unknown>> };
 }
 
 export function createSlackClientService(options: Omit<SlackConnectorOptions, 'token'> = {}): SlackClientService {
     const { token: _static, ...shared } = options as SlackConnectorOptions;
-    return { client: (token) => createSlackConnector({ ...shared, token }).handlers };
+    return {
+        client: (token) => {
+            const { handlers } = createSlackConnector({ ...shared, token });
+            return { call: (input) => handlers.call(input, undefined) };
+        },
+    };
 }
 
 function toRecord(r: SlackResult): Record<string, unknown> {
