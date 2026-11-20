@@ -4972,6 +4972,7 @@ const ar = {
     statusRejected: 'مرفوض',
     statusRecalled: 'مسحوب',
     statusReturned: 'أُعيد للمراجعة',
+    statusCancelled: 'ملغى',
     sendBackBtn: 'إعادة للمراجعة',
     sendBackTitle: 'إعادة هذا الطلب للمراجعة؟',
     sendBackBody: 'تنتهي هذه الجولة ويُفتح قفل السجل ليتمكن مقدم الطلب من تصحيح البيانات. عند إعادة الإرسال تبدأ جولة موافقة جديدة لجميع الموافقين.',

@@ -4545,6 +4545,7 @@ const ko = {
     statusRejected: '거부됨',
     statusRecalled: '회수됨',
     statusReturned: '수정 요청 반려',
+    statusCancelled: '취소됨',
     sendBackBtn: '반려',
     sendBackTitle: '이 요청을 수정하도록 반려하시겠습니까?',
     sendBackBody: '이번 라운드가 종료되고 레코드 잠금이 해제되어 신청자가 데이터를 수정할 수 있습니다. 다시 제출하면 모든 승인자에게 새로운 승인 라운드가 시작됩니다.',

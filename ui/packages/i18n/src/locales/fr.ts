@@ -4649,6 +4649,7 @@ const fr = {
     statusRejected: 'Rejetée',
     statusRecalled: 'Retirée',
     statusReturned: 'Renvoyé pour révision',
+    statusCancelled: 'Annulée',
     sendBackBtn: 'Renvoyer',
     sendBackTitle: 'Renvoyer cette demande pour révision ?',
     sendBackBody: 'Ce tour se termine et l\'enregistrement est déverrouillé pour que le demandeur corrige les données. À la nouvelle soumission, un nouveau tour d\'approbation s\'ouvre pour tous les approbateurs.',

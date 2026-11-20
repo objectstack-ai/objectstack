@@ -8,7 +8,7 @@
 
 import * as React from 'react';
 import { cn } from '@object-ui/components';
-import { Check } from 'lucide-react';
+import { Check, Minus, Undo2, X } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/react';
 import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
 
@@ -25,7 +25,17 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
  * The approvals get's `flow_steps` is NOT a route: it is the flow graph's
  * trunk, so a request a decision sent down another branch was drawn on rungs
  * it never visits (objectstack#26563); no caller hands it in. The gate on HOW
- * MANY steps lives here, once: fewer than two steps draws nothing.
+ * MANY steps lives here, once: fewer than two steps draws nothing, unless the
+ * route is a decided request's (objectstack#35730).
+ *
+ * ## A decided request's own step
+ *
+ * A decided request's route (`ahead: 'decided'`) ends at its own step, and
+ * the served step state says only `done` (approved) or `current` (any other
+ * decision). So the caller hands in the request's status as `decided`, and the
+ * last step is drawn with that decision, its marker and its word, never as the
+ * step in progress. One step is then enough to draw: the first step of a flow,
+ * or a one-step flow, decided, is still the answer to "where did it stop".
  *
  * ## Vertical, at every step count (objectui#5554)
  *
@@ -51,11 +61,38 @@ export type ApprovalFlowStep = NonNullable<ApprovalRequestLite['flow_route']>['s
 export interface ApprovalStepLineProps {
   /** The served route's steps (`flow_route.steps`), in route order. Fewer than two steps draws nothing. */
   steps: ReadonlyArray<ApprovalFlowStep> | null | undefined;
+  /** The request's status when its route is decided (`flow_route.ahead === 'decided'`); else absent. */
+  decided?: string;
 }
 
-export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps }) => {
+/** Whether {@link ApprovalStepLine} draws anything for these props: the one gate on step count. */
+export function stepLineDraws({ steps, decided }: ApprovalStepLineProps): boolean {
+  return !!steps && steps.length >= (decided ? 1 : 2);
+}
+
+/** A decision's marker: its icon and the marker's tint. */
+const DECISION_MARKER: Readonly<Record<string, { icon: typeof Check; tint: string }>> = {
+  approved: { icon: Check, tint: 'bg-emerald-500 text-white' },
+  rejected: { icon: X, tint: 'bg-red-500 text-white' },
+  returned: { icon: Undo2, tint: 'bg-muted text-muted-foreground border' },
+  recalled: { icon: Minus, tint: 'bg-muted text-muted-foreground border' },
+  cancelled: { icon: Minus, tint: 'bg-muted text-muted-foreground border' },
+};
+
+export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps, decided }) => {
   const { t } = useObjectTranslation();
-  if (!steps || steps.length < 2) return null;
+  if (!steps || !stepLineDraws({ steps, decided })) return null;
+  // Literal keys, so the call-site i18n gate checks every one.
+  const decisionWord = (status: string): string | null => {
+    switch (status) {
+      case 'approved': return String(t('approvalsInbox.statusApproved', { defaultValue: 'Approved' }));
+      case 'rejected': return String(t('approvalsInbox.statusRejected', { defaultValue: 'Rejected' }));
+      case 'returned': return String(t('approvalsInbox.statusReturned', { defaultValue: 'Returned for revision' }));
+      case 'recalled': return String(t('approvalsInbox.statusRecalled', { defaultValue: 'Recalled' }));
+      case 'cancelled': return String(t('approvalsInbox.statusCancelled', { defaultValue: 'Cancelled' }));
+      default: return null;
+    }
+  };
   return (
     <ol
       className="flex flex-col"
@@ -63,16 +100,22 @@ export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps }) => 
     >
       {steps.map((s, i) => {
         const next = steps[i + 1];
+        const decision = decided && !next ? decided : undefined;
+        const marker = decision ? DECISION_MARKER[decision] : undefined;
+        const word = decision ? decisionWord(decision) : null;
+        const state = decision ? 'decided' : s.state;
+        const Icon = marker?.icon ?? Check;
         return (
-          <li key={s.id} className="flex items-start gap-2">
+          <li key={s.id} className="flex items-start gap-2" data-decision={decision}>
             <div className="flex flex-col items-center self-stretch">
               <span className={cn(
                 'flex items-center justify-center h-5 w-5 shrink-0 rounded-full text-[10px] font-semibold',
-                s.state === 'done' && 'bg-emerald-500 text-white',
-                s.state === 'current' && 'bg-amber-500 text-white ring-2 ring-amber-200 dark:ring-amber-500/30',
-                s.state === 'upcoming' && 'bg-muted text-muted-foreground border',
+                marker?.tint ?? (decision && 'bg-muted text-muted-foreground border'),
+                state === 'done' && 'bg-emerald-500 text-white',
+                state === 'current' && 'bg-amber-500 text-white ring-2 ring-amber-200 dark:ring-amber-500/30',
+                state === 'upcoming' && 'bg-muted text-muted-foreground border',
               )}>
-                {s.state === 'done' ? <Check className="h-3 w-3" /> : i + 1}
+                {state === 'done' || marker ? <Icon className="h-3 w-3" aria-hidden /> : i + 1}
               </span>
               {next && (
                 // Tinted by the step it leads INTO — the same rule the
@@ -82,8 +125,9 @@ export const ApprovalStepLine: React.FC<ApprovalStepLineProps> = ({ steps }) => 
             </div>
             <span className={cn(
               'min-w-0 flex-1 pt-0.5 text-xs break-words',
-              s.state === 'current' ? 'font-medium' : 'text-muted-foreground',
+              state === 'current' ? 'font-medium' : 'text-muted-foreground',
             )}>{s.label}</span>
+            {word && <span className="min-w-0 pt-0.5 text-xs font-medium break-words">{word}</span>}
           </li>
         );
       })}

@@ -44,7 +44,9 @@
  *     its own step, and, while it is pending, the steps ahead the flow's graph
  *     decides. At ANY status: a decided request and a `first_response` node
  *     draw it too. The markup is `ApprovalStepLine`, the one the business
- *     record's approvals panel draws. Never the row's `flow_steps`, the flow
+ *     record's approvals panel draws; on a decided request it marks the own
+ *     step with the decision and draws a single step too (objectstack#35730).
+ *     Never the row's `flow_steps`, the flow
  *     graph's trunk, which showed a request a decision sent down another
  *     branch on rungs it never visits (objectstack#26563).
  *  3. **Progress** — `DecisionProgressIndicator` (A3), drawn from the request's
@@ -55,6 +57,9 @@
  *     approver named, with a position's label and the countersign group the
  *     slot fills, as the approvals inbox's request sheet names them. See
  *     "Naming the pending approvers" below.
+ *
+ *  Parts 2 to 4 share the "Approval progress" card, and a card none of them
+ *  draws into is not drawn at all (objectstack#35730).
  *  5. **Decisions** — `DeclaredActionsBar` over `sys_approval_request`'s OWN
  *     declared actions at `record_section`, the location and the bar the
  *     business record page already runs them through (objectui#3055). Every
@@ -182,7 +187,7 @@ import { cn, Badge } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
 import { History, Stamp, Workflow } from 'lucide-react';
 import { ApprovalActionTimeline } from '../approval-progress/ApprovalActionTimeline.js';
-import { ApprovalStepLine } from '../approval-progress/ApprovalStepLine.js';
+import { ApprovalStepLine, stepLineDraws } from '../approval-progress/ApprovalStepLine.js';
 import { DecisionProgressIndicator } from '../approval-progress/DecisionProgressIndicator.js';
 import { eligibleApproverCount } from '../approval-progress/eligibleApprovers.js';
 import { DeclaredActionsBar } from '../DeclaredActionsBar.js';
@@ -224,7 +229,7 @@ export interface ApprovalDecisionPanelProps {
  */
 function PendingApprovers({ request }: { request: ApprovalRequestLite }) {
   const { t } = useObjectTranslation();
-  const pending = request.status === 'pending';
+  const pending = waitsOnAnyone(request);
   // Only the references the server left unnamed, and none on a decided
   // request, so a slate the approvals get named whole costs no request.
   const refs = React.useMemo(
@@ -271,6 +276,11 @@ function PendingApprovers({ request }: { request: ApprovalRequestLite }) {
       </div>
     </div>
   );
+}
+
+/** Whether {@link PendingApprovers} draws: a pending request with at least one slot. */
+function waitsOnAnyone(request: ApprovalRequestLite): boolean {
+  return request.status === 'pending' && (request.pending_approvers?.length ?? 0) > 0;
 }
 
 /**
@@ -430,6 +440,11 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
   }, [requestId]);
 
   const tr = (key: string, defaultValue: string) => String(t(`approvalsInbox.${key}`, { defaultValue }));
+  const line = {
+    steps: request.flow_route?.steps,
+    decided: request.flow_route?.ahead === 'decided' ? request.status : undefined,
+  };
+  const hasProgress = stepLineDraws(line) || !!progress || waitsOnAnyone(request);
 
   return (
     <div className={cn('@container space-y-4', className)} data-testid="approval-decision-panel">
@@ -452,11 +467,13 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
           {submitted && <SubmittedChildTables model={submitted} />}
         </div>
         <aside className="min-w-0 space-y-4" data-testid="approval-decision-rail">
-          <RailCard icon={Stamp} title={tr('progressTitle', 'Approval progress')} testId="approval-decision-progress">
-            <ApprovalStepLine steps={request.flow_route?.steps} />
-            {progress && <DecisionProgressIndicator progress={progress} eligibleApprovers={eligible} />}
-            <PendingApprovers request={request} />
-          </RailCard>
+          {hasProgress && (
+            <RailCard icon={Stamp} title={tr('progressTitle', 'Approval progress')} testId="approval-decision-progress">
+              <ApprovalStepLine {...line} />
+              {progress && <DecisionProgressIndicator progress={progress} eligibleApprovers={eligible} />}
+              <PendingApprovers request={request} />
+            </RailCard>
+          )}
           {submitted && <SubmittedAttachmentsCard model={submitted} />}
           {thread.readable && (
             <RailCard icon={History} title={tr('history', 'Activity')} testId="approval-decision-activity">

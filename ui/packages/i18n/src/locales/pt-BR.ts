@@ -4648,6 +4648,7 @@ const pt = {
     statusRejected: 'Rejeitada',
     statusRecalled: 'Retirada',
     statusReturned: 'Devolvido para revisão',
+    statusCancelled: 'Cancelada',
     sendBackBtn: 'Devolver',
     sendBackTitle: 'Devolver esta solicitação para revisão?',
     sendBackBody: 'Esta rodada termina e o registro é desbloqueado para o solicitante corrigir os dados. Ao reenviar, uma nova rodada de aprovação é aberta para todos os aprovadores.',
