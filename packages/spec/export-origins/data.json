@@ -915,6 +915,19 @@
     "ValueRoundTripCase": "src/data/value-roundtrip-conformance.ts#ValueRoundTripCase (interface)",
     "ValueRoundTripColumn": "src/data/value-roundtrip-conformance.ts#ValueRoundTripColumn (type)",
     "ValueShapeFieldDef": "src/data/field-value.zod.ts#ValueShapeFieldDef (interface)",
+    "WORK_CALENDAR_CODE_PATTERN": "src/data/work-calendar.ts#WORK_CALENDAR_CODE_PATTERN (const)",
+    "WORK_CALENDAR_INVALID_CODE": "src/data/work-calendar.ts#WORK_CALENDAR_INVALID_CODE (const)",
+    "WORK_CALENDAR_MAINTENANCE_LEAD_DAYS": "src/data/work-calendar.ts#WORK_CALENDAR_MAINTENANCE_LEAD_DAYS (const)",
+    "WORK_CALENDAR_NOT_MAINTAINED_CODE": "src/data/work-calendar.ts#WORK_CALENDAR_NOT_MAINTAINED_CODE (const)",
+    "WORK_CALENDAR_UNRESOLVED_CODE": "src/data/work-calendar.ts#WORK_CALENDAR_UNRESOLVED_CODE (const)",
+    "WORK_CALENDAR_WEEKDAY_FIELDS": "src/data/work-calendar.ts#WORK_CALENDAR_WEEKDAY_FIELDS (const)",
+    "WallClockParts": "src/data/wall-clock.ts#WallClockParts (interface)",
+    "WorkCalendar": "src/data/work-calendar.ts#WorkCalendar (interface)",
+    "WorkCalendarDay": "src/data/work-calendar.ts#WorkCalendarDay (interface)",
+    "WorkCalendarUnresolvedReason": "src/data/work-calendar.ts#WorkCalendarUnresolvedReason (type)",
+    "WorkPeriod": "src/data/work-calendar.ts#WorkPeriod (interface)",
+    "WorkPeriodsParse": "src/data/work-calendar.ts#WorkPeriodsParse (type)",
+    "WorkPeriodsRefusal": "src/data/work-calendar.ts#WorkPeriodsRefusal (type)",
     "ZeroLimitConformanceCase": "src/data/pagination-conformance.ts#ZeroLimitConformanceCase (interface)",
     "actionRefusalsWithoutSandboxedBody": "src/data/hook-refusal-codes.ts#actionRefusalsWithoutSandboxedBody (function)",
     "actionTextsWithoutRunnableCode": "src/data/hook-refusal-codes.ts#actionTextsWithoutRunnableCode (function)",
@@ -1156,6 +1169,8 @@
     "validateDriverConfig": "src/data/driver/config-registry.zod.ts#validateDriverConfig (function)",
     "valueRoundTripDivergence": "src/data/value-roundtrip-conformance.ts#valueRoundTripDivergence (function)",
     "valueSchemaFor": "src/data/field-value.zod.ts#valueSchemaFor (function)",
-    "virtualFieldAggregateRemedy": "src/data/aggregate-field-type-compatibility.ts#virtualFieldAggregateRemedy (function)"
+    "virtualFieldAggregateRemedy": "src/data/aggregate-field-type-compatibility.ts#virtualFieldAggregateRemedy (function)",
+    "wallClockToUtcMs": "src/data/wall-clock.ts#wallClockToUtcMs (function)",
+    "zonedWallClockToUtcMs": "src/data/wall-clock.ts#zonedWallClockToUtcMs (function)"
   }
 }

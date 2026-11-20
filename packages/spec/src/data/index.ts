@@ -173,6 +173,13 @@ export * from './date-macros.zod';
 // rule (#8690 C half). `ui/dashboard.zod.ts` re-exports the vocabulary.
 export * from './date-range-presets';
 export * from './calendar-day';
+// [ADR-0157 D11, open point 3] The wall-clock → instant primitive (the one
+// daylight-saving rule), below `@objectstack/formula` so the working-calendar
+// arithmetic there and every other reader convert through one rule;
+// `@objectstack/core` re-exports it. Beside it, the working calendar's codes,
+// column names and resolved-calendar types (the arithmetic is formula's).
+export * from './wall-clock';
+export * from './work-calendar';
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
 // FilterCondition` lowering the seams run once, after the comparand doors and
 // after filter-token resolution: the `$between` split, the whole-day upper

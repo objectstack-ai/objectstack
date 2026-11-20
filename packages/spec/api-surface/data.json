@@ -929,6 +929,19 @@
     "ValueRoundTripCase (interface)",
     "ValueRoundTripColumn (type)",
     "ValueShapeFieldDef (interface)",
+    "WORK_CALENDAR_CODE_PATTERN (const)",
+    "WORK_CALENDAR_INVALID_CODE (const)",
+    "WORK_CALENDAR_MAINTENANCE_LEAD_DAYS (const)",
+    "WORK_CALENDAR_NOT_MAINTAINED_CODE (const)",
+    "WORK_CALENDAR_UNRESOLVED_CODE (const)",
+    "WORK_CALENDAR_WEEKDAY_FIELDS (const)",
+    "WallClockParts (interface)",
+    "WorkCalendar (interface)",
+    "WorkCalendarDay (interface)",
+    "WorkCalendarUnresolvedReason (type)",
+    "WorkPeriod (interface)",
+    "WorkPeriodsParse (type)",
+    "WorkPeriodsRefusal (type)",
     "ZeroLimitConformanceCase (interface)",
     "actionRefusalsWithoutSandboxedBody (function)",
     "actionTextsWithoutRunnableCode (function)",
@@ -1170,6 +1183,8 @@
     "validateDriverConfig (function)",
     "valueRoundTripDivergence (function)",
     "valueSchemaFor (function)",
-    "virtualFieldAggregateRemedy (function)"
+    "virtualFieldAggregateRemedy (function)",
+    "wallClockToUtcMs (function)",
+    "zonedWallClockToUtcMs (function)"
   ]
 }
