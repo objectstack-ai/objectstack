@@ -2,7 +2,8 @@
 //
 // An update whose every caller-supplied key is dropped (a static `readonly`
 // field, a `readonlyWhen`-locked field) is a no-op: no driver write, no audit
-// stamps, `afterUpdate` does not run, and the answer is the current record
+// stamps, `afterUpdate` does not run, no realtime `updated` event is published,
+// no roll-up recomputes, and the answer is the current record
 // (by-id) or zero written rows (predicate), with the drops still reported
 // through `onFieldsDropped` — the channel the REST `droppedFields` answer is
 // built from. Both branches. An update where at least one key survives —
@@ -25,17 +26,35 @@ import { ObjectQL } from './engine.js';
 const OBJECT = 'nd_task';
 const T_SEED = '2026-11-01T09:00:00.000Z';
 const T_UPDATE = '2026-11-19T10:00:00.000Z';
+const PARENT = 'nd_project';
+const LINE = 'nd_line';
 const SEEDER = 'usr_seed';
 const EDITOR = 'usr_editor';
 
-/** A store-backed stub driver that records every write it is handed. */
+/**
+ * A store-backed stub driver that records every write it is handed. One store
+ * per object; `rows` and `writes` are the task object's, `writesTo(o)` any
+ * other object's.
+ */
 function makeCapturingDriver() {
-  const rows = new Map<string, Record<string, any>>();
+  const stores = new Map<string, Map<string, Record<string, any>>>();
+  const storeFor = (o: string) => {
+    let s = stores.get(o);
+    if (!s) { s = new Map(); stores.set(o, s); }
+    return s;
+  };
+  const allWrites: Array<{ object: string; verb: 'update' | 'updateMany'; data: Record<string, unknown> }> = [];
+  const rows = storeFor(OBJECT);
   const writes: Array<{ verb: 'update' | 'updateMany'; data: Record<string, unknown> }> = [];
+  const record = (object: string, verb: 'update' | 'updateMany', data: Record<string, unknown>) => {
+    allWrites.push({ object, verb, data: { ...data } });
+    if (object === OBJECT) writes.push({ verb, data: { ...data } });
+  };
   const matches = (row: any, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]: [string, any]) => {
       if (k === '$and') return (v as any[]).every((w) => matches(row, w));
+      if (k === '$or') return (v as any[]).some((w) => matches(row, w));
       if (k.startsWith('$')) throw new Error(`stub driver: unsupported combinator ${k}`);
       if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
         return Object.entries(v).every(([op, target]) => {
@@ -51,43 +70,51 @@ function makeCapturingDriver() {
     name: 'nd-store', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async syncSchema() {},
-    async find(_o: string, ast: any) {
-      const hits = Array.from(rows.values()).filter((r) => matches(r, ast?.where));
+    async find(o: string, ast: any) {
+      const hits = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
       // The caller's bound, applied AFTER the filter.
       const page = typeof ast?.limit === 'number' ? hits.slice(0, ast.limit) : hits;
       return page.map((r) => ({ ...r }));
     },
-    async findOne(_o: string, ast: any) {
-      for (const r of rows.values()) if (matches(r, ast?.where)) return { ...r };
+    async findOne(o: string, ast: any) {
+      for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return { ...r };
       return null;
     },
-    async create(_o: string, data: Record<string, unknown>) {
+    async create(o: string, data: Record<string, unknown>) {
       const row = { ...data };
-      rows.set(String(row.id), row);
+      storeFor(o).set(String(row.id), row);
       return { ...row };
     },
-    async update(_o: string, id: string, data: Record<string, unknown>) {
-      writes.push({ verb: 'update', data: { ...data } });
-      const row = { ...rows.get(id), ...data, id };
-      rows.set(id, row);
+    async update(o: string, id: string, data: Record<string, unknown>) {
+      record(o, 'update', data);
+      const s = storeFor(o);
+      const row = { ...s.get(id), ...data, id };
+      s.set(id, row);
       return { ...row };
     },
-    async updateMany(_o: string, ast: any, data: Record<string, unknown>) {
-      writes.push({ verb: 'updateMany', data: { ...data } });
+    async updateMany(o: string, ast: any, data: Record<string, unknown>) {
+      record(o, 'updateMany', data);
+      const s = storeFor(o);
       let count = 0;
-      for (const row of [...rows.values()]) {
+      for (const row of [...s.values()]) {
         if (!matches(row, ast?.where)) continue;
-        rows.set(row.id, { ...row, ...data, id: row.id });
+        s.set(row.id, { ...row, ...data, id: row.id });
         count += 1;
       }
       return count;
     },
-    async delete(_o: string, id: string) { return rows.delete(id); },
-    async count(_o: string, ast: any) {
-      return Array.from(rows.values()).filter((r) => matches(r, ast?.where)).length;
+    async delete(o: string, id: string) { return storeFor(o).delete(id); },
+    async count(o: string, ast: any) {
+      return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where)).length;
     },
   };
-  return { driver, rows, writes };
+  const writesTo = (o: string) => allWrites.filter((w) => w.object === o);
+  const reset = () => {
+    for (const s of stores.values()) s.clear();
+    allWrites.length = 0;
+    writes.length = 0;
+  };
+  return { driver, rows, writes, storeFor, writesTo, reset };
 }
 
 describe('an update whose every caller-supplied key is dropped is a no-op', () => {
@@ -97,6 +124,8 @@ describe('an update whose every caller-supplied key is dropped is a no-op', () =
   const afterUpdateCalls: Array<{ id: unknown }> = [];
   /** When set, a `beforeUpdate` hook writes this value onto `derived`. */
   let hookWritesDerived: string | undefined;
+  /** Every envelope the stub realtime service was handed. */
+  const published: Array<{ type?: string; object?: string }> = [];
 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
@@ -122,6 +151,32 @@ describe('an update whose every caller-supplied key is dropped is a no-op', () =
         derived: { name: 'derived', label: 'Derived', type: 'text' },
       },
     } as any, 'test', 'test');
+    // The roll-up pair: a parent counting its lines, and a line carrying a
+    // read-only field to drop.
+    objectql.registry.registerObject({
+      name: PARENT,
+      label: 'No-op Project',
+      datasource: 'nd-store',
+      fields: {
+        name: { name: 'name', label: 'Name', type: 'text' },
+        line_count: { name: 'line_count', label: 'Lines', type: 'summary', summaryOperations: { object: LINE, function: 'count' } },
+      },
+    } as any, 'test', 'test');
+    objectql.registry.registerObject({
+      name: LINE,
+      label: 'No-op Line',
+      datasource: 'nd-store',
+      fields: {
+        label: { name: 'label', label: 'Label', type: 'text' },
+        score: { name: 'score', label: 'Score', type: 'number', readonly: true },
+        project: { name: 'project', label: 'Project', type: 'master_detail', reference: PARENT },
+      },
+    } as any, 'test', 'test');
+    objectql.setRealtimeService({
+      publish: async (event: any) => { published.push(event); },
+      subscribe: async () => 'sub-1',
+      unsubscribe: async () => undefined,
+    } as any);
     objectql.registerHook('afterUpdate', async (ctx: any) => {
       afterUpdateCalls.push({ id: ctx.input?.id ?? ctx.result?.id });
     }, { object: OBJECT });
@@ -137,8 +192,8 @@ describe('an update whose every caller-supplied key is dropped is a no-op', () =
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(T_UPDATE));
-    stub.rows.clear();
-    stub.writes.length = 0;
+    stub.reset();
+    published.length = 0;
     afterUpdateCalls.length = 0;
     hookWritesDerived = undefined;
     const seeded = (id: string, status: string) => ({
@@ -147,6 +202,18 @@ describe('an update whose every caller-supplied key is dropped is a no-op', () =
     });
     stub.rows.set('t1', seeded('t1', 'closed'));
     stub.rows.set('t2', seeded('t2', 'closed'));
+    // The parent's stored count is deliberately STALE (99, two lines exist), so
+    // any recompute is visible as a write of 2.
+    stub.storeFor(PARENT).set('p1', {
+      id: 'p1', name: 'P', line_count: 99,
+      created_at: T_SEED, updated_at: T_SEED, created_by: SEEDER, updated_by: SEEDER,
+    });
+    for (const id of ['l1', 'l2']) {
+      stub.storeFor(LINE).set(id, {
+        id, label: `l-${id}`, score: 1, project: 'p1',
+        created_at: T_SEED, updated_at: T_SEED, created_by: SEEDER, updated_by: SEEDER,
+      });
+    }
   });
 
   const asEditor = (extra: Record<string, unknown> = {}) => ({
@@ -262,6 +329,65 @@ describe('an update whose every caller-supplied key is dropped is a no-op', () =
         { verb: 'updateMany', data: { derived: 'from-hook', updated_at: T_UPDATE, updated_by: EDITOR } },
       ]);
       expect(afterUpdateCalls).toHaveLength(2);
+    });
+  });
+
+  // ── the change event ───────────────────────────────────────────────────
+
+  describe('the realtime change event', () => {
+    const updatedOf = (object: string) =>
+      published.filter((e) => e.object === object && typeof e.type === 'string' && e.type.endsWith('.updated'));
+
+    it('by-id: an all-dropped update publishes no updated event', async () => {
+      await objectql.update(OBJECT, { id: 't1', total_score: 100 }, asEditor() as any);
+      expect(updatedOf(OBJECT)).toEqual([]);
+    });
+
+    it('predicate: an all-dropped update publishes no updated event', async () => {
+      await objectql.update(OBJECT, { total_score: 100 }, asEditor({ where: { status: 'closed' }, multi: true }) as any);
+      expect(updatedOf(OBJECT)).toEqual([]);
+    });
+
+    it('control, by-id: a surviving field publishes exactly one data.record.updated', async () => {
+      await objectql.update(OBJECT, { id: 't1', total_score: 100, title: 'new' }, asEditor() as any);
+      expect(updatedOf(OBJECT).map((e) => e.type)).toEqual(['data.record.updated']);
+    });
+
+    it('control, predicate: a surviving field publishes exactly one data.records.updated', async () => {
+      await objectql.update(OBJECT, { total_score: 100, title: 'bulk' }, asEditor({ where: { status: 'closed' }, multi: true }) as any);
+      expect(updatedOf(OBJECT).map((e) => e.type)).toEqual(['data.records.updated']);
+    });
+  });
+
+  // ── the roll-up ────────────────────────────────────────────────────────
+
+  describe('the roll-up recompute', () => {
+    const lineMulti = () => asEditor({ where: { project: 'p1' }, multi: true });
+
+    it('by-id: an all-dropped line update leaves the parent unwritten', async () => {
+      await objectql.update(LINE, { id: 'l1', score: 5 }, asEditor() as any);
+      expect(stub.writesTo(LINE)).toEqual([]);
+      expect(stub.writesTo(PARENT)).toEqual([]);
+      expect(stub.storeFor(PARENT).get('p1')).toMatchObject({ line_count: 99, updated_at: T_SEED, updated_by: SEEDER });
+    });
+
+    it('predicate: an all-dropped line update leaves the parent unwritten', async () => {
+      await objectql.update(LINE, { score: 5 }, lineMulti() as any);
+      expect(stub.writesTo(LINE)).toEqual([]);
+      expect(stub.writesTo(PARENT)).toEqual([]);
+      expect(stub.storeFor(PARENT).get('p1')).toMatchObject({ line_count: 99, updated_at: T_SEED, updated_by: SEEDER });
+    });
+
+    it('control, by-id: a surviving field still recomputes the parent', async () => {
+      await objectql.update(LINE, { id: 'l1', score: 5, label: 'x' }, asEditor() as any);
+      expect(stub.writesTo(PARENT).length).toBeGreaterThan(0);
+      expect(stub.storeFor(PARENT).get('p1')?.line_count).toBe(2);
+    });
+
+    it('control, predicate: a surviving field still recomputes the parent', async () => {
+      await objectql.update(LINE, { score: 5, label: 'x' }, lineMulti() as any);
+      expect(stub.writesTo(PARENT).length).toBeGreaterThan(0);
+      expect(stub.storeFor(PARENT).get('p1')?.line_count).toBe(2);
     });
   });
 });
