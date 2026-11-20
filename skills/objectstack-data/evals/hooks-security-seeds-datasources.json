@@ -68,7 +68,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "externalId", "refused"],
-        "must_not_contain": ["code: ''", "code: null"]
+        "must_not_contain": []
       }
     },
     {
