@@ -3219,7 +3219,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       setFailureNotice((prev) => (prev?.rowKey === rowKey ? null : prev));
     } else {
       clearCellError(rowKey, columnKey);
-      setFailureNotice((prev) => (prev?.rowKey === rowKey && prev.columnKey === columnKey ? null : prev));
+      setFailureNotice((prev) => (prev?.rowKey === rowKey && prev?.columnKey === columnKey ? null : prev));
     }
   };
 
@@ -4862,7 +4862,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               <CellNotice text={cellNotice.text} onDismiss={() => setCellNotice(null)} />
                             )}
                             {selectFirst && !isEditing && cellError !== undefined
-                              && failureNotice?.rowKey === rowKey && failureNotice.columnKey === col.accessorKey
+                              && failureNotice?.rowKey === rowKey && failureNotice?.columnKey === col.accessorKey
                               && !(cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex) && (() => {
                                 // objectstack#35685 — the refusal, on the cell it kept.
                                 const refusal = rowRefusals.get(rowKey);

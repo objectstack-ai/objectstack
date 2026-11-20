@@ -96,7 +96,7 @@ function renderTable(onRowSave: Save, extra: Record<string, unknown> = {}, withP
 /** A save the test settles by hand. */
 function deferredSave() {
   const calls: Array<{ changes: Record<string, unknown>; resolve: () => void; reject: (e: unknown) => void }> = [];
-  const onRowSave = vi.fn((_i: number, changes: Record<string, unknown>) => new Promise<void>((resolve, reject) => {
+  const onRowSave = vi.fn((_i: number, changes: Record<string, unknown>, _row?: unknown) => new Promise<void>((resolve, reject) => {
     calls.push({ changes, resolve, reject });
   }));
   return { onRowSave, calls };
@@ -135,7 +135,7 @@ describe('data-table autosave — a committed cell saves at once (objectstack#35
   });
 
   it('a boolean flipped on Space saves at once', async () => {
-    const onRowSave = vi.fn(async () => {});
+    const onRowSave = vi.fn(async (_i: number, _changes: Record<string, unknown>) => {});
     const t = renderTable(onRowSave);
     fireEvent.click(t.cell(0, 3));
     fireEvent.keyDown(t.catcher()!, { key: ' ' });
