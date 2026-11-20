@@ -343,7 +343,8 @@ for (const source of SOURCES) {
       expect(onConfig.escalation, 'the inspector stored exactly what the author entered').toEqual(authored);
       const on = ApprovalNodeConfigSchema.safeParse(onConfig);
       expect(on.success, on.success ? '' : JSON.stringify(on.error.issues)).toBe(true);
-      expect((on.data as { escalation?: unknown }).escalation, 'and the contract keeps every value').toEqual(authored);
+      // The parse adds the one default the author left unset, `clock` (ADR-0157 D5).
+      expect((on.data as { escalation?: unknown }).escalation, 'and the contract keeps every value').toEqual({ ...authored, clock: 'wall_clock' });
 
       // OFF, values retained.
       gateBox(l)!.click();
@@ -352,7 +353,7 @@ for (const source of SOURCES) {
       expect(JSON.stringify(offConfig.escalation), 'every value identical, the switch false').toBe(JSON.stringify(retained));
       const off = ApprovalNodeConfigSchema.safeParse(offConfig);
       expect(off.success, off.success ? '' : JSON.stringify(off.error.issues)).toBe(true);
-      expect((off.data as { escalation?: unknown }).escalation, 'and the contract keeps them, switched off').toEqual(retained);
+      expect((off.data as { escalation?: unknown }).escalation, 'and the contract keeps them, switched off').toEqual({ ...retained, clock: 'wall_clock' });
     });
   });
 
@@ -422,7 +423,9 @@ for (const source of SOURCES) {
     it("'working_time' shows the calendar, and a code typed there round-trips through ApprovalNodeConfigSchema", () => {
       const { latest } = mount(draftWith({ approvers: APPROVERS, escalation: { timeoutHours: 4, clock: 'working_time' } }));
       expect(screen.queryByText(l.calendar)).not.toBeNull();
-      fireEvent.change(controlLabelled(l.calendar), { target: { value: 'cn_standard' } });
+      const calendarInput = screen.getByText(l.calendar).parentElement?.querySelector('input');
+      if (!calendarInput) throw new Error(`no input beside '${l.calendar}'`);
+      fireEvent.change(calendarInput, { target: { value: 'cn_standard' } });
       const after = configOf(latest())!;
       expect(after.escalation).toEqual({ timeoutHours: 4, clock: 'working_time', calendar: 'cn_standard' });
       expect(ApprovalNodeConfigSchema.safeParse(after).success).toBe(true);
