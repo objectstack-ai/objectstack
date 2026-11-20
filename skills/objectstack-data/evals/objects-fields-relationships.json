@@ -172,7 +172,7 @@
     {
       "id": 10,
       "prompt": "给 `task` 加一个「是否完成」字段，设成必填，免得有人忘了填。",
-      "expected_output": "Adds `is_done: { type: 'boolean', label: '是否完成', defaultValue: false }` with NO `required`: a checkbox always holds one of its two values, so `required` can only read as \"must be true\" and a form that reads it that way refuses the unchecked state — the one state a new task starts in; the default also lands imported or seeded rows that omit the column on a real `false`. Tells the user that \"must be ticked\" (terms, a confirmation) is a `validations[]` rule, not `required`. The label is Chinese, as the request is.",
+      "expected_output": "Adds `is_done: { type: 'boolean', label: '是否完成', defaultValue: false }`; `required: true` may stay or go, and either way the answer says what it does: on a boolean `required` refuses only `null`, and an unchecked box is a value, so it never means \"must be ticked\" and nobody can forget to fill it — the default lands every row, imported or seeded ones included, on a real `false`. Tells the user that \"must be ticked\" (terms, a consent) is a `validations[]` `script` rule whose `condition` is true while the box is not `true`, not `required`. The label is Chinese, as the request is.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -181,7 +181,6 @@
           "label: '是否完成'"
         ],
         "must_not_contain": [
-          "required: true,", "required: true }",
           "label: 'Is Done'"
         ]
       }
@@ -189,7 +188,7 @@
     {
       "id": 11,
       "prompt": "订单的流程是 草稿 → 已提交 → 已审批 / 已驳回，审批通过后才能发货。请建模这个流程，并保证没人能直接建一张已审批的订单。",
-      "expected_output": "The lifecycle is a `status` field of `type: 'select'` on `order` (options `draft` / `submitted` / `approved` / `rejected` with Chinese labels), guarded by a `type: 'state_machine'` validation whose `transitions` map uses option VALUES and which declares `initialStates: ['draft']` — `transitions` governs only UPDATE and a `select` accepts any option on insert, so without it an order can be created already `approved`. No separate status / stage / step table, and no approval-record object: the approval itself is a flow (objectstack-automation).",
+      "expected_output": "The lifecycle is a `status` field of `type: 'select'` on `order` (options `draft` / `submitted` / `approved` / `rejected` with Chinese labels), guarded by a `type: 'state_machine'` validation whose `transitions` map uses option VALUES and which declares `initialStates: ['draft']` — `transitions` governs only UPDATE and a `select` accepts any option on insert, so without it an order can be created already `approved`, and publish refuses the machine (`state-machine-no-initial-states`; only an update-only machine, `events: ['update']`, owes none). No separate status / stage / step table, and no approval-record object: the approval itself is a flow (objectstack-automation).",
       "files": [],
       "assertions": {
         "must_contain": [
