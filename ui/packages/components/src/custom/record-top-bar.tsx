@@ -292,10 +292,12 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
                   className="peer/actions flex min-w-0 items-center justify-end gap-2 text-sm text-foreground empty:hidden"
                   data-record-top-bar-actions=""
                 />
+                {/* Hidden beside no actions, and beside a host's toggle slot
+                    that holds nothing (a drawer with no panel switch). */}
                 {toggles && (
                   <span
                     aria-hidden="true"
-                    className="mx-1.5 h-4 w-px shrink-0 bg-border peer-empty/actions:hidden"
+                    className="mx-1.5 h-4 w-px shrink-0 bg-border peer-empty/actions:hidden [&:has(+:empty)]:hidden"
                     data-record-top-bar-divider="actions"
                   />
                 )}
