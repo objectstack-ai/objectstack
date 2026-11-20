@@ -413,9 +413,9 @@ export class SqlDriver implements IDataDriver {
       // here. Every dialect; `SqliteWasmDriver` and `TursoDriver` inherit it
       // (Turso's remote transport compiles the leaf with its own compiler).
       readableIdsLeaf: true,
-      // [ADR-0155 D4] The filter compiler compiles a `SharedRecordIds` leaf to its
-      // fixed inner read as one subquery (`applyFilterCondition`), every dialect;
-      // TursoDriver's remote transport compiles it with its own compiler.
+      // [ADR-0155 D4] One subquery per `SharedRecordIds` leaf (`applyFilterCondition`)
+      // on every dialect; same rows as the id list measured on SQLite and PostgreSQL
+      // only (O2: `fixed-read-leaf-key-type.ts`). Turso's remote transport has its own.
       fixedReadLeaves: ['SharedRecordIds' as const],
     };
   }
@@ -6525,9 +6525,9 @@ export class SqlDriver implements IDataDriver {
     return InternalHelpersFacet.readableIdsSubquery.call(internalHelpersHost.of(this), leaf, options);
   }
 
-  private fixedReadLeafSubquery(leaf: FixedReadLeaf): Knex.QueryBuilder {
-    // [ADR-0155 D2] The body lives in `sql-driver-internal-helpers.ts`, its docblock with it.
-    return InternalHelpersFacet.fixedReadLeafSubquery.call(internalHelpersHost.of(this), leaf);
+  private fixedReadLeafSubquery(leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string }): Knex.QueryBuilder {
+    // [ADR-0155 D2, O2] The body lives in `sql-driver-internal-helpers.ts`, its docblock with it.
+    return InternalHelpersFacet.fixedReadLeafSubquery.call(internalHelpersHost.of(this), leaf, outer);
   }
 
   /**

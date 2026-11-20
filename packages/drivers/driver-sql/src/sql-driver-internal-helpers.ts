@@ -39,6 +39,7 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { Knex } from 'knex';
 import type { SqlDriver } from './sql-driver.js';
 import { fixedInnerReadPredicates } from './fixed-read-leaf-compile.js';
+import { castFixedReadLeafColumn, fixedReadLeafKeyCast } from './fixed-read-leaf-key-type.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link InternalHelpersFacet} read — every one of
@@ -173,10 +174,20 @@ export class InternalHelpersFacet {
    *   another datasource before any driver is called.
    * - **One statement.** No transaction of its own (it is part of the outer
    *   statement), no cap, no ordering, ⛔ no `EXISTS`, no correlation, no join.
+   * - **The outer key's type (O2, ruled A).** `outer` names the object and the
+   *   column the subquery is compared with. On PostgreSQL, where that column's
+   *   base type is not text, the projection is `record_id` cast to it, as the
+   *   catalog read primed it (`fixed-read-leaf-key-type.ts`), so an integer or
+   *   uuid key answers the rows today's list answers. A text key, any other
+   *   dialect, or a table no door primed projects `record_id` as before.
    */
-  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle'>, leaf: FixedReadLeaf): Knex.QueryBuilder {
+  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle' | 'knex' | 'physicalSchemaByObject' | 'physicalTableByObject'>, leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string }): Knex.QueryBuilder {
     const read = fixedInnerReadPredicates(leaf, { emptyStringIsNull: this.isOracle });
-    const inner = this.getBuilder(read.table).select(read.column);
+    // The physical table as `getBuilder` addresses it: the key the prime recorded under.
+    const cast = outer?.object
+      ? fixedReadLeafKeyCast(this.knex.client, this.physicalSchemaByObject[outer.object], this.physicalTableByObject[outer.object] ?? outer.object, outer.column)
+      : null;
+    const inner = this.getBuilder(read.table).select(cast === null ? read.column : castFixedReadLeafColumn(this.knex, read.column, cast));
     for (const [column, value] of read.equals) inner.where(column, value);
     for (const [column, values] of read.memberOf) inner.whereIn(column, [...values]);
     inner.whereNotNull(read.column);

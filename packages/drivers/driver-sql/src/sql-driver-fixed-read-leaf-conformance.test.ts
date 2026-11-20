@@ -22,6 +22,10 @@
  * - **O2**: the comparison is the outer column's against `record_id` under the
  *   dialect's own collation, exactly as today's list binds it, so the leaf and
  *   the list answer the same rows for case and padding variants too;
+ * - **O2 on PostgreSQL (ruled A)**: a federated table keyed by integer,
+ *   bigint, uuid, `character(n)` or a domain answers the list's rows, because
+ *   the inner read casts `record_id` to the key's base type
+ *   (`fixed-read-leaf-key-type.ts`); a text key keeps step 3's statement;
  * - the declaration, the absence of a tenant scope in the statement, the
  *   bindings, and the refusals with `code` and `status`.
  *
@@ -41,7 +45,7 @@ import {
   type FixedReadLeafRow,
 } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
-import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
+import { DIALECT_CELLS, PG_CELL, currentLiveSchema, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 const set = SHARED_RECORD_IDS_CASE_SET;
 const seamed = (where: unknown): any => lowerFilterCondition(where, { isDatetimeColumn: () => false });
@@ -253,6 +257,8 @@ function declareFixedReadLeafSweep(cell: DialectCell): void {
           }
         });
       }
+
+      if (cell.id === 'pg') declarePgKeyTypePins(() => driver, () => knex);
     });
 
     describe('the statement', () => {
@@ -317,6 +323,217 @@ function declareFixedReadLeafSweep(cell: DialectCell): void {
         expect(error).toHaveBeenCalledTimes(1);
         await fresh.disconnect?.();
       });
+    });
+  });
+}
+
+// ── O2 on PostgreSQL: the outer key's base type (ruled A) ───────────────────
+
+/**
+ * [ADR-0155 O2, ruling 7051669729 (A)] On PostgreSQL the inner read projects
+ * `record_id` cast to the outer key column's base type, read once per table
+ * from the catalog (`fixed-read-leaf-key-type.ts`). Each key type here is a
+ * federated table made by raw DDL and bound with `registerExternalObject`,
+ * the way a sharing-scoped external object meets the leaf, and each pin holds
+ * the leaf to the rows TODAY'S LIST of the same grants answers (D-0), on
+ * `find`, `count` and the predicate update, plus the `$or` and nested
+ * `ReadableIds` positions. A malformed grant id fails the statement in the
+ * list's own envelope.
+ */
+interface PgKeyCase {
+  readonly name: string;
+  /** The `id` column's DDL type. */
+  readonly ddl: string;
+  /** Row ids, as inserted. */
+  readonly ids: readonly string[];
+  /** Grant `record_id`s for u9, as today's list would bind them. */
+  readonly grants: readonly string[];
+  /** The ids both forms answer, as the driver reads them back (sorted text). */
+  readonly expected: readonly string[];
+  /** The cast the compiled inner read carries, `null` for none. */
+  readonly cast: string | null;
+  /** Bind the table with `external.remoteSchema` (the schema-qualified catalog read). */
+  readonly qualified?: boolean;
+}
+
+const PG_KEY_CASES: readonly PgKeyCase[] = [
+  { name: 'integer', ddl: 'integer', ids: ['7', '42', '43'], grants: ['42', '07', ' 7'], expected: ['42', '7'], cast: '"pg_catalog"."int4"' },
+  { name: 'bigint', ddl: 'bigint', ids: ['7', '9007199254740993', '9007199254740994'], grants: ['07', '9007199254740993'], expected: ['7', '9007199254740993'], cast: '"pg_catalog"."int8"' },
+  {
+    name: 'uuid',
+    ddl: 'uuid',
+    ids: ['8a1f0c3e-1b2c-4d5e-8f90-123456789abc', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002'],
+    grants: ['8A1F0C3E-1B2C-4D5E-8F90-123456789ABC', '{00000000-0000-0000-0000-000000000001}'],
+    expected: ['00000000-0000-0000-0000-000000000001', '8a1f0c3e-1b2c-4d5e-8f90-123456789abc'],
+    cast: '"pg_catalog"."uuid"',
+    qualified: true,
+  },
+  // A string key that is not text: the list compares as `bpchar` (padding
+  // ignored), so the inner read is cast to `bpchar` too, with no length.
+  { name: 'character(4)', ddl: 'character(4)', ids: ['k1', 'k2', 'k3'], grants: ['k1  ', 'k2'], expected: ['k1  ', 'k2  '], cast: '"pg_catalog"."bpchar"' },
+  // A domain is cast to the type under it.
+  { name: 'a domain over integer', ddl: 'srid_pk_dom', ids: ['7', '42', '43'], grants: ['07', '42'], expected: ['42', '7'], cast: '"pg_catalog"."int4"' },
+  // Every table the platform manages: no cast, step 3's statement.
+  { name: 'text', ddl: 'text', ids: ['k1', 'k2', 'k3'], grants: ['k1', 'k2 '], expected: ['k1'], cast: null },
+];
+
+function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): void {
+  describe('O2 on PostgreSQL: record_id is cast to the outer key\'s base type (ruled A)', () => {
+    const EXT = (c: PgKeyCase) => `srid_pk_${c.name.replace(/[^a-z0-9]+/g, '_')}`;
+    const CHILD = 'srid_pk_child';
+    const grantRows = (c: PgKeyCase) => [
+      ...c.grants.map((g, i) => ({ id: `${EXT(c)}_g${i}`, object_name: EXT(c), recipient_type: 'user', recipient_id: 'u9', record_id: g, access_level: 'lvl_edit', organization_id: 'org_a' })),
+      // N4's witness on a typed key: a blank grant the cast must never see as a value.
+      { id: `${EXT(c)}_blank`, object_name: EXT(c), recipient_type: 'user', recipient_id: 'u9', record_id: '', access_level: 'lvl_edit', organization_id: 'org_a' },
+    ];
+
+    beforeAll(async () => {
+      const driver = driverOf();
+      const knex = knexOf();
+      await driver.execute('drop domain if exists srid_pk_dom cascade').catch(() => {});
+      await driver.execute('create domain srid_pk_dom as integer check (value > 0)');
+      const schema = currentLiveSchema();
+      for (const c of PG_KEY_CASES) {
+        await driver.execute(`drop table if exists ${EXT(c)}`);
+        await driver.execute(`create table ${EXT(c)} (id ${c.ddl} primary key, label text)`);
+        await knex(EXT(c)).insert(c.ids.map((id) => ({ id, label: 'x' })));
+        await knex(GRANTS).insert(grantRows(c));
+        driver.registerExternalObject({
+          name: EXT(c),
+          fields: { label: { type: 'text' } },
+          ...(c.qualified ? { external: { remoteName: EXT(c), remoteSchema: schema } } : {}),
+        } as any);
+      }
+      await driver.execute(`drop table if exists ${CHILD}`);
+      await driver.execute(`create table ${CHILD} (id text primary key, parent integer, label text)`);
+      await knex(CHILD).insert([{ id: 'c7', parent: 7 }, { id: 'c42', parent: 42 }, { id: 'c43', parent: 43 }]);
+      driver.registerExternalObject({ name: CHILD, fields: { parent: { type: 'number' }, label: { type: 'text' } } } as any);
+    }, 60_000);
+
+    afterAll(async () => {
+      const driver = driverOf();
+      const knex = knexOf();
+      for (const c of PG_KEY_CASES) {
+        await knex(GRANTS).where('object_name', EXT(c)).del().catch(() => {});
+        await driver.execute(`drop table if exists ${EXT(c)}`).catch(() => {});
+      }
+      await driver.execute(`drop table if exists ${CHILD}`).catch(() => {});
+      await driver.execute('drop domain if exists srid_pk_dom cascade').catch(() => {});
+    });
+
+    for (const c of PG_KEY_CASES) {
+      describe(`${c.name} key`, () => {
+        const leaf = () => seamed({ id: { $in: SharedRecordIds.read(EXT(c), 'u9') } });
+        const list = () => seamed({ id: { $in: [...c.grants] } });
+
+        it('find and count: the leaf answers the rows today\'s list answers', async () => {
+          const driver = driverOf();
+          const viaList = sortedIds(await driver.find(EXT(c), { where: list() }));
+          expect(viaList).toEqual([...c.expected]);
+          expect(sortedIds(await driver.find(EXT(c), { where: leaf() }))).toEqual(viaList);
+          expect(await driver.count(EXT(c), { where: leaf() })).toBe(viaList.length);
+        });
+
+        it('the negation and an $or position answer as the list does', async () => {
+          const driver = driverOf();
+          const not = sortedIds(await driver.find(EXT(c), { where: seamed({ $not: { id: { $in: SharedRecordIds.read(EXT(c), 'u9') } } }) }));
+          expect(not).toEqual(sortedIds(await driver.find(EXT(c), { where: seamed({ $not: { id: { $in: [...c.grants] } } }) })));
+          const orLeaf = seamed({ $or: [{ id: { $in: SharedRecordIds.read(EXT(c), 'u9') } }, { label: 'none' }] });
+          const orList = seamed({ $or: [{ id: { $in: [...c.grants] } }, { label: 'none' }] });
+          expect(sortedIds(await driver.find(EXT(c), { where: orLeaf }))).toEqual(sortedIds(await driver.find(EXT(c), { where: orList })));
+        });
+
+        it('the predicate update: the write form touches the list\'s rows', async () => {
+          const driver = driverOf();
+          const knex = knexOf();
+          const where = seamed({ id: { $in: SharedRecordIds.write(EXT(c), 'u9', ['lvl_edit', 'lvl_full']) } });
+          try {
+            expect(await driver.updateMany(EXT(c), { where }, { label: 'touched' })).toBe(c.expected.length);
+            expect(sortedIds(await knex(EXT(c)).where('label', 'touched').select('id'))).toEqual([...c.expected]);
+          } finally {
+            await knex(EXT(c)).update({ label: 'x' });
+          }
+        });
+
+        it(c.cast === null ? 'the statement is step 3\'s: no cast' : `the statement casts record_id to ${c.cast}`, async () => {
+          const knex = knexOf();
+          const seen: string[] = [];
+          const onQuery = (q: { sql: string }) => { if (q.sql.includes(GRANTS)) seen.push(q.sql); };
+          knex.on('query', onQuery);
+          try {
+            await driverOf().find(EXT(c), { where: leaf() });
+          } finally {
+            knex.removeListener('query', onQuery);
+          }
+          expect(seen).toHaveLength(1);
+          if (c.cast === null) {
+            expect(seen[0]).toContain('in (select "record_id" from "sys_record_share"');
+            expect(seen[0]).not.toMatch(/CAST\(/i);
+          } else {
+            expect(seen[0]).toContain(`in (select CAST(NULLIF("record_id", '') AS ${c.cast}) from "sys_record_share"`);
+          }
+        });
+      });
+    }
+
+    it('nested under a composed ReadableIds scope: the parent\'s key type is the one cast to', async () => {
+      const driver = driverOf();
+      const intCase = PG_KEY_CASES[0];
+      const scoped = (scope: unknown) => seamed({ parent: { $in: ReadableIds.compose(ReadableIds.of(EXT(intCase)), scope as FilterCondition) } });
+      const viaList = sortedIds(await driver.find(CHILD, { where: scoped({ id: { $in: [...intCase.grants] } }) }));
+      expect(viaList).toEqual(['c42', 'c7']);
+      expect(sortedIds(await driver.find(CHILD, { where: scoped({ id: { $in: SharedRecordIds.read(EXT(intCase), 'u9') } }) }))).toEqual(viaList);
+      expect(await driver.count(CHILD, { where: scoped({ id: { $in: SharedRecordIds.read(EXT(intCase), 'u9') } }) })).toBe(2);
+    });
+
+    it('aggregate agrees with find on a typed key', async () => {
+      const intCase = PG_KEY_CASES[0];
+      const out = await driverOf().aggregate(
+        EXT(intCase),
+        { where: seamed({ id: { $in: SharedRecordIds.read(EXT(intCase), 'u9') } }), aggregations: [{ function: 'count', alias: 'n' }] },
+      );
+      expect(Number((out[0] as any).n)).toBe(intCase.expected.length);
+    });
+
+    it('a malformed grant id fails the statement in the envelope today\'s list fails it in', async () => {
+      const driver = driverOf();
+      const knex = knexOf();
+      const intCase = PG_KEY_CASES[0];
+      await knex(GRANTS).insert({ id: 'srid_pk_bad', object_name: EXT(intCase), recipient_type: 'user', recipient_id: 'u9', record_id: 'abc', access_level: 'lvl_edit', organization_id: 'org_a' });
+      try {
+        const viaList = await driver.find(EXT(intCase), { where: seamed({ id: { $in: [...intCase.grants, 'abc'] } }) }).catch((e) => e);
+        const viaLeaf = await driver.find(EXT(intCase), { where: seamed({ id: { $in: SharedRecordIds.read(EXT(intCase), 'u9') } }) }).catch((e) => e);
+        expect(viaList).toMatchObject({ code: 'DATABASE_ERROR', status: 500 });
+        expect(viaLeaf).toMatchObject({ code: viaList.code, status: viaList.status });
+        // The same database refusal: invalid input for the key's type (22P02), not a missing operator (42883).
+        expect(String(viaLeaf.cause?.code ?? viaLeaf.message)).toMatch(/22P02|invalid input syntax for type integer/);
+      } finally {
+        await knex(GRANTS).where('id', 'srid_pk_bad').del();
+      }
+    });
+
+    it('reads the catalog once per table: a second statement and another verb ask it nothing', async () => {
+      const fresh = new SqlDriver(PG_CELL.config());
+      const knex: Knex = (fresh as any).knex;
+      const intCase = PG_KEY_CASES[0];
+      fresh.registerExternalObject({ name: EXT(intCase), fields: { label: { type: 'text' } } } as any);
+      const catalogReads: string[] = [];
+      const onQuery = (q: { sql: string }) => { if (q.sql.includes('pg_attribute')) catalogReads.push(q.sql); };
+      knex.on('query', onQuery);
+      try {
+        const where = seamed({ id: { $in: SharedRecordIds.read(EXT(intCase), 'u9') } });
+        expect(sortedIds(await fresh.find(EXT(intCase), { where }))).toEqual([...intCase.expected]);
+        expect(catalogReads).toHaveLength(1);
+        await fresh.find(EXT(intCase), { where });
+        await fresh.count(EXT(intCase), { where });
+        expect(catalogReads).toHaveLength(1);
+        // A statement with no leaf reads nothing.
+        await fresh.find(EXT(intCase), { where: { label: 'x' } as any });
+        expect(catalogReads).toHaveLength(1);
+      } finally {
+        knex.removeListener('query', onQuery);
+        await fresh.disconnect?.();
+      }
     });
   });
 }

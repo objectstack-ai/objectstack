@@ -40,6 +40,7 @@ import {
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link AggregationFacet} read — every one of
@@ -118,12 +119,15 @@ export class AggregationFacet {
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
-    // …and the same two primes for each joined related object, whose scope
+    // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
+    await primeFixedReadLeafKeyTypes(this, object, query.where);
+    // …and the same primes for each joined related object, whose scope
     // compiles against its own table.
     for (const join of relationJoins ?? []) {
       if (join.parent === null) continue;
       if (this.isMssql) await this.primeMssqlGuidColumns(join.parent.object, join.parent.scope);
       if (this.isOracle) await this.primeOracleRawUuidColumns(join.parent.object);
+      await primeFixedReadLeafKeyTypes(this, join.parent.object, join.parent.scope);
     }
     const builder = this.getBuilder(object, options);
     // The column a FIELD names in this statement: its `external.columnMap`

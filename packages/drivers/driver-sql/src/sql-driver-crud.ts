@@ -42,6 +42,7 @@ import type { SqlDriver } from './sql-driver.js';
 import { oracleUuidReadForm } from './sql-driver-oracle-dialect.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { latestPerDirectiveOf, latestPerIdSubquery } from './sql-driver-latest-per.js';
+import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 
 /**
  * [`DriverOptions.lockRows`] Lock the rows a `find()` returns until its
@@ -164,6 +165,8 @@ export class CrudFacet {
     if (this.isMssql) await this.primeMssqlPagingKey(object);
     // [#31395] …and which of its columns are GUIDs, before a text operator compiles.
     if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
+    // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
+    await primeFixedReadLeafKeyTypes(this, object, query.where);
     // The whole ORDER BY, decided once: the caller's keys plus whatever this
     // driver has to add to make a paged read deterministic. Derived out here
     // rather than inside `buildBase` so the recovery ladder below can ask
