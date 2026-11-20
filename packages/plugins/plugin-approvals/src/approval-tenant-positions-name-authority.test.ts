@@ -513,7 +513,7 @@ describe('[ADR-0131 D1] under a walled posture, a request with no organization i
     try {
       switch (door) {
         case 'approve': await svc.decide(id, { decision: 'approve', actorId } as any, ctx); break;
-        case 'reject': await svc.decide(id, { decision: 'reject', actorId } as any, ctx); break;
+        case 'reject': await svc.decide(id, { decision: 'reject', comment: 'Over budget.', actorId } as any, ctx); break;
         case 'recall': await svc.recall(id, { actorId } as any, ctx); break;
         case 'reassign': await svc.reassign(id, { actorId, to: 'usr_target' }, ctx); break;
         case 'sendBack': await svc.sendBack(id, { actorId, comment: 'please revise' } as any, ctx); break;

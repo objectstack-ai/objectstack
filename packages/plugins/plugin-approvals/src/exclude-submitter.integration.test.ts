@@ -304,7 +304,7 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
       await expect(svc.decide(row.id, { decision: 'approve', actorId: 'u_sub' } as any, SUB))
         .rejects.toThrow(/^FORBIDDEN: 'u_sub' submitted this request, and its approval step sets excludeSubmitter/);
       expect((await actionsOf(row.id)).map((a) => a.action)).toEqual(['submit']);
-      const out = await svc.decide(row.id, { decision: 'reject', actorId: 'u_sub' } as any, SUB);
+      const out = await svc.decide(row.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u_sub' } as any, SUB);
       expect(out.request.status).toBe('rejected');
     });
 
