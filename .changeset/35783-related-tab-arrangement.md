@@ -8,7 +8,7 @@ feat(record-page): a related list's tab moves left or right and hides, and 「�
 Clause-②: no
 Metadata-protocol: none
 
-A reader arranges the record page's related lists from their tabs again (the related cards that carried the ⠿ handle and 「隐藏」 left the page with objectstack#35595):
+**Reader arrangement is back.** The related cards' ⠿ handle, ⌥↑ / ⌥↓ and 「隐藏」 left the page with objectstack#35595, and with them the reader's way to reorder or hide a related list. This note supersedes the "Reader arrangement leaves with the cards" bullet of that release's note: 「左移」, 「右移」 and 「隐藏」 now sit on each related tab's own menu, 「恢复默认顺序」 sits in 「更多」 (in a drawer and an embedded pane too), and an arrangement already stored keeps applying.
 
 - **A related list's tab is its menu.** Open a list's tab and click it again (or press Enter, Space or ↓ on it): 「左移」 and 「右移」 move it one place among the related lists, and 「隐藏」 takes it off the row into 「更多」's hidden lists and returns to Overview. The open tab draws a ▾ to say so.
 - **「更多」 restores the default.** While the order or the hidden set is not the default, 「更多」 ends with 「恢复默认顺序」: the default order with every list shown. It is in a drawer and an embedded pane too, which have no rail.
