@@ -66,6 +66,23 @@ export type {
 } from './MasterDetailForm';
 export { LineItemsPanel } from './LineItemsPanel';
 export type { LineItemsPanelSchema } from './LineItemsPanel';
+// The record page's edit state: a body table as editable lines, saved with the
+// record in one batch by the page host (`RecordBodyTableEditor.tsx`).
+export {
+  RecordBodyTableEditor,
+  RecordEditSessionContext,
+  buildRecordEditBatch,
+  attributeRecordEditRefusal,
+} from './RecordBodyTableEditor';
+export type {
+  RecordBodyTableEditorProps,
+  RecordEditSession,
+  RecordEditOpOwner,
+  RecordEditRefusal,
+  BodyTableEditHandle,
+  BodyTableSnapshot,
+  BodyTableRowError,
+} from './RecordBodyTableEditor';
 export { deriveDetail, deriveColumns, deriveFormFields, findRelationshipField, resolveInlineMode } from './deriveMasterDetail';
 export type { DerivedDetail, InlineMode, ChildObjectSchemaLike } from './deriveMasterDetail';
 

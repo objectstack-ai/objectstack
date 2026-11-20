@@ -1272,6 +1272,8 @@ const zhHant = {
     lockedByApproval: '審批中已鎖定',
     lockedTooltip: '該記錄有待審批的請求，編輯已被鎖定',
     lockedByState: '當前狀態下不可編輯',
+    bodyTableRow: '第 {{row}} 行',
+    bodyTablesReadOnlyBulk: '編輯時這些明細表保持唯讀：要和主記錄一起儲存，需要在它們的物件上開啟批次寫入。主記錄本身的欄位仍可編輯和儲存。',
     writeStrippedTitle: '已儲存，但部分欄位未生效',
     writeWarningsTitle: '已儲存，但有警告',
     writeStrippedReadonly: '以下欄位為只讀，未生效：{{fields}}',

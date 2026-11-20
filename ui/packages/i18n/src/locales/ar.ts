@@ -1580,6 +1580,8 @@ const ar = {
     lockedByApproval: "مقفل للموافقة",
     lockedTooltip: "يحتوي هذا السجل على طلب موافقة معلق؛ التعديل مقفل",
     lockedByState: "غير قابل للتعديل في حالته الحالية",
+    bodyTableRow: "الصف {{row}}",
+    bodyTablesReadOnlyBulk: "تبقى جداول البنود هذه للقراءة فقط أثناء التعديل: حفظها مع السجل يتطلب تمكين الكتابة المجمعة على كائناتها. لا يزال بإمكانك تعديل حقول السجل نفسه وحفظها.",
     writeStrippedTitle: "تم الحفظ، لكن بعض الحقول لم تُطبَّق",
     writeWarningsTitle: "تم الحفظ، مع تحذيرات",
     writeStrippedReadonly: "للقراءة فقط، لذلك لم تُطبَّق: {{fields}}",

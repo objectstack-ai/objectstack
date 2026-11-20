@@ -1448,6 +1448,8 @@ const pt = {
     lockedByApproval: "Bloqueado para aprovação",
     lockedTooltip: "Este registro tem uma solicitação de aprovação pendente; a edição está bloqueada",
     lockedByState: "Não editável no estado atual",
+    bodyTableRow: "Linha {{row}}",
+    bodyTablesReadOnlyBulk: "Estas tabelas de itens ficam somente leitura durante a edição: salvá-las junto com o registro exige gravações em massa habilitadas em seus objetos. Os campos do próprio registro ainda podem ser editados e salvos.",
     writeStrippedTitle: "Salvo, mas alguns campos não foram aplicados",
     writeWarningsTitle: "Salvo, com avisos",
     writeStrippedReadonly: "Somente leitura, portanto não foi aplicado: {{fields}}",

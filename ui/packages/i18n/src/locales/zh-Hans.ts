@@ -1272,6 +1272,8 @@ const zh = {
     lockedByApproval: '审批中已锁定',
     lockedTooltip: '该记录有待审批的请求，编辑已被锁定',
     lockedByState: '当前状态下不可编辑',
+    bodyTableRow: '第 {{row}} 行',
+    bodyTablesReadOnlyBulk: '编辑时这些明细表保持只读：要和主记录一起保存，需要在它们的对象上开启批量写入。主记录本身的字段仍可编辑和保存。',
     writeStrippedTitle: '已保存，但部分字段未生效',
     writeWarningsTitle: '已保存，但有警告',
     writeStrippedReadonly: '以下字段为只读，未生效：{{fields}}',

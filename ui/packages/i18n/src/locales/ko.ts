@@ -1406,6 +1406,8 @@ const ko = {
     lockedByApproval: "승인을 위해 잠김",
     lockedTooltip: "이 레코드에 대기 중인 승인 요청이 있습니다. 편집이 잠겨 있습니다",
     lockedByState: "현재 상태에서는 편집할 수 없습니다",
+    bodyTableRow: "{{row}}행",
+    bodyTablesReadOnlyBulk: "편집하는 동안 이 항목 표는 읽기 전용입니다. 레코드와 함께 저장하려면 해당 개체에서 일괄 쓰기를 사용하도록 설정해야 합니다. 레코드 자체의 필드는 계속 편집하고 저장할 수 있습니다.",
     writeStrippedTitle: "저장되었지만 일부 필드는 적용되지 않았습니다",
     writeWarningsTitle: "저장되었지만 경고가 있습니다",
     writeStrippedReadonly: "다음 필드는 읽기 전용이므로 적용되지 않았습니다: {{fields}}",

@@ -1540,6 +1540,8 @@ const en = {
     lockedByApproval: 'Locked for approval',
     lockedTooltip: 'This record has a pending approval request; editing is locked',
     lockedByState: 'Not editable in its current state',
+    bodyTableRow: 'Row {{row}}',
+    bodyTablesReadOnlyBulk: 'These line tables stay read-only while you edit: saving them together with the record needs bulk writes enabled on their objects. The record\'s own fields can still be edited and saved.',
     writeStrippedTitle: 'Saved — but some fields did not take effect',
     writeWarningsTitle: 'Saved — with warnings',
     writeStrippedReadonly: 'Read-only, so it did not take effect: {{fields}}',

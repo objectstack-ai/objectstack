@@ -1448,6 +1448,8 @@ const fr = {
     lockedByApproval: "Verrouillé pour approbation",
     lockedTooltip: "Cet enregistrement a une demande d'approbation en attente ; la modification est verrouillée",
     lockedByState: "Non modifiable dans son état actuel",
+    bodyTableRow: "Ligne {{row}}",
+    bodyTablesReadOnlyBulk: "Ces tableaux de lignes restent en lecture seule pendant la modification : les enregistrer avec la fiche exige que les écritures en masse soient activées sur leurs objets. Les champs de la fiche elle-même restent modifiables et enregistrables.",
     writeStrippedTitle: "Enregistré — mais certains champs n'ont pas été appliqués",
     writeWarningsTitle: "Enregistré — avec des avertissements",
     writeStrippedReadonly: "En lecture seule, donc non appliqué : {{fields}}",
