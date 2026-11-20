@@ -7,7 +7,7 @@
  * Supports PostgreSQL, MySQL, SQLite, and other SQL databases.
  */
 
-import type { DateGranularityValue, DriverOptions, FilterCondition, SchemaMode } from '@objectstack/spec/data';
+import type { DateGranularityValue, DriverOptions, FilterCondition, FixedReadLeaf, SchemaMode } from '@objectstack/spec/data';
 // The ONE introspection contract (ADR-0015 / `ISchemaDiffService`). This
 // driver's introspection types are DERIVED from these rather than
 // re-declared next to them — see the `Introspection Types` region below.
@@ -413,6 +413,10 @@ export class SqlDriver implements IDataDriver {
       // here. Every dialect; `SqliteWasmDriver` and `TursoDriver` inherit it
       // (Turso's remote transport compiles the leaf with its own compiler).
       readableIdsLeaf: true,
+      // [ADR-0155 D4] The filter compiler compiles a `SharedRecordIds` leaf to its
+      // fixed inner read as one subquery (`applyFilterCondition`), every dialect;
+      // TursoDriver's remote transport compiles it with its own compiler.
+      fixedReadLeaves: ['SharedRecordIds' as const],
     };
   }
 
@@ -764,6 +768,8 @@ export class SqlDriver implements IDataDriver {
    * `driver-turso`), so the operator reading the line looks in the right place.
    */
   protected readonly readableIdsDriverName: string = 'driver-sql';
+  /** [ADR-0155 D4] Whether this instance has logged its fixed-read leaf refusal (once per driver). */
+  protected readonly fixedReadLeafRefusalLog = { logged: false };
 
   /**
    * Optional logger sink for security-audit warnings. Tests inject a spy;
@@ -6519,6 +6525,11 @@ export class SqlDriver implements IDataDriver {
     return InternalHelpersFacet.readableIdsSubquery.call(internalHelpersHost.of(this), leaf, options);
   }
 
+  private fixedReadLeafSubquery(leaf: FixedReadLeaf): Knex.QueryBuilder {
+    // [ADR-0155 D2] The body lives in `sql-driver-internal-helpers.ts`, its docblock with it.
+    return InternalHelpersFacet.fixedReadLeafSubquery.call(internalHelpersHost.of(this), leaf);
+  }
+
   /**
    * Auto-inject the tenant column on insert rows when:
    *   1. `options.tenantId` is provided, AND
@@ -9705,6 +9716,8 @@ export class SqlDriver implements IDataDriver {
       get dateFieldsOnInstantColumn() { return driver.dateFieldsOnInstantColumn; },
       get datetimeFields() { return driver.datetimeFields; },
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
+      get fixedReadLeafRefusalLog() { return driver.fixedReadLeafRefusalLog; },
+      fixedReadLeafSubquery: (...a) => driver.fixedReadLeafSubquery(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
       get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
@@ -9748,6 +9761,7 @@ export class SqlDriver implements IDataDriver {
       applyTenantScope: (...a) => driver.applyTenantScope(...a),
       get getBuilder() { return driver.getBuilder.bind(driver); },
       isMultiTenantMode: (...a) => driver.isMultiTenantMode(...a),
+      get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       get logger() { return driver.logger; },
       get physicalSchemaByObject() { return driver.physicalSchemaByObject; },

@@ -23,6 +23,11 @@ import { DraftPreviewBar } from '../preview/DraftPreviewBar.js';
 import { UnpublishedAppBar } from '../preview/UnpublishedAppBar.js';
 import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
+import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
+import { useLastApp } from '../context/LastAppProvider.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
@@ -130,19 +135,6 @@ export function isRecordPagePath(pathname: string): boolean {
   return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
 }
 
-/**
- * Does `pathname` keep the phone's bottom menu bar off (objectstack#34594)? A
- * record page (its bottom edge is the record's action bar) and a record form,
- * create (`/apps/APP/OBJECT/new`) or edit (`.../record/ID/edit`), whose bottom
- * edge is its submit buttons. Every other app route draws the bar.
- */
-export function hidesPhoneNavBar(pathname: string): boolean {
-  return (
-    isRecordPagePath(pathname) ||
-    /^\/apps\/[^/]+\/[^/]+\/(?:new|record\/[^/]+\/edit)\/?$/.test(pathname)
-  );
-}
-
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
   useResponsiveSidebar();
@@ -187,10 +179,20 @@ export function ConsoleLayout({
   // page draws its phone face at, so the two never disagree for a frame.
   const phone = usePhoneViewport();
   const recordPageOwnsTopBar = phone && isRecordPagePath(location.pathname);
-  // objectstack#34594 — on a phone the app's menu is a bar along the bottom
-  // edge, except where that edge belongs to a record's actions or a form's
-  // submit buttons. The route slot leaves the bar's height free at its end.
-  const phoneNavBar = phone && !hidesPhoneNavBar(location.pathname);
+  // objectstack#35882 — on a phone the bottom bar (Home, Notifications,
+  // Approvals, search) is drawn on the three pages it opens and on no page
+  // below them: a list, a record or a form has the page to itself, and 「‹」 at
+  // the top left goes back. The route slot leaves the bar's height free at its
+  // end.
+  const phoneNavBar = phone && isPhoneTabRoute(location.pathname);
+  // objectstack#35881 — the app this person last had open, where a phone
+  // lands after sign-in. Recorded at every width: it is the person's last app.
+  const { rememberApp } = useLastApp();
+  useEffect(() => {
+    if (activeAppName) rememberApp(activeAppName);
+  }, [activeAppName, rememberApp]);
+  const { apps: metadataApps } = useMetadata();
+  const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the
@@ -241,13 +243,15 @@ export function ConsoleLayout({
     <CommandPaletteProvider>
     {/* objectui#13130 — first in the DOM, so it is the first Tab stop. */}
     <SkipToContentLink targetRef={mainContentRef} />
+    {/* objectstack#35881 — the phone app home's slot, shared by the sidebar
+        (which draws the menu into it) and the route (which holds it). */}
+    <PhoneAppHomeSlotProvider>
     <AppShell
       sidebar={
          <UnifiedSidebar
            activeAppName={activeAppName}
            onAppChange={onAppChange}
            railOverlay
-           phoneNavBar={phoneNavBar}
          />
       }
       showHeader={!recordPageOwnsTopBar}
@@ -270,14 +274,15 @@ export function ConsoleLayout({
       // the table's, the record-count footer below the fold. The phone keeps
       // block layout.
       //
-      // objectstack#34594 — while the phone menu bar is drawn, the inset keeps
-      // the bar's height (h-12 plus the safe area) free at its bottom: a page
+      // objectstack#34594 — while the phone bottom bar is drawn, the inset keeps
+      // the bar's height (h-12, its 4 px padding each side, plus the safe
+      // area; objectstack#35882) free at its bottom: a page
       // that bounds itself to the inset ends above the bar (the inset's
       // content box is that much shorter), and a taller page scrolls its last
       // row out from under the bar (a scroll container's end padding scrolls).
       className={cn(
         '!p-0 overflow-y-auto overflow-x-hidden bg-muted/5 lg:flex lg:flex-col',
-        phoneNavBar && '!pb-[calc(3rem+env(safe-area-inset-bottom))]',
+        phoneNavBar && '!pb-[calc(3.5rem+env(safe-area-inset-bottom))]',
       )}
       rightRail={chatDock.rail}
       branding={
@@ -331,9 +336,13 @@ export function ConsoleLayout({
         </div>
       </ConsoleLayoutInner>
 
+      {/* objectstack#35882 — the phone's bottom bar, after the page in reading order. */}
+      {phoneNavBar && <PhoneAppNavBar basePath={appBasePath} activeAppName={activeAppName} />}
+
       {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
       {chatDock.sheet}
     </AppShell>
+    </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>
     </ChatDockControlProvider>
   );
