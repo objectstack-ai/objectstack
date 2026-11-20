@@ -19,7 +19,9 @@
  *
  * CONTROLS, each must read again: a held answer that changes the view's filter
  * or its sort (the query moves), a view switch, and a real filter change on the
- * address after the list has settled.
+ * address after the list has settled. A control asserts AT LEAST one more read
+ * carrying the change, never an exact count: its job is that a real change
+ * never loses its read, which must hold with or without the fix.
  *
  * Everything renders for real (`ObjectView`, `plugin-view`, `ListView`), with
  * the `ObjectView.hostRerenderRefetch-10046` harness's mocks.
@@ -209,15 +211,15 @@ describe('objectstack#35536 — a view answer that lands after the first read re
   it('CONTROL: an answer that changes the view filter reads again, with the filter', async () => {
     const host = await mountHost();
     await host.answer([answerRow({ filter: [['stage', '=', 'b']] })]);
-    expect(listQueries).toHaveLength(2);
-    expect(JSON.stringify(listQueries[1].$filter)).toContain('"b"');
+    expect(listQueries.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(listQueries.at(-1).$filter)).toContain('"b"');
   });
 
   it('CONTROL: an answer that changes the view sort reads again, with the sort', async () => {
     const host = await mountHost();
     await host.answer([answerRow({ sort: [{ field: 'name', order: 'desc' }] })]);
-    expect(listQueries).toHaveLength(2);
-    expect(listQueries[1].$orderby).toEqual([{ field: 'name', order: 'desc' }]);
+    expect(listQueries.length).toBeGreaterThanOrEqual(2);
+    expect(listQueries.at(-1).$orderby).toEqual([{ field: 'name', order: 'desc' }]);
   });
 
   it('CONTROL: a view switch after the answer reads again', async () => {

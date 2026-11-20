@@ -118,7 +118,8 @@ function restoreAfterBlock() {
  * fresh `{ provider: 'object' }` block of equal content; nothing the read sends
  * changed, so no second read. The CONTROLS: a sort or a filter change reads
  * again with what changed, and rows handed in whole (`provider: 'value'`)
- * still replace the shown rows when the host hands in new ones.
+ * still replace the shown rows when the host hands in new ones. A control
+ * asserts at least one more read carrying the change, never an exact count.
  */
 describe('ListView.dataBlockNoReread-35536', () => {
   restoreAfterBlock();
@@ -189,16 +190,16 @@ describe('ListView.dataBlockNoReread-35536', () => {
     const host = mount(schemaWith());
     await settled(host.ds);
     await host.rerender(schemaWith({ sort: [{ field: 'name', order: 'desc' }] }));
-    await waitFor(() => expect(reads(host.ds)).toHaveLength(2));
-    expect(reads(host.ds)[1][1].$orderby).toEqual([{ field: 'name', order: 'desc' }]);
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(reads(host.ds).at(-1)![1].$orderby).toEqual([{ field: 'name', order: 'desc' }]);
   });
 
   it('CONTROL: a filter change reads again, with the filter', async () => {
     const host = mount(schemaWith());
     await settled(host.ds);
     await host.rerender(schemaWith({ filter: [['stage', '=', 'b']] }));
-    await waitFor(() => expect(reads(host.ds)).toHaveLength(2));
-    expect(JSON.stringify(reads(host.ds)[1][1].$filter)).toContain('"b"');
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(JSON.stringify(reads(host.ds).at(-1)![1].$filter)).toContain('"b"');
   });
 
   it('CONTROL: rows handed in whole are replaced when the host hands in new ones, with no read', async () => {
