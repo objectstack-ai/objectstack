@@ -4730,7 +4730,7 @@ const zhHant = {
     replyPlaceholder: '在此回覆…',
     slaRemaining: 'SLA 剩餘 {{dur}}',
     slaOverdue: 'SLA 已超期 {{dur}}',
-    slaCalendarNotFound: '日曆算不出：沒有日曆「{{calendar}}」',
+    slaCalendarNotFound: '日曆算不出：沒有日曆“{{calendar}}”',
     slaCalendarNoDefault: '日曆算不出：沒有預設日曆',
     slaCalendarNotMaintained: '日曆算不出：未維護到 {{date}}',
     slaCalendarUnusable: '日曆算不出：請在設定中修正日曆',
