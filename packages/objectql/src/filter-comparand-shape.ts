@@ -130,6 +130,11 @@ export function assertListComparandShapes(
   node: unknown,
   path = 'where',
 ): void {
+  // [ADR-0155 D1] A fixed-read leaf out of position is refused by name FIRST:
+  // it is branded, so the fault is the code that wrote it, and the door below
+  // would read one in a `$nin` or a list as a caller's non-list (400). The
+  // sites it returns are judged in full at the executor boundary.
+  collectFixedReadLeaves(object, operation, node, path);
   assertListComparandShapesAt(node, `${operation}('${object}')`, path, {
     admitReadableIds: true,
     admitFixedReadLeaves: ENGINE_FIXED_READ_LEAF_BRANDS,
@@ -137,8 +142,6 @@ export function assertListComparandShapes(
   // The sites it returns are composed at the executor boundary, on the final
   // AST; here only its refusals are wanted.
   collectComposableReadableIds(object, operation, node, path);
-  // The same for the fixed-read leaves: judged in full at the boundary.
-  collectFixedReadLeaves(object, operation, node, path);
 }
 
 /** The read verbs whose `where` may carry a `ReadableIds` leaf (ADR-0139 D1). */

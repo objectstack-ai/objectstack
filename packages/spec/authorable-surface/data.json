@@ -193,6 +193,7 @@
     "data/DriverCapabilities:connectionPooling [RETIRED]",
     "data/DriverCapabilities:create [RETIRED]",
     "data/DriverCapabilities:delete [RETIRED]",
+    "data/DriverCapabilities:fixedReadLeaves",
     "data/DriverCapabilities:fullTextSearch [RETIRED]",
     "data/DriverCapabilities:geospatialQuery [RETIRED]",
     "data/DriverCapabilities:indexes [RETIRED]",

@@ -29,7 +29,7 @@
  * ({@link logRefusalOnce}).
  */
 
-import { fixedInnerReadOf, fixedReadLeafNameOf, type FixedReadLeaf } from '@objectstack/spec/data';
+import { fixedInnerReadOf, fixedReadLeafNameOf, isFixedReadLeaf } from '@objectstack/spec/data';
 import { logRefusalOnce, type ReadableIdsRefusalLog } from './readable-ids-driver-refusal.js';
 
 /** The ADR-0112 envelope of the refusal: a composition fault, never `INVALID_FILTER`. */
@@ -45,9 +45,15 @@ export type FixedReadLeafRefusalError = Error & {
  * How every refusal names the leaf at `at`: its name and the one table its
  * fixed inner read reads, never its inputs (a recipient is a principal's id,
  * and the message reaches logs).
+ *
+ * `leaf` is `unknown` on purpose: the brand is a `unique symbol`, and a caller
+ * in another package can hold the leaf's type from the other module format's
+ * declarations of `@objectstack/spec`, which TypeScript reads as a second,
+ * unrelated symbol. The guard decides at run time instead.
  */
-export function describeFixedReadLeaf(at: string, leaf: FixedReadLeaf): string {
-  return `${at} holds a ${fixedReadLeafNameOf(leaf) ?? 'fixed-read'} leaf, a fixed read of '${fixedInnerReadOf(leaf).table}'`;
+export function describeFixedReadLeaf(at: string, leaf: unknown): string {
+  if (!isFixedReadLeaf(leaf)) return `${at} holds a value that is not a fixed-read leaf`;
+  return `${at} holds a ${fixedReadLeafNameOf(leaf)} leaf, a fixed read of '${fixedInnerReadOf(leaf).table}'`;
 }
 
 /**
