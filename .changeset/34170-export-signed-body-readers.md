@@ -1,5 +1,5 @@
 ---
-'@objectstack/plugin-audit': minor
+'@objectstack/plugin-audit': patch
 ---
 
 feat(plugin-audit): export the readers that rebuild a stored checkpoint or amendment row into its signed body
