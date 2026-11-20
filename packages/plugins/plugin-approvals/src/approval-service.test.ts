@@ -1428,7 +1428,7 @@ describe('ApprovalService (node era)', () => {
   it('decide: refuses a reject whose comment is missing, empty, blank or null, and leaves the request pending', async () => {
     const resumed: any[] = [];
     svc.attachAutomation({ async resume(runId) { resumed.push(runId); } });
-    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const req: any = await svc.openNodeRequest(openInput(['u9']), CTX);
     for (const comment of [undefined, '', '   ', null]) {
       const err: any = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment } as any, SYS)
         .then(() => undefined, (e) => e);
@@ -1443,7 +1443,7 @@ describe('ApprovalService (node era)', () => {
 
   // An approve keeps its comment optional: the resume test above approves with none.
   it('decide: CONTROL — a reject with its reason is recorded with it', async () => {
-    const req = await svc.openNodeRequest(openInput(['u9']), CTX);
+    const req: any = await svc.openNodeRequest(openInput(['u9']), CTX);
     const out = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment: 'Over budget.' }, SYS);
     expect([out.finalized, out.request.status]).toEqual([true, 'rejected']);
     expect((engine._tables['sys_approval_action'] ?? []).find((a: any) => a.request_id === req.id && a.action === 'reject')?.comment)
