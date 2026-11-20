@@ -4756,7 +4756,7 @@ const RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 const RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION: RuleExplanation = {
   rule: 'related-list-attachments-off',
-  covers: "a relatedLists 'sys_attachment' entry on an object without files",
+  covers: "'sys_attachment' in relatedLists without files enabled",
   paragraphs: [
     "`'sys_attachment'` in `relatedLists` places the record page's attachments tab. The tab is drawn only " +
       'for an object that enables files (`enable.files: true`), the same gate the server enforces on ' +
