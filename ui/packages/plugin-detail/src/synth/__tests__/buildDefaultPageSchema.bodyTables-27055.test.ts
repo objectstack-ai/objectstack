@@ -234,7 +234,7 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
   });
 
   describe('a section drawn closed that trails the open ones follows the tables (common fields first)', () => {
-    const grouped = (collapses: Record<string, string>) => ({
+    const grouped = (collapses: Record<string, 'collapsed' | 'expanded'>) => ({
       name: 'quote',
       fields: {
         name: { type: 'text', label: 'Name', group: 'basic' },
@@ -260,8 +260,8 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
       ]);
     });
 
-    it('a `collapsible` group that opens expanded is a common one: it stays before the tables', () => {
-      expect(shape(items(buildDefaultTabs(grouped({ notes: 'collapsible' }), { related: [LINES] }))[0].children)).toEqual([
+    it('an `expanded` group (collapsible, open when the page opens) is a common one: it stays before the tables', () => {
+      expect(shape(items(buildDefaultTabs(grouped({ notes: 'expanded' }), { related: [LINES] }))[0].children)).toEqual([
         'details(basic,terms,notes)',
         'table(quote_line_item)',
       ]);
@@ -301,7 +301,7 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
           { key: 'basic', label: 'basic' },
           { key: 'lines', label: 'Lines', relatedList: 'quote_line_item' },
           { key: 'terms', label: 'terms' },
-          { key: 'notes', label: 'notes', collapse: 'collapsed' },
+          { key: 'notes', label: 'notes', collapse: 'collapsed' as const },
         ],
       };
       expect(shape(items(buildDefaultTabs(def, { related: [LINES, SCHEDULE] }))[0].children)).toEqual([
