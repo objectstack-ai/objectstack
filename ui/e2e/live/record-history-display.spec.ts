@@ -92,16 +92,23 @@ test('the timeline stream\'s Changes chip shows display values (localized dates,
   // #35602). Pin that grouping, then expand it: the reads below are of the
   // change lines themselves, never of the fold's summary.
   const fold = stream.getByTestId('activity-fold');
-  await expect(fold, 'the three updates are one fold row').toHaveCount(1, { timeout: 15_000 });
-  await expect(fold).toHaveAttribute('data-fold-count', '3');
+  await expect(fold, 'the updates are one fold row').toHaveCount(1, { timeout: 15_000 });
   const expand = fold.locator('button[aria-expanded]');
-  await expect(expand).toHaveAttribute('aria-expanded', 'false');
+  await expect(expand, 'the fold starts collapsed').toHaveAttribute('aria-expanded', 'false');
   await expand.click();
   await expect(expand).toHaveAttribute('aria-expanded', 'true');
   const foldEntries = fold.getByTestId('activity-fold-entries');
   // The three UPDATE entries render as change lines; wait for the latest one.
-  await expect(foldEntries.locator('[data-stream-change]')).toHaveCount(3);
   await expect(foldEntries.locator('[data-stream-change]', { hasText: 'Owner' }).first()).toBeVisible({ timeout: 15_000 });
+  // The fold counts the rows it expands to, and holds all three updates. (The
+  // Changes chip also draws the creation's own audit entry as a change line,
+  // which folds in beside them when it is stamped the same day, so the count
+  // is not pinned to exactly three.)
+  const foldRow = foldEntries.locator('[data-stream-row]');
+  await expect(foldRow.filter({ hasText: 'Customer Since', hasNotText: 'Lifecycle' }), 'the date update').toHaveCount(1);
+  await expect(foldRow.filter({ hasText: 'Finance' }), 'the lifecycle and industry update').toHaveCount(1);
+  await expect(foldRow.filter({ hasText: other.name }), 'the owner update').toHaveCount(1);
+  await expect(fold).toHaveAttribute('data-fold-count', String(await foldRow.count()));
   const text = (await stream.innerText()).replace(/\s+/g, ' ');
   // What the change lines say, without the fold row's summary (which names
   // fields, not values): every positive read below is of a real line, and
