@@ -698,12 +698,13 @@ export const SysApprovalRequest = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       target: '/api/v1/approvals/requests/{id}/reject',
-      // A rejection always carries its reason (maintainer requirement on the
-      // record page's Reject). `required: true` is enforced by the declared
-      // param contract (ADR-0104 D2, `validateActionParams`), which counts a
-      // blank or whitespace-only string as missing: the action door, MCP
-      // `run_action` and the console's param dialog all refuse a reject
-      // without one, before the target route is called.
+      // A reject through `approval_reject` always carries its reason
+      // (maintainer requirement on the record page's Reject). `required: true`
+      // is enforced by the declared param contract (ADR-0104 D2,
+      // `validateActionParams`), which counts a blank or whitespace-only
+      // string as missing: the action door, MCP `run_action` and the console's
+      // param dialog all refuse a reject without one, before the target route
+      // is called. The target route itself does not judge the reason.
       params: [
         { name: 'comment', label: 'Comment', type: 'textarea', required: true },
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },

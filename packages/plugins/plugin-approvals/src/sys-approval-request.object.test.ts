@@ -324,7 +324,7 @@ describe('[#32442, ruling A] the AI read declaration', () => {
 });
 
 /**
- * A rejection always carries its reason. `approval_reject` declares its
+ * A reject through `approval_reject` always carries its reason. It declares its
  * `comment` required, and the declared param contract (ADR-0104 D2) is what
  * every action door judges a call by before the target route runs: the REST
  * action door, MCP `run_action` and the console's param dialog. This runs the

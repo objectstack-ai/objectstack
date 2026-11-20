@@ -319,7 +319,7 @@ describe('an approver\'s agent decides a pending approval request over MCP (#324
   });
 
   /**
-   * A rejection always carries its reason: `approval_reject` declares its
+   * A reject through `approval_reject` always carries its reason: it declares its
    * `comment` required, so the declared param contract (ADR-0104 D2) refuses a
    * missing or blank one at the REST action door and at MCP `run_action`,
    * before the confirmation gate and before the approvals route. CONTROL: the
