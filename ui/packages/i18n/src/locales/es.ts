@@ -5136,6 +5136,7 @@ const es = {
     newestFirst: "Más reciente → Más antiguo",
     addSort: "Agregar orden",
     removeSort: "Quitar orden",
+    reorder: 'Arrastra para reordenar',
   },
   collaboration: {
     commentCount: "{{count}} comentarios",

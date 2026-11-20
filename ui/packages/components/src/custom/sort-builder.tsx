@@ -7,7 +7,7 @@
  */
 
 import * as React from "react"
-import { X, Plus } from "lucide-react"
+import { X, Plus, GripVertical } from "lucide-react"
 import { createSafeTranslation } from "@object-ui/i18n"
 import type { SortItem as SpecSortItem } from "@objectstack/spec/shared"
 
@@ -26,6 +26,7 @@ const useSafeSortTranslation = createSafeTranslation(
     'sortBuilder.newestFirst': 'Newest → Oldest',
     'sortBuilder.addSort': 'Add sort',
     'sortBuilder.removeSort': 'Remove sort',
+    'sortBuilder.reorder': 'Drag to reorder',
   },
   'sortBuilder.sortBy',
 )
@@ -147,6 +148,20 @@ export function SortBuilder({
     handleChange(items.filter(item => item.id !== id));
   };
 
+  // objectstack#35876 — the levels' order is the sort's priority: a row's
+  // handle drags it to another place, and ArrowUp / ArrowDown on the focused
+  // handle move it one place.
+  const dragFrom = React.useRef<number | null>(null);
+  const handleRefs = React.useRef(new Map<string, HTMLButtonElement>());
+  const moveItem = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return;
+    const next = items.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    handleChange(next);
+    return moved.id;
+  };
+
   return (
     <div className={cn("space-y-3", className)}>
       <div className="space-y-2">
@@ -157,13 +172,59 @@ export function SortBuilder({
           // the words, then the field beside Remove, then the direction.
           <div
             key={item.id}
-            className="flex items-center gap-2 max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto]"
+            className="flex items-center gap-2 max-sm:grid max-sm:grid-cols-[auto_minmax(0,1fr)_auto]"
             data-testid="sort-builder-row"
+            // The drag is this list's own: a host that draws the builder inside
+            // its own drag target (a reorderable chip) never sees it.
+            onDragOver={(event) => {
+              if (dragFrom.current === null) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onDrop={(event) => {
+              if (dragFrom.current === null) return;
+              event.preventDefault();
+              event.stopPropagation();
+              moveItem(dragFrom.current, index);
+              dragFrom.current = null;
+            }}
           >
-             <span className="text-sm font-medium w-16 text-muted-foreground max-sm:col-span-2 max-sm:w-auto">
+             <button
+               type="button"
+               ref={(node) => {
+                 if (node) handleRefs.current.set(item.id, node);
+                 else handleRefs.current.delete(item.id);
+               }}
+               draggable={items.length > 1}
+               disabled={items.length < 2}
+               onDragStart={(event) => {
+                 event.stopPropagation();
+                 dragFrom.current = index;
+                 event.dataTransfer?.setData('text/plain', String(index));
+               }}
+               onDragEnd={(event) => {
+                 event.stopPropagation();
+                 dragFrom.current = null;
+               }}
+               onKeyDown={(event) => {
+                 const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null;
+                 if (to === null) return;
+                 event.preventDefault();
+                 const moved = moveItem(index, to);
+                 // The handle keeps focus at the row's new place.
+                 if (moved) requestAnimationFrame(() => handleRefs.current.get(moved)?.focus());
+               }}
+               aria-label={t('sortBuilder.reorder')}
+               title={t('sortBuilder.reorder')}
+               className="inline-flex h-9 w-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-40 max-sm:col-start-1 max-sm:row-start-1 max-sm:row-span-3 max-sm:h-auto"
+               data-testid="sort-builder-handle"
+             >
+               <GripVertical className="h-4 w-4" aria-hidden="true" />
+             </button>
+             <span className="text-sm font-medium w-16 text-muted-foreground max-sm:col-start-2 max-sm:col-span-2 max-sm:w-auto">
                {index === 0 ? t('sortBuilder.sortBy') : t('sortBuilder.thenBy')}
              </span>
-             <div className="flex-1 min-w-0 max-sm:col-start-1 max-sm:row-start-2">
+             <div className="flex-1 min-w-0 max-sm:col-start-2 max-sm:row-start-2">
                 <Select
                   value={item.field}
                   onValueChange={(val) => updateItem(item.id, { field: val })}
@@ -184,7 +245,7 @@ export function SortBuilder({
                   </SelectContent>
                 </Select>
              </div>
-             <div className="w-36 max-sm:col-span-2 max-sm:row-start-3 max-sm:w-auto">
+             <div className="w-36 max-sm:col-start-2 max-sm:col-span-2 max-sm:row-start-3 max-sm:w-auto">
                 <Select
                   value={item.order}
                   onValueChange={(val) => updateItem(item.id, { order: val as 'asc' | 'desc' })}
@@ -201,7 +262,7 @@ export function SortBuilder({
              <Button
                variant="ghost"
                size="icon"
-               className="h-9 w-9 shrink-0 max-sm:col-start-2 max-sm:row-start-2 max-sm:h-11 max-sm:w-11"
+               className="h-9 w-9 shrink-0 max-sm:col-start-3 max-sm:row-start-2 max-sm:h-11 max-sm:w-11"
                onClick={() => removeItem(item.id)}
                aria-label={t('sortBuilder.removeSort')}
              >

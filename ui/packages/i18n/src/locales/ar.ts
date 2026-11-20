@@ -5575,6 +5575,7 @@ const ar = {
     newestFirst: "الأحدث → الأقدم",
     addSort: "إضافة ترتيب",
     removeSort: "إزالة الترتيب",
+    reorder: 'اسحب لإعادة الترتيب',
   },
   collaboration: {
     // objectui#11445 — `commentCount` and `reactionCount` below are count

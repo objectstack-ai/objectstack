@@ -4988,6 +4988,7 @@ const ko = {
     newestFirst: "최신 순",
     addSort: "정렬 추가",
     removeSort: "정렬 삭제",
+    reorder: '드래그하여 순서 변경',
   },
   collaboration: {
     commentCount: "댓글 {{count}}개",

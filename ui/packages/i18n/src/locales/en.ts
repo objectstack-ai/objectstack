@@ -5745,6 +5745,7 @@ const en = {
     newestFirst: 'Newest → Oldest',
     addSort: 'Add sort',
     removeSort: 'Remove sort',
+    reorder: 'Drag to reorder',
   },
   // `@object-ui/collaboration` — the comment thread's copy (objectstack#5506,
   // objectui#3424). The package used to carry every one of these as an English

@@ -5131,6 +5131,7 @@ const pt = {
     newestFirst: "Mais recente → Mais antigo",
     addSort: "Adicionar ordenação",
     removeSort: "Remover ordenação",
+    reorder: 'Arraste para reordenar',
   },
   collaboration: {
     commentCount: "{{count}} comentários",

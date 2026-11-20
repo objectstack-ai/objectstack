@@ -4991,6 +4991,7 @@ const ja = {
     newestFirst: "新しい順",
     addSort: "並べ替えを追加",
     removeSort: "並べ替えを削除",
+    reorder: 'ドラッグして並べ替え',
   },
   collaboration: {
     commentCount: "コメント {{count}} 件",

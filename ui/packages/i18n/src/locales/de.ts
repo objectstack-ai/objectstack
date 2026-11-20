@@ -4989,6 +4989,7 @@ const de = {
     newestFirst: "Neueste → Älteste",
     addSort: "Sortierung hinzufügen",
     removeSort: "Sortierung entfernen",
+    reorder: 'Zum Neuordnen ziehen',
   },
   collaboration: {
     commentCount: "{{count}} Kommentare",
