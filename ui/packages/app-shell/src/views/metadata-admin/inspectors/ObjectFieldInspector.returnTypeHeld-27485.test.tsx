@@ -95,6 +95,12 @@ function Harness({
     budget: { type: 'number' },
     amount: { type: 'currency', currencyConfig: USD },
     total: { type: 'summary', summaryOperations: { object: 'line', field: 'amount', function: 'sum' } },
+    fee_eur: { type: 'currency', currencyConfig: EUR },
+    home_amount: { type: 'currency' },
+    currency_code: { type: 'text' },
+    local_amount: { type: 'currency', currencyConfig: LOCAL },
+    // A formula that declares no `returnType`: its unit cannot be read.
+    subtotal: { type: 'formula', expression: 'record.est_hours * 3' },
     f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType, ...extra },
   });
   React.useEffect(() => {
@@ -117,6 +123,8 @@ function Harness({
 }
 
 const USD = { currencyMode: 'fixed', defaultCurrency: 'USD' } as const;
+const EUR = { currencyMode: 'fixed', defaultCurrency: 'EUR' } as const;
+const LOCAL = { currencyMode: 'record', currencyField: 'currency_code' } as const;
 
 function renderFormula(returnType?: string, { money = false, extra }: { money?: boolean; extra?: Record<string, unknown> } = {}) {
   stubEngine({ money });
@@ -273,11 +281,51 @@ describe('ObjectFieldInspector — the money verdict proves or withdraws a decla
   });
 
   it('CONTROL — a declared `percent` is still kept under a `number` verdict', async () => {
+    // An edit to a DIFFERENT quantity expression than the harness default, so
+    // the stamp really runs and the verdict really is `number`.
     const { box, latest } = renderFormula('percent', { money: true });
-    fireEvent.change(box, { target: { value: COUNT } });
-    await waitFor(() => expect(latest().expression).toBe(COUNT), { timeout: 3000 });
+    fireEvent.change(box, { target: { value: 'record.est_hours * 3' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours * 3'), { timeout: 3000 });
     await settle();
     expect(latest().returnType).toBe('percent');
+  });
+
+  it('a declared `percent` is kept under a money verdict too', async () => {
+    const { box, latest } = renderFormula('percent', { money: true });
+    fireEvent.change(box, { target: { value: 'record.amount * 0.2' } });
+    await waitFor(() => expect(latest().expression).toBe('record.amount * 0.2'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+    expect('currencyConfig' in latest()).toBe(false);
+  });
+
+  it('a proven currency that moves updates the config: a USD amount to a EUR amount', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.fee_eur * 0.1' } });
+    await waitFor(() => expect(latest().currencyConfig).toEqual(EUR), { timeout: 3000 });
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a move to a dynamic amount removes the config: absent is the tenant default', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.home_amount * 0.1' } });
+    await waitFor(() => expect('currencyConfig' in latest()).toBe(false), { timeout: 3000 });
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a record-mode source stamps its own code field', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.local_amount * 0.1' } });
+    await waitFor(() => expect(latest().currencyConfig).toEqual(LOCAL), { timeout: 3000 });
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a hand-declared `currency` over a formula with no `returnType` survives an expression edit', async () => {
+    const { box, latest } = renderFormula('currency', { money: true, extra: { expression: 'record.subtotal * 0.1' } });
+    fireEvent.change(box, { target: { value: 'record.subtotal * 0.12' } });
+    await waitFor(() => expect(latest().expression).toBe('record.subtotal * 0.12'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
   });
 
   it('CONTROL — a verdict that proves text, boolean or date still stamps over a declared `currency`', async () => {

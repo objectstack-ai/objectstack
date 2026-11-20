@@ -37,6 +37,9 @@ const FIELDS: Readonly<Record<string, FormulaSourceField>> = {
   rollup: { type: 'summary' },
   weighted: { type: 'formula', returnType: 'currency', currencyConfig: USD },
   count_formula: { type: 'formula', returnType: 'number' },
+  account: { type: 'lookup' },
+  // A formula that declares no `returnType`: its unit cannot be read.
+  subtotal: { type: 'formula' },
   broken: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'US' } },
   // `fixed` with no code: the spec refuses it rather than filling in CNY (#27157).
   fixed_no_code: { type: 'currency', currencyConfig: { currencyMode: 'fixed' } },
@@ -113,16 +116,16 @@ describe('CONTROL — a numeric formula stays `number`', () => {
     expect(inferFormulaReturn('record.count_formula + 1', FIELDS)).toEqual({ returnType: 'number' });
   });
 
-  it('nothing it cannot prove is money: an expression that reads no amount gets exactly the plain inference', () => {
+  it('nothing it cannot prove is money: a numeric expression over declared non-money units, or one that is not numeric, gets exactly the plain inference', () => {
     for (const source of [
       'record.quantity * 2',
-      // A ratio of two amounts in one currency is proven a plain number.
+      // A ratio of two amounts in one currency is proven a plain number, and
+      // cel-js types it `dyn`: the plain inference answers `{}`.
       'record.amount / record.tax',
       'record.amount > 100',
       'upper(record.name)',
       'today()',
       'record.amount + record.name',
-      'record.unknown_field * 2',
       'size(record.name)',
     ]) {
       expect(inferFormulaReturn(source, FIELDS), source).toEqual(plainStamp(source));
@@ -181,6 +184,16 @@ describe('#35631 — an amount the proof cannot follow is unproven, never `numbe
     'max(record.amount, record.quantity)',
     'sqrt(record.amount)', // a function the proof does not name
     'record.weighted * record.weighted',
+    // Reads whose unit cannot be read — each answered `number` before.
+    'record.account.balance * 0.9', // a hop through a reference
+    'record.subtotal * 0.2', // a formula that declares no returnType
+    "record['amount'] * 0.1", // the indexed spelling of an amount
+    'record.?amount * 0.1', // the optional spelling
+    "record[?'amount'] * 0.1", // the optional indexed spelling
+    'record.unknown_field * 2', // a name the map does not declare
+    // One shape per leg of the unit check.
+    '100 / record.weighted', // a formula declared `currency`
+    '100 / amount', // a bare identifier naming an amount
   ];
 
   it('each answers `{}`', () => {
@@ -193,6 +206,13 @@ describe('#35631 — an amount the proof cannot follow is unproven, never `numbe
     expect(inferFormulaReturn('record.amount * 0.1', FIELDS))
       .toEqual({ returnType: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } });
     expect(inferFormulaReturn('record.quantity * 2', FIELDS)).toEqual({ returnType: 'number' });
+  });
+
+  it('CONTROL — every spelling of a quantity read, and a formula declared `number`, still answers `number`', () => {
+    for (const source of ["record['quantity'] * 2", 'record.count_formula * 2', 'quantity * 2', 'record.probability * 2']) {
+      expect(inferFormulaReturn(source, FIELDS), source).toEqual(plainStamp(source));
+    }
+    expect(inferFormulaReturn("record['quantity'] * 2", FIELDS)).toEqual({ returnType: 'number' });
   });
 });
 

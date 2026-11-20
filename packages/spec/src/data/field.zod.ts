@@ -2403,11 +2403,12 @@ export const FieldSchema = lazySchema(() => {
    * under every verdict that proves no other type — where it would stamp
    * `number`, and where the type is unproven (a field-over-field quotient such
    * as `record.spent / record.budget` types `dyn`), which would otherwise
-   * clear it. A declared `currency` is kept under an unproven verdict the
-   * same way. A verdict that proves `text`, `boolean` or `date` still stamps.
+   * clear it. A declared `percent` is kept under a money verdict too: it is
+   * never re-stamped `currency`. A declared `currency` is kept under an
+   * unproven verdict the same way. A verdict that proves `text`, `boolean` or `date` still stamps.
    */
   returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency', 'percent']).optional()
-    .describe('Value type of a formula field (number/text/boolean/date/currency/percent). Authoring stamps `number`, `text`, `boolean` or `date` from the expression\'s inferred type and leaves it absent when none is proven; `percent` is declared by the author, and a verdict that proves no other type (`number`, or none) keeps it. `currency` is stamped when the expression provably computes money, and withdrawn for `number` (its `currencyConfig` dropped) when an edit leaves it a plain number; an unproven verdict keeps it. `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face.'),
+    .describe('Value type of a formula field (number/text/boolean/date/currency/percent). Authoring stamps `number`, `text`, `boolean` or `date` from the expression\'s inferred type and leaves it absent when none is proven; `percent` is declared by the author, and a verdict that proves no other type (`number`, or none) keeps it, as does a money verdict: a declared `percent` is never re-stamped `currency`. Otherwise `currency` is stamped when the expression provably computes money, and withdrawn for `number` (its `currencyConfig` dropped) when an edit leaves it a plain number; an unproven verdict keeps it. `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face.'),
   summaryOperations: strictObject({
     surface: 'this roll-up summary',
     history: FIELD_HISTORY,
