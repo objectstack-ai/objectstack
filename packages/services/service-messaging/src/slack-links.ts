@@ -14,7 +14,8 @@
  * answers an unverified email exactly as it answers no match. The proposal
  * records a digest of the email it was made for; {@link SlackLinkStore.confirm}
  * confirms only while the person's email is still verified and still that
- * email, and a new proposal replaces one made for another email.
+ * email, and applies only to the proposal that was checked. A new proposal
+ * replaces one made for another email.
  *
  * ## What every write carries
  *
@@ -297,7 +298,10 @@ export class SlackLinkStore {
     /**
      * The person confirms their proposal: from now on it delivers. Only while
      * their email is still verified and still the email the proposal was made
-     * for; otherwise refused, and the person asks for a new proposal.
+     * for; otherwise refused, and the person asks for a new proposal. The
+     * write applies only to the proposal that was checked: it is conditioned
+     * on the row's id, its `proposed` state and that email's digest, and a
+     * write that matches no row is refused the same way.
      */
     async confirm(organizationId: string, userId: string): Promise<SlackLink> {
         const link = await this.linkOf(organizationId, userId);
@@ -306,13 +310,16 @@ export class SlackLinkStore {
                 'You have no proposed Slack link in this organization to confirm: ask for a proposal first. Nothing was changed.');
         }
         if (link.state === 'confirmed') return link;
+        const outdated = () => new SlackLinkError(409, 'RESOURCE_CONFLICT', enMessages.slackLinkProposalOutdated, 'slackLinkProposalOutdated');
         const email = await this.verifiedEmail(userId);
-        if (!email || link.proposalEmailHash !== emailDigest(email)) {
-            throw new SlackLinkError(409, 'RESOURCE_CONFLICT', enMessages.slackLinkProposalOutdated, 'slackLinkProposalOutdated');
-        }
-        await this.data().update(CHANNEL_USER_LINK_OBJECT,
+        const digest = email ? emailDigest(email) : undefined;
+        if (!digest || link.proposalEmailHash !== digest) throw outdated();
+        // A predicate write (`multi: true`), so every `where` key is evaluated
+        // and the answer is the count of rows it changed: at most this one.
+        const written = await this.data().update(CHANNEL_USER_LINK_OBJECT,
             { state: 'confirmed', confirmed_at: this.opts.now?.() ?? new Date().toISOString() },
-            { where: { id: link.id }, ...by(userId, organizationId) } as never);
+            { where: { id: link.id, state: 'proposed', proposal_email_hash: digest }, multi: true, ...by(userId, organizationId) } as never);
+        if (!written) throw outdated();
         return (await this.linkOf(organizationId, userId))!;
     }
 

@@ -11,7 +11,8 @@
  *  - the person: a proposal by email delivers nothing until confirmed;
  *  - the proposal rule: a Slack link is proposed only for a verified email
  *    and names no one before it is confirmed, and a confirmation holds only
- *    while that email is still verified and still the person's;
+ *    while that email is still verified and still the person's, and applies
+ *    only to the proposal that was checked;
  *  - the riders of ruling 7024100939: (1) every removal is a write the audit
  *    hook sees, attributed to who removed it; (2) an administrator's removal
  *    tells the person by inbox and email; (3) a link goes with the person's
@@ -134,7 +135,23 @@ async function boot() {
 
     const { slack, calls } = scriptedSlack();
     const notices: any[] = [];
-    const store = new SlackLinkStore({ getData: () => ql as any, getSlack: () => slack, notify: async (i) => notices.push(i), logger: silent });
+    // The engine the store writes through; `beforeLinkUpdate` runs once, just before the store's next link write.
+    const race: { beforeLinkUpdate?: () => Promise<unknown> } = {};
+    const data = new Proxy(ql, {
+        get(target, prop) {
+            if (prop === 'update') {
+                return async (object: string, values: unknown, options: unknown) => {
+                    const before = object === CHANNEL_USER_LINK_OBJECT ? race.beforeLinkUpdate : undefined;
+                    race.beforeLinkUpdate = undefined;
+                    if (before) await before();
+                    return ql.update(object, values, options as never);
+                };
+            }
+            const member = Reflect.get(target, prop, target);
+            return typeof member === 'function' ? member.bind(target) : member;
+        },
+    });
+    const store = new SlackLinkStore({ getData: () => data as any, getSlack: () => slack, notify: async (i) => notices.push(i), logger: silent });
     expect(bindSlackLinkRemovalTriggers(ql as any, store, silent)).toBe(true);
     // The platform's write audit (plugin-audit) is an `after*` hook attributing `session.userId`; this stands in for it.
     const audit: Array<{ event: string; id: unknown; by: unknown }> = [];
@@ -163,7 +180,7 @@ async function boot() {
         return call('POST', `${SLACK_LINK_ROUTE}/confirm`, bearer);
     };
     const setUser = (id: string, values: Record<string, unknown>) => ql.update('sys_user', values, { where: { id }, ...SYSTEM } as never);
-    return { ql, driver, store, call, links, install, connect, setUser, calls, notices, audit };
+    return { ql, driver, store, call, links, install, connect, setUser, race, calls, notices, audit };
 }
 
 describe('the Slack install — an administrator\'s token, at rest', () => {
@@ -282,6 +299,20 @@ describe('the proposal rule — a verified email, and no one named before it is 
         expect(unchanged.body.data.link).toMatchObject({ slackUserId: 'UADM', state: 'confirmed' });
         expect(await t.store.confirmedUsers('org_a', ['u_ada', 'u_bob', 'u_admin'])).toEqual(new Set(['u_admin']));
         expect((await t.links()).filter((l) => l.state === 'proposed').map((l) => l.user_id).sort()).toEqual(['u_ada', 'u_bob']);
+    });
+
+    it('a confirmation applies only to the proposal that was checked: a row changed before the write is not confirmed', async () => {
+        const t = await boot();
+        await t.install();
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
+        const [row] = (await t.ql.find(CHANNEL_USER_LINK_OBJECT, { fields: ['id'] }, SYSTEM)) as any[];
+        t.race.beforeLinkUpdate = () => t.ql.update(CHANNEL_USER_LINK_OBJECT, { proposal_email_hash: 'f'.repeat(64) }, { where: { id: row.id }, ...SYSTEM } as never);
+        const raced = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
+        expect(t.race.beforeLinkUpdate).toBeUndefined();
+        expect([raced.body.error.code, raced.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+        const [after] = (await t.ql.find(CHANNEL_USER_LINK_OBJECT, { fields: ['state', 'confirmed_at'] }, SYSTEM)) as any[];
+        expect([after.state, after.confirmed_at ?? null]).toEqual(['proposed', null]);
+        expect(await t.store.confirmedUsers('org_a', ['u_ada'])).toEqual(new Set());
     });
 
     it('a new proposal replaces one made for another email, and confirms for the new one', async () => {
