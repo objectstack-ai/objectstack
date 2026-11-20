@@ -318,7 +318,7 @@ export function storedOAuthGrants(engine: OAuthGrantEngine): MountedOAuthGrants 
             ),
           );
         } catch (error) {
-          if (isMissingTableError(error)) return [];
+          if (isMissingTableError(error, object)) return [];
           throw error;
         }
       },
