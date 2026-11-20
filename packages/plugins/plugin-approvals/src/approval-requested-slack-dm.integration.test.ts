@@ -17,7 +17,9 @@
  *    the same absolute URL the e-mail carries;
  *  - the approver muted `slack`, or is in quiet hours: no DM is sent;
  *  - a proposed link only, or none: inbox and e-mail only — no `slack` row at
- *    all, so nothing to dead-letter.
+ *    all, so nothing to dead-letter;
+ *  - no connector-slack composed: the request does not ask for `slack`, so no
+ *    refusal is logged on every request.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -43,7 +45,7 @@ const APPROVER = 'u_approver';
 const ORIGIN = 'https://app.example.test';
 const TOKEN = 'xoxb-acme';
 
-type Setup = 'confirmed' | 'proposed' | 'none' | 'muted' | 'quiet';
+type Setup = 'confirmed' | 'proposed' | 'none' | 'muted' | 'quiet' | 'uncomposed';
 
 /** Slack's Web API, stubbed at the HTTP boundary: every request it is sent, and Slack's answers. */
 function slackHttp() {
@@ -107,15 +109,16 @@ async function boot(setup: Setup) {
 
   const slack = slackHttp();
   const sent: Array<Record<string, any>> = [];
-  const logger = { info: () => {}, debug: () => {}, warn: () => {}, error: () => {}, child: () => logger };
+  const warnings: string[] = [];
+  const logger = { info: () => {}, debug: () => {}, warn: (m: string) => { warnings.push(String(m)); }, error: () => {}, child: () => logger };
   const services: Record<string, unknown> = {
     objectql: engine,
     data: engine,
     manifest: { register: (m: any) => { for (const def of m.objects ?? []) register(def); } },
     email: { async send(input: any) { sent.push(input); return { id: `mail_${sent.length}` }; } },
-    // connector-slack's client service, as ConnectorSlackPlugin registers it.
-    slack: createSlackClientService({ fetchImpl: slack.fetchImpl }),
   };
+  // connector-slack's client service, as ConnectorSlackPlugin registers it.
+  if (setup !== 'uncomposed') services.slack = createSlackClientService({ fetchImpl: slack.fetchImpl });
   const readyHooks: Array<() => Promise<void> | void> = [];
   const ctx: any = {
     getService: (name: string) => {
@@ -140,9 +143,9 @@ async function boot(setup: Setup) {
 
   // The organization's administrator installs Slack; the approver links their Slack user.
   const links = new SlackLinkStore({ getData: () => engine as any, getSlack: () => services.slack as any, notify: async () => undefined, logger });
-  await links.install(DEFAULT_ORGANIZATION_ID, TOKEN, 'u_admin');
-  if (setup !== 'none') await links.propose(DEFAULT_ORGANIZATION_ID, APPROVER);
-  if (setup !== 'none' && setup !== 'proposed') await links.confirm(DEFAULT_ORGANIZATION_ID, APPROVER);
+  if (setup !== 'uncomposed') await links.install(DEFAULT_ORGANIZATION_ID, TOKEN, 'u_admin');
+  if (setup !== 'none' && setup !== 'uncomposed') await links.propose(DEFAULT_ORGANIZATION_ID, APPROVER);
+  if (setup !== 'none' && setup !== 'uncomposed' && setup !== 'proposed') await links.confirm(DEFAULT_ORGANIZATION_ID, APPROVER);
   const preference = (row: Record<string, unknown>) => engine.insert('sys_notification_preference',
     { id: `pref_${setup}`, organization_id: DEFAULT_ORGANIZATION_ID, user_id: APPROVER, ...row }, { context: SYSTEM } as any);
   if (setup === 'muted') await preference({ topic: '*', channel: 'slack', enabled: false });
@@ -158,7 +161,7 @@ async function boot(setup: Setup) {
 
   const deliveries = async () => (await driver.getKnex()('sys_notification_delivery').where({ topic: 'approval.requested' }).select('*')) as any[];
   const link = `${ORIGIN}/system/approvals?request=${encodeURIComponent(String(opened.id))}`;
-  return { slack, sent, deliveries, link };
+  return { slack, sent, deliveries, link, warnings };
 }
 
 /** The deliveries once none is waiting in the outbox. */
@@ -207,5 +210,11 @@ describe('an approval request reaches a linked approver by Slack DM (#34730)', (
     const t = await boot(setup);
     expect(await settled(t.deliveries)).toEqual([`email:${APPROVER}:success`, `inbox:${APPROVER}:success`]);
     expect(t.slack.requests).toEqual([]);
+  });
+
+  it('a composition without connector-slack: the request does not ask for slack, so nothing is refused or logged', async () => {
+    const t = await boot('uncomposed');
+    expect(await settled(t.deliveries)).toEqual([`email:${APPROVER}:success`, `inbox:${APPROVER}:success`]);
+    expect(t.warnings.filter((w) => w.includes("'slack'"))).toEqual([]);
   });
 });
