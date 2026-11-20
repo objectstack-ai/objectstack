@@ -77,7 +77,8 @@ your `ui/` src — only `:5180` reflects local UI edits.
 
 ← [`AGENTS.md` › Build & Test](../../AGENTS.md#build--test)
 
-The merge queue has a speed budget in `scripts/ci/queue-budget.json`: a 22-minute median and a 32-minute p90
-alarm, the maintainer's numbers to change. `queue-duration-budget.yml` reads the last 7 days of queue runs every
-week and files or refreshes one speed-up card when the queue is over. A PR that changes CI or adds a gate reports
-its job's before/after median in its body as advisory, never as a gate.
+The numbers in `scripts/ci/queue-budget.json` are the maintainer's: a 22-minute median and a 32-minute p90 alarm,
+set against the `merge_group` baseline the file records. Every Monday `queue-duration-budget.yml` reads the last
+7 days of queue runs with `scripts/ci/queue-duration.mjs`, whose header defines what one reading measures; an over
+week files or refreshes the one speed-up card, and a week within budget writes nothing. A PR's own before/after
+median stays advisory because a gate grading a duration reports and never reds a required job.

@@ -138,7 +138,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/checklist-author/SKILL.md', 3574],
   ['.claude/skills/dogfood-verification/SKILL.md', 9526],
   ['.claude/skills/spec-property-retirement/SKILL.md', 26922],
-  ['AGENTS.md', 78106],
+  ['AGENTS.md', 78401], // raised 78106 → 78401 (+295 B, the merge-queue speed-budget sentence; 1050 → 1053 lines) by ruling record 7044162186 「抬到 1053,整句写进去」 under ruling record 6184799323, letter B
   ['CLAUDE.md', 273],
 ]);
 
