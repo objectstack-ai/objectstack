@@ -94,8 +94,9 @@ them into three tiers by flags × item provenance (`packages/metadata-protocol/s
 > (`packages/spec/src/kernel/metadata-plugin.zod.ts`) reads `allowRuntimeCreate: true`,
 > `allowEnvironmentOverlay: false` and `supportsOverlay: false`, the tier-B posture. A brand-new
 > capability can be saved in the environment, and a packaged declaration cannot be re-declared or
-> re-scoped there. The save door refuses a platform capability name and a name another holder
-> already declares before anything is stored, and judges the body by `CapabilityDeclarationSchema`
+> re-scoped there. The save door judges the body by `CapabilityDeclarationSchema` (422, the type's
+> entry in `packages/spec/src/kernel/metadata-type-schemas.ts`), and refuses a platform capability
+> name and a name another holder already declares before anything is stored
 > (`packages/metadata-protocol/src/protocol-save-door-refusals.ts`). An unmanaged copy (ADR-0131
 > D6) copies an app's capabilities and renames them with the copy when it takes a new namespace
 > (`packages/metadata-protocol/src/package-namespace-rename.ts`). Ruled by the maintainer on
