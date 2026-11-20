@@ -369,5 +369,20 @@ describe('os doctor --scan-deprecations, end to end', () => {
       // What the advice pointed at is printed: the → replacement per finding.
       expect(run.out).toContain('Use maxLength (camelCase)');
     }, E2E_TIMEOUT);
+
+    // The advice is a promise that `--verbose` prints a fix the plain run hid.
+    // A missing `*.test.ts` beside a `*.zod.ts` warns with no fix line in
+    // either mode, so when it is the only warning the promise has nothing
+    // behind it and the summary must not make it.
+    it('makes no such advice when the only warnings carry no fix to reveal', async () => {
+      const specSrc = path.join(tmp, 'packages', 'spec', 'src');
+      fs.mkdirSync(specSrc, { recursive: true });
+      fs.writeFileSync(path.join(specSrc, 'a.zod.ts'), 'export const a = 1;\n', 'utf8');
+
+      const run = await runDoctor([]);
+
+      expect(run.out).toContain('Missing test: a.test.ts (for a.zod.ts)');
+      expect(summaryTail(run.out)).not.toContain('--verbose');
+    }, E2E_TIMEOUT);
   });
 });

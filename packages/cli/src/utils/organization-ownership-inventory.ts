@@ -851,6 +851,10 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
   // administrators author its own rate table; no parent row anchors a rate.
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // Units of measure (`@objectstack/platform-objects`, ADR-0158 U3): an
+  // organization's administrators author its own units; the platform ships no
+  // row, and no parent row anchors a unit.
+  { object: 'sys_unit', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // Working calendars (`@objectstack/platform-objects`, ADR-0157 D1): an
   // organization's administrators author its calendars, and an exception's
   // calendar carries the organization.

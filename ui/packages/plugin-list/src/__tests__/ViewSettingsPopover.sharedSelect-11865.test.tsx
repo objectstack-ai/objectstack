@@ -73,8 +73,8 @@ function renderPopover(config: RowColor) {
     />,
   );
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
-  // With no config the section starts collapsed, as it did with the native control.
-  if (!config) fireEvent.click(screen.getByRole('button', { name: 'Row Color' }));
+  // The colour picker is the Options menu's Row color level (objectstack#35551).
+  fireEvent.click(screen.getByTestId('options-row-color'));
   return { setRowColorConfig, trigger: screen.getByTestId('color-field-select') };
 }
 

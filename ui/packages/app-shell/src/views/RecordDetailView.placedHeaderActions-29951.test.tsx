@@ -208,7 +208,10 @@ afterEach(() => {
 describe.each<Face>(['page', 'drawer'])('#29951 sys_user record header (%s)', (face) => {
   it('draws the action another package places on sys_user, on the shipped placedActions header', async () => {
     const { inline, menu } = await mountResolved('sys_user', SHIPPED_HEADER, face);
-    expect(inline).toContain('Open Profile');
+    // objectstack#35593 — the page's one-row header draws ONE inline action
+    // and folds the rest into the ⋯; a drawer with no pane bar keeps three.
+    const row = face === 'page' ? [...inline, ...menu] : inline;
+    expect(row).toContain('Open Profile');
     expect(menu).toContain('Copy Profile Link');
     // The platform's own placed actions stay, and nothing placed elsewhere draws.
     expect(inline).toContain('Ban User');

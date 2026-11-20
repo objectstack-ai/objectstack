@@ -168,20 +168,32 @@ test('ungrouped + related-heavy: flat details and the related panels on Contoso'
   // other page of this smoke draws at the Desktop Chrome viewport, and the
   // stack is also what the split pane (720 px) and a phone draw.
   //
-  // The window is derived, not picked. Measured on this harness (a fresh
-  // browser context, so no stored sidebar cookie): from a 768 px window
-  // (`MOBILE_BREAKPOINT`, the desktop shell) to 1000 px the console sidebar
-  // came up as its 48 px icon rail, and the record view was the window minus
-  // that rail — two columns at 808 px (760 of view), one at 800 px (752).
-  // So the desktop stack tier is a window of 768 to 807 px, and an expanded
-  // sidebar (256 px) only narrows the view further. 780 sits inside it with
-  // headroom on both sides: 732 px of view against the 760 floor, 12 px above
-  // the mobile breakpoint. ⛔ Not 1200 px: since objectstack#27473 moved the
-  // floor to a 760 px view, 1200 draws two columns. ⛔ Not below 768 px: that
-  // is the mobile shell, where the off-canvas sidebar gives the view the
-  // whole window (760 px measured as two columns).
-  await page.setViewportSize({ width: 780, height: 800 });
+  // The window and the sidebar are derived, not picked. A collapsed console
+  // sidebar draws no icon rail from 768 px up — ruling 6973617688 on
+  // objectstack#35062: "Both collapsed states hide the sidebar completely:
+  // the manual collapse (`UnifiedSidebar` `collapsible="icon"`) and the
+  // automatic fold between 768 px and the record-drawer threshold (#27593,
+  // `consoleSidebarRail.ts`, below 1416 px). No icon column remains." So in a
+  // fresh browser context no desktop window stacks: measured on this harness,
+  // from a 768 px window (`MOBILE_BREAKPOINT`, the desktop shell) to 1415 px
+  // the sidebar folds hidden and the record view is the whole window (two
+  // columns at 768), and from 1416 px it is expanded and the view is at least
+  // 1160. The case therefore docks the sidebar the way a reader does — the
+  // app bar's trigger floats the menu and its "Keep sidebar open" keeps the
+  // 256 px sidebar beside the page — and the view is the window minus it:
+  // one column at 1015 px (759 of view), two at 1016 px (760), the same after
+  // a reload. So the docked stack tier is a window of 768 to 1015 px. 900
+  // sits inside it with headroom on both sides: 644 px of view against the
+  // 760 floor, 132 px above the mobile breakpoint. ⛔ Not 780 px with the
+  // sidebar left as it comes up: that window now draws two columns (780 px of
+  // view). ⛔ Not below 768 px: that is the mobile shell, where the off-canvas
+  // sidebar gives the view the whole window (stack below 760), but where the
+  // details draw no Invoices body table (measured at 720 and 740 px).
+  await page.setViewportSize({ width: 900, height: 800 });
   const errors = await openRecord(page, recordUrl('showcase_account', contosoId));
+  await page.locator('[data-sidebar="trigger"]').click();
+  await page.getByTestId('sidebar-keep-open').click();
+  await expect(page.getByTestId('sidebar-keep-open')).toHaveAttribute('aria-pressed', 'true');
 
   // Heuristic stepper (account.status is a select named "status").
   // record:path renders a desktop + a mobile variant — assert the visible one.

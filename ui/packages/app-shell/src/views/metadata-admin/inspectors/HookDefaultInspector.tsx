@@ -171,6 +171,9 @@ export function HookDefaultInspector({
   locale,
   serverSchema,
   onBlockingIssuesChange,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
 
@@ -516,6 +519,9 @@ export function HookDefaultInspector({
             value={draft}
             hiddenFields={CURATED_FIELDS}
             readOnly={readOnly}
+            issues={issues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={onInlineIssueFieldsChange}
             onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         </div>

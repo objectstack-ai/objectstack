@@ -174,9 +174,10 @@ export * from './date-macros.zod';
 export * from './date-range-presets';
 export * from './calendar-day';
 // [ADR-0157 D11, open point 3] The wall-clock → instant primitive (the one
-// daylight-saving rule) and the working-calendar arithmetic built on it, below
-// `@objectstack/formula` so the working-day formula functions and the calendar
-// service count with one rule. `@objectstack/core` re-exports the primitive.
+// daylight-saving rule), below `@objectstack/formula` so the working-calendar
+// arithmetic there and every other reader convert through one rule;
+// `@objectstack/core` re-exports it. Beside it, the working calendar's codes,
+// column names and resolved-calendar types (the arithmetic is formula's).
 export * from './wall-clock';
 export * from './work-calendar';
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
@@ -219,6 +220,11 @@ export * from './field-customization';
 // home currency's CLDR fraction digits with it, from this one table rather
 // than a second copy or a runtime `Intl` probe.
 export * from './currency-fraction-digits';
+// [ADR-0158 U1, U2; Open item 1] The standard unit table: the closed set of
+// UN/ECE Recommendation 20 codes with each one's dimension and its ratio to the
+// dimension's base unit, kept apart from the value-domain vocabulary the way
+// the CLDR digits table is, and the organization unit code namespace (U3).
+export * from './standard-units';
 // The credential read mask (ADR-0100) — the ONE string a masked read serves, in
 // place of the two byte-identical literals objectql and service-settings each
 // declared until #7572. Both now import this one, so the mask a console sees on
@@ -419,6 +425,13 @@ export * from './record-surface';
 // `applySystemFields` and by author-time tooling that must resolve a reference
 // to one but cannot load a runtime.
 export * from './injected-system-columns';
+
+// [ruling 7000907189 point 1] Which objects offer the Change Owner action: the
+// structural test (`isTransferEligible`) and the switch `userActions.transfer`
+// resolved onto its sharingModel default (`resolveUserActionTransfer`) — the one
+// answer the server's Change Owner endpoint (#35402) and the console's action
+// (#35403) will read; neither exists yet.
+export * from './user-action-transfer';
 
 // injected-system-column DEFINITIONS + the #7865 provenance marker (#8116) —
 // WHAT each injected column looks like, and whether storage actually backs it

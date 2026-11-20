@@ -203,6 +203,7 @@ import {
   SysPlatformSettingAudit,
   SysMigration,
   SysExchangeRate,
+  SysUnit,
   SysWorkCalendar,
   SysWorkCalendarException,
 } from '../src/system/index.js';
@@ -362,6 +363,7 @@ const config: ObjectStackDefinition = defineStack({
     SysPlatformSettingAudit,
     SysMigration,
     SysExchangeRate,
+    SysUnit,
     SysWorkCalendar,
     SysWorkCalendarException,
   ] as any,

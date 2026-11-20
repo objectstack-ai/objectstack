@@ -8,8 +8,8 @@
  * component reads the returned handlers.
  */
 
-import { useCallback, type Dispatch, type SetStateAction } from 'react';
-import type { useNavigate } from 'react-router-dom';
+import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
+import { useParams, type useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
 import type { useObjectTranslation } from '@object-ui/i18n';
@@ -20,10 +20,42 @@ import { isSavedViewId } from '../utils/viewIdentity.js';
 import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata, createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import type { RuntimeCreateApp } from './runtime-metadata-persistence.js';
+import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import { dispatchViewPatches } from './objectViewOptions.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+import type { InPlaceViewRequest } from './CreateViewDialog.js';
+import { buildInPlaceViewConfig, type PersonalViewListState } from './personalViews.js';
+import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
+
+/**
+ * objectstack#35624 — the app a view created here is saved into
+ * (`RuntimePersistCtx.app`): the routed app's package by the draft preview
+ * bar's own rule (`draftBarPackageOf`), so the bar counts and publishes the
+ * view the create wrote. When the create could not be saved into the app, the
+ * author is told where it went instead.
+ */
+export function useRuntimeCreateApp(t: ReturnType<typeof useObjectTranslation>['t']): RuntimeCreateApp {
+    const { appName } = useParams();
+    const { apps } = useMetadata();
+    const packageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
+    // Memoised for cost only: the create reads the two fields, never the identity.
+    return useMemo(
+        () => ({
+            packageId,
+            onSavedOutsideApp: () => {
+                toast.info(t('view.savedOutsideApp', {
+                    defaultValue:
+                        'This view was saved as a draft outside this app, because the app’s customization package cannot be used here. This app’s draft bar does not count or publish it: publish it from Home.',
+                }));
+            },
+        }),
+        [packageId, t],
+    );
+}
 
 export function useObjectViewViewCrud({
     dataSource,
@@ -66,6 +98,7 @@ export function useObjectViewViewCrud({
     activeViewId: string | undefined;
     baseView: ReturnType<typeof buildViewTabs>[number];
 }) {
+    const createApp = useRuntimeCreateApp(t);
     // objectui#12504 — no toolbar control writes the shared view. The sort and
     // the column layout (objectui#12418), the density and the Hide Fields
     // popover (objectui#12474) are the user's own list state (`listPrefs`), and
@@ -175,6 +208,8 @@ export function useObjectViewViewCrud({
                     // `useAdapter()`) so the seam can drop the object's view keys.
                     dataSource,
                     objectName,
+                    // objectstack#35624 — saved into the app it was made in.
+                    app: createApp,
                 });
             }
             setShowViewConfigPanel(false);
@@ -209,7 +244,7 @@ export function useObjectViewViewCrud({
             });
             return false;
         }
-    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t]);
+    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t, createApp]);
 
     /** Real-time draft field update — propagates each toggle/input change immediately */
     const handleViewUpdate = useCallback((field: string, value: any) => {
@@ -424,4 +459,84 @@ export function useObjectViewViewCrud({
         handleConfigView,
         handleAddView,
     };
+}
+
+/**
+ * The switcher's in-place create (the create card's `onCreate`): build the new
+ * view's body from the open view ({@link buildInPlaceViewConfig}), then
+ *
+ * - `personal` — save it as one of the reader's own views (`sys_personal_view`)
+ *   and open it;
+ * - `shared` — hand it to the add-view door (`createShared`, the view-config
+ *   panel's create: an invisible draft opened in draft preview, published
+ *   explicitly), under the machine key the card generated. The draft and
+ *   publish rules are that door's, unchanged.
+ *
+ * Resolves `true` once the view exists; on a refusal it says why (a toast with
+ * the door's own words) and resolves `false`, so the card keeps its input.
+ */
+export function useCreateViewInPlace({
+    objectName,
+    activeView,
+    readListState,
+    savePersonal,
+    openPersonal,
+    createShared,
+    clearSourceListState,
+    t,
+}: {
+    objectName: string;
+    /** The open view, the new view's starting point. */
+    activeView: Record<string, any> | undefined;
+    /** The list on screen, read at create time (the address's toolbar state, the panel, the reader's state). */
+    readListState: () => PersonalViewListState;
+    /** Save one of the reader's own views; resolves its id. */
+    savePersonal: (label: string, config: Record<string, unknown>) => Promise<string>;
+    /** Open one of the reader's own views by id. */
+    openPersonal: (id: string) => void;
+    /** The add-view door for a shared view (`handleViewCreate`). */
+    createShared: (config: Record<string, any>) => Promise<boolean>;
+    /**
+     * Clear the reader's temporary list state on the view the new one came
+     * from, once a personal view took it over (as Save as my view does,
+     * objectstack#30073): that view then opens as its own again.
+     */
+    clearSourceListState?: (viewId: string) => void;
+    t: ReturnType<typeof useObjectTranslation>['t'];
+}) {
+    return useCallback(async ({ config, scope, includeCurrent }: InPlaceViewRequest): Promise<boolean> => {
+        const { type, label, name } = config;
+        const block = config[type];
+        const listState = readListState();
+        const built = buildInPlaceViewConfig(
+            objectName,
+            activeView ?? {},
+            { type, ...(block && typeof block === 'object' ? { block } : {}) },
+            includeCurrent ? listState : { preference: listState.preference },
+        );
+        if (!built.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
+            return false;
+        }
+        if (scope === 'shared') {
+            // The body's own identity is the open view's; the new view's is
+            // the name and key the card gave it.
+            const body: Record<string, unknown> = { ...built.config, type, label, name };
+            delete body.id;
+            return createShared(body);
+        }
+        try {
+            const id = await savePersonal(label, built.config);
+            if (includeCurrent && activeView?.id) clearSourceListState?.(String(activeView.id));
+            openPersonal(id);
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to create a personal view:', err);
+            toast.error(t('form.saveError'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+            return false;
+        }
+    }, [objectName, activeView, readListState, savePersonal, openPersonal, createShared, clearSourceListState, t]);
 }

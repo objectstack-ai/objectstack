@@ -1,30 +1,26 @@
 /**
- * ViewSettingsPopover — the list toolbar's "Display" control.
+ * ViewSettingsPopover — the list's Options menu.
  *
- * Since objectui#12423 this is the DEFAULT desktop shape of the list toolbar:
- * the bar keeps Filter, Sort, Display and Search, and everything else sits
- * here, in this order —
- *   - Layout (the visualization switcher; only when the list offers a choice)
- *   - Open records (how a row opens its record; only when the host passes it)
- *   - Sort (below `sm` only, when the host passes it: the bar's Sort button
- *     is not drawn there)
- *   - Group, Row color, Hide fields
- *   - Density
- *   - Row numbers (a session-only switch, grid only)
- *   - Edit inline (a switch, grid only, when the principal may edit)
- *   - footer: Reset to view default · Refresh, then the export entries on a
- *     row of their own that wraps, so every format stays inside the panel
+ * Opened from the view bar's Options trigger, it is a short menu: each row
+ * names one setting on the left and its current value on the right, and opens
+ * a second level that changes it. At the top, the view's name (renamed in
+ * place where the host allows it). Then, each only when the host offers it:
  *
- * It began as UX Sprint 2 (P1-4)'s "View settings" gear behind
- * `compactToolbar: true`; the wide form — one toolbar button per control — is
- * what a host gets with `compactToolbar: false`, and ListView.tsx keeps it.
- * Content is duplicated between the two forms: change one, change both. One
- * exception: Open records is drawn here only — see `recordOpen`.
+ *   - Layout: the visualizations, each by icon AND words;
+ *   - Fields: 「N shown」 → the shown fields (search, drag to reorder, eye to
+ *     hide) above the hidden ones (one click shows a field again);
+ *   - Group, Row color;
+ *   - Row height: compact, standard, spacious;
+ *   - Sort (below `sm` only, where the bar draws no Sort button);
+ *   - More: how a record opens, row numbers, inline edit.
  *
- * Every control persists exactly what its wide-form twin persists; this
- * component writes nothing itself. The trigger's count is the number of
- * settings that differ from the view's own (the host computes it), and Reset
- * hands every one of them back.
+ * The footer keeps Restore defaults, Refresh and the export entries.
+ *
+ * Every setting here is the reader's own: this component writes nothing
+ * itself, each control hands its change to the host, which keeps it as the
+ * reader's preference. The wide toolbar form (`compactToolbar: false`) keeps
+ * one button per control in ListView.tsx; content is duplicated between the
+ * two forms, so change one, change both. Open records is drawn here only.
  *
  * @module
  */
@@ -33,6 +29,7 @@ import * as React from 'react';
 import {
   cn,
   Button,
+  Input,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -51,13 +48,18 @@ import {
   Rows4,
   Rows3,
   Rows2,
-  ChevronDown,
+  Check,
+  ChevronLeft,
+  ChevronRight,
   RotateCw,
   Download,
   Loader2,
   Undo2,
+  Save,
 } from 'lucide-react';
 import { TOOLBAR_TEXT_TRIGGER } from '../listToolbarRow';
+import { ViewSwitcherFaceContext } from '../ViewSwitcher';
+import { FieldList, type FieldListItem } from '../conditions/FieldList';
 
 /**
  * A bar or panel control's touch size below `sm`: 44 px on both sides (WCAG
@@ -115,9 +117,28 @@ export function groupFieldOptions(fields: readonly ViewSettingsField[]): Array<{
     .map((f) => ({ value: f.name, label: f.label || f.name }));
 }
 
+export type ViewSettingsDensityMode = 'compact' | 'comfortable' | 'spacious';
+
 export interface ViewSettingsDensity {
-  mode: 'compact' | 'comfortable' | 'spacious';
+  mode: ViewSettingsDensityMode;
   cycle: () => void;
+  /**
+   * Choose one height. Wired ⇒ Row height is a second level listing the three
+   * heights; absent ⇒ the row steps to the next height on each click.
+   */
+  setMode?: (mode: ViewSettingsDensityMode) => void;
+}
+
+/**
+ * The view's name at the top of the menu. `onRename` is passed only to a
+ * reader who may rename this view (the owner of one of their own views, or a
+ * reader who may edit the shared view); without it the name is shown, not
+ * edited. Resolves `false` when the rename was refused (the host has said
+ * why), and the field then shows the name it had.
+ */
+export interface ViewSettingsViewName {
+  label: string;
+  onRename?: (next: string) => boolean | Promise<boolean>;
 }
 
 /**
@@ -137,11 +158,9 @@ export type ViewSettingsRecordOpenPreference = 'drawer' | 'page';
  * section answers by the mode the host resolved for this object and view:
  *
  *   - `drawer`: two segments, Drawer | Full page, writing the reader's
- *     preference through `setPreference`, with a one-line note that the
- *     choice is the reader's own and that a record's `↗` always opens the
- *     full page;
- *   - `page`: one read-only line saying the object is declared to open as a
- *     full page — the declaration wins, so there is nothing to choose;
+ *     preference through `setPreference`;
+ *   - `page`: one read-only line saying records always open as a full page —
+ *     the object's declaration wins, so there is nothing to choose;
  *   - `new_window` / `none`: no section. The preference changes nothing there
  *     and the ruling gives those declarations no line of their own.
  */
@@ -162,6 +181,25 @@ export interface ViewSettingsPopoverProps {
   t: (key: string, opts?: any) => string;
   allFields: ViewSettingsField[];
 
+  /** The view's name, at the top of the menu. Absent ⇒ no name row. */
+  viewName?: ViewSettingsViewName;
+
+  /**
+   * The order the reader's columns are drawn in: the same list the grid's
+   * header drag keeps (its column state's `order`, by column key). Names it
+   * does not list keep the `allFields` order after the listed ones.
+   */
+  fieldOrder?: readonly string[];
+  /** A field's type (the object's declaration), for the icon the Fields level draws beside it. */
+  fieldType?: (name: string) => string | undefined;
+  /**
+   * Store a new column order: the whole list, every field of `allFields`
+   * (hidden ones in place) and any other key `fieldOrder` held, kept as it
+   * was. Wired ⇒ the shown fields can be dragged; the host writes it where the
+   * header drag writes, so the two are one state.
+   */
+  onFieldOrderChange?: (order: string[]) => void;
+
   /**
    * The Layout row: the visualization switcher. The host passes it only when
    * the list offers more than one visualization, as a function of `closeMenu`:
@@ -169,10 +207,10 @@ export interface ViewSettingsPopoverProps {
    * `closeMenu` when a layout is picked (objectui#12621). The panel's toggles
    * (row numbers, inline edit, density, hidden fields) never close it.
    *
-   * The row folds a segmented control that would not fit to icons (see
-   * `LayoutSlot`). It folds what it can read: a `role="tablist"` whose tabs
-   * carry their name in `aria-label` and `title` and their words in a direct
-   * child `<span>`, the shape `ViewSwitcherDropdown` draws.
+   * The menu draws the element twice through `ViewSwitcherFaceContext`: as
+   * the current layout's name on the Layout row (`value`) and as the list of
+   * layouts on the second level (`list`), the faces `ViewSwitcherDropdown`
+   * draws.
    */
   layout?: (closeMenu: () => void) => React.ReactNode;
 
@@ -245,6 +283,18 @@ export interface ViewSettingsPopoverProps {
   changedCount?: number;
   /** Hand every changed setting back to the view's own. Drawn when wired. */
   onReset?: () => void;
+  /**
+   * Whether 恢复默认 is disabled. Defaults to "nothing counted"
+   * (`changedCount === 0`); a host that owns the reset and wires it only
+   * while the list differs from the view passes `false`.
+   */
+  resetDisabled?: boolean;
+  /**
+   * 保存: the list on screen becomes the open view's stored body. A host
+   * wires it only for a view the reader owns and may update, and only while
+   * the list differs from it (objectstack#30073). Drawn beside 恢复默认.
+   */
+  onSave?: () => void;
 
   /** Footer: re-fetch the list. Drawn when wired. */
   onRefresh?: () => void;
@@ -257,46 +307,78 @@ export interface ViewSettingsPopoverProps {
   exportError?: string | null;
 }
 
-interface SectionProps {
-  title: string;
-  badge?: number;
-  onClear?: () => void;
-  clearLabel?: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
+/** The second levels of the menu; `root` is the menu itself. */
+type MenuPage = 'root' | 'layout' | 'fields' | 'group' | 'color' | 'rowHeight' | 'sort' | 'more';
+
+/**
+ * One row of the menu: the setting's name on the left, its current value on
+ * the right, and a chevron, for a row that opens a second level.
+ */
+function MenuRow({
+  label,
+  value,
+  onOpen,
+  testId,
+}: {
+  label: string;
+  value?: React.ReactNode;
+  onOpen: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid={testId}
+      className={cn(
+        'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      )}
+    >
+      <span className="shrink-0 text-foreground">{label}</span>
+      <span className="ml-auto flex min-w-0 items-center gap-1 text-muted-foreground" data-testid={`${testId}-value`}>
+        {value != null && <span className="min-w-0 truncate">{value}</span>}
+        <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      </span>
+    </button>
+  );
 }
 
-function Section({ title, badge, onClear, clearLabel, defaultOpen = true, children }: SectionProps) {
-  const [open, setOpen] = React.useState(defaultOpen);
+/**
+ * A second level: a back control, worded with the level's title, over the
+ * level's content. `action` is drawn at the right of the title row.
+ */
+function SubPage({
+  title,
+  onBack,
+  action,
+  children,
+  testId,
+}: {
+  title: string;
+  onBack: () => void;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  testId: string;
+}) {
   return (
-    <div className="border-b last:border-b-0">
-      <div className="flex items-center justify-between px-3 py-2 max-sm:py-0">
+    <div data-testid={testId}>
+      <div className="flex items-center gap-1 border-b px-1 py-1">
         <button
           type="button"
-          onClick={() => setOpen((x) => !x)}
-          className="flex items-center gap-1.5 text-xs font-medium text-foreground/80 hover:text-foreground max-sm:min-h-11 max-sm:flex-1"
-        >
-          <ChevronDown
-            className={cn('h-3.5 w-3.5 transition-transform', !open && '-rotate-90')}
-          />
-          {title}
-          {typeof badge === 'number' && badge > 0 && (
-            <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary/10 px-1 text-[10px] text-primary tabular-nums">
-              {badge}
-            </span>
+          onClick={onBack}
+          data-testid="options-back"
+          className={cn(
+            'flex min-w-0 items-center gap-1 rounded-sm px-1.5 py-1 text-[13px] font-medium hover:bg-muted max-sm:min-h-11',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
+        >
+          <ChevronLeft className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{title}</span>
         </button>
-        {onClear && (
-          <button
-            type="button"
-            onClick={onClear}
-            className="text-[11px] text-muted-foreground hover:text-foreground max-sm:min-h-11 max-sm:px-2"
-          >
-            {clearLabel}
-          </button>
-        )}
+        {action && <div className="ml-auto pr-1">{action}</div>}
       </div>
-      {open && <div className="px-3 pb-3">{children}</div>}
+      {children}
     </div>
   );
 }
@@ -431,81 +513,148 @@ function RecordOpenSection({
           </ToggleGroup>
         ) : (
           <span className="min-w-0 text-right text-xs text-muted-foreground" data-testid="display-record-open-declared">
-            {t('list.recordOpenDeclaredPage', { defaultValue: 'This object is declared to open as a full page' })}
+            {t('list.optionsMenu.recordOpenAlwaysPage', { defaultValue: 'Records always open as a full page' })}
           </span>
         )}
       </div>
-      {resolvedMode === 'drawer' && (
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground" data-testid="display-record-open-note">
-          {t('list.recordOpenNote', {
-            defaultValue: 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
-          })}
-        </p>
-      )}
     </div>
   );
 }
 
-/** Set on the layout slot while its segments show icons only; the class below reads it. */
-const LAYOUT_FOLD_ATTR = 'data-layout-fold';
+/**
+ * The fields of `allFields`, in the order the reader's columns are drawn:
+ * the names `order` lists first, in its order, then the rest in their own.
+ */
+export function orderFields(
+  fields: readonly ViewSettingsField[],
+  order: readonly string[] | undefined,
+): ViewSettingsField[] {
+  if (!order || order.length === 0) return [...fields];
+  const rank = new Map(order.map((name, i) => [name, i]));
+  const rankOf = (fieldName: string): number => rank.get(fieldName) ?? Number.MAX_SAFE_INTEGER;
+  return fields
+    .map((entry, i) => ({ entry, i }))
+    .sort((a, b) => rankOf(a.entry.name) - rankOf(b.entry.name) || a.i - b.i)
+    .map(({ entry }) => entry);
+}
+
+/** The words a density mode is shown by, on the Row height row and its level. */
+function rowHeightLabel(t: ViewSettingsPopoverProps['t'], mode: ViewSettingsDensityMode): string {
+  return mode === 'compact'
+    ? t('list.optionsMenu.rowHeightCompact', { defaultValue: 'Compact' })
+    : mode === 'comfortable'
+      ? t('list.optionsMenu.rowHeightStandard', { defaultValue: 'Standard' })
+      : t('list.optionsMenu.rowHeightSpacious', { defaultValue: 'Spacious' });
+}
+
+const ROW_HEIGHT_MODES: readonly ViewSettingsDensityMode[] = ['compact', 'comfortable', 'spacious'];
 
 /**
- * The Layout row's control, folded to icons when its segments would not fit
- * (objectstack#26637). The panel is a fixed width and the row shares it with
- * its title, so four or five icon + label segments ran out of room and broke
- * each label onto two lines, in zh-CN and longer still in en.
- *
- * The fold is MEASURED, never a count or a breakpoint: what decides it is the
- * width the segments need with every label shown against the width the slot
- * has, in whatever locale is rendering. Folded, every segment but the selected
- * one hides its words; its icon stays, and its `aria-label` and `title` stay
- * its accessible name and tooltip. The selected segment keeps its label.
- *
- * Labels never wrap here (`whitespace-nowrap`, `shrink-0`), so the width the
- * segments need is the slot's children's `scrollWidth`. While folded the
- * hidden labels add nothing to it, so each measurement lifts the fold for one
- * synchronous read and puts it back before the browser paints. It runs after
- * every render (labels, locale and the views offered all arrive as props) and
- * whenever the slot itself resizes.
+ * The view's name at the top of the menu, renamed in place: Enter or leaving
+ * the field keeps a changed, non-blank name; Escape puts the name back. A
+ * rename the host refuses shows the name it had.
  */
-function LayoutSlot({ children }: { children: React.ReactNode }) {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [folded, setFolded] = React.useState(false);
-
-  const measure = React.useCallback(() => {
-    const slot = ref.current;
-    if (!slot) return;
-    const fold = slot.getAttribute(LAYOUT_FOLD_ATTR);
-    if (fold !== null) slot.removeAttribute(LAYOUT_FOLD_ATTR);
-    let needed = 0;
-    for (const child of Array.from(slot.children)) needed += (child as HTMLElement).scrollWidth;
-    if (fold !== null) slot.setAttribute(LAYOUT_FOLD_ATTR, fold);
-    setFolded(needed > slot.clientWidth);
-  }, []);
-
-  React.useLayoutEffect(measure);
-
-  React.useEffect(() => {
-    const slot = ref.current;
-    if (!slot || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => measure());
-    observer.observe(slot);
-    return () => observer.disconnect();
-  }, [measure]);
-
+function ViewNameField({ t, viewName }: { t: ViewSettingsPopoverProps['t']; viewName: ViewSettingsViewName }) {
+  const { label, onRename } = viewName;
+  const [draft, setDraft] = React.useState(label);
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => setDraft(label), [label]);
+  const title = t('list.optionsMenu.viewName', { defaultValue: 'View name' });
+  if (!onRename) {
+    return (
+      <div className="border-b px-3 py-2 text-[13px] font-medium break-words" data-testid="options-view-name">
+        {label}
+      </div>
+    );
+  }
+  const commit = async () => {
+    const next = draft.trim();
+    if (!next || next === label) {
+      setDraft(label);
+      return;
+    }
+    setBusy(true);
+    try {
+      const ok = await onRename(next);
+      if (!ok) setDraft(label);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div
-      ref={ref}
-      data-layout-fold={folded ? 'icons' : undefined}
-      className={cn(
-        'flex min-w-0 flex-1 justify-end',
-        '[&_[role=tab]]:shrink-0 [&_[role=tab]]:whitespace-nowrap',
-        '[&[data-layout-fold]_[role=tab][aria-selected=false]>span]:hidden',
-      )}
-      data-testid="display-layout-slot"
-    >
-      {children}
+    <div className="border-b p-2">
+      <Input
+        value={draft}
+        disabled={busy}
+        aria-label={title}
+        title={title}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { void commit(); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === 'Escape') {
+            // Escape reverts the name; the menu stays open.
+            e.stopPropagation();
+            setDraft(label);
+          }
+        }}
+        className="h-8 text-[13px] font-medium max-sm:h-11"
+        data-testid="options-view-name-input"
+      />
     </div>
+  );
+}
+
+/**
+ * The Fields level: the list's shared field list (`../conditions/FieldList`,
+ * the one the Filter and Sort controls open) as the view's field manager. A
+ * search box; the shown fields in column order, reordered by drag or by a grip
+ * handle and the arrow keys, each hidden by its eye; then the view's columns
+ * the reader hid and the object's fields they may add, each shown or added
+ * with one click. Every change applies at once. `allFields` holds only the
+ * fields the reader may read: the host withholds the rest.
+ */
+function FieldsPage({
+  allFields,
+  hiddenFields,
+  updateHiddenFields,
+  addableFields,
+  onAddField,
+  fieldOrder,
+  onFieldOrderChange,
+  fieldType,
+}: {
+  allFields: readonly ViewSettingsField[];
+  hiddenFields: Set<string>;
+  updateHiddenFields: (next: Set<string>) => void;
+  addableFields?: readonly ViewSettingsField[];
+  onAddField?: (name: string) => void;
+  fieldOrder?: readonly string[];
+  onFieldOrderChange?: (order: string[]) => void;
+  fieldType?: (name: string) => string | undefined;
+}) {
+  const addable = onAddField ? addableFields ?? [] : [];
+  const columns = new Set(allFields.map((f) => f.name));
+  const items: FieldListItem[] = [
+    ...allFields,
+    ...addable.filter((f) => !columns.has(f.name)),
+  ].map((f) => ({ value: f.name, label: f.label || f.name, type: fieldType?.(f.name) }));
+  const shown = orderFields(allFields, fieldOrder).filter((f) => !hiddenFields.has(f.name)).map((f) => f.name);
+  return (
+    <FieldList
+      fields={items}
+      shownFields={shown}
+      order={fieldOrder}
+      onOrderChange={onFieldOrderChange}
+      onHide={(name) => updateHiddenFields(new Set([...hiddenFields, name]))}
+      onShow={(name) => updateHiddenFields(new Set([...hiddenFields].filter((n) => n !== name)))}
+      addable={addable.map((f) => f.name)}
+      onAdd={onAddField}
+      testId="options-fields"
+      className="w-full"
+    />
   );
 }
 
@@ -513,6 +662,10 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   const {
     t,
     allFields,
+    viewName,
+    fieldOrder,
+    onFieldOrderChange,
+    fieldType,
     layout,
     recordOpen,
     sort,
@@ -536,6 +689,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     setInlineEdit,
     changedCount = 0,
     onReset,
+    resetDisabled,
+    onSave,
     onRefresh,
     refreshing,
     exportFormats,
@@ -545,18 +700,274 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   } = props;
 
   const [open, setOpen] = React.useState(false);
+  const [page, setPage] = React.useState<MenuPage>('root');
   const belowSm = useBelowSm();
   // Closing through the controlled state lets Radix return focus to the
-  // Display trigger, as Escape and an outside click do.
+  // Options trigger, as Escape and an outside click do.
   const closeMenu = React.useCallback(() => setOpen(false), []);
-
-  const DensityIcon =
-    density?.mode === 'compact' ? Rows4 : density?.mode === 'comfortable' ? Rows3 : Rows2;
+  // The menu opens on its first level every time.
+  React.useEffect(() => {
+    if (!open) setPage('root');
+  }, [open]);
+  const back = () => setPage('root');
 
   // The trigger is named 「Options」 on the view bar (objectstack#35548).
   const triggerLabel = t('list.options', { defaultValue: 'Options' });
   const hasExport = !!onExport && !!exportFormats && exportFormats.length > 0;
-  const hasFooter = !!onReset || !!onRefresh || hasExport;
+  const hasFooter = !!onSave || !!onReset || !!onRefresh || hasExport;
+
+  const fieldLabel = (name: string) => allFields.find((f) => f.name === name)?.label || name;
+  const none = t('list.none', { defaultValue: 'None' });
+  const groupFields: string[] = Array.isArray(groupingConfig?.fields)
+    ? groupingConfig.fields.map((f: { field?: string }) => f?.field).filter((f: unknown): f is string => typeof f === 'string' && !!f)
+    : [];
+  const recordOpenDrawn = !!recordOpen && (recordOpen.resolvedMode === 'drawer' || recordOpen.resolvedMode === 'page');
+  const hasMore = recordOpenDrawn || !!setRowNumbers || (!!showInlineEdit && !!setInlineEdit);
+  const fieldsOffered = !!showHideFields && !!hiddenFields && !!updateHiddenFields;
+  const shownCount = fieldsOffered ? allFields.filter((f) => !hiddenFields!.has(f.name)).length : 0;
+  const DensityIcon =
+    density?.mode === 'compact' ? Rows4 : density?.mode === 'comfortable' ? Rows3 : Rows2;
+
+  const titles: Record<Exclude<MenuPage, 'root'>, string> = {
+    layout: t('list.layout', { defaultValue: 'Layout' }),
+    fields: t('list.optionsMenu.fields', { defaultValue: 'Fields' }),
+    group: t('list.group', { defaultValue: 'Group' }),
+    color: t('list.rowColor', { defaultValue: 'Row Color' }),
+    rowHeight: t('list.optionsMenu.rowHeight', { defaultValue: 'Row height' }),
+    sort: t('list.sort', { defaultValue: 'Sort' }),
+    more: t('list.optionsMenu.more', { defaultValue: 'More' }),
+  };
+  const clearAction = (onClear: () => void, testId: string) => (
+    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs max-sm:h-11" onClick={onClear} data-testid={testId}>
+      {t('list.clear', { defaultValue: 'Clear' })}
+    </Button>
+  );
+
+  const rootMenu = (
+    <div data-testid="options-menu">
+      {viewName && <ViewNameField t={t} viewName={viewName} />}
+      <div className="p-1">
+        {layout && (
+          <MenuRow
+            label={titles.layout}
+            value={<ViewSwitcherFaceContext.Provider value="value">{layout(closeMenu)}</ViewSwitcherFaceContext.Provider>}
+            onOpen={() => setPage('layout')}
+            testId="options-row-layout"
+          />
+        )}
+        {fieldsOffered && (
+          <MenuRow
+            label={titles.fields}
+            value={t('list.optionsMenu.fieldsShown', { count: shownCount, defaultValue: `${shownCount} shown` })}
+            onOpen={() => setPage('fields')}
+            testId="options-row-fields"
+          />
+        )}
+        {showGroup && setGroupingConfig && (
+          <MenuRow
+            label={titles.group}
+            value={groupFields.length > 0 ? groupFields.map(fieldLabel).join(' › ') : none}
+            onOpen={() => setPage('group')}
+            testId="options-row-group"
+          />
+        )}
+        {showColor && setRowColorConfig && (
+          <MenuRow
+            label={titles.color}
+            value={rowColorConfig ? fieldLabel(rowColorConfig.field) : none}
+            onOpen={() => setPage('color')}
+            testId="options-row-color"
+          />
+        )}
+        {showDensity && density && (density.setMode ? (
+          <MenuRow
+            label={titles.rowHeight}
+            value={rowHeightLabel(t, density.mode)}
+            onOpen={() => setPage('rowHeight')}
+            testId="options-row-row-height"
+          />
+        ) : (
+          // A host that can only step through the heights gets a row that steps.
+          <button
+            type="button"
+            onClick={density.cycle}
+            title={t('grid.toolbar.densityCycleShortHint', { defaultValue: 'Click to cycle' })}
+            data-testid="view-settings-density-cycle"
+            className={cn(
+              'flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            )}
+          >
+            <span className="shrink-0">{titles.rowHeight}</span>
+            <span className="ml-auto flex items-center gap-1.5 text-muted-foreground">
+              <DensityIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              {rowHeightLabel(t, density.mode)}
+            </span>
+          </button>
+        ))}
+        {sort && (
+          <div className="sm:hidden">
+            <MenuRow label={titles.sort} onOpen={() => setPage('sort')} testId="options-row-sort" />
+          </div>
+        )}
+        {hasMore && (
+          <MenuRow label={titles.more} onOpen={() => setPage('more')} testId="options-row-more" />
+        )}
+      </div>
+    </div>
+  );
+
+  let body: React.ReactNode = rootMenu;
+  if (page === 'layout' && layout) {
+    body = (
+      <SubPage title={titles.layout} onBack={back} testId="options-page-layout">
+        <ViewSwitcherFaceContext.Provider value="list">{layout(closeMenu)}</ViewSwitcherFaceContext.Provider>
+      </SubPage>
+    );
+  } else if (page === 'fields' && fieldsOffered) {
+    body = (
+      <SubPage
+        title={titles.fields}
+        onBack={back}
+        testId="options-page-fields"
+        action={hiddenFields!.size > 0
+          ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs max-sm:h-11"
+              onClick={() => updateHiddenFields!(new Set())}
+              data-testid="options-fields-show-all"
+            >
+              {t('list.showAll', { defaultValue: 'Show all' })}
+            </Button>
+          )
+          : undefined}
+      >
+        <FieldsPage
+          allFields={allFields}
+          hiddenFields={hiddenFields!}
+          updateHiddenFields={updateHiddenFields!}
+          addableFields={addableFields}
+          onAddField={onAddField}
+          fieldOrder={fieldOrder}
+          fieldType={fieldType}
+          onFieldOrderChange={onFieldOrderChange}
+        />
+      </SubPage>
+    );
+  } else if (page === 'group' && showGroup && setGroupingConfig) {
+    body = (
+      <SubPage
+        title={titles.group}
+        onBack={back}
+        testId="options-page-group"
+        action={groupingConfig ? clearAction(() => setGroupingConfig(undefined), 'options-group-clear') : undefined}
+      >
+        <div className="p-3">
+          <GroupingEditor
+            value={groupingConfig as any}
+            fieldOptions={groupFieldOptions(allFields)}
+            maxLevels={3}
+            labels={{
+              addGroup: t('list.addGroup', 'Add group field'),
+              collapseTitle: t('list.collapsedByDefault', 'Collapsed by default'),
+              removeTitle: t('list.removeGroup', 'Remove'),
+            }}
+            onChange={(next) => setGroupingConfig(next as any)}
+          />
+        </div>
+      </SubPage>
+    );
+  } else if (page === 'color' && showColor && setRowColorConfig) {
+    // `list.rowColor` names this level: it is the counterpart of the wide
+    // toolbar's Row color panel, which takes the same key (objectui#4118).
+    body = (
+      <SubPage
+        title={titles.color}
+        onBack={back}
+        testId="options-page-color"
+        action={rowColorConfig ? clearAction(() => setRowColorConfig(undefined), 'options-color-clear') : undefined}
+      >
+        <div className="p-3">
+          <label className="mb-1 block text-[11px] text-muted-foreground">
+            {t('list.colorByField', { defaultValue: 'Color by field' })}
+          </label>
+          <ColorFieldPicker
+            value={rowColorConfig?.field || ''}
+            options={[
+              { value: '', label: none },
+              ...allFields.map((field) => ({ value: field.name, label: field.label || field.name })),
+            ]}
+            onPick={(field) => {
+              if (!field) {
+                setRowColorConfig(undefined);
+              } else {
+                setRowColorConfig({ field, colors: rowColorConfig?.colors || {} });
+              }
+            }}
+          />
+        </div>
+      </SubPage>
+    );
+  } else if (page === 'rowHeight' && density?.setMode) {
+    const setMode = density.setMode;
+    body = (
+      <SubPage title={titles.rowHeight} onBack={back} testId="options-page-row-height">
+        <div role="radiogroup" aria-label={titles.rowHeight} className="p-1">
+          {ROW_HEIGHT_MODES.map((mode) => {
+            const active = density.mode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setMode(mode)}
+                data-testid={`options-row-height-${mode}`}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted max-sm:min-h-11',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  active ? 'font-medium text-foreground' : 'text-foreground/90',
+                )}
+              >
+                <span className="flex-1">{rowHeightLabel(t, mode)}</span>
+                {active && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
+      </SubPage>
+    );
+  } else if (page === 'sort' && sort) {
+    body = (
+      <SubPage title={titles.sort} onBack={back} testId="options-page-sort">
+        <div className="px-3 py-2" data-testid="display-sort">{sort}</div>
+      </SubPage>
+    );
+  } else if (page === 'more' && hasMore) {
+    body = (
+      <SubPage title={titles.more} onBack={back} testId="options-page-more">
+        {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
+        {setRowNumbers && (
+          <SwitchRow
+            label={t('list.rowNumbers', { defaultValue: 'Row numbers' })}
+            checked={!!rowNumbers}
+            onCheckedChange={setRowNumbers}
+            testId="display-row-numbers-toggle"
+          />
+        )}
+        {showInlineEdit && setInlineEdit && (
+          <SwitchRow
+            label={t('list.inlineEditShort', { defaultValue: 'Edit inline' })}
+            checked={!!inlineEdit}
+            onCheckedChange={setInlineEdit}
+            testId="toolbar-inline-edit-toggle"
+          />
+        )}
+      </SubPage>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -587,209 +998,66 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           )}
         </Button>
       </PopoverTrigger>
-      {/* Below `sm` the panel takes the phone's width, as Filter and Sort do, so
-          the Sort block's rows keep their words. */}
+      {/* Below `sm` the menu takes the phone's width, as Filter and Sort do. */}
       <PopoverContent
         align="end"
         collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined}
-        className="w-[calc(100vw-2rem)] sm:w-80 p-0"
+        className="w-[calc(100vw-2rem)] sm:w-72 p-0"
         data-testid="view-settings-content"
+        data-page={page}
+        // The menu opens on itself, not in the view name's field: a key
+        // pressed after opening must not start renaming the view.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          (event.currentTarget as HTMLElement | null)?.focus?.();
+        }}
       >
-        <div className="max-h-[min(70vh,560px)] overflow-y-auto">
-          {layout && (
-            <div className="flex items-center justify-between gap-3 border-b px-3 py-2" data-testid="display-layout-row">
-              <span className="shrink-0 whitespace-nowrap text-xs font-medium text-foreground/80">
-                {t('list.layout', { defaultValue: 'Layout' })}
-              </span>
-              <LayoutSlot>{layout(closeMenu)}</LayoutSlot>
-            </div>
-          )}
+        <div className="max-h-[min(70vh,560px)] overflow-y-auto">{body}</div>
 
-          {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
-
-          {sort && (
-            <div className="border-b px-3 py-2 sm:hidden" data-testid="display-sort">
-              {sort}
-            </div>
-          )}
-
-          {showGroup && setGroupingConfig && (
-            <Section
-              title={t('list.group', { defaultValue: 'Group' })}
-              badge={groupingConfig?.fields?.length || 0}
-              onClear={groupingConfig ? () => setGroupingConfig(undefined) : undefined}
-              clearLabel={t('list.clear', { defaultValue: 'Clear' })}
-            >
-              <GroupingEditor
-                value={groupingConfig as any}
-                fieldOptions={groupFieldOptions(allFields)}
-                maxLevels={3}
-                labels={{
-                  addGroup: t('list.addGroup', 'Add group field'),
-                  collapseTitle: t('list.collapsedByDefault', 'Collapsed by default'),
-                  removeTitle: t('list.removeGroup', 'Remove'),
-                }}
-                onChange={(next) => setGroupingConfig(next as any)}
-              />
-            </Section>
-          )}
-
-          {/* `list.rowColor` names the SECTION; `list.color` is the wide
-              toolbar-BUTTON label for the same feature — ListView renders the
-              button with `list.color` and the panel it opens with
-              `list.rowColor`. This Section is that panel's counterpart here,
-              so it takes the panel's key (objectui#4118). */}
-          {showColor && setRowColorConfig && (
-            <Section
-              title={t('list.rowColor', { defaultValue: 'Row Color' })}
-              onClear={rowColorConfig ? () => setRowColorConfig(undefined) : undefined}
-              clearLabel={t('list.clear', { defaultValue: 'Clear' })}
-              defaultOpen={!!rowColorConfig}
-            >
-              <label className="block text-[11px] text-muted-foreground mb-1">
-                {t('list.colorByField', { defaultValue: 'Color by field' })}
-              </label>
-              <ColorFieldPicker
-                value={rowColorConfig?.field || ''}
-                options={[
-                  { value: '', label: t('list.none', { defaultValue: 'None' }) },
-                  ...allFields.map((field) => ({ value: field.name, label: field.label || field.name })),
-                ]}
-                onPick={(field) => {
-                  if (!field) {
-                    setRowColorConfig(undefined);
-                  } else {
-                    setRowColorConfig({ field, colors: rowColorConfig?.colors || {} });
-                  }
-                }}
-              />
-            </Section>
-          )}
-
-          {showHideFields && hiddenFields && updateHiddenFields && (
-            <Section
-              title={t('list.hideFieldsTitle', { defaultValue: 'Hide Fields' })}
-              badge={hiddenFields.size}
-              onClear={hiddenFields.size > 0 ? () => updateHiddenFields(new Set()) : undefined}
-              clearLabel={t('list.showAll', { defaultValue: 'Show all' })}
-              defaultOpen={hiddenFields.size > 0}
-            >
-              <div className="max-h-48 overflow-y-auto space-y-0.5">
-                {allFields.map((field) => (
-                  <label
-                    key={field.name}
-                    className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted cursor-pointer max-sm:min-h-11"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!hiddenFields.has(field.name)}
-                      onChange={() => {
-                        const next = new Set(hiddenFields);
-                        if (next.has(field.name)) next.delete(field.name);
-                        else next.add(field.name);
-                        updateHiddenFields(next);
-                      }}
-                      className="rounded border-input"
-                    />
-                    <span className="truncate">{field.label || field.name}</span>
-                  </label>
-                ))}
-                {onAddField && addableFields && addableFields.length > 0 && (
-                  <div className="border-t pt-0.5 space-y-0.5" data-testid="view-settings-addable-fields">
-                    {addableFields.map((field) => (
-                      <label
-                        key={field.name}
-                        className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted cursor-pointer max-sm:min-h-11"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={false}
-                          onChange={() => onAddField(field.name)}
-                          className="rounded border-input"
-                        />
-                        <span className="truncate">{field.label || field.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Section>
-          )}
-
-          {showDensity && density && (
-            <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
-              <span className="text-xs font-medium text-foreground/80">
-                {t('grid.toolbar.densityMode', { defaultValue: 'Density' })}
-              </span>
+        {page === 'root' && hasFooter && (
+          <div className="flex flex-wrap items-center gap-1 border-t px-1 py-1" data-testid="display-footer">
+            {onSave && (
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                className="h-7 gap-1.5 max-sm:h-11"
-                onClick={density.cycle}
-                title={t('grid.toolbar.densityCycleShortHint', { defaultValue: 'Click to cycle' })}
-                data-testid="view-settings-density-cycle"
+                className="h-7 px-2 text-xs max-sm:h-11"
+                onClick={() => {
+                  closeMenu();
+                  onSave();
+                }}
+                data-testid="display-save-button"
               >
-                <DensityIcon className="h-3.5 w-3.5" />
-                <span className="text-xs">
-                  {density.mode === 'compact'
-                    ? t('grid.toolbar.densityCompact', { defaultValue: 'Compact' })
-                    : density.mode === 'comfortable'
-                      ? t('grid.toolbar.densityComfortable', { defaultValue: 'Comfortable' })
-                      : t('grid.toolbar.densitySpacious', { defaultValue: 'Spacious' })}
-                </span>
+                <Save className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                {t('common.save', { defaultValue: 'Save' })}
               </Button>
-            </div>
-          )}
-
-          {setRowNumbers && (
-            <SwitchRow
-              label={t('list.rowNumbers', { defaultValue: 'Row numbers' })}
-              checked={!!rowNumbers}
-              onCheckedChange={setRowNumbers}
-              testId="display-row-numbers-toggle"
-            />
-          )}
-
-          {showInlineEdit && setInlineEdit && (
-            <SwitchRow
-              label={t('list.inlineEditShort', { defaultValue: 'Edit inline' })}
-              checked={!!inlineEdit}
-              onCheckedChange={setInlineEdit}
-              testId="toolbar-inline-edit-toggle"
-            />
-          )}
-        </div>
-
-        {hasFooter && (
-          <div className="flex flex-wrap items-center gap-1 border-t bg-muted/30 px-2 py-1.5" data-testid="display-footer">
+            )}
             {onReset && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2 text-xs max-sm:h-11"
-                disabled={changedCount === 0}
+                disabled={resetDisabled ?? changedCount === 0}
                 onClick={onReset}
                 data-testid="display-reset-button"
               >
-                <Undo2 className="h-3.5 w-3.5 mr-1.5" />
-                {t('list.resetToViewDefault', { defaultValue: 'Reset to view default' })}
+                <Undo2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                {t('list.optionsMenu.restoreDefaults', { defaultValue: 'Restore defaults' })}
               </Button>
             )}
             {onRefresh && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="ml-auto h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
+                className="ml-auto h-7 px-2 text-xs text-muted-foreground hover:text-primary max-sm:h-11"
                 onClick={onRefresh}
                 disabled={refreshing}
-                title={t('list.refresh', { defaultValue: 'Refresh' })}
-                aria-label={t('list.refresh', { defaultValue: 'Refresh' })}
                 data-testid="refresh-button"
               >
-                <RotateCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+                <RotateCw className={cn('mr-1.5 h-3.5 w-3.5', refreshing && 'animate-spin')} aria-hidden="true" />
+                {t('list.refresh', { defaultValue: 'Refresh' })}
               </Button>
             )}
-            {/* The export entries take a full row and wrap within it: the panel
+            {/* The export entries take a full row and wrap within it: the menu
                 is a fixed width, and one entry per format can outgrow it. */}
             {hasExport && (
               <div
@@ -807,8 +1075,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                     data-testid={`display-export-${format}`}
                   >
                     {exportBusy
-                      ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      : <Download className="h-3.5 w-3.5 mr-1.5" />}
+                      ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      : <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />}
                     {t('list.exportAs', { format: format.toUpperCase(), defaultValue: `Export as ${format.toUpperCase()}` })}
                   </Button>
                 ))}

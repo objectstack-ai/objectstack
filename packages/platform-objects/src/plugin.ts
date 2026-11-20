@@ -7,6 +7,7 @@ import { SysMigration } from './system/sys-migration.object.js';
 import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
 import { SysExchangeRate } from './system/sys-exchange-rate.object.js';
+import { SysUnit } from './system/sys-unit.object.js';
 import { SysWorkCalendar } from './system/sys-work-calendar.object.js';
 import { SysWorkCalendarException } from './system/sys-work-calendar-exception.object.js';
 import { SysTrustedKey } from './system/sys-trusted-key.object.js';
@@ -115,6 +116,13 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    engine-facing infrastructure above, not with an optional service. Rides
  *    the first manifest (the project database), like every per-organization
  *    table here.
+ *  - **`sys_unit`** — the organization's own units of measure (ADR-0158 U3;
+ *    its owner settled by Open item 2 on the same reasoning as
+ *    `sys_exchange_rate`). Its readers are the engine's write-time unit
+ *    membership check and the display of a quantity with its unit, present
+ *    in every composition that can write or read a record, so it has no
+ *    on/off capability boundary of its own (ADR-0029 D2) and registers here,
+ *    in the first manifest beside the exchange rates.
  *  - **`sys_work_calendar`** / **`sys_work_calendar_exception`** — the
  *    organization's working calendars and their dated holidays and make-up
  *    workdays (ADR-0157 D1). Registered here for the reason the rate table
@@ -230,7 +238,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysWorkCalendar, SysWorkCalendarException, SysTrustedKey, SysLifecycleState, SysRecycleBin, SysSeedLandedKey],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysUnit, SysWorkCalendar, SysWorkCalendarException, SysTrustedKey, SysLifecycleState, SysRecycleBin, SysSeedLandedKey],
       });
       ctx?.getService?.('manifest')?.register?.({
         ...ACTIVATION_LEDGER_MANIFEST,

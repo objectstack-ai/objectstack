@@ -33,6 +33,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView } from '../ListView';
+import { openAdvancedFilter, openAdvancedSort } from './conditionPanels';
 
 const RECORDS = [{ id: '1', name: 'Acme', stage: 'won' }];
 
@@ -82,8 +83,12 @@ function mount(schema: Partial<ListViewSchema> = {}, props: Record<string, unkno
 async function changeTwoDisplaySettings() {
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
   const content = await screen.findByTestId('view-settings-content');
-  fireEvent.click(within(content).getByTestId('view-settings-density-cycle'));
-  fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
+  // Two levels of the Display menu: a row height, then Row numbers under More.
+  fireEvent.click(within(content).getByTestId('options-row-row-height'));
+  fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
+  fireEvent.click(within(content).getByTestId('options-back'));
+  fireEvent.click(within(content).getByTestId('options-row-more'));
+  fireEvent.click(await within(content).findByTestId('display-row-numbers-toggle'));
   await waitFor(() => expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('2'));
   fireEvent.keyDown(content, { key: 'Escape' });
   await waitFor(() => expect(screen.queryByTestId('view-settings-content')).toBeNull());
@@ -171,12 +176,12 @@ describe('Filter, Sort and Options: text buttons from `sm` up, icons below it (o
     await screen.findByTestId('grid-stub');
 
     fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
-    expect(await screen.findByText('Filter Records')).toBeInTheDocument();
+    expect(await openAdvancedFilter()).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('Filter Records')).toBeNull());
 
     fireEvent.click(screen.getByRole('button', { name: 'Sort' }));
-    expect(await screen.findByText('Sort Records')).toBeInTheDocument();
+    expect(await openAdvancedSort()).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText('Sort Records')).toBeNull());
 

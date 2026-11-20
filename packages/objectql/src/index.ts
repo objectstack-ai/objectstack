@@ -736,7 +736,8 @@ export type {
 } from './hook-metrics.js';
 
 // [ADR-0157] The working-calendar service and the calendar objects' write
-// hooks. Its contract, refusals and arithmetic are `@objectstack/spec/data`'s.
+// hooks. Its contract is `IWorkCalendarService` (`@objectstack/spec/contracts`);
+// its refusals and arithmetic are `@objectstack/formula`'s.
 export {
   WorkCalendarService,
   installWorkCalendarHooks,

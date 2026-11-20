@@ -67,7 +67,7 @@ import {
 } from './action-activation.js';
 import type { IMetadataService } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
-import { WORK_CALENDAR_SERVICE } from '@objectstack/spec/data';
+import { WORK_CALENDAR_SERVICE } from '@objectstack/spec/contracts';
 import {
   collectManifestPicklistNames,
   collectManifestPicklistReferences,

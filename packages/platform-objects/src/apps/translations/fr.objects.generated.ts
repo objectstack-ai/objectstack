@@ -4423,6 +4423,79 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "Calendrier de travail",
     pluralLabel: "Calendriers de travail",

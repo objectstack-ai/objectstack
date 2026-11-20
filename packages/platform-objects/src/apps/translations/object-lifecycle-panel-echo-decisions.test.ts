@@ -1289,7 +1289,15 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 744 since #34575: the hook form offers the `texts` record and its
       // `message` / `params` entry fields — three row labels, authored in all
       // three locales.
-      expect(translated.length, `${locale} positive control`).toBe(744);
+      // 745 since the object form's `userActions` composite offers `transfer`
+      // (the Change Owner switch, ruling 7000907189 point 1) — one row label,
+      // authored in all three locales.
+      // 748 since #35096: the action form offers the `texts` record and its
+      // `message` / `params` entry fields — three row labels, authored in all
+      // three locales.
+      // 754 since #34823: the action form offers the `refusals` record and its
+      // five entry fields — six row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(754);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

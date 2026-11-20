@@ -8,6 +8,10 @@ import {
 } from './suggestions.zod';
 import { PROTOCOL_UPGRADE_GUIDE_URL, RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from './protocol-upgrade-guide';
 import { suggestFieldType } from './field-type-suggestion';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { renameBudget, suggestRename } from './rename-guess';
 
 describe('levenshteinDistance', () => {
   it('should return 0 for identical strings', () => {
@@ -276,5 +280,58 @@ describe('strictUnknownKeyError — retiredKeyUpgradeGuide', () => {
     expect(m).toBe(
       `Unrecognized key(s) on this probe call: \`filter\`. Did you mean \`filter\` → \`where\`? ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} H.`,
     );
+  });
+});
+
+/**
+ * The ONE rename rule every unknown-key suggester in `packages/spec` reads.
+ * Before it was shared, `ObjectSchema.create()` and `defineSeed` each carried a
+ * copy of the budget without the short-key screen, so they went on answering a
+ * short key with an unrelated one after the strict refusal had stopped.
+ */
+describe('suggestRename — the one rename rule', () => {
+  it('spends a third of the key, never less than 2', () => {
+    expect(renameBudget('abc')).toBe(2);
+    expect(renameBudget('abcdef')).toBe(2);
+    expect(renameBudget('abcdefghi')).toBe(3);
+  });
+
+  it('offers a short key only a candidate one edit away, counting an adjacent swap as one', () => {
+    expect(suggestRename('aria', ['areas', 'label'])).toBeUndefined();
+    expect(suggestRename('nmae', ['name', 'label'])).toBe('name');
+    expect(suggestRename('labl', ['name', 'label'])).toBe('label');
+  });
+
+  it('spends the full budget above five characters', () => {
+    expect(suggestRename('lead_sorce', ['lead_source', 'name'])).toBe('lead_source');
+    expect(suggestRename('primaryFeild', ['primaryField'])).toBe('primaryField');
+  });
+
+  it('offers nothing for an empty key', () => {
+    expect(suggestRename('', ['a', 'b'])).toBeUndefined();
+  });
+
+  // The class guard: a suggester that computes its own budget, or hands
+  // `findClosestMatches` its own distance, is the copy this rule replaced.
+  // Comments that QUOTE the budget are prose and are skipped.
+  it('no other source file in the package spells the budget or passes its own distance', () => {
+    const srcRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) { walk(path); continue; }
+        if (!entry.name.endsWith('.ts') || /\.(test|spec)\.ts$/.test(entry.name)) continue;
+        if (entry.name === 'rename-guess.ts') continue;
+        readFileSync(path, 'utf8').split('\n').forEach((line, i) => {
+          const code = line.trim();
+          if (code.startsWith('//') || code.startsWith('*') || code.startsWith('/*')) return;
+          if (/Math\.max\(\s*2\s*,\s*Math\.floor\(/.test(code)
+            || /findClosestMatches\([^)]*,[^)]*,/.test(code)) offenders.push(`${relative(srcRoot, path)}:${i + 1}`);
+        });
+      }
+    };
+    walk(srcRoot);
+    expect(offenders).toEqual([]);
   });
 });

@@ -95,6 +95,7 @@ export const ko: TranslationData = {
         nav_settings_hub: { label: '전체 설정' },
         nav_settings_localization: { label: '현지화' },
         nav_exchange_rates: { label: '환율' },
+        nav_units_of_measure: { label: '측정 단위' },
         nav_work_calendars: { label: '근무 캘린더' },
         nav_work_calendar_exceptions: { label: '캘린더 예외' },
         nav_settings_company: { label: '회사' },
