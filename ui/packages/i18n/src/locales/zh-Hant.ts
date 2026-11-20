@@ -3518,11 +3518,11 @@ const zhHant = {
   layout: {
     appSwitcher: {
       switchApplication: '切換應用',
-      currentApp: '目前應用',
+      currentApp: '當前應用',
       otherApps: '其他應用',
       yourApps: '你的應用',
       searchApps: '搜尋應用…',
-      noAppsMatch: '沒有符合的應用',
+      noAppsMatch: '沒有匹配的應用',
       chooseApp: '選擇應用',
       backToAppHome: '返回應用選單',
       appsAvailable: '共 {{count}} 個可用應用',
