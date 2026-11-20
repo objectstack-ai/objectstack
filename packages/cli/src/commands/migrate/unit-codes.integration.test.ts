@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ObjectQL, backfillUnitCodes, unitCodeBackfillComplete } from '@objectstack/objectql';
+import { ObjectQL, backfillUnitCodes, formatUnitCodeBackfillReport, unitCodeBackfillComplete } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 
 const UNIT = {
@@ -123,6 +123,8 @@ describe('backfillUnitCodes on SQL (ObjectQL + SqlDriver, better-sqlite3)', () =
     const again = await run({ mapping: FULL, apply: true });
     expect(again).toMatchObject({ scannedRecords: 6, mapped: 0, written: 0, unmatched: 0, skippedMember: 6, blankBesideQuantity: 0 });
     expect(await table('uom')).toEqual(after);
+    expect(formatUnitCodeBackfillReport(again)).toContain('✓ Every uc_material.uom value is a unit code the field admits — nothing to convert.');
+    expect(unitCodeBackfillComplete(again)).toBe(true);
   });
 
   it('a retired organization unit as a target is refused INVALID_FIELD / 400 before the walk reads a row', async () => {
@@ -135,9 +137,13 @@ describe('backfillUnitCodes on SQL (ObjectQL + SqlDriver, better-sqlite3)', () =
   it('a row resting on a retired unit holds a unit code: left as stored, never unmatched (L1)', async () => {
     await knex('uc_material').insert({ id: 'm7', organization_id: 'org_a', uom: 'SACK_50', weight: 2, base_uom: null });
     const report = await run({ mapping: FULL, apply: true });
-    expect(report).toMatchObject({ mapped: 5, written: 5, unmatched: 0, skippedMember: 2, failures: [] });
-    expect(report.values.find((v) => v.value === 'SACK_50')).toEqual({ value: 'SACK_50', rows: 1, disposition: 'member' });
+    expect(report).toMatchObject({ mapped: 5, written: 5, unmatched: 0, skippedMember: 1, skippedRetired: 1, failures: [] });
+    expect(report.values.find((v) => v.value === 'SACK_50')).toEqual({ value: 'SACK_50', rows: 1, disposition: 'retired' });
     expect((await table('uom')).m7).toBe('SACK_50');
+    // Still refused at its next quantity edit: counted apart, named, and the run is not complete.
+    expect(formatUnitCodeBackfillReport(report)).toContain('⚠ 1 row(s) rest on a retired unit, left as stored (a unit code is never ' +
+      'rewritten): each is refused at its next quantity edit until the record is given a current unit.');
+    expect(unitCodeBackfillComplete(report)).toBe(false);
   });
 
   it('a standalone unitMode code field is reached too', async () => {

@@ -97,7 +97,8 @@ const engine = {
 
 const REPORT = {
   object: 'material', organizationId: null, allOrganizations: false, field: 'uom', quantityFields: ['weight'],
-  scannedRecords: 3, mapped: 2, written: 0, unmatched: 0, skippedMember: 1, skippedBlank: 0, blankBesideQuantity: 0,
+  scannedRecords: 3, mapped: 2, written: 0, unmatched: 0, skippedMember: 1, skippedRetired: 0, skippedOtherDimension: 0,
+  skippedBlank: 0, blankBesideQuantity: 0,
   values: [
     { value: 'KGM', rows: 1, disposition: 'member' },
     { value: 'kg', rows: 2, disposition: 'mapped', code: 'KGM' },

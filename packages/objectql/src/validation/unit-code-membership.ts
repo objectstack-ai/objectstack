@@ -411,8 +411,8 @@ export function assertUnitCodes(
  * quantity written beside a resting code that is no unit code, or beside a
  * resting blank (`unit-code-backfill.ts`, `os migrate unit-codes` and its REST
  * twin). Never a written code's remedy: that writer chose the value. The
- * metadata save's `unit_mode_to_record` / `unit_mode_to_code` finding names
- * the same run (`@objectstack/metadata-protocol`, `protocol-write-face.ts`).
+ * metadata save's `unit_code_field_declared` / `unit_mode_to_record` finding
+ * names the same run (`@objectstack/metadata-protocol`, `protocol-write-face.ts`).
  */
 export function unitCodeBackfillRemedy(object: string, codeField: string, blank: boolean): string {
   return ` Rows stored before '${codeField}' was a unit code field are converted all at once by an organization admin, `

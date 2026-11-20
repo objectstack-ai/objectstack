@@ -113,7 +113,7 @@ describe('backfillUnitCodes — free text stored before the field was a unit cod
     const report = await run({ mapping: { kg: 'KGM', '公斤': 'KGM' } });
     expect(report).toMatchObject({
       field: 'uom', quantityFields: ['weight'], scannedRecords: 8, mapped: 2, written: 0, unmatched: 2,
-      skippedMember: 2, skippedBlank: 1, blankBesideQuantity: 1, applied: false, failures: [],
+      skippedMember: 2, skippedRetired: 0, skippedOtherDimension: 0, skippedBlank: 1, blankBesideQuantity: 1, applied: false, failures: [],
     });
     expect(report.values).toEqual([
       { value: 'JIN1', rows: 1, disposition: 'member' },
@@ -143,7 +143,8 @@ describe('backfillUnitCodes — free text stored before the field was a unit cod
     expect(d.writes.map((w) => [w.id, w.data.uom]).sort()).toEqual([['m1', 'KGM'], ['m2', 'KGM'], ['m4', 'KGM'], ['m8', 'LBR']]);
     // The quantities are the rows' own and are never rewritten.
     expect(d.storeFor('uom_material').get('m1')?.weight).toBe(1);
-    expect(unitCodeBackfillComplete(report)).toBe(true);
+    // m5's blank unit beside a quantity is still refused at its next quantity edit: not complete.
+    expect(unitCodeBackfillComplete(report)).toBe(false);
   });
 
   it('the "" entry writes a blank unit beside a quantity, and only there', async () => {
@@ -151,28 +152,62 @@ describe('backfillUnitCodes — free text stored before the field was a unit cod
     expect(report).toMatchObject({ mapped: 5, written: 5, blankBesideQuantity: 0, skippedBlank: 1 });
     expect(uom('m5')).toBe('KGM');
     expect(uom('m6')).toBeNull();
+    expect(unitCodeBackfillComplete(report)).toBe(true);
   });
 
   it('is idempotent: a second apply run finds nothing to rewrite and writes nothing', async () => {
+    const FULL = { ...MAPPING, '': 'KGM' };
+    await run({ mapping: FULL, apply: true });
+    const writes = d.writes.length;
+    const again = await run({ mapping: FULL, apply: true });
+    expect(again).toMatchObject({ mapped: 0, written: 0, unmatched: 0, skippedMember: 7, blankBesideQuantity: 0, skippedBlank: 1 });
+    expect(d.writes.length).toBe(writes);
+    expect(formatUnitCodeBackfillReport(again)).toContain('✓ Every uom_material.uom value is a unit code the field admits — nothing to convert.');
+    expect(unitCodeBackfillComplete(again)).toBe(true);
+  });
+
+  it('a blank unit beside a quantity that the mapping leaves earns no ✓: the report counts it, and the run is not complete', async () => {
     await run({ mapping: MAPPING, apply: true });
     const writes = d.writes.length;
     const again = await run({ mapping: MAPPING, apply: true });
-    expect(again).toMatchObject({ mapped: 0, written: 0, unmatched: 0, skippedMember: 6 });
+    expect(again).toMatchObject({ mapped: 0, written: 0, unmatched: 0, skippedMember: 6, blankBesideQuantity: 1 });
     expect(d.writes.length).toBe(writes);
-    expect(formatUnitCodeBackfillReport(again)).toContain('✓ Every uom_material.uom value is a unit code — nothing to convert.');
+    const lines = formatUnitCodeBackfillReport(again);
+    expect(lines.some((l) => l.startsWith('✓'))).toBe(false);
+    expect(lines).toContain('Nothing to rewrite from the mapping, but 1 row(s) of uom_material.uom hold no unit code the field admits (below).');
+    expect(lines).toContain('⚠ 1 blank unit(s) beside a quantity left blank: each row is refused at its next quantity edit until it holds ' +
+      'a unit code. A "" entry in the mapping writes them.');
+    expect(unitCodeBackfillComplete(again)).toBe(false);
   });
 
   it('a row resting on a retired unit, or on a code of another dimension, holds a unit code: left as stored, never unmatched (L1)', async () => {
     stored('r1', { uom: 'SACK_50', weight: 9 }); // a unit org_a retired: L1 keeps the resting row's code
     stored('r2', { uom: 'MTR', weight: 3 });     // a standard code of the length dimension
-    const report = await run({ mapping: MAPPING, apply: true });
-    expect(report).toMatchObject({ mapped: 4, written: 4, unmatched: 0, skippedMember: 4, failures: [] });
+    const report = await run({ mapping: { ...MAPPING, '': 'KGM' }, apply: true });
+    expect(report).toMatchObject({
+      mapped: 5, written: 5, unmatched: 0, skippedMember: 2, skippedRetired: 1, skippedOtherDimension: 1, blankBesideQuantity: 0, failures: [],
+    });
     expect(report.values.filter((v) => ['SACK_50', 'MTR'].includes(v.value))).toEqual([
-      { value: 'MTR', rows: 1, disposition: 'member' },
-      { value: 'SACK_50', rows: 1, disposition: 'member' },
+      { value: 'MTR', rows: 1, disposition: 'other-dimension' },
+      { value: 'SACK_50', rows: 1, disposition: 'retired' },
     ]);
     expect([uom('r1'), uom('r2')]).toEqual(['SACK_50', 'MTR']);
     expect(d.writes.map((w) => w.id)).not.toContain('r1');
+    expect(d.writes.map((w) => w.id)).not.toContain('r2');
+    // Both rows are still refused at their next quantity edit, so the operator is told, and the run is not complete.
+    const lines = formatUnitCodeBackfillReport(report);
+    expect(lines).toContain('  "SACK_50": 1 row(s), a retired unit, left as stored (refused at its next quantity edit)');
+    expect(lines).toContain('  "MTR": 1 row(s), a unit code of another dimension, left as stored (refused at its next quantity edit)');
+    expect(lines).toContain('⚠ 1 row(s) rest on a retired unit, left as stored (a unit code is never rewritten): each is refused at its ' +
+      'next quantity edit until the record is given a current unit.');
+    expect(lines).toContain("⚠ 1 row(s) hold a unit code of another dimension than the field's unitDimension, left as stored: each is " +
+      'refused at its next quantity edit until the record is corrected.');
+    expect(unitCodeBackfillComplete(report)).toBe(false);
+    // A second run rewrites nothing, and still earns no ✓.
+    const again = await run({ mapping: { ...MAPPING, '': 'KGM' }, apply: true });
+    expect(again).toMatchObject({ mapped: 0, written: 0, skippedRetired: 1, skippedOtherDimension: 1 });
+    expect(formatUnitCodeBackfillReport(again)).toContain(
+      'Nothing to rewrite from the mapping, but 2 row(s) of uom_material.uom hold no unit code the field admits (below).');
   });
 
   it.each([
@@ -246,8 +281,9 @@ describe('backfillUnitCodes — free text stored before the field was a unit cod
       '  "公斤": 1 row(s), → KGM',
       'Would rewrite 4 row(s) from the mapping.',
       '  e.g. m1, m2, m4, m8',
-      '· Skipped: 2 row(s) already holding a unit code (never rewritten), 1 blank row(s) with no quantity (no unit owed), ' +
-        '1 blank unit(s) beside a quantity left blank (written only from a "" entry in the mapping).',
+      '· Skipped: 2 row(s) already holding a unit code (never rewritten), 1 blank row(s) with no quantity (no unit owed).',
+      '⚠ 1 blank unit(s) beside a quantity left blank: each row is refused at its next quantity edit until it holds a unit code. ' +
+        'A "" entry in the mapping writes them.',
       'Dry run — no row or table was written. Re-run with --apply to convert.',
     ]);
   });

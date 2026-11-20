@@ -41,13 +41,27 @@
  *   resting row's code and its quantity is in that unit. A code of another
  *   dimension than `unitDimension` is a code too. Neither is free text, and the
  *   write check answers both at the row's next quantity edit; rewriting them
- *   from a mapping would change what the stored quantity means. A blank code
- *   with no quantity value beside it is left alone. Each is counted.
+ *   from a mapping would change what the stored quantity means. So each is
+ *   listed and counted apart from the codes the field admits (`retired`,
+ *   `other-dimension`; `skippedRetired`, `skippedOtherDimension`), and so is a
+ *   blank beside a quantity the mapping has no `""` entry for
+ *   (`blankBesideQuantity`): each such row is still refused at its next
+ *   quantity edit, and a run that leaves one is not complete
+ *   (`unitCodeBackfillComplete`). A blank code with no quantity value beside
+ *   it is left alone, owed nothing.
  * - Every distinct stored value is listed with its row count, so the operator
  *   sees each spelling before writing.
  * - An apply run counts first, read-only, and refuses before any write while a
  *   non-blank value that is no unit code has no mapping entry, naming each one. So one
  *   apply run converts the whole field or nothing, and a re-run writes nothing.
+ *
+ * The walk reads each row and tallies and tests its value here, in the
+ * application, never in a `GROUP BY` or an anti-join on `sys_unit`: matching is
+ * exact, which a database collation does not guarantee (a case-insensitive or
+ * pad-space collation merges `kg`, `KG` and `kg `); a blank is judged here for
+ * the currency backfill's reason (null comparison is where drivers diverge);
+ * and each converted row is written by its id, so the write check judges
+ * every code.
  *
  * Writes go through `engine.update`, one per row, as the currency backfill's
  * do: the write check judges each converted code like any caller's, audited and
@@ -77,8 +91,14 @@ export interface UnitCodeBackfillValue {
   /** The stored text exactly as written; `""` for a blank unit beside a quantity. */
   value: string;
   rows: number;
-  /** `member`: already a unit code, never rewritten. `mapped`: rewritten to `code`. `unmatched`: no entry. */
-  disposition: 'member' | 'mapped' | 'unmatched';
+  /**
+   * `member`: a unit code the field admits, never rewritten. `retired`: a
+   * retired unit of the row's organization, and `other-dimension`: a unit code
+   * of another dimension than the field's `unitDimension` — each left as
+   * stored and refused at the row's next quantity edit. `mapped`: rewritten
+   * to `code`. `unmatched`: no entry.
+   */
+  disposition: 'member' | 'retired' | 'other-dimension' | 'mapped' | 'unmatched';
   code?: string;
 }
 
@@ -89,8 +109,15 @@ export interface UnitCodeBackfillOrganization {
   mapped: number;
   written: number;
   unmatched: number;
+  /** Rows holding a unit code the field admits. */
   skippedMember: number;
+  /** Rows resting on a retired unit (`retired`), left as stored. */
+  skippedRetired: number;
+  /** Rows holding a unit code of another dimension (`other-dimension`), left as stored. */
+  skippedOtherDimension: number;
+  /** Blank units with no quantity beside them: owed nothing. */
   skippedBlank: number;
+  /** Blank units beside a quantity, left blank because the mapping has no `""` entry. */
   blankBesideQuantity: number;
 }
 
@@ -364,7 +391,7 @@ async function walkUnitCodes(
   const { codeField, quantityFields } = source;
   const context = organizationId !== undefined ? { ...SYSTEM_CTX, tenantId: organizationId } : { ...SYSTEM_CTX };
   const counts = (): Omit<UnitCodeBackfillOrganization, 'organizationId'> =>
-    ({ scannedRecords: 0, mapped: 0, written: 0, unmatched: 0, skippedMember: 0, skippedBlank: 0, blankBesideQuantity: 0 });
+    ({ scannedRecords: 0, mapped: 0, written: 0, unmatched: 0, skippedMember: 0, skippedRetired: 0, skippedOtherDimension: 0, skippedBlank: 0, blankBesideQuantity: 0 });
   const report: UnitCodeBackfillReport = {
     object, organizationId: organizationId ?? null, allOrganizations: options.allOrganizations === true,
     field: codeField, quantityFields: [...quantityFields], ...counts(), values: [],
@@ -423,9 +450,13 @@ async function walkUnitCodes(
       } else {
         value = typeof stored === 'string' ? stored : String(stored);
         // Any code is left as stored, a retired unit or another dimension included: see the header.
-        if (units.verdict(org, value) !== undefined) {
-          bump('skippedMember');
-          tallyValue(values, value, 'member', mapping);
+        const verdict = units.verdict(org, value);
+        if (verdict !== undefined) {
+          const resting = verdict === 'retired'
+            ? 'retired'
+            : source.dimension !== undefined && verdict !== source.dimension ? 'other-dimension' : 'member';
+          bump(resting === 'retired' ? 'skippedRetired' : resting === 'other-dimension' ? 'skippedOtherDimension' : 'skippedMember');
+          tallyValue(values, value, resting, mapping);
           continue;
         }
         if (!has(value)) {
@@ -470,6 +501,15 @@ function tallyValue(values: Map<string, UnitCodeBackfillValue>, value: string, d
   values.set(key, entry);
 }
 
+/** What the listing says of each distinct value's rows. */
+const DISPOSITION_TEXT: Record<UnitCodeBackfillValue['disposition'], (v: UnitCodeBackfillValue) => string> = {
+  member: () => 'already a unit code (never rewritten)',
+  retired: () => 'a retired unit, left as stored (refused at its next quantity edit)',
+  'other-dimension': () => 'a unit code of another dimension, left as stored (refused at its next quantity edit)',
+  mapped: (v) => `→ ${v.code}`,
+  unmatched: () => 'no mapping entry',
+};
+
 /** Human-readable report body, shared by the CLI's dry-run and apply output. */
 export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): string[] {
   const scope = report.organizationId !== null
@@ -484,10 +524,10 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
   }
   for (const v of report.values) {
     const shown = v.value === '' ? '(blank, beside a quantity)' : JSON.stringify(v.value);
-    lines.push(`  ${shown}: ${v.rows} row(s), ` + (v.disposition === 'mapped'
-      ? `→ ${v.code}`
-      : v.disposition === 'member' ? 'already a unit code (never rewritten)' : 'no mapping entry'));
+    lines.push(`  ${shown}: ${v.rows} row(s), ` + DISPOSITION_TEXT[v.disposition](v));
   }
+  // The rows this run leaves that the write check still refuses at their next quantity edit.
+  const refused = report.blankBesideQuantity + report.skippedRetired + report.skippedOtherDimension;
   if (report.mapped > 0) {
     lines.push(report.applied
       ? `Wrote ${report.written} of ${report.mapped} row(s) the mapping rewrites.`
@@ -495,11 +535,25 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
   } else if (report.unmatched === 0) {
     lines.push(report.truncated
       ? `No ${report.object}.${report.field} value to rewrite among the ${report.scannedRecords} row(s) examined.`
-      : `✓ Every ${report.object}.${report.field} value is a unit code — nothing to convert.`);
+      : refused === 0
+        ? `✓ Every ${report.object}.${report.field} value is a unit code the field admits — nothing to convert.`
+        : `Nothing to rewrite from the mapping, but ${refused} row(s) of ${report.object}.${report.field} hold no unit code ` +
+          'the field admits (below).');
   }
   lines.push(`· Skipped: ${report.skippedMember} row(s) already holding a unit code (never rewritten), ` +
-    `${report.skippedBlank} blank row(s) with no quantity (no unit owed), ${report.blankBesideQuantity} blank unit(s) beside ` +
-    'a quantity left blank (written only from a "" entry in the mapping).');
+    `${report.skippedBlank} blank row(s) with no quantity (no unit owed).`);
+  if (report.blankBesideQuantity > 0) {
+    lines.push(`⚠ ${report.blankBesideQuantity} blank unit(s) beside a quantity left blank: each row is refused at its next ` +
+      'quantity edit until it holds a unit code. A "" entry in the mapping writes them.');
+  }
+  if (report.skippedRetired > 0) {
+    lines.push(`⚠ ${report.skippedRetired} row(s) rest on a retired unit, left as stored (a unit code is never rewritten): ` +
+      'each is refused at its next quantity edit until the record is given a current unit.');
+  }
+  if (report.skippedOtherDimension > 0) {
+    lines.push(`⚠ ${report.skippedOtherDimension} row(s) hold a unit code of another dimension than the field's unitDimension, ` +
+      'left as stored: each is refused at its next quantity edit until the record is corrected.');
+  }
   if (report.unmatched > 0) {
     lines.push(`✗ ${report.unmatched} row(s) hold a value with no mapping entry: an apply run is refused until each value is ` +
       'mapped or those rows are corrected.');
@@ -515,7 +569,15 @@ export function formatUnitCodeBackfillReport(report: UnitCodeBackfillReport): st
   return lines;
 }
 
-/** Did this run leave the field with no known value to convert? */
+/**
+ * Did this run leave every row of the field holding a unit code the field
+ * admits, so no quantity edit is refused over a resting value? A blank beside
+ * a quantity, a retired unit and a code of another dimension each still are,
+ * so a run leaving any of them is not complete, nor is one with an unmatched
+ * value, a failed row or an unexamined row.
+ */
 export function unitCodeBackfillComplete(report: UnitCodeBackfillReport): boolean {
-  return report.failures.length === 0 && !report.truncated && report.unmatched === 0 && (report.applied || report.mapped === 0);
+  return report.failures.length === 0 && !report.truncated && report.unmatched === 0
+    && report.blankBesideQuantity === 0 && report.skippedRetired === 0 && report.skippedOtherDimension === 0
+    && (report.applied || report.mapped === 0);
 }
