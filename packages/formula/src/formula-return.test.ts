@@ -137,10 +137,16 @@ describe('CONTROL — a numeric formula stays `number`', () => {
     const withCount = { ...FIELDS, line_count: { type: 'summary', summaryOperations: { object: 'line', function: 'count' } } };
     expect(inferFormulaReturn('record.line_count * 2', withCount)).toEqual({ returnType: 'number' });
   });
-  it('without the host\'s fields it never claims money — the plain inference, unchanged', () => {
-    expect(inferFormulaReturn('record.amount * 0.1')).toEqual({ returnType: 'number' });
-    expect(inferFormulaReturn('record.amount * 0.1').returnType).toBe(inferExpressionType('record.amount * 0.1'));
+  it('without the host\'s fields it never claims money, nor proves a plain number: no read has a declared unit', () => {
+    // #35631 — every read names a field the (empty) map does not declare, so
+    // the numeric path is unproven; the CEL type alone would say `number`.
+    expect(inferExpressionType('record.amount * 0.1')).toBe('number');
+    expect(inferFormulaReturn('record.amount * 0.1')).toEqual({});
     expect(inferFormulaReturn('record.budget - record.spent')).toEqual({});
+    // A constant needs no field: the unit proof succeeds.
+    expect(inferFormulaReturn('2 * 3')).toEqual({ returnType: 'number' });
+    // A non-numeric result is not on the numeric path.
+    expect(inferFormulaReturn('record.amount > 100')).toEqual({ returnType: 'boolean' });
   });
 
   it('an empty, missing or non-string source declares nothing', () => {
