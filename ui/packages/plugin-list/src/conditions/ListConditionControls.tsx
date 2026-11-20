@@ -173,7 +173,7 @@ function lookupIds(value: unknown): string[] {
  * arrays the host rebuilds every render (`ui/AGENTS.md` #10). A read that
  * fails, or a record nothing names, answers `undefined`: the chip keeps the id.
  */
-export function useLookupValueNames(
+function useLookupValueNames(
   dataSource: Pick<DataSource, 'find' | 'getObjectSchema'> | null | undefined,
   fields: ReadonlyArray<ConditionField>,
   conditions: ReadonlyArray<NamedCondition>,
