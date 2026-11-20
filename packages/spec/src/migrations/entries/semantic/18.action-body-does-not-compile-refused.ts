@@ -36,7 +36,8 @@ export const entry: SemanticMigration = {
     + 'runtime builds, from the same function, with the host JavaScript engine and without running it. The host '
     + 'engine and the runtime\'s QuickJS agreed on every early error probed except regular-expression patterns, '
     + 'hence the warning there. Such a body never ran, so no run of it ever succeeded and no stored row changes '
-    + 'shape. Hook and job bodies, which run in a different wrapper, are not judged. No first-party stack (example '
+    + 'shape. Hook and job bodies run in a different wrapper and are judged by their own rules '
+    + '(hook-job-body-does-not-compile-refused). No first-party stack (example '
     + 'apps, skills, docs samples) carries such a body today. There is no mechanical rewrite: renaming a local is '
     + 'a choice about which name the rest of the body reads.',
   acceptanceCriteria:
