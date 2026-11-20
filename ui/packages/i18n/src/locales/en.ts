@@ -1489,6 +1489,8 @@ const en = {
     manageViewsDescription: 'Reorder, rename, pin, or delete every view in this object.',
     searchViews: 'Search views',
     addNewView: 'Add new view',
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: 'This view was saved as a draft outside this app, because the app’s customization package cannot be used here. This app’s draft bar does not count or publish it: publish it from Home.',
     done: 'Done',
     noViewsFound: 'No views match your search.',
     // objectstack#27594 — the list title's view switcher.

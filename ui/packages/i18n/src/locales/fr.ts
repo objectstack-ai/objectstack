@@ -1225,6 +1225,8 @@ const fr = {
     manageViewsDescription: "Réorganiser, renommer, épingler ou supprimer toutes les vues de cet objet.",
     searchViews: "Rechercher des vues",
     addNewView: "Ajouter une nouvelle vue",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Cette vue a été enregistrée comme brouillon en dehors de cette application, car le package de personnalisation de l’application ne peut pas être utilisé ici. La barre de brouillons de cette application ne la compte pas et ne la publie pas : publiez-la depuis l’accueil.",
     done: "Terminé",
     noViewsFound: "Aucune vue ne correspond à votre recherche.",
     // objectstack#27594 — the list title's view switcher.

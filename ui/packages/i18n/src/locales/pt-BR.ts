@@ -1225,6 +1225,8 @@ const pt = {
     manageViewsDescription: "Reordenar, renomear, fixar ou excluir todas as exibições deste objeto.",
     searchViews: "Pesquisar exibições",
     addNewView: "Adicionar nova exibição",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Esta exibição foi salva como rascunho fora deste aplicativo, porque o pacote de personalização do aplicativo não pode ser usado aqui. A barra de rascunhos deste aplicativo não a conta nem a publica: publique-a pela página inicial.",
     done: "Concluído",
     noViewsFound: "Nenhuma exibição corresponde à sua pesquisa.",
     // objectstack#27594 — the list title's view switcher.

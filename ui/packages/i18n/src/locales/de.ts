@@ -1194,6 +1194,8 @@ const de = {
     manageViewsDescription: "Alle Ansichten dieses Objekts neu anordnen, umbenennen, anheften oder löschen.",
     searchViews: "Ansichten suchen",
     addNewView: "Neue Ansicht hinzufügen",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "Diese Ansicht wurde als Entwurf außerhalb dieser App gespeichert, weil das Anpassungspaket der App hier nicht verwendet werden kann. Die Entwurfsleiste dieser App zählt und veröffentlicht sie nicht: Veröffentlichen Sie sie über die Startseite.",
     done: "Fertig",
     noViewsFound: "Keine Ansichten entsprechen Ihrer Suche.",
     // objectstack#27594 — the list title's view switcher.
