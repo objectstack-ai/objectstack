@@ -532,7 +532,7 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
     });
   });
 
-  describe('S1, the answer chosen pending the seat: a newly matched row that fails a check-only policy refuses the whole update', () => {
+  describe('S1, the declared narrowing: a newly matched row that fails a check-only policy refuses the whole update', () => {
     it('ALICE under a check-only EMEA policy, r2 in APAC: by id r1 is written and r2 refused; by predicate the write is refused whole', async () => {
       // Before this change the predicate write matched r1 alone (the floor)
       // and answered success with r1 written. r2 is now matched, because its
