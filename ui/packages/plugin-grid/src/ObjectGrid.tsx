@@ -93,6 +93,7 @@ import { useGridTranslation } from './objectGridTranslations';
 import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInlineRules';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
 import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
+import { type RowPatch, mergeSavedRow } from './objectGridRowPatch';
 import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary, type ObjectGridRowGroup } from './objectGridProps';
 import { FooterSummaryReport } from './objectGridFooterSummaryReport';
 import { useObjectGridDiagnostics } from './objectGridDiagnostics';
@@ -342,7 +343,8 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * [objectstack#35684] The select-first cell model, as the HOST that owns
    * the page asks for it (the list page does). `true` ⇒ a click selects a
    * cell and never edits it or opens the record; double-click, Enter, F2 or
-   * typing edits; Space opens the record; a cell that opens no editor says
+   * typing edits (Space included); each committed cell saves at once and
+   * updates its own row (objectstack#35685); a cell that opens no editor says
    * why (`describeCell`, `./objectGridCellFacts`). Absent ⇒ the table keeps
    * its click-to-edit / click-to-open behaviour, as before this prop existed.
    *
@@ -784,6 +786,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // A grid torn down mid-conflict settles it as Cancel, so the awaiting save
   // never hangs.
   useEffect(() => () => rowConflictDecisionRef.current?.('cancel'), []);
+  // objectstack#35685 — the rows a select-first save redrew in place, per
+  // record id. Each applies while the grid still holds the row object it was
+  // saved from (`RowPatch.base`); the next load's rows replace them.
+  const [rowPatches, setRowPatches] = useState<ReadonlyMap<string, RowPatch>>(new Map());
+  const patchedRowsCacheRef = React.useRef(new WeakMap<any[], { patches: ReadonlyMap<string, RowPatch>; rows: any[] }>());
   const [showExport, setShowExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -2523,11 +2530,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     id: string,
     changes: Record<string, any>,
     row: any,
-  ): Promise<void> => {
+  ): Promise<unknown> => {
     const readVersion = rowVersionOf(row);
     const ifMatch = rowVersionToSend(writtenVersionsRef.current.get(id), readVersion);
     const result = await ds.update(resource, id, changes, ifMatch ? { ifMatch } : undefined);
     rememberRowWrite(id, readVersion, result);
+    return result;
   };
 
   /**
@@ -2536,7 +2544,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *    ("I have seen the newer record, apply mine on top"). Resolves `saved`.
    *  - Reload latest: the edit is dropped and the record is declared changed on
    *    the data-invalidation bus, so whoever holds the rows reads them again.
-   *    Resolves `reloaded`; nothing was written.
+   *    Resolves `reloaded`; nothing was written. `saved` carries the record
+   *    the write answered with.
    *  - Cancel: rejects with the 409, so the table keeps the edit and flags the
    *    row as not saved.
    */
@@ -2547,12 +2556,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     changes: Record<string, any>,
     row: any,
     err: { currentVersion?: string; currentRecord?: Record<string, unknown> | null },
-  ): Promise<'saved' | 'reloaded'> => {
+  ): Promise<{ outcome: 'saved'; result: unknown } | { outcome: 'reloaded' }> => {
     const choice = await askRowConflict(buildRowConflict(changes, err));
     if (choice === 'cancel') throw err;
     if (choice === 'reload') {
       notifyDataChanged({ objectName: resource, recordId: String(id) });
-      return 'reloaded';
+      return { outcome: 'reloaded' };
     }
     const currentVersion = typeof err.currentVersion === 'string' && err.currentVersion.length > 0
       ? err.currentVersion
@@ -2561,7 +2570,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resource, id, changes, currentVersion ? { ifMatch: currentVersion } : undefined,
     );
     rememberRowWrite(id, rowVersionOf(row), result);
-    return 'saved';
+    return { outcome: 'saved', result };
   };
 
   /**
@@ -2599,15 +2608,32 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // write is one toast.
     const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
     try {
+      let answer: unknown;
       try {
-        await writeRowGuarded(dataSource, objectName, id, changes, row);
+        answer = await writeRowGuarded(dataSource, objectName, id, changes, row);
       } catch (err) {
         if (!isConcurrentUpdateError(err)) throw err;
         // A reload re-reads through the bus; there is nothing of ours to show.
-        if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)) === 'reloaded') return;
+        const resolved = await resolveRowConflict(dataSource, objectName, id, changes, row, err);
+        if (resolved.outcome === 'reloaded') return;
+        answer = resolved.result;
       }
-      // Refresh so the grid shows the persisted values.
-      setRefreshKey(k => k + 1);
+      if (hostCellSelection) {
+        // objectstack#35685 — the select-first model redraws this row alone,
+        // from the write's answer: no other row is read again, so the table
+        // does not move, and a sorted or grouped row keeps its place until
+        // the next load.
+        const key = String(id);
+        setRowPatches((prev) => {
+          const next = new Map(prev);
+          const held = prev.get(key);
+          next.set(key, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, changes, answer) });
+          return next;
+        });
+      } else {
+        // Refresh so the grid shows the persisted values.
+        setRefreshKey(k => k + 1);
+      }
       // objectui#12303 — the write is said, through the console's shared toast
       // (the one the form, kanban and view surfaces raise). Only here, once the
       // row landed: a refusal rejects above, and the table flags the row.
@@ -2684,7 +2710,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         continue;
       }
       try {
-        if ((await resolveRowConflict(dataSource, objectName, id, rowChanges, row, err)) === 'saved') {
+        if ((await resolveRowConflict(dataSource, objectName, id, rowChanges, row, err)).outcome === 'saved') {
           saved += 1;
         }
       } catch (resolutionError) {
@@ -2927,6 +2953,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         cells: Object.fromEntries(Array.from(summaries, ([key, summary]) => [key, summary.label])),
       }
     : undefined;
+  // objectstack#35685 — a row a select-first save redrew, in place of the row
+  // the grid read, while that read is the one held.
+  const patchedRowOf = (row: any): any => {
+    if (rowPatches.size === 0) return row;
+    const id = resolveRecordId(row);
+    const patch = id === undefined || id === null ? undefined : rowPatches.get(String(id));
+    return patch && patch.base === row ? patch.row : row;
+  };
+  // The patched copy of a row list is kept per list and patch set, so a render
+  // that changes neither hands the table the same array (a cost, not a contract).
+  const patchedRows = (rows: any[]): any[] => {
+    if (rowPatches.size === 0) return rows;
+    const cached = patchedRowsCacheRef.current.get(rows);
+    if (cached && cached.patches === rowPatches) return cached.rows;
+    const next = rows.map(patchedRowOf);
+    patchedRowsCacheRef.current.set(rows, { patches: rowPatches, rows: next });
+    return next;
+  };
+
   const dataTableSchema: ObjectGridDataTableSchema = {
     type: 'data-table',
     // The deprecated `title` fallback resolves like `label` (objectui#10993):
@@ -2935,7 +2980,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     caption: resolveInlineI18nLabel(schema.label, displayLocale)
       || resolveInlineI18nLabel(schema.title, displayLocale),
     columns: tableColumns,
-    data,
+    data: patchedRows(data),
     summaryRow,
     // objectstack#35554 — a host that loads window by window draws no pager.
     pagination: paginationEnabled && !onLoadMore,
@@ -3943,7 +3988,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // The rows an open leaf group draws: a server-grouped group's current page,
   // or the rows grouped in hand.
   const leafRowsOf = (group: typeof groups[number]): any[] =>
-    serverGroupedFetch ? (groupRows.pages[group.key]?.rows ?? []) : group.rows;
+    patchedRows(serverGroupedFetch ? (groupRows.pages[group.key]?.rows ?? []) : group.rows);
 
   // objectui#12620 — the groups on this page of groups, flattened into the
   // one table's bands in display order: each group's band, then (open leaf)

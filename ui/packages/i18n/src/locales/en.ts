@@ -776,6 +776,10 @@ const en = {
     cancelChanges: 'Cancel changes',
     saveRow: 'Save row',
     cellReadOnly: 'This cell can\'t be edited here.',
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: 'Saving…',
+    cellSaved: 'Saved',
+    openRecordToFinish: 'Open the record to finish this change',
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

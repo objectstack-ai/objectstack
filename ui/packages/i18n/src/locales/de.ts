@@ -513,6 +513,10 @@ const de = {
     cancelChanges: "Änderungen verwerfen",
     saveRow: "Zeile speichern",
     cellReadOnly: "Diese Zelle kann hier nicht bearbeitet werden.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "Wird gespeichert…",
+    cellSaved: "Gespeichert",
+    openRecordToFinish: "Datensatz öffnen, um die Änderung abzuschließen",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

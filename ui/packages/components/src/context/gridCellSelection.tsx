@@ -12,7 +12,8 @@
  *
  * Inside a provider whose value is not `null`, a data cell is SELECTED by a
  * single click, never edited by it and never opening the record. An editor
- * opens on double-click, Enter, F2 or typing; Space opens the record; Esc
+ * opens on double-click, Enter, F2 or typing (Space included; a two-state
+ * cell flips instead); the title link or a touch tap opens the record; Esc
  * cancels; Enter and Tab commit and move (in a multi-line editor Enter is a
  * newline and Ctrl/Cmd+Enter commits). A cell that opens no editor says why
  * in place. Outside a provider (`null`, the default) the table keeps its

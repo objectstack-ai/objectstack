@@ -526,6 +526,10 @@ const zh = {
     cancelChanges: '取消更改',
     saveRow: '保存行',
     cellReadOnly: '此单元格不能在这里编辑。',
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: '保存中…',
+    cellSaved: '已保存',
+    openRecordToFinish: '打开记录完成修改',
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.

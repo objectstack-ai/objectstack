@@ -519,6 +519,10 @@ const fr = {
     cancelChanges: "Annuler les modifications",
     saveRow: "Enregistrer la ligne",
     cellReadOnly: "Cette cellule ne peut pas être modifiée ici.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "Enregistrement…",
+    cellSaved: "Enregistré",
+    openRecordToFinish: "Ouvrir la fiche pour terminer la modification",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
