@@ -86,6 +86,7 @@ import {
   type PluginContext,
   recordNotFoundError,
   isExternalAudienceContext,
+  withoutOperationPrivateKeys,
 } from '@objectstack/core';
 import { type PermissionSet, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
@@ -154,6 +155,8 @@ import {
   writesOwner,
 } from './owner-anchor-stamp.js';
 import { externalGrantPatch } from './external-owd-grant-stamp.js';
+import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { predicateWriteFloorDropIds } from './security-plugin-sharing-verdicts.js';
 import { computedFieldsReadingThroughReferences } from './field-masker.js';
 
 /**
@@ -914,9 +917,17 @@ export function registerAuthzMiddleware(
     // Null until step 2.7 runs. A by-id update post-image is judged on a path
     // where it did (same single id, same guard triple). A predicate update
     // never reaches 2.7, so its per-row check (step 3.6, [#19950]) keeps the
-    // floor on exactly the terms its `where` scope does: step 3 composes the
-    // bulk scope with no floor options either.
+    // floor on exactly the terms its `where` scope does: step 3 decides the
+    // floor per matched row ({@link predicateFloorDropIds}), and the check
+    // reads that decision for each row it judges.
     let preImageFloorOpts: RlsFilterOptions | null = null;
+    // [#35802] The predicate write's per-row floor decision: the matched rows
+    // whose platform ownership floor step 3 replaced, because a by-id write of
+    // each would have had it replaced ({@link predicateWriteFloorDropIds}).
+    // Null until step 3 runs, and on every write it does not decide for. Step
+    // 3.6's per-row check reads it when the engine hands the rows over, which
+    // is after step 3 has run.
+    let predicateFloorDropIds: ReadonlySet<unknown> | null = null;
     // [ADR-0090 D10] Its twin for the DELEGATOR of an on-behalf-of write: the
     // floor decision and coverage vouch the delegator's OWN direct by-id write
     // of this row would get ({@link delegatorOwnWriteFloorOptions}). Null on
@@ -2297,16 +2308,25 @@ export function registerAuthzMiddleware(
         // carry). A refusal is still attributed to `checkParts`, the
         // compiled policies as they are.
         const judgeStoredForm = storedFormCheckJudge(checkParts, checkFieldOptions);
-        const satisfiesCheck = (image: Record<string, unknown>): boolean => {
+        // [#35802] `parts` and `judge` name the check a row is held to. Every
+        // image is held to `checkParts` except a predicate update's row whose
+        // floor step 3 replaced, which is held to the check its by-id write
+        // would get (`floorDropJudge` below); a refusal is attributed to the
+        // parts that judged it.
+        const satisfiesCheck = (
+          image: Record<string, unknown>,
+          parts: readonly Record<string, unknown>[] = checkParts,
+          judge: (image: Record<string, unknown>) => boolean = judgeStoredForm,
+        ): boolean => {
           try {
-            return judgeStoredForm(image);
+            return judge(image);
           } catch (e) {
             const refusal = crossFieldClassRefusalCarriedBy(e);
             if (refusal && checkFieldOptions?.fields) {
               // The caller's 400 names nothing from the policy; the operator
               // reading this line is told which policy and which columns.
               const fields = checkFieldOptions.fields;
-              const policies = checkParts.flatMap((f) => {
+              const policies = parts.flatMap((f) => {
                 const members = compiledPolicyNameOf(f) === undefined && Array.isArray((f as { $or?: unknown }).$or)
                   ? ((f as { $or: unknown[] }).$or)
                   : [f];
@@ -2361,11 +2381,21 @@ export function registerAuthzMiddleware(
         // context are all resolved — and only the IMAGES are deferred.
         // Deferring the compilation too would move authorization inputs into
         // the engine's timeline for no gain.
-        const newWriteImageCheck = (): WriteImageCheckSeam => ({
+        //
+        // [#35802] `floorDropJudge`, when given, is the check a predicate
+        // update's row is held to when step 3 replaced that row's platform
+        // ownership floor. The row is told by its `id` on the image, against
+        // the ids step 3 recorded; an image whose `id` is not one of them (a
+        // payload that overwrote it included) keeps `checkParts`, the floor.
+        const newWriteImageCheck = (
+          floorDropJudge?: (image: Record<string, unknown>) => boolean,
+        ): WriteImageCheckSeam => ({
           evaluate: (rows) => {
             for (const row of rows) {
               if (!row || typeof row !== 'object') continue;
-              if (!satisfiesCheck(row)) denyCheck();
+              const floorReplaced =
+                floorDropJudge !== undefined && predicateFloorDropIds?.has((row as { id?: unknown }).id) === true;
+              if (!(floorReplaced ? floorDropJudge(row) : satisfiesCheck(row))) denyCheck();
             }
           },
         });
@@ -2444,7 +2474,38 @@ export function registerAuthzMiddleware(
           // If no image can be formed the write is not admitted: the engine
           // refuses an update it cannot route, and a seam it never runs
           // fails CLOSED after `next()`.
-          writeImageCheckSeam = newWriteImageCheck();
+          //
+          // [#35802] A PREDICATE update's row whose platform ownership floor
+          // step 3 replaces is held to the check its by-id write would be: the
+          // one `computeWriteCheckFilter` composes with the floor replaced
+          // (step 2.7 passes the same knob for a by-id `allow`), so the floor's
+          // `using` does not refuse on the new row a write it admitted on the
+          // old one. Every other row keeps `checkParts`. Not on a delegated
+          // write, whose floors step 3 keeps, nor where step 2.7 already
+          // decided this write's floor (`preImageFloorOpts`), whose
+          // `checkParts` already carry that decision.
+          let floorDropJudge: ((image: Record<string, unknown>) => boolean) | undefined;
+          if (
+            !preImageFloorOpts &&
+            !delegatorSets &&
+            this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)
+          ) {
+            const floorDropCheck = await this.computeWriteCheckFilter(
+              permissionSets,
+              opCtx.object,
+              opCtx.operation,
+              opCtx.context,
+              { dropPlatformOwnershipFloor: true },
+            );
+            if (floorDropCheck) {
+              const floorDropParts = [floorDropCheck];
+              const judgeFloorDrop = storedFormCheckJudge(floorDropParts, checkFieldOptions);
+              floorDropJudge = (image) => satisfiesCheck(image, floorDropParts, judgeFloorDrop);
+            } else {
+              floorDropJudge = () => true;
+            }
+          }
+          writeImageCheckSeam = newWriteImageCheck(floorDropJudge);
           opCtx.postHookWriteImageCheck = writeImageCheckSeam;
           businessCheckSeamInstalled = true;
         }
@@ -2723,6 +2784,9 @@ export function registerAuthzMiddleware(
         opCtx.context,
       );
       const rlsFilter = andComposeLayers(layered.layer0, layered.layer1);
+      // [#35802] Where the caller's scope sits in `extra`: a predicate write
+      // re-composes its Layer 1 below, once the rows it matches are known.
+      const rlsFilterAt = extra.length;
       if (rlsFilter) extra.push(rlsFilter);
       // [ADR-0090 D12] The delegated unit read admitted at step 2 sees the
       // units its scopes cover, and only those.
@@ -2769,7 +2833,35 @@ export function registerAuthzMiddleware(
       // writes none of the object's records, whatever its predicate addresses.
       // The by-id leg (step 2.7) refuses the same caller too.
       if (this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
-        extra.push(await this.readableRowsScopeForPredicateWrite(opCtx));
+        const readableScope = await this.readableRowsScopeForPredicateWrite(opCtx);
+        extra.push(readableScope);
+        // [#35802] The #5492 floor composition, per matched row. Step 2.7
+        // lets the declared write authority's `allow` replace the platform
+        // ownership floor for the ONE row a by-id write names; a predicate
+        // write names none, so this Layer 1 used to keep the floor as an
+        // unconditional AND, and a Modify All holder or an `edit`-share
+        // target matched only the rows they had created — a smaller success,
+        // never a refusal. The rows are known here, so each matched row the
+        // floor would refuse is given the by-id decision for that row
+        // ({@link predicateWriteFloorRelief}): the floor stays where it is
+        // decided to stay (`abstain`, `deny`, an unresolvable verdict), and is
+        // replaced only where the by-id write of that row would replace it.
+        // Layer 0 is recomposed as it stood, and every authored policy stays
+        // in both arms. Not for a delegated write, which keeps both floors on
+        // the by-id path too.
+        if (rlsFilter && layered.layer1 && !delegatorSets) {
+          const relief = await predicateWriteFloorRelief.call(
+            this,
+            opCtx,
+            permissionSets,
+            layered.layer1,
+            idsOfReadableScope(readableScope),
+          );
+          if (relief) {
+            extra[rlsFilterAt] = andComposeLayers(layered.layer0, relief.layer1) as Record<string, unknown>;
+            predicateFloorDropIds = relief.dropIds;
+          }
+        }
       }
       // [#15813 / ADR-0131 D8] RECORD the Layer 0 verdict on the operation —
       // the seam ruled on #15706 (option (i)): the wall states what it
@@ -2880,4 +2972,110 @@ export function registerAuthzMiddleware(
   };
   ql.registerMiddleware(authzMiddleware);
   return authzMiddleware;
+}
+
+/**
+ * [#35802] The ids a predicate write's read question answered, out of the
+ * scope {@link SecurityPlugin.readableRowsScopeForPredicateWrite} composes
+ * (`{ id: { $in: ids } }`). A scope of any other shape answers none, so the
+ * floor stays where it is.
+ */
+function idsOfReadableScope(scope: Record<string, unknown>): (string | number)[] {
+  const leaf = scope.id as { $in?: unknown } | undefined;
+  const ids = leaf && typeof leaf === 'object' && Array.isArray(leaf.$in) ? leaf.$in : [];
+  return ids.filter((id): id is string | number => typeof id === 'string' || typeof id === 'number');
+}
+
+/**
+ * [#35802] The predicate write's Layer 1 with the #5492 floor composition
+ * applied per matched row, or `null` where nothing changes.
+ *
+ * `floored` is the Layer 1 step 3 composed for this write — the platform
+ * ownership floor kept as an unconditional AND, every authored policy beside
+ * it. `readableIds` are the rows the caller's predicate matches that the
+ * caller can read (step 3's read question, at most
+ * `PREDICATE_WRITE_READABLE_ID_CAP`: above it the write was refused before
+ * this ran, so the work below is bounded by the same cap and nothing is ever
+ * cut off). Three steps:
+ *
+ * 1. The floor must be in play for this write class at all (the provenance
+ *    test {@link resolvePreImageFloorDrop} applies). If not, `null`.
+ * 2. The rows `floored` already admits are read once, under the caller's
+ *    context, and set aside: they are matched today whatever any verdict says,
+ *    so nothing is asked about them and the check they are held to does not
+ *    move. A read the read door refuses keeps the floor (`null`): never wider
+ *    than the floor when the question could not be asked.
+ * 3. Every other matched row gets the by-id decision for that row,
+ *    {@link predicateWriteFloorDropIds} — `resolvePreImageFloorDrop` itself.
+ *    The rows it replaces the floor for are OR-ed in under the Layer 1 the
+ *    by-id write of each composes: `computeLayeredRlsFilter` with
+ *    `dropPlatformOwnershipFloor`, so an authored policy still binds them.
+ *
+ * The answer is `floored OR (id IN dropIds AND replaced)`. It only ever adds
+ * rows to `floored`, and each row it adds is one the by-id pre-image gate
+ * admits for the same caller. The sharing middleware's own bulk scope (the
+ * owner/depth set, the `edit` shares on update only) is ANDed in by that
+ * middleware as before, and the readable scope beside this one still binds.
+ */
+async function predicateWriteFloorRelief(
+  this: Pick<AuthzMiddlewareHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'ql' | 'resolvePreImageFloorDrop'>,
+  opCtx: any,
+  permissionSets: PermissionSet[],
+  floored: Record<string, unknown>,
+  readableIds: readonly (string | number)[],
+): Promise<{ layer1: Record<string, unknown>; dropIds: ReadonlySet<unknown> } | null> {
+  if (readableIds.length === 0) return null;
+  const rlsOperation = rlsOperationForVerb(opCtx.operation);
+  const floorInPlay = this.collectRLSPolicies(
+    permissionSets,
+    opCtx.object,
+    rlsOperation,
+    (opCtx.context?.positions ?? []) as string[],
+    opCtx.context,
+  ).some(isPlatformOwnershipFloorPolicy);
+  if (!floorInPlay) return null;
+  // A fresh compile for the read, so nothing the read pipeline does to its
+  // own query reaches the tree the write runs with. Marked `'policy'` like the
+  // by-id re-read's: the read's caller-predicate guard judges `{ id }`, not a
+  // row-level predicate on a field the caller may not query.
+  const probe = (await this.computeLayeredRlsFilter(permissionSets, opCtx.object, opCtx.operation, opCtx.context)).layer1;
+  if (!probe) return null;
+  const admitted = await readUnlessRefused(() =>
+    this.ql.find(opCtx.object, {
+      where: { $and: [{ id: { $in: [...readableIds] } }, markFilterSubtreeProvenance({ $and: [probe] }, 'policy')] },
+      fields: ['id'],
+      limit: readableIds.length + 1,
+      context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
+    }),
+  );
+  if (admitted.refused) return null;
+  const admittedIds = new Set<unknown>(
+    (Array.isArray(admitted.value) ? admitted.value : []).map((r: unknown) =>
+      r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined,
+    ),
+  );
+  // A falsy id is no row address (`resolveEngineUpdateDispatch`), so it is
+  // never one the floor is replaced for.
+  const candidates = readableIds.filter((id) => !!id && !admittedIds.has(id));
+  if (candidates.length === 0) return null;
+  const dropIds = await predicateWriteFloorDropIds.call(
+    this,
+    rlsOperation,
+    opCtx.object,
+    candidates,
+    opCtx.context,
+    permissionSets,
+    false,
+  );
+  if (dropIds.length === 0) return null;
+  const replaced = (
+    await this.computeLayeredRlsFilter(permissionSets, opCtx.object, opCtx.operation, opCtx.context, {
+      dropPlatformOwnershipFloor: true,
+    })
+  ).layer1;
+  const dropLeaf = { id: { $in: dropIds } };
+  return {
+    layer1: { $or: [floored, replaced ? { $and: [dropLeaf, replaced] } : dropLeaf] },
+    dropIds: new Set<unknown>(dropIds),
+  };
 }
