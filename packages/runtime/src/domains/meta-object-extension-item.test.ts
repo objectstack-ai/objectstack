@@ -1036,9 +1036,9 @@ describe('an unchanged owner object re-saved at the public door while an extensi
         await rig.protocol.installPackage({
             manifest: { id: EXT, name: 'lead-ext', version: '0.1.0', type: 'app', namespace: 'leadext', dependencies: { [PAIR]: '^0.1.0' } },
         });
-        await rig.saveAndPublish(EXT, { extend: LEAD, fields: { region__c: { type: 'text', label: 'Region' } } }, LEAD);
+        await rig.saveAndPublish(EXT, { extend: LEAD, fields: { leadext_region: { type: 'text', label: 'Region' } } }, LEAD);
         // Precondition: the extension's column is served on the owner.
-        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toContain('region__c');
+        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toContain('leadext_region');
         const put = (item: unknown) => rig.dispatcher.handleMetadata(`/object/${LEAD}`, AUTHOR, 'PUT', item, { package: PAIR });
         const stored = async () => {
             const row: any = await rig.engine.findOne('sys_metadata', { where: { type: 'object', name: LEAD, package_id: PAIR, state: 'active' }, context: { isSystem: true } });
@@ -1055,7 +1055,7 @@ describe('an unchanged owner object re-saved at the public door while an extensi
 
         expect({ status: res.response?.status, code: res.response?.body?.error?.code }, JSON.stringify(res.response?.body)).toEqual({ status: 200, code: undefined });
         expect(await rig.stored(), 'the owner row holds only its own fields').toEqual(['score', 'title']);
-        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toEqual(expect.arrayContaining(['title', 'score', 'region__c']));
+        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toEqual(expect.arrayContaining(['title', 'score', 'leadext_region']));
     }, 60_000);
 
     it('CONTROL: a save that drops the owner\'s own column is still refused 409 DESTRUCTIVE_CHANGE naming that column alone', async () => {
