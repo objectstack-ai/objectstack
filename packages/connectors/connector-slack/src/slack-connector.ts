@@ -196,6 +196,28 @@ export function createSlackConnector(opts: SlackConnectorOptions): SlackConnecto
     };
 }
 
+/**
+ * The `slack` service `ConnectorSlackPlugin` registers: this package's
+ * client, built for a bot token the CALLER holds. `@objectstack/service-messaging`'s
+ * Slack DM channel sends through it with each organization's own token
+ * (ADR-0022 §3, ADR-0013 addendum point 1). It reaches the client through the
+ * service registry, not a package import: service-messaging importing this
+ * package would close a workspace dependency cycle through
+ * `@objectstack/service-automation`.
+ *
+ * The other options (`baseUrl`, `defaultHeaders`, `fetchImpl`) apply to every
+ * client it builds; a static `token` among them is never used here.
+ */
+export interface SlackClientService {
+    /** A client for `token`: the action handlers of {@link createSlackConnector}. */
+    client(token: string): SlackConnectorBundle['handlers'];
+}
+
+export function createSlackClientService(options: Omit<SlackConnectorOptions, 'token'> = {}): SlackClientService {
+    const { token: _static, ...shared } = options as SlackConnectorOptions;
+    return { client: (token) => createSlackConnector({ ...shared, token }).handlers };
+}
+
 function toRecord(r: SlackResult): Record<string, unknown> {
     return { ok: r.ok, status: r.status, body: r.body, error: r.error };
 }

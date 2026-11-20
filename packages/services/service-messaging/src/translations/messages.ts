@@ -12,9 +12,11 @@
  * `MessagingTranslations` (ADR-0029 D8), and read by
  * `t('messages.<id>', locale, params)`.
  *
- * Today that is one sentence: the heading of a digest of two or more items
- * (`digest-render.ts`). A one-item digest carries that item's own title, so
- * this heading is never rendered for fewer than two.
+ * Two kinds today: the heading of a digest of two or more items
+ * (`digest-render.ts`; a one-item digest carries that item's own title, so
+ * this heading is never rendered for fewer than two), and the notice a person
+ * gets when an administrator removes their Slack link (`slack-links.ts`,
+ * holes `{{workspace}}`: the Slack workspace's name).
  *
  * ## Keeping the copy honest
  *
@@ -55,6 +57,8 @@ type Messages = NonNullable<TranslationData['messages']>;
 /** The ids, as `en` spells them — every other locale carries exactly these. */
 export const enMessages = {
     notificationDigestTitle: 'You have {{count}} notifications',
+    slackLinkRemovedTitle: 'Your Slack link was removed',
+    slackLinkRemovedBody: 'An administrator removed the link between your account and your Slack user in {{workspace}}. Notifications no longer reach you on Slack; you can connect again from your notification settings.',
 } as const satisfies Messages;
 
 /** One messaging sentence's id. */
@@ -64,42 +68,62 @@ type MessagingMessages = Readonly<Record<MessagingMessageId, string>>;
 
 export const zhCNMessages: MessagingMessages = {
     notificationDigestTitle: '您有 {{count}} 条通知',
+    slackLinkRemovedTitle: '您的 Slack 关联已被移除',
+    slackLinkRemovedBody: '管理员移除了您的账户与 {{workspace}} 中您的 Slack 用户之间的关联。通知将不再通过 Slack 发送给您；您可以在通知设置中重新关联。',
 };
 
 export const jaJPMessages: MessagingMessages = {
     notificationDigestTitle: '{{count}} 件の通知があります',
+    slackLinkRemovedTitle: 'Slack の連携が解除されました',
+    slackLinkRemovedBody: '管理者が、あなたのアカウントと {{workspace}} のあなたの Slack ユーザーとの連携を解除しました。今後、通知は Slack に届きません。通知設定から再度連携できます。',
 };
 
 export const esESMessages: MessagingMessages = {
     notificationDigestTitle: 'Tiene {{count}} notificaciones',
+    slackLinkRemovedTitle: 'Se ha eliminado su vínculo con Slack',
+    slackLinkRemovedBody: 'Un administrador ha eliminado el vínculo entre su cuenta y su usuario de Slack en {{workspace}}. Las notificaciones ya no le llegarán por Slack; puede volver a conectarse desde la configuración de notificaciones.',
 };
 
 export const zhHantMessages: MessagingMessages = {
     notificationDigestTitle: '您有 {{count}} 則通知',
+    slackLinkRemovedTitle: '您的 Slack 連結已被移除',
+    slackLinkRemovedBody: '管理員移除了您的帳戶與 {{workspace}} 中您的 Slack 使用者之間的連結。通知將不再透過 Slack 傳送給您；您可以在通知設定中重新連結。',
 };
 
 export const arMessages: MessagingMessages = {
     notificationDigestTitle: 'عدد الإشعارات لديك: {{count}}',
+    slackLinkRemovedTitle: 'تمت إزالة ربط Slack الخاص بك',
+    slackLinkRemovedBody: 'أزال أحد المسؤولين الربط بين حسابك ومستخدم Slack الخاص بك في {{workspace}}. لن تصلك الإشعارات بعد الآن على Slack؛ ويمكنك الربط مرة أخرى من إعدادات الإشعارات.',
 };
 
 export const frMessages: MessagingMessages = {
     notificationDigestTitle: 'Vous avez {{count}} notifications',
+    slackLinkRemovedTitle: 'Votre lien Slack a été supprimé',
+    slackLinkRemovedBody: 'Un administrateur a supprimé le lien entre votre compte et votre utilisateur Slack dans {{workspace}}. Les notifications ne vous parviennent plus sur Slack ; vous pouvez vous reconnecter depuis vos paramètres de notification.',
 };
 
 export const ptBRMessages: MessagingMessages = {
     notificationDigestTitle: 'Você tem {{count}} notificações',
+    slackLinkRemovedTitle: 'Seu vínculo com o Slack foi removido',
+    slackLinkRemovedBody: 'Um administrador removeu o vínculo entre sua conta e seu usuário do Slack em {{workspace}}. As notificações não chegarão mais a você pelo Slack; você pode se conectar novamente nas configurações de notificação.',
 };
 
 export const ruMessages: MessagingMessages = {
     notificationDigestTitle: 'Уведомлений: {{count}}',
+    slackLinkRemovedTitle: 'Ваша привязка к Slack удалена',
+    slackLinkRemovedBody: 'Администратор удалил привязку вашей учётной записи к вашему пользователю Slack в {{workspace}}. Уведомления больше не приходят вам в Slack; вы можете подключиться снова в настройках уведомлений.',
 };
 
 export const deMessages: MessagingMessages = {
     notificationDigestTitle: 'Sie haben {{count}} Benachrichtigungen',
+    slackLinkRemovedTitle: 'Ihre Slack-Verknüpfung wurde entfernt',
+    slackLinkRemovedBody: 'Ein Administrator hat die Verknüpfung zwischen Ihrem Konto und Ihrem Slack-Benutzer in {{workspace}} entfernt. Benachrichtigungen erreichen Sie nicht mehr über Slack; Sie können sich in Ihren Benachrichtigungseinstellungen erneut verbinden.',
 };
 
 export const koMessages: MessagingMessages = {
     notificationDigestTitle: '알림이 {{count}}개 있습니다',
+    slackLinkRemovedTitle: 'Slack 연결이 해제되었습니다',
+    slackLinkRemovedBody: '관리자가 {{workspace}}에서 회원님의 계정과 Slack 사용자 간의 연결을 해제했습니다. 이제 알림이 Slack으로 전송되지 않으며, 알림 설정에서 다시 연결할 수 있습니다.',
 };
 
 /** The shipped locales, keyed as the bundle beside this file keys them. */
