@@ -2,8 +2,8 @@
   "number": 35663,
   "kind": "issue",
   "title": "列表页左侧一条线对齐：勾选列在列多时被压到 16 宽并贴住屏幕左边；页面栏、视图栏、表格、页脚的左起点各不相同",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T22:11:25Z",
-  "updated_at": "2026-11-20T01:03:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T04:32:11Z",
+  "closed_at": "2026-11-20T04:31:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35663",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-20 原话：「再看看列表页的布局，左侧一列没有对齐是不是很奇怪，左侧边距也很小」；「还有行号好像也不是很有必要，默认是不是可以不开，甚至去掉这个选项」；「不显示行号，checkbox 应该始终显示。」\n\n## 现状（主干 `d96c878e33`，本机环境，视口 1280 宽，浏览器实测）\n\n「联系人」列表（列多，表格总宽 1410，超出视口，要横向滚动）：\n\n| 位置 | 内容的左起点（像素） |\n|---|---|\n| 页面栏的对象图标 | 16 |\n| 视图栏的视图图标 | 22 |\n| 表头的全选框 | 0，贴住屏幕左边 |\n| 每行的行号 | 4；两位数的行号（10、11、12）从 0.6 开始，几乎顶到边 |\n| 第一列数据的文字 | 28 |\n| 页脚「12 条记录」 | 16 |\n\n- 同一页左侧出现 0、4、16、22、28 五条线。\n- 勾选列声明的宽度是 40（`w-10`，左右内边距 0），实际被压到 16：表格是自动布局，列宽只是参考值，列总宽超出视口时这一列最先被压缩。`ui/packages/components/src/renderers/complex/data-table.tsx:1707-1713` 的注释已经写到这一列会塌到最小内容宽度，当时只修了冻结列的偏移，没有保住宽度。\n- 不需要横向滚动的列表上程度轻一些：「客户」列表里勾选框的左起点是 11，仍然和页面栏的 16、视图栏的 22 不在一条线上。\n\n- 行号：是界面上的一个显示开关，默认开（`ui/packages/plugin-list/src/ListView.tsx:2095` 的 `defaultRowNumbers = true`，`ui/packages/plugin-grid/src/ObjectGrid.tsx:3041`），开关在「选项」里（`ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx:746`）。开着时这一格平时显示行号，悬停或选中才换成勾选框。规范（`packages/spec`）里没有这个键。\n\n## 要做的\n\n- **不显示行号，勾选框始终显示**（维护者裁决）。列表首格只放勾选框，不再悬停才出现。\n- 「选项」里去掉「行号」开关；`defaultRowNumbers` 的默认值改为关。个人偏好里已经存的行号设置不再生效，「已个性化」标记里对应的一项一并去掉。组件上的 `showRowNumbers` 属性是否保留给其他宿主，由实现方定，列表页不再打开它。\n\n- 定一条左基线：16。页面栏图标、视图栏图标、全选框、每行的勾选框、页脚文字都从这条线起。\n- 勾选列固定宽度，不随列数和视口宽度变化，横向滚动时也不变。建议 16 左边距 + 16 勾选框 + 8 间隔，共 40。\n- 第一列数据的文字紧跟其后，表头文字和单元格文字左对齐。\n- 右侧同样核对一次：页面栏和视图栏右端的按钮、表格最后一列、页脚右端在同一条线上（现在页面栏是 16）。\n\n## 不做的\n\n- 不改列的内边距以外的行高、字号（子卡 objectstack-ai/objectstack#35548 已定）。\n- 不改侧栏和顶栏。\n\n## 验收\n\n- 1280 宽，「联系人」这类要横向滚动的列表和「客户」这类不用滚动的列表：页面栏图标、视图栏图标、全选框、每行的勾选框、页脚文字的左起点都是 16，实测相差不超过 1 像素。\n- 勾选列在两类列表上宽度相同；横向滚动到最右再回来，宽度和冻结位置不变，冻结列之间没有透出下面内容的缝。\n- 列表上没有行号；每行的勾选框不用悬停就看得见。「选项」里没有「行号」开关；之前打开过行号的用户，刷新后也不显示行号。\n- 窄屏（视口 375 宽）下左边距不小于 12。\n\nReader: `domain:ui` 车道。`ui/packages/components/src/renderers/complex/data-table.tsx`（勾选列和行号列的宽度、冻结偏移）、`ui/packages/app-shell/src/views/objectViewPageHeader.tsx`、视图栏所在组件。\n\nDedupe: `列表 左边距 对齐`、`勾选列 宽度 贴边`、`selection column collapse`（objectstack，open）→ 0；相关：objectstack-ai/objectstack#35548（已关，列表框架）。\n\n正文最后更新：2026-11-19T22:13Z\n"

@@ -1,0 +1,32 @@
+{
+  "number": 35823,
+  "kind": "issue",
+  "title": "Unmanaged install: a manifest without namespace silently derives one from the package id and double-prefixes names that carry a different prefix; refuse or name the mismatch instead",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T09:59:04Z",
+  "updated_at": "2026-11-20T10:02:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35823",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ② an out-of-scope finding from objectstack-ai/cloud#4856. There, cloud's publish snapshot dropped `manifest.namespace`; cloud PR #4910 fixes cloud's side. Reader: the `domain:server` lane (metadata-protocol). Dedupe: `deriveNamespaceFromPackageId`, `unmanaged copy double prefix`: no card found.\n\n## Finding\n\n`packages/metadata-protocol/src/package-unmanaged-install.ts:522`:\n\n    sourceNamespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId)\n\nWhen a producer hands over a manifest without `namespace`, the copy derives one from the package id, for example `asset_lifecycle_b` from `ai.objectstack.gallery.asset-lifecycle-b`. The rename then prefixes names that already carry a different prefix (`demoasset_asset`), and it does not refuse. The result is a silently double-prefixed copy (`trialdemoasset_demoasset_asset`), while items without the object prefix are left as they were, so one app mixes three spellings. This was measured on the card's local rig.\n\nUnder the project's \"loud over lenient\" axis, a derived namespace that does not match the names' actual prefix should be refused with a message naming both, or should not be guessed at all, rather than tolerated.\n\n## Done when\n\nAn unmanaged install whose manifest has no namespace either refuses, naming the missing key, or detects that the names' common prefix differs from the derived namespace and refuses with both named. A test pins it. The behaviour when a namespace is present is unchanged."
+}

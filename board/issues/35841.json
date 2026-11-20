@@ -1,0 +1,31 @@
+{
+  "number": 35841,
+  "kind": "issue",
+  "title": "mcp stdio server: state the authoring contract version in its default instructions (scope-out of PR #35838)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T10:51:42Z",
+  "updated_at": "2026-11-20T11:48:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35841",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1k1GRsQbF3vCPKxhz\n\nFiling gate: ① (scope-out of PR #35838, seat 4 ruling in the a4-C area) · Source: fleet · Area: a4-C · Seat: repo:objectstack#4\n\n# stdio MCP server: state the authoring contract version in its default instructions\n\nPR #35838 (`Fixes #34774`) adds the line `Authoring contract: @objectstack/spec <version>.` to the open **HTTP** MCP server's default `initialize` instructions, on connections that serve the authoring tools (seat ruling A: pin #32766 stays, so a connection with no build door never mentions authoring). The **stdio** server's default instructions (`MCPServerRuntime.start` in `packages/mcp/src/mcp-server-runtime.ts`) were left untouched, because #34774 names the HTTP server.\n\n## Scope\n\n- Measure first: does the stdio server serve the draft-door authoring tools (`save_metadata_draft` and siblings) on any configuration? If it never does, the line has no reader there: close this card as not needed, with the measurement.\n- If it does: carry the same line, from the same single version source PR #35838 reads, under the same gate (authoring tools served), and keep the whole default text under 4,096 characters. Pin both: the line is present with authoring tools, and absent without them (#32766).\n\n## Why\n\nA stdio client that saves drafts learns the server's spec version only by being refused on a major mismatch, rather than up front. Who acts: the server lane (`packages/mcp`). Reach: stdio clients that author drafts. No customer named.\n\nGrade: **p3 · domain:server**, a follow-up of a landing card, no wrong data.\n\nDedup: search `is:issue \"Authoring contract\" stdio` → 27 hits; none carries the stdio server (the nearest are #34774, the parent, and #34686, the HTTP door's initialize text, closed).\n\nRelated: #34774, PR #35838, #32766. Parent epic #34659.\n\n"
+}

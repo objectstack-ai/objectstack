@@ -2,8 +2,8 @@
   "number": 34117,
   "kind": "issue",
   "title": "pm: two texts still teach the target:* board after #32956 (check-label-desc-cap header, hotcrm lane line)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:fleet",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T19:40:42Z",
-  "updated_at": "2026-11-19T06:03:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T04:15:57Z",
+  "closed_at": "2026-11-20T04:15:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34117",
   "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ① a follow-up owed by work in flight: the at-tier contract review of PR #34113 (card #32956) graded S1 and S2 should-fix with no carrier on that PR. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** #34113 落地后,`ensure-pm-labels.sh` 不再写 `target:v17`。但两处文字仍按旧说法写:`check-label-desc-cap.mjs` 头注拿 `for V in v17` 循环当例子;pm-dispatch 的 hotcrm 车道参考用「标签清单里没有 `target:*`」来推断「没有发版板」。\n- **要做的:** 换掉这两处说法,不改任何判定。\n- **受管文件:** 否。\n\n## What is wrong\n\n1. `scripts/pm/check-label-desc-cap.mjs` (header, about :45-:48) describes, in the present tense, a description \"Release blocker for $V\" expanded per iteration of `for V in v17` in the file it reads. PR #34113 removes that loop.\n2. `.claude/skills/pm-dispatch/references/lanes/hotcrm.md:41` reads 「无发版板:标签清单无 `target:*`」. Since #32906 the board is `priority:p0` inside the release window, so the absence of `target:*` proves nothing.\n\n## What lands\n\n1. Swap the header example for a live expansion the file still has (the `lease:$A` loop is one).\n2. Reword the hotcrm line to the p0-in-window rule, within the line budget of that file.\n\n`scripts/pm/check-label-desc-cap.mjs` (header comment only), `.claude/skills/pm-dispatch/references/lanes/hotcrm.md` (one line); `skip-changeset`; `Clause-②: no`. Serial after PR #34113. Dedupe: `is:issue check-label-desc-cap v17 example` → none. **New.**\n"

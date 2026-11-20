@@ -1,0 +1,33 @@
+{
+  "number": 35760,
+  "kind": "issue",
+  "title": "filing-gate: a dedupe search that hits an open card on the same mechanism appends a comment to it instead of filing a new card",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T06:01:07Z",
+  "updated_at": "2026-11-20T11:43:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35760",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. Ruling-ref: the maintainer, 2026-11-20 ~06:0xZ, verbatim: 「感觉你的第二种方案也很好啊」, approving triage's option 2 for cutting card volume: a seat's existing pre-filing dedupe search, when it hits an open card on the same mechanism, ends in a comment on that card rather than a new card. He rejected the heavier alternative (every seat reading all open cards) as too costly in tokens: 「你让席位立卡之前去读所有的卡好像有点难，而且是不是会有点浪费token」. ⛔ Not a claim.\n\n## 维护者速读\n- 要改什么：席位立卡前本来就要按关键词查重；以后查到「同一机制、还开着」的卡，就在那张卡下补一条评论，不再新立一张。\n- 为什么：从源头少立卡；只用现有的查重搜索，不需要读全部卡，几乎不多花 token。\n- 不改会怎样：只有完全重复才不立，同机制的小问题仍各立一张，卡继续涨。\n- 要你做什么：无。\n\n## Change\n- `references/filing-gate.md` (the dedupe step every filing already runs): today a filer stops only on an exact duplicate. Add: if the keyword search returns an **open** card whose fix touches the same mechanism or file, and that card is unclaimed or claimed by the filer's own seat, the filer posts the finding as a comment on it (what, where, evidence, suggested grade) and files nothing.\n- If the hit card is claimed by **another** seat, file as today and name the hit card in the new card's `Dedupe:` line, so triage can fold it later.\n- The grade of the hit card follows the existing rules: a comment that raises severity or reach is regraded by triage at its next touch, never by the filer.\n- No new reading duty: the filer reads only the cards its existing search returns.\n- Triage keeps folding at first touch and in a daily queue pass (already in force since 2026-11-20), so a miss here costs one later fold, not a lost finding.\n\nSibling rule card: #35732 (ADR amendment rows append to the week's ADR card)."
+}

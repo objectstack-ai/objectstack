@@ -1,0 +1,36 @@
+{
+  "number": 35833,
+  "kind": "pull_request",
+  "title": "fix(plugin-list): a cold list load reads its first page once when the view answer lands late",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T10:42:28Z",
+  "updated_at": "2026-11-20T11:37:13Z",
+  "closed_at": "2026-11-20T11:37:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T11:37:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35833",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgRuogP8Tp8XyFXLc92Bxvo6)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFixes #35536\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；打开列表页时，即使视图定义比数据晚到，第一页数据也只取一次（之前会原样再取一次）。\n- 为什么做：属于首屏重复请求收口工作，替首屏提速那张父卡解决列表页这一处重复读取。\n- 出错会怎样：若改错，列表在视图筛选或排序真正变化时可能不刷新；改动只有一处，可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n`ListView`'s data-read effect named `schema.data` by identity. When the view answer (`/meta/view?object=`, the adapter's `listViews`) lands after the first data read, it re-serves the active view, the page rebuilds the list schema, and `ListView` receives a fresh `{ provider: 'object', object }` data block of equal content. That one dependency re-armed the effect and the first page was read again, byte-identical.\n\nThe effect only ever reads `schema.data` for rows a host hands in whole (an array, or a `provider: 'value'` block's `items`); every other data block changes nothing the query sends. The effect now names `inlineRows` (that array, or `null`) instead of `schema.data`. Inline rows stay compared by identity, so new rows from a host still re-run it. `objectui#4567`'s by-identity rule for `columns` is untouched: this narrows only the data-block dependency to what the body reads.\n\nWhy not \"hold the first read until the view settles\": the list cannot tell an answer that will change nothing from one that will, and delaying the first read would cost every cold load the view round trip. Why not a value key over the whole query: the effect's own notes record why a value key over the projection inputs is wrong here (the Studio \"+ Add field\" live dependency).\n\nThe re-issuing consumer, measured in the browser with a temporary dependency probe (not committed): on the delayed load, the only dependency that moved when the view answer landed was `schema.data`, carrying `{\"provider\":\"object\",\"object\":\"showcase_task\"}`; the second data read left 61 ms later.\n\nFiles: `ui/packages/plugin-list/src/ListView.tsx` (the data-read effect), two test files, one changeset. No change to `ObjectView.tsx` or `objectViewHelpers.ts` was needed.\n\n## Tests\n\n- `ListView.harness.test.tsx`, new top-level block `ListView.dataBlockNoReread-35536`: a new data block of equal content re-reads nothing; CONTROLS: a sort change reads again with `$orderby`, a filter change reads again with the filter, rows handed in whole are replaced when the host hands in new ones, with no read.\n- New `ObjectView.lateViewAnswerOneRead-35536.test.tsx` (real `ObjectView` + `plugin-view` + `ListView`, the view answer HELD until after the first read): the answer re-serving the active view leaves the cold load at one list read; an empty answer too; CONTROLS: an answer that changes the view filter reads again with it, an answer that changes the sort reads again with it, a view switch reads again, an address filter change reads again with it. Controls assert at least one more read carrying the change, never an exact count.\n\n<details><summary>Runs at the final head</summary>\n\n- Both touched files: `Test Files 2 passed (2) / Tests 121 passed (121)`, lock VERDICT command-exit 0.\n- Scoped suites (`plugin-list/src/__tests__/ListView*` + `app-shell/src/views/ObjectView*`), at the fix commit: `Test Files 224 passed (224) / Tests 2194 passed (2194)`.\n- `@object-ui/plugin-list` type-check exit 0; `@object-ui/app-shell` type-check exit 0 (both `tsconfig.test.json` include `src/**/*.test.tsx`).\n- eslint over the three changed ui files: 0 errors.\n\n</details>\n\n<details><summary>Ablations (scripts/ablation-replace.mjs, anchor hit, restored to the HEAD blob each time; ui tests resolve the workspace @object-ui packages from source)</summary>\n\n1. Dependency back to `schema.data`: 2 red (`a new data block of equal content re-reads nothing`: 3 reads; `the answer re-serving the active view leaves the cold load at ONE list read`: 2 reads), 8 green.\n2. Over-applied (no data dependency at all): 1 red (`rows handed in whole are replaced...`: still `v1`), 9 green.\n3. Restored: 10 of 10 green.\n\nA first ablation run read 4 red: two controls asserted an exact count and were fix limbs in disguise; they now assert at least one more read carrying the change.\n\n</details>\n\n## Acceptance notes\n\n- Re-measured on `origin/main` 65fddc8435 before any code (built console, showcase `/_console/apps/com.example.showcase/showcase_task`, a fresh browser context per load): as-is the duplicate did not appear (0 of 6), with `meta/view?object=` held 1.5 s it appeared on 6 of 6.\n- Out of scope, noted only: on the same load `serverSort` changes identity once before the object definition loads (the effect is gated on it then, so no read).\n\n## Verification\n\n| Posture (6 cold loads each) | Before (65fddc8435) | After (fix commit 7b825e5a3d) |\n|:---|:---|:---|\n| As-is | 1,1,1,1,1,1 (0 of 6 doubled) | 1,1,1,1,1,1 (0 of 6) |\n| `meta/view?object=` held 1.5 s | 2,2,2,2,2,2 (6 of 6 doubled, byte-identical, about 1.0 s apart) | 1,1,1,1,1,1 (0 of 6) |\n\nBrowser control after the fix: opening the In Progress view reads again with `filter=[[\"status\",\"equals\",\"in_progress\"]]` and shows its 2 rows.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/app-shell/src/views/ObjectView.lateViewAnswerOneRead-35536.test.tsx`, expect 6 passed.\n\nRead first: the `inlineRows` declaration and the dependency list in `ListView.tsx` (the only behaviour change), then the held-answer harness.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZiaBg6rk7dpy1s9Me)_\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me -->\n"
+}

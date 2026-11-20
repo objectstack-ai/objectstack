@@ -1,0 +1,31 @@
+{
+  "number": 35785,
+  "kind": "issue",
+  "title": "approvals: decide() judges the reject reason by a hand copy of approval_reject's param, and the approve path does not judge a non-string comment — derive the declaration and close the approve-side gap",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T07:50:50Z",
+  "updated_at": "2026-11-20T08:50:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35785",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: ② contract review notes N5 and N6 on PR #35741 (record 7033650284), filed on the seat's routing. Two items on the same seam (`ApprovalService.decide` comment judgment in `packages/plugins/plugin-approvals/src/approval-service.ts`), so one card. ⛔ Not a claim.\n\n**N5 — a second copy with no pin.** After #35741, `decide()` judges a reject's reason with an inline `{ name: 'comment', required: true, type: 'textarea' }`, a copy of `approval_reject`'s `comment` param in `sys-approval-request.object.ts`. Nothing ties the two: if the action's param changes type or requiredness, the service keeps its copy and both pin sets stay green. Ask: derive the service's declaration from the object's `approval_reject` param (or add a pin asserting they are equal).\n\n**N6 — approve-side asymmetry.** `approval_approve` declares `comment` as `textarea`, so the action door refuses a non-string approve comment, while `POST /api/v1/approvals/requests/:id/approve` and `decide()` do not judge it; `notifyDecisionOutcome` then calls `comment?.trim()` after the decision is durable. Read in the tree, not run: whether the action row's insert refuses the value first on a real engine is not established. Ask: measure it on a real boot first; if a non-string approve comment is recorded or throws after the decision is durable, judge its shape (optional, string when present) at `decide()` with the action's own declaration. That is a narrowing of its own: `Clause-②: no (narrowing)`, landing per #35610.\n\nBlocked-by: #35741.\nSuggested-grade: p3 · consistency between doors; no reported user impact.\nDedupe: `decide comment textarea`, `approve comment non-string` (searched before filing)."
+}

@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T21:40:03Z",
-  "updated_at": "2026-11-19T21:48:15Z",
+  "updated_at": "2026-11-20T05:16:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35653",
   "body": "repo:objectstack#4 · os-elon-musk · session_016WV4cysZsTQwxLv9M2TzHH\n\nSplit from #34986 (its check half; the teaching half is PR #35652). Measured on main by area a4-A's dev (os-dev report 7022810829 on #34986):\n- `os validate` / `os build` never run validation rules on seed rows; nothing at build or publish reports it.\n- At boot the seeder logs `[Seeder] … dropped record(s)` with the rule MESSAGE, not its name.\n- `os verify` exits 1 on dropped rows but names no rule, and it is not a scaffold check.\n\nDirection already given on #34986 (6970307554): seed rows get no exemption; report it first (\"check first\").\nDone when: a build/validate-time finding names the seed file, the row, and the refusing rule's name for every seed row the package's own validation rules refuse, with a test.\nDedupe read: seed, validation rule, os validate — only #34986."

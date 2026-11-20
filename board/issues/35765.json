@@ -1,0 +1,31 @@
+{
+  "number": 35765,
+  "kind": "issue",
+  "title": "Sweep · area:data · week of 2026-11-20: small low-risk data fixes batched into one PR",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T06:12:26Z",
+  "updated_at": "2026-11-20T09:52:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35765",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. Ruling-ref: the maintainer, 2026-11-20 ~06:3xZ, verbatim: 「同意」, on triage's proposal to batch small, low-risk, non-urgent work into recurring sweep cards that one seat ships as one PR, to save the per-card fixed cost (session start, CI, review, queue slot, approvals). Asked and answered: 「只有p3可以这样吗」 — not only p3: small p2 also qualifies. ⛔ Not a claim.\n\n## 维护者速读\n- 是什么：数据领域（查询、权限、记录、审计）的扫尾卡，本周的小改动集中在这里，一个 PR 做完。\n- 为什么：每张小卡单独开发都要走一遍会话、测试、审核和排队，合起来走一次，省掉大部分固定开销，也少很多卡。\n- 收什么：小、风险低、晚几天修也不要紧的 p3 和 p2；不收 p1、错数据、安全项、天天碰到的问题和大改动。\n- 要你做什么：无（涉及受管文件时照常批）。\n\n\n## What enters (triage moves rows here at first touch or in its daily pass)\n- Any p3 small fix, and any p2 that is small (one file or one mechanism), low-risk and not hit daily: shipped-text fixes, review follow-ups with a user effect, minor UI copy.\n- ⛔ Never: p1; a p2 that computes wrong data, is a security item, or breaks a daily path; work of size M or larger; topic children (the topic already batches); claimed or started cards.\n\n## How it ships\n- Once a week the lane's seat claims this card and ships **one PR** of at most ~10 rows that touch unrelated, low-risk spots. Rows it does not reach roll to next week's card of this name.\n- Each row names its source card; the source card is closed as folded and its body stays the detail. The PR lists the rows it closes.\n- The card closes when its PR merges; triage opens next week's card.\n\n## Rows\n_(none yet; triage adds them)_"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 35814,
+  "kind": "issue",
+  "title": "Number and boolean comparand doors: the refusal says a {placeholder} \"resolves to an id or a date\", but a period key resolves to an ISO week key",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T09:24:59Z",
+  "updated_at": "2026-11-20T09:54:38Z",
+  "closed_at": "2026-11-20T09:53:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35814",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Out-of-scope finding of the T1 stale-prose dev (PR #35806, os-dev-report 7035287739), widened and ruled \"file before landing\" by the CONTRACT_REVIEW_TIER review of that PR (record 7035670717, S4), and filed as a p3 rider for the next stale-prose batch on L1 7035433107. Dedupe: `placeholder resolves to an id or a date`, `id or a date placeholder number door` and `ISO week key placeholder number door` return only #35522, #34611 and #35409 (the three cards PR #35806 closes; none names these sentences) and #35496 (skills text for `{current_iso_week}`, a different surface).\n\n## What happens (read at PR #35806 head `a555ecc5`, same on `origin/main`)\nThe number door and its boolean arm refuse any `{placeholder}` comparand on a `number` / `boolean` field. They explain the refusal by saying the token \"resolves to an id or a date\". Since #35391, a period key (`{current_iso_week}`) resolves to an ISO week key, which is neither of those. The conclusion still holds, because no token resolves to a number or a boolean. The stated reason is incomplete, and after #35806 one file says two different things: its header lists the ISO week key, while its message does not.\n\nPlaces (from the review record):\n- runtime strings: `packages/spec/src/data/filter-number-comparand-declared-type.ts:524`, `packages/spec/src/data/filter-boolean-comparand-declared-type.ts:388`;\n- docblocks and comments: `filter-number-comparand-declared-type.ts:295`, `filter-boolean-comparand-declared-type.ts:59-60`, `packages/objectql/src/number-comparand-declared-type-door.ts:57-58`, `packages/objectql/src/engine-top-level.ts:965-966`;\n- a stale \"steps around a placeholder\" in `packages/objectql/src/engine-resolved-token-year-range.test.ts:25-26`.\n\nreach: published refusal text of `@objectstack/spec` (`INVALID_FILTER` / 400; the code and status are unchanged). Authors who read the refusal are told a reason that does not cover the token they wrote. Read from code.\n\n## Done when\nEvery place above states what a placeholder resolves to (an id, a date, or an ISO week key), or says only that no token resolves to a number or a boolean. Move the pins on the two runtime strings with them. Add a patch changeset with FROM/TO for the two messages. Clause-② no.\n\n## Business rationale\nAn author who writes `{current_iso_week}` against a number field gets a refusal whose reason names neither what they wrote nor what it becomes, and the next fix they try is a guess. Reader: the area:data lane seat (d7-C), as a rider on the next stale-prose batch.\n\nGrade: p3 · area:data · Bug (prose) · authors using period keys on number/boolean fields, rarely · evidence read."
+}

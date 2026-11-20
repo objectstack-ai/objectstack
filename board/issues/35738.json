@@ -1,0 +1,34 @@
+{
+  "number": 35738,
+  "kind": "issue",
+  "title": "Value data source: a $-keyed plain object (including the { $now, addDays } anchor) and a class instance under equality, negation and text operators are still compared by reference or as text",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T04:31:01Z",
+  "updated_at": "2026-11-20T05:30:42Z",
+  "closed_at": "2026-11-20T05:30:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35738",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Residual population named \"for a card\" by the CONTRACT_REVIEW_TIER review of PR #35604 (record 7030429102, §④), outside that PR's refused population (a plain object with no `$` key). Dedupe: `value data source comparand reference` (no card on this), and #35493 (the plain-object card, now in PR #35604).\n\n## What happens (read at the PR head `1bc51be2`, unchanged on `origin/main` `a3a74f27`)\n`ValueDataSource` (`ui/packages/core/src/adapters/ValueDataSource.ts`, `matchesDollarOperator` and the AST arm) still compares two comparand shapes by reference or as text:\n1. A plain object with a `$` key that is not a `{ $field }` reference. That includes the spec's declared `{ $now, addDays }` date anchor, which the platform resolves and serves; no `$now` is read in `ValueDataSource.ts` or in `convertFiltersToAST`. So `{ due: { $lt: { $now: true, addDays: 7 } } }` compares the stored date with the text `[object Object]` on a value-provider view. Whether a producer hands such an anchor to `find` today was not traced.\n2. A non-plain object (a moment / luxon date, a decimal) under `$eq` / `$ne` / `$in` / `$nin` and the text operators: `$ne`, `$nin` and `$notContains` answer every row. Comment 7012153506 on #35493 rules a class instance to be data, and the orderings compare it through `valueOf`; what the equality and negation operators owe it is not ruled.\n\nreach: published `@object-ui/core` export `ValueDataSource#find` (value-provider views, previews); wrong rows, no refusal. Read from code, not run.\n\n## Done when\n(1) the value source resolves the declared `{ $now, addDays }` anchor the way the platform does, or refuses it with a named sentence; any other `$`-keyed non-reference object is refused. (2) equality / negation / text operators treat a class instance consistently with the orderings (compare through `valueOf`) or refuse it; the dev measures which the spec's comparand door does and follows it. Pins per shape, CONTROL scalar / `Date` / `{ $field }` unchanged. If (2) turns out to need a product choice, the seat routes it to the decision box instead of guessing.\n\n## Business rationale\nBuilders preview dashboards and lists on in-memory value sources; a relative-date filter (`due within 7 days`) or a decimal comparand silently answers the wrong rows there while the server answers right, so a preview misleads. Reader: the area:data lane seat that holds the client filter grammar (d7-C), after PR #35604 lands (same file).\n\nGrade: p3 · area:data · Bug · previews, rarely (no traced producer for (1)) · evidence read."
+}

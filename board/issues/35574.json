@@ -2,9 +2,9 @@
   "number": 35574,
   "kind": "pull_request",
   "title": "docs(spec): FilterCondition form 4 states the engine's three-relationship hop limit",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
     "protocol:data",
     "size/s",
     "tooling"
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T15:59:31Z",
-  "updated_at": "2026-11-19T16:56:33Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 4,
+  "updated_at": "2026-11-20T05:14:44Z",
+  "closed_at": "2026-11-20T05:14:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T05:14:42Z",
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35574",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoK8YCcS3hkJHvVLxZNeiKG8)_\nFixes #35494\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感:阅读平台协议说明的开发者和智能体,原先读到\"关联筛选只能嵌一层\",现在读到\"最多三层\"。\n- 修正数据查询说明书里一句与引擎实际能力不符的话,替照着说明写筛选条件的作者和智能体消除误导。\n- 只改说明文字,不改任何校验或查询行为;出错最多是说明不准,可直接撤回。\n- 无。\n\n## What changes\n\n`packages/spec/src/data/filter.zod.ts`, comment prose only (no schema, type or runtime change). Four sentences said the nested-relation form (form 4 on `FilterCondition`) is served \"one level\"; all four now state the engine's limit of three relationships:\n\n- form 4 docblock (the multi-line sentence): \"Up to three relationships deep (ADR-0071's 3-hop limit, `RELATION_CONDITION_MAX_HOPS` in `packages/objectql/src/relation-filter-lowering.ts`): every key must be a field the related object declares, a relation key may hold a condition of its own, and a condition past the third relationship, or a dotted key, is refused (`INVALID_FILTER` / 400).\"\n- the `FilterCondition` member comment, the `QueryFilter` example comment, and the `Filter` (typed) member comment: \"one level\" becomes \"up to three relationships\" / \"up to 3 hops\", one line each as before.\n\nWhere the limit lives (measured at b65488a8): `RELATION_CONDITION_MAX_HOPS = 3` at `packages/objectql/src/relation-filter-lowering.ts:104`, checked in `admitRelationCondition` at `:221` (`refuse('hop-limit', …)`), thrown through `relationConditionError` as `invalidFilterError` (`INVALID_FILTER`, status 400, `packages/objectql/src/filter-comparand-shape.ts:84`). It is enforced once at the engine's filter seam, not per driver. ADR-0071 Decision, as written: \"A depth cap (default **3 hops** → 4 objects, Salesforce-report-type parity) bounds join count/perf\"; the constant's docblock names it as that limit.\n\n## Tests\n\nNo behaviour changes, so no test or ablation. Generated artifacts: these sentences are TypeScript comments, not `.describe()` text, so no committed generated reference doc copies them; `check:generated` and `check:docs` are green with nothing regenerated (details below).\n\n## Acceptance notes\n\n- Sentence census: `git grep -n -i -E \"one (level|hop)|single (level|hop)|nested relation|nested-relation\" -- packages/spec/src` at b65488a8. Four nested-relation \"one level\" sentences, all in `filter.zod.ts` (2222, 2235, 2373, 2464); the card named three. The remaining \"one level\" hit in that file (2616) is about filter key nesting, not relations. Other spec \"one hop\" hits concern formula reads, which are a separate one-hop contract.\n- `git grep` for each old sentence across the repo found no copy outside `filter.zod.ts` except a released `packages/spec/CHANGELOG.md` entry, which is release-owned and left alone.\n\n## Verification\n\nTwo-minute check: `git grep -n \"one level\" packages/spec/src/data/filter.zod.ts` prints one line (2619, key nesting), and `sed -n 104p packages/objectql/src/relation-filter-lowering.ts` prints `export const RELATION_CONDITION_MAX_HOPS = 3;`.\n\n<details><summary>Local gates at 3253eff9</summary>\n\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated` under the verify lock: `VERDICT command-exit 0`, \"All 14 generated artifacts are up to date\".\n- `pnpm --filter @objectstack/spec run check:docs` exit 0: \"249 generated files in sync with packages/spec\".\n- `pnpm --filter @objectstack/spec run check:api-surface` exit 0: \"public API surface + factory signatures unchanged\".\n- `pnpm check:spec-docblock-symbol-anchors` exit 0 (the new path cite resolves); `pnpm check:adr-symbol-anchors` exit 0; `pnpm check:nul-bytes` exit 0; `pnpm check:doc-authoring` exit 0; `pnpm check:issue-citations` and `node scripts/check-issue-citations.mjs` exit 0 (\"no issue citations added\"); `node scripts/docs-audit/check-drift-comment.mjs` exit 0.\n- `dispatch-gates --ran`: 75 derived, 9 run, 66 left to CI (declared narrowing; CI runs the full farm).\n\n</details>\n\nhttps://claude.ai/code/session_01L9qibvVRcFWKrfWeG5jzPb\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibvVRcFWKrfWeG5jzPb)_\n"

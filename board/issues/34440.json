@@ -2,8 +2,8 @@
   "number": 34440,
   "kind": "issue",
   "title": "metadata-protocol: a package-less row beside a disabled holder and served holders is served by save order on the plain read and /published, while /layers refuses naming the disabled package",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:package",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-16T18:13:28Z",
-  "updated_at": "2026-11-19T05:08:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:20:01Z",
+  "closed_at": "2026-11-20T05:20:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34440",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5obaLbqgzRUR9xXfft\n\nFiling gate: ① a reproducible defect with a named location, measured on a booted kernel. It is the out-of-scope finding contract review record 6915442261 on PR #34355 names (\"disabled holder + served holders\"); PR #34355 does not move it, by scope.\n\n## Location\n\n`packages/metadata-protocol/src/protocol-meta-item-face.ts`, `servedRowHolderOf`: past the no-disabled arm, `if (rows.unbound) return undefined;` leaves the read as it was whenever a package-less row is stored and any holder is disabled. `/published` reads the package-less row through its own path, and `/layers` refuses through `packagelessLayeredReadRefusal`, whose candidates are not judged over the served set.\n\n## Symptom\n\nWith two enabled packages and one disabled package each storing a row of one name, plus a package-less row of it, `GET /api/v1/meta/dashboard/NAME` serves an enabled package's row or the package-less row depending on save order, `/published` serves the package-less row, and `/layers` refuses `409` naming the disabled package too.\n\n## How found\n\nMeasured, not read. A probe on PR #34355's branch (tree `e0babb98e`, whose disabled arm is `main`'s) drove `HttpDispatcher.dispatch` and `getMetaItemForExecution` on a booted kernel (the real protocol, metadata service, registry and `sys_metadata` store; the `[#32354]` harness in `packages/runtime/src/domains/meta-disabled-holder-served-stack.test.ts`). Packages E and F enabled, D disabled (`registry.disablePackage`), registered D, E, F; dashboard `dis_dash`:\n\n| Rows saved (in order) | plain read | `/published` | `/layers` | execution read |\n|:---|:---|:---|:---|:---|\n| E, F, D, package-less | 200 E's row | 200 package-less row | 409 naming E, D, F | E's row |\n| package-less, D, F, E | 200 package-less row | 200 package-less row | 409 naming E, D, F | package-less row |\n| E, D, package-less | 200 E's row | 200 package-less row | 409 naming E, D | E's row |\n| CONTROL: E, F, D (no package-less row) | 409 naming E, F | 409 naming E, F | 409 naming E, F | `RESOURCE_CONFLICT` |\n\nThe CONTROL is the answer #32354 settled: a disabled package holds no name and is never named. The package-less row breaks it in three ways: the plain read follows save order, `/published` serves the package-less row in place of the holders, and `/layers` names the disabled package.\n\nreach: public HTTP door, measured: `GET /api/v1/meta/dashboard/NAME` answers `200` with the package-less row when it was saved first and `200` with E's row when E's was, and `GET /api/v1/meta/dashboard/NAME/layers` answers `409` with the disabled package in `details.candidates`.\n\n## Acceptance\n\n1. Two enabled holders' rows, a disabled holder's row and a package-less row of a name no package ships: the plain read, `/published`, `/layers` and the execution read naming no package all refuse `409 RESOURCE_CONFLICT` naming exactly the two enabled holders, never the disabled one, and never serve the package-less row, in every save order of the four rows.\n2. One enabled holder's row, a disabled holder's row and a package-less row: every bare door gives one answer, the enabled holder's row, as the no-disabled CONTROL of #33210 (one holder beside a package-less row) does, and no door names the disabled package.\n3. CONTROL: the same rows with no package-less row keep the answer in the table above (`409` naming the two enabled holders on every bare door).\n4. CONTROL: each exact address (`?package=E`, `?package=F`) serves its own row; `?package=D` answers the withheld `404` while D is disabled.\n5. Both registration orders (the disabled package first, and last), before and after a reboot (re-disabling after the boot, as the harness does).\n6. Pins in the shared harness `packages/runtime/src/domains/meta-disabled-holder-served-stack.test.ts` (one top-level `describe`), and on `RestServer` in `packages/rest/src/meta-disabled-package-doors.test.ts`; an ablation of each arm the fix adds, its run quoted in the PR.\n\n## Declaration it would need\n\n`Clause-②: no (narrowing)` (the plain read and `/published` move from served to refused; nothing moves from refused to served), `Metadata-protocol: none`, `!` in the title, a BREAKING banner, and an ADR-0087 disposition: check whether `two-row-holders-bare-read-refused` already covers the shape (two or more enabled packages hold the name only as stored rows) or a new semantic entry is needed.\n\n## Related\n\n- #33210 / PR #34355: the same shape with no disabled holder (refused there).\n- #32354, #32183: a disabled package holds no name and is never named.\n- #32607: two enabled row holders refused on every bare door.\n- #34348: the save side of a package-unbound row beside disabled-only or two enabled holders (decision card; read side not covered).\n\nDedupe: searched `is:issue \"package-less row\" \"disabled holder\" repo:objectstack-ai/objectstack` (34 hits), `is:issue package-less disabled holder layers refuses repo:objectstack-ai/objectstack` (57 hits) and `is:issue is:open \"package-less\" \"disabled\" \"plain read\" repo:objectstack-ai/objectstack` (9 hits) on 2026-11-16; none reports this read-side shape (closest: #33210, no disabled holder; #34348, the save side)."

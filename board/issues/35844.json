@@ -1,0 +1,32 @@
+{
+  "number": 35844,
+  "kind": "issue",
+  "title": "approvals/messaging: the approval Slack DM and the approval email build their deep link from different origins — share one source so a host that sets only publicBaseUrl still gets an absolute DM link",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T11:02:24Z",
+  "updated_at": "2026-11-20T11:47:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35844",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: ② contract review N3 on PR #35789 (record 7037841566), the publicBaseUrl scope-out of #34730 step 2. ⛔ Not a claim.\n\n**What.** After #35789, the approval email's deep link uses `ApprovalsServicePlugin`'s `publicBaseUrl` option first, while the Slack DM makes the link absolute from the deployment origin chain (`OS_AUTH_URL`, legacy `BETTER_AUTH_URL`, then `OS_BASE_URL`). A host that sets only `publicBaseUrl` gets an absolute link in the email and none in the DM. The two also normalise differently: the DM goes through `URL`, the email concatenates the raw value, so a mixed-case host or a default port gives the same destination in different bytes.\n\n**Ask.** One origin source for both: e.g. the producer hands an absolute link in the notification payload that the slack channel prefers, or both read one shared resolver. Pin: a host with only `publicBaseUrl` set gets the same absolute destination in the email and the DM.\n\nBlocked-by: #35789.\nSuggested-grade: p3 · only hosts that set publicBaseUrl apart from their env origin.\nRelated: #34862 (the email link may miss the /_console mount; a different defect on the email side, but a shared resolver would carry both).\nDedupe: `publicBaseUrl` (2 hits: #34862, #34730), `deep link origin` (searched before filing)."
+}

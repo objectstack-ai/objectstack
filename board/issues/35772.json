@@ -1,0 +1,36 @@
+{
+  "number": 35772,
+  "kind": "issue",
+  "title": "approvals: after the reject-requires-reason change (#35716, #35741), the contract docblock, object comment, docs, checklist and skill reference still say a reject reason is optional — bring them in line",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T06:19:58Z",
+  "updated_at": "2026-11-20T11:30:56Z",
+  "closed_at": "2026-11-20T10:44:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35772",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: ② contract review S2 on PR #35741 (record 7032134627) — the texts that PR defers, filed so its `Skills-docs:` line can name them. ⛔ Not a claim.\n\n**What.** #35716 (merged) made `approval_reject` require a reason; #35741 makes `ApprovalService.decide`, `POST /api/v1/approvals/requests/:id/reject` and `client.approvals.reject` require it too. Once #35741 lands, these still read as if a reject reason were optional or action-scoped:\n\n- `packages/spec/src/contracts/approval-service.ts` — `ApprovalDecisionInput.comment?` and the `IApprovalService.decide` docblock say nothing of the reject rule (the contract-bearing one; the `outputs` member beside it states its own approve-only rule there).\n- `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` — the comment above `approval_reject.params`: \"The target route itself does not judge the reason.\" becomes false.\n- `content/docs/automation/approvals.mdx` — `body: { actorId?, comment? }` for reject (~774) is false; the decision-surface table row and the `approval_reject` paragraph are action-scoped.\n- `docs/qa/platform-checklist/areas/approvals.json` — the quorum step posting `/reject` with no body; the `r`-key step that confirms with nothing typed.\n- `skills/objectstack-automation/references/state-machines-and-approvals.md`, \"Recording a decision\" — teaches `decide()` and `POST …/reject` without the reason.\n\n**Ask.** Rewrite each so a reject requires a non-blank reason at every human door (action, route, service, SDK, console), naming the email action link as the one exception until #35722 lands. Text only; no behaviour change. `packages/spec` and `skills/**` may be governed surfaces: check `check-governed-merges.mjs` on the final file list.\n\nBlocked-by: #35741 (texts describe its behaviour).\nSuggested-grade: p2 · docs/contract truth for a shipped narrowing.\nDedupe: `reject reason optional docs`, `ApprovalDecisionInput comment` (searched before filing)."
+}

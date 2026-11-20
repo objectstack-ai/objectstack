@@ -1,0 +1,38 @@
+{
+  "number": 35728,
+  "kind": "pull_request",
+  "title": "fix(objectql,service-analytics): query_dataset's ObjectQL face cuts its top-N in the database",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T03:43:55Z",
+  "updated_at": "2026-11-20T05:14:44Z",
+  "closed_at": "2026-11-20T05:14:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-20T05:14:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35728",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDxdrYJq965rUfrZBso8FS3)_\nFixes #35287\nClause-②: yes\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用问数工具查「前 N 名」时,数据存在 SQL 数据库里的对象只读回前 N 组,不再整表分组读回再在内存里截;按文字排序时前 N 名由数据库的排序规则决定(空值排最后),与原生 SQL 路径和聚合记录工具一致。\n- 为什么做:属于「MCP 二期与问数」专题的 SQL 优先目标,大分组只为返回几行却整组读出的浪费由此消除。\n- 出错会怎样:最坏是文字排序的前 N 名在大小写、标点上与以前不同;内存库、MongoDB、OData 和按显示名排序的查询走原路不变;可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nArm A of the maintainer's ruling on this card (「A 交给数据库排序(推荐)」, ruling record 7023449707), with the riders in 7023599246 as acceptance.\n\n- **`@objectstack/objectql`** (`aggregate-order-cut.ts`, `engine-delete-and-aggregate.ts`): an `AGGREGATE_ORDER_CUT` request may set `declinable: true`. Where the cut cannot be served (`aggregateOrderCutRefusal`: a driver that compiles none, an aggregate computed in memory, a `having`, a relation group join) the engine then reads nothing, answers `[]`, leaves `outcome` unset and records the reason on a new `declined` slot. Without the flag nothing changes: `aggregate_records` keeps its 400. The \"Refused, never approximated\" docblock is amended to say who declines and who is refused. The decline is a separate optional slot rather than a new arm of `AggregateOrderCutOutcome`, so the published outcome type is unchanged and the three existing callers (runtime `action-execution.ts`, runtime `domains/mcp.ts`, mcp `stdio-data-bridge.ts`) were reviewed and need no edit: none opts in, all still narrow on `outcome.kind === 'served'`.\n- **`@objectstack/service-analytics`**: a new `executeOrderCutAggregate` member on `DatasetScopedStrategyContext` (mirroring `executeRelationGroupAggregate`), passed through `AnalyticsServiceConfig` and wired by `AnalyticsServicePlugin` only when it auto-bridges `executeAggregate`. `ObjectQLStrategy.execute` (base path) sends the query's `order` as the engine's `orderBy` (a measure by its alias, a dimension by its group column) and `limit = offset + limit`; served, it skips the `offset` over the database's rows and answers `totalGroups` from the statement's count; declined (or no seam, no `limit`, an order key it cannot map), it reads every group and runs today's `applyWindow(applyOrdering(...))`.\n- **Rider, lookup/select label order**: unchanged by construction. The dataset executor never pushes a window whose order names a label-bearing dimension (`canPushDownWindow`), so such a selection reaches the face with no `limit` and is ordered and cut in memory by label. Pinned below. The optional `rank` route for select keys was not taken.\n\n**The win is narrower than the card body says**: memory, MongoDB, OData, Turso's remote face, uncompiled date buckets (a reference timezone, a granularity the driver does not compile), measure filters the driver does not evaluate and any `having` still decline and are cut in memory. The cross-object path (`executeCrossObject`) is untouched.\n\n**Visible behaviour (Clause-② yes, ruled)**: a text-ordered top-N on a compiling driver returns the database's choice of groups, its collation and NULL last in both directions, instead of `applyOrdering`'s (`localeCompare`, `''` as empty). The executor's post-pass still re-sorts the rows it was handed with `applyOrdering`, as it does for the native face.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/service-analytics exec vitest run src/__tests__/objectql-order-cut-face.test.ts`, expect 7 passed.\n\nRead first: `packages/services/service-analytics/src/strategies/objectql-strategy.ts` (`readOrderCut`, `windowServedCut`: the order-key mapping and the offset arithmetic), `packages/objectql/src/engine-delete-and-aggregate.ts` (the decline branch), `packages/services/service-analytics/src/plugin.ts` (the bridge reads `outcome` and `declined`).\n\n- New `objectql-order-cut-face.test.ts` (real `ObjectQL` + `SqliteWasmDriver` through the plugin's own composition): top two by a measure reads 2 rows in one statement and `totalGroups` is 5; `limit 2 offset 1` sends a cut of 3 and answers groups 2 and 3; text order picks `Emea` over `amer` (binary collation) and never keeps the NULL group ascending or descending; the analytics query door uses the same face; a reference-zone date bucket and a driver that compiles no cut fall back with no refusal and an exact `totalGroups`; a lookup dimension ordered by name is cut in memory (by name `Amy`, `Bob`, where an id cut would have kept `Zed`, `Cat`).\n- `aggregate-order-cut.test.ts` gains a top-level `describe`: declinable requests on memory, MongoDB and OData drivers, with a `having`, and with a zone bucketed in memory answer `[]` with the reason on `declined`, driver never asked; served unchanged on a compiling driver; a malformed order key still refused `INVALID_SORT`.\n- Ablation, once, on the seam (the strategy's `readOrderCut` forced to `undefined` via `scripts/ablation-replace.mjs`, anchor 1 to 0, blob `c581598c` to `5983467d`): 4 of 7 face pins red (the four that assert the database cut), the 3 fallback pins green; restored, blob equals HEAD, `git diff HEAD` empty.\n\n<details><summary>Local runs (head d726cc761 for ratchets and typecheck)</summary>\n\n- `pnpm --filter @objectstack/objectql test`: 617/618 files, 13956/13960 tests; the 4 failures were the new describe, read mid-edit (its file and its source were rewritten while the suite ran); the file re-run alone: 20/20.\n- `pnpm --filter @objectstack/service-analytics test`: 220/220 files, 5616 passed, 345 skipped.\n- `pnpm --filter @objectstack/objectql typecheck`, `pnpm --filter @objectstack/service-analytics typecheck`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 76 families derived, 74 exit 0, 2 exit 3 PREREQUISITE NOT MET (`check-plugin-teardown-shape --self-test`: positive control unreachable in this clone; `check:dual-build-cjs-loads`: needs every package's `dist/`), so NOT MEASURED here, CI runs both. Ratchets re-run on d726cc761: `type-check-coverage`, `type-check-debt`, `issue-citations`, `nul-bytes`, `doc-authoring`, `dts-closure` exit 0.\n- `node scripts/pm/overlap-check.mjs --branch=claude/area-a4C-35287`: clean (origin/main 5d2ce34f, #34817 merges cleanly).\n\n</details>\n\n## Acceptance notes\n\n- Runtime and mcp were not type-checked locally: their imports of `AggregateOrderCutOutcome` / `AggregateOrderCutRequest` see only an added optional field; CI's `TypeScript Type Check` covers them.\n- No `having` reaches the analytics face, so its decline is pinned at the engine only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

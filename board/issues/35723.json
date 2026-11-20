@@ -1,0 +1,32 @@
+{
+  "number": 35723,
+  "kind": "issue",
+  "title": "Record activity shows no approvals: emit approval feed items from plugin-approvals so the one-line approval row appears (follow-up to #35602)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-20T03:22:47Z",
+  "updated_at": "2026-11-20T03:49:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35723",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ① the half of #35602 its PR cannot reach inside its file surface. Filed by area ux-3 on seat 5's ruling (B: keep the approval row host-supplied until a producer exists). Suggested grade: p2. ⛔ Not a claim; triage sets lane and grade.\n\n## What is missing\n\nPR #35708 (#35602) draws an approval in the record activity stream as one line with 「看审批」, through an optional host callback `onViewApprovals`. Nothing emits `approval` feed items today, so the row is reachable only from items a host supplies. A user looking at a record under approval sees no approval in its activity. Context only: objectui#5877, and the producer census pin `ui/packages/plugin-detail/src/renderers/__tests__/feedTypeProducerCensus-5877.test.ts`.\n\n## Done when\n\n- plugin-approvals emits an `approval` feed item for each approval step on the record it governs (submitted, approved, rejected, recalled), readable by the same users who can read the record's approvals.\n- The record activity stream shows each as the one-line approval row from #35708.\n- 「看审批」 opens the record's Approvals tab (the tab container from #35595); the host wires `onViewApprovals` in the same PR.\n- The census pin moves `approval` from \"no producer\" to \"produced\", and a real-kernel test pins one item per step and no item for a reader without approval access.\n\nDedupe: issue search `approval feed item producer`, `approval activity timeline` → only #35602 (and the architecture card #25950, which rebuilds the approval UI and does not emit feed items)."
+}

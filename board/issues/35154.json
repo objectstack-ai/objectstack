@@ -18,11 +18,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T08:18:32Z",
-  "updated_at": "2026-11-18T10:34:53Z",
+  "updated_at": "2026-11-20T05:59:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35154",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「现在就改结构」. The lines are the maintainer's: 「我们有代码搭建，mcp搭建，云端搭建，，mcp问数，云端问数」; so is their order: 「代码搭建已经可用，只是优化，mcp问数优先，其次是mcp搭建」; and the cloud lines are linked, not held here: 「云端子专题和卡片开在云项目，你只是链接，而且暂时不启动」. A parent may hold 100 children; #34659 had 72 after two days, which is why it is split.\n\n## What this is\n\nNot a line of the product: the instruments. Each line of #34659 is accepted on a reading, and a reading is only as good as the round, the cards and the grader behind it.\n\n## Whose these are\n\nThe scenario cards and their runner are not this epic's. `docs/qa/scenarios/**` is the territory of the scenario-library epic (objectstack-ai/cloud#3600) and the runner and scorer belong to the devx lane; the rounds are the eval seat's. This epic is a customer of them: it says what it needs measured, and files a card when a reading it depends on is wrong or missing.\n\nSo a card belongs under this parent only if one of #34659's readings depends on it:\n\n- the daily MCP ask round, the ten question kinds, the verified builds it runs on;\n- the skills eval runner and its cases, which read the published skills before and after a change;\n- a grader or card defect that makes one of those readings wrong.\n\nA defect of the runner or a card that touches none of this epic's readings is the library's or the devx lane's own, and is filed and tracked there, not here.\n\n## Children here that are candidates to hand back\n\nFindings from the ask rounds about the platform or a card, which no reading of this epic waits on. They were hung on #34659 while it had one level; whether each stays here or goes to its owner is the first thing to settle under this parent."

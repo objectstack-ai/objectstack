@@ -2,8 +2,8 @@
   "number": 33986,
   "kind": "issue",
   "title": "Setup: the built-in permission set `storage_attachment_member` (\"Attachments: read and attach (every member)\") has no zh-CN label",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T15:27:57Z",
-  "updated_at": "2026-11-19T06:09:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T09:09:55Z",
+  "closed_at": "2026-11-20T09:08:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33986",
   "body": "Filing class: ① user-visible defect (untranslated label) — reach: public door, measured in a browser. **Reader:** `domain:server` lane — whichever package declares the `storage_attachment_member` permission set (the attachment opt-in work of 18.4.0) and its zh-CN bundle.\n\n## Symptom\n\nSetup → 权限集分配 in a zh-CN Console lists every built-in permission set in Chinese (查看者 — 只读, 成员 — 标准访问, 组织管理员 …) except one: **`Attachments: read and attach (every member)`** (`storage_attachment_member`), which renders in English.\n\nMeasured on 18.5.0 (npm), objectstack-ai/hotclm `pnpm demo:zh`, dev admin, Console language zh-CN, `/_console/apps/com.objectstack.setup/component/security/permission-set-assignment`. Screenshot `31-setup-permission-sets.png` in the hotclm 18.5 upgrade report.\n\n## Expected\n\nThe set's label (and description, if any) ships a zh-CN translation like its siblings; the platform's i18n coverage gate counts it.\n\n## Business reason\n\nAn administrator assigning access reads one English row among Chinese ones; it is the set every member holds for attachments, so it is one an admin is likely to open.\n\nDedupe: objectstack issues (all states) for `storage_attachment_member` — 13 hits, all QA runs / attachment-access cards, none about its label.\n\n---\n_Filed from the hotclm 18.5.0 upgrade browser regression (2026-11-15)._\n"

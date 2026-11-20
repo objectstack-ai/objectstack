@@ -13,18 +13,20 @@
   "labels": [
     "area:ux",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T23:16:54Z",
-  "updated_at": "2026-11-20T02:19:56Z",
+  "updated_at": "2026-11-20T07:54:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35692",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ a finding of the #35597 dev (os-dev-report 7024903308, out_of_scope_findings; declared on PR #35691's Skills-docs line as follow-up owed). It is a child of #35597 (epic #35590) and is nested under it.\nReader: `domain:skills` (`skills/**`). Suggested grade: p2, the parent's grade. Start the card thread on the fable model (skills/** rule).\nDedupe: `relationships.md inlineEdit body table` → only #35597.\nBlocked-by: #35597 (the text must describe the rule as merged).\n\n## 维护者速读\n\n- 用户能看到什么变化：给开发者和 AI 用的技能文档改成新规则：主从子表默认出现在记录页概览里，不用再额外声明。\n- 为什么做：记录页的规则已经改了，文档还写着旧规则，照着写会多写一个不需要的声明。\n- 出错会怎样：只改文档和评测样例，不影响运行；写错时 AI 可能给出多余的声明。\n- 要你做什么：无。\n\n## Facts\n\n- PR #35691 (#35597) widens `isBodyTableRelationship`: a `master_detail` FK with no `relatedList` is a record-page body table by default; `inlineEdit` is no longer required for that. `relatedList: false` / `true` / `'primary'` keep their meanings. Form-side inline editing (`inlineEdit`) is unchanged.\n- `skills/objectstack-data/rules/relationships.md` (~251-314) still ties the record-page body table to `inlineEdit`.\n- `skills/objectstack-ui/evals/record-page.json` still expects the old rule.\n\n## Ask\n\nAfter #35597 merges, update both to the merged rule: `inlineEdit` is about editing children inside the parent's form; showing them as an overview body table follows from `master_detail` alone, with `relatedList` as the opt-out. Keep the published-skill style rules (`skills/**` checks).\n\n⛔ Not a claim."

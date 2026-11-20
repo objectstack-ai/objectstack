@@ -1,0 +1,37 @@
+{
+  "number": 35727,
+  "kind": "issue",
+  "title": "列表从记录「↗」打开时条件出现两遍：上面一个带记录名的标签，下面又一个锁定条件「Account: = <原始 id>」和第二个「重置」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T03:43:15Z",
+  "updated_at": "2026-11-20T05:57:04Z",
+  "closed_at": "2026-11-20T05:56:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35727",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\n\nFiling gate: ① a measured defect under list epic #35547, sub-card of #35549 (filter conditions as tags). Filed by area ux-3 on seat 5's ask; suggested grade p1, because it shows on every list opened with a URL condition (every 「↗ 在列表中打开」 from a record's related tab). ⛔ Not a claim on its own; the claim follows.\n\n## Seen (showcase, 1280×800; screenshot from ux-2's run on #35601: `/mnt/project-files/objectstack-seat5/area-ux/ux-2/a4-35601/06-open-list-sourced.png`)\n\nOpen an account (Globex), go to its Contacts tab, press 「↗」. The Contacts list opens filtered to that account and shows the same condition twice:\n\n1. The page's row: 「Filtered by · Account Globex ×」 with a 「Reset」 on the right.\n2. Under the toolbar, the list's own condition row: a locked chip 「🔒 Account: = 3zKQep1xNgNHlrBO」 (the raw record id), 「+ Add filter」, and a second 「Reset」.\n\nCause, by reading `origin/main`: the data page (`ObjectDataPage.tsx`) draws its URL conditions as its own tags AND passes them to the list as the view's filter (`schema.filter`). The list (`ListConditionControls.tsx`, `ConditionChipRow`) draws every view-filter condition as a locked chip, with the comparand as written (a lookup's id, never its name).\n\n## Done when\n\n- A list opened with URL conditions shows each condition once, as one tag carrying the record's name, and one 「Reset」.\n- Where the list does draw a locked chip for a lookup condition (a saved view filtered on a lookup), the chip shows the record's name, not its id.\n- The list's own 「+ Add filter」 and user-condition chips still work beside the page's tags; removing a page tag still clears that condition.\n- Pinned at the list (one tag per condition, name not id) and at the data page's sourced open; zh-CN and en.\n\nDedupe: issue search `locked chip raw id`, `Filtered by duplicate chip`, `view-condition-chip lookup name`, `open in list condition tag` → only #35601 (ux-2's related tab, which draws the source tag; this card is the list side)."
+}

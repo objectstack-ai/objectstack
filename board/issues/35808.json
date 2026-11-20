@@ -1,0 +1,33 @@
+{
+  "number": 35808,
+  "kind": "issue",
+  "title": "skills: teach unitConfig and the unit-code write refusals in the data skill (follow-up of PR #35805)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T09:13:17Z",
+  "updated_at": "2026-11-20T09:15:34Z",
+  "closed_at": "2026-11-20T09:15:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35808",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ③ an owed `Skills-docs:` follow-up, filed by the area thread before ACCEPT of PR #35805 (card #35489), per SKILL.md's `Skills-docs: follow-up owed` rule · Source: fleet\n\n## What is owed\n\nPR #35805 (Part of #35489, ADR-0158 R1) adds an authorable key and declares `Metadata-protocol: added` and `Clause-②: yes`:\n\n- `unitConfig` on a field, a discriminated union of three closed shapes:\n  - `{ unitMode: 'fixed', unit }` on a `number`, where `unit` is one standard code checked at build;\n  - `{ unitMode: 'record', unitField, unitDimension? }` on a `number`, pointing at a sibling `text` field that holds each row's code;\n  - `{ unitMode: 'code', unitDimension? }` on a `text`, a field that holds a unit code itself (ADR-0158 Open item 8).\n- The object door refuses a `record` pointer that names no field, its own field, a non-`text` field, a field with its own `unitConfig`, or a dotted path.\n- The write path refuses a code that is not a standard unit or one of the organization's non-retired units: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED` and `ERR_UNIT_DIMENSION_MISMATCH`, all 400. A `sys_unit` row cannot be deleted (`ERR_UNIT_DELETE_REFUSED`, 405).\n\nWho benefits: an AI or human author building an inventory, procurement or logistics app. Without the skill, they write quantities as bare numbers beside free-text unit columns, or guess keys (`unit`, `uom`, `dimension`) that the save refuses. These skill files teach no unit of measure today:\n\n- `skills/objectstack-data/rules/field-types.md`: the `number` field section, beside the currency field's `currencyConfig` teaching;\n- `skills/objectstack-data/evals/objects-fields-relationships.json`;\n- `skills/objectstack-project/references/platform-catalog.md`.\n\n## Done when\n\n- `field-types.md` teaches `unitConfig`'s three modes with one minimal example each. It says which field type carries which mode, and that a `record` pointer is a sibling `text` field in exact uppercase codes. It names the four write refusals and that org units are retired, never deleted.\n- An eval exercises it: an author asks for a quantity with a per-row unit and gets `unitMode: 'record'`. The PR states why if no eval applies.\n- `platform-catalog.md` lists units of measure as a capability.\n- It lands only after PR #35805 has merged, so the skill never teaches a key that main does not have.\n\nReader: the `domain:skills` lane, set by triage. Blocked-by: #35489 (PR #35805).\n\nGrading: area:data · Task · docs follow-up of an added authorable key · evidence: PR #35805 body and report 7035276751; `git grep -i unit origin/main -- skills/objectstack-data/rules/field-types.md` has no unit-of-measure teaching (one hit, `unit_price`, unrelated).\nSuggested grade: p2 (an owed Skills-docs follow-up of an added key; until the skill teaches it, authors guess the spelling).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue unitConfig` gives 7 hits (#35339 #35467 #35488 #35489 #35490 #35491 #35492). None is a skills card."
+}

@@ -1,0 +1,34 @@
+{
+  "number": 35800,
+  "kind": "issue",
+  "title": "Work calendars: add test cells for four organization rules that hold by reading only",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T08:38:20Z",
+  "updated_at": "2026-11-20T08:50:05Z",
+  "closed_at": "2026-11-20T08:50:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35800",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nArea: data-1 · follow-up of #35355 (PR #35642 contract review 7033477356, N8)\n\n## 维护者速读\n- **问题：** 工作日历的组织隔离规则里，有四种情况目前是靠读代码确认成立的，没有自动化测试覆盖。\n- **要做：** 为这四种情况各补一条测试，让以后的改动一旦破坏它们就会报错。\n- **不做会怎样：** 现在行为是对的；但以后有人改动相关代码时，可能悄悄把节假日关联到别的组织的日历，导致截止时间算错而无人察觉。\n- **你要做的：** 无需决定，按普通改动走。\n\n## What\n#35642 pins the `sys_work_calendar` / `sys_work_calendar_exception` organization rules under `isolated` with system writers and members. The contract review confirmed four more legs by reading, with no cell:\n\n1. The exception→calendar rule (a calendar of another organization is refused) under the `group` posture, with the other organization in the caller's accessible set.\n2. A create with no organization outside `single` (the hooks cannot read, so the create is refused).\n3. The import door with an exception row naming a calendar of another organization: that row is refused alone, and the rest of the batch lands.\n4. An exception update that carries both a new `organization_id` and `calendar`: refused on the organization rule, with zero reads. The read recorder today counts one-default reads only, so it needs to count the calendar read too.\n\n## Done when\nEach of the four legs has a cell in the calendar rest test file (or the objectql unit file for leg 4). Each cell asserts the 400 `VALIDATION_FAILED` envelope and its reason, and has a CONTROL where the rule should not fire. Ablating each rule turns its cell red.\n\nGrade: `area:data · Test coverage · reach: maintainers of the calendar hooks · evidence: read (contract review 7033477356 N8)` → p2."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 35722,
+  "kind": "issue",
+  "title": "approvals: the email action-link reject (ADR-0043 confirm page) records \"Via action link\" instead of a reason the approver typed — add a required reason field (remaining leg of #35593's \"reject carries a reason\")",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T03:08:01Z",
+  "updated_at": "2026-11-20T03:49:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35722",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: ② out-of-scope finding while building #35719 (dev report 7029076347); filed on the seat's routing. ⛔ Not a claim.\n\n**What.** `redeemActionToken` (plugin-approvals approval-service.ts ~7945) decides a reject from the email action link with the fixed comment \"Via action link\". The confirm page (action-link-pages.ts form ~94) has no reason field. After #35659 and #35719, every other reject door requires a reason the person typed; this door records a canned string.\n\n**Ask.** Add a required, non-blank reason field to the confirm page for a reject (approve stays optional), pass it through `redeemActionToken`, and translate the new copy in every locale the package ships. Pin both a reject that is refused when the reason is blank and one that succeeds with a reason.\n\nSuggested-grade: p2 · the last door for the maintainer's requirement in #35593.\nDedupe: `approval action link reject reason`, `Via action link comment` (0 open hits)."
+}

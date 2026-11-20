@@ -1,0 +1,36 @@
+{
+  "number": 35734,
+  "kind": "issue",
+  "title": "Formula returnType percent: the lint return-type list still names five types, and the record header chip and grid footer summary do not treat a percent-returning formula as a percentage",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T04:06:32Z",
+  "updated_at": "2026-11-20T09:40:21Z",
+  "closed_at": "2026-11-20T09:39:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35734",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Two out-of-diff observations of the CONTRACT_REVIEW_TIER review of PR #35565 (seat 5 mailbox 7017067661), relayed by seat 7 and re-read on `origin/main` `a3a74f27` before filing. Dedupe: `percent formula returnType footer` (7 hits, none open on this), `rule-explanations formula return type percent` (2 hits, both closed, other subjects).\n\n## What is wrong (read on main `a3a74f27`)\n`FormulaField.returnType` is `z.enum(['number', 'text', 'boolean', 'date', 'currency', 'percent'])` (`packages/spec/src/data/field.zod.ts`, about :2405). Three places still treat `percent` as if it were not a formula return type:\n1. **Lint prescription.** `packages/lint/src/rule-explanations.ts` (about :2737) tells the author to make \"a field of its `returnType` (`number`, `text`, `boolean`, `date` or `currency`)\": five types, so the prescription for a `percent` formula names no type that fits.\n2. **Grid footer summary.** `ui/packages/plugin-grid/src/useColumnSummary.ts` picks its format arm from `column.type` (about :422; only a `summary` column is resolved to its value type). A `formula` column whose `returnType` is `percent` misses the `percent` arm (about :452), so the footer total is formatted as a plain number under cells that read as percentages.\n3. **Record header chip.** `ui/packages/plugin-detail/src/HeaderHighlight.tsx` computes `isKpi` from `resolvedType` (about :174 and :259–264), which is `formula` for such a field, so a percent-returning formula is not drawn as a KPI chip the way a `percent` field is.\n\nreach: (1) shipped lint text an author reads at `os check`; (2)(3) any app with a `formula` field whose `returnType` is `percent` shown in a grid with a footer summary or in the record header. Read from code, not run in a browser.\n\n## Done when\nThe lint sentence names all six return types (or derives them from the enum); the footer and the header chip resolve a formula's `returnType` before choosing the percent arm, with a pin each (a percent-returning formula's footer reads as a percentage; CONTROL a `number` formula unchanged).\n\n## Business rationale\nBuilders who declare a rate as a formula (`returnType: 'percent'`) see the cells as percentages but the footer total as a raw fraction, and the lint fix-it text points them at types that do not fit. Reader: the area:data lane seat holding formula display (seat 7, d7-C), one PR; triage may split the lint line from the UI faces.\n\nGrade: p3 · area:data · Bug · builders, sometimes · evidence read."
+}

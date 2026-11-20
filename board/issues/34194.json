@@ -2,8 +2,8 @@
   "number": 34194,
   "kind": "issue",
   "title": "lint: judge beforeInsert created_at / updated_at by hook priority (only a hook below 10 reads them null)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:build",
     "domain:spec",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-16T00:39:28Z",
-  "updated_at": "2026-11-19T06:02:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:27:44Z",
+  "closed_at": "2026-11-20T05:27:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34194",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nFollow-up from PR #34129 (card #33435): r1 S2 (record 6901107947), r3 N5 (record 6903617482), and seat ruling 6901005939.\n\n**Now.** `validate-expressions.ts` refuses an unguarded ordering or arithmetic over `record.created_at` / `record.updated_at` in the `condition` of every hook whose `events` include `beforeInsert`, whatever the hook's `priority`. Hooks run in ascending `priority`, the stamp sits at 10, and `HookSchema.priority` defaults to 100. So only a hook authored below 10 reads null. Every hook at the default priority is refused although it can never meet null. #34129 scoped the prose to \"priority below 10\"; the rule itself did not change.\n\n**Ask.**\n1. Read `hook.priority` (default 100) at both doors, `os build` and the publish gate, and add `created_at` / `updated_at` to the nullable index only when priority < 10.\n2. Pin it with three hooks: priority 5 refused; default priority accepted; priority 10 at the boundary, judged against where the stamp hook actually runs, with the reading written into the test.\n3. Fix the `flows.mdx` rule 5 sentence (r3 N5). It says `created_at` / `updated_at` \"need none\", but the publish gate drops only the *ordering* finding on those two columns. Arithmetic on `record.created_at`, and a `previous.created_at` read, are still refused there without the guard. Either narrow the sentence to comparisons, or close that residue in the same change.\n\nThis is a widening, so it needs `Clause-②` and an ADR-0087 entry for the accept-set change."

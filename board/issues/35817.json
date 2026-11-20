@@ -1,0 +1,37 @@
+{
+  "number": 35817,
+  "kind": "issue",
+  "title": "skills: the automation skill reference teaches decide() and POST …/reject without the reject reason that #35741 now requires (sub-card of #35772)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T09:41:49Z",
+  "updated_at": "2026-11-20T12:24:31Z",
+  "closed_at": "2026-11-20T12:23:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35817",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nPart of #35772\n\nFiling gate: ② seat contract review S1 on PR #35803 (record 7036174996): the `skills/**` hunk of #35772 moves to a `domain:skills` sub-card per references/lanes/skills.md. ⛔ Not a claim.\n\n**What.** `skills/objectstack-automation/references/state-machines-and-approvals.md`, § \"Recording a decision\", teaches `ApprovalService.decide()` and `POST /api/v1/approvals/requests/:id/approve | /reject` with no reject reason. Since #35741 (merged d9be915f), a reject whose `comment` is missing, blank or not a string is refused with `400 VALIDATION_ERROR` before anything is read or written; an approve keeps its comment optional. An agent following the reference writes a reasonless reject that fails.\n\n**Ask.** State the rule in that section (a reject always carries a non-blank `comment`, its reason, else `400 VALIDATION_ERROR`), paid for in place inside the file's token ceiling (`check-skills-token-ratchet.mjs`). A wording already reviewed true against main is in PR #35803's first head `6d93210a` (contract record 7036174996 ① and ④ judged it true; it paid by replacing the outputs paragraph's restatement with \"(Dynamic approvers ② below)\"). Changeset: `'@objectstack/skills': patch` only. Decide whether an eval is owed per the skills lane.\n\n**The hunk, as reviewed true at `6d93210a`** (re-base it on main before use):\n\n```diff\ndiff --git a/skills/objectstack-automation/references/state-machines-and-approvals.md b/skills/objectstack-automation/references/state-machines-and-approvals.md\nindex 825ace0e21..3277c7f9b2 100644\n--- a/skills/objectstack-automation/references/state-machines-and-approvals.md\n+++ b/skills/objectstack-automation/references/state-machines-and-approvals.md\n@@ -171,9 +171,10 @@ Three pieces author it:\n ### Recording a decision\n \n A decision is recorded through `ApprovalService.decide()` (or the REST routes\n-`POST /api/v1/approvals/requests/:id/approve` | `/reject`). That finalizes the\n-`sys_approval_request` and **resumes** the suspended run down the matching\n-branch — you never resume the flow by hand, and you *cannot*: the\n+`POST /api/v1/approvals/requests/:id/approve` | `/reject`), a reject always\n+with a non-blank `comment`, its reason (else `400 VALIDATION_ERROR`). That\n+finalizes the `sys_approval_request` and **resumes** the suspended run down the\n+matching branch — you never resume the flow by hand, and you *cannot*: the\n `approval` node declares `resumeAuthority: 'service'`, so\n `POST /api/v1/automation/:name/runs/:runId/resume` answers **403** for a run\n parked on one (including via a `subflow` pause) and changes nothing.\n@@ -182,10 +183,8 @@ A decision may also carry **structured outputs** (`{ outputs: { … } }` in the\n decide body) when the node declares the keys in `decisionOutputs` — the author\n declares keys, approvers only fill values. Accepted outputs resume the run as\n `<nodeId>.<key>` flow variables, so a LATER node reads them as\n-`vars.<nodeId>.<key>` — this is how \"the previous approver picks the next\n-step's approvers\" works without writing to a record field (see Dynamic\n-approvers below). A decision carrying an undeclared key is rejected;\n-`decision` / `requestId` are reserved. A declaration marked\n+`vars.<nodeId>.<key>` (Dynamic approvers ② below). A decision carrying an\n+undeclared key is rejected; `decision` / `requestId` are reserved. A declaration marked\n `required: true` must carry a non-blank value to **approve** (never to\n reject) — enforced before any write, with no elevation bypass, so the run\n cannot resume past the node with the key a later `expression` approver reads\n```\n\n**Same file in flight:** open PR #35673 also edits this reference; whichever lands second re-runs `node scripts/check-skills-token-ratchet.mjs` (record 7036174996 measured the merged file at 5928/5936 in either order).\n\nBlocked-by: #35772 (its PR #35803 lands the product half first).\nSuggested-grade: p2 · same grade as the parent.\nDedupe: `state-machines-and-approvals reject comment` (searched before filing).\n"
+}

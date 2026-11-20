@@ -1,0 +1,37 @@
+{
+  "number": 35783,
+  "kind": "issue",
+  "title": "记录页子表页签恢复读者调整：每个子表页签的菜单可左移、右移、隐藏，「更多」里可恢复默认（承 #35595）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T07:45:30Z",
+  "updated_at": "2026-11-20T10:32:52Z",
+  "closed_at": "2026-11-20T10:31:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35783",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbSphdunq2aJq7ktuY\n\nRuling-ref: priority:p1 · the maintainer, 2026-11-20 (seat 5 decision card on the #35763 removal): 「先合并，另开卡恢复」\n\nSplit from #35595 by seat 5, area ux-1. ⛔ Not a claim.\n\n## What happens today (after PR #35763)\n\n- Reader arrangement used to live on the record page's related cards: the ⠿ handle, ⌥↑ / ⌥↓ and 「隐藏」 (#27055). PR #35763 replaced those cards with one tab per related list and a read-only Overview rail, so a reader can no longer reorder or hide a related list.\n- An order or hides already stored still apply. 「恢复默认顺序」 / 「显示」 still undo them, but only from the rail's foot. A drawer or an embedded pane has no rail, so there is no way to reset there.\n- `ui/packages/plugin-detail/src/synth/relatedArrangement.ts` still holds the arrangement reducer, and the i18n keys for move, hide and reset still exist. `RelatedCardStack.tsx`, `RelatedCardMenu.tsx` and `useRelatedArrangement.ts` are no longer drawn by any page.\n\n## What to do\n\n1. Give each related-list tab a menu with 「左移」, 「右移」 and 「隐藏」. They write the same stored arrangement through `relatedArrangement.ts`'s reducer, so a stored order and stored hides keep working.\n2. Put a reset entry in the tab row's 「更多」 menu: 「恢复默认顺序」 and show the hidden lists again. This also covers the drawer and the embedded pane, which have no rail foot.\n3. Reuse the existing i18n keys. Add a key only where none fits.\n4. Delete `RelatedCardStack`, `RelatedCardMenu` and `useRelatedArrangement` if nothing else imports them, along with their tests. Move the reducer's tests over if they live with the deleted files.\n5. Overview, Attachments, Approvals and Activity cannot be moved or hidden.\n\n## Done when\n\n- On a record page, a reader moves a related tab left and right, hides it, and gets everything back with the reset in 「更多」. The change persists the way #27055's arrangement did.\n- The same works in a drawer.\n- Tests pin move, hide, reset and the fixed tabs. One e2e covers move, hide and reset. A `docs/qa/platform-checklist` item is added or edited.\n- Estimate: about 400–600 lines.\n\nReader: `domain:ui` lane, `ui/packages/plugin-detail/src/{RecordTabRow.tsx,synth/recordTabRow.ts,synth/relatedArrangement.ts}`."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 35850,
+  "kind": "issue",
+  "title": "主从子表：概览里的位置之外，页签里也始终列出（带条数）；右栏不放；三张及以上在概览里用页签切换",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T12:09:28Z",
+  "updated_at": "2026-11-20T12:36:58Z",
+  "closed_at": "2026-11-20T12:36:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35850",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「这时候子表在最上面就很奇怪，我们应该综合评估主子表适合出现在哪个位置，以及多个主子表时怎么处理。」；「主子表既然可能被挂到下面，是不是还是应该不从选项卡中隐藏，始终显示。但是右侧的列不需要，避免重复。」\n\n## 现状（主干 `7878cf0557` 之后）\n\n- 主从子表画在概览的正文里；位置已由 objectstack-ai/objectstack#35742（PR objectstack-ai/objectstack#35824）改为排在主记录展开的字段分组之后。\n- 搭建的人可以用对象的 `fieldGroups[].relatedList` 把它摆到任意两个分组之间（`packages/spec/src/data/object.zod.ts:1373-1399`，objectstack-ai/objectstack#27069）。数组顺序就是显示顺序。\n- 按 objectstack-ai/objectstack#35597 的规则，进了概览正文的主从子表**不占页签、不进右栏**。会议记录页只有「概览」和「动态」两个页签，看不到「待办事项」。\n- 多张主从子表时依次排下来，没有上限。\n\n## 要做的\n\n1. **页签里始终列出主从子表**，带条数，和普通关联的子表一样有自己的页签。理由：它在概览里可能排在很下面，页签是固定的入口；页签里是整张表（满宽、满高），概览里是嵌在字段之间的一段。这一条取代 objectstack-ai/objectstack#35597 里「只出现在概览这一处、不占页签」的规定。\n2. **页签顺序**：主从子表排在「概览」之后、普通关联的子表之前。\n3. **右栏不放主从子表**（保持现状），避免和概览正文重复。\n4. **概览里多张主从子表**：\n   - 两张以内：各自一段，依次排，各有标题和合计。\n   - 三张及以上、且没有被 `fieldGroups[].relatedList` 单独摆放的：在默认位置并成一组页签切换，一次显示一张，页签上带条数。被某个分组明确指向的那张，仍按那个分组的位置单独显示。\n   - 不新增元数据键。\n5. **编辑时**：概览里的各张主从子表一起进入编辑、同一次保存（objectstack-ai/objectstack#35599）；并成页签的，切换不丢已改内容，没显示的那几张也在同一次保存里。主从子表自己的页签里不提供这种一起编辑，只有「添加」和「在列表中打开」（objectstack-ai/objectstack#35601）。\n\n## 不做的\n\n- 不改默认位置（展开的分组之后），不改 `fieldGroups[].relatedList` 的含义。\n- 不改普通关联子表的页签和右栏规则。\n\n## 验收\n\n- 「会议」记录页：页签是「概览」「待办事项 N」「动态」；概览里仍有待办事项那一段；右栏里没有待办事项。\n- 点「待办事项」页签：满宽的表格，右上角只有「↗」和「+ 添加」。\n- 一个有两张主从子表的对象：概览里两段依次排。\n- 一个有三张主从子表、都没单独摆放的对象：概览里是一组三个页签；把其中一张用 `fieldGroups[].relatedList` 摆到第一个分组之后，它单独显示在那里，其余两张依次排（不再并成页签）。\n- 进入编辑，改第一张的一行、切到第二张再改一行，保存一次，两处都成功。\n- PR 正文列出迁移和作废的测试（objectstack-ai/objectstack#35597 的「不占页签」测试按新规则更新）。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`（页签的合成约 :800-1000）、`ui/packages/plugin-detail/src/RelatedList.tsx`、`ui/packages/app-shell/src/views/RecordDetailView.tsx`。\n\nDedupe: `主从子表 页签 始终`（objectstack，open）→ 无同题卡；相关：objectstack-ai/objectstack#35597、#35742（均已关）。"
+}

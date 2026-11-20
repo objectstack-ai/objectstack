@@ -1,0 +1,32 @@
+{
+  "number": 35836,
+  "kind": "issue",
+  "title": "Value data source: a class instance with no primitive valueOf (Map, RegExp, a class without valueOf) is compared as text under the ordering operators, where the spec door refuses it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T10:44:03Z",
+  "updated_at": "2026-11-20T10:49:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35836",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Should-fix S4 of the CONTRACT_REVIEW_TIER review of PR #35832 (#35735 fold group), record 7037477278, which accepts ruling A (keep `valueOf` under the orderings) for that PR and routes the rest to a card, with option B for the maintainer. Dedupe: `class instance ordering valueOf text` and `value data source [object Map]` find no card.\n\n## What happens (read at PR #35832 head `0c86f9c32`)\nUnder `$gt` / `$gte` / `$lt` / `$lte` / `$between`, and their AST twins, `ValueDataSource` compares a class-instance comparand through JavaScript's relational coercion. For an instance whose `valueOf()` returns a primitive (a moment, a decimal with `valueOf`), that is a by-value comparison. For one whose `valueOf()` does not (`new Map()`, a `RegExp`, a class without `valueOf`, or `Object.create(somePlainObject)`), it compares the text `[object Map]` / `[object Object]`. That is the defect #35493 closed for plain objects. The spec comparand door (`normalizeFilterComparandTypes` → `judgeLiteralComparand`) refuses every non-plain, non-`Date` object at every scalar operator.\n\n## Options (the second needs a maintainer word, since it reverses the disposition recorded on #35604)\n- A′ (seat's default): refuse under the orderings and `$between` only an instance whose `valueOf()` is not a primitive, and keep by-value for the rest, as #35604 recorded.\n- B: refuse every class instance at every operator, as the server's door does (one more narrowing of `ValueDataSource#find`).\n\n## Done when\nThe chosen option is pinned per operator on both arms, with CONTROLs for `Date`, scalars and (under A′) an instance with a numeric `valueOf`. Narrowing: `Clause-②: no (narrowing)`, BREAKING, `!` title, dogfood battery.\n\n## Business rationale\nA preview filter `amount < someDecimal` with a decimal type that lacks `valueOf` silently sorts by text and shows the wrong rows, while the server refuses it. Reader: the area:data lane seat (d7-C), after PR #35832 lands (same file).\n\nGrade: p3 · area:data · Bug · previews with exotic comparands, rarely · evidence read."
+}

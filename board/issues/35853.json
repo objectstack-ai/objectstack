@@ -1,0 +1,32 @@
+{
+  "number": 35853,
+  "kind": "issue",
+  "title": "记录页头部改成两行：导航条（上下条、来自哪个列表、关闭在最右）加记录名一行；操作按钮恢复最多露 3 个（图 40）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-20T12:21:24Z",
+  "updated_at": "2026-11-20T12:48:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35853",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「我让你参考的是顶部条」（参照 Attio 的记录页顶部条）；「我们后来把按钮都并到顶部了」；「画个效果图」；看图后：「我们的关闭按钮可以统一风格，都放在右侧。然后 35593 电脑上打开记录详情页 只显示一个，为什么会有这个规则」；协调席列出六项待定后：「先定记录页头部和打开方式那六项，立卡」。\n\n本卡是六项里的三项：头部两行、上下条和列表来历加回、操作按钮恢复最多 3 个。另外三项（打开方式）在同专题的另一张卡。\n\n## 目标效果（图 40）\n\n![图 40 记录页顶部条：整页、抽屉、无列表来历](https://github.com/objectstack-ai/objectstack/blob/efb3fb68704075b8fe94c344ef699e41e16fa044/record-redo/40-record-topbar.png?raw=true)\n\n图是深色稿，只表达结构和位置，颜色沿用现有主题变量。\n\n## 现状（主干 `7878cf0557`）\n\n- 头部是一行（objectstack-ai/objectstack#35593，已合入）：对象名 / 记录名、状态标签、操作按钮、面板开关都在这一行。\n- 这一行里默认只露 1 个操作按钮，其余进「更多」（`ui/packages/components/src/renderers/layout/containers.tsx:3153` 的 `defaultMaxVisible={inBar ? 1 : undefined}`；不在这一行时默认是 3，:2607）。这个「1」是协调席写进 #35593 的，不是维护者定的。规范里的说明也已改成默认 1（objectstack-ai/objectstack#35660，已关）。\n- 抽屉头部没有「第几条」和上一条、下一条（按维护者 2026-11-19 的意见去掉的）。整页也没有。\n- 页签上方有约 48 的空白带（objectstack-ai/objectstack#35745）。\n\n## 参照\n\nAttio（商业产品，只参照结构）：顶部是一条导航条，只放关闭、上下条、「1 of 14 in All Companies」；记录名单独一行。\n\n![参照：Attio 的侧边面板](https://github.com/objectstack-ai/objectstack/blob/efb3fb68704075b8fe94c344ef699e41e16fa044/record-redo/attio-side-panel.jpg?raw=true)\n\n![参照：Attio 的整页](https://github.com/objectstack-ai/objectstack/blob/efb3fb68704075b8fe94c344ef699e41e16fa044/record-redo/attio-record-page.jpg?raw=true)\n\n## 要做的\n\n1. **头部两行**，整页和抽屉用同一套：\n   - 第一行是导航条（40）：左边是上一条、下一条、「第 N 条，共 M 条 · <来的那个列表视图名>」；**关闭在最右端**。不放记录名，不放操作。\n   - 第二行是记录本身（48）：图标、记录名（比现在大一号）、阶段和审批状态标签；右边是操作按钮。\n2. **「只有一组按钮、随状态换内容」不变**（#35593）：按钮从第一行搬到第二行右边，规则照旧；任何时候只有一个主色按钮。\n3. **上一条、下一条和列表来历**：从列表点进来时才出现，按那个列表当前的筛选和排序走。这一条取代维护者 2026-11-19「抽屉打开的时候，不需要第几条，上一条下一条」的意见，他在 2026-11-20 对照 Attio 后改了决定。\n4. **没有列表来历时**（从链接、通知、搜索直接打开）：导航条左边只写对象名，最右仍是关闭，点关闭回到这个对象的默认列表；没有上下条和「第几条」。\n5. **操作按钮恢复成最多露 3 个**，放不下时按宽度收进「更多」。抽屉窄，自然会少露。手机上仍只露一个主操作（objectstack-ai/objectstack#35419）。页面定义里写了明确数字的仍按写的来。规范里 `page:header` 的 `maxVisible` 说明改回与渲染一致（等于撤回 #35660 的改动）。\n6. **页签紧跟第二行**，中间不留空白带（承接 #35745 的第一条）。\n\n## 不做的\n\n- 第二行以下不动：页签、概览、右栏、主从子表。\n- 记录从列表里怎么打开（整页还是侧边）、抽屉的外观，在另一张卡。\n- 「来历」怎么带（网址里放什么）由实现方定，要求见验收。\n\n## 验收\n\n- 从带筛选和排序的列表打开一条记录（整页和抽屉各验一次）：第一行显示「第 N 条，共 M 条 · 视图名」，N、M 与列表一致；点下一条到的是列表里的下一行；第一条时上一条不可点。\n- 关闭在三种情况下都在导航条最右端。\n- 从通知或直接粘贴网址打开：第一行左边只有对象名，没有上下条。\n- 1280 宽的整页，一个有 5 个头部操作的对象：第二行右边露出 3 个加「更多」；抽屉里按宽度更少；390 宽只露 1 个。\n- 等我审批的记录：第二行右边是通过、拒绝、更多，只有「通过」是主色。\n- 没有阶段条的对象：页签顶边紧跟第二行。\n- PR 正文列出迁移和作废的测试（#35593 的「默认露 1 个」、抽屉无翻页的测试按新规则更新）。\n\nReader: `domain:ui` 车道；`maxVisible` 的说明文字涉及 `packages/spec`。`ui/packages/components/src/custom/record-top-bar.tsx`、`navigation-overlay.tsx`、`ui/packages/components/src/renderers/layout/containers.tsx`（约 :2607、:3153）、`ui/packages/app-shell/src/views/RecordDetailView.tsx`。\n\nDedupe: `记录页 头部 两行 导航条`、`上一条 下一条 列表 来历`（objectstack，open）→ 0；相关：objectstack-ai/objectstack#35593、#35660（均已关，本卡修改它们的结论）、#35745。"
+}

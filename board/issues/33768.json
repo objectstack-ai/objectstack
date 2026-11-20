@@ -2,8 +2,8 @@
   "number": 33768,
   "kind": "issue",
   "title": "review follow-ups of PR #33732",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:fleet",
     "domain:skills",
     "finding",
-    "pm:queue",
-    "pm:retriage",
     "priority:p3",
     "tooling"
   ],
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T09:55:48Z",
-  "updated_at": "2026-11-19T06:11:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T04:17:12Z",
+  "closed_at": "2026-11-20T04:17:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 18,
+  "comments": 20,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33768",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33732 append here. Dedupe: no open issue names PR #33732 apart from its card #33647.\n\n## review follow-ups of PR #33732 (card #33647, PR 2 of 2)\n\nRecords: 6891728476 (first), 6892058186 (delta), 6892612604 (delta, PASS on head `94df19bc`, nits only). Every item is a nit or an accepted deviation; none changes what the relay does on a measured reading today.\n\n- [x] Stale `fleet-write.yml` comment and the PD#14 sentence the PR body sends here (Acceptance notes of PR #33732). Landed by PR #34256 (`3bf9c5c4`).\n- [ ] N1 `headCommit` is read as the entry's merge-group commit from the schema docs only: measure it at the first live `own-failure` stroke and record it in `platform-readings.md`.\n- [ ] E1 the confirming gap after dequeue is one fixed `DEQUEUE_POLL_MS` (3 s) while `platform-readings.md` records the removal-to-merge gap only as \"seconds\": measure the gap at the first live `seat-asks` stroke and record it.\n- [x] E2 no self-test row pins a failed second pull read (ok, 502, ok, ok landing at three polls).\n- [x] E3 the jsdocs on `dequeueAction` and `dequeuePullAfter` still describe one read; the file headers say two.\n- [x] D3 optional hardening: refuse a carrying comment holding a seat signature on ANY line, not only the first (the row pinning \"signature lower down still carries\" flips with it).\n- [ ] D2 (no action asked): the landing-seat binding is to a declared seat by two typed texts; a pin needs a seat-to-session roster read.\n- [ ] D4 accepted deviation: the carry line dropped 「旧批准」 (128 bytes against the 120 cap); the code refuses a comment with no authorised approval behind it by name. Restore it if a byte budget frees up.\n- [ ] N2 of 6891728476: the SKILL.md lane table row does not point at `lanes/queue.md` (340 of 341 bytes; a row-pin raise needs its own ruling).\n- [x] Follower of PR #34256 (note 6905853116): `scripts/pm/check-governed-queue-guard.mjs` refusal hints (about lines 1990 and 2957) still say no seat act dequeues a queued PR. Make them follow PD14 (the landing seat sends the relay's `pr_dequeue`). ⛔ This is a Tier H enforcement-chain edit. Landed by PR #34559 (`f4a2d14d`).\n- [x] Follower of PR #34256 (note 6905853116, plus its review N3): add a `platform-readings.md` row for the live dequeue measured by fleet-write run 43767458575 (audit 6902190812 on PR #34097), paid in-family. Tell the landing seat first, in `landing-operations.md`. Landed by PR #34559 (`f4a2d14d`).\n\n`scripts/pm/fleet-write/**`, `.claude/skills/pm-dispatch/**`; `skip-changeset`; `Clause-②: no`. Waits for PR #33732.\n\n<!-- signed: domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19 -->\n\n\n"

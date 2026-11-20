@@ -1,0 +1,35 @@
+{
+  "number": 35821,
+  "kind": "pull_request",
+  "title": "docs(spec): page:header maxVisible describe states the renderer's per-host fallbacks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T09:55:43Z",
+  "updated_at": "2026-11-20T11:17:30Z",
+  "closed_at": "2026-11-20T11:17:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T11:17:28Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35821",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgEV9LRY8FfTWS7J6T3MwsSL)_\nFixes #35660\n\nrepo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：只改元数据参考文档里「页头按钮露几个」的说明文字，界面行为不变。\n- 属于记录页一行头部专题的收尾，让文档与上一张卡改过的默认值一致。\n- 只是说明文字，出错只会让作者读到不准的说明，可直接撤回。\n- 无。\n\n## What changes\n\n`packages/spec/src/ui/component.zod.ts`, `page:header`:\n\n- `maxVisible` describe: \"(renderer default 3)\" becomes \"Renderer default when unset: 1 in a record page's one-row header bar, 3 on any other header.\"\n- `mobileMaxVisible` describe: \"(renderer default 1)\" becomes \"Renderer default when unset: 2 in a record page's bottom action bar on a phone, 1 on any other header.\"\n- The docblock above them no longer names 3 / 1 as the fallbacks; it points at the describe strings. Its reason for having no schema default is unchanged.\n- `content/docs/references/ui/component.mdx` regenerated with `pnpm --filter @objectstack/spec gen:docs` (2 rows).\n- Changeset `35660-page-header-max-visible-describe.md`, `patch` on `@objectstack/spec`.\n- `content/docs/ui/pages.mdx:303` (hand-written, claim surface amendment 2, comment 7036602364): the Default cell of the `maxVisible` / `mobileMaxVisible` row said \"3 / 1\"; it now states the same per-host fallbacks. The docs-drift bot flagged it (comment 7036588828). The release-owned pages it also names are untouched.\n\nNo schema shape change, no `.default()`, no renderer code.\n\n## Tests\n\n<details><summary>Renderer fallbacks measured at origin/main 65fddc84 (A1)</summary>\n\nAll in `ui/packages/components/src/renderers/layout/containers.tsx`, the one resolver `PageHeaderActions`:\n\n- `:2603-2607`: bar face uses `mobileMaxVisible ?? PHONE_ACTION_BAR_BUTTONS`; mobile row uses `mobileMaxVisible ?? 1`; desktop uses `maxVisible ?? defaultMaxVisible ?? 3`.\n- `:1929`: `PHONE_ACTION_BAR_BUTTONS = 2`.\n- `:3153`: `page:header` passes `defaultMaxVisible={inBar ? 1 : undefined}`; `inBar` is true only at `:3492`, the record page's one-row header bar (`drawsInBar`, `:3168`). The in-page record header (`:3547`) and the non-record header (`:3570`) pass nothing, so 3.\n- `:3149`: `face=\"bar\"` when the host gives a phone face (the record page's bottom action bar).\n- `ui/packages/app-shell/src/views/RecordDetailView.tsx:5775`: the print chrome draws `PageHeaderActions` with no budget props (3 / 1), but that row has no `page:header`, so the keys do not reach it.\n\n</details>\n\n<details><summary>Generated artifacts (A2) and gates, local, head 3af57151; pages.mdx commit 263001fa re-ran affected-docs, drift-comment, doc-anchors, doc-authoring, docs-spec-enumerations, nul-bytes, all exit 0</summary>\n\n- `git grep` of both old strings: only `component.zod.ts` and `content/docs/references/ui/component.mdx`.\n- `pnpm --filter @objectstack/spec build`: VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec check:generated`: \"All 14 generated artifacts are up to date\" (exit 0).\n- exit 0: `check:docs`, `check:liveness`, `check:authorable-surface`, `check:api-surface`, `check:llms-txt` (spec); `check:adr-0087-registration --base origin/main`, `check-changeset-no-major`, `check-empty-changeset`, `check-comment-mask-corpus`, `check-issue-citations`, `docs-audit/check-affected-docs`, `docs-audit/check-drift-comment`, `check:doc-anchors`, `check:docs-spec-enumerations`, `check-nul-bytes`.\n- `overlap-check --branch=HEAD`: VERDICT clean.\n- The rest of the derived families run in CI.\n\n</details>\n\n## Acceptance notes\n\n- Out of scope, not edited (outside the claim's file surface): the renderer comment at `containers.tsx:2574` (\"default to 3 / 1\"), the prop docs at `containers.tsx:1947/1949`, `ui/packages/types/src/ui-action.ts:1072` \"(default: 1)\" and `ui/packages/components/src/renderers/action/auto-trigger.ts:24` still state the old pair. They are code comments, no metadata or author-facing reference; carrier: none.\n\n## Verification\n\n`pnpm --filter @objectstack/spec gen:docs && git diff content/docs/references/ui/component.mdx` shows no change: the two `page:header` rows read as above.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZh8cPvxZUjw1JuYzZ\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU -->\n"
+}

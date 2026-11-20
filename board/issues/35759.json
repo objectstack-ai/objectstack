@@ -1,0 +1,37 @@
+{
+  "number": 35759,
+  "kind": "pull_request",
+  "title": "p1 · unblocks cloud#4905 — feat(mcp): export the app-docs answer-order rule and its served-check from the barrel",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T06:00:25Z",
+  "updated_at": "2026-11-20T09:46:55Z",
+  "closed_at": "2026-11-20T09:46:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T09:46:53Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35759",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDxdrYJq965rUfrZBso8FS3)_\nFixes #35633\nClause-②: yes — widening: four new exported symbols on the published `@objectstack/mcp` barrel (`packageDocAnswerRule`, `packageDocToolsServed`, `definitionReaderOf`, `DEFINITION_READER_TOOL_NAMES`); nothing removed or refused. Seat runs a contract read before ready.\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：用户无感；平台 MCP 的开场说明一字不变。\n- 为什么做：云端 MCP 入口自己写开场说明，要引用「先查应用手册、回答末尾给出处」这同一段话，现在能从平台包里直接取，不必抄第二份（云端对应卡「云端构建入口带上回答顺序」正等这一步）。\n- 出错会怎样：只多了几个对外可用的名字，原有行为不变；有问题可直接撤回。\n- 要你做的：无。\n\n## What changes\n\n- `packages/mcp/src/mcp-server-runtime.ts`: `packageDocAnswerRule(definitionReader?)` is now exported (its parameter became optional; same text). The reader pick moves into an exported pure helper `definitionReaderOf(toolNames: Iterable<string>)` over the now-exported `DEFINITION_READER_TOOL_NAMES`; the module-local `definitionReaderServed` calls it, so the open server's pick is unchanged.\n- `packages/mcp/src/index.ts`: the barrel re-exports `packageDocAnswerRule`, `definitionReaderOf`, `DEFINITION_READER_TOOL_NAMES` (from the runtime module) and `packageDocToolsServed` (from `mcp-http-tools.ts`, which this diff does not edit, so it stays apart from #35682's round on that file).\n- Signature designed for the host caller (cloud build door): every input is a plain argument. The host sends the rule where `packageDocToolsServed(bridge, { grantedScopes })` is true and names `definitionReaderOf(<tool names its connection lists>)`; no access to the open server's internals is needed.\n- New pin `packages/mcp/src/package-doc-answer-rule-barrel-35633.test.ts` imports from `./index.js`: the four exports exist, and for each reader a connection lists (none, `get_metadata_item`, `describe_metadata`) the open server's default `initialize` text holds `packageDocAnswerRule(reader)` as one whole paragraph.\n- `.changeset/35633-mcp-doc-answer-rule-export.md`: `'@objectstack/mcp': patch` (Metadata-protocol `none` grades `patch` under ruling A in `check-changeset-no-major.mjs`).\n\nNo existing pin is flipped.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/mcp exec vitest run --maxWorkers=2 src/package-doc-answer-rule-barrel-35633.test.ts` should print `Tests 2 passed (2)`.\n\nRead first (by risk): `packages/mcp/src/mcp-server-runtime.ts` (the `definitionReaderServed` hunk: same pick, now via `definitionReaderOf`), then `packages/mcp/src/index.ts`.\n\n<details><summary>Local runs at a32f3e23c (code) and 01e6d0f64 (head; changeset line only)</summary>\n\n- `pnpm --filter '@objectstack/mcp^...' build` under the verify lock: `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/mcp test`: `Test Files 80 passed (80)`, `Tests 1441 passed (1441)`; `typecheck` (tsc + `check:test-typecheck`): OK; `build`: exit 0, `dist/index.d.ts` names the new exports.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived list (64 commands) run locally: 67 derived, 65 exit 0, 2 NOT MEASURED (exit 3, prerequisite refused: `check-plugin-teardown-shape --self-test` needs an unshallowed clone; `check:dual-build-cjs-loads` needs every package built), 0 unrun; `dispatch-gates --ran` reconciliation `67 derived famil(ies) accounted for`. Both NOT MEASURED families run in CI.\n- At 01e6d0f64 (the changeset's `Clause-②:` line copied verbatim from the claim) the changeset-reading families re-run, each exit 0: `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check:nul-bytes`, `check-issue-citations`, `check-closing-keyword-parity`.\n- `node scripts/pm/overlap-check.mjs --branch=claude/area-a4C-35633`: `VERDICT clean exit 0`.\n- No ablation: the diff changes no tested behaviour (exports only; the open server's text and pick are byte-identical).\n\n</details>\n\n## Acceptance notes\n\n- The card offered \"rule text plus a way to name the reader\" or \"`definitionReaderServed`\"; `definitionReaderServed` takes the open server's authoring injection, so the export is the pure name-list form `definitionReaderOf` instead, which `definitionReaderServed` now calls (one pick).\n- `DEFINITION_READER_TOOL_NAMES` lives in `mcp-server-runtime.ts` (in the claim's surface).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n<!-- signed: repo:objectstack#4 · os-elon-musk · session_016WV4d1k1GRsQbF3vCPKxhz -->\n"
+}

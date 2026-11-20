@@ -1,0 +1,31 @@
+{
+  "number": 35778,
+  "kind": "issue",
+  "title": "review follow-ups of PR #35682: initialize points at /mcp/skill, run_action no_confirmation_service hint, remaining tools/list weight",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T06:54:06Z",
+  "updated_at": "2026-11-20T07:48:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35778",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1k1GRsQbF3vCPKxhz\n\nFiling gate: ① (L1 follow-ups of PR #35682, one card per PR) · Source: fleet · Area: a4-C · Seat: repo:objectstack#4\n\n# review follow-ups of PR #35682\n\nPR #35682 (Part of #34689, Fixes #33272) slimmed the open MCP door's `tools/list` (47,712 → 36,481 bytes) by moving teaching prose out of tool descriptions into the served SKILL.md. L1-a left non-blocking notes (7026997961, 7028088861) that were recorded on #34689 (7027050676, 7028099958). #34689 closes on its landed code half, so they are carried here.\n\n## Items\n\n- [ ] **initialize does not point at the skill.** The open door's `initialize` instructions do not tell a client that the teaching text now lives at `/api/v1/mcp/skill`. A client that never loads the skill loses the moved prose with no hint where it went. One line in `packages/mcp/src/mcp-server-runtime.ts`'s default instructions.\n- [ ] **run_action lost the `no_confirmation_service` hint.** The base told a client that on `no_confirmation_service` the user performs the action in the app; the slimmed text folds that into \"do not retry unless the user asks\". Restore a short clause (`packages/mcp/src/mcp-http-tools.ts`).\n- [ ] **Remaining weight outside #35682's surface (optional slimming):** list_datasets / query_dataset descriptions (~2,979 B, `packages/services/service-analytics/src/dataset-tools.ts`), spec `QueryDatasetInputSchema` (~4,591 B), `FlowVariableSchema` item descriptions inside validate_expression (~1,838 B). Each needs its own measure-first look; the spec one is a spec-description change.\n\n## Why\nBusiness reason: every MCP client pays tools/list on connect, and a client that does not load the skill should still find the moved guidance and know what a refusal means. Who acts: the server lane (area:ai, `packages/mcp`). Reach: every open-door MCP client.\n\nGrade: **p3 · domain:server** — guidance wording and optional slimming after a landed fix; no wrong answer today.\n\nDedup: `\"PR #35682\"` → 0; `initialize mcp/skill pointer` → 0 open.\n\nRelated: #34689, #33272, PR #35682, epic #34659. Before/after ask round for #34689: parked on #35154 (7031811704).\n"
+}

@@ -2,8 +2,8 @@
   "number": 34190,
   "kind": "issue",
   "title": "metadata-protocol: the layered read of a doc name two enabled packages hold answers one holder's layers while the plain read refuses (ADR-0150 D3/D5)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:package",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-16T00:18:55Z",
-  "updated_at": "2026-11-19T19:43:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:22:43Z",
+  "closed_at": "2026-11-20T05:22:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34190",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jTkZnXtRhuEiiyidvJ\n\nFiling gate: class (a). Two doors disagree on the same address. Raised as should-fix S3 by contract-review record 6903815196 (review#2) on PR #33885, at head a2b29893.\nPrior rulings read: ADR-0150 D3/D5 (a name two holders hold is refused with candidates, never answered by picking one); PR #34036 (merged 2026-11-15, \"a bare doc read refuses a name two enabled packages hold, naming both\"); PR #33885 (the layered read answers as the plain read for the types the registry reads by package). Dedupe: searched `layered doc readsByPackage` and `getMetaItemLayered doc two packages`; the only hit is #32622 itself (package-read types, no `doc`).\n\n## What happens (read on the tree, not measured)\n- Since #34036, the plain read of a `doc` name that two enabled packages hold refuses with 409 `RESOURCE_CONFLICT` and names both.\n- The layered read's guard in `packages/metadata-protocol/src/protocol-meta-layered-reads.ts` is `readsByPackage(type)`. `doc` is not in that set, so `getMetaItemLayered({ type: 'doc', name })` never reaches the judgment and answers one holder's layers.\n- REST `/layers` answers the 409 only where a step of its chain asks the plain read. The composition with no engine wired was not followed.\n- When the doc refusal is thrown inside the REST `/layers` route, #33885's catch now gives it candidates too. That path is not pinned.\n- Neither PR opened the gap on its own. It appears where the two meet.\n\n## Expected\n- The layered read asks the doc judgment before it reads layers, as the plain read does. A bare `/layers` (and `?layers=true`) of a `doc` name two enabled packages hold answers 409 with `details.candidates` naming both, in process and on both transports. `?package=` of each holder still serves that holder's layers. CONTROL: a doc name one package holds is served.\n- Measure first. If the REST or dispatcher door already refuses in every composition, the card reduces to pins.\n\nClause-② arm: `yes (narrowing)` if a served layered answer becomes refused. `Metadata-protocol: none`."

@@ -2,8 +2,8 @@
   "number": 33272,
   "kind": "issue",
   "title": "mcp skill: the served SKILL.md line and its Console mirror do not name validate_expression's `variables` input (after #33176)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-14T15:16:17Z",
-  "updated_at": "2026-11-19T21:55:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T06:39:47Z",
+  "closed_at": "2026-11-20T06:39:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

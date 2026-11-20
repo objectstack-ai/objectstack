@@ -1,0 +1,31 @@
+{
+  "number": 35855,
+  "kind": "issue",
+  "title": "Triage rules, the review items #35819 leaves out: a keyed finding comment triage must answer, the North Star p3-close line against the evaluation keep, and the weekly sweep card roll-over",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T12:32:09Z",
+  "updated_at": "2026-11-20T12:34:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35855",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgWecYFDaW5zEE7pxqo\n\nFiling gate: ③ maintainer-directed (Source: maintainer). Found-in #35819 (card #35760). ⛔ Not a claim.\nRuling-ref: the maintainer (Sales), 2026-11-20 12:31Z, decision card in the project, picked option 「另开一张卡做」 on 「分诊规则评审里要改北极星和已裁规则的三条，怎么处理？」, consequence as shown: 「#35819 只改不碰北极星的部分，照常走；三条放进新卡，改 NORTH-STAR 要 os-zhuang 批，晚一些生效。」. This rules only that the items go to this card. Whether each item is adopted, and in what wording, is still the maintainer's call, item by item, on this card.\nBlocked-by: #35819\n\n## 维护者速读\n- 是什么：分诊规则独立评审（卡 #35760 评论 7038100802）里，#35819 没写的几条：三条要改北极星或已裁规则，另四条是小的措辞补充。\n- 为什么另开：改 `docs/NORTH-STAR.md` 需要 os-zhuang 亲手批（Tier H），放进 #35819 会把整单拖成人工批；另几条改的是你已裁的规则，要你逐条点头。\n- 不做会怎样：新规则下，已定级卡上补的新发现可能没人读；评测类 p3 卡和北极星的「无用户影响 p3 首触即关」两句打架；每周清扫卡换周时，留言可能落在已关的旧卡上。\n- 要你做什么：逐条说采纳与否（下面每条一行）；采纳的部分落地时，`docs/NORTH-STAR.md` 那部分要 os-zhuang 批。\n\n## Items (numbers are review 7038100802's; line numbers there are at `1a21ce93`)\n\nEach needs the maintainer's word on this card before it is written.\n\n- [ ] **A1. A finding comment on a graded card has a reader.** Row 1 sends a finding on an open same-mechanism card to a comment on it. No first-touch disjunct reads an already-graded card that only gains a comment, and the North Star's \"not re-graded card by card\" line keeps triage from regrading it. Proposal in the review: the comment opens with a line-initial key (e.g. `Finding-add:`); triage reads those keys in its round, as a named exception to that North Star line; a card with an unanswered key is not closed, folded or delivered by `Fixes`; the answer is fixed, lifted to its own card, or rejected with a reason.\n- [ ] **A5 (North Star part). The p3 first-touch close line and the evaluation keep.** `docs/NORTH-STAR.md` \"Priority\" says a p3 with no effect on users is closed at first touch. Row 4 (「影响评测的卡不能关，这个会影响到AI的开发效果」) keeps cards that affect evaluation. The review asks the North Star line to carry the same exception. Tier H.\n- [ ] **A6 (remainder). Weekly sweep card roll-over.** #35819 writes the ruled part (triage moves unreached rows to next week's card; the old card's close note names it). Not written, proposed by the review: one standing card per area with weekly batches inside it, or locking the old card at roll-over; a body ledger kept by triage (row, grade, size, state). This changes the ruled weekly-card design.\n- [ ] **B2.** Define \"started\" by the existing in-flight test (`pm:dispatched`, an assignee, or an open or merged PR reference).\n- [ ] **B4.** Say that a triage fold (row 3) is a merge of cards, not a dispatch fold under the five fold gates.\n- [ ] **B7.** Apply row 4's evaluation keep to every triage close path, not only the p3 first-touch standard.\n- [ ] **C1.** Merge the row-7 size scale with the existing `size/*` label and the `Size/model suggestion:` line.\n\n## Surfaces and tier\n- `docs/NORTH-STAR.md` (A1 if it names an exception, A5): Tier H, approver os-zhuang.\n- `.claude/skills/pm-dispatch/references/triage-duties.md`, `filing-gate.md`, `lanes/triage.md`, `execution-duties.md` (A1, A6, B2, B4, B7, C1): the same files as #35819, hence `Blocked-by: #35819`.\n- One PR holding a Tier H path is Tier H as a whole.\n\n## Filing answers\n- Category ③; business reason above; reader: the seat that takes this card after the maintainer rules, then triage (the rules it runs).\n- Dedupe: `is:issue is:open 7038100802` → 2 hits (#35760, the source card; #6015, the triage seat post); `is:issue is:open \"sweep card\" NORTH-STAR` → 4 hits (#35760, #35205, #6015, #12708), none carrying these items.\n- Grade: left to triage at first touch (seat order)."
+}

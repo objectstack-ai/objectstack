@@ -2,8 +2,8 @@
   "number": 34346,
   "kind": "issue",
   "title": "metadata-protocol: with two enabled holders and a stored row bound to a disabled holder, a bare save writes one enabled holder's row and a bare draft save or delete addresses the disabled holder's row, while the bare read refuses 409",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:package",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-16T08:36:01Z",
-  "updated_at": "2026-11-19T05:09:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:21:13Z",
+  "closed_at": "2026-11-20T05:21:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34346",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ② a correctness follow-up a contract review named. Source: review#1's contract record 6911434197 on PR #34324 (S1, and the \"mixed, draft save and delete\" cell in ④). Filed by area S5 (E1b) as a follow-up of #33955. The area is winding down, so this card is left for the queue.\n\n## 维护者速读\n\n- 问题：一个名字由两个启用的包 E、F 共同持有，同时存储里有一行绑定在某个已停用包上。这时不带包名的读取会正确地返回 409，列出 E 和 F。但不带包名的发布保存会直接写进 E 的那一行（200），草稿保存和删除则会写或删已停用包的那一行。\n- 影响：写入和读取对\"这个名字归谁\"给出了不同的答案，违反了 ADR-0150 \"有歧义就报告，绝不猜\" 的规则。这不是回归，main 上本来就这样，只是 #34324 测过的状态里没有覆盖到这一格。\n- 修法方向：在按启用绑定挑地址之前，先问一遍解析器（和不带包名的读取用同一个判断）。草稿保存和删除也走同一步。\n- 优先级 p2。\n\n## Read (not measured)\n\n- Seam: `servedPackagelessSaveAddress` in `packages/metadata-protocol/src/protocol-save.ts`. It sees the disabled binding, keeps the single enabled binding (E) and returns it, so the new holder judgment in the other branch is never asked.\n- The draft-save and bare-delete doors have no #32605 step at all. They take the address from the rows, so they write or remove the disabled holder's row while the read serves the enabled holders. Over a row of each, the delete's 409 names the disabled package.\n\n## Acceptance\n\n1. State: E and F enabled, both holding N; stored rows bound to a disabled package D and to E only. A bare publish save, a bare draft save and a bare delete each answer the bare read's 409 naming E and F, with no row written or removed. Pin each one in both registration orders, and ablate each.\n2. CONTROLs: `?package=E` save and delete unchanged; one enabled holder plus D's row unchanged (#32605); environment item unchanged.\n3. Declaration: `Clause-②: no (narrowing)` (200 to 409), with the BREAKING banner, the ADR-0087 marker and a dogfood battery.\n\nPrior rulings read: ADR-0150 D5 (a bare address with two holders answers 409, never a silent pick); ruling A on #34144; PR #32605's served-address step; PR #34324.\n\n## Dedupe\n\nI searched \"servedPackagelessSaveAddress\" and \"package-unbound\". Only #33955, #34144 and #34262 (being closed by PR #34324) and #34059 (action key) name the seam, and none covers this cell."

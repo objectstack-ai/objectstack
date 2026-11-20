@@ -2,8 +2,8 @@
   "number": 35229,
   "kind": "issue",
   "title": "fleet skills: the skill ratchet counts bytes, and prose is no longer held to a 120-byte line (skills clean-up step 1)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "area:fleet",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T17:25:34Z",
-  "updated_at": "2026-11-20T01:53:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T04:29:25Z",
+  "closed_at": "2026-11-20T04:27:42Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35229",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1. Ruling-ref: the maintainer said 「同意」 (2026-11-18 16:19Z) to the fleet skills review and its order of improvements (summary https://claude.ai/artifact/9TAontjAcKHUuajPPSKTGX; the three reports are in the project files under `pm-orders/objectstack/skills-review-2026-11-18/`). ⛔ Not a claim.\n\nThe order is one step, one PR, starting after the rule PR for #35207 merges: skill ratchet by bytes → #35215 (clear current values) → contradictions → slim entry files → lanes become seats plus epics (text → scripts → lane files) → split platform-readings → prose into scripts → each repo's rules back to its own repo, cloud skills and dogfood.\n\n\n## What to do\n\nStep 1, the first PR after #35207 merges. `scripts/pm/check-skill-line-ratchet.mjs` counts BYTES per skill file instead of lines. The 120-byte line width no longer applies to prose, so a skill may be written in full sentences. The ceiling map is re-based to bytes at the merge-base. The gate's self-test is reworked, and the change takes its own contract review (it is a governance gate).\n\n## Done when\n\nThe ratchet judges bytes, prose lines may run past 120 bytes, the self-test covers both, and the skill gates pass on main."

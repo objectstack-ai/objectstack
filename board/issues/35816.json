@@ -1,0 +1,32 @@
+{
+  "number": 35816,
+  "kind": "issue",
+  "title": "记录页编辑状态：「取消」是蓝色主按钮、「保存」是描边，主次反了；有默认值的必填列在新行上显示红框",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T09:38:07Z",
+  "updated_at": "2026-11-20T12:32:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35816",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「更新最新的代码，再确认」。这是确认 objectstack-ai/objectstack#35599（PR objectstack-ai/objectstack#35755）合入效果时看到的。\n\n## 已确认可用（主干 `7878cf0557`，本机环境，浏览器实测）\n\n对象「会议」和它的主从子表「待办事项」：点头部「编辑」，主记录字段和子表的行在同一页一起进入编辑；改了「参会人数」并新增一行待办，点一次「保存」，两处都保存成功，动态里记了一条更新。\n\n## 现状里的两处问题\n\n1. **按钮主次反了**：编辑状态下头部是「× 取消」和「✓ 保存」。「取消」是蓝色实心的主按钮，「保存」是描边的次要按钮。用户的手会先落到蓝色按钮上，结果是放弃修改。\n2. **必填红框误报**：新增一行只填了名称，「状态」列（必填）立刻显示红框。实际没选状态直接保存也成功了，保存后这一行的状态是「待处理」（字段的默认值）。也就是：默认值没有预填到新行里，界面却按「必填未填」报了红。\n\n![现状：取消是主按钮；新行的状态列显示红框](https://github.com/objectstack-ai/objectstack/blob/9f7c9064942ea6560458d37f64d0bd8e8ebb351b/record-redo/verify-edit-together.jpg?raw=true)\n\n## 要做的\n\n- 编辑状态下「保存」是主按钮（实心），「取消」是次要按钮。顺序保持「取消、保存」或改为「保存、取消」由实现方按现有表单的惯例定，全站一致。\n- 新增的子表行预填字段的默认值（这里是状态 = 待处理）。预填后不再出现红框。\n- 必填且没有默认值的列：新行刚出现、用户还没碰过时不报红；点保存时还没填，再报红并说明。\n\n## 不做的\n\n- 不改一起保存的事务和请求方式。\n\n## 验收\n\n- 记录页进入编辑：「保存」是实心主按钮，「取消」不是。\n- 「待办事项」新增一行：状态列已是「待处理」，没有红框。\n- 给子表加一个必填且无默认值的列：新行不立刻报红；直接点保存，这一格报红并有文字说明，整次保存不提交。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/RecordDetailView.tsx`（编辑状态的头部按钮）、`ui/packages/plugin-form/src/MasterDetailForm.tsx`（新行的默认值与必填提示）。\n\nDedupe: `记录页 编辑 取消 保存 主按钮`（objectstack，open）→ 无同题卡；相关：objectstack-ai/objectstack#35599（已关）。\n\n正文最后更新：2026-11-20T09:38Z\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 35815,
+  "kind": "issue",
+  "title": "Studio formula inspector: a declared currency still goes stale when an edit turns into field-over-field quantity arithmetic or reads a quantity through a relationship",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:data",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T09:30:07Z",
+  "updated_at": "2026-11-20T09:54:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35815",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Nit N1 of the CONTRACT_REVIEW_TIER reviews of PR #35774 (#35631): record 7034135842, which left it for a follow-up card, and delta PASS 7035793960, which says it is wider on the landing head. L1 7035256454 asked that it be filed if it passes the business test. Nit N3 of the same delta record rides along. Dedupe: `formula currency stale quantity` and `returnType currency kept quantity formula` return only #35631, the parent, whose PR closes the shapes a literal pins and leaves these.\n\n## What happens (read at PR #35774 head `b9ce479e`)\nAfter #35774, the formula inspector withdraws a declared `currency` only when `inferFormulaReturn` answers `number`, which now means \"proved not money\". The producer still answers `{}` (unproven) for quantities it could prove but does not:\n- **Field-over-field quantity arithmetic** (`record.quantity * record.hours`) and a **same-currency ratio** (`record.amount / record.tax`): the unit proof (`dimOf`) proves a quantity, but the CEL type is `dyn`, so the numeric path never runs and the answer is `{}`.\n- **A quantity read through a relationship** (`record.account.employee_count * 2`): the read check cannot judge a hop, so the answer is `{}`. Proving it would need the related object's fields at the producer.\n\nSo an author who edits `record.amount * 0.1` into `record.quantity * record.hours` keeps `returnType: 'currency'` and its `currencyConfig`, and the value is drawn as money. This is the defect #35631 fixed, on the shapes no literal pins. It is the safe direction: the published text says an unproven verdict keeps the declaration.\n\nRider (N3): the `record.?amount * 0.1` and `record[?'amount'] * 0.1` pins in `packages/formula/src/formula-return.test.ts` answer `{}` on every head, because an optional is not typed as a number, so they guard nothing. A discriminating shape is `record.?amount.orValue(0) * 0.1`, with `record.?quantity.orValue(0) * 2` as its CONTROL. The changeset line and the test comment (about `:193`) that say those spellings moved from `number` should be corrected.\n\nreach: Studio's object field inspector, for formula fields, sometimes. A stale currency display on a quantity formula. Read from code, not run.\n\n## Done when\n`inferFormulaReturn` answers `number` for a proven quantity whose CEL type is `dyn` (both field-over-field shapes), and a declared `currency` is withdrawn on that edit at the inspector, with a pin per shape and CONTROLs that keep money and the unproven cases at `{}`. The relationship-hop leg is either proved using the related object's declared fields or recorded as an accepted limit in the producer header. The N3 pins are made to discriminate, and the two sentences are corrected.\n\n## Business rationale\nAuthors refactor formulas in Studio. A field that stops computing money but keeps drawing a currency symbol misleads every list, detail and report that shows it. #35631 fixed the literal shapes; these are the arithmetic shapes authors write next. Reader: the area:data lane seat (d7-C), one PR in `packages/formula` (and a pin at the inspector).\n\nGrade: p3 · area:data · Bug · Studio formula authors, sometimes · evidence read."
+}

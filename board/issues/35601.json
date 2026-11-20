@@ -2,8 +2,8 @@
   "number": 35601,
   "kind": "issue",
   "title": "相关子表的页签：不放筛选排序，右上角只留「添加」和「在列表中打开」；批量添加要么全成要么全不成",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T17:05:08Z",
-  "updated_at": "2026-11-19T17:55:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T10:10:57Z",
+  "closed_at": "2026-11-20T10:10:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35601",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（维护者 2026-11-19：「这一批卡p2」）。\n\n维护者 2026-11-19 原话：「子表中的记录会很多到需要筛选过滤排序吗」「其他系统是怎么处理的，真的需要的话，跳转到全屏的列表页，带上过滤条件页面操作？」；看过 Twenty 的演示后指出图 38 里残留的筛选行：「图38 下面的子表筛选你没去掉」。关于添加：「他只是把子表增加了一种编辑的入口 可以批量选」。\n\n## 目标（图 38；图里用产品明细举例只为示意表格和工具栏的样子，主从子表实际放在概览里，页签里是普通关联的子表）\n\n![图 38 相关子表的页签](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/38-related-tab.png?raw=true)\n\n图是深色稿，只表达结构和尺寸，颜色沿用现有主题变量。参照对象 Twenty 是 AGPL，只参照结构，⛔ 不抄代码。代码读数取自 `origin/main` `7ece0204a6`。外壳（顶栏、左侧栏）不动。\n\n## 现状\n\n- 相关列表的配置：对象、关系字段、列、排序、条数上限（默认 5）、筛选、标题、`showViewAll`、动作、`add`（`packages/spec/src/ui/component.zod.ts:1655-1834`）。\n- 「新建」打开子对象的新建表单并预先关联父记录（`RelatedRecordActionsBridge.tsx:649+`）。「添加」只在页面配置了 `add` 时出现，打开 `RecordPickerDialog`（可搜索、多选、翻页、已选数量）；保存时**一条一条写**，不是原子的（`ui/packages/plugin-detail/src/RelatedList.tsx:2028-2050`）。\n- 「查看全部」已经会跳到子对象的列表页并带 `filter[field]=parentId`（`RelatedRecordActionsBridge.tsx:633-647`、`useOpenRecordList.ts:42-52`）；但在空列表和正文表格上是隐藏的（`RelatedList.tsx:3937`）。\n- 实测（本机，HotCRM 商机的产品明细）：右上角同时有「添加」和「新建」两个按钮，字面上看不出区别。\n\n## 要做的\n\n1. **不放筛选、排序、选项、搜索**，也不放条件行。排序靠点表头；排序和列宽按人记住。\n2. **条数只写在页签标题上**，页签里不再重复标题和条数。\n3. **右上角两样**：「↗」（在列表中打开，小图标）和「+ 添加」。\n4. **「+ 添加」合成一个入口**：\n   - 主从子表（行只属于这条记录）：有可选的来源目录时（如产品）打开批量选择框，框里最上面一项是「新建一条」；没有来源目录时直接新增一行。\n   - 普通关联（对方是独立存在的记录）：打开批量选择框，可搜索、勾选已有的，最上面一项是「新建」。\n   - 相关列表不需要页面显式配置 `add` 才有这个入口，按关系类型自动给。\n5. **批量添加原子化**：一次选多条，走批量接口，同一个事务，全成或全不成；失败时指出是哪一条。\n6. **「在列表中打开」**在空列表和正文表格上也显示。跳过去后：视图栏下有一枚条件标签「所属 X：记录名 ×」（用列表筛选卡 objectstack-ai/objectstack#35549 的条件标签）；路径里写明来源（「对象 / 记录名 / 子表名」）；「重置」回到带着来源条件的状态；在那里点「新建」自动带上父记录。\n7. **任务这类有状态的子表**默认按状态分组显示（未完成的组在前、已完成的在后，可折叠），不用预设筛选条件。\n8. 表格样式与列表页一致（objectstack-ai/objectstack#35548），合计与列对齐。\n\n## 不做的\n\n- 不在子表页签里做筛选流程；需要筛选一律去列表页。\n- 不改 `RecordPickerDialog` 的列和搜索能力。\n\n## 验收\n\n- 任意子表页签：没有筛选、排序、选项按钮，没有条件行；右上只有「↗」和「+ 添加」。\n- 商机产品明细点「+ 添加」：打开产品选择框，勾 3 个确认，只发一次批量请求，加进 3 行；把其中一个改成会失败的，结果是一行都没加，并提示是哪一个。\n- 点「↗」：到产品明细的列表页，有条件标签，条数等于这条商机下的行数；删掉标签看到全部，点「重置」回到只看这条商机。\n- 空的子表页签里「↗」和「+ 添加」都在。\n- 任务子表按状态分组，已完成的在最后一组。\n- 一次合入、一次验收。PR 正文列出迁移和作废的测试，以及同笔修改的 `docs/qa/platform-checklist` 条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src/RelatedList.tsx`、`RelatedRecordActionsBridge.tsx`、`useOpenRecordList.ts`、`ui/packages/components/src/custom/record-related-list.tsx`、`packages/rest/src/batch-routes.ts`。条件标签依赖 objectstack-ai/objectstack#35549。\n\nDedupe: `相关列表 添加 新建 批量`、`related list add picker atomic`（objectstack，open）→ 0。"

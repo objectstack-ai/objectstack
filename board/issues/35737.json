@@ -1,0 +1,36 @@
+{
+  "number": 35737,
+  "kind": "pull_request",
+  "title": "fix(auth): a hung \"Sign in with SSO\" request gives the login page back after the 20 s sign-in watchdog",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T04:30:25Z",
+  "updated_at": "2026-11-20T05:21:40Z",
+  "closed_at": "2026-11-20T05:21:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T05:21:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35737",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoA1ALjVcUcAuAA15MyUocBx)_\n\nFixes #34861\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:登录页按“使用 SSO 登录”后若服务器一直不回应,约 20 秒后转圈停止、提示登录超时,邮箱框和按钮恢复可用,可以直接重试;此前会一直转圈直到刷新页面。\n- 为什么做:修复单点登录用户在身份提供方接口卡住时被困在登录页的问题,与其他登录按钮已有的 20 秒超时保护对齐。\n- 出错会怎样:只影响按邮箱走单点登录的那一步;最坏情况是超时提示出现得过早或不出现,可直接撤回本次改动恢复原样。\n- 要你做什么:无\n\n## What changes\n\n- `ui/packages/auth/src/LoginForm.tsx`, `handleSso`: the `POST /api/v1/auth/sign-in/sso` request now carries an `AbortController` signal, aborted after `SSO_SIGN_IN_TIMEOUT_MS` (20 000 ms). On that abort the form shows `SSO_SIGN_IN_TIMEOUT_TEXT` and clears `ssoSubmitting`, so the SSO button and the SSO email field are usable again (retry path). The timer is cleared in `finally` on every settle; a successful answer still navigates to `data.url` and keeps the pending state through teardown.\n- The window and the sentence are the same as the provider buttons' watchdog (`SIGN_IN_TIMEOUT_MS` / `withTimeout` inside `signInWithProvider` in `createAuthClient.ts`). They are module constants in `LoginForm.tsx`, not imported: `createAuthClient.ts` is outside this card's file surface, and the watchdog there is a local of `signInWithProvider` with nothing exported to share.\n- The body read (`res.json()`) is also under the signal: an abort during the body read surfaces as the timeout, not as the \"No SSO provider\" fallback.\n- Changeset: `@object-ui/auth` patch.\n\n## Why\n\nA hung SSO request left the button spinning and the email field disabled until a reload (reproduced by QA twice under SSO-only mode). The card's expected behaviour: \"after about 20 s the watchdog recovers the button with an error and a retry path.\"\n\n## Tests\n\nNew top-level `describe` in the shared harness `ui/packages/auth/src/__tests__/LoginForm.test.tsx` (SSO-only mode, fake `setTimeout`/`clearTimeout`):\n\n- Pin: the SSO fetch never answers. At 19 999 ms the button and the email field are still disabled, the request's signal is not aborted and no alert shows; at 20 000 ms the signal is aborted, the alert reads as a timeout, and the button and the email field are enabled.\n- CONTROL: an answering fetch still sets `window.location.href` to the IdP URL; after 20 s the signal is not aborted, the button keeps its pending state, and no alert shows.\n\n<details><summary>Readings at head 171e0ee3 (after merging origin/main a3a74f27)</summary>\n\n- `pnpm --dir ui exec vitest run packages/auth/` under the verify lock: `Test Files 48 passed (48)`, `Tests 493 passed (493)`, VERDICT command-exit 0.\n- `pnpm --filter @object-ui/auth type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`; the second program includes `src/**/*.test.tsx`): VERDICT command-exit 0.\n- Ablation (at c00af542, the fix committed first; the test imports `../LoginForm` from source, no dist in the path): `node scripts/ablation-replace.mjs` replaced the timer body `controller.abort();` / `SSO_SIGN_IN_TIMEOUT_MS` with a no-op and a 1e9 ms delay (anchor x1 to x0, replacement x0 to x1, blob 990a9efa to 60b77598). Pin RED: `expected false to be true` on `signal.aborted`; CONTROL green. Restored: blob equals HEAD (990a9efa), `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- The 20 s value and the timeout sentence now live in two places (`LoginForm.tsx` module constants and the local inside `signInWithProvider`). Moving the watchdog into one shared module is a follow-up for whoever next edits `createAuthClient.ts`; not done here because that file was outside this card's surface.\n- The timeout sentence is not localized, same as the provider buttons' watchdog sentence (shown via the error's message). No new `LoginFormLabels` key was added.\n- `onError` is not called on the SSO path, as before this change.\n\n## Verification\n\nRead first: `ui/packages/auth/src/LoginForm.tsx` `handleSso` (risk hunk: the `res.json().catch` rethrow on timeout and the `finally` clearing the timer, which must not fire after a successful navigation).\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/auth/src/__tests__/LoginForm.test.tsx -t \"aborted after 20 s\"` shows 2 passed.\n\n<details><summary>Local gate readings</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 38 families for this diff. 37 ran at head 171e0ee3, all exit 0. `--ran` reconciliation: \"38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED\".\n- `pnpm --dir ui exec vitest run scripts/` ran once at c00af542 (before the merge): exit 1, 2 files red of 173 (`date-only-zone-pins-10183.test.ts`, which drives other ui packages' zone tests, and a closure-budget test that needs a built Console bundle: \"Budgeted chunk `ui-components` is ABSENT from the eager closure\"). Neither reads `ui/packages/auth`. Read as an unbuilt-workspace reading, not a verdict, and left to CI's `Test UI`.\n- `node scripts/pm/overlap-check.mjs --branch=HEAD` and `--pr=35575`: VERDICT clean exit 0.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (No formatter ran; `pnpm lint` is a repo-wide scan left to CI, not run locally.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (Not touched.)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibyy9KSA69EGZtjDj9c\n"
+}

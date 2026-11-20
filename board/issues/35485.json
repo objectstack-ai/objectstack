@@ -2,8 +2,8 @@
   "number": 35485,
   "kind": "issue",
   "title": "Seed keyed-mode record whose single-field key is authored as an empty array keys empty and is inserted on every load",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:package",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T11:30:17Z",
-  "updated_at": "2026-11-19T11:50:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:25:25Z",
+  "closed_at": "2026-11-20T05:25:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35485",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② out-of-scope finding (class b, named producer): seat L2 on PR #35459 (#34857 + #35336), record 7007796559, nit N3. ⛔ Not a claim.\nReader: `domain:server` (`packages/metadata-protocol/src/seed-loader.ts`). Suggested-grade: p3 · one line in the blank helper. Parent: #34857.\nDedupe: `isBlankSeedKeyValue empty array` in open issues: none.\n\n## 维护者速读\n\n- 用户能看到什么变化：极少见的写法（把唯一标识写成空列表）目前仍会每次加载都多插一条；修好后会像留空一样被拒收并说明原因。\n- 为什么做：刚上线的\"标识留空就拒收\"规则漏了这一种写法。\n- 出错会怎样：现有示例数据都不这样写；影响仅限这种写法的作者。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nAfter PR #35459, `isBlankSeedKeyValue` treats no value, `null` and `''` as blank. The single-field arm of `externalIdKey` is `String(record[externalId] ?? '')`, which is also `''` for `[]`, so a record whose single key field is authored `[]` keys empty, is not refused, and is inserted on every load. Not reachable from any stock dataset.\n\n## Expected\n\nA value that keys empty is blank for the refusal too (one rule: blank exactly when the key string is empty), pinned with a three-load `[]` case. If this widens the refusal it is a narrowing: carry the declaration and, if the gate asks, extend the existing ADR-0087 entry rather than adding one."

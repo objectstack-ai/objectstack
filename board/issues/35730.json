@@ -1,0 +1,33 @@
+{
+  "number": 35730,
+  "kind": "issue",
+  "title": "approvals: a decided first-step request's page shows an empty \"Approval progress\" card",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T03:52:36Z",
+  "updated_at": "2026-11-20T10:46:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35730",
+  "body": "## What happens\n\nOn the approval request page (`sys_approval_request` record, `ApprovalDecisionPanel`), the right rail's **Approval progress** card (zh-CN 「审批进度」) renders only its title, with an empty body, when the request is the **first approval step of its run and is already decided** (approved or rejected).\n\nSeen on an app deployment (a 4-step sequential quote approval, one `approval` node per step): the step-1 request, approved, shows\n\n- header: Status **Approved**, Step = step 1's label;\n- Activity card: submit + approve rows, as expected;\n- **Approval progress card: title only, nothing under it.**\n\nA reader takes the empty card as \"something is broken\", or as \"the whole approval is done\", while the record's own approval (step 2 onward) is still running.\n\n## Why (read from source, `main` at 34834073)\n\nThe card body is three parts (`ui/packages/app-shell/src/views/approval-decision/ApprovalDecisionPanel.tsx`, the `approval-decision-progress` RailCard):\n\n1. `<ApprovalStepLine steps={request.flow_route?.steps} />`\n   - `flowRoute` (`packages/plugins/plugin-approvals/src/approval-route.ts`) returns `[...passedSteps, own]` once the row is not `pending`: no steps ahead are drawn for a decided request.\n   - For a first-step request `passedSteps` is empty, so `steps` has length 1.\n   - `ApprovalStepLine` returns `null` when `steps.length < 2` (`ui/packages/app-shell/src/views/approval-progress/ApprovalStepLine.tsx`).\n2. `{progress && <DecisionProgressIndicator …/>}`: no `decision_progress` on a single-approver decided step.\n3. `<PendingApprovers …/>`: nobody is pending on a decided request.\n\nAll three render nothing, so the card is an empty shell. The same holds for a decided request of a one-step flow.\n\n## Expected\n\nOne of:\n\n- **(a)** Draw the card's step line for a decided request even with one step, e.g. \"① Step 1 ✓ Approved\", plus a line saying whether the run went on (the record's approval continues at the next step / the approval ended); or\n- **(b)** Do not render the card when none of its three parts has anything to show.\n\n(a) is more useful: the reader of a decided step request wants to know where the record's approval stands now. `flow_route.ahead` is already `'decided'` there, so the UI can tell this case apart.\n\n## Repro\n\n1. A record-change or submit flow with two sequential `approval` nodes (step 1 → step 2), single approver each.\n2. Submit a record; approve step 1.\n3. Open step 1's `sys_approval_request` record page.\n4. Observed: the Approval progress card is empty. Expected: per (a) or (b) above."
+}

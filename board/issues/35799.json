@@ -1,0 +1,34 @@
+{
+  "number": 35799,
+  "kind": "issue",
+  "title": "Work calendars: give an exception row in a seed load without an organization its own refusal reason",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T08:37:30Z",
+  "updated_at": "2026-11-20T08:49:32Z",
+  "closed_at": "2026-11-20T08:49:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35799",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\nArea: data-1 · follow-up of #35355 (PR #35642 contract review 7033477356, N7; seat ruling on #35355)\n\n## 维护者速读\n- **问题：** 多组织部署里，没有固定组织的种子数据导入节假日例外时，会被拒绝，但提示语说的是“例外日期必须属于同组织的日历”，不是真正原因。\n- **要做：** 对这种“无法确定组织”的情况给一条单独的、不泄露其它组织信息的提示，告诉作者给每条记录写明所属组织。\n- **不做会怎样：** 写种子数据的人看到的原因不对，会去查日历本身，浪费排查时间；数据本身不会出错。\n- **你要做的：** 无需决定，按普通改动走。\n\n## What\nSince #35642, the `sys_work_calendar_exception` hooks read the named calendar by id in the exception's organization, and refuse with one fixed reason (\"An exception date names a calendar of its own organization.\") when no row comes back. A create the hooks cannot read for is refused with the same reason. That case is a row that names an organization other than the session's, or a row with no organization outside `single`.\n\nA seed load in an install with several organizations that pins none of them is told by the seed loader to name the owner on each record. Its exception rows are such creates, so they get the calendar-organization sentence. The cause of this refusal depends only on the write itself (no organization it can be judged in), so a reason of its own gives nothing away about other organizations' calendars. Loads pinned to an organization and installs with one organization are unaffected.\n\n## Done when\n- The unreadable-create branch in `packages/objectql/src/work-calendar-service.ts` refuses with a reason of its own (400 `VALIDATION_FAILED`, ADR-0114 field code). The reason says the row's organization could not be determined and that the record should name its organization. It names no organization, code or id.\n- The foreign-calendar and missing-calendar cases keep their one shared reason, byte-identical to each other (the no-existence-oracle pin stays).\n- A cell pins the seed-shaped case: a create with no organization outside `single` gets the new reason.\n\nGrade: `area:data · DX · reach: seed and import authors in multi-organization installs · evidence: read (contract review 7033477356 N7)` → p2."
+}

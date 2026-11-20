@@ -1,0 +1,35 @@
+{
+  "number": 35719,
+  "kind": "issue",
+  "title": "approvals: the approvals route POST /approvals/requests/:id/reject and client.approvals.reject still record a reject with no reason (follow-up of #35659, which narrows only the approval_reject action)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T02:58:56Z",
+  "updated_at": "2026-11-20T08:23:55Z",
+  "closed_at": "2026-11-20T08:23:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35719",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: ② out-of-scope finding while building #35659 (PR #35716, L1 verdict 7028928770 must-fix 1b). ⛔ Not a claim.\n\n**What.** PR #35716 makes `approval_reject`'s `comment` required. A missing or blank reason is then refused at the REST action door, at MCP `run_action` and in the console dialog. The approvals route itself is untouched and still records a reject with no comment: `POST /api/v1/approvals/requests/:id/reject` (rest-route-ledger.ts ~475, disposition `sdk`; `client.approvals.reject(id, { comment? })`) and the service `decide` path behind it.\n\n**Question.** The maintainer's requirement in #35593 is that a rejection must carry a reason and be confirmed before it is submitted. Should the route, the SDK method and service `decide` refuse a reasonless reject as well? That would be a further narrowing of a public SDK route: `Clause-②: no (narrowing)`, BREAKING for SDK callers, with its own contract read.\n\n**Ask.** Decide yes or no. If yes, refuse a missing or blank reason on the route and in `decide`, with the same wording and code as the action-param refusal. Make `comment` required in the SDK type, and pin it at the route.\n\nSuggested-grade: p2 · same maintainer requirement as #35659, on the remaining public door.\nDedupe: `approvals reject route comment required` (open: #35659 only)."
+}

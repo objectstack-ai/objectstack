@@ -1,0 +1,34 @@
+{
+  "number": 35852,
+  "kind": "issue",
+  "title": "技能、文档和示例补上「分组指向子表」的写法（fieldGroups[].relatedList）：现在只有参考表里一行，没人知道能用",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T12:10:56Z",
+  "updated_at": "2026-11-20T12:37:59Z",
+  "closed_at": "2026-11-20T12:37:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35852",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「把子表当成一个分组、排在分组之间」这件事 10 月份就做进去了（objectstack#27069），只是没人用，是技能也没写吧？例子有吗？」\n\n## 现状（主干 `7878cf0557`，协调席检索）\n\n规范里有这个键：对象的 `fieldGroups` 里，一项可以写 `relatedList: '<子对象>'` 或 `'<子对象>.<字段>'`，把那张正文表格摆在这一项的位置上（`packages/spec/src/data/object.zod.ts:1373-1399`，objectstack-ai/objectstack#27069、#27592）。数组顺序就是显示顺序。\n\n它出现过的地方：\n\n- 参考文档的自动生成表里有一行（`content/docs/references/data/object.mdx:332, 745`）。\n- 18.3 的发布说明里有一行（`content/docs/releases/v18/18-3.mdx:553`）。\n\n没有出现的地方：\n\n- **技能**：`skills/objectstack-ui/rules/record-page.md` 和 `skills/objectstack-data/rules/relationships.md` 讲了关系字段上的 `relatedList: 'primary'` 和父对象的 `relatedLists` 顺序，没有提分组指向子表这种写法。AI 搭建读的就是这些规则，所以它不会用。\n- **指南文档**：`content/docs/ui/field-grouping-and-order.mdx`、`content/docs/ui/components/record.mdx` 没有提。\n- **示例**：仓库里的示例和 HotCRM 的对象定义里没有一处用到（检索 `relatedList: '<名字>'` 为空）。\n- **评测**：`skills/objectstack-ui/evals/record-page.json` 里是否有覆盖，未核实。\n\n## 要做的\n\n- **技能规则**：在 `skills/objectstack-ui/rules/record-page.md`（必要时 `objectstack-data/rules/relationships.md` 互相指一下）加一小节，说明：\n  - 主从子表默认排在展开的字段分组之后（objectstack-ai/objectstack#35742 之后的行为）；\n  - 要调位置，在父对象的 `fieldGroups` 里加一项 `{ key, label, relatedList }`，挪这一项就是挪位置；\n  - 这种分组不放字段；只能指向正文表格；子对象有两个字段指向父对象时写成 `子对象.字段`。\n  - 给一个完整的例子：报价单，基本信息 → 报价明细 → 条款。\n- **搭建时的默认做法**写进规则：建了主从子表，如果明细是这个对象的主体（订单、报价、合同这类），在父对象的分组里把它摆在第一个分组之后；否则不摆，用默认位置。\n- **指南文档**：`field-grouping-and-order.mdx` 加同样的一节和例子。\n- **评测用例**：加一条「把报价明细放到基本信息下面、条款上面」，期望产出 `fieldGroups[].relatedList`，不是手写页面。\n- **示例**：仓库示例里挑一个有主从明细的对象用上这个写法。HotCRM 的报价单、商机由 objectstack-ai/hotcrm#2720 跟进。\n\n## 不做的\n\n- 不改规范，不改渲染。\n\n## 验收\n\n- 技能规则和指南文档里各有一节讲这个写法，例子能通过 `defineStack` 校验。\n- 新的评测用例通过。\n- 用 AI 搭建一个「订单 + 订单明细」的应用：父对象的 `fieldGroups` 里有一项指向订单明细，记录页上明细排在第一个分组之后。\n- 仓库示例里至少一处使用。\n\nReader: `domain:docs` / 技能维护车道。`skills/objectstack-ui/rules/record-page.md`、`skills/objectstack-data/rules/relationships.md`、`skills/objectstack-ui/evals/record-page.json`、`content/docs/ui/field-grouping-and-order.mdx`。\n\nDedupe: `fieldGroups relatedList skill 技能`（objectstack，open）→ 0。"
+}

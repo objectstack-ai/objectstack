@@ -2,8 +2,8 @@
   "number": 35004,
   "kind": "issue",
   "title": "skills: the ask-data skill says what the client does after the user answers an ask-back",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T22:41:43Z",
-  "updated_at": "2026-11-19T04:07:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T11:11:00Z",
+  "closed_at": "2026-11-20T11:09:43Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35004",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-17, verbatim: 「立卡」, answering this session's list of four gaps nobody had carded. The gap was reported by the dispatching seat `repo:objectstack#3` on #34659 (comment 6960624063, item 2); the filer did not re-read the code behind it.\n\n## Why\n\nThe skill tells a client to ask which reading is meant and stops there. After the person answers, the client has no instruction: compute the chosen candidate through the governed route, or fall back. Left open, each client decides for itself.\n\n## Evidence\n\n- Per the report: the ADR-0149 D3 note states the step after the answer; neither `skills/objectstack-ask/SKILL.md` nor #34868 does.\n\n## Scope\n\n- One row in the skill, in the ADR note's words: the candidate the user names is then asked for by its exact name and answered through `query_dataset`; a user who names none of them gets the fallback, labelled.\n- The served `/mcp/skill` text follows (single source). One eval case for the second turn.\n\n## Done when\n\n- A two-turn ask (ambiguous word, then the user's choice) ends in a governed answer citing the chosen measure.\n\n## Relations\n\n- Parent: #34659. Related: #34868, #34996 (the skill iteration loop may carry this change; then close this card as carried).\n- Governed surface: `skills/**`."

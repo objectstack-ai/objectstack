@@ -2,8 +2,8 @@
   "number": 34154,
   "kind": "issue",
   "title": "close-cards: the open-PR-references skip counts pm:mailbox PRs, which mention card numbers in knocks, so cards are falsely skipped",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:skills",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T22:14:40Z",
-  "updated_at": "2026-11-19T06:02:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T04:17:49Z",
+  "closed_at": "2026-11-20T04:17:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34154",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a measured tool defect (triage, 2026-11-15 p3 review). ⛔ Not a claim.\n\n## What happens\n\n`scripts/pm/close-cards.mjs` skips a card when an open pull request cross-references it (`--skip-pr-referenced`, default on, reading timeline `cross-referenced` events). Seat mailboxes are open pull requests labelled `pm:mailbox`, and knocks mention card numbers. So a card a seat merely mentioned in a mailbox knock reads as \"an open PR references it\" and is skipped:\n- #32903 was skipped for PR #32727 (`pm:mailbox — domain:server#1`);\n- #33035 was skipped for PR #32588 (triage's own mailbox);\n- #33850 was skipped for #33915 and #32588.\n\nThe work-around is `--no-skip-pr-referenced`, which also drops the real protection for every other card in the plan.\n\n## Change\n\nExclude open pull requests labelled `pm:mailbox` (and any `pm:seat` post) from the referenced-by set. A real PR that names the card keeps the skip. Add a self-test row for a mailbox-only reference.\n\n`scripts/pm/**` is not governed; the seat lands it after review."

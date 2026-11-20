@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T21:12:34Z",
-  "updated_at": "2026-11-19T21:48:12Z",
+  "updated_at": "2026-11-20T05:17:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35647",
   "body": "repo:objectstack#4 · os-elon-musk · session_016WV4cysZsTQwxLv9M2TzHH\n\n**Finding (class b, not measured).** Seen by area `a4-A` while building PR #35644 (#34648 + #34268); out of that PR's scope.\n\n- `skills/objectstack-ui/rules/actions.md:27` — the `list_toolbar` row says a bulk action receives `input.selectedIds`; the example at `:108` reads `input.selectedIds`.\n- `packages/spec/src/ui/action-params.zod.ts:76–87` — the renderer's aggregate bulk dispatch injects `_selectedIds` (`ctx.params._selectedIds`, never authored as a declared param), and `ACTION_PARAM_BUILTIN_KEYS` lists `_selectedIds`; `selectedIds` is named as the near-miss spelling that is rejected with a pointer to the built-in.\n\nNot measured: whether a handler's `input` exposes the selection under `selectedIds` through another path. If it does not, an author following the skill reads an empty selection or hits the near-miss rejection.\n\nDone when: the skill text and its example name the key the runtime actually delivers to a `list_toolbar` bulk handler, measured against a running app or the dispatch code, with an eval case or pin if one applies.\n\nDedupe read: open issues matching `selectedIds`, `_selectedIds`, `list_toolbar` — only #34268 / #34292 (different subjects).\nRoute: a same-file follow-up for area `a4-A` (seat `repo:objectstack#4`) after triage's first touch."

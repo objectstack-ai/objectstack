@@ -2,8 +2,8 @@
   "number": 35108,
   "kind": "issue",
   "title": "deps: the daily OSV scan is red — next 16.4.1 (GHSA-mfr8-8qww-v76h, GHSA-vc7v-qv4w-wrv8; fixed in 16.4.5) and picomatch 4.0.7 (GHSA-fc5q-39xc-vjpf, 8.7, no patched version)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,22 @@
   "labels": [
     "area:fleet",
     "domain:devx",
-    "pm:queue",
-    "priority:p2",
+    "priority:p1",
     "security"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T03:46:22Z",
-  "updated_at": "2026-11-19T03:59:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T11:08:53Z",
+  "closed_at": "2026-11-20T11:07:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35108",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage (R1210). The scheduled **Validate Dependencies** run is red on `main`: run 44227606138 (2026-11-18 03:02Z), and also 11-17 03:02Z.\n\n## What the scan reports (public advisories, `pnpm-lock.yaml`)\n| Advisory | CVSS | Package | Installed | Fixed |\n|:--|:--|:--|:--|:--|\n| GHSA-mfr8-8qww-v76h | 6.3 | next | 16.4.1 | 16.4.5 |\n| GHSA-vc7v-qv4w-wrv8 | 6.3 | next | 16.4.1 | 16.4.5 |\n| GHSA-fc5q-39xc-vjpf | 8.7 | picomatch | 4.0.7 | none yet |\n\n`next` is declared only by `apps/docs/package.json`, the docs site, not the shipped runtime.\n\n## Done when\n1. Bump `next` to ≥ 16.4.5 in `apps/docs`, and the lockfile resolves it.\n2. For `picomatch`: find which package pulls 4.0.7 and whether its vulnerable path is reachable. Bump it if a non-breaking version exists. Otherwise add a reasoned filter in `osv-scanner.toml`, the way the minimatch entry (GHSA-g3hv-75wg-m249) is justified, naming the dependent and why it is not reachable.\n3. The next scheduled Validate Dependencies run is green.\n\nGrade: **p1 · domain:devx**. Theme: performance and security. A red daily dependency scan on `main` is graded p1 by precedent (#32386, #33211). It goes to repo:objectstack#1, the p1 seat."

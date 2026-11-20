@@ -1,0 +1,37 @@
+{
+  "number": 35826,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the chart view's view bar starts its icon on the list page's 16px edge",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T10:16:16Z",
+  "updated_at": "2026-11-20T11:07:35Z",
+  "closed_at": "2026-11-20T11:07:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T11:07:33Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35826",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgEV9LRY8FfTWS7J6T3MwsSL)_\nFixes #35729\n\nrepo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：宽屏下图表视图的视图栏图标和列表视图一样离左边 16，在列表和图表之间切换时视图切换器不再左右跳；手机宽度不变。\n- 为什么做：#35663 把列表视图栏对齐到 16 后，图表视图自己那份视图栏还留在 22，是 #35663 的 L1 记录里留下的后续项。\n- 出错会怎样：只改图表视图栏的内边距，并删掉一个已经没人读的内部参数，不动数据和权限；有问题可以直接撤回。\n- 要你做什么：无\n\n## What changes\n\n- **The chart view's view bar takes the list view bar's padding** (`objectViewListRenderer.tsx`, `chartPage`): `sm:px-4` becomes `sm:pl-2.5 sm:pr-2`, the same values as `TOOLBAR_ROW` in `plugin-list`'s `listToolbarRow.ts` (not imported: `plugin-list`'s index does not export the constant, and exporting it was outside the claim). From `sm` up the switcher's 6px-padded icon lands on 16, where the list's does. Below `sm` both bars keep `px-2`, so 375 is unchanged.\n- **The idle `inSetup` input goes end to end** (claim amendment 2, 7036258221). Since #35663 removed the Setup app's row-number line, `useObjectViewListRenderer` read it only in the `renderListView` memo's dependency list. Removed: that dependency, the destructured prop and its type, the type-only `isSetupAppSegment` import (renderer); the derivation, its stale objectui#12606 comment, its pass and the `isSetupAppSegment` import (`ObjectView.tsx`). Remaining readers: none in either file. Other `inSetup` / `isSetupAppSegment` readers in app-shell (`ResourceListPage`, `RecordDetailView`) are their own and untouched.\n\n## Tests\n\n- `ui/e2e/list-left-edge-35663.spec.ts` (#35663's geometry spec) gains a chart view bar: its class is read out of `objectViewListRenderer.tsx` at run time (the `chartPage` bar), and a second bar with that class, holding the real switcher class, sits under the list's view bar. At 1280 (wide and narrow cases) its icon is on the 16 edge and on the list view's icon (±1), and its right padding equals the list bar's; at 375 its icon equals the list's (and ≥12).\n- Ablation: with the bar's class put back to `sm:px-4`, the two 1280 cases go red (`chart view-bar icon starts at 22, not 16`); 375 and the scroll case stay green, as they should.\n- No unit test added: no vitest reads the chart bar's class or `inSetup` (grep over `ui/packages/*/src` for `inSetup`, `isSetupAppSegment` and `sm:px-4 sm:py-0` beside `ObjectView` / `objectViewListRenderer`: 0 hits), and jsdom has no layout for the padding.\n\n## Acceptance notes\n\nReadings (the e2e harness, main area 1024 wide beside a 256 sidebar at 1280; x from the main area's left):\n\n| | list view icon | chart view icon | list bar right padding | chart bar right padding |\n|---|---|---|---|---|\n| main 65fddc84, 1280 | 16 | 22 | 8 | 16 |\n| this PR, 1280 (wide and narrow) | 16 | 16 | 8 | 8 |\n| main, 375 | 14 | 14 | — | — |\n| this PR, 375 | 14 | 14 | — | — |\n\n- The chart bar draws only the switcher, so \"right edge 16\" reads as the bar's right padding equal to the list bar's 8 (the list's last trigger adds its own 8 to reach 16).\n- Platform checklist: not edited. `records-forms.list-view-capabilities` steps[11] (from #35663) states the list page's left edge; a chart-view sentence there would be outside the claim's surface. carrier: none.\n\nScreenshots (1280 narrow, 1280 wide, 375; the fixture's icons are blank 16px boxes): `objectstack-seat5/area-ux/ux-4/chart/card-35729/` in the project files.\n\n## Verification\n\nRead first: `ui/packages/app-shell/src/views/objectViewListRenderer.tsx`, the `chartPage` bar class; then the `inSetup` removal in the same file and `ObjectView.tsx`.\n\nTwo-minute check: open an object with a chart view at 1280, switch between a list view and the chart view; the view switcher's icon stays put.\n\n<details><summary>Local readings</summary>\n\n- Geometry spec: 4 passed at this head; ablated, 2 of 4 red as above.\n- `pnpm --filter @object-ui/app-shell type-check`: exit 0 (after `pnpm --filter '@object-ui/app-shell^...' build`).\n- `vitest run packages/app-shell/src/views/ObjectView.`: 93 files, 826 tests passed.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 38 commands derived, all exit 0 (log `gates-ran.log` beside the screenshots)\n- `node scripts/pm/overlap-check.mjs --branch=HEAD`: clean (origin/main merges cleanly; #35747 shares `objectViewListRenderer.tsx`, merges cleanly).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CasQ2sQyph6xUMdArZ\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU -->\n"
+}

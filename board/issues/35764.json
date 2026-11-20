@@ -1,0 +1,37 @@
+{
+  "number": 35764,
+  "kind": "pull_request",
+  "title": "fix(scenarios): travel_expense figure questions write one measure's own word",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T06:08:48Z",
+  "updated_at": "2026-11-20T09:46:55Z",
+  "closed_at": "2026-11-20T09:46:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T09:46:53Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35764",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDxdrYJq965rUfrZBso8FS3)_\nFixes #35544\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化:用户无感;只改了差旅报销场景卡里三道问数题的问法,评测里这三题会按受管指标直接给出数字,不再反问。\n- 为什么做:问数评测日轮里这三道题因问法里的「claims」同时贴近「报销金额」和「报销单数」两个指标而被反问丢分,这是卡片的问题,服务端按既定规则反问是对的。\n- 出错会怎样:只影响评测卡的打分,不碰产品代码;可直接撤回。卡片指纹变了,评测日序列在此处分段,前后两段不能合在一张表里比。\n- 要你做什么:无\n\n## What changes\n\n**This is a card defect.** The MCP door behaves as ADR-0149 D3 and its amendment rule. The three figure questions `paid_reimbursement`, `claims_by_status` and `claimed_last_month` lift the word \"claims\". On the card's own datasets that word matches **no** member exactly. It is a near miss on two `reimbursement` measures: `claimed_amount` (synonym \"expense claims\") and `claim_count` (synonym \"number of claims\"). So `list_datasets` answers 0 matches and 2 `candidates`, `nextStep.decision` is `candidates_only`, and an agent following the rule asks back (\"never pick one, never treat a candidate as a match\"). The card's own `dq_claimed_so_far` pins the same rule for a near miss. Measured on main c321914f with the real `dataset-term-matcher.ts` fed the card's `expect.datasets`: `[\"claims\"]` gives no match and candidates claimed_amount and claim_count; `[\"claims\",\"status\"]` adds dimension-only candidates for \"status\".\n\nEach ask now writes a word that matches exactly the measure its truth computes, in both languages, the way `dq_expense_claims` already does:\n\n| question | en (before → after) | zh (before → after) | hit |\n|:--|:--|:--|:--|\n| `paid_reimbursement` | How much has been reimbursed on paid claims in total? → How much is the **claimed amount** for everything already paid? | 已付款的报销单一共报销了多少钱? → 已付款报销单的**报销金额**合计是多少? | `reimbursement.claimed_amount` |\n| `claims_by_status` | How many claims are in each status? → What is the **number of claims** in each status? | 各个状态的报销单各有多少张? → 各个状态的**报销单数**分别是多少? | `reimbursement.claim_count` |\n| `claimed_last_month` | What do last month's claims add up to? → What do **expense claims** from last month add up to? | 上个月的报销单合计金额是多少? → 上个月的**报销金额**合计是多少? | `reimbursement.claimed_amount` |\n\nThe truths, personas, datasets and synonyms are unchanged. The verified build `builds/travel_expense.json` is unchanged and needs no rebuild: the build half renders `prompt.*` and the `expect` rows, never `run.questions`. `builds/travel_expense.provenance.json` records the new card sha256 (`9d0c7dad…` → `abe91b8f…`).\n\n**The scenario day series splits at this card hash.** `summary` refuses to put runs on two card hashes in one table, so ask-round records before and after this PR are two series.\n\n**`claimed_last_month` and the date filter.** `reimbursement` declares no date dimension. I measured whether `query_dataset` admits a raw-field `runtimeFilter` on `claim_date`. It does: the plugin-wired service through the real `createDatasetTools` path served `{ claim_date: { $gte, $lte } }` and `{ claim_date: { $between } }` as `WHERE (\"claim_date\" >= ? AND \"claim_date\" <= ?)`. The control, a field the object lacks, was refused `INVALID_FIELD` 400. So the governed route does not depend on widening the door, and the \"last month\" wording stays.\n\nThe pin is a new top-level `describe` in the card's existing harness, `packages/qa/scenarios/test/travel-expense.test.ts`:\n- `\"claims\"` alone stays a true tie: no hit, and a near miss on exactly `reimbursement.claimed_amount` and `reimbursement.claim_count`.\n- Each reworded ask, in en and zh, writes a word that is a hit on its truth's measure alone.\n\n## Tests\n\n<details><summary>Per-card pin, reverse check, package suite</summary>\n\n- `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 --reporter=verbose test/travel-expense.test.ts`: 14/14, the four new cases green.\n- Reverse check: I put origin/main's card back on disk (old-ask count 1) and the run went red, `Tests 3 failed | 11 passed`: the three \"ask writes a word…\" cases failed. The true-tie case stays green on both wordings, as it should, since the datasets did not change. I restored with `git checkout HEAD --`, and the HEAD blob hash matched.\n- `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2` (whole package): 38/40 files and 1191 tests passed. The 2 build-fixture files needed `dist/`; after `pnpm --filter @objectstack/scenarios build` they passed 2/2 (14 tests). The packed library carries the new card (`dist/library/docs/qa/scenarios/travel_expense.json`).\n- `pnpm --filter @objectstack/scenarios typecheck`: exit 0.\n</details>\n\n## Acceptance notes\n\n- The changeset is a patch for `@objectstack/scenarios`, because the package ships the open card library in `dist/library`.\n- The new pin uses the scenarios package's own `hitsOf` / `isNearMiss` (`src/datasets.ts`, the platform's `normalizeDatasetTerm`), not the service-analytics matcher, so the package gains no dependency. The real matcher's answers above come from a one-off probe in this PR's measurement phase, not from a kept test.\n\n## Verification\n\n- Two minutes: `pnpm --filter @objectstack/scenarios exec vitest run test/travel-expense.test.ts -t \"measure's own word\"`. Expect 4 passed.\n- First read: `docs/qa/scenarios/travel_expense.json`, the three `ask` lines. They are the whole behaviour change.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

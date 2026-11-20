@@ -1,0 +1,37 @@
+{
+  "number": 35758,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): ban and unban write the admin audit row; the remove-sso-user row is named in the ledger note and docs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T06:00:03Z",
+  "updated_at": "2026-11-20T07:57:44Z",
+  "closed_at": "2026-11-20T07:57:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T07:57:42Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35758",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoA1ALjVcUcAuAA15MyUocBx)_\n\nFixes #35440\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化：平台管理员封禁或解封用户后，审计日志里多一条写明是哪位管理员操作的记录；认证文档和接口清单写明了“移除待加入人员”会留下的审计记录。\n- 为什么做：管理员审计跟进项。其他管理员用户操作都会写这条记录，只有封禁和解封没有；在没装管理插件的环境里，原来的记录写的是“系统”，查不到是谁封禁的。\n- 出错会怎样：审计记录写失败不影响封禁或解封本身，只会在日志里留一条警告；改动可以直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n- `admin/ban-user` and `admin/unban-user` now write one admin audit row for a change that committed, through the shared `writeAdminAudit` the other admin user doors use (create-user, set-user-password, add/import/remove SSO user): `action: 'update'` on the target `sys_user`, naming the administrator, with `metadata` `{ event: 'user.admin_banned' | 'user.admin_unbanned', hostNotified }`. A refused ban or unban writes no row. The ban writes themselves are unchanged (the maintainer ruling recorded in `admin-ban-endpoints.ts` stands).\n- `AdminAuditDecisions` gains the two events. The ban reason and expiry are fields of the user, so they stay on plugin-audit's mirror row and are kept out of `metadata`, as that type's docblock requires.\n- The route ledger note for `POST /api/v1/auth/admin/remove-sso-user` and `content/docs/permissions/authentication.mdx` now name that door's `user.admin_removed_pending` row (action `delete`, written only on a committed removal). The ban/unban paragraph of the doc names the new rows.\n\n## Why\n\nItem 2 of the card asked to measure whether plugin-audit's mirror row already covers a ban. It does not:\n\n- With the admin plugin, the ban write reaches the engine as `{ isSystem: true, attributedUserId: ADMIN_ID }`, so the mirror row names the admin. But it is a plain `update` field diff, with no event and no `hostNotified`.\n- Without the admin plugin (`engineUserBanWriter`, the managed Free/Team case), the write reaches the engine as `{ isSystem: true, positions: [], permissions: [] }`, with no `attributedUserId`. So the mirror row records the ban as the system. There, no row named the administrator who banned.\n\nMeasured by a throwaway spy on `engine.update` in the shared route harness (not committed). Real route, both kernels, ban then unban:\n\n```text\nMEASURE adminPlugin=true  context {\"isSystem\":true,\"attributedUserId\":\"ADMIN_ID\"}  sys_audit_log rows: []\nMEASURE adminPlugin=false context {\"isSystem\":true,\"positions\":[],\"permissions\":[]} sys_audit_log rows: []\n```\n\nThat rules out an exemption, so the doors now write the row.\n\n## Tests\n\nThe pins are in the shared route harness for these doors (`pending-sso-users.test.ts`, which already drives `admin/ban-user` / `admin/unban-user` over the real mount), in a new `[#35440]` describe:\n\n- With the admin plugin off and on: one ban plus one unban write exactly two `update` rows. Each names the admin as `user_id` / `actor` on `sys_user` / the target, with metadata `user.admin_banned` / `user.admin_unbanned` and `hostNotified: true`.\n- With no host wired, the row carries `hostNotified: false`.\n- CONTROL: a host-refused ban (409), a self-ban (400) and a member-cap-refused unban (403) write no row.\n\n<details><summary>Readings (final head 0f9dc05fa5, after merging origin/main)</summary>\n\n- `pnpm --filter @objectstack/plugin-auth typecheck && pnpm --filter @objectstack/plugin-auth test`: `check:test-typecheck: OK`; Test Files 287 passed (287), Tests 6070 passed | 10 skipped (6080). Lock VERDICT command-exit 0. The pre-merge head 64d7c506 read 287/287 files and 6053 passed.\n- Ablation, on the committed fix at 64d7c506: `scripts/ablation-replace.mjs --delete` of the ban door's `auditBan` call. The anchor went 1 to 0 and the blob from 6f0477963c20 to 1fe3fd0e2ff3. The `[#35440]` describe then went 4 of 4 red: the CONTROL's committed-ban leg asserts the row too. On restore the blob matched HEAD again (6f0477963c20) and `git diff HEAD` was empty. Plugin-auth tests import `src`, so no dist rebuild sits between the mutation and the run.\n\n</details>\n\n## Acceptance notes\n\n- **Deviation from the claim's surface:** `admin/ban-user` and `admin/unban-user` have no ledger note to amend. They appear only in `BETTER_AUTH_MOUNTED_SURFACE`, the list of vendor routes the raw mount shadows, with no note string. The new rows are named in `admin-ban-endpoints.ts`'s header and in the doc instead.\n- **Out of scope, reported to the seat:** without the admin plugin, the mirror row for the ban columns is still attributed to the system, because `engineUserBanWriter` passes a bare system context with no attributed user. The explicit row added here is now the trail that names the administrator. Fixing the mirror row's attribution is a change to `user-ban-write.ts`, outside this claim.\n- A failed audit insert keeps the existing `writeAdminAudit` posture: it never fails the answer and logs one `warn`.\n\n## Verification\n\nRead first, by risk:\n1. `packages/plugins/plugin-auth/src/admin-ban-endpoints.ts`, the `auditBan` helper and its two call sites. Each call sits after the committed write (and, for a ban, after the session revocation), so no refusal path reaches it.\n2. `packages/plugins/plugin-auth/src/admin-user-endpoints.ts`, the new `AdminAuditDecisions` member. It is closed to decisions only, with no field value of the user.\n3. `packages/plugins/plugin-auth/src/pending-sso-users.test.ts`, the `[#35440]` describe.\n\nTwo-minute check: `pnpm --filter @objectstack/plugin-auth exec vitest run --maxWorkers=2 src/pending-sso-users.test.ts -t 35440`. Expect 4 passed.\n\n<details><summary>Local gate subset (head 0f9dc05fa5)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 104 families, and all 104 ran with exit 0 (`--ran`: 104 derived, 104 run, 0 UNRUN). Exit codes were captured per command before any pipe. On the pre-merge head, `check:skill-examples` and `check:dual-build-cjs-loads` answered PREREQUISITE NOT MET (unbuilt dist); they measured once the closure was built.\n- `node scripts/check-platform-checklist.mjs --changed-from origin/main`: OK, 0 anchors lost.\n- `node scripts/pm/overlap-check.mjs --branch=HEAD`: VERDICT clean (main, #35664 and #34738 merge cleanly).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibyy9KSA69EGZtjDj9c\n"
+}

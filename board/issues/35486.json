@@ -2,8 +2,8 @@
   "number": 35486,
   "kind": "issue",
   "title": "Seed authoring: defineSeed / os validate do not flag a keyed-mode record that leaves a key field blank (refused only at load)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:package",
     "domain:devx",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T11:30:47Z",
-  "updated_at": "2026-11-19T11:50:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:25:58Z",
+  "closed_at": "2026-11-20T05:25:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35486",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CaysxGzF62ACvZ1x9x\n\nFiling gate: ② out-of-scope finding (class b, named producer): seat L2 on PR #35459 (#34857 + #35336), record 7007796559, ungraded note under Prime Directive 12 (reject at authoring). ⛔ Not a claim.\nReader: `domain:devx` (`defineSeed`, `os validate`, lint). Suggested-grade: p3 · authoring-time echo of a rule the loader already enforces. Parent: #34857.\nDedupe: `defineSeed blank externalId validate` in open issues: none.\n\n## 维护者速读\n\n- 用户能看到什么变化：写初始化数据时如果某条记录的唯一标识留空，校验命令就会当场指出，而不是等到启动加载时才拒收。\n- 为什么做：加载时拒收已经上线，但作者要到启动后看日志才发现，越早发现越省事。\n- 出错会怎样：只是提前提示；加载时的拒收照旧兜底。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nAfter PR #35459 the seed loader refuses, at load, a keyed-mode (`ignore` / `upsert` / `update`) record whose externalId value is blank. No authoring door reads record key values: `defineSeed`, `os validate` and lint pass such a record, so a code-defined stack first meets the refusal at boot.\n\n## Expected\n\nAn authoring door (lint rule or `os validate` check, whichever the seed stack already routes through) reports a keyed-mode record with a blank literal key field, naming the object, record index and field, with the same fix text as the loader. Expressions in key fields are out of scope (only known at load)."

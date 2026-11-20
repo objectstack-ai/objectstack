@@ -2,8 +2,8 @@
   "number": 33932,
   "kind": "issue",
   "title": "Audit seal lock: bound the isHeld probe, release and close so a stalled connection cannot hang the sealer or --apply",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T14:33:22Z",
-  "updated_at": "2026-11-19T06:09:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T08:03:53Z",
+  "closed_at": "2026-11-20T08:03:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33932",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cyNkH7W7e89m6j4aQq\n\nFiling gate: **② a finding from a dispatched card.** Review of #33675 (Part of #31908, slice P4b3, ADR-0154 D3 as amended in #33489), record 6894679963, item N3: `isHeld()` on the audit seal lock session runs `select 1` with no timeout. The seat ruled it out of scope for that PR's must-fix and asked for this card.\n\n## Maintainer quick read\n\n- Problem: the sealer and `os migrate audit-* --apply` check that their database session lock is still held with an unbounded probe. When the database connection stalls half-open, with no reply and no reset, that check can hang, and so can the sealer pass or the `--apply` run that waits on it.\n- To do: make the hold's whole finish path bounded: the liveness probe, the lock release, and closing the raw connection. Bounding `isHeld()` alone is not enough, because `release()` and `destroyRawConnection` wait on the same stalled transport.\n- Needed from you: nothing; the server lane picks it up.\n\n## Where\n\n- `packages/objectql/src/database-session-lock.ts`: `isHeld()` (`select 1`), release, and the raw-connection close.\n- `packages/plugins/plugin-audit/src/audit-seal/seal-lock.ts`: the hold's `finish()` and the sealer pass's lock cover, which call them.\n\n## Done when\n\n- A stalled connection cannot hang `finish()`. The probe, the release and the close each time out, and a timed-out probe reads as a lost lock: the run reports the lost session at error, names `os audit verify`, and exits non-zero, as an ended session does today.\n- A pin with a fake connection that never answers proves each leg is bounded, and an ablation turns the pin red.\n- The schema-migration lock keeps its statements and behaviour unless the change is declared.\n\nBlocked-by: #33675 (the hold and `isHeld()` land there).\nRelated: #31908, #33489, #33675.\n"

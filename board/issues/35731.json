@@ -1,0 +1,33 @@
+{
+  "number": 35731,
+  "kind": "issue",
+  "title": "ADR revisions, week of 2026-11-20: rolling checklist of ADR text out of step with main (one governed PR)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T03:52:37Z",
+  "updated_at": "2026-11-20T07:14:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35731",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed. Ruling-ref: the maintainer, 2026-11-20 ~04:0xZ, verbatim: 「adr接受你的建议」, accepting triage's proposal: ADR amendment requests that already name a concrete change are collected on one rolling card per week and land as one governed `docs/adr/**` PR, instead of one card and one Tier H approval each. ⛔ Not a claim.\n\n## 维护者速读\n- 是什么：本周所有「ADR 写的和现在代码不一致」的修订，收在这一张卡里，一次合成一个 PR，你只批一次。\n- 为什么：AI 席位改代码前会读 ADR；ADR 与代码矛盾会把 AI 带偏。\n- 收录规则：只收与主干矛盾的；纯补记、不矛盾的不收。\n- 要你做什么：PR 好了以后批一次（`docs/adr/**` 需你亲手批）。\n\n## How this card works\n- One checklist row per ADR passage that disagrees with `main`. A seat that finds a new one appends a row here (ADR, section, what it says, what is true now, the landing PR) instead of filing a card.\n- Each row lands as an append-only dated note; the original decision text is not rewritten.\n- A row whose prerequisite PR has not merged stays unchecked; the PR carries only rows whose code is on `main`.\n- The card closes when its PR merges; next week's rows open a new card of this name.\n\n## Rows (carried from the five single cards closed 2026-11-20 on the maintainer's word; their bodies hold the full detail)\n- [ ] **ADR-0090 D10 rule 4 and its 2026-09-20 note; ADR-0151 \"Leaves unchanged\"** (from #34057): they describe `ExecutionContext.performedBy` as the OAuth client only. #33786 / PR #34018 adds a second, server-constructed producer (the in-product AI path: `agentId`, `conversationId`, `confirmationId`). Prerequisite: PR #34018 merged.\n- [ ] **ADR-0113 \"Author-time fence\"** (from #35477): says every formula read in a required field's `visibleWhen` warns. #35190 / PR #35475 narrows the warning to formulas the author-time check cannot evaluate. Prerequisite: PR #35475 merged. Also fix any `skills/**` quote of the old sentence in the same PR.\n- [ ] **ADR-0149 \"Leaves unchanged\"** (from #34309): still lists `/analytics/dataset/query` as unchanged. By the maintainer's ruling 6902027136 on #34005, every dataset face (REST single and batch, `query_dataset`, the MCP bridges, the publish build probes) answers declared members only. Prerequisite: PR #34198 merged.\n- [ ] **ADR-0126, four code-only rows (lines ~88, ~154, ~179, ~497)** (from #35503): list `capability` as code-only. PR #35261 (`6ffa816e55`, merged) made it runtime-creatable on the maintainer's ruling 6999763503 (overlay stays closed). Prerequisite: met.\n- [ ] **ADR-0090, D9 neighbourhood** (from #33011): add the sentence that the platform baseline contribution channel is for always-on platform services only (condition 2 of ruling 6837170004 on #32754), naming the interface PR #32932 added. Prerequisite: PR #32932 merged. Re-anchor any `scripts/adr-anchors/**` entry the edit moves.\n\nNot carried (pure additions with no contradiction, closed on the maintainer's word): #35657, #35088, #34820."
+}

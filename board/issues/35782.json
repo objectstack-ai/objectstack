@@ -1,0 +1,35 @@
+{
+  "number": 35782,
+  "kind": "issue",
+  "title": "Audit seal lock: bound the acquire leg (tryLock, marker, heldAmong, wait) so a stalled connection cannot hang the sealer or --apply before it holds the lock",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T07:38:26Z",
+  "updated_at": "2026-11-20T07:47:46Z",
+  "closed_at": "2026-11-20T07:47:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35782",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibwJEh7hMPPvagWM1g7\n\nFiling category: out-of-scope follow-up from #33932 (PR #35779, L1 7033450596 point 4), filed by the seat area d7-B. ⛔ Not a claim.\nDedupe: `repo:objectstack-ai/objectstack is:issue` with `tryLock heldAmong` and `session lock acquire stalled` → only #33932, the hold-side twin.\n\n**Business reason.** An operator relies on the sealer to write checkpoints on schedule, and on `os audit seal --apply` to finish or fail loudly. If the database connection stops answering while the lock is being taken, the pass waits forever before it holds anything. No checkpoint is written, nothing is logged, and `--apply` never exits. The audit log then goes unsealed with no signal, which is the gap an auditor asks about. #33932 closed the same hang on the hold side (probe, unlock, close). This card is the acquire side.\n\n## What is wrong\n\n`packages/objectql/src/database-session-lock.ts` (at PR #35779's head): `tryLock` (~235), the marker statement (~243-248), `heldAmong` (~250) and the blocking wait in `acquireDatabaseSessionLock` each send a statement with no answer bound. Their callers are `plugin-audit` `audit-seal/seal-lock.ts` (~196 `tryDatabaseSessionLock`, ~205 `acquireDatabaseSessionLock`). A connection that never answers (a half-open socket, a stalled proxy) hangs the sealer pass or the `--apply` run before it starts.\n\n## Done when\n\nEach acquire-side statement is bounded the way #35779 bounds the hold side, with the same `withinAnswerTime` and constant. A timed-out acquire reads as \"not taken\": no checkpoint is written, the sealer logs it, and `--apply` exits non-zero naming the stalled connection. A never-answering fake pins every leg, with a live-session control. The blocking wait's own timeout semantics are kept or declared.\n\nSize M · area:data · domain:server · Clause-② expected no (no new export, no accept set moves)."
+}

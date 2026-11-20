@@ -1,0 +1,37 @@
+{
+  "number": 35736,
+  "kind": "pull_request",
+  "title": "fix(audit): an aggregate bulk call's invocation row records its per-row counts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T04:30:21Z",
+  "updated_at": "2026-11-20T05:56:23Z",
+  "closed_at": "2026-11-20T05:56:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T05:56:21Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35736",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao6bxiPKCvVuzoFTExumbxoz)_\nFixes #34292\nClause-②: yes\nMetadata-protocol: none\n\n## 维护者速读\n\n- 管理员在审计日志里查看批量操作记录时，一次部分失败的批量动作除了仍标「成功」外，还会写明选中几行、成功几行、失败几行、未确认几行；以前只有「成功」两个字。\n- 属于批量操作结果如实呈现这一组工作，替审计合规读者解决「部分失败被记成全部成功」的问题，并与控制台批量对话框的计数规则保持一致。\n- 只影响带选中行列表的批量动作的审计行；若计数有误，只是审计日志里多出的数字不准，动作本身的执行和返回不受影响，可直接撤回本次改动。\n- 无。\n\n## What changes\n\nRuling (verbatim, maintainer 2026-11-19T05:04Z): 「B 仍记成功,加行数」 — seat ruling record 7000299515: the invocation audit outcome stays `succeeded`; when the request carries `_selectedIds` and the resolve value reads under `BulkActionResultSchema`, the row also records selected / succeeded / failed / unconfirmed counts; when it cannot be read, one \"unreadable\" key and no succeeded count.\n\n- **One reader, in the runtime.** `actionInvocationBulkReading(params, result)` (`packages/runtime/src/action-invocation-audit.ts`) reads an answered call's resolve value against its `params._selectedIds`, with the console's aggregate reader's rules (`readAggregateResult`, `ui/packages/plugin-grid/src/hooks/useBulkExecutor.ts`): no `_selectedIds` array, or a value with neither a `succeeded` nor a `failed` own member, records nothing; a value carrying one that fails `BulkActionResultSchema` reads `{ unreadable: true }`; a parsed value is counted with ids outside the selection dropped, duplicates once, an id in both lists failed, a selected id in neither list unconfirmed. No shared reader existed in `packages/spec` or the runtime (the console's lives under `ui/`, which the runtime cannot import), so this is the server's one copy, built on the same spec schema.\n- **The writer sites.** The invocation row is written from three places: the REST `POST /actions` door and a host's `dispatchAction` (`runResolvedActionAsRest`, `action-dispatch.ts`), the MCP `run_action` tool (`invokeBusinessAction`, `action-execution.ts`), and the MCP `resume_run` tool (`domains/mcp.ts`). The first two now hand the event a `bulk` member on an answered call; `AdmittedActionCall` carries the admitted `params` so both read the same bag. `resume_run` is unchanged: its request carries the screen's values, never `_selectedIds`, so the ruling's condition never holds there. The row itself is built by `buildActionInvocationAuditRow` (`plugin-audit`), which now writes the reading into the existing `metadata` JSON — `bulk_selected`, `bulk_succeeded`, `bulk_failed`, `bulk_unconfirmed`, or `bulk_unreadable: true` alone — on a `succeeded` row only. No new column; `sys_audit_log`'s declared fields are unchanged.\n- `ActionInvocationAuditEvent` gains an optional `bulk` member in both packages; `@objectstack/plugin-audit` exports `ActionInvocationBulkReading`. That is the public-surface widening `Clause-②: yes` declares. Nothing a metadata author writes changes (`Metadata-protocol: none`).\n\n## Tests\n\nPins sit in the two existing harness files as top-level `describe` blocks named for this card:\n\n- `packages/runtime/src/action-invocation-audit.test.ts`: on both the REST and MCP doors, a partial resolve (`3/1/1/1`), an all-succeeded resolve, an unreadable resolve, the resolve-nothing control (still `succeeded`, no counts), and a call with no `_selectedIds`; a throwing handler records `failed` and no counts; the four counting rules and the neither-member / neighbour-shape cases on the reader.\n- `packages/plugins/plugin-audit/src/action-invocation-audit.test.ts`: the row read back through a real engine for the counts and the unreadable mark; no bulk key without a reading, and none on a failed row.\n\n<details><summary>Readings at 78e4446ec9 (tests, typecheck, ablation)</summary>\n\n- `pnpm --filter @objectstack/runtime test`: Test Files 631 passed (631), Tests 11662 passed, 25 skipped. `pnpm --filter @objectstack/plugin-audit test`: Test Files 103 passed (103), Tests 1727 passed.\n- `pnpm --filter @objectstack/plugin-audit typecheck` and `pnpm --filter @objectstack/runtime typecheck`: exit 0, both test layers OK.\n- Ablation, runtime (via `scripts/ablation-replace.mjs`, anchor 1 to 0, restored blob == HEAD): the reader made to record nothing for every call turns 8 of the 45 harness tests red: partial, all-succeeded and unreadable on both doors, the four counting rules and the neighbour-shape case. The resolve-nothing control, the no-`_selectedIds` case and the throwing handler stay green.\n- Ablation, plugin-audit (same tool, restored blob == HEAD): dropping the row's bulk keys turns 2 of 17 red: the partial counts and the unreadable mark.\n\n</details>\n\n## Acceptance notes\n\n- `BulkActionResultSchema`'s docblock no longer carries `[PLANNED — not enforced]` on `origin/main` (the console reader's landing removed it), so this PR does not touch `packages/spec`.\n- An `api` action that forwards to another action route writes two rows; each records the counts its own door read off its own answer.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/runtime exec vitest run --maxWorkers=2 src/action-invocation-audit.test.ts` — expect the `[#34292]` block green, 45 tests passing.\n\nRead first: `packages/runtime/src/action-invocation-audit.ts` (`actionInvocationBulkReading`, the counting rules), `packages/runtime/src/action-dispatch.ts` (`runResolvedActionAsRest`: counts only on an `answered` outcome), `packages/plugins/plugin-audit/src/action-invocation-audit.ts` (`bulkMetadata`, written on `succeeded` rows only).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwJEh7hMPPvagWM1g7)_\n"
+}

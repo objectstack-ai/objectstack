@@ -1,0 +1,33 @@
+{
+  "number": 35749,
+  "kind": "issue",
+  "title": "List inline edit: drop the Options menu's dead toggle props and retire the toggle's two pack words",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T05:07:10Z",
+  "updated_at": "2026-11-20T05:49:45Z",
+  "closed_at": "2026-11-20T05:49:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35749",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTC8kn7AdeMpMmyhJG\n\nFiling gate: ④ child of the coordination parent #35683 (list inline-edit redo). Source: topic #35683. Follow-up of PR #35747 (#35684 + #35687). The seat ordered it filed rather than carried in that PR.\n\n## What is left\n\nPR #35747 removes the list page's inline-edit mode and both of its toggles. `ListView` stops passing the toggle props to the Options menu, so the menu's toggle row is never drawn. The PR leaves `ViewSettingsPopover.tsx` alone because, at claim time, PR #35646 was rewriting it (#35646 has since merged). What stays behind, read at PR #35747 head `ef7ba2b4` (re-read on main before working):\n\n- `ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx`: the `showInlineEdit`, `inlineEdit` and `setInlineEdit` props and the toggle row they gate (test id `toolbar-inline-edit-toggle`).\n- The language-pack keys `list.inlineEditShort` and `list.inlineEditLabel` in all 11 locale packs. #35747 keeps them on purpose, so its `Clause-②` stays a pure widening.\n- `ListViewProps.onInlineEditChange` (deprecated by #35747 and never called) and the `'inlineEdit'` member of `ListPersonalizationPart`.\n\n## Why\n\nNothing changes for a user. A developer or an AI author reading the Options menu's props, the list's props or the packs still finds a toggle that no longer exists. They can wire it back, or write `onInlineEditChange` and expect it to be called.\n\n## Done when\n\n- The three props, the row, `onInlineEditChange`, the `'inlineEdit'` personalization member and the two keys are gone, or each one that stays names its reader.\n- Removing published props and pack keys narrows the public surface. The claim reads `Clause-②: no (narrowing)`, so the PR owes a `CONTRACT_REVIEW_TIER` L2 and a breaking changeset that carries the FROM → TO line for each removed name.\n\nBlocked-by: #35747\n\nGrading: area:ux · Task · p3 · reach: no user-visible effect (dead props and published words left by a merged removal) · evidence: read on the PR #35747 branch at `ef7ba2b4`.\n\nReader: area b1-I of repo:objectstack#1 once PR #35747 merges, or the `domain:ui` lane.\n\nDedupe: `showInlineEdit` (objectstack issues, open and closed) → 1 (#35684, the parent removal itself); `inlineEditLabel` → 1 (#35684); `\"inline edit\" toggle` open → 4, none about these props."
+}

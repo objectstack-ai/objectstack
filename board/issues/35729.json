@@ -1,0 +1,36 @@
+{
+  "number": 35729,
+  "kind": "issue",
+  "title": "图表视图的视图栏没跟上列表左对齐：左右边距 sm:px-4、图标 22，与列表视图栏（#35663 后 sm:pl-2.5 / 图标 16）不一致；顺带清掉闲置的 inSetup 依赖",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T03:46:22Z",
+  "updated_at": "2026-11-20T11:08:36Z",
+  "closed_at": "2026-11-20T11:07:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35729",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（#35663 / PR #35706 的 L1 记录 7029715490 第 R2 条）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（PR #35706 头 `829219f7` 读源码，未在公开入口实测）\n\n- #35663 把列表视图栏改成 `sm:pl-2.5 sm:pr-2`、视图图标距左 16（`ui/packages/plugin-list/src/listToolbarRow.ts` 的 `TOOLBAR_ROW`）。\n- 图表视图在 `ui/packages/app-shell/src/views/objectViewListRenderer.tsx` ~373 有自己一份视图栏（`chartPage`，`border-b px-2 py-1.5 sm:h-10 sm:px-4 sm:py-0`），宽屏下图标仍在 22，和列表视图切换时左起点会跳。\n- 同文件 `inSetup` 在 #35663 去掉行号宿主行后，只剩 ~1145 的 memo 依赖数组里一处，已无用。\n\n## 要做的\n\n- 图表视图栏复用列表视图栏的同一份间距（`TOOLBAR_ROW` 或同值），宽屏图标距左 16、右缘 16；375 宽不变。\n- 从 memo 依赖里删掉闲置的 `inSetup`，若 `inSetup` 不再有其他读者，一并去掉它的取值。\n\n## 验收\n\n- 1280 宽下列表视图与图表视图切换，视图图标左起点都在 16，不跳；375 宽与现状一致。\n- 有一条几何钉测（可沿用 #35663 的几何 spec 加图表一格）。\n\nReader: area:ux（列表页重做专题 #35547 一线）。\n\nDedupe: `chart view bar left edge`（objectstack，open）→ 只有 #35663 本身。"
+}

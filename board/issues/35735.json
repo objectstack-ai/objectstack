@@ -1,0 +1,33 @@
+{
+  "number": 35735,
+  "kind": "issue",
+  "title": "Client filter grammar: a non-boolean $null / $exists flag (an object, a string) is read by truthiness in convertFiltersToAST and the value data source, where the spec door refuses it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T04:30:21Z",
+  "updated_at": "2026-11-20T12:13:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35735",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Out-of-scope finding of the #35493 dev (os-dev-report 7030059306), confirmed fileable with a wider reach by the CONTRACT_REVIEW_TIER review of PR #35604 (record 7030429102, §③). Dedupe: `$null $exists truthiness` (2 open hits: #35493, the comparand card this came from, and the triage seat post), `value data source comparand reference` (no card on this).\n\n## What happens (read at `origin/main` `a3a74f27`)\n`SpecialOperatorSchema` declares `$null` and `$exists` as `z.boolean()` flags, and the spec's comparand-type door refuses a non-boolean flag (both operators are in `SCALAR_COMPARAND_OPERATORS`). Two client faces read the flag by truthiness instead:\n- `convertFiltersToAST` (`ui/packages/core/src/utils/filter-converter.ts`, the `$null` / `$exists` arm, about :880–888) lowers `{ f: { $null: { owner: 'u1' } } }` to `['f', 'is_null', true]` and `{ f: { $exists: 'no' } }` to `['f', 'is_not_null', true]`. On every route that lowers through it, a server-backed source answers the null-ness rows and the server's door never sees the flag.\n- `ValueDataSource`'s `matchesDollarOperator` (`ui/packages/core/src/adapters/ValueDataSource.ts`) answers the same filters by truthiness: the dev's probe at `b65488a8` read `{ f: { $null: { owner: 'u1' } } }` → the IS NULL row, `$exists` with an object → the non-null rows.\n\nreach: published `@object-ui/core` exports (`convertFiltersToAST`, `ValueDataSource#find`): a filter the platform refuses with `INVALID_FILTER` / 400 answers rows instead. Measured by the dev's probe on the value source; the converter arm read from code.\n\n## Done when\n`$null` / `$exists` take a boolean flag on all three faces (converter, value source `$` arm, value source AST arm), as `$empty` already does: a non-boolean flag is refused with a named sentence, a pin per face, CONTROL `true` / `false` unchanged. One PR across the converter and both arms, so the object form and its lowered form never split. Narrowing of published exports: `Clause-②: no (narrowing)` with BREAKING and an ADR-0087 marker.\n\n## Business rationale\nDevelopers and AI agents build list and dashboard filters in the console and in previews; a typo'd flag (`$null: 'true'`, an object) silently answers rows instead of telling them the filter is wrong, while the same filter is refused on a server-backed object. Reader: the area:data lane seat that holds the client filter grammar (d7-C), one PR.\n\nGrade: p2 · area:data · Bug · developers and previews, sometimes · evidence measured (value source) and read (converter); same class as #35493 (p2)."
+}

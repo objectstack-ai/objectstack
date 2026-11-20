@@ -1,0 +1,32 @@
+{
+  "number": 35813,
+  "kind": "issue",
+  "title": "pm-dispatch skill: for p1 cards the L1 review thread starts the isolated L2 in parallel with L1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T09:24:26Z",
+  "updated_at": "2026-11-20T09:28:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35813",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\n## Problem\n\n`references/contract-review.md:18` says the dispatching seat runs the contract review (「谁跑 = 派发席,档经子代理或卡线程取」). In a project, that serialises the two reviews: the card thread hands back, L1 runs, and only then does the seat or card thread start the isolated L2. Each wait costs a wake and a full context re-read.\n\n## Ruling\n\nThe maintainer ruled the lean flow for every p1 card. The ruling record is the first comment on this card; the PR's `Ruling-ref:` cites it.\n\n## What changes\n\n- `references/contract-review.md:18`: for a p1 card dispatched to a card thread, the L1 review thread starts the isolated L2 sub-agent at the same time as its L1, only when the card owes L2. The template brief is still posted before the record; independence and tier evidence are unchanged. Both opinions go back to the seat together, and the seat adopts the L2 record as today.\n- `references/dispatch-runbook.md`, card-thread section: the same hand-back path in one line, and the card thread builds itself with no `os-dev` sub-agent (it already reads `os-dev.md`, the order, the card and its comments, not `SKILL.md`; keep that).\n- The L1 lane file that names what the L1 thread does (`references/lanes/l1-review.md` or wherever the L1 thread's duties live): add the L2 start.\n- Nothing else changes: the seat still claims, adopts, lands and closes out; S cards still run as sub-agents per #35784.\n\n## Constraints\n\n- `.claude/**` is governed: `Rule-change: ruled`, one `Ruling-ref:` line; the L2 record must read `Rule-change-verified: ruled`.\n- Byte ratchet at headroom 0: compress the same file first; a raise needs the ruling record id and the measured delta per file.\n\n## Done when\n\n- `contract-review.md` and the card-thread section name the L1 thread as the L2 starter for p1 card-thread cards, running in parallel with L1.\n- `check-skill-line-ratchet.mjs` passes."
+}

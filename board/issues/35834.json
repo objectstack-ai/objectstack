@@ -1,0 +1,32 @@
+{
+  "number": 35834,
+  "kind": "issue",
+  "title": "Value data source: under $or a refused comparand or flag is judged per row, so the sibling branch still serves rows for a filter the converter and the server refuse whole",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T10:43:33Z",
+  "updated_at": "2026-11-20T10:49:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35834",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ①, Source: fleet. Should-fix S5 of the CONTRACT_REVIEW_TIER review of PR #35832 (#35735 fold group), record 7037477278, where it is named as a standing design that predates that PR and is routed to a card. Dedupe: `value data source $or refusal per row` and `loweringConditionRefusal walk` find no card.\n\n## What happens (read at PR #35832 head `0c86f9c32`)\n`ValueDataSource` (`ui/packages/core/src/adapters/ValueDataSource.ts`) refuses a bad comparand or flag per node and per row (`refuseFilterNode` inside the matcher). Under `$or`, a row that satisfies another branch never reaches the refused node. So `{ $or: [{ id: 'a' }, { nickname: { $null: 'no' } }] }` answers row `a`, and logs only if some row fails the first branch. `convertFiltersToAST` throws for the same object, and the server answers 400. With the `{ $now, addDays }` anchor, it answers a subset of what the server serves. `loweringConditionRefusal` already describes this hazard and closes it up front, but only for a zero-key or non-plain condition. `$empty` has the same shape.\n\nreach: published `@object-ui/core` `ValueDataSource#find` (value-provider views, previews). A filter the platform refuses whole serves some rows. Read from code, not run.\n\n## Done when\nEvery per-node refusal the value source makes (the flag doors, `objectComparandRefusal`, `$empty`) is judged up front over the whole filter, as the zero-key condition is. A refused node anywhere refuses the whole filter, with no rows served. Pin it under `$or` and under nested `$and`/`$or`, with a CONTROL showing a valid `$or` unchanged. Narrowing: `Clause-②: no (narrowing)`, BREAKING, `!` title, dogfood battery.\n\n## Business rationale\nIn a preview, a filter with one bad branch should say it is wrong, not quietly show the other branch's rows while the same filter fails on the server. Reader: the area:data lane seat (d7-C), after PR #35832 lands (same file).\n\nGrade: p3 · area:data · Bug · previews with $or filters, rarely · evidence read."
+}

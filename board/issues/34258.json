@@ -2,8 +2,8 @@
   "number": 34258,
   "kind": "issue",
   "title": "metadata-protocol: the package-less withhold for an action judges the name's holders, not the row's (object, name) key, so an enabled holder on another object keeps a disabled key's customization served",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:package",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-16T02:52:43Z",
-  "updated_at": "2026-11-19T19:43:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:21:48Z",
+  "closed_at": "2026-11-20T05:21:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34258",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a product defect with a named location, read in review. Source: review-c's fresh contract record 6905931301 on PR #33995 (N1), and review#2's record 6903732565 (N1, holder predicates at two grains). Filed by area S5 (E1b), lease E1, as a follow-up of #33385/#33401.\n\n## 维护者速读\n\n- 问题：PR #33995 会在一个名字的所有持有者都被停用时，隐藏不带包的定制行。对动作（action）来说，回退判断 `disabledOnlyHolderOf` 看的是整个名字的持有者，不是这一行所在 (对象, 名字) 的持有者。\n- 影响：如果另一个对象上有同名动作的启用持有者，这一行即使所在键的持有者全部停用，仍会被返回（少隐藏，不会多隐藏）。需要三个包共用一个动作名才会出现。\n- 修法方向：按行的键判断；顺便把三处存储行持有者判断合成一个（review#2 N1）。\n- 优先级 p3，只随同文件的 p1/p2 PR 一起做。\n\n## Read (not measured)\n\nSeam: `packages/metadata-protocol/src/protocol-meta-item-face.ts`, `packagelessRowWithheldHolder`. For `action` with two or more holders on the row's owner key, the fallback `disabledOnlyHolderOf` judges the name's holders. `enabledRowHolds` is a third stored-row holder predicate, judged at the name's grain where the face's other two judge at the member.\n\n## Acceptance\n\n1. A package-less action row whose `(object, name)` key has only disabled holders is withheld even when an enabled package holds the same name on another object. CONTROL: an enabled holder at the row's key keeps it served. Pin and ablate.\n2. Use one stored-row holder predicate at the key's grain, or say in its docblock why the grains differ.\n3. Declare the FROM→TO with its Clause-② arm. Served→withheld is a narrowing.\n\nPrior rulings read: ADR-0150 D3/D4 and the #33385 / #33401 rulings PR #33995 implements. That PR must merge first, since this edits its new code.\n\n## Dedupe\n\nI searched \"disabledOnlyHolderOf\" and \"packagelessRowWithheld\" with no hits outside PR #33995."

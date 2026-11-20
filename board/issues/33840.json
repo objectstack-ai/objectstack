@@ -2,8 +2,8 @@
   "number": 33840,
   "kind": "issue",
   "title": "POST /api/v1/analytics/query with an empty `measures` and no dimensions answers 500 DATABASE_ERROR (the engine runs `SELECT  FROM`) instead of a 400 at the entry",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-15T11:53:46Z",
-  "updated_at": "2026-11-19T19:42:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T12:24:36Z",
+  "closed_at": "2026-11-20T12:23:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33840",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nReproduction (a557fa38, stock showcase `objectstack dev --seed-admin --no-compile`, fresh file DB, admin bearer):\n1. POST /api/v1/analytics/query  body `{\"cube\":\"showcase_delivery\",\"measures\":[]}`\n2. also `{\"cube\":\"showcase_delivery\",\"measures\":[],\"dimensions\":[]}` and `{\"cube\":\"showcase_task\",\"measures\":[]}` (auto-inferred cube)\n\nExpected: 400 VALIDATION_FAILED at the entry naming the problem (a query must select at least one measure or dimension), the way `filters`, retired keys, an empty cube name and an unknown measure are refused at the entry, and the way the dataset door already refuses a selection that names no measure (#33141).\nActual: 500 `{\"success\":false,\"error\":{\"code\":\"DATABASE_ERROR\",\"message\":\"Internal server error\",\"httpStatus\":500&#125;&#125;`; server log: `[sql-driver] DATABASE_ERROR — the backend refused a raw statement (SQLITE_ERROR) … near \"FROM\": syntax error`, stack through NativeSQLStrategy.execute → AnalyticsService.queryIn. Reproduced on two fresh boots.\nControl: `{\"cube\":\"showcase_delivery\",\"measures\":[],\"dimensions\":[\"showcase_delivery.status\"]}` → 200 (dimension-only is legal), so the gap is \"nothing selected\".\n\nMechanism: AnalyticsQuery `measures: z.array(z.string())` has no minimum and no cross-check with `dimensions` (packages/spec/src/data/analytics.zod.ts:982); the native SQL strategy assembles `SELECT ${selectClauses.join(', ')} FROM \"&lt;table>\"` with an empty list (packages/services/service-analytics/src/strategies/native-sql-strategy.ts:1635). Not new since 18.4.0 (same lines at 181ad7d4).\n\nSearched (open issues, none matching): \"analytics query empty measures 500\", \"analytics measures empty SELECT FROM\", \"analytics/query 500 no measures dimensions\", \"SELECT FROM syntax error analytics\".\n\nQA-source: #33829 · dashboards.cube-query · neg[2]"

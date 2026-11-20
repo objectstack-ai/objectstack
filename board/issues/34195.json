@@ -2,8 +2,8 @@
   "number": 34195,
   "kind": "issue",
   "title": "lint: a hop leaf through an injected lookup (record.owner_id.<field>) is judged at neither door",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:build",
     "domain:spec",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-16T00:40:14Z",
-  "updated_at": "2026-11-19T06:02:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:27:11Z",
+  "closed_at": "2026-11-20T05:27:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34195",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nOut-of-scope item carried by seat ruling 6901005939 on card #33435 (PR #34129).\n\nPR #34129 judges the null guard on the six injected system columns themselves (`owner_id`, `created_by`, `updated_by`, `owning_business_unit_id`, `queue`, `organization_id`) in flow and hook conditions. A condition that hops *through* one of them, such as `record.owner_id.name > ...` or a misspelt `record.owner_id.nmae`, is judged at neither `os build` nor the publish door. The hop's target object is not resolved for an injected lookup, so neither the leaf's existence nor its nullability is checked.\n\n**Ask.** Resolve the target of an injected lookup (the platform's user / business-unit / queue / organization objects) in the expression walk. Then judge the leaf as a declared lookup's leaf is judged: an unknown field is refused, and a nullable leaf needs the guard. Pin it with one refused misspelling, one guarded read accepted, and one unguarded ordering refused. Measure first whether any example or first-party package already writes such a hop."

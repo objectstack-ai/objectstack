@@ -1,0 +1,36 @@
+{
+  "number": 35726,
+  "kind": "issue",
+  "title": "rest: the cross-object batch refusal names the failing operation's index, so a multi-pick related-list add can say which record failed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T03:40:16Z",
+  "updated_at": "2026-11-20T10:09:59Z",
+  "closed_at": "2026-11-20T10:09:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35726",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ a measured finding of the #35601 dev (os-dev-report on #35601; PR #35725 open question). It is a child of #35601 (epic #35590) and is nested under it. #35601's acceptance (\"把其中一个改成会失败的，结果是一行都没加，并提示是哪一个\") is held open on this card: PR #35725 says `Part of #35601`.\nReader: `domain:server` (`packages/rest`), UI consumer in `ui/packages/plugin-detail` (`RelatedList.tsx`). Suggested grade: p2, the parent's grade.\nDedupe: `batch failing operation index`, `batch refusal op index` → only #35601.\nBlocked-by: #35601's PR #35725 (the UI consumer lands there).\n\n## 维护者速读\n\n- 用户能看到什么变化：在相关子表里一次添加多条、其中一条失败时，提示会指出是哪一条。\n- 为什么做：现在一次添加多条已经是全成或全不成，但失败提示只转述服务器的话，校验类错误说不出是哪一条。\n- 出错会怎样：只在失败的回复里多带一个「第几条」的信息，成功路径和全成全不成的行为都不变。\n- 要你做什么：无。\n\n## Facts\n\n- PR #35725 sends a multi-pick add as ONE `POST /api/v1/batch` (`atomic: true`, ADR-0119 D4, ADR-0035 backbone): all or nothing, verified live.\n- A refused batch answers e.g. `404 {error:'Record ID not found in showcase_contact', code:'RECORD_NOT_FOUND', userMessage}` with NO operation index (measured live by the #35601 dev). The message names the record for not-found / permission refusals, but not for validation refusals.\n- `packages/rest/src/batch-routes.ts` already tracks `index` per op for dropped-field events (~:429-491) and resolves `{ $ref: <opIndex> }`; the refusal path does not carry it.\n\n## Ask\n\nAdd the failing operation's index (and its object) to the cross-object `POST {basePath}/batch` refusal body, additively (a new optional key; Clause-② yes, widening — contract L2). Then have `RelatedList.tsx`'s add path name the picked record at that index in its error. Keep the rulings at `batch-routes.ts` ~:463 (#14147 option C) and ~:495 (A-prime) intact. Pin: a 3-pick add whose 2nd op fails reports index 1 and the UI names that record; CONTROL: success unchanged.\n\n⛔ Not a claim."
+}

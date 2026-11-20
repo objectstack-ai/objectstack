@@ -1,0 +1,33 @@
+{
+  "number": 35845,
+  "kind": "pull_request",
+  "title": "docs(adr-0035): note the overview body-table order after the open field sections",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T11:07:02Z",
+  "updated_at": "2026-11-20T11:16:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35845",
+  "body": "Part of #35742\n\n## What changes\n\nAdds one dated, add-only note to ADR-0035 (`docs/adr/0035-config-driven-master-detail.md`), directly under the 2026-11-19 amendment (#35597). No existing text changes.\n\nThe note records the overview order that PR #35824 shipped for #35742. The 11-19 amendment's clause \"under the header strip and above the field sections\" no longer holds. The details column now reads, top to bottom:\n\n1. the header strip (key fields and the stage bar);\n2. the field sections drawn open;\n3. the body tables, in the parent's `relatedLists` order;\n4. the field sections drawn closed that follow the last open one.\n\nThe note also records these cases:\n- A closed section between two open ones keeps its place.\n- When every section is drawn closed, the tables come last.\n- A field group whose `relatedList` names a table still places it.\n- An object with no stage bar and no key fields opens on its own fields.\n- The host's \"More details\" opens expanded, so it stays before the tables. This is seat ruling (2), 2026-11-20 10:12Z.\n\n## Why\n\nThe seat ruled on 2026-11-20 at 10:12Z that the ADR text must match the shipped order, as part of #35742's done-criteria. It also ruled that the note goes in its own small PR, so that #35824 stayed off the governed path.\n\n## Verification\n\n- `git diff origin/main` is +14 / −0 in one file. The note sits after the 11-19 amendment's last line.\n- `check-governed-merges --branch` reads `docs/adr/**`, so the PR is governed (Tier H). It lands by the maintainer's hand or an authorized approval.\n- The order stated matches `bodyTablePlacement` in `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts` on main, with the pins listed in #35824.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZrgaiMgTJCnswR6jQ\n"
+}

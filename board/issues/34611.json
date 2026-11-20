@@ -15,18 +15,20 @@
     "documentation",
     "domain:server",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T03:05:58Z",
-  "updated_at": "2026-11-19T05:07:22Z",
+  "updated_at": "2026-11-20T09:10:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34611",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: class a, review follow-ups owed by PR #34514 (card #34384, merged `e3ef29f49c`), passed on by area `o2-G`. Contract-review nits N1 and N2, and L1 deviation D1. Dedupe: `filter-normalizer notSet escape`, `dashboards.mdx 1,000`; no open card.\n\nreach (read from the reviews, not run here): three places in the text say more than, or something other than, what the code does.\n\n- N1: in `filter-normalizer.ts`, the JSDoc on the `const` branch and the comment in `collectFilterLeaves` give the reason \"a member is always named by the escape's `notSet` leaf\". That reason is incomplete.\n- N2: the #34514 changeset says \"Under `$not`\". That holds only for a single `$not`, so it should read \"Under one `$not`\".\n- D1: the first sentence of the 1,000-row paragraph in `dashboards.mdx` says an SQL datasource is not limited. That is wider than `query-syntax.mdx` lines 715–725, which state the actual limit.\n\nSuggested-grade: p3 · `domain:server`\n\n## 维护者速读\n\n- 现象：上一张分析卡合入后，审核留下的三处文字不准：两处代码注释的理由不全、一句更新说明多说了，一段文档比另一份文档说得宽。\n- 为什么要修：文档和注释是 AI 写应用时读的，说宽了会让它以为没有上限。\n- 需要你做的：无。\n\n## Change\n\nMake the two comments state the full reason, change the changeset sentence to \"Under one `$not`\" if it is still unreleased (otherwise fix the docs only), and make the `dashboards.mdx` sentence match `query-syntax.mdx`.\n\n## Done when\n\nAll three texts agree with the code and with each other.\n"

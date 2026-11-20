@@ -1,0 +1,32 @@
+{
+  "number": 35745,
+  "kind": "issue",
+  "title": "记录页两处：页签上方有约 48 的空白带；日期字段显示成「6天前」，和列表里的「11月13日」不一致",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T04:49:23Z",
+  "updated_at": "2026-11-20T12:33:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35745",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「更新并验证」。这是验证记录页几个已合入 PR（objectstack-ai/objectstack#35679、#35691、#35708）时看到的两处。\n\n## 现状（主干 `598a34d043`，本机环境，1280 宽，整页记录页，浏览器实测）\n\n1. **页签上方的空白带**：顶栏 48 加一行头部 44，头部底边在 92；页签一行的顶边实测在 140。中间约 48 是空的。没有阶段条的对象（会议、客户）都是这样，头部压成一行省下的高度又被这条空白占掉了。\n2. **日期显示成相对时间**：「会议」的「会议日期」是日期字段，值是 11 月 13 日。记录页上显示「6天前」，列表里同一条显示「11月13日」。同一环境里「销售商机」的「预计成交日期」是未来日期，记录页显示「2026年9月20日」。业务日期用相对时间，读的人要自己换算是哪天。\n\n![现状：页签上方的空白带，会议日期显示为 6天前](https://github.com/objectstack-ai/objectstack/blob/78a7ecc1dc57af6b6273a610d9a971199001efcc/record-redo/verify-meeting-overview.jpg?raw=true)\n\n## 要做的\n\n- 头部和页签之间不留空白带：没有阶段条时，页签一行紧跟头部，间距和列表页「页面栏到视图栏」一致。\n- 日期、日期时间字段在记录页上显示具体日期，写法和列表一致；相对时间只作为悬停提示或跟在后面的次要文字。创建时间、修改时间这类系统时间可以保留相对写法（页脚的「2天前」）。\n\n## 不做的\n\n- 不改互动页签里每条动态的相对时间。\n- 不改列表里的日期写法。\n\n## 验收\n\n- 「会议」记录页（没有阶段条）：页签顶边到头部底边的距离不超过 12。\n- 「会议日期」在记录页和列表里显示同一个具体日期。\n- 过去 7 天内、今天、未来的日期各验一条，都显示具体日期。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/RecordDetailView.tsx`（头部与页签之间的布局）、日期字段的只读显示（`ui/packages/fields`）。\n\nDedupe: `记录页 日期 相对时间`、`记录页 页签 上方 空白`（objectstack，open）→ 无同题卡。"
+}

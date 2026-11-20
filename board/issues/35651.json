@@ -2,8 +2,8 @@
   "number": 35651,
   "kind": "issue",
   "title": "pm scripts: a folded PR with two Fixes lines cannot pass label-write --land's dogfood gate, because deliveredCardNumber finds no single card",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:fleet",
     "bug",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T21:29:42Z",
-  "updated_at": "2026-11-19T21:31:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T06:19:39Z",
+  "closed_at": "2026-11-20T06:18:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35651",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: ① fleet-tool defect. Source: fleet. Seat 1's area b1-C hit it landing PR #35629 (fold of #35251 + #35252), and reported it at 2026-11-19T21:28Z. ⛔ Not a claim.\n\nGrade: left to triage. It does not block any fix today, because there is a workaround. But it works against the maintainer's standing order (2026-11-19 17:00Z: fold cards that share a file or mechanism into one PR by default), and every folded breaking or narrowing PR will hit it.\n\n## What happens\n\n`label-write.mjs --land` runs `landDogfoodGate` (`scripts/pm/label-write.mjs`, around line 1727) on a breaking or narrowing pull. The gate asks `deliveredCardNumber` (`scripts/pm/record-recognisers.mjs`, around line 2210) which card thread holds the `os-dev-report` with the `dogfood_battery`. A folded PR's body carries one `Fixes #N` per card, at equal strength. So `deliveredCardNumber` returns `card: null` (\"it delivers 2 cards at the same strength … not derivable from the pull request alone\"), and the gate refuses with \"no card\".\n\nThe workaround used on PR #35629 was to demote one line to `Part of #35252` and close that card by hand after the merge. That loses the auto-close and adds a manual step on every fold.\n\n`deliveredCardNumber` is shared. The queue guard uses it to pair a PR with the one card thread its contract-review record may sit on (`check-governed-queue-guard.mjs`), so any change has to keep that pairing unambiguous.\n\n## Expected\n\nA folded PR that names its chain head lands through `--land` with one `Fixes` per card. For example, a line-start declaration such as the claim's chain-head card could decide the tie, or the gate could accept the report on any delivered card's thread. The owner picks the shape. Either way the record pairing in the queue guard stays derivable, and the gate never reads a report it cannot locate.\n\n## Done when\n\n- `--land` passes on a fold whose body carries two `Fixes` lines and a dogfood report on the chain-head card, and still refuses when no delivered card carries one. Both are pinned in `label-write.mjs --self-test`.\n- `record-recognisers.mjs --self-test` and `check-governed-queue-guard.mjs --self-test` stay green, with a case for the tie-break.\n- `execution-duties.md`'s fold text points at the tie-break line, if one is added.\n\nWho acts: area:fleet (pm scripts)."

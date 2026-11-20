@@ -2,7 +2,7 @@
   "number": 35686,
   "kind": "pull_request",
   "title": "fix(spec): the save door reads ctx.text?.( as a literal text-key ask",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -24,10 +24,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T23:07:02Z",
-  "updated_at": "2026-11-20T01:46:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-20T02:22:51Z",
+  "closed_at": "2026-11-20T02:22:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T02:22:49Z",
   "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35686",

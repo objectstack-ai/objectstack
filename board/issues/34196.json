@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-16T00:41:08Z",
-  "updated_at": "2026-11-19T06:02:17Z",
+  "updated_at": "2026-11-20T05:18:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34196",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nOut-of-scope item carried by seat ruling 6901005939 on card #33435 (PR #34129).\n\nPR #34129 widened the null-guard index to injected system columns for flow and hook conditions only. Validation rules and `requiredWhen` keep the declared-field index, and both doors judge them over the authored object, so an unguarded ordering over `record.owner_id` / `record.organization_id` in a validation rule is still accepted at `os build` and at the publish gate. The two doors agree, so this is a coverage gap and not a disagreement.\n\n**Ask.** Measure when each injected column is populated relative to validation, and to the `requiredWhen` evaluation, on insert and on update. Where a column can still be null at that point, extend the nullable index for those sites at both doors and pin it. Where it cannot, record the measurement in the rule's comment and close this card."

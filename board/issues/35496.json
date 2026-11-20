@@ -13,18 +13,20 @@
   "labels": [
     "area:package",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T11:55:53Z",
-  "updated_at": "2026-11-19T12:50:50Z",
+  "updated_at": "2026-11-20T06:01:55Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35496",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: ① skills drift owed by a merged PR: PR #35391 (#34938, merged 89364b49ff) declares `Skills-docs: follow-up owed`, and the seat files that card after merge. ⛔ Not a claim.\nReader: `domain:skills` (`skills/objectstack-query/`). Suggested-grade: p2 · the published query skill does not teach a filter token the platform now resolves, nor the refusal on date columns. Parent: #34938.\nDedupe: `current_iso_week` in open issues: #35394, #35395, #35396 (code cards, not the skill text); `filters.md skills`: #33875 (nested relations), #31112 (rule homes). None covers this.\n\n## 维护者速读\n\n- 用户能看到什么变化：给 AI 用的查询技能说明会写上新的「本 ISO 周」周键占位符：它是什么、能用在哪种字段、用错会怎样。\n- 为什么做：#35391 新增了 `{current_iso_week}`，技能说明还没写。\n- 出错会怎样：只改说明；写错了重改即可，不影响运行。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nSince PR #35391, `{current_iso_week}` / `${current_iso_week}` is a period-key token (`PERIOD_KEY_TOKENS`) that filter placeholders resolve. `skills/objectstack-query/rules/filters.md`, section \"Date Macros (declarative filter metadata)\", lists the date macros only and says nothing about this token.\n\n## Expected\n\nIn the \"Date Macros\" section of `filters.md`:\n1. Add `{current_iso_week}` / `${current_iso_week}` as a period-key token, in a sibling list beside the date macros. It is not a date macro.\n2. It resolves to the ISO week key `YYYY-Www`, in the workspace time zone, weeks starting Monday, with the ISO week-year at year edges (2027-01-01 is `2026-W53`).\n3. It is for text week-key fields only. On a date, datetime or time field it is refused with `INVALID_FILTER` / 400, exactly as the literal key would be. For date columns, use `{current_week_start}` / `{current_week_end}` or `this_week`.\n4. A date dashboard default and `calendar.initialDate` refuse it. A text default accepts it and shows the resolved key. It must be the whole value, not part of a string.\n5. In the scope paragraph, name `resolvePeriodKeyTokens()`, and say `resolveFilterPlaceholders()` covers all three vocabularies.\n6. There is no last-week or next-week token. Don't imply one.\n\n## Done when\n\n- `filters.md` is changed as above, and the skills lint passes.\n- Nothing else in `skills/objectstack-query/` contradicts it (search `current_week` and `week`)."

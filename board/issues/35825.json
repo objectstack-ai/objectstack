@@ -1,0 +1,37 @@
+{
+  "number": 35825,
+  "kind": "pull_request",
+  "title": "fix(docs): take next 16.4.6 in apps/docs so the daily OSV scan is green",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T10:15:53Z",
+  "updated_at": "2026-11-20T11:07:36Z",
+  "closed_at": "2026-11-20T11:07:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T11:07:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35825",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuXvxhFoLCxyVvdJ9eQRZsAr)_\nFixes #35108\n\nrepo:objectstack#1 · os-sales · session_01L6bhgTWPccNTuCwS1djJ86 (card thread, claim 7036311318)\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只升级文档站用的网页框架小版本,产品本身和发布出去的包都不变。\n- 为什么做:每天的依赖安全扫描在主干上连红多日,这次把它恢复成绿灯。\n- 出错会怎样:最坏是文档站构建出问题,不影响用户和客户;可直接撤回本改动。\n- 要你做的:无。\n\n## What changes\n\n- `apps/docs/package.json`: `next` 16.4.1 to 16.4.6, the newest 16.4 patch. All seven advisories the daily scan matches on `next` 16.4.1 are fixed in 16.4.5: GHSA-7qx7-33qx-rqx2, GHSA-f3mh-rxg3-f5g2, GHSA-mfr8-8qww-v76h, GHSA-pc58-hwjq-p385, GHSA-rhh4-g77r-r9qj, GHSA-vc7v-qv4w-wrv8, GHSA-vvgp-ww4w-46vf (the card names two; the scan now lists seven, all medium).\n- `pnpm-lock.yaml`, regenerated with `pnpm install --lockfile-only`: only `next`, `@next/env` and the eight `@next/swc-*` binaries change version (16.4.1 to 16.4.6). The other lines are peer suffixes on `fumadocs-core`, `fumadocs-mdx`, `fumadocs-ui`, `better-auth` and three `@better-auth/*` packages that follow `next`; none of those packages changes version. `next` 16.4.6 keeps 16.4.1's own dependency pins, so nothing else in the lockfile moves.\n- picomatch 4.0.7 (GHSA-fc5q-39xc-vjpf): no change is needed. The advisory was **withdrawn** on 2026-11-18 15:38Z (\"not a security issue\", per its own OSV record), and the scan stopped reporting it: the 2026-11-20 03:02Z scheduled run lists only the seven `next` rows. So no dependent is moved and no `osv-scanner.toml` entry is added.\n- No changeset, labelled `skip-changeset`: `apps/docs` is private and the lockfile ships in no package.\n\n## Why\n\nThe scheduled Validate Dependencies run has been red on `main` since 2026-11-17 (runs 44227606138, 44448633810, 44665012084). A permanently red daily scan stops being a signal.\n\n## Verification\n\nTwo-minute check: run the scan's own command, `osv-scanner --lockfile=pnpm-lock.yaml` (scanner v2.5.0, the version the workflow pins), on this branch. Expected: `No issues found`, exit 0.\n\n<details><summary>Scan before and after (local, scanner v2.5.0, offline npm database downloaded 2026-11-20 09:47Z)</summary>\n\nThe api.osv.dev host is not reachable from this container, so the scan ran as `osv-scanner --offline-vulnerabilities --download-offline-databases --lockfile=pnpm-lock.yaml`, the same scan against OSV's published npm database. The before reading matches CI's own 03:02Z run row for row.\n\nBefore, merge base `cbc50a5a` (exit 1):\n\n```text\nLoaded filter from: osv-scanner.toml\nLoaded npm local db from .../osv-scalibr/npm/all.zip\nGHSA-g3hv-75wg-m249 and 1 alias have been filtered out because: ...\nFiltered 1 vulnerability from output\nTotal 1 package affected by 7 known vulnerabilities (0 Critical, 0 High, 7 Medium, 0 Low, 0 Unknown) from 1 ecosystem.\n7 vulnerabilities can be fixed.\n| https://osv.dev/GHSA-7qx7-33qx-rqx2 | 6.9 | npm | next | 16.4.1 | 16.4.5 | pnpm-lock.yaml |\n| https://osv.dev/GHSA-f3mh-rxg3-f5g2 | 6.0 | npm | next | 16.4.1 | 16.4.5 | pnpm-lock.yaml |\n| https://osv.dev/GHSA-mfr8-8qww-v76h | 6.3 | npm | next | 16.4.1 | 16.4.5 | pnpm-lock.yaml |\n| https://osv.dev/GHSA-pc58-hwjq-p385 | 6.3 | npm | next | 16.4.1 | 16.4.5 | pnpm-lock.yaml |\n| https://osv.dev/GHSA-rhh4-g77r-r9qj | 6.3 | npm | next | 16.4.1 | 16.4.5 | pnpm-lock.yaml |\n| https://osv.dev/GHSA-vc7v-qv4w-wrv8 | 6.3 | npm | next | 16.4.1 | 16.4.5 | pnpm-lock.yaml |\n| https://osv.dev/GHSA-vvgp-ww4w-46vf | 6.3 | npm | next | 16.4.1 | 16.4.5 | pnpm-lock.yaml |\n```\n\nAfter, head `5de22b8a` (exit 0):\n\n```text\nLoaded filter from: osv-scanner.toml\nLoaded npm local db from .../osv-scalibr/npm/all.zip\nGHSA-g3hv-75wg-m249 and 1 alias have been filtered out because: ...\nFiltered 1 vulnerability from output\nNo issues found\n```\n\nThe withdrawn picomatch record, read from the same database: `\"withdrawn\": \"2026-11-18T15:38:56Z\"`, summary `Withdrawn Advisory: picomatch vulnerable to ReDoS through single-branch repeated extglobs`.\n\n</details>\n\n<details><summary>Local gates on head 5de22b8a (derived list, 44 commands)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 44 commands for the two changed paths (132 changed lines). All 44 ran.\n- First pass: 40 exited 0. Four exited 3 (PREREQUISITE NOT MET, no `dist/`): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`. After `pnpm build` under the verify lock (VERDICT command-exit 0, 120/120 tasks), all four exited 0.\n- Among the 44: `check:osv-exemptions` and its `--self-test`, `osv-base-relative.mjs --self-test`, `check:override-consistency`, `check:vendor-export-contract-resolve` and `check:changeset-fixed`, each exit 0.\n- `--ran` reconciliation: 44 derived, 44 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm --filter @objectstack/docs typecheck` (fumadocs-mdx, next typegen, tsc) on `next` 16.4.6: VERDICT command-exit 0.\n- NOT MEASURED locally: the docs site's `next build`. CI's `Build Docs (the command production runs)` step builds it on this PR with the production command; read it from the check-runs.\n\n</details>\n\n## Acceptance notes\n\n- Done-when 3 (the next scheduled run is green) can only be read after this merges: the 03:00Z run on the merged `main`. This PR's own Validate Dependencies check judges base-relatively, so it shows the seven rows cleared against the merge base, not the absolute verdict.\n- The minimatch exemption GHSA-g3hv-75wg-m249 in `osv-scanner.toml` still filters a live match and expires 2026-11-30, ten days from now. When it lapses the daily scan goes red again unless it is renewed in its own PR or the parents move. Not touched here; noted for the seat.\n- A local trap, for whoever re-measures: `osv-scanner --offline-vulnerabilities` WITHOUT `--download-offline-databases` loads no database and prints `No issues found`, exit 0, on the red lockfile too. The tell is the missing `Loaded npm local db` line. Both readings above carry that line.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTWPccNTuCwS1djJ86)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTWPccNTuCwS1djJ86\n"
+}

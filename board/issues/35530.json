@@ -13,18 +13,18 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T14:16:14Z",
-  "updated_at": "2026-11-19T14:53:43Z",
+  "updated_at": "2026-11-20T13:45:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35530",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ an out-of-scope finding of the #35410 dev (os-dev-report 7010857170, PR #35519 Acceptance notes), read in the object definitions and not measured. L1-a named it as owed (ACCEPT 7011659709). It is a follow-up of the #34211 page-load work and is nested under #34211.\nReader: `domain:server` (the messaging objects' index declarations). Suggested grade: p3 (not a landing block at the 20-row window; the cost grows with a user's receipt history).\nDedupe: `notification receipt index created_at`, `inbox message index`, `sys_inbox_message index`. No open card.\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；铃铛角标的两次读取在数据量大的账号上会变慢，加索引后保持稳定。\n- 为什么做：页面加载提速时把已读状态的读取改成按时间取最新一批，这两张表还没有按用户和时间的索引。\n- 出错会怎样：只影响查询速度，不影响数据；撤回即可。\n- 要你做什么：无。\n\n## Facts (read at PR #35519, landing head `43ed4f99`)\n\n- After #35519 the console's inbox feed reads `sys_inbox_message` filtered by `user_id`, newest first, top 20, and in parallel `sys_notification_receipt` filtered by `user_id` + `channel: inbox`, newest first, top 20. Both poll at the 10 s foreground cadence.\n- `sys_notification_receipt` indexes `(notification_id, user_id, channel)` (unique) and `(user_id, state)`. `sys_inbox_message` declares none. Neither has `created_at` in an index, so each read sorts the user's rows.\n\n## Ask\n\nAdd a `(user_id, channel, created_at)` index on `sys_notification_receipt` and a `(user_id, created_at)` index on `sys_inbox_message`. Measure the two reads' query plan or time before and after on a user with a large history (e.g. a few thousand receipts). Check whether adding an index is a metadata-protocol or Clause-② change for these system objects and declare it.\n\n⛔ Not a claim."

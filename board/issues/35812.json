@@ -1,0 +1,31 @@
+{
+  "number": 35812,
+  "kind": "issue",
+  "title": "Units of measure: deleting an organization also deletes its units (the one exemption from the sys_unit delete refusal)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T09:21:31Z",
+  "updated_at": "2026-11-20T09:23:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35812",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ③ a task the maintainer directed. On seat 7's decision card he ruled option B, verbatim: 「删组织时一并删单位」. The ruling's time is in this card's first comment. · Source: maintainer\n\n## 维护者速读\n- 问题：PR #35805（#35489）上线后，只要组织里有任何自定义单位，这个组织就永远删不掉。\n- 原因：删组织前会检查组织名下还有没有数据（单位也算），而单位本身在任何场景下都不允许删除（ADR-0158 待决项 11：单位只能停用，不能删）。\n- 你的裁决：删组织时一并删掉它的单位。这是单位不可删规则唯一的例外，其他任何场景照旧拒绝。\n- 要你做的：无。\n\n## Why (business)\nAn organization delete is the platform's tenant-offboarding door. After #35805, any organization that ever created a unit is refused with `DELETE_RESTRICTED`, and the caller has no remedy: the units cannot be deleted first, because the engine refuses every `sys_unit` delete (405 `ERR_UNIT_DELETE_REFUSED`). The exemption is sound. Open item 11 forbids re-creating a code with another meaning inside an organization, which a deleted organization can never do.\n\n## What to build\n- The organization delete's own cascade removes the organization's `sys_unit` rows. This is the one exemption from `refuseOrganizationUnitDelete` (PR #35805, `packages/objectql/src/engine-delete-and-aggregate.ts`). The engine's cascade claim carries the exemption, never a caller flag or a context bit, so no direct delete of a unit is admitted in any context.\n- `refuseOrganizationDeleteWhileOwned` / `organizationOwnedRowCounts` (`packages/objectql/src/engine-cascade-planning.ts`) stop counting `sys_unit` as blocking ownership once the cascade removes it.\n- Pins: a real-stack cell where an organization with units and no other owned rows deletes, and its units are gone. A direct unit delete is still refused (405) under user, system and automation contexts, by id and batched, including a unit of an organization whose delete is in flight.\n- ADR-0158 Open item 11 gains a note naming the exemption. This rides the ADR-0158 amendment PR that follows #35805.\n\n## Order\nBlocked-by: #35489\n\nWaits on PR #35805, which ships the refusal (option C until this card lands).\n\nReader: the `area:data` seat 7, after #35805 lands. Domain set by triage.\n\nGrading: area:data · Task · a maintainer-ruled follow-up of an in-flight build · evidence: os-dev report 7035276751 on #35489 (open question 1); code read on PR #35805's head 91a4947352.\nSuggested grade: p2 (tenant offboarding is refused, with no remedy, for every organization that created a unit).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue sys_unit organization delete` gives 8 hits, all of them the units-of-measure cards and none about the organization delete."
+}

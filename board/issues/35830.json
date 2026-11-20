@@ -1,0 +1,37 @@
+{
+  "number": 35830,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): an unchanged owner object re-save is not refused over a column an extension adds",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T10:25:28Z",
+  "updated_at": "2026-11-20T11:37:11Z",
+  "closed_at": "2026-11-20T11:37:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T11:37:09Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35830",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuCoQZgWaAdx6G98kBWAN6uD)_\nFixes #35589\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 管理员在 Studio 或接口里把一个对象原样再保存一次时，如果另有一个已装的扩展包给这个对象加过一列，以前会被拒绝并说“会删掉这列数据”；现在保存成功，那一列照常保留。\n- 属于“扩展包给别人的对象加字段”这项能力，替装了这类扩展包的管理员解决“自己的对象再也存不进去”的问题。\n- 真正删掉对象自己那一列的保存仍然被拒绝；出错的话最坏是误放行一次删列，这个改动只动比较逻辑、不动数据，可以直接撤回。\n- 无\n\n## What changes\n\nThe destructive-change door of `saveMetaItem` (`packages/metadata-protocol/src/protocol-save.ts`, Phase 3a-destructive) diffs the incoming `object` body against the item read at the save's own address. That read folds every enabled extension's `extend` contribution onto the owner's layer (ADR-0029 D9.2, `foldObjectExtendersFromRegistry`), while the incoming body is the owner's layer alone. So an unchanged owner re-save while an extension adds a stored column answered `409 DESTRUCTIVE_CHANGE` with `field_removed` on the extension's column. On the dispatcher's `PUT /meta`, which takes no `force`, the owner could not be saved at all.\n\nThe door now folds the enabled extensions onto the incoming body the same way before the diff, so it compares the object served before the save with the one served after it. The folded body is used only for the diff (the detector, the null-master counts and `stillShownBy`); the body that is persisted is unchanged, the owner's own layer. The guard itself (`detectDestructiveObjectChanges`) is not touched: a column only the owner declares is still a drop.\n\nMeasured before the fix (dist built from `origin/main` 65fddc84), at `PUT /api/v1/meta/object/crm_custom_lead?package=com.acme.crm.custom` with the owner's stored body unchanged, while `com.acme.leadext` extends it with `leadext_region`:\n\n```\nstatus 409, code DESTRUCTIVE_CHANGE\n\"object/crm_custom_lead would drop or transform existing data: Field 'leadext_region' removed — existing data in this column will become inaccessible. — this save cannot be forced: …\"\ndetails.issues: [{ code: field_removed, field: leadext_region, stillShownBy: [] }]\n```\n\n## Tests\n\n`packages/runtime/src/domains/meta-object-extension-item.test.ts`, new top-level `describe` in the extension item's shared harness (real SQLite store, real `ObjectQL`, real protocol, real `HttpDispatcher` `PUT /meta`):\n\n- an unchanged owner re-save answers 200, the stored owner row still holds only its own fields, and the extension's column is still served;\n- CONTROL: a save that drops the owner's own `score` column is still refused `409 DESTRUCTIVE_CHANGE`, its `issues` naming `field_removed:score` alone (before the fix it also named the extension's column), and nothing is written.\n\n<details><summary>Before / after and ablation</summary>\n\n- Before (unfixed dist): `Tests 2 failed | 50 skipped (52)`, both cases red with the 409 above.\n- After (rebuilt `@objectstack/metadata-protocol`): `meta-object-extension-item.test.ts` `Tests 52 passed (52)`.\n- Ablation on the committed fix: `ablation-replace.mjs` replaced `const next = host.foldObjectExtendersFromRegistry(request.type, request.name, request.item);` with `const next = request.item;`, rebuilt, `ablation-dist-preflight.mjs … --absent` exit 0 (marker absent from all 24 built files) → `Tests 2 failed | 50 skipped`. Restore by `git checkout HEAD --`, blob hash matched HEAD, rebuilt, preflight: marker present in 2 built files → `Tests 2 passed | 50 skipped`.\n\n</details>\n\n<details><summary>Package suites</summary>\n\n- `pnpm --filter @objectstack/metadata-protocol typecheck` exit 0; `vitest run` `Test Files 362 passed | 9 skipped (371)`, `Tests 23298 passed | 45 skipped (23343)`.\n- `pnpm --filter @objectstack/runtime typecheck`: `tsc --noEmit` exit 0; its `check:test-typecheck` reports 3 `TS2307 Cannot find module '@objectstack/driver-turso'` in three test files this diff does not touch (`boolean-written-spelling-row-scope`, `meta-object-publish-column-changes`, `organization-ownership-boot-guard.turso-remote.kernel`): that package is outside the built closure here. NOT MEASURED locally; CI's type check reads it.\n\n</details>\n\n## Acceptance notes\n\n- Read first, by risk: `protocol-save.ts` the Phase 3a-destructive hunk (the folded `next` and its three uses); the new `describe` at the end of `meta-object-extension-item.test.ts`.\n- A field an extension REPLACES under the owner's own key was also judged against the wrong side before (the served type against the owner's type); it is now judged served against served, so an unchanged owner save is not reported as a retype there either. Not separately pinned.\n- Two-minute check: `pnpm --filter @objectstack/runtime exec vitest run src/domains/meta-object-extension-item.test.ts -t 'unchanged owner object'` after building `@objectstack/metadata-protocol`; expect 2 passed.\n- Branch name is the platform-assigned `claude/project-thread-kcfy6z` (the claim names it), not `claude/issue-35589-…`.\n- `Clause-②: no`, as L1-a ruled (record 7037241570, citing `execution-duties.md:111`): the door's declared contract refuses a save that drops a stored column, and ADR-0029 D9.2 makes an enabled extension's column part of the served object, so this brings the door back to that contract; no authorable key, schema accept set or published surface moves.\n\n## Verification\n\nHead `6e1d4fe2` changes only the `Clause-②` line of the changeset from `16d777ee`; the readings below were taken on `16d777ee`. `node scripts/pm/dispatch-gates.mjs --commands` derived 70 families from the change set (3 paths vs merge base 65fddc843); all 70 run locally on this head.\n\n<details><summary>Derived gates: 68 exit 0, 2 exit 3</summary>\n\n- 68 of 70 exit 0.\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` exit 3 on the first run (its pinned positive-control commit 621a48760 was not in the shallow clone); after `git fetch --depth=1 origin 621a48760…`, rerun exit 0 (`48 cases pass`). The `--ran` record keeps both codes and reads it as 3.\n- `pnpm check:dual-build-cjs-loads` exit 3, PREREQUISITE NOT MET (dists of packages outside the built closure, `connector-imap` and 34 more). NOT MEASURED locally; CI builds everything.\n- `dispatch-gates --ran`: `70 derived famil(ies) accounted for — 68 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)`.\n\n</details>\n\nEvery family CI runs is read from this PR's check-runs at hand-back; none is re-run locally.\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgW9d2BwLCxbQ2GXPZE -->\n"
+}

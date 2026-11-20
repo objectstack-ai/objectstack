@@ -1,0 +1,32 @@
+{
+  "number": 35849,
+  "kind": "issue",
+  "title": "记录页关键字段：不再把字段从分组里拿掉，后台配的分组原样生效；顶部那一排改为只读",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-20T12:08:47Z",
+  "updated_at": "2026-11-20T12:48:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35849",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「如果在记录详情页始终把关键字段置顶，那之前在后端配置很好的表单字段和分组岂不是不生效。和实际的表单编辑页面也会不一样。」；「自动选择的关键字会让人误会。」；「关键字段保留在主表单区域后，顶部的关键字段就不需要快速编辑了，就是只读了。」\n\n## 现状（主干 `7878cf0557`）\n\n- 记录页顶部的关键字段那一排显示了哪些字段，下面的字段分组里就把这些字段拿掉；阶段字段画成阶段条后也被拿掉（`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts:592-602` 的 `headerDrawnFields`，用在 :938、:1143，来自 objectstack-ai/objectstack#28868）。\n- 结果一：搭建的人在对象上配好的分组（`fieldGroups` 加字段的 `group`）在阅读时被拆散，某一组里少了几个字段。\n- 结果二：进入编辑后这些字段回到原来的分组，阅读和编辑的布局不一样，字段位置会跳。\n- 顶部那一排的字段可以原地快速编辑。\n- 没声明 `highlightFields` 时顶部不出现那一排（这一点是对的，保持）。\n\n## 参照（官方文档，协调席 2026-11-20 查证）\n\n- Salesforce：要点面板取自紧凑布局，和页面布局是两份独立的设置，从一份里去掉字段不影响另一份；系统不自动去重，重复与否由管理员定。\n- Dynamics 365：把字段放进表单头部时，设计器让管理员选「移动」（正文里拿掉）还是「复制」（两处都有）；头部的值是只读的。\n- 没有查到哪个平台在没配置时按规则自动挑关键字段。\n\n## 要做的\n\n- **不再从分组里拿掉字段**。顶部那一排是摘要；字段分组按对象的声明完整显示，阅读和编辑是同一套分组、同一个顺序。阶段字段同理，画了阶段条也保留在它的分组里。\n- **顶部那一排只读**：不提供原地编辑。要改值，在下面分组里改，或者点「编辑」。阶段条的点击换阶段不在本卡范围，保持现状。\n- **不想重复由搭建的人决定**：不把那个字段声明成关键字段，或者不放进分组。系统不替他去重。\n- **没声明就不显示**，不自动挑字段。悬停浮窗同理，没声明时只有记录名和对象名，保持现状。\n\n## 不做的\n\n- 不改关键字段的声明方式和上限（6 个）。\n- 不改悬停浮窗、相关子表默认列、选记录弹窗读取关键字段的方式。\n\n## 验收\n\n- 一个对象把分组里的三个字段声明成关键字段：阅读时顶部显示这三个，下面那个分组里它们仍在原位；点「编辑」后分组里的字段和顺序与阅读时一致。\n- 顶部那一排的值不能原地编辑（没有悬停铅笔、双击不进入编辑）。\n- 声明了阶段字段的对象：阶段条照常显示，阶段字段也在它的分组里。\n- 没声明关键字段的对象：顶部没有那一排，页面上也没有系统自己挑出来的字段。\n- PR 正文列出迁移和作废的测试（objectstack-ai/objectstack#28868 的去重测试按新规则更新）。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`（`headerDrawnFields`）、`record:highlights` 的渲染。\n\nDedupe: `关键字段 分组 拿掉 重复`、`关键字段 只读 顶部`（objectstack，open）→ 无同题卡；相关：objectstack-ai/objectstack#28868（已关，本卡取代它的去重规则）。"
+}

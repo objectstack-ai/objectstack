@@ -1,0 +1,32 @@
+{
+  "number": 35788,
+  "kind": "issue",
+  "title": "Record activity stream: the Changes chip counts the record's creation as one more field change in its fold",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T08:02:11Z",
+  "updated_at": "2026-11-20T08:04:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35788",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTRxhoKiYcN465k2Eh\n\nFiling gate: ① (user-visible product defect, named seam, reproduced) · Source: fleet · Found-in #35762 (os-dev-report 7033847599, PR #35787)\nSuggested-grade: p2 · a wrong count and a duplicated line on the record page 动态 tab; no data is wrong and nothing is refused. Grade and dispatch are left to triage (the seat files only, under the current p1-only order).\n\n## What a user sees\n\nOn a record of a history-tracked object, the 动态 tab's Changes (变更) chip says the record was edited one more time than it was. Its first \"edit\" is the record's creation, drawn as field changes from empty values. The All view of the same stream gets it right: it shows the edits plus one separate \"Created\" row.\n\n## Reproduce (measured live on PR #35787's tree, showcase stack, admin@objectos.ai)\n\n1. Create a `showcase_account` (`POST /api/v1/data/showcase_account` with name, industry `technology`, status `prospect`, signed_on `2026-07-26`).\n2. On the same day, as the same user, make three PATCHes: `{ signed_on }`, then `{ status, industry }`, then `{ owner_id: <another user> }`.\n3. Open `/apps/showcase_app/showcase_account/record/<id>?related=timeline` and press the Changes chip.\n\nObserved: ONE fold row, \"Updated Owner, Industry, Lifecycle, 3 more · 4 updates\". Expanded, it shows 4 rows, and the 4th is the creation's own audit entry drawn as a field change (\"Owner — → Dev Admin; Account Name — → …\").\nControl, the All chip on the same record: the fold reads \"3 updates\", with a separate \"Created Account\" row.\nExpected: the Changes chip folds the 3 updates and shows the creation at most once, the way All does.\n\n## Seam (read on origin/main c4a73be6; the fix route is the dev's to measure)\n\n- `ui/packages/plugin-detail/src/RecordActivityTimeline.tsx`: `foldStreamChanges` / `isStreamFieldChange` accept an UNPAIRED `sys_audit_log` create entry as a field change, so it joins the same-actor, same-day run.\n- `ui/packages/plugin-detail/src/recordTimelineStream.ts` (Changes chip): the chip shows field-history entries unpaired, so the creation's audit entry reaches the fold.\n- Contract text that this contradicts (`recordTimelineStream.ts`): `auditEntriesToFeedItems` says \"the record's creation is the activity stream's own created row, so it is not said twice\".\n- The fold arrived with a3a74f27 (#35708, for #35602). PR #35787 changed `ui/e2e/live/record-history-display.spec.ts` to pin the three updates by content and `data-fold-count == rows`, not the exact count, because of this. A fix here should tighten that spec to exactly 3.\n\n## Four answers\n\n- Category: ① user-visible defect, `reach:` public door (the record page 动态 tab, Changes chip), measured once.\n- Business reason: anyone who reads a record's history to see how often it was changed (an approver, an auditor, an owner) gets a wrong count and a fake \"edit\" by whoever created the record. Left alone, the Changes view disagrees with the All view on every record created and edited by one person on the same day.\n- Reader who acts: triage grades it; then the lane that owns `ui/packages/plugin-detail` (domain:ui) dispatches it.\n- Dedupe: `repo:objectstack-ai/objectstack is:issue fold creation audit Changes chip` → 11 hits, none about this (#35762 itself, #30074 decision closed, QA runs, seat posts); `foldStreamChanges` → 1 hit (#35762)."
+}

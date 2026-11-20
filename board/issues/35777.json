@@ -1,0 +1,37 @@
+{
+  "number": 35777,
+  "kind": "pull_request",
+  "title": "docs(spec): FilterCondition form 4 says per verb and driver how a nested-relation condition is served",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T06:39:37Z",
+  "updated_at": "2026-11-20T07:55:00Z",
+  "closed_at": "2026-11-20T07:54:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T07:54:57Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35777",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoK8YCcS3hkJHvVLxZNeiKG8)_\nFixes #35592\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感:规格包里\"关联条件过滤\"的说明文字改为按查询动作与数据库驱动分别说明,运行行为不变。\n- 属于过滤语法文档准确性收口,替用 MongoDB 等驱动写过滤条件的开发者和 AI 助手解决被旧说明误导的问题。\n- 只改说明文字,出错时最坏是文字仍不准确,不影响任何数据或请求,可直接撤回。\n- 无。\n\n## What changes\nThe form 4 (nested relation) paragraph of the `FilterCondition` docblock in `packages/spec/src/data/filter.zod.ts`, prose only, measured against `origin/main` cceb5c62:\n\n- **\"the same on every driver\" removed.** On a read verb (`find`, `findOne`, `count`, `aggregate`) a single-valued relation is one subquery inside the read's own statement where that is provably the same read; a multi-valued relation, `update`, `delete`, and a read the subquery cannot prove read the related ids. Measured: `SEMI_JOIN_READ_VERBS` and the `!site.multiple` test in `packages/objectql/src/relation-filter-lowering.ts` (`relationReadDriverRefusal`) and `packages/objectql/src/engine-query-lowering.ts` (`lowerRelationConditions`, the semi-join branch).\n- **Refusal named.** A driver without `DriverCapabilities.readableIdsLeaf` (MongoDB, OData) refuses a single-valued condition on a read verb up front, `INVALID_FILTER` / 400, citing ADR-0139 D3 as amended 2026-11-17 (\"A nested-relation condition beneath a single-valued relation on a read verb is refused up front on a driver without it, `INVALID_FILTER` / 400\"). A multi-valued relation and the write verbs keep the capped id read there (`relationReadDriverRefusal` returns early for both).\n- **Cap sentence scoped** to \"Where ids are read\", naming `RELATION_FILTER_ID_CAP`.\n\n`content/docs/kernel/contracts/data-engine.mdx` already states the same (its \"the same on every driver that serves it\" paragraph and the `readableIdsLeaf` refusal paragraph) and was measured correct, so it is untouched. No generated reference copies the sentence (`git grep \"same on every driver\"` hits only this file and unrelated pages). One `patch` changeset on `@objectstack/spec` (the file ships in `files[]`).\n\nRead first: `packages/spec/src/data/filter.zod.ts` form 4 paragraph (the only risk: a sentence that disagrees with the engine).\n\nTwo-minute check: `git grep -n \"same on every driver\" packages/spec/src` answers nothing.\n\n## Tests\nText only; no tests added and no ablation (no tested behaviour changed). `pnpm --filter @objectstack/spec build` under the verify lock: `VERDICT command-exit 0`.\n\n## Acceptance notes\n- ADR-0155 D1 (named by the dispatch) governs the share-grant leaf, not this author-written form; nothing from it is quoted in the docblock.\n\n## Verification\nAt head `981517ac` (tree objectstack-ai/objectstack, merge base cceb5c62). Changed lines: 36 (+27 / -9, 2 files).\n\n<details><summary>Local derived gates: 83 derived, 79 run green, 4 NOT MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` re-derived from this branch (the dispatch's list included `data-engine.mdx`, which this PR does not touch): 83 commands. Each run with its exit code captured before any pipe; reconciliation `--ran`: \"83 derived, 79 run, 4 NOT-MEASURED, 0 UNRUN\".\n\n- exit 0 on 79, including `check:docs`, `check:api-surface`, `check:authorable-surface`, `check:spec-docblock-symbol-anchors`, `check:doc-authoring`, `check:issue-citations`, `check:nul-bytes`, `check:adr-anchors`, `check-adr-0087-registration --base origin/main`, `check-empty-changeset`, `check-changeset-no-major`.\n- NOT MEASURED (exit 3, prerequisite not met, CI runs them): `check:dual-build-cjs-loads` and `check:lean-entry-closure` (need a whole-repo build), `check:doc-formula-expressions` (needs `@objectstack/formula` and `@objectstack/lint` built), `check-plugin-teardown-shape --self-test` (needs an unshallow clone).\n- `pnpm --filter @objectstack/spec build` under the verify lock: `VERDICT command-exit 0`.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0`.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibvVRcFWKrfWeG5jzPb)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibvVRcFWKrfWeG5jzPb\n"
+}

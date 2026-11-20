@@ -1,0 +1,37 @@
+{
+  "number": 35796,
+  "kind": "pull_request",
+  "title": "fix(service-storage): translate the storage_attachment_member permission set",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T08:19:13Z",
+  "updated_at": "2026-11-20T09:08:50Z",
+  "closed_at": "2026-11-20T09:08:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T09:08:48Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35796",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoA1ALjVcUcAuAA15MyUocBx)_\n\nFixes #33986\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 中文控制台的管理员在「设置 → 权限集分配」里看到的附件成员权限集,名称和说明从英文变成中文,另外九种界面语言同样有了译文。\n- 替使用非英文界面的管理员解决:存储服务带来的这个附件权限集漏了翻译,是列表里唯一一行英文。\n- 出错时最多是某种语言的措辞不够贴切,权限本身和发放时机都不变,可以直接撤回。\n- 无\n\n## What changes\n\n- `packages/services/service-storage/src/translations/permission-sets.ts` (new, hand-authored): the `permissions.storage_attachment_member.label` / `.description` translations for the ten locales the sibling built-in sets ship (zh-CN, ja-JP, es-ES, zh-Hant, ar, fr, pt-BR, ru, de, ko). zh-CN label: 附件：读取与添加（所有成员）.\n- `packages/services/service-storage/src/translations/index.ts`: each translated locale of `StorageTranslations` now carries that `permissions` group beside its generated `objects`, the same shape plugin-security's `SecurityTranslations` uses. No generated file is touched.\n- Changeset: `@objectstack/service-storage` patch.\n\n## Why\n\nThe set is declared by service-storage (`attachment-member-grant.ts`) and contributed to the member baseline at runtime, so plugin-security's permission-set bundle never carried it: that bundle's own pin (`permission-set-descriptions.test.ts`, \"translates exactly the built-in sets\") limits it to the nine sets plugin-security declares. The owner of the set is the owner of its translation (ADR-0029 D8). Both bundles reach the i18n service through `loadTranslations`, which deep-merges, so the two `permissions` groups sit side by side and `translatePermissionSet` resolves either set on `GET /meta/permission`.\n\n## Tests\n\n- New `src/translations/permission-sets.test.ts` (24 tests): per translated locale, the group holds exactly `storage_attachment_member`, label and description differ from the English, the label keeps the English label's shape, and `translateMetadataDocument('permission', …)` serves the translated label and description; `en` serves the set as declared (same reference); CONTROL: a stand-in sibling `member_default` group and this bundle loaded into `createMemoryI18n` in both orders, and both sets still resolve in zh-CN.\n- Ablation (one-off, not committed): deleting the `permissions:` line from `withSets` in `index.ts` through `scripts/ablation-replace.mjs` (anchor 1 -> 0, blob ab15c3d0615e -> 6f1df31f0bcd) turns the file red, `Tests 12 failed | 12 passed (24)` (the ten per-locale group checks and both merge controls); restored, blob == HEAD, `git diff HEAD` empty.\n\n## Acceptance notes\n\n- The label follows the English label's shape (`Attachments: read and attach (every member)`, a colon and no ` — `), the rule plugin-security's pin holds its own labels to, rather than the siblings' ` — ` split; the English source label is unchanged (this card changes translations only).\n- The English description is two sentences and names the object; the translations follow the source. The siblings' one-sentence description pin covers plugin-security's own sets only.\n- Untouched and binding: what the set grants and when it is contributed (maintainer ruling 6879388034, the ⛔ on `contributeAttachmentMemberGrant`).\n- `check:i18n-coverage` lints static stack configs and cannot see this runtime-contributed set; its count is unchanged.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/service-storage exec vitest run --maxWorkers=2 src/translations/permission-sets.test.ts` prints `Tests 24 passed (24)`.\n\n<details><summary>Local runs</summary>\n\n- `pnpm --filter '@objectstack/service-storage^...' build`: lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/service-storage test` + `typecheck`: `Test Files 87 passed (87)`, `Tests 1697 passed | 1 skipped (1698)`, `check:test-typecheck: OK`; VERDICT command-exit 0 (head 50a8e086fd).\n- Final head f6ce5b4b7b: focused `permission-sets` + `bundle-ownership` + `attachment-member-grant` tests `Tests 36 passed (36)`, `typecheck`, `check:nul-bytes`, `check:i18n-stale-fill`: VERDICT command-exit 0.\n- `dispatch-gates --ran`: 63 of 65 derived families run, exit 0 each. NOT MEASURED locally: `check:i18n` and `check:dual-build-cjs-loads`, reason: both need the whole workspace build (exit 3, prerequisite not met); declared to CI.\n- `overlap-check --branch=HEAD`: VERDICT clean exit 0.\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes (CI-owned run).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibyy9KSA69EGZtjDj9c\n"
+}

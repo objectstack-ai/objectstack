@@ -2,8 +2,8 @@
   "number": 34838,
   "kind": "issue",
   "title": "test-budget: two dogfood headers (service-account-lifecycle, service-account-register-key) name no class, and none of the three ruled classes fits a one-boot-per-file dogfood test",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:fleet",
     "domain:devx",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T12:48:37Z",
-  "updated_at": "2026-11-19T04:13:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T04:14:45Z",
+  "closed_at": "2026-11-20T04:14:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34838",
   "body": "repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C\n\nFiling gate: class c, an out-of-scope finding of the #34711 dev round (PR #34835), measured by the seat. ⛔ Not a claim. Grading and `domain:*` are triage's.\n\nSuggested-grade: p2 · the same outcome as #34711 (the timings refresh refuses its regression diff)\n\n## 维护者速读\n\n- 现象：两个 dogfood 测试文件的耗时预算头写着 20 秒，但没写「类别」，耗时刷新脚本读到会拒绝。三个已裁类别都不贴切：这两个文件都是整份只启动一次 showcase。\n- 为什么要修：刷新脚本只要读到其中一个，整份回归读数就作废；#34711 修完其余 5 个之后，只剩这一对。\n- 需要你做的：可能需要裁一次(加第四个类别，还是这两个文件根本不该有预算头),由分诊判路由。\n\n## Measured\n\n`readTestBudget` from `scripts/measure-test-shard-timings.mjs`, run by the seat over every file carrying a `test-budget` header:\n- `origin/main` c513d62a: 169 files, 7 refused.\n- PR #34835 head 5d31cacf67 (Fixes #34711): 169 files, 2 refused. The two are:\n  - `packages/qa/dogfood/test/service-account-lifecycle.dogfood.test.ts:2`\n  - `packages/qa/dogfood/test/service-account-register-key.dogfood.test.ts:2`\n\nBoth read `// test-budget: 20 — one showcase boot for the whole file, its auth and data doors driven in process; no timer is waited out`, which has no `CLASS:` segment. `TEST_BUDGET_CLASSES` holds three values (rulings 6181973363 on #23534, 6212133431 on #23821). None says \"one boot for the whole file\".\n\n## Options seen (not a recommendation)\n\n- A: drop both headers, if a CI reading puts each file at or under the 10 s line. A header is only for a file above the line.\n- B: a fourth class by maintainer ruling, the way #23821 added \"compiles the package type graph once\".\n- C: the files are slimmed under 10 s.\n\n## Re-check\n\n`git grep -n \"test-budget\" origin/main -- packages/qa/dogfood/test/service-account-lifecycle.dogfood.test.ts packages/qa/dogfood/test/service-account-register-key.dogfood.test.ts`. Control: `git grep -c \"test-budget: 60\" origin/main -- packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts` hits once PR #34835 lands.\n\nDedupe: `readTestBudget` (9 hits, none on these files); `\"test-budget\" dogfood service-account` (16 hits, no open card on these files)."

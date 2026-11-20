@@ -2,8 +2,8 @@
   "number": 35011,
   "kind": "issue",
   "title": "a standalone grid's authored $filter on a field withheld by a disabled package still answers 400 — #34979 fixes only the list view's grid (follow-up of #34901)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:package",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T22:58:23Z",
-  "updated_at": "2026-11-19T04:07:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T05:29:06Z",
+  "closed_at": "2026-11-20T05:29:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35011",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6963320315), from the seat's L2 on PR #34979 (6963280774). That review found #34901's failure class live on other surfaces: a view or definition naming a field that a disabled package withholds. The review read code and ran nothing on these, so this card is **reading first**.\n\nFollow-up of #34901 (p1; HotCRM's next release waits on it). The view-type bindings are already #34989.\n\n## Question\nA standalone grid (a page block, not the list view) whose authored `$filter` names a withheld field: confirm it still answers 400 while the package is off, and drop or neutralise the withheld clause the way #34979 does for the list view's grid.\n\nDone when a live reading (a package P extends an object with a field, a definition in Q names that field, P disabled) answers the question, and the fix is made or filed with its own grade.\n\nGrade: **p1 · domain:ui**. Theme: HotCRM usable, with a named effect. It is the same failure #34901 fixes, a whole grid failing with 400 when a package is off, on the remaining grid surface. The code read is concrete, so the reading here is confirmation before the fix."

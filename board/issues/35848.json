@@ -1,0 +1,31 @@
+{
+  "number": 35848,
+  "kind": "issue",
+  "title": "Decision: may a self-hosted server serve the restriction profile without sign-in? (ADR-0138 D2 amendment for GET /discovery/restriction-profile)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T11:55:33Z",
+  "updated_at": "2026-11-20T12:48:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35848",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1k1GRsQbF3vCPKxhz\n\nFiling gate: ① (contract-review must-fix F1 on PR #35838, split out by seat 4) · Source: fleet · Area: a4-C · Seat: repo:objectstack#4\n\n## 维护者速读\n\n- 问题：自托管服务器要不要对**未登录**的任何人公开一个只读信息：它运行的规范（`@objectstack/spec`）是哪一版，以及“这里没有任何限制”。CLI 的 `os validate --target <自托管地址>` 读这个信息时不带登录凭据，所以不公开它就读不到。\n- 现状规则（ADR-0138 D2）：未登录请求只放行一份封闭清单上的入口，其余一律 401；新入口要先修订 ADR 才能加进清单。\n- 选项：A 修订 ADR，把这个路由并入现有的“发现（discovery）”角色，只加进匿名入口的巡检表；C 不公开，路由要求登录，CLI 改为带凭据读取（另开卡改 CLI）；D 不做这个路由。（原选项 B 已撤下，原因见下文。）\n- 参考：云端已经对未登录请求提供同一个路由（#31240 评论 6716619631），所以选 C 会让自托管比云端更严。\n- 推荐：由 seat 经 Fable 审后给出。\n- 不定会怎样：`os validate --target` 对自托管环境继续失败（今天就是这样）；MCP 客户端的版本声明和主版本拒绝（#34774 的另一半）不受影响，照常落地。\n\n## Decision asked\n\nDoes a ruled amendment of ADR-0138 D2 admit `GET {basePath}/discovery/restriction-profile` (and its environment-scoped twin, where scoping mounts it) into the control-plane **discovery** role, so an unauthenticated request is served? If yes, through which carrier:\n- **A** a row in the anonymous-door sweep only (`anonymous-door-sweep.classification.ts`, the discovery row), or\n- ~~**B** an exact `ALLOW_ROUTES` row in the auth gate as well~~. **Withdrawn (seat Fable review):** the parked handler never calls `enforceAuth`, so under A an anonymous caller is already served. An `ALLOW_ROUTES` row would change no answer for this route, and would only add a standing core exemption on every mount base and on the dispatcher seam. Not offered.\n- **C** no: the route requires authentication, and the CLI's `fetchRestrictionProfile` (`packages/cli/src/utils/restriction-profile.ts`) learns to send a credential (a CLI card).\n- **D** no route: `os validate --target` against a self-hosted runtime keeps reading a profile only from a file (`--target ./restriction-profile.json`).\n\n## Record\n\nSeat 4 contract review 7038862149 on PR #35838, finding **F1 (must-fix)**: ADR-0138 D2 serves an unauthenticated request only for the six door classes and the \"outside by construction\" families; everything else answers 401, and \"a new surface is therefore 401 until this list names it\". `ALLOW_ROUTES` matches exact segments (`['discovery']`), so `/api/v1/discovery/restriction-profile` is not on it. The sweep's discovery row is `routeIs('GET /api/v1', 'GET /.well-known/objectstack')`. `anonymous-door-sweep.dogfood.test.ts` reads the population off the booted showcase, so a 200 there turns \"the everything-else class answers 401 throughout\" red. This battery runs on `merge_group`/`push` only, which is why PR CI was green. The sweep header says a route moves into an outside family \"only by an amendment of ADR-0138, and the classification is edited after that amendment, never instead of it\" (precedent: the invitation-preview door).\n\nWhat the route says (review note N4): a constant open profile, `RestrictionProfileSchema` with no restrictions and `versions { spec, skills }`. The one new anonymous fact is the spec version under an operator stamp. `/discovery` already answers anonymously with `version` (the metadata-protocol package version, in the same `fixed` changeset group as spec, unless `OS_RUNTIME_VERSION` overrides it). `openapi.json`'s `info.version` has required authentication since #22430.\n\n**Cloud parity:** the cloud already serves this route without authentication (#31240 comment 6716619631). Option C would make a self-hosted runtime stricter than the cloud on the same route.\n\n## Code\n\nFace 3 of #34774 (the route in `packages/rest/src/discovery-routes.ts`, its `REST_ROUTE_LEDGER` row, the mount-table pin 2 → 3 under `api.enableDiscovery`, and the route's tests) is parked on branch `claude/area-a4C-34774-route` at `c7890e5b8529042294502f557a787442c4efaea6`. PR #35838 lands faces 1 and 2 (the `initialize` contract line and `clientSpecVersion` on `save_metadata_draft`) as `Part of #34774`. After the ruling, the parked branch is rebased with the ADR amendment and the classification row (A or B), or rewritten for C.\n\n## Why\n\nBusiness reason: `os validate --target <self-hosted URL>` (#34774 Done-when part 2) fails today against every self-hosted runtime, so a developer cannot check a build against what the server will accept before deploying. Who acts: the server lane (area a4-C) after the ruling. The ADR amendment is a governed surface. Reach: every self-hosted developer using `os validate --target`. No customer named.\n\nGrade: **p2 · domain:server**, the second half of p2 #34774.\n\nRelated: #34774 (parent card), PR #35838, ADR-0138, #34659 (epic, ruling D4 = A), #22430.\n\n"
+}

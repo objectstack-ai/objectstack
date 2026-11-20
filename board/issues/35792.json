@@ -1,0 +1,32 @@
+{
+  "number": 35792,
+  "kind": "issue",
+  "title": "pm-dispatch skill: an area hands a security card back to the seat only when it is under disclosure discipline",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T08:14:59Z",
+  "updated_at": "2026-11-20T08:17:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35792",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTRf6qBRCqPh4JZaZL\n\nBlocked-by: #35740\nFound-in: #35790\n\n## Problem\n\n`.claude/skills/pm-dispatch/references/area-lease.md:50` (main `1e018d6ed`), the last clause of the 留道 line, lists what an area always hands out: `交出闭集:他道在线席已认领、cloud 路由、安全、ADR。` The word `安全` is unqualified, so every `security` card leaves the area for the seat, whatever its size and whether or not it carries private detail.\n\n## Ruling\n\nThe maintainer ruled on 2026-11-20 that whether a card runs in its own thread, in an area or in the seat follows its size and shape only, and that only a security card under disclosure discipline stays in the seat session. The ruling record is comment 7033659866 on #35784; the seat reads this line as inside that ruling. #35784 (PR #35790) changes the two routing lines in `dispatch-runbook.md` and `SKILL.md`; it leaves this file alone because open PR #35740 edits it.\n\n## What changes\n\n- The hand-out set names security cards under disclosure discipline (private detail that may not leave the seat session), not every security card. A security card without that discipline is routed by size like any other card.\n- Sweep the file for any other line that hands a card out of an area because it is `security` alone.\n\n## Constraints\n\n- `.claude/**` is governed: the PR body carries `Rule-change: ruled` and `Ruling-ref: 7033659866`; the L2 record must read `Rule-change-verified: ruled`.\n- The file is under the byte ratchet at headroom 0: fit the text by compressing the same file, no ceiling raise.\n- Start only after #35740 merges (same file).\n\n## Done when\n\n- `area-lease.md` hands a security card to the seat only under disclosure discipline, and agrees with the card-thread section of `dispatch-runbook.md` as #35790 leaves it.\n\nFiled by area b1-D at the seat's request; not claimed, not started."
+}
