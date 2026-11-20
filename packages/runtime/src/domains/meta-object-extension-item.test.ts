@@ -153,7 +153,7 @@ async function boot(extraObjects: readonly Record<string, unknown>[] = []) {
         expect(r.response?.status, JSON.stringify(r.response?.body)).toBe(200);
         return r.response?.body?.data;
     };
-    return { engine, protocol: p, saveAndPublish, rows, fieldsOn, extenders, exportOf };
+    return { engine, protocol: p, dispatcher, saveAndPublish, rows, fieldsOn, extenders, exportOf };
 }
 
 const has = (list: string[]) => list.includes('region__c');
@@ -1011,5 +1011,61 @@ describe('[#29594] the App unit: HotCRM and three modules share one pair, and a 
         const created: any = await engine.insert(CASE, { subject: 'Outage', sla_tier__c: 'gold', organization_id: 'org_1' }, { context: { isSystem: true } });
         const back: any = await engine.findOne(CASE, { where: { id: created.id }, context: { isSystem: true } });
         expect(back?.sla_tier__c).toBe('gold');
+    }, 60_000);
+});
+
+describe('an unchanged owner object re-saved at the public door while an extension adds a column', () => {
+    // The owner is a stored object of the pair; a third package that depends on
+    // the pair extends it with a stored column. The owner's author then PUTs the
+    // owner's own body back unchanged. The destructive-change diff must judge the
+    // owner's layer, so the extension's column is no field this save drops.
+    const LEAD = 'crm_custom_lead';
+    const EXT = 'com.acme.leadext';
+    const leadBody = (fields: Record<string, unknown> = { title: { name: 'title', label: 'Title', type: 'text' }, score: { name: 'score', label: 'Score', type: 'number' } }) => ({
+        name: LEAD, label: 'Lead', sharingModel: 'private', fields,
+    });
+    const AUTHOR: any = {
+        request: {}, environmentId: 'platform',
+        executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+    };
+
+    async function extendedLead() {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: 'object', name: LEAD, mode: 'draft', packageId: PAIR, item: leadBody() });
+        await rig.protocol.publishMetaItem({ type: 'object', name: LEAD, packageId: PAIR });
+        await rig.protocol.installPackage({
+            manifest: { id: EXT, name: 'lead-ext', version: '0.1.0', type: 'app', namespace: 'leadext', dependencies: { [PAIR]: '^0.1.0' } },
+        });
+        await rig.saveAndPublish(EXT, { extend: LEAD, fields: { region__c: { type: 'text', label: 'Region' } } }, LEAD);
+        // Precondition: the extension's column is served on the owner.
+        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toContain('region__c');
+        const put = (item: unknown) => rig.dispatcher.handleMetadata(`/object/${LEAD}`, AUTHOR, 'PUT', item, { package: PAIR });
+        const stored = async () => {
+            const row: any = await rig.engine.findOne('sys_metadata', { where: { type: 'object', name: LEAD, package_id: PAIR, state: 'active' }, context: { isSystem: true } });
+            const body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+            return Object.keys(body?.fields ?? {}).sort();
+        };
+        return { ...rig, put, stored };
+    }
+
+    it('answers 200 and keeps the extension\'s column served', async () => {
+        const rig = await extendedLead();
+
+        const res: any = await rig.put(leadBody());
+
+        expect({ status: res.response?.status, code: res.response?.body?.error?.code }, JSON.stringify(res.response?.body)).toEqual({ status: 200, code: undefined });
+        expect(await rig.stored(), 'the owner row holds only its own fields').toEqual(['score', 'title']);
+        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toEqual(expect.arrayContaining(['title', 'score', 'region__c']));
+    }, 60_000);
+
+    it('CONTROL: a save that drops the owner\'s own column is still refused 409 DESTRUCTIVE_CHANGE naming that column alone', async () => {
+        const rig = await extendedLead();
+
+        const res: any = await rig.put(leadBody({ title: { name: 'title', label: 'Title', type: 'text' } }));
+
+        expect({ status: res.response?.status, code: res.response?.body?.error?.code }).toEqual({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
+        const issues = (res.response?.body?.error?.details?.issues ?? []).map((i: any) => `${i.code}:${i.field}`);
+        expect(issues).toEqual(['field_removed:score']);
+        expect(await rig.stored(), 'nothing was written').toEqual(['score', 'title']);
     }, 60_000);
 });
