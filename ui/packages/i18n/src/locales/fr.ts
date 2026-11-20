@@ -1562,6 +1562,8 @@ const fr = {
     relatedShowHidden: "Afficher",
     recordTabs: "Onglets de l'enregistrement",
     recordTabOverview: "Aperçu",
+    recordTabMoveBefore: "Déplacer à gauche",
+    recordTabMoveAfter: "Déplacer à droite",
     recordTabsMore: "{{count}} onglets de plus",
     recordTabsMore_one: "{{count}} onglet de plus",
     recordTabsMore_many: "{{count}} onglets de plus",

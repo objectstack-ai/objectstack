@@ -1516,6 +1516,8 @@ const ko = {
     relatedShowHidden: "표시",
     recordTabs: "레코드 탭",
     recordTabOverview: "개요",
+    recordTabMoveBefore: "왼쪽으로 이동",
+    recordTabMoveAfter: "오른쪽으로 이동",
     recordTabsMore: "탭 {{count}}개 더",
     recordTabsMore_one: "탭 {{count}}개 더",
     recordTabsMore_other: "탭 {{count}}개 더",

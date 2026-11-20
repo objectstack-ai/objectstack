@@ -1516,6 +1516,8 @@ const de = {
     relatedShowHidden: "Anzeigen",
     recordTabs: "Datensatz-Tabs",
     recordTabOverview: "Übersicht",
+    recordTabMoveBefore: "Nach links verschieben",
+    recordTabMoveAfter: "Nach rechts verschieben",
     recordTabsMore: "{{count}} weitere Tabs",
     recordTabsMore_one: "{{count}} weiterer Tab",
     recordTabsMore_other: "{{count}} weitere Tabs",
