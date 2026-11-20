@@ -230,6 +230,7 @@ describe('RelatedList — which body-table columns are totalled (objectstack#299
     paid: { type: 'currency', label: 'Paid', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
     dynamic_fee: { type: 'currency', label: 'Dynamic fee' },
     currency_code: { type: 'text', label: 'Currency' },
+    contract: { type: 'master_detail', label: 'Contract', reference: 'clm_contract' },
   };
   const planRows = [
     { id: 'p1', name: 'First', seq: 1, version_no: 1, planned_amount: 1000, fee: 10, paid: 100, dynamic_fee: 1, currency_code: 'EUR' },
@@ -248,22 +249,26 @@ describe('RelatedList — which body-table columns are totalled (objectstack#299
     parent?: { name: string; fields: unknown; data?: Record<string, unknown> };
     tenantCurrency?: string;
     filter?: Record<string, unknown>;
+    referenceField?: string;
+    childFields?: Record<string, unknown>;
   }) {
     const rows = opts.rows ?? planRows;
     const aggregate = serverAggregate(rows);
+    const referenceField = opts.referenceField ?? 'contract';
+    const childFields = opts.childFields ?? planFields;
     const list = (
-      <RecordBodyTablesContext.Provider value={new Set(['clm_payment_plan.contract'])}>
+      <RecordBodyTablesContext.Provider value={new Set([`clm_payment_plan.${referenceField}`])}>
         <RelatedList
           title="Payment plan"
           type="table"
           api="clm_payment_plan"
           objectName="clm_payment_plan"
-          referenceField="contract"
+          referenceField={referenceField}
           parentId="c1"
           filter={opts.filter as any}
-          columns={opts.columns.map((field) => ({ field, label: (planFields as any)[field].label }))}
+          columns={opts.columns.map((field) => ({ field, label: (childFields as any)[field].label }))}
           data={rows as any[]}
-          dataSource={{ find: vi.fn(async () => rows), aggregate, getObjectSchema: vi.fn(async () => ({ name: 'clm_payment_plan', fields: planFields })) } as any}
+          dataSource={{ find: vi.fn(async () => rows), aggregate, getObjectSchema: vi.fn(async () => ({ name: 'clm_payment_plan', fields: childFields })) } as any}
         />
       </RecordBodyTablesContext.Provider>
     );
@@ -318,6 +323,39 @@ describe('RelatedList — which body-table columns are totalled (objectstack#299
     const { aggregate } = renderPlan({
       columns: ['name', 'planned_amount'],
       parent: contract({ planned_total: rollUp('sum', 'planned_amount') }, { planned_total: 7 }),
+    });
+    await waitFor(() => expect(summaryOf('planned_amount')).toBe('7'));
+    expect(aggregate).not.toHaveBeenCalled();
+  });
+
+  // A child with TWO keys to the parent, the second a lookup: a roll-up with
+  // no `relationshipField` sums through the one the engine picks — the FIRST
+  // (`ObjectQL.buildSummaryIndex`) — so its stored figure is that list's total
+  // and never the other list's.
+  const twoKeyFields = {
+    ...planFields,
+    renewal_of: { type: 'lookup', label: 'Renewal of', reference: 'clm_contract' },
+  };
+
+  it("a two-key child, roll-up with no relationshipField: the engine's key reads the stored roll-up, the other key asks the server", async () => {
+    const parent = contract({ planned_total: rollUp('sum', 'planned_amount') }, { planned_total: 7 });
+    const picked = renderPlan({ columns: ['name', 'planned_amount'], childFields: twoKeyFields, parent });
+    await waitFor(() => expect(summaryOf('planned_amount')).toBe('7'));
+    expect(picked.aggregate).not.toHaveBeenCalled();
+    picked.unmount();
+
+    const other = renderPlan({ columns: ['name', 'planned_amount'], childFields: twoKeyFields, referenceField: 'renewal_of', parent });
+    await waitFor(() => expect(summaryOf('planned_amount')).toContain('383,000.5'));
+    expect(other.aggregate).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(other.aggregate.mock.calls[0][1].where)).toContain('renewal_of');
+  });
+
+  it('CONTROL — a roll-up naming the second key is that list\'s total', async () => {
+    const { aggregate } = renderPlan({
+      columns: ['name', 'planned_amount'],
+      childFields: twoKeyFields,
+      referenceField: 'renewal_of',
+      parent: contract({ planned_total: rollUp('sum', 'planned_amount', 'clm_payment_plan', { relationshipField: 'renewal_of' }) }, { planned_total: 7 }),
     });
     await waitFor(() => expect(summaryOf('planned_amount')).toBe('7'));
     expect(aggregate).not.toHaveBeenCalled();

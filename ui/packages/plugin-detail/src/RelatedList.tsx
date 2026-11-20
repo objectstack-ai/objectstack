@@ -713,26 +713,56 @@ const ROLLED_UP_FIELD_TYPES = new Set(['number', 'integer', 'decimal']);
  *
  * `sameRows` says whether the roll-up's value IS this list's total
  * (objectstack#35597): it sums every child row through this list's foreign key
- * (its `relationshipField` absent, which auto-detects the one FK, or naming
- * this list's) with no `filter` of its own. Only then may the parent's stored
- * figure stand for the list; otherwise the column is still additive, and the
- * server aggregates it over the list's own condition.
+ * with no `filter` of its own. A roll-up names that key by its
+ * `relationshipField`; with none, the engine takes the child's FIRST `lookup` /
+ * `master_detail` field that references the parent
+ * (`ObjectQL.buildSummaryIndex`), so an absent one is this list's key only when
+ * this list's key is that field (`engineRollUpForeignKey`). A child with two
+ * keys to the same parent otherwise draws the other key's roll-up under this
+ * list. Only then may the parent's stored figure stand for the list; otherwise
+ * the column is still additive, and the server aggregates it over the list's
+ * own condition.
  */
 interface RolledUpSum {
   readonly summaryField: string;
   readonly sameRows: boolean;
 }
 
+/** A field container in either shape the metadata API serves, as `[name, def]` pairs in declared order. */
+function fieldEntriesOf(container: unknown): Array<[string | undefined, unknown]> {
+  if (!container || typeof container !== 'object') return [];
+  return Array.isArray(container)
+    ? container.map((def) => [typeof (def as any)?.name === 'string' ? (def as any).name : undefined, def])
+    : Object.entries(container as Record<string, unknown>);
+}
+
+/**
+ * The child's foreign key a roll-up with no `relationshipField` sums through:
+ * the engine's own pick (`ObjectQL.buildSummaryIndex`, the `fkField` scan) —
+ * the FIRST `lookup` / `master_detail` field, in the child's declared order,
+ * whose `reference` names the parent. `undefined` when none does.
+ */
+function engineRollUpForeignKey(childFields: unknown, parentObject: string | undefined): string | undefined {
+  if (!parentObject) return undefined;
+  for (const [name, def] of fieldEntriesOf(childFields)) {
+    const d = def as { type?: unknown; reference?: unknown } | null;
+    if (d?.type !== 'master_detail' && d?.type !== 'lookup') continue;
+    if (typeof name === 'string' && name !== '' && d.reference === parentObject) return name;
+  }
+  return undefined;
+}
+
 function rolledUpSums(
   parentFields: unknown,
   childObject: string | undefined,
   referenceField: string | undefined,
+  childFields: unknown,
+  parentObject: string | undefined,
 ): ReadonlyMap<string, RolledUpSum> {
   const out = new Map<string, RolledUpSum>();
   if (!childObject || !parentFields || typeof parentFields !== 'object') return out;
-  const entries: Array<[string | undefined, unknown]> = Array.isArray(parentFields)
-    ? parentFields.map((def) => [typeof (def as any)?.name === 'string' ? (def as any).name : undefined, def])
-    : Object.entries(parentFields as Record<string, unknown>);
+  const entries = fieldEntriesOf(parentFields);
+  const engineKey = engineRollUpForeignKey(childFields, parentObject);
   for (const [name, def] of entries) {
     const d = def as {
       type?: unknown;
@@ -742,7 +772,9 @@ function rolledUpSums(
     if (ops?.function !== 'sum' || ops.object !== childObject || typeof ops.field !== 'string' || ops.field === '') continue;
     const sameRows =
       typeof name === 'string' && name !== ''
-      && (ops.relationshipField === undefined || ops.relationshipField === referenceField)
+      && (ops.relationshipField === undefined
+        ? referenceField !== undefined && referenceField === engineKey
+        : ops.relationshipField === referenceField)
       && (ops.filter === undefined || ops.filter === null);
     const known = out.get(ops.field);
     if (!known || (!known.sameRows && sameRows)) out.set(ops.field, { summaryField: name ?? '', sameRows });
@@ -819,13 +851,16 @@ function useBodyTableTotals(opts: {
   const { currency: tenantCurrency } = useLocalization();
   // The record page's own object: the parent whose roll-ups name this child.
   const recordContext = useRecordContext();
-  const parentSchema = recordContext?.objectSchema as { fields?: unknown } | undefined;
+  const parentSchema = recordContext?.objectSchema as { name?: unknown; fields?: unknown } | undefined;
+  const parentObject = typeof parentSchema?.name === 'string' && parentSchema.name !== ''
+    ? parentSchema.name
+    : recordContext?.objectName || undefined;
   const parentRecord = recordContext?.data as Record<string, unknown> | undefined;
   const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
 
   const plans = React.useMemo<BodyTableTotalPlan[]>(() => {
     if (!enabled) return [];
-    const rolledUp = rolledUpSums(parentSchema?.fields, childObject, referenceField);
+    const rolledUp = rolledUpSums(parentSchema?.fields, childObject, referenceField, objectSchema?.fields, parentObject);
     const out: BodyTableTotalPlan[] = [];
     for (const col of columns ?? []) {
       const key = col?.accessorKey || columnIdentity(col);
@@ -857,7 +892,7 @@ function useBodyTableTotals(opts: {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, columns, objectSchema, parentSchema, parentRecord, childObject, referenceField, tenantCurrency, filterKey]);
+  }, [enabled, columns, objectSchema, parentSchema, parentObject, parentRecord, childObject, referenceField, tenantCurrency, filterKey]);
 
   const [sums, setSums] = React.useState<Record<string, { value: number; currency?: string }> | null>(null);
   const scoped = !!referenceField && parentId !== undefined && parentId !== null && parentId !== '';
