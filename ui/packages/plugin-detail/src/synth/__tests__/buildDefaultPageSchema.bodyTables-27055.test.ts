@@ -191,7 +191,7 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
   const meetingDef = {
     name: 'meeting',
     fields: {
-      subject: { type: 'text', label: 'Subject' },
+      subject: { type: 'text', label: 'Subject', group: 'basic' },
       owner: { type: 'text', label: 'Owner', group: 'basic' },
       meeting_date: { type: 'date', label: 'Date', group: 'basic' },
       location: { type: 'text', label: 'Location', group: 'basic' },
