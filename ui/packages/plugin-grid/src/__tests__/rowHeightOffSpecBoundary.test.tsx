@@ -201,7 +201,7 @@ describe('ObjectGrid rowHeight — off-spec resolves at the state boundary (#444
   it('re-syncing to an off-spec rowHeight resolves to compact too', async () => {
     const { container, rerender } = render(
       <ActionProvider>
-        <ObjectGrid schema={makeSchema({ rowHeight: 'tall', hideRowHeightToggle: true })} />
+        <ObjectGrid schema={makeSchema({ rowHeight: 'tall', hideRowHeightToggle: true })} showRowNumbers />
       </ActionProvider>,
     );
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
@@ -209,7 +209,7 @@ describe('ObjectGrid rowHeight — off-spec resolves at the state boundary (#444
 
     rerender(
       <ActionProvider>
-        <ObjectGrid schema={makeSchema({ rowHeight: 'garbage', hideRowHeightToggle: true })} />
+        <ObjectGrid schema={makeSchema({ rowHeight: 'garbage', hideRowHeightToggle: true })} showRowNumbers />
       </ActionProvider>,
     );
     await waitFor(() => expectDensity(container, 'compact'));
