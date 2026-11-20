@@ -31,6 +31,9 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
+// The page reaches a dynamic `import('@objectstack/lint')`; paying its load at
+// collection keeps it out of every case's clocked window.
+import '@objectstack/lint';
 
 vi.mock('@object-ui/permissions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/permissions')>();
