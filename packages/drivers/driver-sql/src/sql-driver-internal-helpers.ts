@@ -5,7 +5,9 @@
  * `getKnex`, `getBuilder`, `resolveTenantField`, `isMultiTenantMode`,
  * `applyTenantScope`, `readableIdsSubquery`, `injectTenantOnInsert`,
  * `auditMissingTenant` moved out of `sql-driver.ts` whole (split
- * by #29598 and #30249).
+ * by #29598 and #30249). `fixedReadLeafSubquery` (ADR-0155 D2) was written
+ * here, a private method's body with its docblock, beside the subquery it
+ * mirrors.
  *
  * A MOVE, not a redesign. {@link InternalHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -30,12 +32,13 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import type { ComposedReadableIds, DriverOptions } from '@objectstack/spec/data';
+import type { ComposedReadableIds, DriverOptions, FixedReadLeaf } from '@objectstack/spec/data';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { Knex } from 'knex';
 import type { SqlDriver } from './sql-driver.js';
+import { fixedInnerReadPredicates } from './fixed-read-leaf-compile.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link InternalHelpersFacet} read — every one of
@@ -49,6 +52,7 @@ export interface InternalHelpersHost {
   applyTenantScope: SqlDriver['applyTenantScope'];
   getBuilder: SqlDriver['getBuilder'];
   isMultiTenantMode: SqlDriver['isMultiTenantMode'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly knex: SqlDriver['knex'];
   readonly logger: SqlDriver['logger'];
   readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
@@ -139,6 +143,43 @@ export class InternalHelpersFacet {
     this.applyTenantScope(sub, parent, options);
     if (leaf.scope !== undefined) this.applyFilters(sub, leaf.scope, options);
     return sub;
+  }
+
+  /**
+   * The body of `SqlDriver#fixedReadLeafSubquery`, a private method, with its
+   * docblock: [ADR-0155 D2, D4] the subquery a fixed-read leaf compiles to,
+   * which the `$in` arm of `applyFilterCondition` embeds as `field IN (…)`:
+   *
+   * ```sql
+   * SELECT record_id FROM sys_record_share
+   *  WHERE object_name = ? AND recipient_type = ? AND recipient_id = ?
+   *    [AND access_level IN (?, …)]            -- the write form (③ ruled A)
+   *    AND record_id IS NOT NULL AND record_id <> ''
+   * ```
+   *
+   * The table, the column and every predicate are the leaf's own description
+   * (`fixedInnerReadPredicates`), every value bound. On Oracle, which stores
+   * `''` as NULL, the guard is `IS NOT NULL` alone.
+   *
+   * - **No tenant scope (ADR-0155 ① ruled A).** ⛔ No `applyTenantScope` on
+   *   this builder: today's read of the table carries none, and the subquery
+   *   carries none either. `scripts/check-tenant-chokepoint.mjs` records the
+   *   absence as an exemption citing that ruling. The OUTER statement's wall is
+   *   untouched: it is applied to the outer builder as on every read.
+   * - **Same datasource.** The table is resolved by `getBuilder`, on this
+   *   driver, as a read of it is; the engine's seam refuses an object bound to
+   *   another datasource before any driver is called.
+   * - **One statement.** No transaction of its own (it is part of the outer
+   *   statement), no cap, no ordering, ⛔ no `EXISTS`, no correlation, no join.
+   */
+  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle'>, leaf: FixedReadLeaf): Knex.QueryBuilder {
+    const read = fixedInnerReadPredicates(leaf, { emptyStringIsNull: this.isOracle });
+    const inner = this.getBuilder(read.table).select(read.column);
+    for (const [column, value] of read.equals) inner.where(column, value);
+    for (const [column, values] of read.memberOf) inner.whereIn(column, [...values]);
+    inner.whereNotNull(read.column);
+    if (read.notEmpty) inner.where(read.column, '<>', '');
+    return inner;
   }
 
   /** The body of `SqlDriver#injectTenantOnInsert`; the method's docblock there is its contract. */
