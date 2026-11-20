@@ -81,6 +81,9 @@ vi.mock('../previews/useObjectFields', () => ({
 import { FlowNodeInspector } from './FlowNodeInspector';
 import { fieldsForNodeType, FLOW_NODE_CONFIG_TYPES } from './flow-node-config';
 import type { MetadataSelection } from '../preview-registry';
+// The inspector's CEL authoring reaches `@objectstack/lint` by a dynamic import;
+// paying its first load here, at collection, keeps it out of a clocked case.
+import '@objectstack/lint';
 // The runtime's own answer for an omitted `escalation` key. Imported so the
 // #6620 rows below compare the RENDERED control against the installed contract
 // instead of against a literal this file would then own a second copy of.
@@ -998,7 +1001,7 @@ describe('the declaration surface this card names', () => {
    */
   const OFF_PICKER_TYPES = ['boundary_event', 'parallel_gateway', 'join_gateway', 'legacy_action', 'notify'];
 
-  it('exactly ten fields declare a defaultValue, and these are they', () => {
+  it('exactly eleven fields declare a defaultValue, and these are they', () => {
     const swept = FLOW_NODE_CONFIG_TYPES;
     expect(
       swept,
@@ -1013,6 +1016,8 @@ describe('the declaration surface this card names', () => {
     }
     expect([...declaring].sort()).toEqual([
       'approval.escalation.action',
+      // The eleventh: ADR-0157 D5's `clock`, whose spec default is 'wall_clock'.
+      'approval.escalation.clock',
       'approval.escalation.enabled',
       'approval.escalation.notifySubmitter',
       'approval.behavior',
@@ -1062,10 +1067,11 @@ describe('the declaration surface this card names', () => {
 
     expect(
       cases.map((c) => c.id).sort(),
-      'the select-kind half of the declaration surface — five of the ten',
+      'the select-kind half of the declaration surface — six of the eleven',
     ).toEqual([
       'approval.behavior',
       'approval.escalation.action',
+      'approval.escalation.clock',
       'approval.onEmptyApprovers',
       'end.outcome',
       'screen.mode',
