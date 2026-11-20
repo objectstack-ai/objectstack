@@ -6145,6 +6145,7 @@ export class ObjectQL implements IObjectQLEngine {
       get formulaHopReads() { return engine.formulaHopReads; },
       formulaOptionLabels: (...a) => engine.formulaOptionLabels(...a),
       hasObjectMiddleware: (...a) => engine.hasObjectMiddleware(...a),
+      get hooks() { return engine.hooks; },
       get i18nService() { return engine.i18nService; },
       get insertRecomputeListeners() { return engine.insertRecomputeListeners; },
       get logger() { return engine.logger; },

@@ -39,6 +39,10 @@ import { normalizeFilterComparandTypes } from '@objectstack/spec/data';
 import type { EngineAggregateOptions, EngineDeleteOptions, FilterCondition, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
+// [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
+// resolvers' host, built once per engine, which carries every member it reads.
+import { securityResolversHost } from './engine-facet-hosts.js';
+import { passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import { assertHavingTemporalComparandsInterpretable, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 import { narrowHavingNumberComparands, narrowNumberComparands } from './number-comparand-declared-type-door.js';
@@ -237,6 +241,8 @@ export class DeleteAndAggregateFacet {
       // delete's predicate is refused at the executor's entry, before the
       // pre-image reads reach the driver.
       collectComposableReadableIds(object, 'delete', opCtx.ast?.where, 'where');
+      // [ADR-0155 D1] …and no fixed-read leaf at all: a share widens edit, never delete.
+      passFixedReadLeaves(securityResolversHost.of(this.facade), object, 'delete', opCtx.ast?.where, opCtx.context);
       const hookContext: HookContext = {
           object,
           event: 'beforeDelete',

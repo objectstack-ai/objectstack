@@ -50,6 +50,7 @@ import {
   type ReadableIds,
   type ComposedReadableIds,
 } from '@objectstack/spec/data';
+import { ENGINE_FIXED_READ_LEAF_BRANDS, collectFixedReadLeaves } from './fixed-read-leaf-position.js';
 
 /**
  * A plain object — filter STRUCTURE rather than a comparand.
@@ -113,6 +114,15 @@ export function invalidFilterError(message: string): Error {
  * the engine will never compose — see {@link collectComposableReadableIds} for
  * the positions. An UNBRANDED copy never gets that far: the door refuses it as
  * a non-list comparand (`INVALID_FILTER` / 400).
+ *
+ * [ADR-0155 D4] It is also the one engine caller that names the fixed-read
+ * leaf brands (`admitFixedReadLeaves`, {@link ENGINE_FIXED_READ_LEAF_BRANDS}):
+ * such a leaf arrives composed and the engine's seam passes it through. It
+ * then refuses, by name, every one out of position or on the wrong verb
+ * (`fixed-read-leaf-position.ts#collectFixedReadLeaves`); the recipient, the
+ * two classes and the driver's declaration are the executor boundary's
+ * (`fixed-read-leaf-seam.ts`). An unbranded copy is refused as a non-list,
+ * here, as before.
  */
 export function assertListComparandShapes(
   object: string,
@@ -120,10 +130,15 @@ export function assertListComparandShapes(
   node: unknown,
   path = 'where',
 ): void {
-  assertListComparandShapesAt(node, `${operation}('${object}')`, path, { admitReadableIds: true });
+  assertListComparandShapesAt(node, `${operation}('${object}')`, path, {
+    admitReadableIds: true,
+    admitFixedReadLeaves: ENGINE_FIXED_READ_LEAF_BRANDS,
+  });
   // The sites it returns are composed at the executor boundary, on the final
   // AST; here only its refusals are wanted.
   collectComposableReadableIds(object, operation, node, path);
+  // The same for the fixed-read leaves: judged in full at the boundary.
+  collectFixedReadLeaves(object, operation, node, path);
 }
 
 /** The read verbs whose `where` may carry a `ReadableIds` leaf (ADR-0139 D1). */

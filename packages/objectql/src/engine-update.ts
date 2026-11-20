@@ -35,6 +35,10 @@
 import type { DroppedFieldsEvent, EngineUpdateOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { collectComposableReadableIds } from './filter-comparand-shape.js';
+// [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
+// resolvers' host, built once per engine, which carries every member it reads.
+import { securityResolversHost } from './engine-facet-hosts.js';
+import { passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import { retiredSecretSlots, secretFieldsWritten } from './engine-secret-internal-fields.js';
 import type { PendingSecretRow, SecretHandleSlot } from './engine-secret-internal-fields.js';
 import { sealedSecretsNamedBy, secretKeysHoldingCallerValues, suppliedOverSealedSecrets } from './engine-update-sealed-secrets.js';
@@ -519,6 +523,11 @@ export class UpdateFacet {
        // wrote — here, at the executor's entry, because the prior-row reads
        // below reach the driver before `updateMany` does.
        collectComposableReadableIds(object, 'update', opCtx.ast?.where, 'where');
+       // [ADR-0155 D4, ③ ruled A] The fixed-read leaves on the same AST, at the
+       // same point: the write form passes through in a predicate update's
+       // where, judged once, as the update, for its prior-row read and its
+       // write alike; every other leaf is refused before either runs.
+       passFixedReadLeaves(securityResolversHost.of(this.facade), object, 'update', opCtx.ast?.where, opCtx.context);
        // [#20082] The write's ONE permission resolution, shared by its option
        // gates and the formula fields on its response — asked at most once, and
        // only by the first of them that needs the map.
