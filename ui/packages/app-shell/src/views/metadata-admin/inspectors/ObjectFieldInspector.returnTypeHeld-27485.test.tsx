@@ -52,7 +52,12 @@ function stubEngine({ money = false }: { money?: boolean } = {}) {
     Promise.resolve({
       // objectstack#35631 — the money verdict is the engine's own, unstubbed;
       // left out, the engine gives none (an engine without the export).
-      ...(money ? { inferFormulaReturn } : {}),
+      ...(money
+        ? {
+            inferFormulaReturn: (input: unknown, fields?: Readonly<Record<string, unknown>>) =>
+              inferFormulaReturn(input as Parameters<typeof inferFormulaReturn>[0], fields as Parameters<typeof inferFormulaReturn>[1]),
+          }
+        : {}),
       validateExpression: (_role: string, input: unknown) => {
         const src = typeof input === 'string' ? input : String((input as { source?: string })?.source ?? '');
         return BROKEN.test(src)
