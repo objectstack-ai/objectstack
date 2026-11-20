@@ -15,13 +15,16 @@
  *   1. A click selects a cell: a ring, no editor, no record opened. Without
  *      the provider the same click still edits (the control).
  *   2. Double-click, Enter or F2 edits; the value is kept.
- *   3. Space opens the record; a two-state cell flips on Space or on a second
- *      click instead, and commits.
+ *   3. Space is typed like any key and opens the editor, never the record
+ *      (the maintainer's correction on #35683); a two-state cell flips on
+ *      Space or on a second click instead, and commits.
  *   4. A link the cell draws keeps its own click; a double-click on the cell
  *      around it edits.
  *   5. A cell that opens no editor says why on the cell: the host's sentence,
  *      else the table's own.
  *   6. A touch tap opens the record and edits nothing.
+ *   7. The edit-only row column is never drawn: each cell saves itself
+ *      (objectstack#35685, `data-table-autosave-35685.test.tsx`).
  */
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -154,14 +157,16 @@ describe('data-table select-first — double-click, Enter and F2 edit', () => {
   });
 });
 
-describe('data-table select-first — Space opens; a two-state cell flips', () => {
-  it('Space on the selected cell opens the record', () => {
+describe('data-table select-first — Space types; a two-state cell flips', () => {
+  it('Space on the selected cell is typed into it: the editor opens on it and no record opens', () => {
     const t = renderTable();
     fireEvent.click(t.cell(0, 0));
-    fireEvent.keyDown(t.catcher()!, { key: ' ' });
-    expect(t.onRowClick).toHaveBeenCalledTimes(1);
-    expect(t.onRowClick.mock.calls[0][0]).toBe(ROWS[0]);
-    expect(t.editor()).toBeNull();
+    // The key is left to the catcher (not prevented), which reads it as typing.
+    expect(fireEvent.keyDown(t.catcher()!, { key: ' ' })).toBe(true);
+    expect(t.onRowClick).not.toHaveBeenCalled();
+    fireEvent.change(t.catcher()!, { target: { value: ' ' } });
+    expect(t.editor()).toHaveValue(' ');
+    expect(t.onRowClick).not.toHaveBeenCalled();
   });
 
   it('Space on a selected boolean flips it and commits, and opens nothing', () => {
@@ -236,26 +241,24 @@ describe('data-table select-first — a cell that opens no editor says why', () 
   });
 });
 
-describe('data-table select-first — the edit-only column is drawn only while a row has changes (objectstack#35554)', () => {
+describe('data-table select-first — no edit-only column, ever (objectstack#35554, objectstack#35685)', () => {
   const editHeader = (c: HTMLElement) => c.querySelector('[data-testid="data-table-edit-column-header"]');
   const lastHeader = (c: HTMLElement) => [...c.querySelectorAll('thead th')].pop()!;
   // The shape `ObjectGrid` hands the list page: a save path and no row menu.
   const EDIT_ONLY = { rowActions: true, onRowSave: () => Promise.resolve() };
 
-  it('none at rest; a commit draws it with that row\'s Cancel and Save; Cancel takes it away', () => {
-    const t = renderTable({ extra: EDIT_ONLY });
+  it('none at rest and none after a commit: the commit saves itself', () => {
+    const onRowSave = vi.fn(() => Promise.resolve());
+    const t = renderTable({ extra: { ...EDIT_ONLY, onRowSave } });
     expect(editHeader(t.container)).toBeNull();
     expect(lastHeader(t.container)).toHaveTextContent('Site');
     fireEvent.click(t.cell(0, 0));
     fireEvent.change(t.catcher()!, { target: { value: 'A' } });
     fireEvent.keyDown(t.editor()!, { key: 'Enter' });
-    expect(editHeader(t.container)).not.toBeNull();
-    expect(lastHeader(t.container)).toBe(editHeader(t.container));
-    const firstRow = t.container.querySelectorAll('tbody tr')[0] as HTMLElement;
-    expect(firstRow.querySelector('button[title="Save row"]')).not.toBeNull();
-    fireEvent.click(firstRow.querySelector('button[title="Cancel changes"]')!);
     expect(editHeader(t.container)).toBeNull();
     expect(lastHeader(t.container)).toHaveTextContent('Site');
+    expect(t.container.querySelector('button[title="Save row"]')).toBeNull();
+    expect(onRowSave).toHaveBeenCalledTimes(1);
   });
 
   it('control: without the provider the column is drawn at rest, as before', () => {
