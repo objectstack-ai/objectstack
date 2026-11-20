@@ -102,7 +102,7 @@ function mount(schemaExtra: Record<string, unknown>) {
     objectName: OBJECT,
     viewType: 'grid',
     columns: ['subject'],
-    // Read-only: an editable grid also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+    // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
     userActions: { editInline: false },
     ...schemaExtra,
   };

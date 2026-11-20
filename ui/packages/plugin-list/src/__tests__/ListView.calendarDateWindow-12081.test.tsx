@@ -140,7 +140,7 @@ const renderList = (schemaExtra: Record<string, unknown>, ds: any) =>
           type: 'list-view',
           objectName: 'clm_contract',
           columns: ['name', 'status'],
-          // Read-only: an editable grid also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+          // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
           userActions: { editInline: false },
           ...schemaExtra,
         } as any}

@@ -116,7 +116,7 @@ const makeDataSource = () =>
 
 function mount(columns: string[]) {
   const dataSource = makeDataSource();
-  // Read-only: an editable grid also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+  // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
   const schema: any = { type: 'list-view', objectName: OBJECT, viewType: 'grid', columns, userActions: { editInline: false } };
   render(
     <SchemaRendererProvider dataSource={dataSource}>

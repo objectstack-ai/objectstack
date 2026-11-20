@@ -127,7 +127,7 @@ async function mount(columns: unknown[]) {
   render(
     <SchemaRendererProvider dataSource={dataSource}>
       <ListView
-        // Read-only: an editable grid also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+        // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
         schema={{ type: 'list-view', objectName: OBJECT, viewType: 'grid', columns, userActions: { editInline: false } } as any}
         dataSource={dataSource}
       />

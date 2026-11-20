@@ -3235,9 +3235,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * (objectui#12292): exactly when the grid it hands them to is editable in
    * place — the same expression as that grid's `editable` below. The grid's
    * save sends each row's `updated_at` as `If-Match`, so the fetch projects it.
-   * Only the grid edits in place, so no other view asks for it.
+   * Every view of the list asks for it, not the grid alone, so a switch
+   * between the grid and another view re-reads nothing (objectui#7394).
    */
-  const rowsCarryConcurrencyToken = currentView === 'grid' && inlineEditOffered;
+  const rowsCarryConcurrencyToken = inlineEditOffered;
 
   // Normalize exportOptions: support both ObjectUI object format and spec string[] format
   const resolvedExportOptions = React.useMemo(() => {
