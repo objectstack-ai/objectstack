@@ -1,0 +1,32 @@
+{
+  "number": 35885,
+  "kind": "issue",
+  "title": "units: a unitField re-pointed at a field new in the same save raises no finding, and two backfill report gaps (follow-up of PR #35865)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T16:44:07Z",
+  "updated_at": "2026-11-20T16:51:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35885",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ③ a review follow-up, filed by the area thread on the L2 records of PR #35865 (card #35492): 7045119376 (the re-point gap, accepted there as a disclosed deviation that still owes a card) and 7041994401 (nits N3 and N4, carried as follow-ups by every later record) · Source: fleet\n\n## What is owed\n\nPR #35865 (ADR-0158 R1, the unit-code backfill door) leaves three small gaps, each disclosed in its PR body and the ADR-0158 amendment text:\n\n1. **Re-point onto a new field.** When a stored record-mode quantity's `unitField` is re-pointed at a field added in the same save, no destructive-change finding is raised, although every stored row then holds its quantity beside a blank unit and is refused `ERR_UNIT_CODE_REQUIRED` at its next quantity edit. The other re-point (onto a field that already was a unit code field) is the sibling of ADR-0144's `currency_field_repointed`, which is out of R1 by the ADR text. This shape is the one with a real row-level debt. Code: `packages/metadata-protocol/src/protocol-write-face.ts#detectDestructiveObjectChanges`.\n2. **N3, a silent mapping key.** A mapping key that is itself a stored unit code is ignored without a word. The report shows the value as already a unit code, but not that the operator's entry went unused. Code: `packages/objectql/src/unit-code-backfill.ts`.\n3. **N4, a truncated preview.** When the preview stops at `maxRecords` (default 100,000), an apply run still writes, although unseen rows may hold unmatched values. The report says `truncated`, as the currency twin's does, but \"one run converts the whole field or nothing\" is not literally kept.\n\nWho benefits: an operator converting a large or reshaped object. Item 1 leaves a save that strands every stored row with no warning; items 2 and 3 leave a report that reads cleaner than the table is.\n\n## Done when\n\n- Item 1: the save raises a 409 `DESTRUCTIVE_CHANGE` finding (`unit_mode_to_record`'s blank-debt wording, or a re-point finding named after `currency_field_repointed`), lifted by `force: true`, reading no row, with the once-only rule of `newlyDeclaredUnitCodeFieldsOf` kept. It is pinned in `protocol-destructive-unit-mode.test.ts`.\n- Item 2: the report names each mapping entry whose key is a stored code and that no row used.\n- Item 3: an apply run over a truncated preview is refused, or the report and CLI say plainly that unseen rows were not judged. Choose the shape against the currency twin `record-currency-backfill.ts`, and keep them alike.\n- The ADR-0158 Open item 9 trailing note and Open item 12 are amended to match.\n\nReader: area:data. Blocked-by: #35492 (PR #35865).\n\nGrading: area:data · Task · review follow-up · evidence: L2 records 7041994401 (N3, N4) and 7045119376 (the re-point gap); dev report 7044992828 (out_of_scope_findings).\nSuggested grade: p3 (unpublished surface until the R1 release; item 1 strands rows only on a rare re-shaping save). Item 1 could be cut alone if triage prefers.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open unit_code_field_declared OR currency_field_repointed` gives #35492 and the triage seat card; no follow-up card exists."
+}

@@ -2,8 +2,8 @@
   "number": 34611,
   "kind": "issue",
   "title": "analytics follow-ups of PR #34514: two filter-normalizer comments give an incomplete reason, and dashboards.mdx says SQL datasources are unlimited",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "documentation",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T03:05:58Z",
-  "updated_at": "2026-11-20T09:10:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T16:04:32Z",
+  "closed_at": "2026-11-20T16:03:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

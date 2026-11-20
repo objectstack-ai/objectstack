@@ -12,18 +12,20 @@
   },
   "labels": [
     "area:workflow",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T06:04:06Z",
-  "updated_at": "2026-11-19T13:53:31Z",
+  "updated_at": "2026-11-20T19:29:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35357",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca1jJvsA1dHsPwMiQb\n\n③ maintainer-directed task · Source: maintainer ruling on #35340 (comment https://github.com/objectstack-ai/objectstack/issues/35340#issuecomment-7000950747; sub-cards approved 2026-11-19 06:03Z 「同意」「都是 p1」).\n\nBlocked-by: #35354\nWaits on #35354 (the ADR) and on the calendar service from ②. Ships in the same release as ② and ③.\n\n## 维护者速读\n- **问题：** 审批超时按自然小时算，夜里、周末、节假日都算进去。\n- **要做：** 给审批升级加一个时钟选项，可以按工作时间算；日历算不出时不升级，并在到期时间处写明原因。\n- **不做会怎样：** 周五下午提交的审批周五晚上就升级，客户看到的到期时间不对。\n- **你要做的：** 无。\n\n## Scope\n- `ApprovalEscalationSchema` (`packages/spec/src/automation/approval.zod.ts` ~855-875): add `clock: 'wall_clock' | 'working_time'` (default `wall_clock`) and an optional `calendar` (code). Rewrite the `timeoutHours` describe text and the code comment that say the platform ships no calendar.\n- The default stays `wall_clock`. The sweep reads stored node-config snapshots (`packages/plugins/plugin-approvals/src/approval-service.ts` ~8055), so existing requests keep their deadlines.\n- Sweep, with `working_time`: compute the deadline from `created_at` through the calendar service (`addWorkingHours`), and recompute it on every sweep rather than storing it (ADR-0157 D12; ADR-0042 §1 single-shot escalation and §3 stand).\n- Calendar resolution follows the ADR: explicit code, then the org default, then refuse. There is never a silent wall-clock fallback.\n- **When the calendar can't answer** (it is missing, or not maintained that far; ADR-0157 D8/D9, ruling record 7003541720): the sweep does not escalate, retries on the next sweep, and the displayed due time shows 「日历算不出」 with the reason. The publish-time lint checks only static authoring errors, e.g. a `calendar` code without `clock: 'working_time'`. ⛔ **No publish-time check that the calendar exists.** That is per-org runtime data, and the lint is a pure `(stack) => Finding[]`. *(Corrected 2026-11-19 from \"a `working_time` escalation with no resolvable calendar is a lint/validation error\", per ADR-0157 D9.)*\n- Studio designer field for the clock and calendar; docs and skills teaching text.\n- Only `timeoutHours` gets a clock key. Other duration keys get one card each, later.\n\n## Done when\nA `working_time` escalation opened Friday 17:00 with 4 hours fires on the next working day per the calendar, including across a holiday and a 调休 make-up Saturday. A request whose calendar can't answer doesn't escalate and shows the reason where the due time is displayed. `wall_clock` behaviour is unchanged.\n\n## Non-goals\nFlipping the default clock; clock keys on other duration keys.\n"

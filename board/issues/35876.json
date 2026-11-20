@@ -1,0 +1,36 @@
+{
+  "number": 35876,
+  "kind": "issue",
+  "title": "列表排序：已有多级排序时点列头会把原来的排序全部清掉；点排序标签会直接把方向反过来",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T16:24:53Z",
+  "updated_at": "2026-11-20T20:08:16Z",
+  "closed_at": "2026-11-20T20:08:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35876",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-20 对修法的回复：「刷新去掉，其他同意」（指协调席列出的整版方案，其中包含本卡两条修法）；看过图 42 后：「按这版立卡」。\n\n## 现状（主干 `7878cf0557`，本机环境，浏览器实测）\n\n「会议」列表，先设好两级排序：会议日期升序、会议地点升序。\n\n1. **点列头会清掉原来的排序。** 点一下「会议地点」的列头，排序变成只有「会议地点 降序」一级，原来的「会议日期」没有了，没有任何提示，也没有撤销。这个结果会立即存成这个人的个性化设置，刷新后仍然是被清掉的状态。\n   - 表格点列头时只交出这一列：`ui/packages/components/src/renderers/complex/data-table.tsx:2259`（`onSortChange?.([{ field: columnKey, order }])`）。\n   - 列表收到后整体替换当前排序：`ui/packages/plugin-list/src/ListView.tsx:6127`（`handleHeaderSort` 里 `setCurrentSort(items)`）。\n2. **点排序标签会直接反转方向。** 视图栏下面那一行的排序标签（「↑ 会议日期」），点一下就从升序变成降序，立即生效并保存。标签看起来像「点开看详情」，实际是一个立即生效的操作。\n3. **调不了多级排序的先后。** 想把「会议地点」排到「会议日期」前面，只能删掉一个再加回来。右上「排序」面板底部有一个「全部排序级别」入口，协调席没有点开核对，如果那里能调先后，这一条以它为准。\n\n## 要做的\n\n效果图（图 42 第四、五张）：\n\n![点排序标签打开面板](https://github.com/objectstack-ai/objectstack/blob/b722139aa11a74f740460da3267ba83315e4c593/list-redo/42-toolbar-4.png?raw=true)\n\n![点列头出菜单](https://github.com/objectstack-ai/objectstack/blob/b722139aa11a74f740460da3267ba83315e4c593/list-redo/42-toolbar-5.png?raw=true)\n\n1. 点列头出菜单：升序、降序、隐藏这一列。不再一点就直接排序。\n2. 在菜单里选了升序或降序时：\n   - 当前没有排序，或只有一级：直接换成这一列。\n   - 当前有两级或更多：把这一列放到第一级，原来的各级往后顺延；这一列原本就在排序里的，挪到第一级并用新选的方向。**不清掉其余各级。**\n3. 点排序标签打开面板，不再反转方向。面板里每级一行：拖动手柄、字段、升序或降序、删除；拖动调先后；底部「添加排序」。\n4. 表头上的 ↑1、↓2 这类标记保留。\n\n第 2 条里「已有多级时放到第一级」是协调席提的做法，维护者以「其他同意」认可；另一种做法「替换并提供撤销」没有采用。\n\n## 不做的\n\n- 不改排序的保存方式（仍然是改了立即存成个人的）。\n- 排序标签并成一个、入口的位置，在另一张卡（工具区重排）里，不在本卡。本卡先在现有的排布上把这两个行为改对，两张卡谁先做都可以。\n- 手机宽度下没有列头，本卡不涉及。\n\n## 验收\n\n- 两级排序下点任意列头：出菜单，列表顺序不变，排序标签不变。\n- 两级排序（会议日期升序、会议地点升序）下，在「会议名称」列头菜单选升序：排序变成三级，会议名称、会议日期、会议地点；刷新后仍是三级。\n- 同样的两级排序下，在「会议地点」列头菜单选降序：排序仍是两级，顺序变成会议地点降序、会议日期升序。\n- 没有排序时，在列头菜单选降序：排序是这一列降序一级。\n- 点排序标签：打开面板，方向不变；在面板里拖动第二行到第一行，表头的 ↑1、↑2 跟着互换，刷新后保持。\n- 键盘：列头获得焦点后按回车打开菜单，上下键选择，回车确认，Esc 关闭且不改排序。\n\nReader: `domain:ui` 车道。`ui/packages/components/src/renderers/complex/data-table.tsx`、`ui/packages/plugin-list/src/ListView.tsx`。\n\nDedupe: `列头 排序 多级 清掉`、`排序 标签 反转 方向`、`sort chip toggle header click multi sort`（objectstack，open）→ 都是 0。相邻但不同：objectstack-ai/objectstack#35645（非安全连接下点表头排序报错，是另一个原因）。"
+}

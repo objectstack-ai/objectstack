@@ -1,0 +1,33 @@
+{
+  "number": 35922,
+  "kind": "issue",
+  "title": "Platform test checklist: add items for the list column-header menu and for reordering sort levels",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "documentation",
+    "domain:docs",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T19:02:13Z",
+  "updated_at": "2026-11-20T19:53:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35922",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiled from the build and review of #35876 (PR #35909). Part of epic #35547 (list page redo).\n\n## Gap\n`docs/qa/platform-checklist/` has no item that drives the two behaviours #35876 adds to the list page:\n1. Clicking a column header opens a menu (sort ascending / descending, add to the existing sort, hide column) instead of replacing the whole sort; a non-sortable header opens the menu without sort entries.\n2. Reordering the levels of a multi-level sort in the sort panel (drag, and arrow keys).\n\nThe nearest item, `records-forms.adhoc-filter-sort-builder`, covers building a sort, not the header menu or the reorder.\n\n## To do\nAuthor the items (or extend the nearest one) with steps, expected results and fixtures, in the checklist's own shape, after #35909 merges so the steps match the shipped UI.\n\n## Acceptance\n- `check-platform-checklist` is OK and the new or extended items name #35876.\n\nReader: `domain:ui` / QA checklist."
+}

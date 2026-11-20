@@ -2,8 +2,8 @@
   "number": 35829,
   "kind": "issue",
   "title": "plugin-auth: a supported seam for a host's active-organization choice at session creation to fall back when the chosen organization's access policy (allowed_ip_ranges, …) would refuse the sign-in",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:auth",
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "hotlong"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-20T10:21:30Z",
-  "updated_at": "2026-11-20T10:49:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T20:05:08Z",
+  "closed_at": "2026-11-20T20:05:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35829",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① a fork measured by the `repo:cloud` lane on objectstack-ai/cloud PR #4909 (cloud#4792, p1). That PR implements the maintainer's ruling 「进入上次的组织」: sign-in starts in the person's last-used organization. Reader: the `domain:server` lane (plugin-auth). Dedupe: `judgeSessionScoping seam`, `session creation scoping fallback`: none found.\n\nGrade: p1 · Task · a blocker takes the top grade of what it blocks (cloud#4792 is p1).\n\n## 维护者速读\n- 问题：云端登录时会选「上次用的组织」作为当前组织。如果那个组织限定了允许登录的网络（IP 名单），而这个人当前不在名单内，平台会直接拒绝登录，这个人连云端都进不去。原本应该退回到他自己的组织。\n- 要做：平台提供一个正式的接口，让云端在登录时能判断「这个组织是否允许本次登录」，不允许就换下一个候选组织；或者由平台自己按云端给的候选顺序挑出第一个允许的组织。\n- 需要你做的：无。\n\n## Measured (objectstack pin `53c9575b7eb4`)\n\n- The host's `session.create.before` chooses the organization, and the host's choice wins (`auth-manager-database-hooks.ts:310`).\n- After that, the framework refuses creation when the chosen organization's scoping does not admit the request (`refuseUnadmittedScoping`, `:345-399`). The refusal is `SESSION_SCOPING_REFUSAL`.\n- The host hook runs before that refusal and cannot catch it.\n- `AuthManager.judgeSessionScoping` is documented `@internal`: \"Package-internal … not a supported entry point\".\n- The client address the judgement uses, `readRequestClientAddress` (`request-client-address.ts:49`), is not exported. The package exports are `'.'`, `'./rate-limit-storage'` and `'./client-address'`.\n\n## Done when\n\nEither of these, with a test:\n- The host can hand plugin-auth an ordered list of candidate organizations at session creation, and the framework picks the first one its scoping admits.\n- Or plugin-auth exports a supported predicate the host can call in its create hook: \"would scoping admit organization X for this request\", using the same established client address.\n\nToday's single-choice behaviour must stay unchanged when no list is given."

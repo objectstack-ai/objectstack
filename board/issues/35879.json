@@ -1,0 +1,31 @@
+{
+  "number": 35879,
+  "kind": "issue",
+  "title": "metadata-protocol: the served type schemas list the platform-stamped keys (_lock, _provenance, _packageId …) as authorable properties",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T16:27:15Z",
+  "updated_at": "2026-11-20T16:51:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35879",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1k1GRsQbF3vCPKxhz\n\nFiling gate: ① (L1-a non-blocking note 1 on PR #35871, L1 verdict 7044738454; a defect noticed, not touched) · Source: fleet · Area: a4-C · Seat: repo:objectstack#4\n\n## 维护者速读\n- **问题：** 平台对外给出的“这类配置能写哪些字段”说明（Studio 和 AI 助手都读它）里，混进了几个由平台自己盖章的内部字段（锁定状态、来源、所属包等）。\n- **要做：** 在生成这份说明时把这些平台盖章字段剔除，或标为只读；并加测试锁住。\n- **不做会怎样：** AI 助手按说明“只写列出的字段”时，可能把这些内部字段也写进去；保存时是被拒、被丢弃还是被存下，目前没量过。\n- **你要做的：** 无。\n\n## What\n- `getMetaTypes()` (`GET /meta/types`, and since PR #35871 the MCP draft door's `contract: true` read) serves each type's JSON Schema through `getMetadataTypeSchema` → `stripUnauthorableProperties` (`packages/metadata-protocol/src/protocol-meta-type-schema.ts:358,373`, `unauthorable-nodes.ts:116`).\n- The served `object` and `view` schemas still list the ADR-0010 stamped keys among their properties: `_lock`, `_lockReason`, `_lockSource`, `_provenance`, `_packageId`, `_packageVersion`, `_lockDocsUrl` (`packages/spec/src/kernel/metadata-protection.zod.ts`). These are set by the platform (loader / registry tag), not authored.\n- `skills/objectstack-mcp-build/SKILL.md` §3 (after #35871) tells a door-only client \"Write only keys these show\", so the served contract reads them as writable.\n- Not measured: whether a draft save of an item carrying these keys refuses, drops or stores them. The first step of the fix is that measurement; if a save stores an authored `_lock`, that part goes to the security seat, not GitHub.\n\n## Done when\n- The served schema for every type that spreads the protection fields omits them (or marks them `readOnly`, whichever the converter's existing conventions favour), with a pin over `getMetadataTypeSchema` for `object` and `view`.\n- The save-side behaviour for an authored stamped key is measured and stated in the PR.\n- The MCP draft door's lean contract stops listing them (follows from the converter; pin one type).\n\n## Reader\n`packages/metadata-protocol` (`domain:server`), area:ai a4-C or the metadata-protocol lane. Clause-② reading for the PR: removing a key from a served *description* refuses nothing a client could save before; if the save side changes, that is a separate reading.\n\n## Dedupe\n`stripUnauthorableProperties` (is:issue) → 2, both closed and unrelated (#21374 form offer, #17502 retiredKey tombstones). `_lockReason schema meta types` → 8, none on the served schema (#23096 closed: `protection` block binding). `stamped keys getMetaTypes` → 7, none on this (#35761 is the read that surfaces it).\n\nGrade: `area:ai · bug · fleet-sourced (L1 note on #35871) · reach: Studio and MCP clients reading /meta/types contracts; save-side effect unmeasured · evidence: read` → p3.\n"
+}

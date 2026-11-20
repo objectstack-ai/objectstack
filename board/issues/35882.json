@@ -1,0 +1,36 @@
+{
+  "number": 35882,
+  "kind": "issue",
+  "title": "手机端底部固定三项：首页、通知、审批，右边单独一个搜索；取代「读用户固定的菜单项」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-20T16:35:20Z",
+  "updated_at": "2026-11-20T19:51:36Z",
+  "closed_at": "2026-11-20T19:51:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35882",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35880（专题：手机端重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-20 原话：「首页、通知、审批」；「右边那个单独的搜索按钮留」。\n\n## 现状（主干 `7878cf0557`，本机环境，视口 375×812，浏览器实测）\n\n- 进应用后底部是这个应用的菜单项加「更多」：客户、联系人、销售商机、跟进记录、更多。这是 objectstack-ai/objectstack#34594（已合并）做的：读用户自己固定的菜单项，完整菜单收进「更多」。\n- 通知和待审批在跨应用首页的「我的工作」里，进了应用之后要靠顶部的铃铛。\n\n## 要做的\n\n效果图（图 43 第一张的底部）：\n\n![43 手机应用首页](https://github.com/objectstack-ai/objectstack/blob/17a8873215693a2e00603ae79fa9b637ce976f76/mobile-redo/43-app-home.png?raw=true)\n\n1. 底部固定三项：**首页、通知、审批**。\n   - 首页：当前应用的菜单页（另一张子卡）。\n   - 通知：现有的通知列表。\n   - 审批：现有的待审批列表。\n2. 三项右边单独一个圆形的**搜索**按钮，打开现有的全局搜索。\n3. 这三项不随应用变，也不由使用者配置。\n4. 取代 objectstack-ai/objectstack#34594：底部不再放应用的菜单项，不再有「更多」，使用者「把菜单项固定到底部」的入口一并去掉；已经存下的固定项不用迁移，忽略即可。\n5. 进到列表页、记录页这类下一层页面时，底部这一条不显示（图 42 手机部分里列表页底部只有悬浮的「+」），回到三项中的任一项时再出现。\n\n第 5 条是协调席照参照产品加的，维护者没有逐条说过；有异议以维护者为准。\n\n## 不做的\n\n- 不改通知列表、待审批列表本身。\n- 通知、审批上的未读数角标沿用现有的。\n\n## 验收\n\n- 375 宽，任意应用的菜单页：底部是首页、通知、审批三项和右边的搜索，没有应用的菜单项、没有「更多」。\n- 切到另一个应用：底部三项不变。\n- 点「审批」：是待审批列表，底部「审批」高亮；点「首页」回到当前应用的菜单页。\n- 有待审批或未读通知时对应项有角标，角标不被裁掉（承 objectstack-ai/objectstack#34596）。\n- 进入「客户」列表：底部三项不显示；点左上「‹」回到菜单页后重新出现。\n- 设置里不再有「固定到底部」的入口。\n\nReader: `domain:ui` 车道。\n\nDedupe: 见父单；被取代的是 objectstack-ai/objectstack#34594、#35020（都已关闭）。"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 35932,
+  "kind": "issue",
+  "title": "Saving a shared view's draft reloads the whole list and shows the published version again until Publish",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T19:40:38Z",
+  "updated_at": "2026-11-20T19:55:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35932",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFound while building #35702 (PR #35919). Part of epic #35547 (list page redo). Not introduced by that PR: the view settings panel's save takes the same path.\n\n## What a user sees\nAn admin changes a shared view (for example picks a footer calculation, or changes view settings). The draft saves (`PUT` 200, the draft bar appears in view settings), the admin sees the change for about half a second, then the list redraws showing the PUBLISHED version again. The change only reappears after Publish. It looks as if the edit was lost.\n\n## Why (measured by the #35702 dev)\n`persistRuntimeMetadata` calls `emitMetadataRefresh` on every draft save; `ObjectView` unmounts and mounts again on that refresh and reads the published view.\n\n## To do\nAfter a draft save, the admin keeps seeing their draft (the draft is what view settings shows); readers keep seeing the published version. No full remount for a draft save.\n\n## Acceptance\n- Admin: draft save → the list keeps showing the draft value, no flash back; Publish → unchanged.\n- A second (non-admin) user sees the published version until Publish.\n\nReader: `domain:ui`."
+}

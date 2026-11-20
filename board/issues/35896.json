@@ -1,0 +1,31 @@
+{
+  "number": 35896,
+  "kind": "issue",
+  "title": "专题：记录页的页签和字段分组改由父对象一处声明（relatedLists 管页签的显示和顺序并含附件、审批、动态；分组自己列字段；扩展包声明位置）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T17:27:03Z",
+  "updated_at": "2026-11-20T17:47:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35896",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点（父单），由维护者直派。维护者 2026-11-21 原话：「新的相关子表和分组的协议规范立卡了吗」「给我具体的元数据例子」「三个内置项，是不是可以直接用对应的对象名」「按对象名这版，立专题」。\n\n## 维护者速读\n\n- **这是什么**：记录页上「显示哪些页签、什么顺序、子表显示哪几列、字段怎么分组排序」，现在分散写在四个地方，有的还写在子对象上。本专题把它们收到**父对象一处**声明，并让扩展包能说明自己带来的字段和子表放在哪。\n- **动的是规范**，界面跟着读。所以单独立专题，不放进记录页专题 objectstack-ai/objectstack#35590。\n- **不破坏已有对象**：每一条都是「没写新写法就照旧」。\n- 优先级 p2 是协调席定的。\n\n## 维护者说过的（2026-11-20 至 21）\n\n- （看 Attio 的记录页配置）「但是你看右侧，他显示哪些子表都是通过tab配置出来的。删除tab就是不现实。」（原文如此，意为「删除 tab 就是不显示」）\n- 「其实除了 overview，我们直接用 relatedLists 是不是就可以。」\n- 「除了 附件、审批、动态 ，我们还有哪些会放在子表上的，一次性定好。」——协调席核对后答复只有这三样。\n- 「三个内置项，是不是可以直接用对应的对象名」\n- 「如果字段分组中指定了顺序，是不是字段本身就不需要指定分组」\n- 「扩展包给「客户」加一个字段，这是基本需求，而且还涉及到排序，有没有好方案」「扩展包也会涉及到给对象增加子表，也会需要改子表的位置」\n- 「主从子表我认为不应该自动申明放在概览中，除非我通过 fieldGroup 强制指定。」（已立 objectstack-ai/objectstack#35889）\n\n## 现状：同一件事分散在四处（主干 `8c18a362a2`）\n\n| 要做的事 | 现在写在哪 |\n|---|---|\n| 某张子表不显示 | **子对象**关系字段上的 `relatedList: false` |\n| 子表之间的先后 | 父对象的 `relatedLists`（`packages/spec/src/data/object.zod.ts:4470`）。只管顺序，不管显示：没列的照样出现，跟在后面 |\n| 子表的标题、列、过滤 | **子对象**关系字段上的 `relatedListTitle` / `relatedListColumns` / `relatedListFilter`（`packages/spec/src/data/field.zod.ts:2379-2443`） |\n| 附件、审批、动态要不要、排第几 | 要不要看对象上的开关和记录状态；排第几写死在代码里（`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts:1064-1080`），配不了 |\n| 字段属于哪个分组 | 每个字段上的 `group`（`field.zod.ts:2766`） |\n| 分组里字段的先后 | 字段在 `fields` 里声明的先后，没有单独的键（`packages/spec/src/data/field-group-layout.ts:160`） |\n| 扩展包往别人的对象里加东西 | `objectExtensions`（`object.zod.ts:6070`）能带字段、校验、索引；不能带分组，不能定位置。新字段只能排在分组末尾 |\n\n实际用量：仓库示例和 HotCRM 里没有对象声明 `relatedLists`，也没有用 `objectExtensions`；`relatedListColumns` 在 HotCRM 有 18 个文件在用。\n\n## 目标写法（一个完整的例子）\n\n```ts\nexport const Quote = ObjectSchema.create({\n  name: 'quote',\n  label: '报价单',\n\n  fields: {\n    name:        Field.text({ label: '报价名称', required: true }),\n    account:     Field.lookup('account', { label: '客户' }),\n    valid_until: Field.date({ label: '有效期至' }),\n    discount:    Field.percent({ label: '折扣' }),\n    total:       Field.currency({ label: '合计' }),\n    terms:       Field.textarea({ label: '条款' }),\n  },\n\n  // 分组自己列出字段和顺序（子卡 3）\n  fieldGroups: [\n    { key: 'basic',  label: '基本信息', fields: ['name', 'account', 'valid_until'] },\n    // 现有写法：想把明细放进字段区时才写这一项；不写，明细只是页签（objectstack-ai/objectstack#35889）\n    { key: 'lines',  label: '报价明细', relatedList: 'quote_line' },\n    { key: 'amount', label: '金额',     fields: ['discount', 'total'] },\n    { key: 'terms',  label: '条款',     fields: ['terms'] },\n  ],\n\n  // 页签：列出来的才显示，按这个顺序（子卡 1）；一项可以带标题和列（子卡 2）\n  relatedLists: [\n    { list: 'quote_line', label: '报价明细', columns: ['product', 'quantity', 'unit_price', 'amount'] },\n    'task',\n    'sys_attachment',\n    'sys_approval_request',\n    'sys_activity',\n  ],\n});\n\n// 扩展包给「客户」加字段和子表，并说明放在哪（子卡 4）\nobjectExtensions: [{\n  extend: 'account',\n  fields: { tax_id: Field.text({ label: '税号' }) },\n  place: [\n    { field: 'tax_id', group: 'basic', after: 'industry' },\n    { list: 'contract', after: 'opportunity', columns: ['name', 'amount', 'end_date'] },\n  ],\n}]\n```\n\n## 规则，各一句话\n\n| 写法 | 规则 |\n|---|---|\n| `relatedLists` | 没声明：全部自动显示，和现在一样。声明了：只显示列出来的，按列的顺序 |\n| 三个内置页签 | 用对象名列进来：`sys_attachment`（附件）、`sys_approval_request`（审批）、`sys_activity`（动态，代表活动、讨论、变更合成的那一条流） |\n| 一项里的 `columns` | 这里写了用这里的；否则用子对象关系字段上的；再否则用子对象的关键字段 |\n| 分组的 `fields` | 写了就按它的成员和顺序；没写的分组照旧按字段上的 `group` |\n| 扩展包的 `place` | 找得到指定的那一项就排在它后面，找不到排末尾，不丢 |\n\n## 子卡\n\n1. `relatedLists` 管页签的显示和顺序，含三个内置页签\n2. `relatedLists` 的一项可以带标题和列\n3. 分组自己列字段\n4. 扩展包声明位置\n5. 技能、文档、示例、HotCRM 用上新写法\n\n（子卡立出后在本卡回复里列出编号。）建议先后：1 → 2 → 3 → 4，5 跟在各张后面分批补。\n\n## 协调席提的、维护者没有逐条表态的（各子卡里单列，有异议以维护者为准）\n\n- 审批、动态即使没列也出现在最后，只能挪不能删；附件可以拿掉。\n- 列的取值顺序；过滤条件这一步不放进 `relatedLists`。\n- 扩展包的键名 `place` 和「排在谁后面」的写法；扩展包只能安排自己带来的东西，不能挪别人的；扩展包带来的东西即使原对象声明了 `relatedLists` 也自动出现。\n- 声明了 `relatedLists` 之后，同一个包里后来新建的子表不自动出现，要列进去才显示（Studio 的编辑器里把「还没加进来的」明显列出）。\n\n## 还没有定、不在本专题任何子卡里的\n\n- 关系字段上 `relatedList: 'primary'` 的去留（现在的意思是「这张子表放进字段区」，和「只有分组指定才放」重叠）。\n- 同一张子表按不同过滤条件拆成两个页签。\n- 环境管理员在界面上调整页签和字段顺序（运行时编辑模式）之后，和包里的声明怎么合并。\n\n## 不做的\n\n- 不改手写记录页的写法。\n- 不改名：`relatedLists` 装进三个内置页签后字面上不只是「相关列表」，说明里写清楚即可，不为好看而迁移。\n\nReader: `domain:spec` 车道牵头，界面读取部分在 `domain:ui`，子卡 5 在 `domain:skills`。这是规范变更，按规范变更的流程走（迁移登记、升级说明、技能同步）。\n\nDedupe: `relatedLists 页签 显示 顺序`、`fieldGroups fields 分组 成员`、`objectExtensions 位置 扩展包`、`relatedLists sys_attachment`（objectstack，open）→ 都是 0。相关的已有卡：objectstack-ai/objectstack#27069（当初加 `relatedLists` 和分组指向子表，已合并）、objectstack-ai/objectstack#35889（主从子表默认只是页签）、已按不做关闭的 #35850、#35852（维护者要求重新讨论后另立，本专题即是）。"
+}

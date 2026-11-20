@@ -1,0 +1,36 @@
+{
+  "number": 35872,
+  "kind": "issue",
+  "title": "ADR-0155 step 3 (driver-sql + Turso remote): compile the share-grant leaf to a subquery, reads and the predicate update path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T14:43:00Z",
+  "updated_at": "2026-11-20T19:11:10Z",
+  "closed_at": "2026-11-20T19:09:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35872",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvvVzM5KhCWkT5f45c\n\nFiling gate: ④ an execution card of an accepted cross-layer ADR · Source: fleet (ADR-0155, accepted in PR #34735, merge 64ccf6b0, ruling 6942854600). Part of #33787. Step 2 (#35786) merged as d7c257e924 via PR #35839 (2026-11-20, 14:40 UTC); its close-out 7042346562 lists what this step carries.\n\n## 维护者速读\n- 问题：一个成员在同一对象上被共享超过 5000 条后，多出来的共享静默失效（#33787）。ADR-0155 分 6 步修，前两步（契约、引擎接口）已合并，这是第 3 步。\n- 这一步做什么：让 SQL 驱动（含 Turso 远程）把\"共享子查询叶子\"编译成数据库内的子查询，覆盖读取和按条件批量更新；还没有地方真正生成这个叶子，用户可见行为不变。\n- 不做会怎样：最后一步切换 plugin-sharing 时，SQL 库上的共享读没法走子查询，#33787 修不了。\n- 要你做的：无。\n\n## Why (business)\nInherits #33787: customers with large sharing volumes silently lose access past 5,000 grants per member per object. This is the step that makes the fix real on SQL databases, where nearly all production tenants live.\n\n## Scope (ADR-0155 Execution plan, step 3)\n- `driver-sql` and the Turso remote transport compile the `SharedRecordIds` leaf: the subquery with no tenant scope (① ruled A), the update path (③ ruled A), pins per dialect, O2, O3, and D6's reading for a caller with no grant.\n- With ③ ruled A, pin the rows each of a predicate update's two statements answers (the prior-row read and the write), each evaluating the share arm for itself (Consequences, Freshness).\n- Declare `fixedReadLeaves: ['SharedRecordIds']` in the SAME change that compiles it. Until a driver declares it, the seam refuses every leaf.\n- Carry step 1's L2 N4: per-dialect witnesses for the not-equal-to-empty half of the blank-id guard and for the cross-organization nested case.\n- Doc residue N5 if this card edits `driver.zod.ts` or `fixed-read-leaf.ts`.\n- ⛔ No producer writes the leaf yet (step 6).\n\n## Reader\nSeat `repo:objectstack#7`, a dedicated card thread (L program; area-lease 〈不入区〉). L1 by `L1-a`; contract (L2) review per `contract-review.md`. Governing text: `docs/adr/0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md` (D1–D6, Execution plan). Carry-forward ledger: comment 7042346562 on #35786.\n\n## Order\nSteps 3, 4 and 5 each depend only on step 2 and may run in parallel. Step 6 is #33787 itself and lands last, after O8's census is recorded in its body. ⛔ No card up to step 5 refuses a boot (plan step 5).\n\n## Dedupe\n`\"ADR-0155\" is:issue` → #33787, #35571 and #35786 (steps 1 and 2, closed). No step-3 card exists.\n\nGrade: p2, the grade of the card it unblocks (#33787, p2). Type: Task."
+}

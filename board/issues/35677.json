@@ -2,8 +2,8 @@
   "number": 35677,
   "kind": "issue",
   "title": "列表页文字层级：视图名和对象名同样亮，分不清主次；视图名、记录数、筛选排序选项按三级灰度排（参照 Twenty 实测）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T22:40:58Z",
-  "updated_at": "2026-11-19T22:49:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T16:30:59Z",
+  "closed_at": "2026-11-20T16:30:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35677",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-20 原话：「对象名和列表视图下拉框字体颜色一样，会不会分不清重点。你看看右侧的颜色效果」（右侧是本机跑的 Twenty）。\n\n## 现状和参照（深色主题，浏览器实测计算样式）\n\n| 文字 | 我们（主干 `d96c878e33`） | Twenty |\n|---|---|---|\n| 页面栏的对象名 | `rgb(248, 250, 252)`，13 号，600 | 亮度约 92%，13 号，600 |\n| 视图栏的视图名 | `rgb(248, 250, 252)`，13 号，500 —— 和对象名同色 | 亮度约 70%，13 号，500 |\n| 视图名旁的记录数 | `rgb(148, 163, 184)`，400 | 亮度约 40%，500 |\n| 筛选、排序、选项 | `rgb(148, 163, 184)`，400；有排序时「排序」变成 `rgb(248, 250, 252)` 500 | 亮度约 70%，400 |\n| 表头列名 | 未量 | 亮度约 51%，500 |\n\n- 我们的对象名和视图名只差字重（600 对 500），颜色一样，两行看起来同等重要。\n- Twenty 是三级：对象名最亮；视图名和右侧三个按钮同一级；记录数和表头更暗。页面上最亮的只有对象名、主按钮和数据本身。\n\n## 要做的\n\n- 视图名降一级，用次要文字色，和「筛选、排序、选项」同级；对象名保持最亮。\n- 记录数再降一级，比视图名暗。\n- 表头列名的颜色核对一次，不比视图名亮。\n- 有筛选或排序生效时怎么提示，以子卡 objectstack-ai/objectstack#35549、#35550 的条件标签为准；按钮本身不靠变成最亮来提示。\n- 浅色主题按同样的三级关系处理。取值用现有的语义色，不新增写死的颜色。\n\n## 不做的\n\n- 不改字号和字重（子卡 objectstack-ai/objectstack#35548 已定）。\n- 不改对象名的颜色。\n\n## 验收\n\n- 深色、浅色主题下：对象名比视图名明显更亮（或更深）；视图名和「筛选、排序、选项」同色；记录数比视图名暗。实测计算样式与此一致。\n- 各级文字与底色的对比度都不低于 4.5:1。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/objectViewTitleSwitcher.tsx`、`objectViewPageHeader.tsx`、视图栏所在组件。进行中的 objectstack-ai/objectstack#35646（视图下拉）和 #35643（筛选排序）会动同一批文件，后合入的一方负责对齐。\n\nDedupe: `视图名 颜色 层级`、`视图栏 文字 颜色`（objectstack，open）→ 0。"

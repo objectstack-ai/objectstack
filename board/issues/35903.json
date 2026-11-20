@@ -1,0 +1,34 @@
+{
+  "number": 35903,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0158 records the R1 unit key, write check and backfill door as shipped",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "security",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T17:33:45Z",
+  "updated_at": "2026-11-20T18:02:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35903",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFixes #35489\nFixes #35492\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 是什么：计量单位决策记录 ADR-0158 的补记。第一版的两张卡已经合并（#35805 单位声明与写入检查，#35865 旧数据批量转换），这里把实际做出来的规则写回记录里，不改任何代码。\n- 为什么做：两张卡各自在评审中定下了键名、报错代码、批量转换规则和删除保护等细节，记录里还写着「待定」，后续卡会按记录里的旧说法去做。\n- 出错会怎样：只改文档；写错了的话只会误导后来读记录的人，可以随时再改或撤回。\n- 要你做什么：这是 `docs/adr/**`，属 Tier H，需要你批准后合并。\n\nADR-0158 amendment for the R1 membership card (#35489, PR #35805, merged `e1143241de`) and the R1 backfill card (#35492, PR #35865, merged `f44758b21e`). Each card's PR was `Part of`, so each card closes with this record. This PR changes `docs/adr/0158-…md` only, one file, +162 / −9. It implements nothing.\n\n## What changes\n\n- **Status line:** one `**Amended**` clause, in the form ADR-0144 uses. `docs/adr/README.md` is unchanged, because `adr-index` reads the first Status sentence only (`node scripts/adr-index.mjs --check` exits 0).\n- **L3, the key as shipped.** The settled code block is replaced by the three-member union `unitConfig` shipped as (`fixed` and `record` on a `number`, `code` on a `text`). A dated lead line says the block was replaced. Three bullets follow **Cross-refusals**: the discriminated union and its did-you-mean answers; which type carries which mode; and the object door's six record-pointer refusals plus the shared-unit-field dimension rule (`object.zod.ts#refuseDishonestRecordUnitField`).\n- **Open item 3:** the five unit error codes. Four answer 400; `ERR_UNIT_DELETE_REFUSED` answers 405.\n- **Open item 6, first half:** a number field with `unitConfig` needs no `scale`, following ADR-0144's currency precedent. The display half stays with R1's display card.\n- **Open item 8:** ruling A (`7008524997`) as built: the `unitMode: 'code'` marker on a `text` field. It is the third member of the one unit key, not a value domain. The backfill reaches it, and its blank is never written.\n- **Open item 9:** the write check's cases as settled on #35467 (`7013996288`). Point 7 is carried to #35492 and built: (a) the remedy in two refusals, and (b) the two destructive findings `unit_code_field_declared` and `unit_mode_to_record`, keyed on the code field and reported once. The R1 gaps are disclosed (re-points, a narrowed `unitDimension`; follow-up #35885). It also records release pairing A (`7037347112`).\n- **Open item 11:** the engine refuses a `sys_unit` delete in every context. This closes the \"not closed by this mechanism\" sentence of the 2026-11-19 note. The maintainer ruled one exemption, the organization delete's own cascade (#35812, ruling B), and it is **not built in R1**: until #35812 lands, an organization that holds a unit cannot be deleted.\n- **Open item 12:** the backfill half as settled on #35469 (`7014013098`) and built by #35492: targets, rows left as stored (retired and other-dimension codes counted apart, and the standalone-field wording), blanks, what \"complete\" means, dry run and apply, scope, and writes. The aggregate half stays with #35491.\n\nThe text was drafted by each card's dev report (`adr_amendment`: 7035276751 with its fix-round delta for #35489; 7044992828, round 3, for #35492). Each was reviewed with its PR's L1 and L2: #35805 L2 7036451051 / 7037493853, and #35865 L2 7041994401 / 7043808549 / 7045119376.\n\n## Not in this PR\n\n- The Releases table has no status column, so the R1 backfill row is unchanged.\n- No other ADR moves. ADR-0144 is cited, not amended.\n\n## Verification\n\nFinal head `1f0f9a8b55` (two commits from `main` at `f44758b21e`; the second applies both reviews' prose fixes). CI at this head: 25 success, 19 expected skip, 0 failed; mergeable clean.\n\nReviews: L1 REWORK 7046347694 → delta ACCEPT 7046638729 · L2 PASS 7046431113 (S1, S2) → delta PASS 7046644989 (S1, S2 closed; no must-fix, no should-fix). `security` label per the L2's Security-touching: yes.\n\n- `node scripts/adr-index.mjs --check`: OK.\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack docs/adr/0158-…md` derives 21 commands, all run, all exit 0 (after `pnpm --filter '@objectstack/lint...' build` for `check:doc-formula-expressions`). Among them: `check:adr-anchors`, `check:adr-symbol-anchors`, `check:adr-index`, `check-adr-links`, `check:doc-authoring`, `check:pm-governed-merges` and `check:pm-prior-rulings`. Reconciliation: `dispatch-gates --ran` reports \"21 derived famil(ies) accounted for — 21 run, 0 NOT-MEASURED\".\n- The edits were made by one script of eight exact anchored replacements, each asserting a single hit.\n\nGoverned: `docs/adr/**` is Tier H (Prime Directive #14). This lands by an authorised approval and the maintainer's merge.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibvMi1U7R2kBd3JbTPu\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 35928,
+  "kind": "issue",
+  "title": "Stage-change confirm: list the automations a state change will actually trigger (needs a server read), in the list cell and on the record page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-20T19:22:49Z",
+  "updated_at": "2026-11-20T19:53:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35928",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiled when slice S3 of #35685 started, as the maintainer's ruling asked (ruling record 7039615827 item 2 on #35685). Part of epic #35683 (inline editing).\n\n## Background\nMaintainer (Sales) 2026-11-20 12:30:51Z picked 「写「可能触发相关自动化」」 for the confirm step when a state-machine field (a field governed by the object's `state_machine` validation rule) changes in a list cell. The card shown with that choice said, verbatim: 「确认框写「阶段从 X 改为 Y，保存后可能触发相关自动化」，和记录页一致。逐条列出流程另开卡，因为要服务端新接口。」 This is that card.\n\n## What a user would see\nToday (and after #35685 S3) the confirm says the field goes from X to Y and that saving may trigger related automation, without naming which. With this card the confirm lists the flows, hooks or approvals the change would actually start, so the user knows what happens before confirming. Same on the record page's stage confirm.\n\n## To do\n- A server read that answers, for one record and one proposed transition, which automations would fire (respecting permissions: list only what the user may know of).\n- The list cell confirm and the record page confirm show that list; when the read fails or is empty, they fall back to today's sentence.\n\n## Not this card\n- The confirm itself and its wording today (#35685 S3).\n\n## Acceptance\n- Changing a stage that starts a flow shows that flow by name in both confirms; a stage with nothing attached shows no list; a read failure falls back to the generic sentence.\n\nReader: `domain:server` + `domain:ui`. Needs a product decision on what may be shown per permission before build. Blocked by #35685."
+}

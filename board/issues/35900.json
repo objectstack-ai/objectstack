@@ -1,0 +1,32 @@
+{
+  "number": 35900,
+  "kind": "issue",
+  "title": "字段分组自己列出成员和顺序（fieldGroups[].fields）；字段上的 group 作为旧写法继续读",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-20T17:29:03Z",
+  "updated_at": "2026-11-20T19:11:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35900",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35896（专题：记录页的页签和字段分组改由父对象一处声明，维护者直派）。⛔ 不是认领。完整的元数据例子在父单。\n\n维护者 2026-11-20 原话：「字段分组中如果想要指定字段的顺序怎么办」「如果字段分组中指定了顺序，是不是字段本身就不需要指定分组」；2026-11-21：「按对象名这版，立专题」（例子里分组自己列字段）。\n\n## 现状（主干 `8c18a362a2`）\n\n- 字段属于哪个分组，写在每个字段上：`group`（`packages/spec/src/data/field.zod.ts:2766`）。\n- 分组里字段的先后 = 字段在 `fields` 里声明的先后，没有单独的键（`packages/spec/src/data/field-group-layout.ts:160`，`deriveFieldGroupLayout`）。\n- 所以：一个声明顺序同时决定分组里的顺序、表单的顺序、没配列的列表的默认列顺序，想只改其中一处做不到；在 Studio 里拖一个字段，存下来的是整个对象的字段顺序变了。\n\n## 要做的\n\n1. 分组可以自己列出成员：`{ key: 'basic', label: '基本信息', fields: ['name', 'account', 'valid_until'] }`。写了就按这个列表的成员和顺序。\n2. 分组没写 `fields`：照现在的规则（字段上的 `group` 加声明顺序）。已有对象不用改。\n3. 字段上的 `group` 标为旧写法，继续读，不删。新写的对象建议只用分组的 `fields`。\n4. 冲突时的规则：\n   - 一个字段出现在某个分组的 `fields` 里，自己的 `group` 又指向另一个分组：校验拒绝，两处都指出来。\n   - 一个字段出现在两个分组的 `fields` 里：校验拒绝。\n   - 字段的 `group` 指向一个写了 `fields` 的分组，但没在那个列表里（比如别的包后加的字段）：排在列表之后，不丢。\n   - 没有被任何分组列到、也没写 `group` 的字段：照旧进末尾那个没有标题的分组。\n5. 带 `relatedList` 的分组不放字段（现有规则），所以它不能同时写 `fields`。\n6. 记录页、新建表单、编辑表单读同一个结果（都走 `deriveFieldGroupLayout`），三处一致。\n7. Studio 的分组编辑（`ui/packages/app-shell/src/views/studio-design/ObjectGroupInspector.tsx`）在分组里拖动字段时，写的是这个分组的 `fields`，不再改整个对象的字段声明顺序。\n\n## 协调席加的（有异议以维护者为准）\n\n- 第 3 条「旧写法继续读、不删」而不是一次迁移掉。\n- 第 4 条的四种冲突处理。\n\n## 不做的\n\n- 不做扩展包往别人分组里指定位置插字段（子卡 4）。\n- 不改系统字段固定排在最后的规则。\n\n## 验收\n\n- 分组写了 `fields: ['account', 'name']`，而 `fields` 里的声明顺序是 name 在前：记录页和表单里这个分组都是客户在前、名称在后。\n- 没写 `fields` 的分组：和改之前相同。\n- 四种冲突各有一条测试，结果如上。\n- 在 Studio 里把一个字段在分组内拖到第一位并保存：对象上只有这个分组的 `fields` 变了，`fields` 的声明顺序没变，列表默认列顺序没变。\n- AI 搭建新增一个字段时，同时把它加进某个分组的 `fields`（或者留在无标题分组），不会出现「字段建了但哪儿都看不到」。\n\nReader: `domain:spec` 牵头，`domain:ui` 配合。\n\nDedupe: 见父单。"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 35917,
+  "kind": "issue",
+  "title": "plugin-security: on a by-id write, a sharing `allow` drops owner_only_writes out of the OR of permissive policies, so an owner-creator holding an authored widener is refused on their own row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T18:56:04Z",
+  "updated_at": "2026-11-20T19:53:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35917",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvVRcFWKrfWeG5jzPb\n\nFiling gate ③: an out-of-scope finding from the #35802 dev (os-dev report 7047889135, PR #35914 Acceptance notes). The seat's 18:55Z call is to file it as its own card. L1 7047985230 named it \"the by-id composition narrowing, the same family as #5492\". Dedupe: `dropPlatformOwnershipFloor`, `authored widener floor`, `owner_only_writes OR permissive`. Only #35802 matched, and it covers the opposite direction (the predicate path missing the deferral).\n\n## What happens\nThis was measured at the engine door only (`ql.update` by id under the caller's context, on the #35914 rig at `99d771ef`). REST PATCH was not measured.\n- **The setup.** An object has `owner_id`, record sharing, and an authored permissive update policy, a widener such as `stage == 'open'`. The caller both created and owns row r1, and r1 is closed.\n- **By-id update of r1: 403 `PERMISSION_DENIED`.** For this caller the #5492 composition at step 2.7 asks the sharing service, the service answers `allow` (the caller owns the row), and that sets `dropPlatformOwnershipFloor`. Layer 1 is an OR of permissive policies. Removing `owner_only_writes` leaves the authored widener as the only term, and a closed row fails it.\n- **Predicate update over the same row: writes it.** The predicate path keeps the floor term in the OR, before #35914 and after.\n\nSo the replacement meant to widen (#5492: \"the platform's own floor defers to the platform's own ownership authority\") narrows here. With the floor removed, the one term that admitted the caller's own row is gone, and nothing replaces it.\n\n## Expected\nWhen the sharing verdict is `allow`, the composition should admit the row; at minimum it must not refuse a row the floor alone admitted. One shape: replace the floor term with an `allow`-true term rather than deleting it from the OR. The fix must keep ADR-0066 ① (modifyAllRecords does not bypass write-side RLS on an ordinary posture) and must leave restrictive authored policies as they are.\n\n## Done when\n- A by-id update or delete by an owner-creator under an authored permissive widener answers the same as before #5492 for their own row.\n- The by-id path and the predicate path agree on the #35914 matrix with the widener case included.\n- Pins cover: the owner-creator on a closed row, the Modify All holder under the widener (unchanged), and a CONTROL restrictive authored policy that still refuses.\n\n## Business rationale\nBuilders write permissive policies like \"anyone may edit an open deal\" expecting them to add access. On an object that declares one, a record's own creator and owner is refused an edit by id on a closed record, which the platform floor admitted before the #5492 composition. The refusal is loud (403), so it fails safe, but the creator and owner lose access to their own record.\n\nGrade: suggested p2 · area:data · domain:server · Bug · evidence measured at the engine door, REST not measured. Not dispatched under the p1-only rule unless triage grades it p1."
+}

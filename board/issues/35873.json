@@ -1,0 +1,31 @@
+{
+  "number": 35873,
+  "kind": "issue",
+  "title": "ADR-0155 step 4 (driver-memory): evaluate the share-grant leaf in process, on reads and the predicate update path",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T14:43:30Z",
+  "updated_at": "2026-11-20T17:08:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35873",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvvVzM5KhCWkT5f45c\n\nFiling gate: ④ an execution card of an accepted cross-layer ADR · Source: fleet (ADR-0155, accepted in PR #34735, merge 64ccf6b0, ruling 6942854600). Part of #33787. Step 2 (#35786) merged as d7c257e924 via PR #35839 (2026-11-20, 14:40 UTC); its close-out 7042346562 lists what this step carries.\n\n## 维护者速读\n- 问题：同 #33787，共享超过 5000 条后静默失效。这是 ADR-0155 的第 4 步。\n- 这一步做什么：让内存驱动（开发、测试和预览用）在进程内执行\"共享子查询叶子\"，覆盖读取和按条件批量更新，和 SQL 驱动给出同样的结果。用户可见行为不变。\n- 不做会怎样：切换后内存驱动上的共享读会被拒绝，开发和测试环境跑不通。\n- 要你做的：无。\n\n## Why (business)\nInherits #33787. The in-memory driver backs dev, test and preview; it must answer the share arm the same way as SQL so the switch (step 6) does not break those environments.\n\n## Scope (ADR-0155 Execution plan, step 4)\n- `driver-memory` (mingo-based) evaluates the `SharedRecordIds` leaf in process, on reads and on the update path (③ ruled A).\n- Declare `fixedReadLeaves: ['SharedRecordIds']` in the SAME change, beside the evaluation.\n- Run the step-1 conformance case-set (13 evaluator cases) against this driver.\n- ⛔ No producer writes the leaf yet (step 6).\n\n## Reader\nSeat `repo:objectstack#7`, a dedicated card thread (L program; area-lease 〈不入区〉). L1 by `L1-a`; contract (L2) review per `contract-review.md`. Governing text: `docs/adr/0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md` (D1–D6, Execution plan). Carry-forward ledger: comment 7042346562 on #35786.\n\n## Order\nSteps 3, 4 and 5 each depend only on step 2 and may run in parallel. Step 6 is #33787 itself and lands last, after O8's census is recorded in its body. ⛔ No card up to step 5 refuses a boot (plan step 5).\n\n## Dedupe\n`\"ADR-0155\" is:issue` → #33787, #35571, #35786. No step-4 card exists.\n\nGrade: p2, the grade of the card it unblocks (#33787, p2). Type: Task."
+}

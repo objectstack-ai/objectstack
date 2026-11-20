@@ -2,8 +2,8 @@
   "number": 34170,
   "kind": "issue",
   "title": "A sink cannot re-read a stored checkpoint into the body it was signed over, so a checkpoint missed once is never re-sent",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-15T23:13:00Z",
-  "updated_at": "2026-11-20T13:51:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T19:50:09Z",
+  "closed_at": "2026-11-20T19:49:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34170",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: ② a framework seam a cloud card needs (objectstack-ai/cloud#4128 slice S1, Enterprise checkpoint anchors). The cloud lane files this card; first touch (domain, queue) is left to triage. Drafted by the cloud#4128 card thread; every file:line was read at objectstack `b914e72`.\nDedupe: `org:objectstack-ai is:issue` with this card's dedupe words → 0 hits. Related: objectstack#34164, #34165, #34166 (same consumer), #31908.\n\n**Business reason.** cloud#4128 item 1 sends every signed checkpoint to a write-once bucket, so that a reviewer can check the audit log against a copy the host's operator could not rewrite. The sink gets each checkpoint once. If the bucket is down longer than the sink's retries, or the process restarts with checkpoints still queued, those checkpoints have no copy outside the host. Nothing can send them later. A gap in the anchored chain is exactly what an auditor asks about.\n\n**What happens at the pin.**\n- `packages/spec/src/contracts/audit-checkpoint.ts:117-120`: the sink is \"Handed each record once … Re-delivery of what a failed call missed is the sink's to arrange (it can re-read the stored records).\"\n- The sink can read `sys_audit_checkpoint` and `sys_audit_amendment` rows. But the readers that turn a stored row back into the exact body that was signed are `checkpointBodyFromRow` (`packages/plugins/plugin-audit/src/audit-seal/signed-body.ts:282`) and `amendmentBodyFromRow` (`:372`). They are exported from `src/audit-seal/index.ts:55,60` only, not from `@objectstack/plugin-audit` (`src/index.ts`, the ADR-0154 export block). A sink outside the package would have to copy the body shape and its parsing, which cloud will not do, because a drift there makes the anchored copy fail to verify.\n\n**What cloud needs.** Export the two readers, or a small `readSignedCheckpoints({ engine, since })` that returns the `{ kind, body, keyId, signature }` entries as `deliver` receives them, from `@objectstack/plugin-audit`. Cloud's sink can then backfill whatever its bucket lacks at start and after a failure, using a conditional PUT that answers 412 for a copy already there.\n\n**Done when.** On a real kernel, an entry built by the exported reader from a stored checkpoint row is byte-identical, in its signed bytes, to the one the sealer handed the sink. Its signature verifies under the stored key.\n\n**Cloud consumer.** objectstack-ai/cloud#4128 (item 1, re-delivery).\nDedupe words: `audit checkpoint sink re-delivery`, `checkpointBodyFromRow export`, `stored checkpoint signed body reader`."

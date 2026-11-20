@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T12:22:07Z",
-  "updated_at": "2026-11-20T12:48:50Z",
+  "updated_at": "2026-11-20T18:29:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35854",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「你看他鼠标滑到Google行，右侧显示一个右侧打开的图标，点击才从右侧打开，否则都是进全屏打开。这样就不需要任何设置」；「我们的 放大成全屏 是抽屉撑满，但是刷新之后呢？好像缩回去了，而且如果这个已经够有为什么还需要保留另外一种」；「他右侧这个drawer ，也比我们的好看」；协调席列出六项待定后：「先定记录页头部和打开方式那六项，立卡」。\n\n本卡是六项里的三项：打开方式、去掉撑满的抽屉并让整页带列表来历、抽屉外观。头部两行在同专题的另一张卡。\n\n## 目标效果（图 40 的第二段）\n\n![图 40 记录页顶部条：整页、抽屉、无列表来历](https://github.com/objectstack-ai/objectstack/blob/efb3fb68704075b8fe94c344ef699e41e16fa044/record-redo/40-record-topbar.png?raw=true)\n\n## 现状（主干 `7878cf0557`，本机实测）\n\n- 从列表打开记录，默认是右侧抽屉；用户可以在「选项 → 更多 → 打开记录」里选抽屉或整页（`ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx:145-177`，objectstack-ai/objectstack#26681、#27545），视图上还有 `navigation.mode`。\n- 实际有三种状态：抽屉；撑满的抽屉（抽屉头部的放大，`ui/packages/components/src/custom/navigation-overlay.tsx` 的 `maximizable`）；独立整页（记录自己的网址）。\n- 撑满的抽屉没有记在网址里：实测宽 1232，刷新后回到 720。\n- 抽屉头部有两个相近的图标，一个撑满、一个去独立整页。\n- 独立整页不知道来自哪个列表：返回和面包屑回到的是没有筛选排序的列表。\n- 抽屉贴着屏幕右边和上下边。\n\n## 参照\n\nAttio（商业产品，只参照行为）：点名称进整页；鼠标移到名称格，格子右边出现「侧边打开」的图标，点它才出侧边面板；侧边面板是四周留边的悬浮卡片；整页仍显示「1 of 14 in All Companies」。\n\n![参照：Attio 名称格悬停出现的图标](https://github.com/objectstack-ai/objectstack/blob/efb3fb68704075b8fe94c344ef699e41e16fa044/record-redo/attio-row-hover-icon.png?raw=true)\n\n![参照：Attio 的侧边面板](https://github.com/objectstack-ai/objectstack/blob/efb3fb68704075b8fe94c344ef699e41e16fa044/record-redo/attio-side-panel.jpg?raw=true)\n\n## 要做的\n\n1. **点名称文字进整页。**\n2. **悬停某一行时，名称格右边出现「在侧边打开」的小图标**，点它才出右侧抽屉。图标在名称格里面，不占固定的列。\n3. **去掉「打开记录：抽屉 / 整页」这个用户设置**，「选项 → 更多」里不再有这一项；已存的个人偏好不再生效。\n4. **去掉撑满的抽屉。** 抽屉头部只留一个放大图标，点了是去整页。\n5. **整页带着列表来历**：从列表（点名称，或从抽屉放大）进整页时，记得来自哪个列表视图和它的筛选排序。刷新后不变；关闭或返回时回到原来的列表、原来的条件和滚动位置。头部用这份来历显示「第几条 · 视图名」和上下条（见另一张卡）。\n6. **抽屉改成悬浮卡片**：四周留 8 的边，圆角，有阴影，不贴屏幕边。抽屉里的内容和整页同一套，窄了不显示右栏。\n7. **触屏**（没有悬停）：点名称进整页，没有侧边打开的图标。\n\n## 视图上的 `navigation.mode`：废弃（维护者 2026-11-20 裁决）\n\n协调席问：「视图上『整页打开』的声明（navigation.mode）在新规则下废弃吗？」维护者：「废弃」。\n\n- 视图元数据上的 `navigation.mode` 不再决定从列表打开记录的方式；规范里把它标为废弃，给出迁移说明（新规则是：点名称进整页，悬停图标开侧边）。\n- 已经写了这个键的现有元数据怎么过渡（接受并忽略、还是给出提示），按规范既有的废弃做法处理，在 PR 里说明；不能让现有应用因为这个键而加载失败。\n- 技能规则和文档里提到这个键的地方同步更新。\n\n## 不做的\n\n- 不改记录页头部的结构（另一张卡）。\n- 不改行内编辑的规则：点格子是选中，点名称文字才打开记录（objectstack-ai/objectstack#35684）。本卡只把「打开」明确为整页。\n- 不做「切到别的菜单再回来还记得列表条件」。\n\n## 验收\n\n- 列表里点名称：进整页。鼠标移到一行上，名称格右边出现图标；点图标：出抽屉，列表还在。\n- 「选项」里没有「打开记录」这一项。\n- 抽屉头部只有一个放大图标，点了进整页；没有「撑满」这个状态。\n- 带筛选排序的列表 → 整页 → 刷新：头部仍显示来历；点关闭：回到带原条件的列表，滚动位置不变。\n- 抽屉四周有边、有圆角和阴影。\n- 触屏设备上点名称进整页。\n- 一个声明了 `navigation.mode` 的现有视图：照常加载，点名称进整页、悬停图标开侧边，和没声明的视图行为一样。\n- PR 正文列出迁移和作废的测试（#26681、#27545 的打开偏好与撑满测试）。\n\nReader: `domain:ui` 车道；`navigation.mode` 的废弃涉及 `packages/spec/src/ui/view.zod.ts`。`ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx`、`ui/packages/components/src/custom/navigation-overlay.tsx`、`ui/packages/app-shell/src/views/objectViewRecordOverlay.tsx`、`recordDrawerStack.tsx`、名称格的渲染（`ui/packages/components/src/renderers/complex/data-table.tsx`）。\n\nDedupe: `点名称 整页 侧边打开 图标`、`抽屉 悬浮 卡片`（objectstack，open）→ 0；相关：objectstack-ai/objectstack#26681、#27545（已关，本卡取代其中的用户偏好和撑满）。\n\n正文最后更新：2026-11-20T12:34Z\n"

@@ -1,0 +1,32 @@
+{
+  "number": 35870,
+  "kind": "issue",
+  "title": "视图 navigation.mode 废弃后（#35854），ADR-0050 §2 的 10-20 补注与 skills 里的说明仍把它当作列表的打开方式（受治理路径，承 #35854）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T14:34:45Z",
+  "updated_at": "2026-11-20T14:49:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35870",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（#35854 卡线程 A4 读数 `topbar/thread/readings-A1-A5.md`，认领修订 7042176613）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（`origin/main` 3c038eb1 读源码）\n\n- 维护者 2026-11-20 裁决视图上的 `navigation.mode` 废弃（#35854 评论 7039654214）：从列表打开记录改为「点名称进整页，悬停名称格的图标开侧边」，不再由这个键决定。`'none'` 仍表示「行不打开任何东西」（页面列表块与 showcase 依赖它）。\n- #35854 的 PR 只改 `packages/spec`、`content/docs` 和 UI；以下两处在受治理路径里，没有动：\n  1. `docs/adr/0050-form-layout-vs-presentation.md` §2 的 10-20 补注，仍写 `navigation.mode` 是逐个列表的打开方式。\n  2. `skills/objectstack-ui/rules/record-page.md:42`、`skills/objectstack-ui/evals/record-page.json:24,28`、`skills/objectstack-ui/evals/README.md:16`（路径以主干为准），仍按旧规则教授或评测这个键。\n\n## 要做的\n\n- ADR-0050 §2：只加一条带日期的补注（add-only），写明 2026-11-20 起 `navigation.mode` 废弃、新的打开规则和 `'none'` 的保留含义，指向 #35854。不改原文。\n- skills：把上述几处改成新规则；评测用例同步。\n\n## 验收\n\n- ADR 只有新增的补注；skills 文字与评测用例和 #35854 合入后的行为一致；相关门禁通过。\n\n受治理：ADR 补注加 skills 文字，按受治理路径落地；skills 卡线程用 fable 起步。\n\nReader: area:ux（`domain:ui`），落地交席位。\n\nDedupe: `navigation.mode deprecated ADR-0050 skills`（objectstack，open）→ 只有 #35854 本身。"
+}

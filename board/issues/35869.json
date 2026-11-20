@@ -1,0 +1,31 @@
+{
+  "number": 35869,
+  "kind": "issue",
+  "title": "client: add meta.migrateUnitCodes, the SDK twin of the unit-code backfill door (follow-up of PR #35865)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T14:27:10Z",
+  "updated_at": "2026-11-20T14:29:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35869",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ③ a review follow-up, filed by the area thread on L1 7041952857 and L2 7041994401 of PR #35865 (card #35492), both answering the dev's open question 1 with A · Source: fleet\n\n## What is owed\n\nPR #35865 (Part of #35492, ADR-0158 R1) adds the tenant-admin REST door `POST /api/v1/meta/_migrate-unit-codes`, which converts stored free-text units to unit codes from an operator's mapping. Its route ledger row ships as `server-only`, because `packages/client` was outside that card's file surface. The currency twin of the same door already has its SDK method, `client.meta.migrateRecordCurrencyCodes` (`packages/client/src/index.ts` ~L2490 on main, pinned in `meta-automation-descriptors.test.ts`).\n\nWho benefits: a tenant admin tool or script that calls the backfill over HTTP. Without the method, it builds the fetch by hand against the route's closed body set, and the two backfill doors have different shapes in the SDK.\n\n## Done when\n\n- `client.meta.migrateUnitCodes({ object, field, mapping, apply? })` posts to `_migrate-unit-codes` with exactly the route's closed body set, and returns its report and refusals as the currency method does.\n- It is pinned beside the `migrateRecordCurrencyCodes` case, and the route ledger row in `packages/rest/src/rest-route-ledger.ts` flips from `server-only` to `sdk`.\n- A changeset at `minor` for `@objectstack/client` (a new method).\n- It lands only after PR #35865 has merged.\n\nReader: area:data, set by triage. Blocked-by: #35492 (PR #35865).\n\nGrading: area:data · Task · SDK parity follow-up of a new REST door · evidence: PR #35865 report 7041766952 (open_questions, Q1) and its route ledger row; `git grep -n migrateUnitCodes origin/main -- packages/client` has no hit.\nSuggested grade: p3 (the door is reachable through the CLI and REST today; this is parity). Small enough for a weekly sweep card if triage prefers.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue migrateUnitCodes` gives 1 hit, #35492 itself."
+}

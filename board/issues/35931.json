@@ -1,0 +1,32 @@
+{
+  "number": 35931,
+  "kind": "issue",
+  "title": "skills: teach the approval escalation clock — timeoutHours can count working time on an org calendar (escalation.clock / escalation.calendar)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:skills",
+    "enhancement",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T19:31:10Z",
+  "updated_at": "2026-11-20T19:53:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35931",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nPart of #35357\n\nFiling gate: the `Skills-docs: follow-up owed` line of PR #35929 (Fixes #35357). Under references/lanes/skills.md, `skills/**` does not ride a product-lane PR. ⛔ Not a claim.\n\n**What.** After #35929, an approval node's `escalation` takes `clock: 'wall_clock' | 'working_time'` (default `wall_clock`) and an optional `calendar` (a working-calendar code). With `working_time`, `timeoutHours` counts working hours on the calendar: the explicit code, else the organization's default, else refused (ADR-0157). A calendar that cannot answer holds the escalation and shows the reason where the due time is displayed. Setting `calendar` without `clock: 'working_time'` is a lint error. `skills/objectstack-automation/references/state-machines-and-approvals.md:350` still says \"`timeoutHours` is **calendar (wall-clock) hours** … the platform ships no business-hours calendar\", which is false after #35929.\n\n**Ask.** Rewrite that row so it states both clocks, the calendar resolution order, the cannot-answer behaviour and the lint rule, paid for in place inside the file's token ceiling (`check-skills-token-ratchet.mjs`). Also check two places for sentences that become false once working calendars ship (#35355 and #35929): `skills/objectstack-data/references/data-hooks.md:348-350` (hand-rolled \"calendar hours\" deadlines) and the `skills/objectstack-project/evals/project-process.json:125-126` eval, which says working calendars are \"Planned … not available\". Changeset: `'@objectstack/skills': patch` only. Decide whether an eval is owed per the skills lane.\n\nBlocked-by: #35929.\nSuggested-grade: p1 · a sub-card of p1 #35357, so the teaching ships with the key.\nDedupe: `escalation clock` and `working_time` skills (searched before filing; no open card)."
+}

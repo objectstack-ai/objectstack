@@ -1,0 +1,32 @@
+{
+  "number": 35930,
+  "kind": "pull_request",
+  "title": "fix(objectql): an organization delete removes its units of measure",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "security",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T19:28:36Z",
+  "updated_at": "2026-11-20T20:02:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35930",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFixes #35812\n<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao8mXHQniWvfYM2uHoosm2Da)_\n\nPushed by the c-35872 card thread on the seat's order (2026-11-20T19:26Z), because d7-D's one pushable branch carries #35903 awaiting Tier H. Built by d7-D's os-dev (local commit 065efab358 on f44758b21e); applied here with `git am` onto main 4609c4896 as ac1491567 (same `git patch-id --stable` 442c55d28b), then one text round 5ebea45947 (patch-id 9f40a93a20: the `(widening)` arm and the two comments). d7-D owns review and landing.\n\n## 维护者速读\n- 问题：一个组织只要建过计量单位就删不掉：删除被 409 `DELETE_RESTRICTED`（指向 `sys_unit`）拒绝，而单位本身又一律不许删（405）。\n- 这一步做什么：组织删除被准许后，由引擎自己的级联删掉该组织的全部单位（含已停用的）；这是 `sys_unit` 删除拒绝的唯一例外，其他任何删单位的请求仍是 405。\n- 不做会怎样：有单位的组织永远删不掉；这是当前发版的阻塞项。\n- 要你做的：无。\n\n## What changes\n- `packages/objectql/src/engine-cascade-planning.ts`, `engine-delete-and-aggregate.ts`, `engine.ts` (6853 lines, under the 6854 ceiling): once an organization's delete is admitted, its cascade removes every `sys_unit` row of that organization, retired ones included, each through the engine's delete under a cascade token that only that removal issues and the named delete claims.\n- `packages/objectql/src/validation/unit-code-membership.ts`: the unit delete refusal recognises that token and nothing else; every other unit delete is still 405 `ERR_UNIT_DELETE_REFUSED` (user, system writer, automation run; by id and batched; a hook's delete during the removal included).\n- `organizationOwnedRowCounts` and the engine's own refusal no longer count units as records that block the organization delete.\n- `packages/platform-objects/src/system/sys-unit.object.ts` and `packages/plugins/plugin-security/src/objects/default-permission-sets.ts`: comments only. Their \"refuses in every context\" lines now say a *direct* unit delete is refused and name the organization-delete exemption (claim amendment 7048707723, at the seat's ask).\n- Changeset `.changeset/35812-org-delete-removes-units.md`: objectql patch, plus platform-objects and plugin-security patch for their shipped comment bytes.\n\n## Why\nRuling 7035627429 (option B): an organization delete cascades its units. Tesla 2026-11-20T18:06Z keeps the release held until this merges.\n\n## Verification\n- objectql full: 624/624 files, 14174 tests, exit 0; plugin-security full: 7072 passed / 45 skipped, exit 0; typecheck exit 0.\n- `dispatch-gates --ran`: 76 derived, 76 run, 0 NOT-MEASURED, all exit 0; `check-changeset-no-major` exit 0.\n- Ablations (`scripts/ablation-replace.mjs`, restored blob-equal): a1 exemption removed → org-delete pins fail (objectql 2, security 1); a2 any caller → objectql 8, security 9 fail; a3 every system ctx → objectql 5, security 6 fail; a4 claim-only, no provenance → exactly the forged-token pin fails.\n- `overlap-check` at ac1491567: merges cleanly with origin/main and with #35773 / #34817 (both share `engine.ts`).\n\nClause-②: yes (widening)\nA refused delete is now admitted: deleting an organization that holds units and no other record succeeds and removes its units. An organization that owns any other record is still refused, and none of its units is removed.\nMetadata-protocol: none\n\n## Acceptance notes\n- Open for L2 / seat (from the dev): unit deletes run with system authority (caller userId and transaction kept, tenantId = the deleted org); the gate is the caller's authority over the org row. Precedent: plugin-auth `removeOrganizationAuthStructure`. Dev recommends accept.\n- ADR-0158 Open item 11 follow-up: #35903 (open, Tier H) says the exemption is not built in R1. When this merges, d7-D files the replacement sentence on the weekly ADR-revisions card (the seat's routing, 2026-11-20T19:26Z). The text: \"It is built (#35812): once an organization's delete is admitted, because it owns no other record, its cascade removes every `sys_unit` row of that organization, retired ones included, each through the engine's delete under a cascade token that only that removal issues; units no longer count as records that block the delete, and every other delete of a unit, a hook's during that cascade included, is still refused 405 `ERR_UNIT_DELETE_REFUSED`.\"\n- The two \"every context\" comments (`sys-unit.object.ts`, `default-permission-sets.ts`) are folded in at `5ebea45947`; nothing is left out of scope.\n- Seat 7 (2026-11-20T19:26Z): the system-authority unit deletes are acceptable from the seat's side and are put to the L2 explicitly.\n\n## Human Minimum\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a, not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibyXo4gSy8DJPNz4ANz\n\n\n"
+}

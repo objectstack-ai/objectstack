@@ -1,0 +1,32 @@
+{
+  "number": 35868,
+  "kind": "issue",
+  "title": "docs: document the unit-code backfill door (os migrate unit-codes and its REST twin) (follow-up of PR #35865)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "documentation",
+    "domain:docs",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T14:21:34Z",
+  "updated_at": "2026-11-20T14:24:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35868",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibvMi1U7R2kBd3JbTPu\n\nFiling gate: ③ an owed `Skills-docs:` follow-up, filed by the area thread before ACCEPT of PR #35865 (card #35492), per SKILL.md's `Skills-docs: follow-up owed` rule · Source: fleet\n\n## What is owed\n\nPR #35865 (Part of #35492, ADR-0158 R1) adds a maintenance door for stored unit text, and declares `Clause-②: yes` and `Metadata-protocol: added`:\n\n- `os migrate unit-codes --object O --field F [--map-file FILE] [--org ID | --all-organizations] [--apply]`, which rewrites free-text units into unit codes from the operator's exact mapping. The dry run is the default, an apply over an unmapped value is refused before any write, and a second run writes nothing.\n- Its tenant-admin twin `POST /api/v1/meta/_migrate-unit-codes`, behind `metadata.endpoints.maintenance` and `setup.write`, for the caller's organization only.\n- Two new destructive-change findings, `unit_mode_to_record` and `unit_mode_to_code` (409 `DESTRUCTIVE_CHANGE`, lifted by `force: true`), raised when a save declares a unit code field over stored rows. The unit write refusals now name the door as their remedy.\n\nWho benefits: an operator or tenant admin who turns on units for an app that already holds free-text units (\"kg\", \"pcs\"). The refusal they meet names `os migrate unit-codes`, and today the docs say nothing about it. These pages do not mention it:\n\n- `content/docs/deployment/cli.mdx`: the `os migrate` table row and a section, beside `os migrate record-currency-codes` (line ~1532 and ~1861 on main);\n- the `metadata.endpoints.maintenance` describe in `packages/spec/src/api/rest-server.zod.ts` and its generated `rest-server.mdx` (a describe edit ships bytes, so it takes a patch changeset);\n- a units page under `content/docs/data-modeling/`, beside `currency.mdx`, that names the door (none exists yet; check the site structure and overlap with `field-types.mdx` first). The skill side of `unitConfig` is already #35808's row on #35769.\n\n## Done when\n\n- `cli.mdx` lists `os migrate unit-codes` in the migrate table and has a section with a dry-run and an apply example, the `\"\"` entry for blanks, and the scope flags.\n- The `maintenance` describe names the unit-code door beside the currency door, and the generated reference is regenerated.\n- A data-modeling page (new, or a section of an existing one after the overlap check) explains converting stored units, and links the CLI section.\n- It lands only after PR #35865 has merged, so the docs never name a door that main does not have.\n\nReader: the docs lane, set by triage. Blocked-by: #35492 (PR #35865).\n\nGrading: area:data · Task · docs follow-up of an added CLI command and REST door · evidence: PR #35865 body and report 7041766952 (out_of_scope_findings); `git grep -n unit-codes origin/main -- content/docs` has no hit.\nSuggested grade: p2 (an owed Skills-docs follow-up; the refusal names a door the docs do not describe). Small enough for the weekly sweep card if triage prefers.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue \"unit-codes\"` gives 19 hits; none is a docs card (the units cards #35339 #35404 #35469 #35488 #35489 #35492, plus unrelated currency and migrate cards)."
+}

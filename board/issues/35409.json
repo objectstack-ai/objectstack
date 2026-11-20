@@ -2,8 +2,8 @@
   "number": 35409,
   "kind": "issue",
   "title": "Summary currency: refresh the stale \"dynamic only on a home-amount roll-up\" wording left after #35045",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:data",
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,9 +21,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T08:28:46Z",
-  "updated_at": "2026-11-20T10:12:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T16:04:01Z",
+  "closed_at": "2026-11-20T16:02:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

@@ -1,0 +1,32 @@
+{
+  "number": 35924,
+  "kind": "issue",
+  "title": "metadata publish: a draft saved before an ObjectSchema refinement landed is promoted without being parsed again",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T19:08:43Z",
+  "updated_at": "2026-11-20T19:53:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35924",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibwJEh7hMPPvagWM1g7\n\nFiling gate: ① · Source: fleet (carrier: seat 7, contract review 7048183393 S4 on PR #35916; dev out-of-scope finding 7048006771)\nArea: area:data · Type: Bug · Priority: p3 (fleet-graded: no user-visible wrong answer measured yet; latent for every ObjectSchema narrowing)\n\n## 维护者速读\n\n- **是什么：** 元数据保存时会按当前 ObjectSchema 校验，但发布时把草稿提升为正式版本，并不会再用 ObjectSchema 重新解析一遍。\n- **影响：** 一份在某条新的 ObjectSchema 校验规则（比如 #34352 的封存默认链列规则）上线之前存下的草稿，发布时会绕过这条规则直接上线。\n- **建议：** 发布提升时对 object 草稿重新做一次 ObjectSchema 解析，不通过就按保存时的同一格式拒绝。\n- **注意：** 先测一次可达性；这是对所有 ObjectSchema 收窄都成立的通用缺口，不是某一条规则独有。\n\n## What happens\n\n- **The save door parses.** It parses an object draft against `ObjectSchema` through `resolveOverlaySchema` and `getMetadataTypeSchema('object')` (`protocol-save.ts`), so a body the current schema refuses is refused with 422.\n- **The publish promotion does not.** `ProtocolHistoryAndPublish.promoteDraftForPublish` (`packages/metadata-protocol/src/protocol-history-and-publish.ts:677` at origin/main) re-runs many save-door refusals on the stored draft, with the save door's judge and envelope. For example, its comments name `assertRuntimeAuthoringRules`, the namespace prefix and `objectRegistrationRefusal`. It never parses the draft against `ObjectSchema` again.\n  - The same comment explains why the other refusals are repeated: \"a draft stored before `saveMetaItem` judged every…\". The schema parse is the one judge left out.\n- **The effect:** an object draft saved before a narrowing `ObjectSchema` refinement lands is promoted live at publish, unjudged by that refinement. The first concrete case is #34352 / PR #35916: a sealed object whose default chain column `tenant_id` is missing, non-text or listed in `valueFields`.\n- **reach:** found by reading the code path on main, not yet measured through the doors. Step 1 below measures it once.\n\n## Business rationale\n\n- **Who benefits:** deployments that upgrade while drafts are pending, and the authors of every `ObjectSchema` narrowing.\n- **What happens without it:** each narrowing stays open on one door for drafts saved before the upgrade. The definition goes live, and only run-time reports catch it, if anything does. For the audit seal that is the condition the narrowing exists to close.\n- **Reader:** the area:data seat's dev, in metadata-protocol.\n\n## Done when\n\n1. Reach is measured once on main. A test saves an object draft that parses, a refinement is made to refuse that draft's body (or a draft row is stored directly), and publish promotes it. If publish already refuses it, close this card with the evidence.\n2. The promotion parses an object draft against the current `ObjectSchema` (`getMetadataTypeSchema('object')`). It refuses with the save door's envelope (422) before `repo.promoteDraft` writes. Judge-only batches judge it too.\n3. There are pins: a pre-refinement draft refused at publish, and a CONTROL where a valid draft still publishes.\n4. Declare it as a narrowing if a body that published before is now refused at publish.\n\n## Dedupe\n\nSearched open issues: `draft promote publish re-parse` returned 1 hit (#34352, the narrowing that exposes the gap; not a duplicate). `promote draft schema validation publish stale` returned 0 issue hits apart from seat posts. No open card covers this."
+}

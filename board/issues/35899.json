@@ -1,0 +1,32 @@
+{
+  "number": 35899,
+  "kind": "issue",
+  "title": "relatedLists 的一项可以带标题和列：在父对象上配子表显示哪几列，不用去改子对象",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-20T17:28:23Z",
+  "updated_at": "2026-11-20T18:47:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35899",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35896（专题：记录页的页签和字段分组改由父对象一处声明，维护者直派）。⛔ 不是认领。完整的元数据例子在父单。\n\n维护者 2026-11-20 原话：「relatedLists 会管显示子表的哪些字段吗」「如果改进 relatedLists 的元数据，让他支持配置列应该怎么设计；过滤条件需要支持吗？有这个需求吗」「如果 字段分组中的相关表想要指定列，应该怎么设计」；2026-11-21：「按对象名这版，立专题」（例子里含带列的写法）。\n\n## 现状（主干 `8c18a362a2`）\n\n- 子表在父页面上显示哪几列，写在**子对象**的关系字段上：`relatedListColumns`（`packages/spec/src/data/field.zod.ts:2402`）；标题是 `relatedListTitle`（`:2379`）。没写时用子对象的关键字段，再没有就自动取前几个。\n- 想调整「客户页上任务子表显示哪几列」，要去改「任务」对象。\n- 用量：`relatedListColumns` 在 HotCRM 有 18 个文件、仓库示例 4 个文件在用；`relatedListFilter` 没有任何地方用。\n\n## 要做的\n\n1. `relatedLists` 的一项有两种写法，可以混用：\n   - 简写：`'task'`（和现在一样）\n   - 完整：`{ list: 'quote_line', label: '报价明细', columns: ['product', 'quantity', 'unit_price', 'amount'] }`，`label` 和 `columns` 都可选。\n2. 列的取值顺序：父对象这一项写了就用它 → 否则子对象关系字段上的 `relatedListColumns` → 否则子对象的关键字段 → 否则自动取。标题同理。已有的写法继续有效，不用迁移。\n3. 同一份列用在所有出现这张子表的地方：子表页签、由字段分组放进字段区的那张表。**分组里不单独指定列**（分组只管位置），避免同一张表两处列不一样。\n4. `columns` 只能写子对象上真实存在的字段，写错在校验时拒绝，和现在关系字段上的规则一致。\n5. Studio 的「相关列表」编辑器里，每一项可以点开选列、改标题。\n\n## 协调席加的（有异议以维护者为准）\n\n- **过滤条件这一步不放进来**。关系字段上已有 `relatedListFilter`，而且没有任何地方在用。\n- 只放名字、标题、列三样；列宽、合计、行排序不放（行排序沿用子对象列表视图的排序）。\n- 分组里不给列的覆盖。\n\n## 不做的\n\n- 不废弃关系字段上的三个键。\n- 不做「同一张子表按不同过滤条件拆成两个页签」。\n\n## 验收\n\n- 父对象写 `{ list: 'quote_line', columns: ['product', 'amount'] }`，子对象关系字段上写的是四列：页签里是两列。\n- 父对象用简写：页签里是关系字段上的四列（和改之前一样）。\n- 字段分组把这张子表放进了字段区：字段区那张表和页签里那张表列相同。\n- `columns` 里写一个不存在的字段：校验拒绝，指出字段名。\n- 带 `label`：页签标题和表上方的子表名都用它。\n- HotCRM 现有的 18 处不改，页面和改之前相同。\n\nReader: `domain:spec` 牵头，`domain:ui` 配合。依赖本专题子卡 1（同一个键的形状变化，建议同一个人接着做）。\n\nDedupe: 见父单。"
+}

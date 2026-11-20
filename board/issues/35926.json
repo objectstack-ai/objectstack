@@ -1,0 +1,32 @@
+{
+  "number": 35926,
+  "kind": "issue",
+  "title": "Retire `inlineEdit: true` on master-detail relationships: after #35889 a parent field group decides, so the key means the same as absent",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T19:09:54Z",
+  "updated_at": "2026-11-20T19:53:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35926",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiled from #35889 slice S1 (PR #35921), which names it as a follow-up. Part of epic #35590 (record page redo).\n\n## Why\nAfter #35889 (maintainer 2026-11-20 17:35:23Z 「一律只看分组」, ruling record 7046311205 on #35889), a master-detail child table joins the parent's form and record edit only when a parent field group names it. `inlineEdit: true` on the relationship no longer changes anything: it reads the same as leaving it out. A declared key that does nothing is the case ADR-0049 (enforce or remove) covers.\n\n## To do\nRetire the key on the ADR-0049 / ADR-0087 route (the `spec-property-retirement` playbook): pick the route, the liveness-ledger entry, the conversion for stored metadata, generated baselines, forms, docs and pin tests. The lint rule `relationship/line-items-inline-edit` already suggests a parent field group instead.\n\n## Not this card\n- The field-group placement itself (#35889).\n- Skills text (#35902).\n\n## Acceptance\n- Authoring `inlineEdit: true` follows the chosen retirement route (warning, conversion or refusal as the route says), and every gate the playbook names is green.\n\nReader: `domain:spec`. Blocked by #35921 merging."
+}

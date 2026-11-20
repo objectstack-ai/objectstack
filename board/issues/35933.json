@@ -1,0 +1,32 @@
+{
+  "number": 35933,
+  "kind": "issue",
+  "title": "Footer calculation menu is offered on read-only package views; the list-view rows lose _packageId so the UI cannot tell them apart",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T19:41:36Z",
+  "updated_at": "2026-11-20T19:54:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35933",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFound while building #35702 (PR #35919). Part of epic #35547 (list page redo).\n\n## What a user sees\nOn a view that ships inside a read-only package, an admin is offered the footer calculation menu; picking a value is refused by the server (403, \"save to the custom package\"), the pick rolls back and a toast explains it. It works, but the admin is offered something that cannot succeed.\n\n## Why\nA dotted view name does not mean read-only: the console's own saved shared views are dotted too (e.g. `showcase_product.team_products`, stored in the custom package). The reliable signal is the view's package, but the data adapter's `listViews` drops `_packageId` from the rows, so the UI cannot see it.\n\n## To do\nCarry `_packageId` (or an explicit read-only flag) on list-view rows through the adapter, and offer the calculation menu (and any other view-saving entry, such as view settings save) only on views the admin can save.\n\n## Acceptance\n- A package-shipped read-only view shows no calculation menu; a custom shared view and a personal view still do.\n\nReader: `domain:ui` (data adapter + list view). Blocked by #35919 merging."
+}

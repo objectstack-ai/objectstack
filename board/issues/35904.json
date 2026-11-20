@@ -1,0 +1,37 @@
+{
+  "number": 35904,
+  "kind": "pull_request",
+  "title": "fix(ui): readable danger text in dark theme",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T17:44:22Z",
+  "updated_at": "2026-11-20T18:31:17Z",
+  "closed_at": "2026-11-20T18:31:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T18:31:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35904",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu8gvJahvLb2VqFMCBZbthYL)_\nFixes #35658\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 深色主题下，列表右键菜单和选中后「…」菜单里的「删除」从几乎看不见的暗红变成清楚的亮红（对比度 1.7:1 → 6.3:1）；浅色主题和删除确认框里的红底按钮完全不变。\n- 属于「列表页重做」专题，是你走查列表页时看到的问题；全站所有用危险红当文字的地方一起变清楚。\n- 出错最坏是深色下某处红字颜色和以前不同，只改颜色、不动数据和流程，可以直接撤回。\n- 无\n\n## What changes\n\nIn dark theme, `--destructive` is `0 62.8% 30.6%`, a deep red chosen as the fill of red buttons (white text on it). `text-destructive` used the same value as a text colour, which measured 1.73:1 on the dark menu (1.49:1 on the hovered item). One value cannot do both jobs: a red that reads at 4.5:1 on near-black is too light to carry white text at 4.5:1.\n\nSo the text colour is split from the fill, with no call site edited:\n\n- Tailwind 4 resolves a `text-*` colour from the `--text-color-*` namespace before `--color-*`. Each shipped `@theme` (`@object-ui/components`, the console, the runner, and the `objectui init` app template in `app-generator.ts`) now declares `--text-color-destructive: hsl(var(--destructive-text, var(--destructive)))`.\n- Only `.dark` defines `--destructive-text` (`0 91% 71%`). Light theme leaves it unset, so `text-destructive` falls back to `--destructive` and is byte-identical in what it renders; a host theme that sets `--destructive` keeps working in light mode.\n- `bg-`, `border-`, `ring-destructive` and `--destructive-foreground` are untouched, so red buttons look the same in both themes.\n- Every `text-destructive` in the repo (and its `hover:`/`focus:`/opacity variants) picks this up, menus or not. The one inline danger text colour (the Gantt resource view's over-capacity label, `hsl(var(--destructive))`) now reads the same token.\n- `content/docs/frontend/theming.mdx` names the new token and when a custom dark theme should set it.\n\n## Tests\n\nNew `packages/components/src/__tests__/dark-danger-text-contrast-35658.test.ts`, per shipped stylesheet (components, console, runner): compiles the sheet's own `@theme` with Tailwind and asserts `text-destructive` reads `--text-color-destructive` while `bg-`/`border-destructive` read `--color-destructive`; `:root` leaves `--destructive-text` unset; the dark danger text clears 4.5:1 on every dark surface the sheet defines (`--background`, `--card`, `--popover`, `--muted`, `--accent`, `--secondary`); the dark red-button pair keeps its values. Plus the app template carries the same split.\n\n<details><summary>Readings</summary>\n\n- Head: `Tests 13 passed (13)`.\n- Reverse check (fix committed, the four theme files checked out from `origin/main`, run, restored with `git checkout HEAD --`, `git diff HEAD` empty): `Tests 7 failed | 6 passed (13)`.\n- `pnpm --dir ui exec vitest run packages/components/ packages/plugin-gantt/ packages/cli/src/__tests__/app-generator.test.ts` exit 0: `Test Files 590 passed | 2 skipped (592)`, `Tests 5587 passed | 138 skipped (5725)`.\n- `pnpm --filter @object-ui/components type-check` exit 0 after building its dependency closure; `tsc -p tsconfig.test.json --listFilesOnly` lists the new test file.\n\n</details>\n\n## Acceptance notes\n\n- Read first, by risk: the `@theme` and `.dark` hunks of `packages/components/src/index.css`; the same two hunks in `apps/console/src/index.css` (the console's iOS dark surfaces are the ones measured below).\n- Light theme's `text-destructive` is 3.76:1 on a white menu (3.22:1 hovered) and the light red button's white text is 3.60:1, both under 4.5:1. Not changed here: the card rules out touching light values. Noted for triage, not filed.\n- Two inline `style={{ color: 'var(--destructive, #ef4444)' }}` export-error lines (ObjectGrid and ListView) resolve to an invalid colour (a bare HSL triple), so the error text renders in the inherited colour, not red. Readable either way; left alone.\n- Two-minute check: run the console in dark theme, right-click a list row; the menu's Delete reads clearly red.\n- Branch name is the platform-assigned `claude/project-thread-0wa2pw` (the claim names it), not `claude/issue-35658-…`.\n\n## Verification\n\nMeasured in the running console (examples/app-showcase backend, `ui/apps/console` Vite dev serving this tree; Chromium, system theme emulated light and dark, Accounts list). Before = the three stylesheets from `origin/main` `8c18a362`; after = head. Ratio = WCAG 2 contrast of the computed text colour on its composed backdrop.\n\n| Theme | Where | Before | After |\n|---|---|---|---|\n| dark | row right-click menu, Delete | `rgb(127, 29, 29)` on `rgb(26, 26, 30)` **1.73:1** | `rgb(248, 114, 114)` on `rgb(26, 26, 30)` **6.31:1** |\n| dark | same, hovered | on `rgb(39, 39, 43)` **1.49:1** | **5.41:1** |\n| dark | selection \"…\" menu, Delete | **1.73:1** | **6.31:1** |\n| dark | same, hovered | **1.49:1** | **5.41:1** |\n| dark | delete confirm red button | `rgb(248, 250, 252)` on `rgb(127, 29, 29)` 9.58:1 | 9.58:1 (unchanged) |\n| light | both menus, Delete | `rgb(239, 68, 68)` on white 3.76:1, hovered 3.22:1 | identical |\n| light | delete confirm red button | 3.60:1 | identical |\n\nScreenshots (before/after, both themes, each row above) and the measurement script are in the project files under `build-seat1/35658/`.\n\n<details><summary>Local gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --ran` at head `00cc92e4`: 71 derived, 71 run, 0 NOT-MEASURED, every recorded exit 0. 68 of them were run on `05a265c1` (same tree except the new test's comment stripping, which now goes through `scripts/js-comment-mask.mjs` after `check-hand-rolled-comment-mask` flagged the hand-rolled regex); `check:skill-examples` (exit 3 first: `packages/spec` not yet built), `check:doc-formula-expressions` and `pnpm --dir ui exec vitest run scripts/` (`Tests 5111 passed | 2 skipped`) were run on the head.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0`, merges cleanly into `origin/main` `8c18a362`.\n- The browser measurements were taken at `05a265c1`; the stylesheets are byte-identical at the head.\n- Every family CI runs beyond the derived set is read from this PR's check runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTTFr43A9SHzSvgUoy)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTTFr43A9SHzSvgUoy\n"
+}
