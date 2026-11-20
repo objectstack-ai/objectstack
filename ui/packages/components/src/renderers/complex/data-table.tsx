@@ -2495,6 +2495,17 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       !byKeyboard && open?.columnKey === columnKey ? null : { x: r.left, y: r.bottom, columnKey },
     );
   };
+  // A menu opened from the keyboard starts on its first entry. Radix moves
+  // focus into a keyboard-opened menu only when it saw the key itself, and
+  // this one mounts after the header's keydown; so the first entry is focused
+  // once the content is in the document, after Radix's own mount focus.
+  useEffect(() => {
+    if (!contextMenu || !columnMenuByKeyboardRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      columnMenuContentRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [contextMenu]);
 
   // The column the open context menu belongs to (objectui#10727). The menu
   // holds only a key, so it is resolved from `columns`, the list the header
@@ -4216,6 +4227,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                     className={cn(
                       col.className,
                       isColumnSortable(col) && 'cursor-pointer select-none',
+                      // A header that opens the column menu is a tab stop (objectstack#35876).
+                      headerMenuOn(col) && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                       isDragging && 'opacity-50',
                       isDragOver && 'border-l-2 border-primary',
                       col.align === 'right' && 'text-right',
@@ -5445,11 +5458,6 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
             className="min-w-[160px]"
             data-testid="column-context-menu"
             onClick={(e) => e.stopPropagation()}
-            onOpenAutoFocus={(e) => {
-              if (!columnMenuByKeyboardRef.current) return;
-              e.preventDefault();
-              columnMenuContentRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-            }}
             onInteractOutside={(e) => {
               // A press on the control the menu was opened from is that
               // control's own toggle: its click shuts the menu.

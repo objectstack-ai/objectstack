@@ -477,7 +477,7 @@ export interface ConditionChipRowProps {
    * 「all sort levels」 step): a sort chip opens it (objectstack#35876). The
    * chip itself never changes the sort.
    */
-  renderSortLevels?: () => React.ReactNode;
+  renderSortLevels: () => React.ReactNode;
   /**
    * Back to the view as saved. Drawn only when passed: the host passes it
    * only while the reader has something of their own to reset.
@@ -610,7 +610,6 @@ export function ConditionChipRow({
                   <span className="truncate">{label}</span>
                 </button>
               );
-              if (!renderSortLevels) return chipButton;
               // objectstack#35876 — the chip opens every sort level in one
               // panel; it does not flip the direction.
               return (
