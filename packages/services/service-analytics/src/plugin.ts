@@ -1536,17 +1536,17 @@ export class AnalyticsServicePlugin implements Plugin {
      * [ADR-0155 D4, plan step 5, #35946] The engine seam's recognition of D4's
      * two classes for a fixed-read leaf a read scope carries
      * (`IObjectQLEngine.fixedReadLeafClassOf`), resolved per call like
-     * `hasObjectMiddleware` above. The engine's "neither" (`undefined` from the
-     * member) is this hook's `null`, the one answer on which `NativeSQLStrategy`
-     * compiles the leaf; a class is handed on as the engine named it.
+     * `hasObjectMiddleware` above, and handed on as the engine gave it: a
+     * class, or `null` for neither, the one answer on which `NativeSQLStrategy`
+     * compiles the leaf.
      *
-     * It FAILS CLOSED: no engine, or an engine without the member, answers
-     * `undefined` ("cannot say"), and the strategy declines the query to the
-     * engine path, as it does on a class and on a throw. ⛔ Never
-     * `engine.fixedReadLeafClassOf?.(leaf) ?? null`: the absent member would
-     * read as "neither class". ⛔ No copy of either class here (D4: "restates
-     * none"). Said once, at `warn`: the rows stay correct, only the native path
-     * for a scope carrying the leaf is gone.
+     * It FAILS CLOSED: no engine, a `getService` throw, or an engine without
+     * the member answers `undefined` ("cannot say"). The strategy declines
+     * every answer but `null` to the engine path, so that tier declines, as a
+     * class and a throw do, and so does a member that does not keep the
+     * contract (one answering `undefined` for neither, say). ⛔ No copy of either class here (D4: "restates none"). An engine
+     * without the member is said once, at `warn`: the rows stay correct, only
+     * the native path for a scope carrying the leaf is gone.
      */
     let reportedEngineWithoutLeafClassAnswer = false;
     const fixedReadLeafClassOf: NonNullable<AnalyticsServiceConfig['fixedReadLeafClassOf']> = (leaf) => {
@@ -1557,8 +1557,7 @@ export class AnalyticsServicePlugin implements Plugin {
         return undefined;
       }
       if (!svc) return undefined;
-      if (typeof svc.fixedReadLeafClassOf === 'function') return svc.fixedReadLeafClassOf(leaf) ?? null;
-      if (!reportedEngineWithoutLeafClassAnswer) {
+      if (typeof svc.fixedReadLeafClassOf !== 'function' && !reportedEngineWithoutLeafClassAnswer) {
         reportedEngineWithoutLeafClassAnswer = true;
         ctx.logger.warn(
           '[Analytics] The "data" engine has no fixedReadLeafClassOf (IObjectQLEngine.fixedReadLeafClassOf), so ' +
@@ -1568,7 +1567,7 @@ export class AnalyticsServicePlugin implements Plugin {
             'native path for those scopes. Reported once.',
         );
       }
-      return undefined;
+      return svc.fixedReadLeafClassOf?.(leaf);
     };
 
     const config: AnalyticsServiceConfig = {

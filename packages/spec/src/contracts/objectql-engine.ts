@@ -283,8 +283,10 @@ export type EngineFilterJudgement =
  * The answer of {@link IObjectQLEngine.fixedReadLeafClassOf} (ADR-0155 D4):
  * which of the two classes a fixed-read leaf falls in on this engine, and what
  * names it. `@objectstack/objectql`'s `FixedReadLeafClass`, the seam's own
- * answer, stated here because spec does not depend on the engine package;
- * `ObjectQL implements IObjectQLEngine` holds the two equal on every build.
+ * answer, restated here because spec does not depend on the engine package.
+ * `ObjectQL implements IObjectQLEngine` checks one direction only, on every
+ * build: the seam's answer must be assignable to this type. A member this type
+ * adds, or a member the seam drops, is caught; a member the seam adds is not.
  */
 export type EngineFixedReadLeafClass =
     | {
@@ -531,7 +533,7 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
     hasObjectMiddleware?(objectName: string): boolean;
     /**
      * [ADR-0155 D4, plan step 5] Which of D4's two classes the fixed-read leaf
-     * `leaf` (`SharedRecordIds`) falls in on this engine, or `undefined` when
+     * `leaf` (`SharedRecordIds`) falls in on this engine, or `null` when
      * neither applies: the engine seam's own recognition
      * (`fixedReadLeafClassOfEngine`), the one the executor boundary runs.
      *
@@ -541,21 +543,22 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      *   `beforeFind` / `afterFind` hook, is registered for that table by name.
      *
      * Read-only: it reads the engine's datasource bindings, middlewares and
-     * hooks, and calls no driver and logs nothing.
+     * hooks, and calls no driver and logs nothing. It throws `TypeError` when
+     * `leaf` is not a fixed-read leaf (`fixedInnerReadOf`).
      *
      * The consumer is a read path that compiles the leaf itself instead of
      * handing it to the engine: the analytics native-SQL strategy (ADR-0155 Q2
-     * as ruled) asks this before it compiles, compiles only on `undefined`, and
-     * declines the query to the engine on a class, where the seam answers it.
-     * It restates neither class (D4: recognised once, in the seam).
+     * as ruled) asks this before it compiles, compiles only on `null`, and
+     * declines the query to the engine on a class, where the seam answers it,
+     * and on a throw. It restates neither class (D4: recognised once, in the
+     * seam).
      *
-     * OPTIONAL by ruling 7051956587: an engine without it cannot answer, and
-     * that consumer reads the absence as "cannot say" and declines, so the
-     * probe is `typeof ql.fixedReadLeafClassOf === 'function'`. ⛔ Never
-     * `ql.fixedReadLeafClassOf?.(leaf) ?? null` alone: an absent member then
-     * reads as "neither class" and the consumer compiles what it cannot see.
+     * OPTIONAL by ruling 7051956587. "Neither" is `null`, never `undefined`, so
+     * `ql.fixedReadLeafClassOf?.(leaf)` is the consumer's whole three-state
+     * answer: a class, `null` (compile), or `undefined` from an engine without
+     * the member, which cannot say, and the consumer declines.
      */
-    fixedReadLeafClassOf?(leaf: FixedReadLeaf): EngineFixedReadLeafClass | undefined;
+    fixedReadLeafClassOf?(leaf: FixedReadLeaf): EngineFixedReadLeafClass | null;
     /** Bind declarative Hook metadata — AppPlugin's app-bundle path. */
     bindHooks(
         hooks: unknown[] | undefined,
