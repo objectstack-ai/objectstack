@@ -630,6 +630,13 @@ const ja = {
       avg: "平均",
       min: "最小",
       max: "最大",
+      earliest: "最も早い",
+      latest: "最も遅い",
+      pageName: "{{label}}（このページ）",
+      calculate: "計算",
+      none: "なし",
+      menuPercentEmpty: "空の割合",
+      menuPercentFilled: "入力済みの割合",
     },
     toolbar: {
       densityMode: "密度",

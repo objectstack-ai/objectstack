@@ -86,11 +86,15 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Chave",
-        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos entram no grupo ao nomear esta chave, portanto renomeá-la os deixa sem grupo."
+        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos que o grupo lista em Campos continuam nele quando a chave é renomeada; um campo que entra ao nomear esta chave na sua própria configuração de grupo fica sem grupo."
       },
       "fieldGroups.label": {
         label: "Rótulo",
         helpText: "Texto do cabeçalho da seção do grupo."
+      },
+      "fieldGroups.fields": {
+        label: "Campos",
+        helpText: "Os campos que este grupo exibe, na ordem de exibição (nomes de campo). Preenchida, a lista define a ordem dentro do grupo sem mover nenhum campo. Um campo citado aqui não pode indicar outro grupo na sua própria configuração de grupo, e um campo só pode ser listado por um grupo. Não permitido junto com Lista relacionada."
       },
       "fieldGroups.icon": {
         label: "Ícone",

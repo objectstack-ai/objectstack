@@ -898,8 +898,9 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
   // ── `sections[].group` — the ADR-0085 §5 REFERENCE form ──────────────────
   //
   // `{ group: 'parties' }` inherits the object's `fieldGroups` entry with that
-  // key: its members (every visible field pointing at it, in declaration
-  // order) and its own presentation (label, icon, description, collapse) —
+  // key: its members (the group's own `fields` list first, in its order, then
+  // every other visible field pointing at it, in declaration order) and its
+  // own presentation (label, icon, description, collapse) —
   // `@objectstack/spec` 17.3.0 `RecordDetailsProps.sections[].group`
   // (objectstack#13855), whose semantics are single-sourced in
   // `deriveFieldGroupLayout`. This renderer used to read the key NOWHERE, and

@@ -6,6 +6,7 @@ import {
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,
   FIELD_GROUP_SHADOWED,
+  FIELD_GROUP_MEMBER_UNKNOWN,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
   SEMANTIC_ROLE_FIELD_UNPROVISIONED,
 } from './validate-semantic-roles';
@@ -285,6 +286,67 @@ describe('validateSemanticRoles (ADR-0085)', () => {
 // derivation the registry's `applySystemFields` consumes, so the warning is
 // still correct wherever the column really is absent.
 // ---------------------------------------------------------------------------
+describe('validateSemanticRoles — a group that lists its own fields', () => {
+  it('counts a listing group as referenced, and judges rule (d) on its listed members', () => {
+    const clean = validateSemanticRoles(stack([{
+      name: 'quote',
+      highlightFields: ['name'],
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['code', 'name'] }],
+      fields: { name: { type: 'text' }, code: { type: 'text' } },
+    }]));
+    expect(clean, JSON.stringify(clean)).toEqual([]);
+    // A highlighted member is drawn in the body (#35849), so highlighting
+    // `code` too leaves the group visible.
+    const highlighted = validateSemanticRoles(stack([{
+      name: 'quote',
+      highlightFields: ['name', 'code'],
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['code', 'name'] }],
+      fields: { name: { type: 'text' }, code: { type: 'text' } },
+    }]));
+    expect(highlighted, JSON.stringify(highlighted)).toEqual([]);
+    // A list naming only the record title is shadowed: the title is the H1.
+    const shadowed = validateSemanticRoles(stack([{
+      name: 'quote',
+      highlightFields: ['name'],
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['name'] }],
+      fields: { name: { type: 'text' }, code: { type: 'text' } },
+    }]));
+    expect(shadowed.map((f) => f.rule)).toEqual([FIELD_GROUP_SHADOWED]);
+  });
+
+  it('warns on a listed name the object does not declare, at its list position', () => {
+    const findings = validateSemanticRoles(stack([{
+      name: 'quote',
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['code', 'acount'] }],
+      fields: { code: { type: 'text' }, account: { type: 'text' } },
+    }]));
+    expect(findings).toEqual([expect.objectContaining({
+      severity: 'warning',
+      rule: FIELD_GROUP_MEMBER_UNKNOWN,
+      path: 'objects[0].fieldGroups[0].fields[1]',
+    })]);
+    expect(findings[0].message).toContain('"acount"');
+  });
+
+  it('a listed injected system column is a field: no warning for owner_id', () => {
+    const findings = validateSemanticRoles(stack([{
+      name: 'quote',
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['owner_id', 'code'] }],
+      fields: { code: { type: 'text' } },
+    }]));
+    expect(findings.filter((f) => f.rule === FIELD_GROUP_MEMBER_UNKNOWN)).toEqual([]);
+  });
+
+  it('a list that names only missing fields leaves the group empty (rule b), beside rule (e)', () => {
+    const findings = validateSemanticRoles(stack([{
+      name: 'quote',
+      fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['code'] }, { key: 'ghost', label: 'Ghost', fields: ['gone'] }],
+      fields: { code: { type: 'text' } },
+    }]));
+    expect(findings.map((f) => f.rule).sort()).toEqual([FIELD_GROUP_EMPTY, FIELD_GROUP_MEMBER_UNKNOWN].sort());
+  });
+});
+
 describe('validateSemanticRoles — injected system columns (#5378)', () => {
   // The issue's acceptance criterion #2, verbatim.
   it('does not warn on highlightFields: [owner_id] for an injection-only object', () => {

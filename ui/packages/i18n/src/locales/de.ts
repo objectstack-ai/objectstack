@@ -630,6 +630,13 @@ const de = {
       avg: "Mittelwert",
       min: "Min.",
       max: "Max.",
+      earliest: "Frühestes",
+      latest: "Spätestes",
+      pageName: "{{label}} (diese Seite)",
+      calculate: "Berechnen",
+      none: "Keine",
+      menuPercentEmpty: "Anteil leer",
+      menuPercentFilled: "Anteil gefüllt",
     },
     toolbar: {
       densityMode: "Dichte",
