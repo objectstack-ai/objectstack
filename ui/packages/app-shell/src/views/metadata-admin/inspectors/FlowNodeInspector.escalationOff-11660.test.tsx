@@ -61,6 +61,9 @@ vi.mock('../previews/useObjectFields', () => ({
 import { FlowNodeInspector } from './FlowNodeInspector';
 import type { MetadataSelection } from '../preview-registry';
 import { ApprovalNodeConfigSchema, getApprovalNodeConfigJsonSchema } from '@objectstack/spec/automation';
+// The inspector's CEL authoring reaches `@objectstack/lint` by a dynamic import;
+// paying its first load here, at collection, keeps it out of a clocked case.
+import '@objectstack/lint';
 
 /* ── The `meta/*` double (objectui#7307), as the sibling inspector files
  * serve it: an empty registry in the `{ type, items: [] }` envelope, and an

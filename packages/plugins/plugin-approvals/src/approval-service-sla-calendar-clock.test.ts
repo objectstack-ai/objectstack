@@ -243,7 +243,11 @@ function calendarReads(calendars: Row[], exceptions: Row[]) {
       const tenant = query.context?.tenantId;
       const hits = src
         .filter((r) => tenant === undefined || r.organization_id === tenant)
-        .filter((r) => Object.entries(query.where ?? {}).every(([k, v]) => r[k] === v));
+        .filter((r) => Object.entries(query.where ?? {}).every(([k, v]) => {
+          // Equality only: a combinator or an operator object is refused, never answered wrong.
+          if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`calendarReads answers equality only, not ${k}`);
+          return r[k] === v;
+        }));
       const from = query.offset ?? 0;
       return hits.slice(from, from + (query.limit ?? hits.length));
     },
