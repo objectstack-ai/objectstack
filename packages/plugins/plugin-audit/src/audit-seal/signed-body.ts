@@ -285,8 +285,21 @@ function columnSet(value: unknown): SealedColumnSet {
  * `id`, `chain_key`, `signature` — is ignored here.
  *
  * Exported from the package entry for a checkpoint sink off the host (D11):
- * read from a stored `sys_audit_checkpoint` row, it answers the body the sink
- * was handed, whose RFC 8785 form is the bytes the row's `signature` covers.
+ * read from an unaltered stored `sys_audit_checkpoint` row, it answers the
+ * body the sink was handed, whose RFC 8785 form is the bytes the row's
+ * `signature` covers.
+ *
+ * It validates and normalizes; it never verifies the signature. A rewritten
+ * row reads back into a body that fails verification, or, re-signed by
+ * whoever holds the signing key, into one that only the off-host trust anchor
+ * catches. So a sink verifies the row's `signature` over the rebuilt body,
+ * under a key it trusts itself, before it treats the row as delivered.
+ *
+ * A sink assembles the entry it re-delivers itself: `kind` is `'checkpoint'`
+ * (the table it read), `keyId` is `body.signing_key_id`, and `signature` is
+ * the row's `signature` column. The signed bytes are the body's RFC 8785
+ * (JCS) serialization, which the sink computes with its own serializer: this
+ * package does not export one.
  *
  * @public
  */
@@ -383,8 +396,21 @@ export function checkpointLeafHashesFromRow(row: Readonly<Record<string, unknown
  * An amendment's signed body, validated and in canonical form, from a body or a stored row.
  *
  * Exported from the package entry for a checkpoint sink off the host (D11):
- * read from a stored `sys_audit_amendment` row, it answers the body the sink
- * was handed, whose RFC 8785 form is the bytes the row's `signature` covers.
+ * read from an unaltered stored `sys_audit_amendment` row, it answers the
+ * body the sink was handed, whose RFC 8785 form is the bytes the row's
+ * `signature` covers.
+ *
+ * It validates and normalizes; it never verifies the signature. A rewritten
+ * row reads back into a body that fails verification, or, re-signed by
+ * whoever holds the signing key, into one that only the off-host trust anchor
+ * catches. So a sink verifies the row's `signature` over the rebuilt body,
+ * under a key it trusts itself, before it treats the row as delivered.
+ *
+ * A sink assembles the entry it re-delivers itself: `kind` is `'amendment'`
+ * (the table it read), `keyId` is `body.signing_key_id`, and `signature` is
+ * the row's `signature` column. The signed bytes are the body's RFC 8785
+ * (JCS) serialization, which the sink computes with its own serializer: this
+ * package does not export one.
  *
  * @public
  */
