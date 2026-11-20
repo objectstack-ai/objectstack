@@ -15,6 +15,7 @@ import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_T
 import type { DroppedFieldsEvent, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryAliasSlot, RecycleBinClearedReference, ServiceObject } from '@objectstack/spec/data';
 import type { EngineFilterJudgement, ISecurityService } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
+import { collectFixedReadLeaves } from './fixed-read-leaf-position.js';
 import { assertResolvedTemporalTokensInRange, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import type { ResolvedTokenJudge } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
@@ -951,8 +952,11 @@ export function lowerWhereFilterArray<T extends object | undefined>(
     // asks "can that column's storage rule READ this value".
     // It must run BEFORE `resolveWhereTokens` (which is downstream of every
     // caller of this function) because the refusal has to precede the driver —
-    // hence the door steps around `{placeholder}` strings rather than judging
-    // them; the token resolver refuses the unknown ones a moment later, loudly.
+    // hence the door judges a `{placeholder}` by its kind rather than as the
+    // value it resolves to: a date macro is stepped around (judged by its year
+    // once resolved), a period key or a context token is judged as written, and
+    // an unknown or record-context token is left to the token resolver, which
+    // refuses it a moment later, loudly.
     assertTemporalComparandsInterpretable(object, operation, schema, where);
     // [#20351] The NUMBER-comparand declared-type door, fifth on the same seam
     // and fifth question about the same predicate: is this string a number the
@@ -1054,6 +1058,10 @@ export function lowerWhereFilterArray<T extends object | undefined>(
   // reference into any other position is refused here by name, as the object
   // branch refuses it — first, before the doors below read it as a value.
   collectComposableReadableIds(object, operation, condition, 'where');
+  // [ADR-0155 D1] The same for a fixed-read leaf the lowering carried by
+  // reference: `parseFilterAST` refuses one as a `$in` comparand (400), and
+  // any other position is refused here by name, before the doors below.
+  collectFixedReadLeaves(object, operation, condition, 'where');
   // [#8296] Same door as the object branch above, on the LOWERED condition —
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
@@ -3735,6 +3743,23 @@ export function hookMatchesObject(
     if (hookTargetList(entry.excludeObjects).includes(objectName)) return false;
   }
   return true;
+}
+
+/**
+ * [ADR-0155 D4] Is `entry` a registration made for `objectName` BY NAME: one
+ * that {@link hookMatchesObject} dispatches for it AND whose `object` names it
+ * literally? A global registration (no `object`) or a `'*'` one covers the
+ * object without naming it, and is outside: the engine reads a registration
+ * by the object it names, and counts no global one, on the line
+ * `hasObjectMiddleware` draws for middleware. The dispatch half is
+ * {@link hookMatchesObject}'s alone, so an `excludeObjects` that subtracts the
+ * object takes it out here too.
+ */
+export function hookNamesObject(
+  entry: Pick<HookEntry, 'object' | 'excludeObjects'>,
+  objectName: string,
+): boolean {
+  return hookTargetList(entry.object).includes(objectName) && hookMatchesObject(entry, objectName);
 }
 
 /**

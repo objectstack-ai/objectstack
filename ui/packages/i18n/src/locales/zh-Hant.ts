@@ -526,6 +526,10 @@ const zhHant = {
     cancelChanges: '取消更改',
     saveRow: '儲存行',
     cellReadOnly: '此單元格不能在這裡編輯。',
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: '儲存中…',
+    cellSaved: '已儲存',
+    openRecordToFinish: '開啟記錄完成修改',
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
@@ -4805,6 +4809,7 @@ const zhHant = {
     statusRejected: '已駁回',
     statusRecalled: '已撤回',
     statusReturned: '已退回修改',
+    statusCancelled: '已取消',
     sendBackBtn: '退回修改',
     sendBackTitle: '將該申請退回修改？',
     sendBackBody: '本輪審批結束，記錄解鎖，申請人可修改資料。重新提交後將為所有審批人開啟新一輪審批。',

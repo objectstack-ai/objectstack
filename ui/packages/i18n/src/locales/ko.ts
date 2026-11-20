@@ -513,6 +513,10 @@ const ko = {
     cancelChanges: "변경 취소",
     saveRow: "행 저장",
     cellReadOnly: "이 셀은 여기에서 편집할 수 없습니다.",
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: "저장 중…",
+    cellSaved: "저장됨",
+    openRecordToFinish: "레코드를 열어 변경을 완료하세요",
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
@@ -4545,6 +4549,7 @@ const ko = {
     statusRejected: '거부됨',
     statusRecalled: '회수됨',
     statusReturned: '수정 요청 반려',
+    statusCancelled: '취소됨',
     sendBackBtn: '반려',
     sendBackTitle: '이 요청을 수정하도록 반려하시겠습니까?',
     sendBackBody: '이번 라운드가 종료되고 레코드 잠금이 해제되어 신청자가 데이터를 수정할 수 있습니다. 다시 제출하면 모든 승인자에게 새로운 승인 라운드가 시작됩니다.',

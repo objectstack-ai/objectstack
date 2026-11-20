@@ -526,6 +526,10 @@ const zh = {
     cancelChanges: '取消更改',
     saveRow: '保存行',
     cellReadOnly: '此单元格不能在这里编辑。',
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: '保存中…',
+    cellSaved: '已保存',
+    openRecordToFinish: '打开记录完成修改',
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
@@ -4805,6 +4809,7 @@ const zh = {
     statusRejected: '已驳回',
     statusRecalled: '已撤回',
     statusReturned: '已退回修改',
+    statusCancelled: '已取消',
     sendBackBtn: '退回修改',
     sendBackTitle: '将该申请退回修改？',
     sendBackBody: '本轮审批结束，记录解锁，申请人可修改数据。重新提交后将为所有审批人开启新一轮审批。',

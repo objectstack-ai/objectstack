@@ -370,17 +370,31 @@ object and the view does not declare `userActions.editInline: false`, and
   move right / left, and Escape cancels and keeps the cell selected. In a
   multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. A click
   elsewhere commits.
-- **Selected cell keys:** the arrows and Tab move the selection; Space opens the
-  record (a checkbox cell flips instead, as does a second click on it);
-  Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text to the field's type and
-  commits it; Escape clears the selection.
+- **Selected cell keys:** the arrows and Tab move the selection; Space is typed
+  like any other key and opens the editor (a checkbox cell flips instead, as
+  does a second click on it); Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text
+  to the field's type and commits it; Escape clears the selection. The record
+  opens from the name link, or a tap on a touch screen.
 - **A cell that opens no editor says why** on the cell: the field is read-only,
   calculated or not editable in a list, the reader may not edit the field, the
   object or the record, the view turned editing off, or the record is locked
   by an approval.
 
-Commits are the grid's own staged edits: the row's Save / Cancel and the Save
-All bar save them, as before.
+**Each commit is saved at once** (objectstack#35685), as one update for that
+record; there is no Save All bar, no row Save / Cancel and no amber row. The
+cell shows a small spinner while its save runs and a check mark once it
+landed. Only that row is redrawn, from the record the server answered with (a
+value a server hook rewrote shows as stored); the list is not read again, so a
+row whose new value would sort it elsewhere stays in place until the next load
+(a refresh, a sort, a filter or a page change).
+
+- **A refused save** keeps the typed value and shows the server's reason on the
+  cell. Escape puts the stored value back. A later edit on the same row is sent
+  together with the refused one, as one update. When the reason names a field
+  the list cannot edit, the notice offers to open the record.
+- **A newer version** (409) still opens the conflict dialog: "Reload latest"
+  re-reads the list, "Overwrite anyway" writes over it and keeps the row in
+  place.
 
 ### Keyboard navigation
 
@@ -419,8 +433,11 @@ WAI-ARIA grid pattern (objectui#11068):
 ### Batch Editing & Multi-Row Save
 
 Edit multiple cells across multiple rows and save them individually or all at
-once. The schema half is just `editable` — the save/cancel affordances appear on
-their own once a row has pending changes:
+once. This is the model of a grid without the select-first cell model (a
+related list, a dashboard table, an `object-grid` outside a list page); a list
+page saves each cell as it is committed (above). The schema half is just
+`editable` — the save/cancel affordances appear on their own once a row has
+pending changes:
 
 ```json
 {

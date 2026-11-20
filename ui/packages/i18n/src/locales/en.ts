@@ -776,6 +776,10 @@ const en = {
     cancelChanges: 'Cancel changes',
     saveRow: 'Save row',
     cellReadOnly: 'This cell can\'t be edited here.',
+    // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
+    cellSaving: 'Saving…',
+    cellSaved: 'Saved',
+    openRecordToFinish: 'Open the record to finish this change',
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
@@ -5502,6 +5506,7 @@ const en = {
     statusRejected: 'Rejected',
     statusRecalled: 'Recalled',
     statusReturned: 'Returned for revision',
+    statusCancelled: 'Cancelled',
     sendBackBtn: 'Send back',
     sendBackTitle: 'Send this request back for revision?',
     sendBackBody: 'This round ends and the record unlocks so the requester can fix the data. When they resubmit, a fresh approval round opens for all approvers.',
