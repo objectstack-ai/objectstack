@@ -1425,7 +1425,7 @@ describe('ApprovalService (node era)', () => {
   // The `approval_reject` action door's refusal, at the member every human
   // door reaches: the same code, status and sentence, nothing read or written.
 
-  it('decide: refuses a reject whose comment is missing, empty, blank or null, and leaves the request pending', async () => {
+  it('decide: refuses a reject whose comment is missing, empty, blank, null or not a string, and leaves the request pending', async () => {
     const resumed: any[] = [];
     svc.attachAutomation({ async resume(runId) { resumed.push(runId); } });
     const req: any = await svc.openNodeRequest(openInput(['u9']), CTX);
