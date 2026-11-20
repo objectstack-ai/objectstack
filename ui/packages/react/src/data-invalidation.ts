@@ -37,7 +37,7 @@
  *     unknown operation).
  */
 
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 
 /** What changed. `objectName: '*'` means "unknown — treat everything as stale". */
 export interface DataChange {
@@ -103,17 +103,79 @@ export function dataChangeMatches(
  * useEffect(() => { void load(); }, [objectName, recordId, invalidationNonce]);
  * ```
  */
-export function useDataInvalidation(objectName?: string, recordId?: string): number {
+export function useDataInvalidation(
+  objectName?: string,
+  recordId?: string,
+  ownWrites?: OwnWrites | null,
+): number {
   const [nonce, setNonce] = useState(0);
+  const ownWritesRef = useRef(ownWrites);
+  ownWritesRef.current = ownWrites;
   useEffect(() => {
     if (!objectName) return;
     return subscribeDataChanges((change) => {
+      if (ownWritesRef.current?.absorbs(change)) return;
       if (dataChangeMatches(change, objectName, recordId)) {
         setNonce((n) => n + 1);
       }
     });
   }, [objectName, recordId]);
   return nonce;
+}
+
+/**
+ * The record writes a reader makes AND draws itself (objectstack#35685).
+ *
+ * A list cell's save redraws its own row from the write's answer, so the list
+ * that holds the grid must not read every row again when that same write
+ * reaches the bus: a re-read would move a sorted row and refetch the page for
+ * one cell. The writer holds the record for the length of its write
+ * ({@link OwnWrites.hold}); a reader that passes the registry to
+ * {@link useDataInvalidation} lets a change that names a held record go by.
+ * Every other reader (the record's detail pane, a related list, a count) is
+ * not given the registry, so it still refreshes; and a change that names no
+ * record, or `'*'`, is never absorbed.
+ */
+export interface OwnWrites {
+  /** Hold (objectName, recordId) as this reader's own write; call the result once it settles. */
+  hold(objectName: string, recordId: string): () => void;
+  /** True while a hold names the record `change` names. */
+  absorbs(change: DataChange): boolean;
+}
+
+/** A fresh registry: one per reader that draws its own writes. */
+export function createOwnWrites(): OwnWrites {
+  const held = new Map<string, number>();
+  const keyOf = (objectName: string, recordId: string) => JSON.stringify([objectName, recordId]);
+  return {
+    hold(objectName, recordId) {
+      const key = keyOf(objectName, recordId);
+      held.set(key, (held.get(key) ?? 0) + 1);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const left = (held.get(key) ?? 1) - 1;
+        if (left > 0) held.set(key, left);
+        else held.delete(key);
+      };
+    },
+    absorbs(change) {
+      if (change.objectName === '*' || change.recordId === undefined) return false;
+      return held.has(keyOf(change.objectName, change.recordId));
+    },
+  };
+}
+
+/**
+ * The registry of the list a grid draws into (`ListView` provides it), so the
+ * grid's own cell saves hold their records there. Null outside such a list.
+ */
+export const OwnWritesContext = createContext<OwnWrites | null>(null);
+
+/** The {@link OwnWritesContext} registry, or null. */
+export function useOwnWrites(): OwnWrites | null {
+  return useContext(OwnWritesContext);
 }
 
 /**

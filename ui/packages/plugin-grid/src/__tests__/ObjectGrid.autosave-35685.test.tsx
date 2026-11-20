@@ -13,7 +13,8 @@
  *
  *   1. A committed cell sends ONE update for its record and no read: the
  *      grid redraws that row from the write's answer, so a value a server
- *      hook rewrote shows as stored, and no other row is read again.
+ *      hook rewrote shows as stored, and no other row is read again, though
+ *      the write is announced on the data-invalidation bus.
  *   2. The `If-Match` of the next save on the row is the version that
  *      answer carried.
  *   3. Control: without `cellSelection` the save bar's row save still
@@ -26,7 +27,7 @@ import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
 import { registerAllFields } from '@object-ui/fields';
-import { ActionProvider } from '@object-ui/react';
+import { ActionProvider, notifyDataChanged } from '@object-ui/react';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { __resetApprovalsServiceLatch } from '../hooks/useRowApprovalLocks';
 import { installExplainDouble } from './explainDouble';
@@ -51,7 +52,10 @@ beforeAll(() => {
 
 const OBJECT = 'deal';
 
-/** A fake server whose update hook rewrites the name it is sent to upper case. */
+/**
+ * A fake server whose update hook rewrites the name it is sent to upper case,
+ * and whose writes are announced on the data-invalidation bus.
+ */
 function makeDataSource() {
   const store: Record<string, any> = {
     d1: { id: 'd1', name: 'alpha', amount: 10, updated_at: '2026-11-20T10:00:00.000Z' },
@@ -67,6 +71,9 @@ function makeDataSource() {
     if (typeof changes.name === 'string') next.name = changes.name.toUpperCase();
     next.updated_at = `2026-11-20T11:00:0${++clock}.000Z`;
     store[id] = next;
+    // Announced on the bus inside the write, as the console's mutation bridge
+    // does, so a grid that re-read on its own write would read again here.
+    notifyDataChanged({ objectName: OBJECT, recordId: id });
     return { ...next };
   });
   return {

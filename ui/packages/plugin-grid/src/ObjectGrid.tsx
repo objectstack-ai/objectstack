@@ -25,7 +25,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
-import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -1299,6 +1299,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // The row load: the invalidation nonce, the load effect, and the
   // `findParams` and page-1 resets, in hook order (`./objectGridRowLoad`).
+  // objectstack#35685 — the writes this grid draws itself: the hosting list's
+  // registry when it has one (so the list does not re-read for them either),
+  // else the grid's own.
+  const hostOwnWrites = useOwnWrites();
+  const localOwnWrites = React.useMemo(createOwnWrites, []);
+  const ownWrites = hostOwnWrites ?? localOwnWrites;
   const { invalidationNonce } = useObjectGridRowLoad({
     schema, dataSource, objectName, dataConfig, hasInlineData, perms, refreshKey, hostFindParams,
     lastFindParamsRef, setData, setLoading, setError, setObjectSchema, setTotalMatching,
@@ -1306,6 +1312,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     groupingProjectionKey, predicateProjectionKey, schemaFilter, schemaFilterRefusal, schemaSort,
     schemaPagination, schemaPageSize, serverPage, setServerPage, headerSort, querySearchTerm,
     searchFieldsKey, serverGroupedFetch, groupingNeedsHeaderQuery, fetchWindow, setGroupRowQuery,
+    ownWrites,
   });
 
   // --- NavigationConfig support ---
@@ -2607,11 +2614,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // warnings and its hook's notice) rides the save toast below, so the
     // write is one toast.
     const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
+    // objectstack#35685 — the select-first grid draws this write's answer
+    // itself (below), so the list holding it lets the write's bus change go by
+    // instead of reading every row again. Held only for the write; a 409 lets
+    // go first, so its "reload latest" reaches the list.
+    const releaseOwnWrite = hostCellSelection ? ownWrites.hold(objectName, String(id)) : () => {};
     try {
       let answer: unknown;
       try {
         answer = await writeRowGuarded(dataSource, objectName, id, changes, row);
       } catch (err) {
+        releaseOwnWrite();
         if (!isConcurrentUpdateError(err)) throw err;
         // A reload re-reads through the bus; there is nothing of ours to show.
         const resolved = await resolveRowConflict(dataSource, objectName, id, changes, row, err);
@@ -2639,6 +2652,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       // row landed: a refusal rejects above, and the table flags the row.
       toastRecordSave(toast, t('table.saved', { count: 1 }), claim.take(undefined));
     } finally {
+      releaseOwnWrite();
       claim.release();
     }
   };

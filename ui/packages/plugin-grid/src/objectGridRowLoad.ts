@@ -10,7 +10,7 @@
 
 import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, DependsOnInput, ViewData } from '@object-ui/types';
-import { useDataInvalidation } from '@object-ui/react';
+import { useDataInvalidation, type OwnWrites } from '@object-ui/react';
 import { recordCurrencyReadField } from '@object-ui/i18n';
 import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
@@ -91,6 +91,7 @@ export function useObjectGridRowLoad({
   groupingProjectionKey, predicateProjectionKey, schemaFilter, schemaFilterRefusal, schemaSort,
   schemaPagination, schemaPageSize, serverPage, setServerPage, headerSort, querySearchTerm,
   searchFieldsKey, serverGroupedFetch, groupingNeedsHeaderQuery, fetchWindow, setGroupRowQuery,
+  ownWrites,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
@@ -127,6 +128,8 @@ export function useObjectGridRowLoad({
   groupingNeedsHeaderQuery: GroupingDecisions['groupingNeedsHeaderQuery'];
   fetchWindow: GroupingDecisions['fetchWindow'];
   setGroupRowQuery: GroupingDecisions['setGroupRowQuery'];
+  /** objectstack#35685 — this grid's own cell saves, which redraw their row themselves. */
+  ownWrites?: OwnWrites | null;
 }) {
   // objectui#10035 — the refresh input this grid had none of, so a host could
   // show it a write only by remounting it (AGENTS.md #8's corollary: refresh
@@ -138,7 +141,9 @@ export function useObjectGridRowLoad({
   // fetches for itself: rows a host handed down (`data`, `bind`, an inline
   // `value` set) are the host's to refresh, and a nonce there would only
   // re-render for nothing.
-  const invalidationNonce = useDataInvalidation(hasInlineData ? undefined : objectName);
+  // objectstack#35685 — a cell save this grid redraws from its own answer is
+  // not a reason to read every row again (`OwnWrites`).
+  const invalidationNonce = useDataInvalidation(hasInlineData ? undefined : objectName, undefined, ownWrites);
 
   // --- Unified async data loading effect ---
   // Combines schema fetch + data fetch into a single async flow with AbortController.
