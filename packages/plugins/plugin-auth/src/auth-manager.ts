@@ -44,6 +44,7 @@ import {
   type CredentialUseClient,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
+import type { EgressGuard } from '@objectstack/core/egress';
 import {
   effectiveSessionLimits,
   isMfaRequirementLevel,
@@ -1440,6 +1441,18 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * deliberately still wins for this budget — see `getOtpSendGuard`.
    */
   sharedCounterStore?: () => Promise<CounterStore>;
+
+  /**
+   * The outbound-request guard SSO discovery sends its reads through
+   * (`sso-discovery-egress.ts`): the connection resolves the identity
+   * provider's host and connects only to an address that is public at that
+   * moment. Absent → `createSsoDiscoveryEgressGuard()`, whose policy refuses
+   * every address that is not public. A suite that fakes the identity provider
+   * by stubbing the global fetch hands a stand-in here
+   * (`sso-discovery-egress.testkit.ts`); the rule itself is pinned with the
+   * real guard.
+   */
+  ssoDiscoveryEgress?: EgressGuard;
 }
 
 /**
@@ -4318,7 +4331,7 @@ export class AuthManager {
    */
   handleVendorRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'resolveAuthSecret'> = {
+    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'runSsoDiscoveryEgress' | 'resolveAuthSecret'> = {
       config: this.config,
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
@@ -4327,9 +4340,48 @@ export class AuthManager {
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
       runSsoCallback: (...a) => this.runSsoCallback(...a),
       runSsoLogout: (...a) => this.runSsoLogout(...a),
+      runSsoDiscoveryEgress: (...a) => this.runSsoDiscoveryEgress(...a),
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
     };
     return handleRequest.call(host, request, transport);
+  }
+
+  /**
+   * The guard SSO discovery sends its reads through: the host's
+   * ({@link AuthManagerOptions.ssoDiscoveryEgress}), else one built once per
+   * manager, whose refusals go to this manager's logger.
+   */
+  private ssoDiscoveryEgressGuard(): Promise<EgressGuard> {
+    if (!this.ssoDiscoveryEgressGuardPromise) {
+      const configured = this.config.ssoDiscoveryEgress;
+      this.ssoDiscoveryEgressGuardPromise = configured
+        ? Promise.resolve(configured)
+        : import('./sso-discovery-egress.js').then(({ createSsoDiscoveryEgressGuard }) =>
+          createSsoDiscoveryEgressGuard(this.config.logger ? { logger: this.config.logger } : {}),
+        );
+      // A guard that cannot be built is asked again on the next read, not cached.
+      this.ssoDiscoveryEgressGuardPromise.catch(() => {
+        this.ssoDiscoveryEgressGuardPromise = undefined;
+      });
+    }
+    return this.ssoDiscoveryEgressGuardPromise;
+  }
+
+  private ssoDiscoveryEgressGuardPromise?: Promise<EgressGuard>;
+
+  /**
+   * Run a vendor endpoint that reads an identity provider (`/sso/register`,
+   * `/sign-in/sso`, `/sso/callback/*`) inside the SSO discovery scope
+   * (`sso-discovery-egress.ts`). The scope judges every read until the global
+   * before-hook names the origins the request's provider configuration reads,
+   * and then only reads of those.
+   */
+  private async runSsoDiscoveryEgress(run: () => Promise<Response>): Promise<Response> {
+    const [{ runInSsoDiscoveryEgressScope }, guard] = await Promise.all([
+      import('./sso-discovery-egress.js'),
+      this.ssoDiscoveryEgressGuard(),
+    ]);
+    return (await runInSsoDiscoveryEgressScope(guard, run)).value;
   }
 
   /**
@@ -4515,6 +4567,13 @@ export class AuthManager {
    * (`ssoDiscoveryTrustedOrigins`) beside the configured ones, on both doors.
    * The discovery read it makes keeps the configured trust, and the request's
    * own origin check never sees them (`sso-discovery-companion-origins.ts`).
+   *
+   * That read connects only to addresses that are public at connect time: it
+   * runs in its own SSO discovery scope, which sends every read the
+   * configured trust does not list through the outbound-request guard
+   * (`sso-discovery-egress.ts`). On a registration, a refusal of the
+   * discovery host the body names is answered on the member that names it,
+   * as the before-hook's earlier judgement of that host answers.
    */
   private async assertSsoSignOutOfIdpSupported(ctx: any): Promise<void> {
     const path = ctx?.path;
@@ -4535,17 +4594,39 @@ export class AuthManager {
       (typeof ctx.body.issuer === 'string' && ctx.body.issuer)
       || (typeof stored?.issuer === 'string' && stored.issuer)
       || undefined;
-    const verdict = await judgeSignOutOfIdpCapability({
-      providerId,
-      issuer,
-      stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
-      body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
-      isTrustedOrigin: (url) => context.isTrustedOrigin(url),
-      isTrustedLogoutOrigin: trustingBodyNamedOrigins(
-        (url) => context.isTrustedOrigin(url),
-        await this.ssoDiscoveryTrustedOrigins(ctx.body),
-      ),
-    });
+    const isTrustedLogoutOrigin = trustingBodyNamedOrigins(
+      (url) => context.isTrustedOrigin(url),
+      await this.ssoDiscoveryTrustedOrigins(ctx.body),
+    );
+    const [{ runInSsoDiscoveryEgressScope, registerDiscoveryRefusalFor }, guard] = await Promise.all([
+      import('./sso-discovery-egress.js'),
+      this.ssoDiscoveryEgressGuard(),
+    ]);
+    const { value: verdict, refused } = await runInSsoDiscoveryEgressScope(
+      guard,
+      () =>
+        judgeSignOutOfIdpCapability({
+          providerId,
+          issuer,
+          stored: stored ? { samlConfig: stored.samlConfig, oidcConfig: stored.oidcConfig } : undefined,
+          body: { samlConfig: ctx.body.samlConfig, oidcConfig: ctx.body.oidcConfig },
+          isTrustedOrigin: (url) => context.isTrustedOrigin(url),
+          isTrustedLogoutOrigin,
+        }),
+      { targets: 'every', isConfiguredTrusted: (url) => context.isTrustedOrigin(url) === true },
+    );
+    const hostRefusal =
+      refused && !refused.unresolved && path === '/sso/register'
+        ? await registerDiscoveryRefusalFor(ctx.body, refused)
+        : undefined;
+    if (hostRefusal) {
+      const { APIError } = await import('better-auth/api');
+      throw new APIError(hostRefusal.status, {
+        code: hostRefusal.code,
+        message: hostRefusal.message,
+        field: hostRefusal.field,
+      });
+    }
     if (!verdict.ok) {
       const { APIError } = await import('better-auth/api');
       throw new APIError(verdict.refusal.status, {
@@ -6191,7 +6272,8 @@ export class AuthManager {
    * its own sub-endpoint check uses). A name that looks public is judged by
    * its name here; the host a registration's discovery reads is resolved, and
    * each address judged, before the register door hands this list on
-   * (`refuseSsoDiscoveryHostNotPublic`). Best-effort: anything unreadable
+   * (`refuseSsoDiscoveryHostNotPublic`), and every read is judged again when
+   * it connects (`sso-discovery-egress.ts`). Best-effort: anything unreadable
    * yields `[]`.
    *
    * ⛔ Never an accepted `Origin`: the request's own origin check reads the

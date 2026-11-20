@@ -108,12 +108,18 @@ export interface EgressGuardOptions {
     logger?: EgressLogger;
 }
 
-/** The init the guarded fetch takes — what both callers send. */
+/** The init the guarded fetch takes — what its callers send. */
 export interface EgressFetchInit {
     method?: string;
     headers?: Record<string, string>;
     body?: string;
     signal?: AbortSignal;
+    /**
+     * Fetch's redirect mode. `follow` (the default) judges every hop it
+     * follows; `manual` answers a redirect response as it is, following
+     * nothing, for a caller that refuses redirects itself.
+     */
+    redirect?: 'follow' | 'manual' | 'error';
 }
 
 /** The installed guard: the policy and the one fetch every guarded caller uses. */
