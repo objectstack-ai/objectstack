@@ -33,6 +33,7 @@ ObjectUI follows the Shadcn convention. Design tokens are defined as HSL channel
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
+    --destructive-text: 0 73.7% 41.8%;
     --destructive-foreground: 210 40% 98%;
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
@@ -53,7 +54,7 @@ ObjectUI follows the Shadcn convention. Design tokens are defined as HSL channel
 }
 ```
 
-`--destructive` is the fill of danger buttons (`bg-destructive`, with `--destructive-foreground` on it). Danger **text** (`text-destructive` and its variants) reads `--destructive-text` instead, falling back to `--destructive` where it is unset. Only `.dark` sets it: the dark fill is too deep to read as text on a dark surface, and one value cannot be both a fill under white text and a text colour on near-black. If your theme overrides `--destructive` in dark mode, set `--destructive-text` beside it to a red that reads at 4.5:1 on your dark surfaces.
+`--destructive` is the fill of danger buttons (`bg-destructive`, with `--destructive-foreground` on it). Danger **text** (`text-destructive` and its variants) reads `--destructive-text` instead, falling back to `--destructive` where it is unset. Both themes set it: the light theme to red-700 (`#b91c1c`), because the brand red reads under 4.5:1 as text on white, and `.dark` to a light red, because the dark fill is too deep to read as text on a dark surface. One value cannot be both a fill under white text and a text colour on every surface. If your stylesheet overrides `--destructive`, set `--destructive-text` beside it, in each mode, to a red that reads at 4.5:1 on that mode's surfaces. A theme applied through the theme engine needs nothing extra: its `error` colour sets both `--destructive` and `--destructive-text`.
 
 Components reference these tokens through Tailwind:
 

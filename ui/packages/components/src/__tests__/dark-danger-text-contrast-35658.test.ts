@@ -6,13 +6,15 @@
  * it measured about 1.6:1 on the near-black menu. One value cannot serve both
  * jobs, so text utilities read their own token: Tailwind resolves a `text-*`
  * colour from `--text-color-*` before `--color-*`, and every shipped `@theme`
- * maps `--text-color-destructive` to `--destructive-text`, which only `.dark`
- * defines. Light theme falls back to `--destructive`, unchanged.
+ * maps `--text-color-destructive` to `--destructive-text`. `.dark` defines a
+ * light red; `:root` defines red-700 (objectstack#35911 ruling), so light
+ * danger text clears 4.5:1 too while the `--destructive` fill stays the brand red.
  *
  * Pinned here, per stylesheet that ships a theme:
  *  - the compiled `text-destructive` reads the text token, and `bg-destructive`
  *    / `border-destructive` still read the fill;
- *  - `:root` leaves `--destructive-text` unset (light theme unchanged);
+ *  - light danger text clears 4.5:1 on every light surface, and the light
+ *    `--destructive` fill is unchanged;
  *  - dark danger text clears 4.5:1 on every dark surface a menu or page draws;
  *  - the red-button pair (`--destructive-foreground` on `--destructive`) keeps
  *    its dark values.
@@ -112,8 +114,12 @@ describe.each(SHEETS)('danger text colour in %s (objectstack#35658)', (sheet) =>
     expect(rule(out, 'border-destructive')).toContain('var(--color-destructive)');
   });
 
-  it('light theme leaves --destructive-text unset, so text falls back to --destructive', () => {
-    expect(root['--destructive-text']).toBeUndefined();
+  it('light danger text is red-700 and clears 4.5:1 on every light surface; the fill keeps the brand red', () => {
+    expect(root['--destructive-text']).toBe('0 73.7% 41.8%');
+    for (const surface of ['--background', '--card', '--popover', '--muted', '--accent', '--secondary']) {
+      expect(root[surface], `:root defines ${surface}`).toBeTruthy();
+      expect(contrast(root['--destructive-text'], root[surface]), `${surface} ${root[surface]}`).toBeGreaterThanOrEqual(4.5);
+    }
     expect(root['--destructive']).toBe('0 84.2% 60.2%');
   });
 
@@ -137,5 +143,6 @@ describe('new-app template (objectstack#35658)', () => {
     const tpl = read('packages/cli/src/utils/app-generator.ts');
     expect(tpl).toContain('--text-color-destructive: hsl(var(--destructive-text, var(--destructive)));');
     expect(tpl).toContain('--destructive-text: 0 91% 71%;');
+    expect(tpl).toContain('--destructive-text: 0 73.7% 41.8%;');
   });
 });

@@ -95,7 +95,10 @@ const COLOR_TO_CSS_MAP: Record<keyof ColorPalette, string | string[]> = {
   accent: '--accent',
   success: '--success',
   warning: '--warning',
-  error: '--destructive',
+  // The fill and the danger TEXT token both follow a tenant's error colour, so
+  // a custom red drives red text too (the stylesheets' own --destructive-text
+  // values are for the shipped red only).
+  error: ['--destructive', '--destructive-text'],
   info: '--info',
   background: '--background',
   surface: '--card',

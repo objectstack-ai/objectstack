@@ -152,6 +152,16 @@ describe('generateColorVars', () => {
     expect(vars['--destructive']).toBeTruthy();
   });
 
+  it('a custom error colour drives the danger text token as well as the fill (objectstack#35911)', () => {
+    const vars = generateColorVars({ primary: '#000', error: '#7C3AED' });
+    expect(vars['--destructive']).toBe(hexToHSL('#7C3AED'));
+    expect(vars['--destructive-text']).toBe(vars['--destructive']);
+  });
+
+  it('no error colour leaves the stylesheet danger text token alone (objectstack#35911)', () => {
+    expect(generateColorVars({ primary: '#000' })).not.toHaveProperty('--destructive-text');
+  });
+
   it('should map surface → --card', () => {
     const vars = generateColorVars({ primary: '#000', surface: '#F8FAFC' });
     expect(vars['--card']).toBeTruthy();
