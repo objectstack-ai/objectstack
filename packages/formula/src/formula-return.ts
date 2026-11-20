@@ -48,11 +48,17 @@
  *    name, a field whose type or currency cannot be read, two different
  *    currencies meeting — is unproven.
  *
- * Unproven is never guessed into money: the answer then is exactly what
- * {@link inferExpressionType} gives today, so a numeric formula stays `number`
- * and the stamp never claims a currency it cannot name. A `summary` field is
- * not read as a quantity: a roll-up of a currency field is itself money, and
- * its source type is not on this object.
+ * Unproven is never guessed into money, and it is never answered as a plain
+ * `number` either when the expression reads a money-typed operand — a
+ * `currency` field, a formula declared `currency`, or a `summary` other than a
+ * `count` — on its numeric path: the answer then is `{}`, unproven, so a
+ * `number` answer always means "proved not money" and a stamp may withdraw a
+ * declared `currency` on it (#35631). An expression that reads no such operand
+ * gets exactly what {@link inferExpressionType} gives, so a numeric formula over
+ * quantities stays `number`, and a ratio of two amounts in one currency is a
+ * proven plain number. A `summary` field is not read as a quantity: a roll-up
+ * of a currency field is itself money, and its source type is not on this
+ * object.
  */
 
 import { CurrencyConfigSchema, NUMERIC_VALUE_TYPES, type Field } from '@objectstack/spec/data';
@@ -69,6 +75,8 @@ export interface FormulaSourceField {
   readonly returnType?: string;
   /** A currency field's (or a currency formula's) `currencyConfig`, as declared. Absent ⇒ dynamic. */
   readonly currencyConfig?: unknown;
+  /** `summary` only — its roll-up, as declared; a `count` is a plain number, any other function may be money. */
+  readonly summaryOperations?: unknown;
 }
 
 /**
@@ -259,6 +267,34 @@ function dimOf(node: unknown, fields: Readonly<Record<string, FormulaSourceField
   }
 }
 
+/** Is `name` a money-typed field of the host: an amount, a `currency` formula, or a roll-up that may sum one? */
+function isMoneyTyped(name: string, fields: Readonly<Record<string, FormulaSourceField>>): boolean {
+  const field = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+  if (!field) return false;
+  if (field.type === 'currency') return true;
+  if (field.type === 'formula') return field.returnType === 'currency';
+  if (field.type === 'summary') {
+    const ops = field.summaryOperations;
+    return !(ops && typeof ops === 'object' && (ops as { function?: unknown }).function === 'count');
+  }
+  return false;
+}
+
+/** Does the expression read a money-typed field of the host anywhere (#35631)? */
+function readsMoneyOperand(node: unknown, fields: Readonly<Record<string, FormulaSourceField>>): boolean {
+  if (Array.isArray(node)) return node.some((n) => readsMoneyOperand(n, fields));
+  if (!isNode(node)) return false;
+  if (node.op === 'id') return typeof node.args === 'string' && isMoneyTyped(node.args, fields);
+  if (node.op === '.' && Array.isArray(node.args) && node.args.length === 2) {
+    const [base, member] = node.args;
+    if (isNode(base) && base.op === 'id' && base.args === 'record' && typeof member === 'string') {
+      return isMoneyTyped(member, fields);
+    }
+    return readsMoneyOperand(base, fields);
+  }
+  return readsMoneyOperand(node.args, fields);
+}
+
 function sourceOf(input: ExprInput): string | null {
   const source = typeof input === 'string'
     ? input
@@ -279,10 +315,13 @@ function sourceOf(input: ExprInput): string | null {
  *   `currencyConfig: { currencyMode: 'record', currencyField }` when they are
  *   record-mode amounts naming one code field (ADR-0144 D2). Sources in two
  *   different currencies are not provably one amount, and fall through.
+ * - A numeric expression that reads a money-typed operand (a `currency`
+ *   field, a `currency` formula, a non-`count` `summary`) and is neither proven
+ *   money nor proven a plain number ⇒ `{}`, unproven — never `number`, which
+ *   a stamp reads as "not money".
  * - Otherwise ⇒ the {@link inferExpressionType} answer as `returnType`
- *   (`number` / `text` / `boolean` / `date`), or `{}` when that is `unknown` —
- *   unchanged from before this function existed, so a numeric formula stays
- *   `number`.
+ *   (`number` / `text` / `boolean` / `date`), or `{}` when that is `unknown`,
+ *   so a numeric formula over quantities stays `number`.
  *
  * Pure and conservative: it never throws, and an expression that does not
  * type-check is never money.
@@ -300,7 +339,8 @@ export function inferFormulaReturn(
     // ternary outright — so the guard idiom would never be judged at all.
     const celType = inferCelType(rewriteNullableTernary(source), names);
     if (celType !== null && MONEY_CEL_TYPES.has(celType)) {
-      const dim = dimOf(parseCelToAst(source), fields);
+      const ast = parseCelToAst(source);
+      const dim = dimOf(ast, fields);
       if (dim.kind === 'money') {
         if (dim.currency.mode === 'fixed') {
           return { returnType: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: dim.currency.code } };
@@ -310,6 +350,10 @@ export function inferFormulaReturn(
         }
         return { returnType: 'currency' };
       }
+      // #35631 — a money operand on the numeric path that the proof could not
+      // follow (a function it does not name, two currencies, an amount times an
+      // amount, a divisor that is an amount, a roll-up): unproven, never `number`.
+      if (dim.kind === 'unproven' && readsMoneyOperand(ast, fields)) return {};
     }
   }
   const plain = inferExpressionType(input, { fields: names });

@@ -94,6 +94,7 @@ function Harness({
     est_hours: { type: 'number' },
     budget: { type: 'number' },
     amount: { type: 'currency', currencyConfig: USD },
+    total: { type: 'summary', summaryOperations: { object: 'line', field: 'amount', function: 'sum' } },
     f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType, ...extra },
   });
   React.useEffect(() => {
@@ -253,6 +254,22 @@ describe('ObjectFieldInspector — the money verdict proves or withdraws a decla
     await settle();
     expect(latest().returnType).toBe('currency');
     expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('a roll-up the proof cannot read as money is unproven, and keeps a declared `currency`', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.total * 0.9' } });
+    await waitFor(() => expect(latest().expression).toBe('record.total * 0.9'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('a new formula over an amount the proof cannot follow still stamps the proven CEL type', async () => {
+    const { box, latest } = renderFormula(undefined, { money: true, extra: { returnType: undefined } });
+    fireEvent.change(box, { target: { value: '100 / record.amount' } });
+    await waitFor(() => expect(latest().returnType).toBe('number'), { timeout: 3000 });
+    expect('currencyConfig' in latest()).toBe(false);
   });
 
   it('CONTROL — a declared `percent` is still kept under a `number` verdict', async () => {
