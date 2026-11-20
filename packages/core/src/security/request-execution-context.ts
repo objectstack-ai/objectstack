@@ -42,7 +42,7 @@
  * | parameter | values, and the door that takes each |
  * |:--|:--|
  * | `anonymous` | `'guest'`: the runtime / MCP dispatcher. `'fail-closed'`: REST, settings, storage, the `/auth/me` endpoints |
- * | `authGate` | `'withhold'`: the dispatcher (its `enforceAuthGate` re-reads the session; a key's answer leaves through `onAdmission`) and the `/auth/me` endpoints (allow-listed for a gated user). `'resolved'`: settings and the storage download door. `'reread-when-active'`: REST. The storage family's ADR-0069 gate reader, which runs before every storage route, stays hand-written beside this function (#24366) |
+ * | `authGate` | `'withhold'`: the dispatcher (its `enforceAuthGate` judges the posture that leaves through `onAdmission`, a key's or the session read's, and re-reads the session only for a principal no own-session read admitted) and the `/auth/me` endpoints (allow-listed for a gated user). `'resolved'`: settings and the storage download door. `'reread-when-active'`: REST, answered by the identity step's read through the request's session-read carrier. The storage family's ADR-0069 gate reader, which runs before every storage route, stays hand-written beside this function (#24366) |
  * | `credentials` | `'session-only'`: the `/auth/me` endpoints, which never opened an API-key door. `'api-key-and-session'`: every other door |
  * | `sessionApi` | `'required'`: REST and the `/auth/me` endpoints, which authenticate nobody without a session API. `'optional'`: the dispatcher, settings and storage, which still admit an API key |
  * | `session` | `'request'`: every door. `{ established }` / `'none'`: the dispatcher's `/mcp` face, for a verified / an unverifiable OAuth access token |
@@ -66,7 +66,6 @@
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { AuthSessionApi, IAuthService } from '@objectstack/spec/contracts';
-import { inProcessSessionReadInput } from '@objectstack/types';
 
 import { classifyAdmissionTenancyPosture, type TenancyServiceResolver } from './admission-tenancy-posture.js';
 import { apiKeyLifecyclePolicySourceOf } from './api-key.js';
@@ -80,6 +79,7 @@ import {
 import { normalizeAuthGate, userAuthGateSourceOf, type AuthGate } from './auth-gate.js';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 import { credentialUseClientFor, type CredentialUseClientInput } from './credential-use-client.js';
+import { joinRequestSessionRead, readRequestSession } from './request-session-read.js';
 import { resolveAuthzContext, resolveLocalizationContext, type ResolvedAuthzContext } from './resolve-authz-context.js';
 
 /** The slice of the kernel's `auth` service this composition reads. */
@@ -128,10 +128,13 @@ export interface RequestExecutionContextInput {
    * - `'resolved'`: the posture `resolveAuthzContext` decided for whichever
    *   credential admitted the caller, from the read that admitted it.
    * - `'reread-when-active'`: an API key's posture as `'resolved'`; for the
-   *   request's own session, read again only while the auth service says a
+   *   request's own session, asked again only while the auth service says a
    *   gate is active (`isAuthGateActive()`, a probe that throws reads as
-   *   inactive). A re-read that fails is `AuthzStoreUnavailableError('auth_gate')`:
-   *   a gate the deployment declared active is never dropped silently.
+   *   inactive), through the request's session-read carrier
+   *   (`request-session-read.ts`): the identity step's read answers unless a
+   *   write has landed since, and only then is the session read again. A
+   *   re-read that fails is `AuthzStoreUnavailableError('auth_gate')`: a gate
+   *   the deployment declared active is never dropped silently.
    */
   authGate: 'withhold' | 'resolved' | 'reread-when-active';
   /** Which credential doors this door opens. `'session-only'` reads no API key. */
@@ -223,7 +226,9 @@ async function decideAuthGate(
   let gatedSession: Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
   try {
     const api = await sessionApi();
-    gatedSession = await api!.getSession!(inProcessSessionReadInput(input.headers));
+    // Through the request's session-read carrier: the identity step's read of
+    // this same request answers, unless a write has landed since it was read.
+    gatedSession = await readRequestSession(api!, input.headers, input.ql);
   } catch (err) {
     throw new AuthzStoreUnavailableError('auth_gate', err);
   }
@@ -246,9 +251,16 @@ export function resolveRequestExecutionContext(
 export function resolveRequestExecutionContext(
   input: RequestExecutionContextInput,
 ): Promise<ExecutionContext | undefined>;
-export async function resolveRequestExecutionContext(
+export function resolveRequestExecutionContext(
   input: RequestExecutionContextInput,
 ): Promise<ExecutionContext | undefined> {
+  // The session arm and the gate read through the request's session-read
+  // carrier: the scope open where this runs (the one the transport ran this
+  // route in), or one opened here for this call alone (`request-session-read.ts`).
+  return joinRequestSessionRead(() => resolveInScope(input));
+}
+
+async function resolveInScope(input: RequestExecutionContextInput): Promise<ExecutionContext | undefined> {
   const { headers, ql, authService } = input;
 
   // A door that requires a session API asks for it before any read, and
@@ -274,7 +286,12 @@ export async function resolveRequestExecutionContext(
     if (typeof session === 'object') return session.established;
     try {
       const api = await sessionApi();
-      return await api?.getSession?.(inProcessSessionReadInput(headers));
+      if (typeof api?.getSession !== 'function') return undefined;
+      // Through the request's session-read carrier: a read the inbound rate
+      // limiter made of this same request answers, where the transport handed
+      // this route the limiter's scope, unless a write has landed since it was
+      // read.
+      return await readRequestSession(api, headers, ql);
     } catch {
       return undefined;
     }

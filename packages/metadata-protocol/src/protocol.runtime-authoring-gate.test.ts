@@ -5205,11 +5205,14 @@ describe('the object save door judges related-list names against the live regist
         expect(quoteRows(rows).map((r) => r.state)).toEqual(['active']);
     });
 
-    // [#27478] A field group only positions a BODY TABLE. The control above
-    // differs from this refusal by the FK's `inlineEdit` alone: without it a
-    // plain master_detail child is a side card, and the group would draw nothing.
+    // [#27478] A field group only positions a BODY TABLE. Since #35597 a plain
+    // master_detail child is a body table by default, so the side card here is
+    // the same FK with `relatedList: true` (it keeps the list a side card), and
+    // the group would draw nothing.
     it('REFUSES a field group naming a side card, with the 422 envelope and the prescription', async () => {
-        const { protocol, rows } = hostWith([line({ quote: { type: 'master_detail', label: 'Quote', reference: 'rl_quote' } })]);
+        const { protocol, rows } = hostWith([
+            line({ quote: { type: 'master_detail', label: 'Quote', reference: 'rl_quote', relatedList: true } }),
+        ]);
 
         const err = await save(protocol, parent({
             fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: 'rl_quote_line.quote' }],

@@ -292,21 +292,18 @@ async function drawView(view: Record<string, unknown>): Promise<string[] | undef
 }
 
 /**
- * Untick `field` in `ListView`'s hide-fields list, as a user does: since
- * objectui#12423 a section of the toolbar's Display panel, collapsed while
- * nothing is hidden.
+ * Hide `field` in `ListView`'s field list, as a user does: the Fields level
+ * of the toolbar's Display menu, one row per shown field with its eye.
  */
 async function hideThroughToggle(field: string): Promise<void> {
   if (!screen.queryByTestId('view-settings-content')) {
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
   }
   const panel = await screen.findByTestId('view-settings-content');
-  const name = new RegExp(`^${field}$`, 'i');
-  if (!within(panel).queryByText(name)) {
-    fireEvent.click(within(panel).getByRole('button', { name: 'Hide Fields' }));
+  if (!within(panel).queryByTestId('options-page-fields')) {
+    fireEvent.click(within(panel).getByTestId('options-row-fields'));
   }
-  const label = await within(panel).findByText(name);
-  fireEvent.click(label.closest('label')!.querySelector('input')!);
+  fireEvent.click(await within(panel).findByTestId(`options-fields-hide-${field}`));
 }
 
 /** The data source's view writes, each a spy: what a write to the shared view would call. */
@@ -528,7 +525,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     expect(drawn).not.toContain('owner');
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const panel = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Hide Fields' }));
+    fireEvent.click(within(panel).getByTestId('options-row-fields'));
     await within(panel).findByText(/^region$/i);
     expect(within(panel).queryByText(/^owner$/i)).toBeNull();
 
@@ -591,7 +588,7 @@ describe('an unprojected view applies neither hiddenFields nor fieldOrder on the
     await mountRoute(listViews, PROBE_ID, makeDataSource());
     fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
     const panel = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(panel).getByRole('button', { name: 'Hide Fields' }));
+    fireEvent.click(within(panel).getByTestId('options-row-fields'));
     await within(panel).findByText(/^region$/i);
     expect(within(panel).queryByText(/^owner$/i)).toBeNull();
 

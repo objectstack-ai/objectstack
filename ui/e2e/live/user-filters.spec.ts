@@ -43,27 +43,25 @@ test.describe('ADR-0053 interface mode — Task Triage tabs element', () => {
 });
 
 test.describe('ADR-0047 data mode — viz dropdown', () => {
-  test('visualization switcher is a single dropdown offering the whitelist', async ({ page }) => {
+  test('visualization switcher is a single list offering the whitelist', async ({ page }) => {
     await page.goto('/apps/showcase_app/showcase_task');
 
-    // The switcher lives in the toolbar's Display popover.
+    // The switcher is the Layout level of the toolbar's Display menu.
     await page.getByTestId('toolbar-display-trigger').click();
-    const trigger = page.getByTestId('view-switcher-dropdown');
-    await expect(trigger).toBeVisible();
-    await trigger.click();
-    // The open switcher's own list, found through the trigger's aria-controls.
-    const menu = page.locator(`[id="${await trigger.getAttribute('aria-controls')}"]`);
+    await page.getByTestId('options-row-layout').click();
+    const menu = page.getByTestId('view-switcher-list');
+    await expect(menu).toBeVisible();
 
     // Whitelist: the default task list's `appearance.allowedVisualizations`
     // (grid, kanban, gallery, calendar, timeline, gantt) — and nothing else.
     // Map and chart are declared on this object as their own named views and
     // stay out of the switcher.
-    await expect(menu.getByRole('button')).toHaveText(['Grid', 'Kanban', 'Gallery', 'Calendar', 'Timeline', 'Gantt']);
+    await expect(menu.getByRole('radio')).toHaveText(['Grid', 'Kanban', 'Gallery', 'Calendar', 'Timeline', 'Gantt']);
 
-    // Switching actually swaps the renderer; the trigger names the new one.
-    await menu.getByRole('button', { name: 'Kanban' }).click();
+    // Switching actually swaps the renderer; the Layout row names the new one.
+    await menu.getByRole('radio', { name: 'Kanban' }).click();
     await page.getByTestId('toolbar-display-trigger').click();
-    await expect(trigger).toContainText('Kanban');
+    await expect(page.getByTestId('options-row-layout-value')).toContainText('Kanban');
   });
 });
 

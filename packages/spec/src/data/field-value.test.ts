@@ -547,3 +547,28 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     });
   });
 });
+
+/**
+ * The value shapes answer an unknown key through `strictObject`, so they read
+ * the package's ONE rename rule (`shared/rename-guess.ts`) — pinned here at
+ * this door so the comment on `LocationValueSchema` that names the rule cannot
+ * drift from what the door does.
+ */
+describe('LocationValueSchema — a short unknown key gets the shared rename rule', () => {
+  const messageFor = (extra: Record<string, unknown>): string => {
+    const result = LocationValueSchema.safeParse({ lat: 1, lng: 2, ...extra });
+    if (result.success) throw new Error('expected LocationValueSchema to refuse the value');
+    return result.error.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+  };
+
+  it('a short key two unrelated edits from a member is offered nothing', () => {
+    // `lon` is two edits from both `lat` and `lng`, inside the old budget of 2.
+    const m = messageFor({ lon: 3 });
+    expect(m).toContain('Unrecognized key(s) on this location value: `lon`.');
+    expect(m).not.toContain('Did you mean');
+  });
+
+  it('a genuine one-edit slip on a short key is still answered', () => {
+    expect(messageFor({ lgn: 3 })).toContain('Did you mean `lgn` → `lng`?');
+  });
+});

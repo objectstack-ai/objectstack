@@ -192,6 +192,50 @@ function observeEngineWrites(ql: object): { observer: EngineWriteObserver; attac
   return { observer, attachedNow: true };
 }
 
+/**
+ * One engine's write state, read before a request-scoped answer is read from
+ * it: the engine's write epoch and its observer's two counters.
+ */
+export interface EngineWriteMark {
+  readonly epoch: number;
+  readonly started: number;
+  readonly completed: number;
+}
+
+/**
+ * The write state of `ql` right now, for another request-scoped memo
+ * (`request-session-read.ts`) that serves an answer only while no write has
+ * started, landed or stayed in flight on the engine since the answer was read.
+ * `epochNow` is the engine's write epoch as `readWriteEpoch` reads it.
+ *
+ * `undefined` — the memo serves nothing — for a `ql` that is not an object or
+ * carries no write epoch, and for an engine whose observer is not registered
+ * yet or whose registration threw. ⛔ It never registers the observer: a write
+ * already in flight at registration never passes it, so an engine first seen
+ * here could not be watched; the first `resolveAuthzContext` that names the
+ * engine registers it, as before.
+ */
+export function engineWriteMark(ql: unknown, epochNow: number | undefined): EngineWriteMark | undefined {
+  if (!ql || typeof ql !== 'object' || epochNow === undefined) return undefined;
+  const observer = engineWriteObservers.get(ql);
+  if (!observer) return undefined;
+  return { epoch: epochNow, started: observer.started, completed: observer.completed };
+}
+
+/**
+ * Has no write started on `ql`, landed on it or stayed in flight inside its
+ * observer since `mark` was read? The test the grants memo applies to its own
+ * entries: epoch and both counters unchanged, and no write inside the observer.
+ */
+export function engineWritesQuietSince(ql: object, mark: EngineWriteMark, epochNow: number | undefined): boolean {
+  const observer = engineWriteObservers.get(ql);
+  return !!observer
+    && epochNow === mark.epoch
+    && observer.started === mark.started
+    && observer.completed === mark.completed
+    && observer.started === observer.completed;
+}
+
 // ── The request scope ────────────────────────────────────────────────────────
 
 interface RequestGrantsMemoEntry {

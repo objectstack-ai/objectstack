@@ -1,6 +1,7 @@
 /**
  * Whether `ObjectGrid` folds its inline primary row actions into the row's
- * "⋮" menu (objectstack#33230).
+ * "⋮" menu (objectstack#33230), and whether the Actions column leaves the
+ * right edge for the frozen zone (objectstack#35446).
  *
  * The Actions column is pinned to the scroll box's right edge
  * (`./objectGridActionsColumn`), so while the table overflows the box the
@@ -15,9 +16,19 @@
  * moves to the top of its row's "⋮" menu (`planRowActionMenu`'s inline budget
  * of 0), so no action is dropped, and the pinned column shrinks to the
  * trigger. The buttons come back once the box is as wide as the table was with
- * them. Where the table still overflows menu-only, the narrower pinned column
- * still sits over the data at the box's edge, as on any list that scrolls
- * sideways.
+ * them.
+ *
+ * Where the table still overflows menu-only, a column pinned to the right edge
+ * would sit over the data column that reaches that edge at rest (the amount
+ * column of a list in a main area narrowed by the AI panel, a small window or
+ * the record drawer). So while the table overflows, the Actions column joins
+ * the frozen zone instead (`actionsFrozen`): `ObjectGrid` draws it right after
+ * the frozen columns, which never cover a column at rest, and the data columns
+ * all scroll. It goes back to the right edge once the box is as wide as the
+ * table was when it moved. The move swaps the frozen zone's edge rule from the
+ * name column to the Actions column, a few pixels at most
+ * ({@link MOVE_WIDTH_SLACK_PX}), so the way back reads the width recorded
+ * before the move and the two placements cannot flip-flop.
  *
  * Every reading is taken once the table's size has held for two frames: the
  * table re-sizes its columns from what their cells drew over several passes,
@@ -28,17 +39,28 @@ import * as React from 'react';
 
 /** Sub-pixel rounding is not an overflow. */
 const OVERFLOW_SLACK_PX = 1;
+/**
+ * How much the move to the frozen zone may narrow the table (the edge rules it
+ * swaps). A frozen table that fits its box with more room than this to spare
+ * goes back to the right edge even before the box reaches the width recorded
+ * at the move, so a table that shrank while frozen is not held there.
+ */
+const MOVE_WIDTH_SLACK_PX = 4;
 /** Frames the table's size must hold before it is read. */
 const SETTLED_FRAMES = 2;
 
 /**
  * Reads the grid's table scroll box under the element `hostRef` is attached
- * to and answers whether the inline row actions fold. Starts unfolded, and
- * starts again unfolded whenever `rows` or `columnsKey` change.
+ * to and answers whether the inline row actions fold and whether the Actions
+ * column is drawn in the frozen zone. Starts unfolded, and starts again
+ * unfolded whenever `rows` or `columnsKey` change; the column's placement is
+ * kept across those changes and read again from the widths they draw, so a
+ * refresh does not move it to the right edge and back.
  */
 export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
   hostRef: (element: HTMLElement | null) => void;
   folded: boolean;
+  actionsFrozen: boolean;
 } {
   const [host, setHost] = React.useState<HTMLElement | null>(null);
   const [folded, setFolded] = React.useState(false);
@@ -46,6 +68,10 @@ export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
   const foldedRef = React.useRef(false);
   // While folded: the table's width with the buttons, read when it folded.
   const unfoldedWidthRef = React.useRef(0);
+  const [actionsFrozen, setActionsFrozen] = React.useState(false);
+  const frozenRef = React.useRef(false);
+  // While frozen: the table's width with the column at the right edge.
+  const pinnedWidthRef = React.useRef(0);
 
   React.useLayoutEffect(() => {
     unfoldedWidthRef.current = 0;
@@ -67,18 +93,38 @@ export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
       foldedRef.current = next;
       setFolded(next);
     };
+    const freeze = (next: boolean, tableWidth: number) => {
+      if (next === frozenRef.current) return;
+      frozenRef.current = next;
+      if (next) pinnedWidthRef.current = tableWidth;
+      setActionsFrozen(next);
+    };
     const read = (box: HTMLElement) => {
       const boxWidth = box.clientWidth;
       if (boxWidth <= 0) return;
+      const tableWidth = box.scrollWidth;
+      const overflow = tableWidth - boxWidth;
       if (foldedRef.current) {
-        if (boxWidth >= unfoldedWidthRef.current) decide(false);
+        if (boxWidth >= unfoldedWidthRef.current) {
+          // The buttons fit again, so the table fits at the right edge too.
+          freeze(false, tableWidth);
+          decide(false);
+          return;
+        }
+      } else if (overflow > OVERFLOW_SLACK_PX && box.querySelector('[data-testid^="row-action-inline-"]')) {
+        // Fold first: the column's placement is read from the menu-only face,
+        // once it has drawn, whether or not the fold resizes the box.
+        unfoldedWidthRef.current = tableWidth;
+        decide(true);
+        schedule();
         return;
       }
-      const tableWidth = box.scrollWidth;
-      if (tableWidth - boxWidth <= OVERFLOW_SLACK_PX) return;
-      if (!box.querySelector('[data-testid^="row-action-inline-"]')) return;
-      unfoldedWidthRef.current = tableWidth;
-      decide(true);
+      if (!box.querySelector('th[data-column-key="_actions"]')) return;
+      if (!frozenRef.current) {
+        if (overflow > OVERFLOW_SLACK_PX) freeze(true, tableWidth);
+      } else if (boxWidth >= pinnedWidthRef.current || overflow < -MOVE_WIDTH_SLACK_PX) {
+        freeze(false, tableWidth);
+      }
     };
     const tick = () => {
       frame = 0;
@@ -128,5 +174,5 @@ export function useInlineRowActionFold(rows: unknown, columnsKey: string): {
     };
   }, [host]);
 
-  return { hostRef: setHost, folded };
+  return { hostRef: setHost, folded, actionsFrozen };
 }

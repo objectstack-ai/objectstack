@@ -1,6 +1,6 @@
 # ADR-0035: Config-driven master-detail (declare on the relationship, forms derive)
 
-**Status**: Accepted · **Amended** (2026-10-28, [#27069](https://github.com/objectstack-ai/objectstack/issues/27069), maintainer rulings on that card: 「A」, an ordered list on the parent, and 「明细行的子表放在右侧合适嘛？」 / 「他如果做到放在基本信息下面，而条款和备注在后面」, line items in the record body) — `relatedList: 'primary'` is a **placement** (the record body, as a full-width table), no longer a prominence hint that orders lists; the order is the parent object's `relatedLists`; and an omitted `relatedList` on a `master_detail` FK that sets `inlineEdit` is now `'primary'` by default. See the note under the read-side table.
+**Status**: Accepted · **Amended** (2026-10-28, [#27069](https://github.com/objectstack-ai/objectstack/issues/27069), maintainer rulings on that card: 「A」, an ordered list on the parent, and 「明细行的子表放在右侧合适嘛？」 / 「他如果做到放在基本信息下面，而条款和备注在后面」, line items in the record body) — `relatedList: 'primary'` is a **placement** (the record body, as a full-width table), no longer a prominence hint that orders lists; the order is the parent object's `relatedLists`; and an omitted `relatedList` on a `master_detail` FK that sets `inlineEdit` is now `'primary'` by default. See the note under the read-side table. · **Amended** (2026-11-19, [#35597](https://github.com/objectstack-ai/objectstack/issues/35597), under the record-page epic [#35590](https://github.com/objectstack-ai/objectstack/issues/35590), maintainer's words on that card: 「就是master-detail表类型的子表」 / 「主从的子表是否应该默认出现在概览的左侧区域？关键字段下面。」) — an omitted `relatedList` on ANY `master_detail` FK is `'primary'` (a body table) by default, `inlineEdit` or not; its totals are server-owned. See the second note under the read-side table.
 **Author**: surfaced while making master-detail (parent + child line-item) entry a first-class, low-config capability
 **Affects**: `@objectstack/spec` (field schema), `@object-ui/plugin-form`, `@object-ui/plugin-view`, `@object-ui/app-shell`; builds on ADR-0034 (atomic multi-write) and the cross-object batch endpoint (#1604)
 
@@ -113,6 +113,31 @@ a self-referential FK surfaces a "children" list.
 > in the derived order described above (owned first). `false` still
 > suppresses a list whatever `relatedLists` says. The read-side table's
 > "`'primary'` promotes it to its own tab" stays true on the tabbed page.
+
+> **Amended (2026-11-19, #35597; epic #35590).** Clause (1) of the note above,
+> and ruling B on #27055 as #27478 implemented it (the one body-table predicate,
+> `isBodyTableRelationship` in `@objectstack/spec/data`), required `inlineEdit`
+> on the `master_detail` FK. They no longer do: an omitted `relatedList` on a
+> `master_detail` FK is `'primary'` by default whether or not the FK sets
+> `inlineEdit`, because a master-detail child is the parent's own rows (the
+> maintainer on #35597: 「就是master-detail表类型的子表」). `relatedList: true`
+> keeps it a side list (the related column and the related tab), `false` hides
+> it, `'primary'` is unchanged, and an omitted `relatedList` on a `lookup` FK
+> is still a side list. The predicate stays the one judgement every reader
+> follows (the record page, Studio, and the field-group refusal at
+> `defineStack` and the publish door). On the record page such a table sits in
+> the overview's details column under the header strip and above the field
+> sections, in the parent's `relatedLists` order (a field group whose
+> `relatedList` names it still places it among the field sections instead,
+> and with no field section at all the details node leads and the tables
+> follow it), is drawn even when empty, and its totals line is the server's
+> (a parent `summary` roll-up when one sums that column over the same rows,
+> otherwise an aggregate over all the child rows by the list's own
+> condition), never a sum of the rows on show. "Only `inlineEdit` children
+> are inlined" (Decision → Derivation rules) is the WRITE side (the parent's
+> create/edit form) and is unchanged: a master-detail child that does not set
+> `inlineEdit` is a body table on the record page and stays out of the
+> parent's form.
 
 The derivation is a pure function — `deriveRelatedLists(objectDef, objects)` in
 `@object-ui/app-shell` (`utils/deriveRelatedLists.ts`) — the read-side analogue

@@ -21,6 +21,7 @@
 
 import { isMultiValueField, referenceCarrierOf } from '@objectstack/spec/data';
 import { declaredCollection } from './artifact-collections.js';
+import { hasManagedStandIn, isManagedDatasource } from './managed-datasource-stand-in.js';
 
 const COMPUTED = new Set(['formula', 'summary', 'autonumber', 'rollup', 'vector']);
 const RELATIONAL = new Set(['lookup', 'master_detail', 'master-detail', 'masterdetail', 'tree']);
@@ -197,6 +198,8 @@ interface Draft {
   relationalRefs: RelationalRef[];
   requiredTargets: string[]; // referenced objects that MUST exist + be ordered-before
   blocked?: string;
+  /** Blocked on purpose: verify withholds writes from it (or from a required target of it). */
+  withheld?: boolean;
 }
 
 /**
@@ -207,6 +210,9 @@ interface Draft {
  * in. Only genuinely unsatisfiable shapes are `blocked`:
  *  - an object on an external datasource (never written: verify writes only to
  *    its ephemeral store), or
+ *  - an object on a declared managed datasource whose engine verify has no
+ *    ephemeral stand-in for (verify's own writes withheld; the app's seed,
+ *    hooks and flows still reach the real store), or
  *  - a required relation whose target is missing from the app config (external), or
  *  - a required-reference cycle (incl. a required self-reference), or
  *  - a required relation whose target is itself blocked (cascade), or
@@ -244,16 +250,39 @@ export function deriveCrudCases(config: any): CrudCase[] {
     // Every write family (CRUD, RLS, reference shapes, delete behaviours,
     // unique scopes, parent write reach, dashboard windows) builds its records
     // from this case, so one blocked case keeps all of them off the object.
-    // The datasource counts as external the way the engine's write gate counts
-    // it: a declared `schemaMode` other than `managed`, or an object carrying
-    // an `external` block. The reason names the gate's state, so the report
-    // says when a write was possible and was withheld.
+    // Two triggers count the object as external. A datasource that is not
+    // managed is the half the engine's write gate reads too — read here by
+    // `isManagedDatasource`, the same reader verify's driver factory decides
+    // stand-in-or-real on, so a datasource the boot connects for real is never
+    // one whose objects verify writes (`./managed-datasource-stand-in.ts`).
+    // That reader also takes a `schemaMode` spelled inside `external` or
+    // `config`, which the engine's gate does not read. An object carrying an
+    // `external` block is verify's own trigger: the engine does not gate on
+    // it, verify withholds the object anyway. The reason names the gate's
+    // state, so the report says when a write was possible and was withheld.
     const ds = obj.datasource ? dsByName.get(obj.datasource) : undefined;
-    if (obj.external || (typeof ds?.schemaMode === 'string' && ds.schemaMode !== 'managed')) {
+    if (obj.external || (ds && !isManagedDatasource(ds))) {
       const writable = ds?.external?.allowWrites === true && obj.external?.writable === true;
       d.blocked =
         `external datasource "${obj.datasource ?? 'default'}" (${writable ? 'writes allowed' : 'read-only'}): ` +
         'not exercised — verify writes only to its ephemeral store';
+      d.withheld = true;
+      drafts.set(obj.name, d);
+      continue;
+    }
+
+    // An object on a declared MANAGED datasource runs on the ephemeral store
+    // verify builds in that datasource's place (`./managed-datasource-stand-in.ts`),
+    // unless its engine has no faithful stand-in: then the boot keeps the real
+    // driver, and verify withholds its own derived writes from the object. The
+    // app's seed, hooks and flows still write to that real store.
+    // `default` is verify's own store whatever the app declares under that name.
+    if (ds && obj.datasource !== 'default' && typeof ds.driver === 'string' && !hasManagedStandIn(ds.driver)) {
+      d.blocked =
+        `managed datasource "${obj.datasource}" (driver "${ds.driver}"): not exercised — verify has no ` +
+        "ephemeral stand-in for this engine, so it withholds its own writes; the app's seed, hooks and " +
+        'flows still write to the real database';
+      d.withheld = true;
       drafts.set(obj.name, d);
       continue;
     }
@@ -325,6 +354,14 @@ export function deriveCrudCases(config: any): CrudCase[] {
       if (d.blocked) continue;
       for (const t of d.requiredTargets) {
         const td = drafts.get(t);
+        if (td?.withheld) {
+          // Say the target was left out on purpose, and why: "not
+          // synthesizable" would send the reader after a field shape.
+          d.blocked = `required relational target "${t}" is withheld on purpose — ${td.blocked}`;
+          d.withheld = true;
+          changed = true;
+          break;
+        }
         if (!td || td.blocked) {
           d.blocked = `required relational target "${t}" is ${!td ? 'missing' : 'not synthesizable'}`;
           changed = true;

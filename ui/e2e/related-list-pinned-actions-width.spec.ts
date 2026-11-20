@@ -397,10 +397,11 @@ test.describe('enlarged related list in a record drawer — the pinned Actions c
     report(testInfo, c, r);
     expect(r.folded).toBe(true);
     expect(r.inlineButtons).toBe(0);
-    // Still wider than the drawer: the pinned column sits at the box's edge
-    // over whichever column scrolls under it, as on any list that scrolls
-    // sideways. A scroll to the end shows Status whole.
+    // Still wider than the drawer: the Actions column leaves the right edge
+    // for the frozen zone beside the name column (objectstack#35446), and a
+    // scroll to the end shows Status whole.
     expect(r.box.scrollWidth).toBeGreaterThan(r.box.clientWidth);
+    expect(r.actions.left, 'the Actions column still sits at the right edge').toBeLessThan(r.box.clientWidth / 2);
     const end = await page.evaluate(async () => {
       const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
       box.scrollLeft = box.scrollWidth;

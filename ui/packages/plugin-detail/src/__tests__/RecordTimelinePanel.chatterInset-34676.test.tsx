@@ -123,6 +123,7 @@ describe('the 动态 panel holding a record:chatter block (objectstack#34676)', 
     expect(face.closest('[data-record-timeline-panel]')).toBeNull();
     const timeline = face.querySelector('section[aria-label="Discussion"]') as HTMLElement;
     expect(timeline).not.toBeNull();
-    expect(timeline.getAttribute('class')).toBe('border-t border-border/60 pt-5');
+    // pt-3 since the dense activity rows (objectstack#35602).
+    expect(timeline.getAttribute('class')).toBe('border-t border-border/60 pt-3');
   });
 });

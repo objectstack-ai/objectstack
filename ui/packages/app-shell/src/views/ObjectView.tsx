@@ -74,7 +74,7 @@ import {
     loadViewOverrides,
     buildViewTabs,
 } from './objectViewTabs.js';
-import { ObjectNotFoundState, useViewTabsFit } from './objectViewChrome.js';
+import { ObjectNotFoundState } from './objectViewChrome.js';
 import { useObjectViewLiveData } from './objectViewLiveData.js';
 import { useObjectViewIdentity } from './objectViewIdentity.js';
 import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
@@ -827,49 +827,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         baseView,
     });
 
-    // objectstack#29635 — Save as my view, and Rename and Delete on the
-    // reader's own views. Save is offered to any reader the server lets save
-    // one (`sys_personal_view` read and create), not to admins only; the name
-    // is asked in `PersonalViewNameDialog`. A reader who cannot read the
-    // list's own object is offered no Save: there is no list to keep.
+    // objectstack#29635 — creating one of the reader's own views, and Rename
+    // and Delete on them. Creating is offered to any reader the server lets
+    // save one (`sys_personal_view` read and create), not to admins only, in
+    // the view switcher's in-place create card (objectstack#35553, which
+    // folded Save as my view into it); a rename's name is asked in
+    // `PersonalViewNameDialog`. A reader who cannot read the list's own object
+    // is offered no create: there is no list to keep.
     const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
-    const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'save' } | { mode: 'rename'; viewId: string } | null>(null);
+    const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'rename'; viewId: string } | null>(null);
     const openPersonalView = (id: string) => {
         if (viewId) navigate(`../${id}`, { relative: 'path' });
         else navigate(`view/${id}`);
-    };
-    /** Save the list on screen as one of the reader's own views, and open it. */
-    const handleSavePersonalView = async (label: string): Promise<boolean> => {
-        if (!activeView) return false;
-        // The list's toolbar state is the address's (`uf_*`), through the same
-        // field gate its seed reads it with.
-        const built = buildPersonalViewConfig(objectDef.name, activeView, {
-            // The panel's group is the one the list shows (an emptied panel
-            // included), not the address's copy of it.
-            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
-            preference: listPrefs.preference.perView?.[activeView.id],
-            panelFilters: viewPanelFilters,
-        });
-        if (!built.ok) {
-            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
-            return false;
-        }
-        try {
-            const savedId = await personalViews.save(label, built.config);
-            // objectstack#30073 — the list now lives in the saved view; the
-            // view it came from returns to its own (no temporary conditions,
-            // not personalized).
-            clearSourceListState(activeView.id);
-            openPersonalView(savedId);
-            return true;
-        } catch (err) {
-            console.error('[ObjectView] Failed to save a personal view:', err);
-            toast.error(t('form.saveError'), {
-                description: err instanceof Error ? err.message : String(err),
-                classNames: { description: 'whitespace-pre-line' },
-            });
-            return false;
-        }
     };
     const handleRenamePersonalView = async (id: string, label: string): Promise<boolean> => {
         try {
@@ -976,9 +945,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    // Below `sm` the page header, and the switcher in its title, is not drawn:
-    // the switcher leads the list's toolbar row instead (objectstack#27058).
-    const pageHeaderShown = useViewTabsFit();
     const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
@@ -1033,7 +999,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
-    const { viewTabItems, titleSwitcher, titleLabel } = useObjectViewTitleSwitcher({
+    const { viewTabItems, titleSwitcher } = useObjectViewTitleSwitcher({
         views,
         savedViews,
         objectDef,
@@ -1052,9 +1018,22 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         setPinnedViewId: setPinnedViewChoice,
         appSegment: appName,
         personalViewIds,
-        onSavePersonalView: personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal
-            ? () => setPersonalViewDialog({ mode: 'save' })
-            : undefined,
+        // objectstack#35553 — the dropdown's 「Add view」 creates in place.
+        create: {
+            activeView,
+            readListState: () => ({
+                url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
+                preference: activeView ? listPrefs.preference.perView?.[activeView.id] : undefined,
+                panelFilters: viewPanelFilters,
+            }),
+            savePersonal: personalViews.save,
+            openPersonal: openPersonalView,
+            createShared: handleViewCreate,
+            clearSourceListState,
+            canCreatePersonal: personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal,
+            canCreateShared: isAdmin,
+            hasUnsavedConditions: listPersonalizedParts.some((part) => part === 'filters' || part === 'sort'),
+        },
         onRenamePersonalView: personalViewsReady && personalGrant('update')
             ? (id: string) => setPersonalViewDialog({ mode: 'rename', viewId: id })
             : undefined,
@@ -1095,8 +1074,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // objectstack#33317 — the resolved mode: `none` for an authored
         // `none` and for a list-only object (`servesRecordRead`).
         rowOpensRecord: navOverlay.mode !== 'none',
-        phoneTitle: !pageHeaderShown && titleSwitcher ? (
-            <span className="flex min-w-0 max-w-full items-center gap-1.5 text-base font-semibold" data-testid="list-phone-title">
+        // objectstack#35548 — the view switcher leads the list's view bar at
+        // every width (on a phone since objectstack#27058); the page bar only
+        // names the object.
+        phoneTitle: titleSwitcher ? (
+            <span className="flex min-w-0 max-w-full items-center gap-1.5 max-sm:text-base max-sm:font-semibold" data-testid="list-phone-title">
                 <span className="flex min-w-0">{titleSwitcher}</span>
                 {personalizedMarker}
             </span>
@@ -1106,6 +1088,19 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         initialUfSelections,
         handleUserFilterSelectionsChange,
         viewPanelFilters,
+        // objectstack#35551 — the Options menu names the view (renamed in
+        // place by its owner or an admin on a saved shared view) and, while
+        // the list differs from its view, offers 保存 and 恢复默认: the
+        // personalization marker's two acts (objectstack#30073).
+        listViewActions: {
+            rename: activeView && activeIsPersonal && personalViewsReady && personalGrant('update')
+                ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
+                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                    ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
+                    : undefined,
+            save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
+            reset: !isEnvironmentList && listPersonalizedParts.length > 0 ? handleResetView : undefined,
+        },
     });
 
     // objectstack#25992 slice 9: the merged views and the plugin's `ObjectViewSchema`
@@ -1153,6 +1148,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         isEnvironmentList,
         toolbarBar,
         viewAccess,
+        titleSwitcher,
     });
 
     // The list itself: one element whether or not a record is open
@@ -1211,11 +1207,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
              <ObjectViewPageHeader
                  objectDef={objectDef}
-                 // Below `sm` the switcher is drawn in the list's toolbar row,
-                 // so the hidden header does not hold a second one.
-                 titleSwitcher={pageHeaderShown ? titleSwitcher : null}
-                 titleLabel={titleLabel}
-                 objectListHref={appName && objectName ? `/apps/${appName}/${objectName}` : undefined}
                  objectPluralLabel={listTitleOf}
                  objectDesc={objectDesc}
                  createButton={createButton}
@@ -1229,7 +1220,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  environmentEntitlements={environmentEntitlements}
                  toolbarBar={toolbarBar}
                  listFavorite={listFavorite}
-                 personalizedMarker={personalizedMarker}
                  foldedHeaderActions={foldedHeaderActions}
              />
 
@@ -1401,13 +1391,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 <PersonalViewNameDialog
                     open={!!personalViewDialog}
                     onOpenChange={(open) => { if (!open) setPersonalViewDialog(null); }}
-                    title={personalViewDialog?.mode === 'rename'
-                        ? t('view.rename', { defaultValue: 'Rename' })
-                        : t('view.switcher.saveAsMyView', { defaultValue: 'Save as my view' })}
+                    title={t('view.rename', { defaultValue: 'Rename' })}
                     initialName={renamingPersonalView?.label ?? ''}
-                    onSubmit={(name) => (personalViewDialog?.mode === 'rename'
+                    onSubmit={(name) => (personalViewDialog
                         ? handleRenamePersonalView(personalViewDialog.viewId, name)
-                        : handleSavePersonalView(name))}
+                        : Promise.resolve(false))}
                     t={t}
                 />
              </div>

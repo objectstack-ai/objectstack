@@ -37,6 +37,7 @@
 - 收班 = 状态 flush + 在飞 `Release:`+`Resume-from:` 回队待兄弟席、不等落地;简报非继承裁决。
 - 坐席同笔:建自绑巡查 routine、开信箱并订阅、存根记 `Patrol:` 与 `Mailbox:`、发 `seat-online`。
 - 分诊席与车道席会话 effort 恒 `high`;坐席时低于即登记行注明,请账号主人以 `high` 重开。
+- 席会话 ⛔ 中途不改 effort;要另一档就起隔离子代理(`execution-duties.md`)。
 - 收班同笔删 routine、关信箱、发 `seat-offline`;强制接管者代发 `seat-online`(`project-forms.md`)。
 - 下班席(`seat-offline`,或两敲 `Request: progress` 无答走接管四件)的在飞归同车道在线兄弟席。
 - 兄弟席 `Resume-from:` 引简报或轮次记录认领;待裁先等字;无兄弟席「待席」;公告归安全席。
@@ -73,7 +74,7 @@
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
 - 健康指标五个:可派发库存(open `pm:queue` 未认领及趋势);决策箱:决策卡 N·待您审合 PR M。
 - M = open `pm:awaiting-merge` PR,两数 ⛔ 不合计;决策卡点名有开放下游者(`Blocked-by:` 反查现算)。
-- finding 数与中位年龄:裸标签数即未定级数,hold 已换标不在内。
+- finding 数与中位年龄:裸标签数即未定级数,hold 已换标不在内;五项现读`fleet-roster.mjs --health`
 - 裸卡数与中位年龄:sweep 析取①,未定级数另计析取④;老化 = 首触欠账。
 - 发版阻塞 = 窗内三仓 open `priority:p0` 之和,归零 = 三张板都空;总 open 数刻意不在指标内。
 - Version Packages PR 默认永不催,挂着的发布 PR 是常态,⛔ 不进维护者摘要。

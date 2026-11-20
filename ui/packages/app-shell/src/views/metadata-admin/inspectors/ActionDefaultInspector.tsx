@@ -656,6 +656,9 @@ export function ActionDefaultInspector({
   locale,
   serverSchema,
   onBlockingIssuesChange,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
 }: MetadataDefaultInspectorProps) {
   const tr = React.useCallback((key: string) => t(key, locale), [locale]);
   // objectui#12510 — the Icon label names the icon picker (the shape objectui#12531
@@ -1271,6 +1274,9 @@ export function ActionDefaultInspector({
             value={draft}
             hiddenFields={[...CURATED_FIELDS, ...RETIRED_FIELDS]}
             readOnly={readOnly}
+            issues={issues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={onInlineIssueFieldsChange}
             onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         </div>

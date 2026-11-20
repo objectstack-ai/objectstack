@@ -179,10 +179,14 @@ describe('objectui#12625 — the record page names its regions, header actions a
   });
 
   it('the header actions are named by their labels', async () => {
+    const user = userEvent.setup();
     await mountLeadPage();
+    // objectstack#35593 — the one-row header draws ONE inline action; the
+    // rest are the ⋯'s items, each named by its label.
     expect(screen.getByRole('button', { name: 'Log a Call' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Log a Meeting' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Schedule a Meeting' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(await screen.findByRole('menuitem', { name: 'Log a Meeting' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Schedule a Meeting' })).toBeInTheDocument();
   });
 
   it('the collapsible field group header is a button named by its label that toggles', async () => {

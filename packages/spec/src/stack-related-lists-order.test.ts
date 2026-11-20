@@ -46,7 +46,8 @@ const event = {
   },
 };
 const note = { name: 'rlo_note', label: 'Note', fields: { title: { type: 'text' as const, label: 'Title' } } };
-// [#27478] A body table: an inline-edited master_detail child with no relatedList.
+// [#27478] A body table: an inline-edited master_detail child with no relatedList
+// (#35597: a master_detail with no relatedList is one with or without inlineEdit).
 const line = {
   name: 'rlo_line',
   label: 'Line',
@@ -187,10 +188,12 @@ describe('defineStack — a field group relatedList names body tables only', () 
     fields: { lead_id: { ...line.fields.lead_id, ...keys } },
   });
 
-  it('accepts a group naming a body table: relatedList primary, or an inline-edited master_detail (controls)', () => {
+  it('accepts a group naming a body table: relatedList primary, or a master_detail with no relatedList (controls)', () => {
     expect(() => defineStack(withChild(taskFk({ relatedList: 'primary' }), 'rlo_task'))).not.toThrow();
     expect(() => defineStack(withChild(line, 'rlo_line'))).not.toThrow();
     expect(() => defineStack(withChild(lineFk({ inlineEdit: true }), 'rlo_line.lead_id'))).not.toThrow();
+    // #35597: a plain master_detail (no inlineEdit) is a body table too.
+    expect(() => defineStack(withChild(lineFk({ inlineEdit: undefined }), 'rlo_line'))).not.toThrow();
   });
 
   it('refuses a group naming a side card, with the FK and the prescription', () => {
@@ -210,9 +213,9 @@ describe('defineStack — a field group relatedList names body tables only', () 
     expect(refusal?.issues).toEqual([expect.stringContaining("'rlo_line.lead_id' is a side card")]);
   });
 
-  it('refuses a plain master_detail (no inlineEdit) and a hidden list, naming which', () => {
-    expect(refusalOf(() => defineStack(withChild(lineFk({ inlineEdit: undefined }), 'rlo_line')))?.issues)
-      .toEqual([expect.stringContaining("'rlo_line.lead_id' is a side card")]);
+  it('refuses a hidden list and a master_detail hidden by relatedList: false, naming which', () => {
+    expect(refusalOf(() => defineStack(withChild(lineFk({ inlineEdit: undefined, relatedList: false }), 'rlo_line')))?.issues)
+      .toEqual([expect.stringContaining("'rlo_line.lead_id' is hidden (relatedList: false)")]);
     expect(refusalOf(() => defineStack(withChild(taskFk({ relatedList: false }), 'rlo_task')))?.issues)
       .toEqual([expect.stringContaining("'rlo_task.lead_id' is hidden (relatedList: false)")]);
   });

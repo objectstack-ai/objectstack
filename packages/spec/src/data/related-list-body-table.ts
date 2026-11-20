@@ -1,21 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#27478 · ruling B on #27055] The ONE predicate behind "is this inbound
- * relationship a BODY TABLE of its parent's record page", and the one refusal
- * a field group's `relatedList` earns when it names a relationship that is not.
+ * [#27478 · ruling B on #27055, as amended by #35597] The ONE predicate behind
+ * "is this inbound relationship a BODY TABLE of its parent's record page", and
+ * the one refusal a field group's `relatedList` earns when it names a
+ * relationship that is not.
  *
  * Body-ness is decided once, by the relationship's own keys on the child's FK
- * field (`FieldSchema.relatedList`, `FieldSchema.inlineEdit`):
+ * field (`FieldSchema.relatedList`), and by the relationship's TYPE:
  *
  *  - `relatedList: 'primary'` — the author marks the list part of the
  *    record's main content;
- *  - a `master_detail` FK that sets `inlineEdit` (`true`, `'grid'` or
- *    `'form'`) and declares NO `relatedList` — line items edited inside the
- *    parent's form are drawn under it by default;
- *  - anything else is a side card (`true` / absent), or hidden (`false`).
- *    `relatedList: true` on an inline-edited `master_detail` keeps it a side
- *    card, as the key's own description says.
+ *  - a `master_detail` FK that declares NO `relatedList` — the parent owns
+ *    these rows, so they are drawn in its body by default (#35597, the
+ *    maintainer's 「就是master-detail表类型的子表」). `inlineEdit` no longer
+ *    takes part: it is the WRITE side (the parent's form, ADR-0035 §3), and a
+ *    master-detail child is a body table whether or not the form edits it;
+ *  - anything else is a side card (`true`, or a `lookup` with no
+ *    `relatedList`), or hidden (`false`). `relatedList: true` on a
+ *    `master_detail` keeps it a side card, as the key's own description says.
+ *    A `lookup` child never becomes a body table by default.
  *
  * A field group's `relatedList` (`ObjectFieldGroupSchema.relatedList`) only
  * POSITIONS a body table among the field sections; it never promotes a side
@@ -35,11 +39,15 @@
  *    absent `relatedList` through it;
  *  - the refusal at `defineStack` and at the publish door.
  *
- * Read on either the PARSED field or a stored body: neither key carries a
+ * Read on either the PARSED field or a stored body: `relatedList` carries no
  * default, so an omitted key is `undefined` on both and the verdict agrees.
  */
 
-/** The FK keys body-ness is decided by — a child's `lookup` / `master_detail` field. */
+/**
+ * The FK keys body-ness is decided by — a child's `lookup` / `master_detail`
+ * field. `inlineEdit` stays accepted so a caller can hand over the whole field;
+ * it does not change the verdict (#35597).
+ */
 export interface RelatedListRelationshipFields {
   readonly type?: unknown;
   readonly relatedList?: unknown;
@@ -55,8 +63,7 @@ export function isBodyTableRelationship(field: RelatedListRelationshipFields | n
   if (!field || (field.type !== 'lookup' && field.type !== 'master_detail')) return false;
   if (field.relatedList === 'primary') return true;
   if (field.relatedList !== undefined) return false;
-  const inlineEdit = field.inlineEdit;
-  return field.type === 'master_detail' && (inlineEdit === true || inlineEdit === 'grid' || inlineEdit === 'form');
+  return field.type === 'master_detail';
 }
 
 /** One inbound relationship a field group's `relatedList` names: the child, its FK, and the FK's keys. */
@@ -96,7 +103,7 @@ export function fieldGroupBodyTableRefusal(
   return (
     `Object '${objectName}' fieldGroups[${index}].relatedList '${entry}' names a related list that is not a body table: ` +
     `${what}. A field group's relatedList only positions a body table (a FK declaring relatedList: 'primary', ` +
-    `or a master_detail FK that sets inlineEdit and declares no relatedList), so the record page draws nothing ` +
+    `or a master_detail FK that declares no relatedList), so the record page draws nothing ` +
     `at the group for any other list. Set relatedList: 'primary' on ${fk}${pick}, or remove the group's relatedList.`
   );
 }

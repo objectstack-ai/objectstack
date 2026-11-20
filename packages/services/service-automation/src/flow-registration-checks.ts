@@ -25,6 +25,7 @@ import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
 // of the single-brace tokens they may still carry, and the one list of where
 // those slots are, both shared with `objectstack validate`.
 import { flowNodeTextSlotSources, flowTextSlotSources, textSlotTemplateRefusal } from '@objectstack/spec/automation';
+import { TEXT_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 // [#21982] Which node types the spec judges an undeclared config key for — the
 // ONE judge of a builtin's undeclared key, met here through `FlowSchema.parse`.
 // `validateNodeConfigKeys` asks it and stands aside for every type it names,
@@ -38,6 +39,7 @@ import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { validateExpression, nearestName } from '@objectstack/formula';
+import type { ExprValidationCode } from '@objectstack/formula';
 // [#29025] The one judge of an undeclared top-level cycle (ADR-0044), shared
 // with the runtime authoring gate (`@objectstack/metadata-protocol`) that the
 // metadata draft verdict and every publish door run, so a flow this engine
@@ -705,6 +707,51 @@ function flowRebindsRunRowRoots(flow: FlowParsed): boolean {
     return nodeBound.has('record') || nodeBound.has('previous');
 }
 
+/**
+ * [#35369] The expression-judge refusal codes the braces rule of
+ * {@link validateFlowExpressions}' header speaks to: a `{…}` brace in a CEL
+ * slot, a single-brace token in a template, and an envelope naming the wrong
+ * dialect for its slot. The header names that rule only when a listed refusal
+ * is one of these (or the retired `{…}` token in a value or text slot, judged
+ * at its own call site); any other refusal — a date-text verdict, an unknown
+ * function, a malformed shape — is listed under a neutral header, so the
+ * author is never first told about a mistake they did not make.
+ */
+const BRACE_RULE_REFUSAL_CODES: ReadonlySet<ExprValidationCode> = new Set<ExprValidationCode>([
+    'cel-template-brace',
+    'template-single-brace',
+    'cel-dialect-mismatch',
+    'template-dialect-mismatch',
+]);
+
+/**
+ * [ruling 7023700548] The codes of the date-text verdict a value envelope gets
+ * only when typed (`valueEnvelopeFieldTypes`): the family whose refusal names
+ * {@link SHARED_STEPS_REWRITE}.
+ */
+const TYPED_VALUE_ENVELOPE_CODES: ReadonlySet<ExprValidationCode> = new Set<ExprValidationCode>([
+    'date-text-call-value-run-may-fail',
+    'date-text-arithmetic-value-run-may-fail',
+]);
+
+/**
+ * [ruling 7023700548] The rewrite the typed date-text refusal names, appended
+ * after the verdict's own fix — the sentence `@objectstack/lint`'s
+ * `validate-expressions.ts` appends at `objectstack validate` (that package is
+ * not a dependency of this one, so each door spells it, and each door's test
+ * pins it).
+ */
+const SHARED_STEPS_REWRITE =
+    'This flow has its own record trigger or time-relative sweep, which hands it a row of that object on every '
+    + 'run it starts, so this stands even where another flow also starts it through a `subflow` or `map` node. '
+    + 'To share these steps with such a flow, move them into a child flow with no trigger of its own, which is '
+    + 'judged untyped because its `record` is whatever each caller hands it, and start that child from both flows.';
+
+/** Whether an expression-judge refusal is one the braces rule speaks to. */
+function isBraceRuleCode(code: ExprValidationCode | undefined): boolean {
+    return code !== undefined && BRACE_RULE_REFUSAL_CODES.has(code);
+}
+
 /** The body of {@link AutomationEngine.validateFlowExpressions}, moved unedited; that method's docblock is its contract. */
 export function validateFlowExpressions(
     this: Pick<RegistrationCheckHost, 'logger' | 'objectSchemaResolver' | 'valueEnvelopeRefusals' | 'deriveTriggerBinding'>,
@@ -714,10 +761,18 @@ export function validateFlowExpressions(
 ): RegistrationCheckRefusal | undefined {
     const failures: string[] = [];
     const sites: RegistrationCheckSite[] = [];
-    /** One failure: its line in the thrown message, and its site for the stored pass. */
-    const refuse = (path: string, where: string, message: string, source: unknown): void => {
+    /** Whether any listed refusal is one the header's braces rule speaks to ({@link BRACE_RULE_REFUSAL_CODES}). */
+    let braceRuleRefused = false;
+    /**
+     * One failure: its line in the thrown message, and its site for the stored
+     * pass. `braces` says whether it is a refusal the header's braces rule
+     * speaks to — decided where the refusal is made, never read back out of
+     * its sentence.
+     */
+    const refuse = (path: string, where: string, message: string, source: unknown, braces: boolean): void => {
         failures.push(`  • ${where}: ${message}\n      source: \`${source}\``);
         sites.push({ path, from: JSON.stringify(String(source)), detail: `${where}: ${message}` });
+        if (braces) braceRuleRefused = true;
     };
 
     // Resolve the object whose row each run binds as its record, so
@@ -753,10 +808,14 @@ export function validateFlowExpressions(
     // flow rebinds neither root the typing reads, `record` or `previous`
     // ({@link flowRebindsRunRowRoots}: `celScope` resolves both through the
     // variable spread, so an assigned or output one is what the envelope
-    // reads). Anywhere else (an inbound hook, a
-    // schedule, a flow started by a parent's `subflow` / `map` or by hand) the
-    // name holds what the entrance handed the run, and no verdict is given.
-    // `objectstack validate` stands down on the same set.
+    // reads). Anywhere else (an inbound hook, a schedule, a flow with no
+    // trigger of its own that a parent's `subflow` / `map` or a caller
+    // starts) the name holds what the entrance handed the run, and no verdict
+    // is given. A flow with its own record trigger or sweep is typed even when
+    // a parent also starts it — its own entrance hands it the typed row on
+    // every run it starts — and its refusal names the rewrite
+    // ({@link SHARED_STEPS_REWRITE}; ruling 7023700548). `objectstack
+    // validate` judges the same set.
     const startCfg = (startNode?.config ?? {}) as Record<string, unknown>;
     const sweep = (startCfg.timeRelative ?? {}) as Record<string, unknown>;
     const runBindsTypedRow = bound?.triggerType === 'record_change'
@@ -775,7 +834,7 @@ export function validateFlowExpressions(
         // Unchanged: matches the CLI build's fatal set exactly.
         const result = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
         for (const e of result.errors) {
-            refuse(path, where, e.message, e.source);
+            refuse(path, where, e.message, e.source, isBraceRuleCode(e.code));
         }
         // Advisory schema-aware pass — only when the source is syntactically
         // valid (else it would just re-report the fatal error). Everything it
@@ -868,12 +927,12 @@ export function validateFlowExpressions(
         if (raw == null) return;
         const shapeRefusal = structuralConditionRefusal(raw);
         if (shapeRefusal) {
-            refuse(path, where, shapeRefusal.message, shapeRefusal.source);
+            refuse(path, where, shapeRefusal.message, shapeRefusal.source, false);
             return;
         }
         const blankRefusal = evaluatedSourceRefusal(raw);
         if (blankRefusal) {
-            refuse(path, where, blankRefusal.message, blankRefusal.source);
+            refuse(path, where, blankRefusal.message, blankRefusal.source, false);
             return;
         }
         check(path, where, raw);
@@ -890,11 +949,11 @@ export function validateFlowExpressions(
         const slotWhere = slot.label;
         const tokenRefusal = textSlotTemplateRefusal(slot.source);
         if (tokenRefusal !== undefined) {
-            refuse(slot.path, slotWhere, tokenRefusal, slot.source);
+            refuse(slot.path, slotWhere, tokenRefusal, slot.source, textSlotRefusalIsSingleBrace(tokenRefusal));
             continue;
         }
         for (const e of validateExpression('template', slot.source).errors) {
-            refuse(slot.path, slotWhere, e.message, slot.source);
+            refuse(slot.path, slotWhere, e.message, slot.source, isBraceRuleCode(e.code));
         }
     }
 
@@ -933,6 +992,8 @@ export function validateFlowExpressions(
                     `${at}node '${node.id}' (${node.type}) ${refusal.label} at ${refusal.block}.${refusal.path}`,
                     refusal.message,
                     refusal.source,
+                    // Every one is a retired `{…}` token in a value slot.
+                    true,
                 );
             }
 
@@ -949,11 +1010,11 @@ export function validateFlowExpressions(
                 const slotWhere = `${at}node '${node.id}' (${node.type}) ${slot.label} at config.${slot.path}`;
                 const tokenRefusal = textSlotTemplateRefusal(slot.source);
                 if (tokenRefusal !== undefined) {
-                    refuse(slotPath, slotWhere, tokenRefusal, slot.source);
+                    refuse(slotPath, slotWhere, tokenRefusal, slot.source, textSlotRefusalIsSingleBrace(tokenRefusal));
                     continue;
                 }
                 for (const e of validateExpression('template', slot.source).errors) {
-                    refuse(slotPath, slotWhere, e.message, slot.source);
+                    refuse(slotPath, slotWhere, e.message, slot.source, isBraceRuleCode(e.code));
                 }
             }
 
@@ -995,7 +1056,18 @@ export function validateFlowExpressions(
                 // modes: the envelope faults on every run.
                 if (found.entry.role === 'value') {
                     for (const refusal of this.valueEnvelopeRefusals(found.value, valueEnvelopeFieldTypes)) {
-                        refuse(slotPath, slotWhere, refusal.message, refusal.source);
+                        // A shape refusal carries no code: of those, only an
+                        // envelope naming a dialect other than `cel` is one the
+                        // braces rule speaks to (a computed value is a CEL
+                        // envelope); a missing or blank `source` is not.
+                        const braces = refusal.code !== undefined
+                            ? isBraceRuleCode(refusal.code)
+                            : envelopeNamesNonCelDialect(found.value);
+                        // [ruling 7023700548] The typed verdict names the rewrite.
+                        const rewrite = refusal.code !== undefined && TYPED_VALUE_ENVELOPE_CODES.has(refusal.code)
+                            ? ` ${SHARED_STEPS_REWRITE}`
+                            : '';
+                        refuse(slotPath, slotWhere, `${refusal.message}${rewrite}`, refusal.source, braces);
                     }
                     continue;
                 }
@@ -1023,7 +1095,7 @@ export function validateFlowExpressions(
                 // `edge.condition` before `checkStructuralCondition` does.
                 const shapeRefusal = predicateSlotRefusal(found.value);
                 if (shapeRefusal) {
-                    refuse(slotPath, slotWhere, shapeRefusal.message, shapeRefusal.source);
+                    refuse(slotPath, slotWhere, shapeRefusal.message, shapeRefusal.source, false);
                     continue;
                 }
                 // No schema hint: a screen's `visibleWhen` binds the screen's OWN
@@ -1042,15 +1114,36 @@ export function validateFlowExpressions(
     }
 
     if (failures.length === 0) return undefined;
-    return {
-        sites,
-        message:
-            `Flow '${flowName}' has ${failures.length} invalid expression${failures.length > 1 ? 's' : ''} (ADR-0032 §1a). ` +
+    const count = `Flow '${flowName}' has ${failures.length} invalid expression${failures.length > 1 ? 's' : ''}`;
+    // [#35369] The braces rule is named only over a list that holds a refusal
+    // it speaks to; any other list gets the neutral count header, each line
+    // under it carrying its own reason.
+    const header = braceRuleRefused
+        ? `${count} (ADR-0032 §1a). ` +
             `Predicates — conditions and declared bare-CEL slots such as a screen field's \`visibleWhen\` — ` +
             `must not wrap references in \`{…}\` template braces, and neither may a value slot (a computed ` +
-            `value is a CEL envelope, the list a \`loop\` or \`map\` iterates included):\n` +
-            `${failures.join('\n')}`,
-    };
+            `value is a CEL envelope, the list a \`loop\` or \`map\` iterates included):`
+        : `${count}; each is refused for the reason given with it, and the flow does not register until ` +
+            `every one is fixed:`;
+    return { sites, message: `${header}\n${failures.join('\n')}` };
+}
+
+/**
+ * Whether a text slot's refusal ({@link textSlotTemplateRefusal}) refuses a
+ * single-brace `{…}` token. Its single-brace half always leads with
+ * {@link TEXT_SLOT_TEMPLATE_REFUSAL} — the spec's published lead sentence —
+ * and comes first when the text carries both; its other half, a `{{ }}` hole
+ * over a `$` name the engine does not bind, is no brace refusal.
+ */
+function textSlotRefusalIsSingleBrace(refusal: string): boolean {
+    return refusal.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL);
+}
+
+/** Whether a value-role slot's envelope names a dialect other than `cel` — the dialect mismatch of a value slot. */
+function envelopeNamesNonCelDialect(value: unknown): boolean {
+    if (!value || typeof value !== 'object') return false;
+    const dialect = (value as { dialect?: unknown }).dialect;
+    return dialect !== undefined && dialect !== 'cel';
 }
 
 /**
