@@ -5502,6 +5502,7 @@ const en = {
     statusRejected: 'Rejected',
     statusRecalled: 'Recalled',
     statusReturned: 'Returned for revision',
+    statusCancelled: 'Cancelled',
     sendBackBtn: 'Send back',
     sendBackTitle: 'Send this request back for revision?',
     sendBackBody: 'This round ends and the record unlocks so the requester can fix the data. When they resubmit, a fresh approval round opens for all approvers.',

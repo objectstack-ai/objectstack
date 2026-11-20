@@ -4653,6 +4653,7 @@ const es = {
     statusRejected: 'Rechazada',
     statusRecalled: 'Retirada',
     statusReturned: 'Devuelto para revisión',
+    statusCancelled: 'Cancelada',
     sendBackBtn: 'Devolver',
     sendBackTitle: '¿Devolver esta solicitud para revisión?',
     sendBackBody: 'Esta ronda termina y el registro se desbloquea para que el solicitante corrija los datos. Al volver a enviarla, se abre una nueva ronda de aprobación para todos los aprobadores.',

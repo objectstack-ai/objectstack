@@ -4805,6 +4805,7 @@ const zh = {
     statusRejected: '已驳回',
     statusRecalled: '已撤回',
     statusReturned: '已退回修改',
+    statusCancelled: '已取消',
     sendBackBtn: '退回修改',
     sendBackTitle: '将该申请退回修改？',
     sendBackBody: '本轮审批结束，记录解锁，申请人可修改数据。重新提交后将为所有审批人开启新一轮审批。',

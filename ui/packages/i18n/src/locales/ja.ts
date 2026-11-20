@@ -4548,6 +4548,7 @@ const ja = {
     statusRejected: '却下',
     statusRecalled: '取り下げ',
     statusReturned: '差し戻し',
+    statusCancelled: 'キャンセル済み',
     sendBackBtn: '差し戻す',
     sendBackTitle: 'このリクエストを差し戻しますか？',
     sendBackBody: 'このラウンドは終了し、レコードのロックが解除され、申請者がデータを修正できます。再提出されると、全承認者に新しい承認ラウンドが開始されます。',

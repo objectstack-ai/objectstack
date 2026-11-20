@@ -4546,6 +4546,7 @@ const de = {
     statusRejected: 'Abgelehnt',
     statusRecalled: 'Zurückgezogen',
     statusReturned: 'Zur Überarbeitung zurückgegeben',
+    statusCancelled: 'Abgebrochen',
     sendBackBtn: 'Zurückgeben',
     sendBackTitle: 'Diese Anfrage zur Überarbeitung zurückgeben?',
     sendBackBody: 'Diese Runde endet und der Datensatz wird entsperrt, damit der Antragsteller die Daten korrigieren kann. Nach erneuter Einreichung beginnt eine neue Genehmigungsrunde für alle Genehmiger.',
