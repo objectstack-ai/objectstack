@@ -131,6 +131,20 @@ function rowOf(fileName: string): HTMLElement {
   return li as HTMLElement;
 }
 
+/**
+ * The actions in the ⋮ menu of the row listing `fileName`: a file row carries
+ * its Download and Delete in that menu since the dense attachments rows
+ * (objectstack#35602). The menu is closed again before returning.
+ */
+async function rowMenuItems(fileName: string): Promise<string[]> {
+  const user = userEvent.setup();
+  await user.click(within(rowOf(fileName)).getByRole('button', { name: `More for ${fileName}` }));
+  const items = (await screen.findAllByRole('menuitem')).map((el) => el.textContent?.trim() ?? '');
+  await user.keyboard('{Escape}');
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  return items;
+}
+
 async function rowsLoaded() {
   await waitFor(() => expect(screen.getByText('mine.pdf')).toBeInTheDocument());
   expect(screen.getByText('others.pdf')).toBeInTheDocument();
@@ -146,13 +160,10 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
     await rowsLoaded();
 
     expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete attachment' })).not.toBeInTheDocument();
     // The own row specifically: `uploaded_by === ME`, and still no delete.
-    expect(
-      within(rowOf('mine.pdf')).queryByRole('button', { name: 'Delete attachment' }),
-    ).not.toBeInTheDocument();
     // Reading is untouched: both rows keep their Download.
-    expect(screen.getAllByRole('button', { name: 'Download' })).toHaveLength(2);
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download']);
+    expect(await rowMenuItems('others.pdf')).toEqual(['Download']);
   });
 
   it('a create grant renders Upload (and no delete without the delete grant)', async () => {
@@ -160,21 +171,17 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
     await rowsLoaded();
 
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete attachment' })).not.toBeInTheDocument();
+    expect(await rowMenuItems('mine.pdf')).toEqual(['Download']);
   });
 
   it('the uploader sees delete on their own file', async () => {
     renderWithGrant({ allowDelete: true });
     await rowsLoaded();
 
-    expect(
-      within(rowOf('mine.pdf')).getByRole('button', { name: 'Delete attachment' }),
-    ).toBeInTheDocument();
+    expect(await rowMenuItems('mine.pdf')).toContain('Delete attachment');
     // Another user's row keeps it too: whether the caller may edit the parent
     // record is the server's to judge, and the refusal mapping answers it.
-    expect(
-      within(rowOf('others.pdf')).getByRole('button', { name: 'Delete attachment' }),
-    ).toBeInTheDocument();
+    expect(await rowMenuItems('others.pdf')).toContain('Delete attachment');
     // No create grant, no Upload.
     expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
   });
@@ -252,6 +259,7 @@ describe('RecordAttachmentsPanel — write affordances follow the sys_attachment
     await rowsLoaded();
 
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Delete attachment' })).toHaveLength(2);
+    expect(await rowMenuItems('mine.pdf')).toContain('Delete attachment');
+    expect(await rowMenuItems('others.pdf')).toContain('Delete attachment');
   });
 });

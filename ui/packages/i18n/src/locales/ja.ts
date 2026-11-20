@@ -1305,6 +1305,13 @@ const ja = {
     timeline: "アクティビティ",
     relatedColumn: "右側の列",
     timelineComposer: "メモを書く… @ でメンション",
+    streamToday: "今日",
+    streamYesterday: "昨日",
+    viewApproval: "承認を見る",
+    replyToComment: "返信",
+    attachmentsDropHint: "ここにファイルをドロップ、または",
+    attachmentsChooseFile: "ファイルを選択",
+    attachmentActions: "{{name}} のその他の操作",
     // objectstack#27055 — the record page v3.
     emptySections: "空のセクション {{count}} 件",
     emptySections_one: "空のセクション {{count}} 件",

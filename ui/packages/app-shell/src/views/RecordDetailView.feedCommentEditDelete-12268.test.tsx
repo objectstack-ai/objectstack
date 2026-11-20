@@ -304,8 +304,8 @@ type View = Awaited<ReturnType<typeof mount>>['view'];
 
 /** The feed row a body sits in: the keyed root element holding the row and its replies. */
 function rowOf(view: View, body: string): HTMLElement {
-  const rows = view.getByText(body).closest('.space-y-4')!.children;
-  const row = Array.from(rows).find((r) => r.textContent?.includes(body));
+  // The keyed comment (or one-line) row since the dense rows (objectstack#35602).
+  const row = view.getByText(body).closest('[data-stream-comment-row],[data-stream-row]');
   if (!row) throw new Error(`no feed row holds ${JSON.stringify(body)}`);
   return row as HTMLElement;
 }

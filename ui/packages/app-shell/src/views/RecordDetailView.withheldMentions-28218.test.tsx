@@ -268,6 +268,13 @@ describe('the comment author is told who a mention will not reach (objectstack#2
     const dataSource = makeDataSource(['u-grace']);
     const view = await mount(dataSource);
 
+    // The reply input opens behind the comment's 「回复」 since the dense
+    // activity rows (objectstack#35602).
+    fireEvent.click(await waitFor(() => {
+      const toggle = document.querySelector<HTMLButtonElement>('[data-feed-reply-toggle]');
+      if (!toggle) throw new Error('no reply toggle yet');
+      return toggle;
+    }));
     const input = await view.findByPlaceholderText(EN.detail.replyPlaceholder);
     fireEvent.change(input, { target: { value: '@Grace Hopper can you confirm?' } });
     await act(async () => {
