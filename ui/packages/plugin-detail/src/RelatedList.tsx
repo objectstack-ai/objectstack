@@ -2395,8 +2395,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const addBatchable = typeof (dataSource as DataSource | undefined)?.batchTransaction === 'function';
   const handleAddRecords = React.useCallback(async (records: any[]) => {
     if (!add || !dataSource || !api || referenceField == null || parentId === undefined || parentId === null) return;
-    const batch = (dataSource as DataSource).batchTransaction;
-    if (typeof batch !== 'function') return;
+    const ds = dataSource as DataSource;
+    if (typeof ds.batchTransaction !== 'function') return;
     const vf = add.picker.valueField || 'id';
     const operations: Parameters<NonNullable<DataSource['batchTransaction']>>[0] = [];
     for (const rec of records || []) {
@@ -2411,7 +2411,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     setAddBusy(true);
     setAddError(null);
     try {
-      await batch.call(dataSource, operations);
+      await ds.batchTransaction(operations);
       setRefreshNonce((n) => n + 1);
     } catch (err: any) {
       const raw = err?.body?.error ?? err?.error ?? err?.message ?? String(err);

@@ -839,10 +839,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // re-parent of the picked record (without one) an update of the picked
   // object — the rows a related list's "+ New" and row Edit read.
   'packages/plugin-detail/src/queueClaim.ts :: claimQueuedRecord :: update': helper('claimQueuedRecord'),
-  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: create':
-    mapped(['relatedNew'], RELATED_LIST),
-  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: update':
-    mapped(['relatedRowEdit'], RELATED_LIST),
+  // One atomic batch since objectstack#35601: a junction `linkField` adds
+  // by creating junction rows (relatedNew), a plain lookup by reparenting
+  // the picked rows (relatedRowEdit).
+  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: batch':
+    mapped(['relatedNew', 'relatedRowEdit'], RELATED_LIST),
   'packages/plugin-detail/src/renderers/record-related-list.tsx :: RecordRelatedListBody :: delete': {
     ...mapped(['relatedRowDelete'], RELATED_LIST_BLOCK),
     note: "the FALLBACK remove (an `add` config, no host delete) reads the same row the host's delete reads, so it never puts back a delete the host withheld",
