@@ -60,6 +60,7 @@ import { coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFiel
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedRequiredWhen, preserveAuditIgnoredOnInsertWarning, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import type { staticReadonlyInsertSubject } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { loadSummaryFoldDependents } from './engine-update.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
@@ -1348,6 +1349,22 @@ export class InsertFacet {
           const header = insertParentForRow?.(row);
           return insertParentMaster ? batchSummaries!.overlayRow(insertParentMaster, header) : header;
         };
+        // [#34821] And a formula or stored computed field of such a parent
+        // calculated from an accumulated roll-up (`remaining = budget -
+        // total`), computed again over the moved values as the predicate
+        // update's fold computes it. Loaded only for the parents a rule of
+        // this batch reads (a related binding or a header): an insert no rule
+        // reads a parent of pays nothing here.
+        if (batchSummaries) {
+          const readParents = new Set<string>();
+          for (let i = 0; i < rows.length; i++) {
+            if (rowErrors[i] !== undefined) continue;
+            for (const entry of Object.values(insertRelatedForRow(rows[i]) ?? {})) if (entry?.row) readParents.add(entry.object);
+            if (insertParentMaster && insertParentForRow?.(rows[i])) readParents.add(insertParentMaster);
+          }
+          const folded = readParents.size > 0 ? batchSummaries.foldedSummaries(rows, readParents) : undefined;
+          if (folded && folded.size > 0) batchSummaries.setDependents(await loadSummaryFoldDependents(this, folded, opCtx.context));
+        }
         // [#18783] The subject's effective object permissions, for an option
         // gated on `current_user.can(…)`: ONE resolution for the whole batch,
         // and none at all unless a row picks such an option. A resolution

@@ -61,8 +61,8 @@ import type { ReferentialClearExemption } from './validation/rule-validator.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
-import { createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases } from './summary-batch-accumulation.js';
-import type { SummaryDependents } from './summary-batch-accumulation.js';
+import { createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases, summaryPatchCanMove } from './summary-batch-accumulation.js';
+import type { SummaryDependents, SummaryFoldStandDownSink } from './summary-batch-accumulation.js';
 import { SUMMARY_GROUPED_AGGREGATE_CHUNK } from './summary-aggregate.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
@@ -2181,15 +2181,25 @@ export class UpdateFacet {
                    // rule reads one and more than one row matched; still all
                    // rows judged before the one `updateMany`.
                    const matchedRows = priorRows ?? [];
-                   const readSummaries = matchedRows.length > 1 ? this.summaryDescriptorsReadByRules(object) : [];
+                   // [#34821] A roll-up the patch cannot move (it writes no
+                   // foreign key, source or filter field of it) is not folded:
+                   // its rules read the stored value, as the by-id update does.
+                   const readSummaries = matchedRows.length > 1
+                     ? this.summaryDescriptorsReadByRules(object).filter((desc) => summaryPatchCanMove(desc, bulkPatch))
+                     : [];
                    const matchedStates = readSummaries.length > 0
                      ? matchedRows.map((row) => ({ previous: row ?? {}, next: { ...(row ?? {}), ...bulkPatch } }))
                      : [];
+                   // [#34821] A roll-up left unfolded leaves one trace, naming it and why.
+                   const standDown: SummaryFoldStandDownSink = (desc, reason) => this.logger.debug('Roll-up left unfolded in a predicate update: its rules read the stored value', {
+                     object, parentObject: desc.parentObject, field: desc.summaryField, reason,
+                   });
                    const summaryFold = readSummaries.length > 0
                      ? createPredicateUpdateSummaryFold(
-                         await loadPredicateUpdateSummaryBases(this.facade, readSummaries, matchedStates, { ...(opCtx.context ?? {}), isSystem: true }),
+                         await loadPredicateUpdateSummaryBases(this.facade, readSummaries, matchedStates, { ...(opCtx.context ?? {}), isSystem: true }, standDown),
                          matchedStates,
                          (updateSchema as any)?.fields,
+                         standDown,
                        )
                      : undefined;
                    if (summaryFold) {
@@ -2470,6 +2480,8 @@ export class UpdateFacet {
  * through another such field (`remaining = budget - spent`, `spent` a
  * roll-up). A rule reading `record.project.remaining` reads such a field, and
  * one by one it would read it over the roll-up the earlier rows moved.
+ * [#34821] A multi-row insert's accumulator reads the same, for the roll-ups
+ * its admitted rows move (`engine-insert.ts`).
  *
  * Read the way a by-id update's rule reads the parent: the values as SYSTEM
  * (`resolvePredicateRelated` reads related rows under system authority). So
@@ -2511,7 +2523,7 @@ export class UpdateFacet {
  * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
  * of reads nothing.
  */
-async function loadSummaryFoldDependents(
+export async function loadSummaryFoldDependents(
   host: Pick<UpdateHost, 'facade' | 'getSchema' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
   folded: Map<string, { fields: Set<string>; parentIds: Set<string> }>,
   context: Parameters<UpdateHost['resolveFormulaPermissions']>[3],
@@ -2596,5 +2608,7 @@ async function loadSummaryFoldDependents(
     const key = `${object}|${parentId}`;
     images.set(key, written(entry, images.get(key) ?? stored, moved));
   };
+  // [#34821] The parent as stored: the base a bulk insert's accumulator moves a roll-up from.
+  dependents.stored = (object, parentId) => served.get(object)?.rows.get(parentId);
   return dependents;
 }

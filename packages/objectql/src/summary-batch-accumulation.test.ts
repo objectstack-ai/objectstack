@@ -9,8 +9,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createBatchSummaryAccumulator, createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases, MIN_MAX_EXCLUDED_ID_BUDGET } from './summary-batch-accumulation.js';
-import type { MatchedRowStates, SummaryBase, SummaryBases } from './summary-batch-accumulation.js';
+import { createBatchSummaryAccumulator, createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases, MIN_MAX_EXCLUDED_ID_BUDGET, summaryPatchCanMove } from './summary-batch-accumulation.js';
+import type { MatchedRowStates, SummaryBase, SummaryBases, SummaryDependents, SummaryFoldStandDown } from './summary-batch-accumulation.js';
 import type { SummaryDescriptor } from './summary-aggregate.js';
 import type { RelatedRecordBinding } from './validation/rule-validator.js';
 
@@ -316,5 +316,128 @@ describe('[#34465] loadPredicateUpdateSummaryBases — the base a predicate upda
     expect(nested.calls).toEqual([]);
     // CONTROL: a field condition spelled with operators is evaluated in memory, so its roll-up is loaded.
     expect((await loadPredicateUpdateSummaryBases(nested.engine, [desc({ fn: 'min', summaryField: 'low', filter: { kind: { $in: ['a'] } } })], matched)).size).toBe(1);
+  });
+});
+
+describe('[#34821] the bulk insert accumulator screens a filter reading through a reference as the predicate update\'s fold does', () => {
+  it('a filter in the nested one-level form, at any depth of $and / $or / $not, is not accumulated: no accumulator when it is the only roll-up', () => {
+    for (const filter of [{ account: { status: 'x' } }, { $not: { account: { status: 'x' } } }, { $or: [{ kind: 'a' }, { account: { status: 'x' } }] }, { account: {} }]) {
+      expect(createBatchSummaryAccumulator([desc({ fn: 'count', filter })], CHILD_FIELDS)).toBeUndefined();
+    }
+  });
+
+  it('CONTROL: a field condition spelled with operators is still accumulated', () => {
+    const acc = createBatchSummaryAccumulator([desc({ fn: 'count', summaryField: 'n', filter: { kind: { $in: ['a'] } } })], CHILD_FIELDS)!;
+    acc.accept({ order: 'o1', kind: 'a' });
+    expect(acc.overlay(bound({ id: 'o1', n: 1 }))!.order!.row).toEqual({ id: 'o1', n: 2 });
+  });
+});
+
+describe('[#34821] the bulk insert accumulator hands the moved roll-ups to what computes the parent fields calculated from them', () => {
+  const sum = desc({});
+
+  it('names, per parent object a rule reads, the roll-ups it moves and the parents the rows name', () => {
+    const acc = createBatchSummaryAccumulator([sum, desc({ parentObject: 'xt_other', summaryField: 'n', fn: 'count' })], CHILD_FIELDS)!;
+    const rows = [{ order: 'o1' }, { order: 'o2' }, { order: null }, null];
+    expect(acc.foldedSummaries(rows, new Set(['xt_order']))).toEqual(new Map([['xt_order', { fields: new Set(['total']), parentIds: new Set(['o1', 'o2']) }]]));
+    expect(acc.foldedSummaries(rows, new Set())).toEqual(new Map());
+  });
+
+  it('a binding naming only the calculated field: the roll-up is moved from the stored parent, and the calculated field patched with what the dependents compute', () => {
+    const acc = createBatchSummaryAccumulator([sum], CHILD_FIELDS)!;
+    const asked: unknown[] = [];
+    const dependents = Object.assign((object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => {
+      asked.push([object, parentId, { ...moved }]);
+      return { remaining: 100 - (moved.total ?? 0), other: 'x' };
+    }, { stored: (object: string, parentId: string) => (object === 'xt_order' && parentId === 'o1' ? { id: 'o1', total: 80 } : undefined) }) as SummaryDependents;
+    acc.setDependents(dependents);
+    const binding: RelatedRecordBinding = { order: { object: 'xt_order', row: { id: 'o1', remaining: 20 } } };
+    // No admitted row yet: nothing moves, the dependents are not asked.
+    expect(acc.overlay(binding)).toBe(binding);
+    acc.accept({ order: 'o1', amount: 30 });
+    expect(acc.overlay(binding)!.order!.row).toEqual({ id: 'o1', remaining: -10 });
+    expect(binding.order!.row).toEqual({ id: 'o1', remaining: 20 });
+    expect(asked).toEqual([['xt_order', 'o1', { total: 110 }]]);
+  });
+
+  it('a binding carrying the roll-up moves it from the value it carries; the header overlay reads the same', () => {
+    const acc = createBatchSummaryAccumulator([sum], CHILD_FIELDS)!;
+    acc.setDependents(Object.assign((_o: string, _p: string, moved: Readonly<Record<string, number | null>>) => ({ remaining: 100 - (moved.total ?? 0) }), { stored: () => ({ id: 'o1', total: 0 }) }) as SummaryDependents);
+    acc.accept({ order: 'o1', amount: 30 });
+    expect(acc.overlay(bound({ id: 'o1', total: 80, remaining: 20 }))!.order!.row).toEqual({ id: 'o1', total: 110, remaining: -10 });
+    expect(acc.overlayRow('xt_order', { id: 'o1', total: 80, remaining: 20 })).toEqual({ id: 'o1', total: 110, remaining: -10 });
+  });
+
+  it('tells the dependents, after each admitted row, every parent that row names with the roll-ups it moves them to', () => {
+    const acc = createBatchSummaryAccumulator([sum], CHILD_FIELDS)!;
+    const advanced: unknown[] = [];
+    acc.setDependents(Object.assign(() => undefined, {
+      stored: (_o: string, parentId: string) => ({ id: parentId, total: parentId === 'o1' ? 80 : 0 }),
+      advance: (object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => { advanced.push([object, parentId, { ...moved }]); },
+    }) as SummaryDependents);
+    acc.accept({ order: 'o1', amount: 30 });
+    acc.accept({ order: 'o2', amount: 5 });
+    acc.accept({ order: 'o1', amount: -50 });
+    expect(advanced).toEqual([
+      ['xt_order', 'o1', { total: 110 }],
+      ['xt_order', 'o2', { total: 5 }],
+      ['xt_order', 'o1', { total: 60 }],
+    ]);
+  });
+});
+
+describe('[#34821] summaryPatchCanMove — a roll-up a predicate update\'s patch cannot move is not folded', () => {
+  const filtered = desc({ fn: 'count', summaryField: 'n', filter: { $and: [{ kind: 'a' }, { $or: [{ is_primary: true }, { $not: { note: 'x' } }] }] } });
+
+  it('moves when the patch writes the foreign key, the source field, or a field the filter names at any depth', () => {
+    expect(summaryPatchCanMove(desc({}), { order: 'o2' })).toBe(true);
+    expect(summaryPatchCanMove(desc({}), { amount: 1 })).toBe(true);
+    expect(summaryPatchCanMove(desc({ fn: 'avg' }), { amount: null })).toBe(true);
+    for (const field of ['kind', 'is_primary', 'note']) expect(summaryPatchCanMove(filtered, { [field]: null })).toBe(true);
+  });
+
+  it('cannot move when the patch writes none of them; a count reads no source field', () => {
+    expect(summaryPatchCanMove(desc({}), { kind: 'b', note: 'n' })).toBe(false);
+    expect(summaryPatchCanMove(filtered, { amount: 5 })).toBe(false);
+    expect(summaryPatchCanMove(desc({ fn: 'count', sourceField: undefined }), { amount: 5 })).toBe(false);
+  });
+
+  it('a filter holding a condition whose fields it cannot read is taken to move', () => {
+    expect(summaryPatchCanMove(desc({ fn: 'count', filter: { $expr: { $gt: ['$amount', 1] } } }), { kind: 'b' })).toBe(true);
+  });
+});
+
+describe('[#34821] each stand-down of a predicate update\'s fold is reported once, naming the roll-up and why', () => {
+  const recorder = (answer: () => any[]) => ({ aggregate: async () => answer() });
+  const matched: MatchedRowStates[] = [
+    { previous: { id: 'a', order: 'o1', amount: 1 }, next: { id: 'a', order: 'o1', amount: 2 } },
+    { previous: { id: 'b', order: 'o1', amount: 2 }, next: { id: 'b', order: 'o1', amount: 3 } },
+  ];
+  const sink = () => {
+    const told: Array<[string, SummaryFoldStandDown]> = [];
+    return { told, standDown: (d: SummaryDescriptor, reason: SummaryFoldStandDown) => { told.push([d.summaryField, reason]); } };
+  };
+
+  it('the base loader: a filter reading through a reference, an answer that is no number, a min / max past the exclusion budget', async () => {
+    const { told, standDown } = sink();
+    await loadPredicateUpdateSummaryBases(recorder(() => [{ order: 'o1', value: 1 }]), [desc({ fn: 'count', summaryField: 'nested', filter: { account: { status: 'x' } } })], matched, undefined, standDown);
+    await loadPredicateUpdateSummaryBases(recorder(() => [{ order: 'o1', value: '2026-01-01' }]), [desc({ fn: 'min', summaryField: 'first_day', sourceField: 'day' })], matched, undefined, standDown);
+    const many: MatchedRowStates[] = Array.from({ length: MIN_MAX_EXCLUDED_ID_BUDGET + 1 }, (_, i) => ({ previous: { id: `r${i}`, order: 'o1' }, next: { id: `r${i}`, order: 'o1' } }));
+    await loadPredicateUpdateSummaryBases(recorder(() => []), [desc({ fn: 'max', summaryField: 'highest' })], many, undefined, standDown);
+    // CONTROL: a roll-up the loader folds is not reported.
+    await loadPredicateUpdateSummaryBases(recorder(() => [{ order: 'o1', value: 3 }]), [desc({})], matched, undefined, standDown);
+    expect(told).toEqual([['nested', 'filter'], ['first_day', 'not_a_number'], ['highest', 'exclusion_budget']]);
+  });
+
+  it('the fold: a filter the walker refuses, a matched value that is no number', () => {
+    const { told, standDown } = sink();
+    const base = new Map([['o1', { count: 0, sum: 3, nonNull: 0, min: null, max: null }]]);
+    const refused = desc({ fn: 'count', summaryField: 'refused', filter: { kind: { $nope: 1 } } });
+    const texty = desc({ summaryField: 'texty', sourceField: 'note' });
+    const kept = desc({});
+    const rows: MatchedRowStates[] = [{ previous: { id: 'a', order: 'o1', amount: 1, kind: 'a', note: 'x' }, next: { id: 'a', order: 'o1', amount: 2, kind: 'a', note: 'y' } }];
+    const fold = createPredicateUpdateSummaryFold(new Map([[refused, base], [texty, base], [kept, base]]), rows, CHILD_FIELDS, standDown);
+    expect(fold!.foldedSummaries().get('xt_order')!.fields).toEqual(new Set(['total']));
+    expect(told).toEqual([['refused', 'filter'], ['texty', 'not_a_number']]);
   });
 });
