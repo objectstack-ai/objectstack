@@ -84,7 +84,7 @@ async function measureToolsList(): Promise<{ total: number; rows: ToolRow[] }> {
 }
 
 /**
- * The slimmed total (36,226 bytes, from 47,712) plus room for one more tool. A PR
+ * The slimmed total (36,481 bytes, from 47,712) plus room for one more tool. A PR
  * that needs more raises it beside its own before/after table.
  */
 const TOOLS_LIST_BYTE_CEILING = 38_000;

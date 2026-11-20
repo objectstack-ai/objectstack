@@ -3926,8 +3926,11 @@ export function registerObjectTools(
           'matched, so do not sum, count or rank the rows as if whole: read on with offset, or use aggregate_records ' +
           'where offered. ' +
           OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
-          'A filter value "{current_user_id}" stands for you. latestPer answers one record per group (the first in ' +
-          'its orderBy; limit then counts groups). ' +
+          'A filter value "{current_user_id}" stands for you, e.g. approvals waiting on you: objectName ' +
+          '"sys_approval_request", where {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}. ' +
+          // [ruling B] A person field holds a user id; names repeat, so email.
+          'A person field takes a user id: find it on objectName "sys_user", where {"email":"..."}. ' +
+          'latestPer answers one record per group (the first in its orderBy; limit then counts groups). ' +
           `expand returns up to ${QUERY_EXPAND_MAX_FIELDS} lookup fields as the records they name, one level, under ` +
           'your permissions; one you may not read keeps its id. ' +
           WITHHELD_FIELDS_DESCRIPTION,
