@@ -49,13 +49,13 @@ export interface EmittedChunk {
   code: string;
   /** Rolldown's static import list, when known; the cross-check for the parser. */
   imports?: readonly string[];
-  /** Rolldown's dynamic import list, when known. */
-  dynamicImports?: readonly string[];
 }
 
 export interface DynamicSiteHops {
   importer: string;
   target: string;
+  /** The target chunk's rolldown name. */
+  targetName: string;
   /** Non-eager files in the target's static closure, the target included. */
   closure: number;
   /** Highest wave in that closure, counted from the `import()` call (1 = all at once). */
@@ -119,11 +119,22 @@ export function dynamicSitesOf(fileName: string, code: string): { target: string
     }
   }
   const sites: { target: string; deps: string[] }[] = [];
-  const re = /\bimport\(\s*["'`](\.{1,2}\/[^"'`]+\.js)["'`]\s*\)(\s*,\s*__vite__mapDeps\(\[([\d,\s]*)\]\))?/g;
-  for (const m of code.matchAll(re)) {
-    const indices = m[3] ? m[3].split(',').map((s) => s.trim()).filter(Boolean).map(Number) : [];
-    sites.push({ target: resolveRelative(fileName, m[1]), deps: indices.map((i) => files[i]).filter(Boolean) });
-  }
+  const opener = /\bimport\(\s*["'`](\.{1,2}\/[^"'`]+\.js)["'`]\s*\)/g;
+  const found = [...code.matchAll(opener)];
+  found.forEach((m, i) => {
+    // Vite wraps the site as `__vitePreload(FN, DEPS, import.meta.url)` and
+    // FN may run on after the import (`.then(…)`, `;return{…}`), so DEPS is
+    // read up to the wrapper's `import.meta.url`. Stopping at the next
+    // `import(` too keeps an unwrapped site from borrowing a later site's deps;
+    // the cost is a false red on two imports in one wrapper — loud, never quiet.
+    const from = (m.index as number) + m[0].length;
+    const nextSite = i + 1 < found.length ? (found[i + 1].index as number) : code.length;
+    const metaUrl = code.indexOf('import.meta.url', from);
+    const tail = code.slice(from, Math.min(nextSite, metaUrl === -1 ? code.length : metaUrl, from + 20_000));
+    const deps = /__vite__mapDeps\(\[([\d,\s]*)\]\)/.exec(tail);
+    const indices = deps ? deps[1].split(',').map((x) => x.trim()).filter(Boolean).map(Number) : [];
+    sites.push({ target: resolveRelative(fileName, m[1]), deps: indices.map((n) => files[n]).filter(Boolean) });
+  });
   return sites;
 }
 
@@ -179,6 +190,18 @@ function waves(roots: readonly string[], seeds: ReadonlySet<string>, edges: Read
   return wave;
 }
 
+function staticClosure(root: string, edges: ReadonlyMap<string, readonly string[]>): Set<string> {
+  const seen = new Set<string>();
+  const stack = [root];
+  while (stack.length) {
+    const f = stack.pop() as string;
+    if (seen.has(f)) continue;
+    seen.add(f);
+    for (const dep of edges.get(f) ?? []) stack.push(dep);
+  }
+  return seen;
+}
+
 /** The hop reading of an emitted console build. Pure. */
 export function measurePreloadHops(html: string, chunks: readonly EmittedChunk[]): PreloadHops {
   const byFile = new Map(chunks.map((c) => [c.fileName, c]));
@@ -207,10 +230,15 @@ export function measurePreloadHops(html: string, chunks: readonly EmittedChunk[]
   for (const c of chunks) {
     for (const site of dynamicSitesOf(c.fileName, c.code)) {
       if (!byFile.has(site.target) || eager.has(site.target)) continue;
-      const w = waves([site.target], new Set(site.deps), edges, eager);
+      // Loaded when the import() runs: the eager closure, and the importer with
+      // its own static closure (Vite leaves those out of the deps, rightly).
+      const loaded = new Set([...eager, ...staticClosure(c.fileName, edges)]);
+      loaded.delete(site.target);
+      const w = waves([site.target], new Set(site.deps), edges, loaded);
       dynamicSites.push({
         importer: c.fileName,
         target: site.target,
+        targetName: (byFile.get(site.target) as EmittedChunk).name,
         closure: w.size,
         maxWave: Math.max(0, ...w.values()),
         late: [...w].filter(([, n]) => n > 1).map(([f, n]) => `${f} (wave ${n})`),
@@ -224,8 +252,6 @@ export interface PreloadVerdict {
   ok: boolean;
   message: string;
 }
-
-const nameOf = (fileName: string) => fileName.replace(/^.*\//, '').replace(/-[A-Za-z0-9_-]{8}\.js$/, '');
 
 /** Pass, refusal, or a refused verdict (blind walk). Pure. */
 export function judgePreloadHops(hops: PreloadHops): PreloadVerdict {
@@ -245,7 +271,7 @@ export function judgePreloadHops(hops: PreloadHops): PreloadVerdict {
   if (measured.length === 0) {
     return { ok: false, message: 'cannot judge: no import() target has a static closure to preload, so "one wave" would be vacuous. Is the dynamic-import parser blind?' };
   }
-  const targets = new Set(measured.map((s) => nameOf(s.target)));
+  const targets = new Set(measured.map((s) => s.targetName));
   const missing = REQUIRED_DYNAMIC_TARGETS.filter((t) => !targets.has(t));
   if (missing.length > 0) {
     return { ok: false, message: `cannot judge: the route chunk(s) ${missing.join(', ')} were not found as import() targets with a static closure, and the #35455 measurement is about them.` };
@@ -288,7 +314,6 @@ export function emittedFrom(bundle: Rollup.OutputBundle): { html: string; chunks
         isEntry: output.isEntry,
         code: output.code,
         imports: output.imports,
-        dynamicImports: output.dynamicImports,
       });
     }
   }
