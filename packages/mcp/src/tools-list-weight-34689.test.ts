@@ -49,6 +49,11 @@ function makeFullBridge(): McpDataBridge & McpActionBridge & McpFileBridge {
     async createUploadLink() {
       return { url: 'https://x.test/u', expiresAt: '2026-01-01T00:00:00.000Z' };
     },
+    // The runtime bridge serves it where storage can mint a link for a record
+    // not yet created; it adds text to create_upload_link, so it is measured.
+    async createUploadLinkForNewRecord() {
+      return { url: 'https://x.test/u', expiresAt: '2026-01-01T00:00:00.000Z', fileIds: ['f'] };
+    },
     async listDatasets() { return { datasets: [] }; },
     async queryDataset() { throw new Error('not called'); },
     datasetToolDefinitions() { return getDatasetToolDefinitions(); },
@@ -79,7 +84,7 @@ async function measureToolsList(): Promise<{ total: number; rows: ToolRow[] }> {
 }
 
 /**
- * The slimmed total (35,614 bytes, from 46,827) plus room for one more tool. A PR
+ * The slimmed total (36,226 bytes, from 47,712) plus room for one more tool. A PR
  * that needs more raises it beside its own before/after table.
  */
 const TOOLS_LIST_BYTE_CEILING = 38_000;

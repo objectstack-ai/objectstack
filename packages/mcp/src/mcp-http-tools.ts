@@ -4756,10 +4756,11 @@ export function registerActionTools(
         // never counts on an action whose author declared
         // `ai.requiresConfirmation: true`; the person is asked in the app.
         // [#33712] A client that supports elicitation is asked in place.
-        'An action its author declared ai.requiresConfirmation: true never runs on this call: the person you act ' +
-        'for is asked in your client where it supports elicitation (accept runs it once), or else in the app, and ' +
+        'An action its author declared ai.requiresConfirmation: true runs only once the person you act for ' +
+        'approves it: in your client where it supports elicitation (accept runs it once), or else in the app, and ' +
         'you are answered status "pending_confirmation" with a pendingId: do not retry, tell the user to approve ' +
-        'it. A refusal ACTION_CONFIRMATION_REQUIRED means nothing ran. ' +
+        'it. A refusal ACTION_CONFIRMATION_REQUIRED (declined, cancelled, timed out, or no confirmation service) ' +
+        'means nothing ran; do not retry unless the user asks. ' +
         // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
         'Under an AI service account\'s own key the call is refused whatever it sends: hand the action to a ' +
         'person, or its author declares ai.requiresConfirmation: false when it is safe unattended. ' +
