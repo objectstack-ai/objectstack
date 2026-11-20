@@ -30,9 +30,23 @@ const THREE: SortItem[] = [
 
 afterEach(cleanup);
 
-function mount(value: SortItem[]) {
+/** The builder under a host that keeps what it hands back, as a list does. */
+function mount(initial: SortItem[]) {
   const onChange = vi.fn();
-  render(<SortBuilder fields={FIELDS} value={value} onChange={onChange} />);
+  function Host() {
+    const [value, setValue] = React.useState(initial);
+    return (
+      <SortBuilder
+        fields={FIELDS}
+        value={value}
+        onChange={(next) => {
+          onChange(next);
+          setValue(next);
+        }}
+      />
+    );
+  }
+  render(<Host />);
   return onChange;
 }
 const fieldsOf = (items: SortItem[]) => items.map((i) => `${i.field}:${i.order}`);
