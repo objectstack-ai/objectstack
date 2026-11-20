@@ -1330,6 +1330,15 @@ export type ViewFilterElementParsed = z.infer<typeof ViewFilterElementSchema>;
  *     on every face — the stored value is `null` (`aggregation-conformance`);
  *     the footer's client-side reading, which also treats `''` and `[]` as
  *     empty, is objectui's to converge under "one vocabulary".
+ *   * `count_true` / `count_false` — the yes / no counts of a BOOLEAN column
+ *     (`boolean`, `toggle`; `COLUMN_SUMMARY_FIELD_TYPES` in
+ *     `view-grouping-query.ts`) — map by DERIVATION too, on the same fork-i
+ *     ground: booleans aggregate as numbers on every backend (ruling #11152,
+ *     `aggregation-conformance`'s `sum(flag)`), so `count_true` = `SUM(field)`
+ *     and `count_false` = `COUNT(field) − SUM(field)`. A null cell is neither
+ *     — it is `count_empty`'s — so `count_true + count_false = count_filled`.
+ *     They are refused over any other field type: a `SUM(field)` over a
+ *     number is a total, not a count of true values.
  *
  * ⛔ Adding a member here without deciding its row in
  * `COLUMN_SUMMARY_AGGREGATION` is a type error by construction, so the table
@@ -1345,6 +1354,8 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
   'count_unique',
   'percent_empty',
   'percent_filled',
+  'count_true',
+  'count_false',
   'sum',
   'avg',
   'min',
@@ -1358,6 +1369,8 @@ export const ColumnSummarySchema = lazySchema(() => z.enum([
   + 'count_filled, count_empty, percent_filled, percent_empty derive from one COUNT(field) node (the '
   + 'non-null count) and the group count — count_filled = COUNT(field), count_empty = count − COUNT(field), '
   + 'percent_filled = COUNT(field) / count (0 when count is 0), percent_empty = 1 − percent_filled. '
+  + 'count_true and count_false are a boolean column\'s yes and no counts, boolean fields only — '
+  + 'count_true = SUM(field), count_false = COUNT(field) − SUM(field); a null cell is neither. '
   + 'Server-side "empty" is null on every face; the footer\'s client-side reading of empty strings and '
   + 'empty arrays as empty is the renderer\'s to converge',
 ));

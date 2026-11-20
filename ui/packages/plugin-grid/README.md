@@ -351,6 +351,8 @@ The accepted values are `ColumnSummarySchema` from `@objectstack/spec`:
 | `count_unique` | distinct non-empty values | raw values |
 | `percent_filled` | share of rows that are non-empty | raw values |
 | `percent_empty` | share of rows that are empty | raw values |
+| `count_true` | rows whose boolean cell is true (Yes) — boolean / toggle only | raw values |
+| `count_false` | rows whose boolean cell is false (No); an empty cell is neither — boolean / toggle only | raw values |
 | `sum` | total | numeric values |
 | `avg` | mean | numeric values |
 | `min` | smallest | numeric values |
@@ -369,7 +371,8 @@ A host that also passes `onColumnSummaryPick(field, summary)`
 (wire it only for a reader who may change the view) turns each cell into a
 menu of the calculations the column's field type allows — `sum`/`avg` on
 numbers and amounts, `min`/`max` on numbers and dates (named Earliest and
-Latest on a date), the count family on any field, the current one ticked and
+Latest on a date), Count of Yes / Count of No first on a boolean, the count
+family on any field, the current one ticked and
 None last. `summaryPickFields` limits the menu to the columns the host can
 save (the console passes the columns the view itself declares); the other cells
 draw their figure only. The grid draws a pick at once; the host saves it as the

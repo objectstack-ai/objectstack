@@ -637,6 +637,10 @@ const ko = {
       none: "없음",
       menuPercentEmpty: "빈 값 비율",
       menuPercentFilled: "입력된 값 비율",
+      countTrue: "예",
+      countFalse: "아니오",
+      menuCountTrue: '"예" 개수',
+      menuCountFalse: '"아니오" 개수',
     },
     toolbar: {
       densityMode: "밀도",

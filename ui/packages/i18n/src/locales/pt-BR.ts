@@ -649,6 +649,10 @@ const pt = {
       none: "Nenhum",
       menuPercentEmpty: "Percentual vazio",
       menuPercentFilled: "Percentual preenchido",
+      countTrue: "Sim",
+      countFalse: "Não",
+      menuCountTrue: "Quantidade de Sim",
+      menuCountFalse: "Quantidade de Não",
     },
     toolbar: {
       densityMode: "Densidade",
