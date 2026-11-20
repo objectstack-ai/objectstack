@@ -7,8 +7,8 @@
 
 feat(spec): `count_true` / `count_false` column summaries — a boolean column's Yes and No counts in the list footer and group headers
 
-Clause-②: yes (widening: `ColumnSummarySchema` gains members; the derived-row shape of `ColumnSummaryAggregation` changes; contract face at `CONTRACT_REVIEW_TIER`)
-Metadata-protocol: none
+Clause-②: yes (widening)
+Metadata-protocol: added
 
 `ListColumn.summary` accepts two more members, `count_true` and `count_false`: the number of rows whose boolean (or toggle) cell is true, and the number whose cell is false. A cell with no value is neither; it stays `count_empty`'s, so `count_true + count_false = count_filled`.
 
