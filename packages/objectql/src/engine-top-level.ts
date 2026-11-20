@@ -951,8 +951,11 @@ export function lowerWhereFilterArray<T extends object | undefined>(
     // asks "can that column's storage rule READ this value".
     // It must run BEFORE `resolveWhereTokens` (which is downstream of every
     // caller of this function) because the refusal has to precede the driver —
-    // hence the door steps around `{placeholder}` strings rather than judging
-    // them; the token resolver refuses the unknown ones a moment later, loudly.
+    // hence the door judges a `{placeholder}` by its kind rather than as the
+    // value it resolves to: a date macro is stepped around (judged by its year
+    // once resolved), a period key or a context token is judged as written, and
+    // an unknown or record-context token is left to the token resolver, which
+    // refuses it a moment later, loudly.
     assertTemporalComparandsInterpretable(object, operation, schema, where);
     // [#20351] The NUMBER-comparand declared-type door, fifth on the same seam
     // and fifth question about the same predicate: is this string a number the

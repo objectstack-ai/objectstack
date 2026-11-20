@@ -1177,7 +1177,10 @@ export class DeleteAndAggregateFacet {
               // bound in a `where` was refused 400 — measured on the base on
               // driver-memory and driver-sql, through the engine and REST.
               // Before the token resolver below, as there, so a `{placeholder}`
-              // is stepped around and resolved (or refused) a moment later.
+              // is judged by its kind as there: a date macro is stepped around
+              // and judged by its year once resolved, a period key or a context
+              // token is judged as written, and an unknown or record-context
+              // token is left to the resolver, which refuses it a moment later.
               // [#20334] Rooted at this position too: the refusal said
               // `at where.placed_on.$gt`.
               assertTemporalComparandsInterpretable(
@@ -1443,9 +1446,11 @@ export class DeleteAndAggregateFacet {
       // group with a 200). Both `applyHaving` doors below read `ast.having`, so
       // one call covers the native and the rows path, before any driver read.
       // After every `having` door above, as `where`'s resolution follows its
-      // doors: the temporal door steps around a `{placeholder}` exactly as
-      // `where`'s does (so, as there, the resolved value is judged only for
-      // its year, by the resolution stage — #20844), and the other doors
+      // doors: the temporal door judges a `{placeholder}` by its kind exactly
+      // as `where`'s does (a date macro stepped around, so, as there, its
+      // resolved value is judged only for its year, by the resolution stage —
+      // #20844; a period key or a context token judged as written; an unknown
+      // or record-context token left to this resolver), and the other doors
       // judged a string that resolves to a string.
       {
           const havingColumnTypes = aggregatedRowColumnTypes(query.groupBy, query.aggregations, declaredFields);

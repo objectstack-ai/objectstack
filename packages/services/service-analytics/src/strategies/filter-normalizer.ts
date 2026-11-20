@@ -625,12 +625,19 @@ export type NormalizedFilterNode =
    * a condition on that field: on a member the native compile reads through a
    * relationship path it holds only for a row whose parent exists ("no parent
    * never matches, whatever the operator", `cross-object-where.ts`). The member
-   * gates need no second reading of it: the shared lowering wraps every `$nin`
-   * in the NULL escape (`{ $or: [{ f: { $null: true } }, { f: { $nin: [] } }] }`),
-   * so the escape's `notSet` leaf names the same member beside it (see
-   * {@link collectFilterLeaves}), and a `$not` never meets the constant bare
-   * ({@link notOf} receives the escape's `$or`). Every other constant names no
-   * member.
+   * gates need no second reading of it: the shared lowering
+   * (`lowerFilterCondition`, `@objectstack/spec/data`) always puts a leaf on the
+   * same member beside the `$nin` (see {@link collectFilterLeaves}). Outside a
+   * `$not` it wraps every `$nin` in the NULL escape
+   * (`{ $or: [{ f: { $null: true } }, { f: { $nin: [] } }] }`), whose `notSet`
+   * leaf names the member. Inside a `$not` it takes that escape when a row with
+   * no value satisfies every operator of the field's spec (`$nin` alone, or
+   * beside `$null: true` / `$eq: null`); for a mixed spec it takes a `$null:
+   * false` requirement instead, a `set` leaf on the member, as its own conjunct
+   * or the enclosing conjunct that already requires the field. So a `$not`
+   * never meets the constant bare either: {@link notOf} receives the escape's
+   * `$or`, or the conjunction holding the constant. Every other constant names
+   * no member.
    */
   | { kind: 'const'; value: boolean; member?: string }
   | { kind: 'and'; children: NormalizedFilterNode[] }
@@ -2501,8 +2508,12 @@ export function collectFilterLeaves(
   // A boolean constant names no member — it constrains rows, not columns — so
   // it contributes nothing to the cross-object envelope check. The empty
   // `$nin`'s TRUE names its member too, and is not read here: the shared
-  // lowering wraps every `$nin` in its NULL escape, whose `notSet` leaf names
-  // the same member, so every gate already reads that member for it.
+  // lowering always puts a leaf on the same member beside the `$nin`, so every
+  // gate already reads that member for it. Outside a `$not` that is the
+  // `notSet` leaf of the NULL escape every `$nin` is wrapped in; inside one it
+  // is that escape's leaf, or for a mixed spec the `set` leaf of a
+  // `$null: false` requirement (its own conjunct, or the enclosing one that
+  // already requires the field). See the `const` arm of `NormalizedFilterNode`.
   if (node.kind === 'const') return [];
   if (node.kind === 'not') return collectFilterLeaves(node.child);
   return node.children.flatMap(collectFilterLeaves);

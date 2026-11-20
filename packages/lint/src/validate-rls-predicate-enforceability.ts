@@ -202,10 +202,16 @@
  *   app-staged set holds app data this rule cannot know: measured,
  *   `close_date in current_user.holidays` lowered with the probe string is
  *   refused by the temporal door, while with `[]` it is admitted.
- * - **With what context:** none. A `{placeholder}` string in a predicate
- *   therefore answers `FILTER_TOKEN_UNRESOLVED` (known) or
- *   `FILTER_TOKEN_UNKNOWN` (unknown) — the engine's own semantics for a filter
- *   judged with no caller. An RLS predicate names the caller as `current_user.*`.
+ * - **With what context:** none, so a `{placeholder}` string in a predicate
+ *   answers as the engine answers a filter judged with no caller. The
+ *   field-aware doors run first: on a `date`, `datetime` or `time` field a
+ *   period key or a context token is judged as written and answers
+ *   `INVALID_FILTER` (the temporal door), and on a number field every
+ *   placeholder does (the number door). Otherwise the resolver answers: a
+ *   context token or a record-context token `FILTER_TOKEN_UNRESOLVED`, an
+ *   unknown one `FILTER_TOKEN_UNKNOWN`, while a date macro and a period key
+ *   resolve with no caller (a date macro then judged by its year). An RLS
+ *   predicate names the caller as `current_user.*`.
  * - **When:** only when every pass above left this clause clean, so one
  *   defect earns one finding.
  *
