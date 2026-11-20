@@ -28,39 +28,10 @@ import {
 } from '../../scripts/vite-objectstack-workspace.ts';
 import { viteDeclaredLazyViews } from '../../scripts/vite-declared-lazy-views.ts';
 import { viteTypesZodLazy } from '../../scripts/vite-types-zod-lazy.ts';
+import { preloadStaticClosure, viteEagerPreload } from '../../scripts/vite-eager-preload.ts';
 import { getServiceWorkerSource } from '../../packages/mobile/src/serviceWorkerSource.ts';
 import { compression } from 'vite-plugin-compression2';
 import { visualizer } from 'rollup-plugin-visualizer';
-
-// Critical chunks that should be preloaded for faster initial page render.
-// These are the chunks needed on every page load (framework + vendor-react).
-const CRITICAL_CHUNK_PREFIXES = ['vendor-react', 'framework', 'ui-components', 'vendor-radix'];
-
-/**
- * Vite plugin that injects <link rel="modulepreload"> hints for critical chunks
- * into the built HTML, enabling the browser to fetch them in parallel with the
- * main entry script.
- */
-function preloadCriticalChunks(): Plugin {
-  return {
-    name: 'preload-critical-chunks',
-    enforce: 'post',
-    transformIndexHtml(html, ctx) {
-      if (!ctx.bundle) return html;
-      const preloadTags: string[] = [];
-      for (const [fileName] of Object.entries(ctx.bundle)) {
-        if (
-          fileName.endsWith('.js') &&
-          CRITICAL_CHUNK_PREFIXES.some((prefix) => fileName.includes(prefix))
-        ) {
-          preloadTags.push(`<link rel="modulepreload" href="${basePath}${fileName}" />`);
-        }
-      }
-      if (preloadTags.length === 0) return html;
-      return html.replace('</head>', `    ${preloadTags.join('\n    ')}\n  </head>`);
-    },
-  };
-}
 
 /**
  * Build-time guard: `@objectstack/lint` must stay OUT of the eager closure.
@@ -825,8 +796,11 @@ export default defineConfig({
   plugins: [
     viteCryptoStub(),
     react(),
-    // Inject <link rel="modulepreload"> for critical chunks
-    preloadCriticalChunks(),
+    // Fails the build when a chunk a page load needs is found only after the
+    // chunk that imports it has arrived: an eager file without a
+    // modulepreload tag in `index.html`, or a dynamic import whose static
+    // closure is not preloaded beside it (objectstack#35455).
+    viteEagerPreload(),
     // Fails the build if the lazily-imported linter is folded back into an
     // eagerly-loaded chunk. Runs on CI/Vercel too — it costs microseconds and
     // the regression it catches is invisible in every other signal.
@@ -938,10 +912,15 @@ export default defineConfig({
     target: 'esnext',
     sourcemap: false,
     cssCodeSplit: true,
-    // Don't pre-emit `<link rel="modulepreload">` for every chunk; it
-    // negates lazy-loading by pulling all 1700+ icon chunks and heavy
-    // plugin chunks during the initial HTML parse.
-    modulePreload: false,
+    // Every chunk a load needs is requested in ONE wave (objectstack#35455):
+    // `index.html` preloads the entry's whole static closure, and an
+    // `import()` preloads the imported chunk's static closure beside it.
+    // Moves no byte — the HTML host's deps are the eager closure, which the
+    // `$initial`-tagged groups keep free of lazy-only modules, and an
+    // `import()`'s deps are files its chunk imports anyway; only WHEN they are
+    // requested changes. `polyfill: false`: without native modulepreload a
+    // browser just loads them later. `viteEagerPreload()` above enforces it.
+    modulePreload: { polyfill: false, resolveDependencies: preloadStaticClosure },
     commonjsOptions: {
       include: [/node_modules/, /packages/],
       transformMixedEsModules: true
