@@ -65,7 +65,7 @@ const MODE_FIRST_SENTENCE = {
     + 'per object: in the drawer, which expands to the full page, or as the full page for an object that '
     + 'declares `page`, so a popover was a cramped fourth surface for the same record.',
 } as const;
-const MODE_FIX = "Delete the value — `drawer` is the default; declare `page` only for an object whose record should open as a full page;";
+const MODE_FIX = "Delete the value — an object's list opens a record one way for every reader: the record name opens the full page, and the icon beside it while the row is hovered opens the side panel; `navigation.mode` itself is deprecated, so omit the key.";
 const RECORD_ACTION_FIRST_SENTENCE =
   "`interfaceConfig.recordAction: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record "
   + 'opens one way per object: in the drawer, which expands to the full page, or as the full page where the '

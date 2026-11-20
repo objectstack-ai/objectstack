@@ -2887,6 +2887,8 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
 
 // [#26677] `navigation.mode` retired members — the prescription each one
 // answers with at parse (`enumWithRetiredValues`, `../shared/retired-key.ts`).
+// Since #35854 the key itself is deprecated, which the FIX says; each member's
+// own sentence keeps the history of its removal.
 // Declared with `//` on purpose: an enum's error map consumes this, it is no
 // documented surface (the `NAVIGATION_VIEW_RETIRED` placement note below).
 //
@@ -2898,9 +2900,9 @@ export const ListMapConfigSchema = lazySchema(() => strictObject({
 // conversion (ADR-0087 D2, `conversions/registry.ts`) strips a retired member
 // from existing sources and stored rows, which lands them on the default.
 const NAVIGATION_MODE_RETIRED_FIX =
-  'Delete the value — `drawer` is the default; declare `page` only for an object whose record should '
-  + 'open as a full page; a side-by-side pane is a reader\'s own preference in the list\'s Display menu, '
-  + 'not metadata. '
+  'Delete the value — an object\'s list opens a record one way for every reader: the record name '
+  + 'opens the full page, and the icon beside it while the row is hovered opens the side panel; '
+  + '`navigation.mode` itself is deprecated, so omit the key. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 const NAVIGATION_MODE_RETIRED = {
@@ -2976,12 +2978,24 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
 }, {
   /**
-   * [#26677] How a click opens the record. Defaults to `drawer` — before
-   * 18.3.0 it defaulted to `page`, which the console never honoured for an
-   * un-authored list (it guessed the surface from the object's field count).
-   * Declare `page` only for an object whose record should open as a full page.
+   * @deprecated [#35854] No longer picks how an object's list opens a record
+   * (maintainer ruling 2026-11-20: 「废弃」). The console's object list has one
+   * rule for every reader: the record's name opens the full page, and the icon
+   * beside the name while the row is hovered opens the side panel. There
+   * `drawer`, `page` and `new_window` still parse and change nothing — a list
+   * view that declares one behaves as one that declares nothing; `none` still
+   * means the rows open nothing (prefer `preventNavigation: true`). Renderers
+   * outside that list (a page's list block, the timeline, an embedded view)
+   * still read the value until they follow. ADR-0087 D3 semantic entry
+   * `navigation-mode-record-open-deprecated`. Kept in the shape so existing
+   * metadata loads.
    */
-  mode: NavigationModeSchema.default('drawer'),
+  mode: NavigationModeSchema.default('drawer').describe(
+    '[DEPRECATED] No longer picks how an object\'s list opens a record: in the console the record '
+    + 'name opens the full page and the hover icon beside it opens the side panel, for every reader. '
+    + 'There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows '
+    + 'open nothing — prefer `preventNavigation: true`. Omit the key.',
+  ),
 
   /**
    * [#16885] RETIRED — see {@link NAVIGATION_VIEW_RETIRED} above the schema.
@@ -3540,7 +3554,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   selection: SelectionConfigSchema.optional().describe('Row selection configuration'),
 
   /** Navigation / Interaction */
-  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation (drawer by default, page, new_window or none)'),
+  navigation: NavigationConfigSchema.optional().describe('Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel)'),
 
   /** Pagination */
   pagination: PaginationConfigSchema.optional().describe('Pagination configuration'),

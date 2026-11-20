@@ -113,7 +113,6 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 type Lang = 'en' | 'ru' | 'ar';
 
@@ -142,9 +141,6 @@ const OBJECTS = [
 ];
 
 beforeEach(() => {
-  // A stored `split` (objectstack#26677) is an unknown value since
-  // objectstack#28915: the record opens in the drawer over the full list.
-  window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -159,7 +155,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  window.localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
 });
 
 function boot(lang: Lang) {

@@ -193,7 +193,7 @@ export function useObjectViewRecordNavigation({
             if (!recordServed) return { mode: 'none' };
             // objectstack#27058 — on a phone the spec's rule decides, and it
             // answers `page` whatever the view or the object declares.
-            if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) };
+            if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) as ViewNavigationConfig['mode'] };
             const authored = activeView?.navigation ?? objectDef.navigation;
             // `preventNavigation: true` ("Disable standard navigation
             // entirely") outranks every mode: the row resolves to `none`, so
