@@ -175,9 +175,9 @@ for (const face of ['local', 'remote'] as const) {
         try {
           await seed(engine, driver);
           // What landed: a boolean on every row, never TEXT. The remote `toggle` column has TEXT affinity,
-          // so its canonical cell is the text '1' / '0' there.
+          // so its canonical cell is the text '1' / '0' there. Soft, so a red here still reports the reads.
           const toggleForm = face === 'remote' ? 'text' : 'integer';
-          expect(await rawCells(file)).toEqual(Object.fromEntries(
+          expect.soft(await rawCells(file)).toEqual(Object.fromEntries(
             [...SERVED, ...WITHHELD].sort().map((id) => [id, `integer/${toggleForm}`]),
           ));
 
