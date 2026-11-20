@@ -154,34 +154,100 @@ const LEAF_KEYS: ReadonlySet<string> = new Set(['object', 'recipient', 'accessLe
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
-/** A non-empty, frozen list of non-empty strings: the write form's level list. */
-function isLevelList(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.length > 0 && Object.isFrozen(value) && value.every(isNonEmptyString);
+/** The leaf's inputs, as read from its own data properties. */
+interface LeafFields {
+  readonly object: string;
+  readonly recipient: string;
+  readonly accessLevels?: readonly string[];
+}
+
+/**
+ * The write form's level list read from its own data properties: a fresh
+ * frozen copy, or `undefined` unless `value` is a non-empty, frozen array of
+ * non-empty strings held as data, with no accessor at any index.
+ */
+function readLevelList(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || !Object.isFrozen(value)) return undefined;
+  const levels: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined || !('value' in descriptor) || !isNonEmptyString(descriptor.value)) return undefined;
+    levels.push(descriptor.value);
+  }
+  return Object.freeze(levels);
+}
+
+/**
+ * The ONE reading of a value as a leaf, shared by {@link isSharedRecordIds}
+ * and {@link SharedRecordIds.innerRead} so the guard and the description
+ * answer the same question about the same bytes: the inputs, read from the
+ * value's own property DESCRIPTORS, or `undefined` when it is no leaf.
+ *
+ * `Object.isFrozen` tests writability on data properties only, so it is not
+ * enough on its own. A frozen value can still hold an accessor, which may
+ * answer differently to each reader, or inherit a field through a prototype
+ * that stays mutable. So this reading asks four things:
+ *
+ *  - The prototype is the one the factories produce (`Object.prototype`).
+ *  - Every own key, of either kind, is a DATA property.
+ *  - The symbol keys are exactly the brand, non-enumerable and holding `true`.
+ *  - The string keys are within `object`, `recipient` and `accessLevels`, each
+ *    enumerable.
+ *
+ * It reads each input from the descriptor it judged, never through a property
+ * access.
+ */
+function readLeaf(value: unknown): LeafFields | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  if (Object.getPrototypeOf(value) !== Object.prototype || !Object.isFrozen(value)) return undefined;
+  const fields: Record<string, unknown> = {};
+  let branded = false;
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !('value' in descriptor)) return undefined;
+    if (typeof key === 'symbol') {
+      if (key !== SHARED_RECORD_IDS_BRAND || descriptor.enumerable || descriptor.value !== true) return undefined;
+      branded = true;
+    } else {
+      if (!LEAF_KEYS.has(key) || !descriptor.enumerable) return undefined;
+      fields[key] = descriptor.value;
+    }
+  }
+  if (!branded || !isNonEmptyString(fields.object) || !isNonEmptyString(fields.recipient)) return undefined;
+  if (!Object.prototype.hasOwnProperty.call(fields, 'accessLevels')) {
+    return { object: fields.object, recipient: fields.recipient };
+  }
+  const accessLevels = readLevelList(fields.accessLevels);
+  return accessLevels === undefined ? undefined : { object: fields.object, recipient: fields.recipient, accessLevels };
 }
 
 /**
  * Is `value` a branded `SharedRecordIds` leaf?
  *
- * Own symbol key only, holding only the declared value `true`, and no other
- * symbol-keyed property beside it, so no value answers to two leaf brands; a
- * frozen value; `object` and `recipient` non-empty strings; no own string key
- * but `object`, `recipient` and `accessLevels`; and `accessLevels`, when it is
- * an own key, a non-empty frozen list of non-empty strings. A copy that lost
- * the brand (JSON, structured clone, a spread), a brand holding any other
- * value, a value that also carries the `ReadableIds` brand or the composed one,
- * an unfrozen look-alike, `null` and every primitive answer `false`.
+ * Every own key must be a data property, on a frozen value whose prototype is
+ * the factories' (`Object.prototype`):
+ *
+ *  - Exactly one symbol key, the brand: non-enumerable, holding only the
+ *    declared value `true`. No other symbol-keyed property sits beside it, so
+ *    no value answers to two leaf brands.
+ *  - `object` and `recipient` own, enumerable, non-empty strings.
+ *  - No own string key but `object`, `recipient` and `accessLevels`, enumerable
+ *    or not.
+ *  - `accessLevels`, when it is an own key, a non-empty frozen list of
+ *    non-empty strings.
+ *
+ * These all answer `false`:
+ *
+ *  - a copy that lost the brand (JSON, structured clone, a spread);
+ *  - a brand holding any other value;
+ *  - a value that also carries the `ReadableIds` brand or the composed one;
+ *  - an unfrozen look-alike;
+ *  - a frozen look-alike that holds a field as an accessor, inherits one, or
+ *    hides one as non-enumerable;
+ *  - `null` and every primitive.
  */
 export function isSharedRecordIds(value: unknown): value is SharedRecordIds {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const symbols = Object.getOwnPropertySymbols(value);
-  if (symbols.length !== 1 || symbols[0] !== SHARED_RECORD_IDS_BRAND) return false;
-  if ((value as Record<symbol, unknown>)[SHARED_RECORD_IDS_BRAND] !== true) return false;
-  if (!Object.isFrozen(value)) return false;
-  const keys = Object.keys(value);
-  if (!keys.every((key) => LEAF_KEYS.has(key))) return false;
-  const leaf = value as { object?: unknown; recipient?: unknown; accessLevels?: unknown };
-  if (!isNonEmptyString(leaf.object) || !isNonEmptyString(leaf.recipient)) return false;
-  return !Object.prototype.hasOwnProperty.call(value, 'accessLevels') || isLevelList(leaf.accessLevels);
+  return readLeaf(value) !== undefined;
 }
 
 /** How a refused argument is named in a factory's `TypeError`. */
@@ -279,18 +345,20 @@ export const SharedRecordIds: {
     return brand({ object, recipient, accessLevels: Object.freeze([...accessLevels]) });
   },
   innerRead(leaf: SharedRecordIds): FixedInnerRead {
-    if (!isSharedRecordIds(leaf)) {
+    // The guard's own reading: the inputs come from the descriptors it judged.
+    const fields = readLeaf(leaf);
+    if (fields === undefined) {
       throw new TypeError(
         `SharedRecordIds.innerRead() needs a leaf built by SharedRecordIds.read() or .write(), received ` +
           `${describeArgument(leaf)}${leaf !== null && typeof leaf === 'object' ? ' without the SharedRecordIds brand' : ''}.`,
       );
     }
     const memberOf: Record<string, readonly string[]> = {};
-    if (leaf.accessLevels !== undefined) memberOf.access_level = Object.freeze([...leaf.accessLevels]);
+    if (fields.accessLevels !== undefined) memberOf.access_level = fields.accessLevels;
     return Object.freeze({
       table: TABLE,
       column: COLUMN,
-      equals: Object.freeze({ object_name: leaf.object, recipient_type: 'user', recipient_id: leaf.recipient }),
+      equals: Object.freeze({ object_name: fields.object, recipient_type: 'user', recipient_id: fields.recipient }),
       memberOf: Object.freeze(memberOf),
       tenantScope: 'none' as const,
     });

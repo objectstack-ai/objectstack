@@ -7,7 +7,7 @@ feat(spec): declare `SharedRecordIds`, the share-grant semi-join leaf, with its 
 Clause-②: yes
 Metadata-protocol: none
 
-ADR-0155 replaces the list the sharing read scope binds today (`{ id: { $in: [granted ids] } }`, read from `sys_record_share` at most 5,000 grants at a time, so a member past that count silently loses access) with an engine-internal leaf that a SQL driver compiles as a subquery in the same statement. This release declares the contract the later steps build on. Nothing writes the leaf yet, no caller admits it, and no read, write or boot behaves differently.
+ADR-0155 replaces the list the sharing read scope binds today (`{ id: { $in: [granted ids] } }`, read from `sys_record_share` at most 5,000 grants per read, so a member past that count silently loses access) with an engine-internal leaf that a SQL driver compiles as a subquery in the same statement. This release declares the contract the later steps build on. Nothing writes the leaf yet, no caller admits it, and no read, write or boot behaves differently.
 
 New in `@objectstack/spec/data`:
 
@@ -16,4 +16,4 @@ New in `@objectstack/spec/data`:
 - **`ListComparandShapeOptions.admitFixedReadLeaves`** — one option naming the brands a caller of `assertListComparandShapes` admits as a `$in` comparand, beside `admitReadableIds`. No caller passes it in this release, so every door keeps refusing the leaf.
 - **`FIXED_READ_LEAF_CASE_SETS` / `SHARED_RECORD_IDS_CASE_SET`** — the per-driver conformance cases (fixture tables, the rows each `where` must answer, which case needs the inner read to stay unwalled) and the engine seam's position, verb and recipient cases, as data for the driver and engine cards to run.
 
-The `ISharingService.buildReadFilter` and `ISecurityService.getReadFilter` docs now say what holds once plugin-sharing writes the leaf: hand the scope to an engine read in process, under the context it was asked for, a context acting on that user's behalf, or a system context, and never serialise it or match it in process. A host that registers a middleware or a `beforeFind` / `afterFind` hook for `sys_record_share` by name will be refused at boot from that switch on, until it removes the registration. A middleware or find hook registered for no object will not run on the share arm.
+The `ISharingService.buildReadFilter` and `ISecurityService.getReadFilter` docs now say what holds once plugin-sharing writes the leaf: hand the scope to an engine read in process, under the context it was asked for, a context acting on that user's behalf, or a system context, and never serialise it or match it with a generic matcher. A host that registers a middleware or a `beforeFind` / `afterFind` hook for `sys_record_share` by name will be refused at boot from that switch on, until it removes the registration. A middleware or find hook registered for no object will not run on the share arm.

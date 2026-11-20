@@ -309,7 +309,7 @@ export interface ISharingService {
    * `SharedRecordIds` leaf composed for `context`'s user, not a list. Hand the
    * answer to an engine read in process, under `context`, a context acting on
    * that user's behalf, or a system context; ⛔ never serialise it and never
-   * match it in process. "The read scope's share arm becomes an engine-internal
+   * match it with a generic matcher. "The read scope's share arm becomes an engine-internal
    * leaf" above says why, and what a host that registers a narrowing of reads
    * of `sys_record_share` is told.
    */

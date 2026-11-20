@@ -149,6 +149,58 @@ describe('isSharedRecordIds — every copy and every forgery answers false', () 
     expect(isSharedRecordIds(Object.freeze(Object.defineProperty([], SHARED_RECORD_IDS_BRAND, { value: true })))).toBe(false);
   });
 
+  /**
+   * Frozen look-alikes whose fields are not own data properties. `Object.isFrozen`
+   * says nothing about an accessor or an inherited field, so each of these is
+   * frozen and branded and is still no leaf: the guard, the dispatch,
+   * `innerRead` and the door all refuse it.
+   */
+  const refusedEverywhere = (lookAlike: object, how: string) => {
+    expect(Object.isFrozen(lookAlike), `${how}: the look-alike is frozen`).toBe(true);
+    expect(isSharedRecordIds(lookAlike), how).toBe(false);
+    expect(isFixedReadLeaf(lookAlike), how).toBe(false);
+    expect(() => SharedRecordIds.innerRead(lookAlike as SharedRecordIds), how).toThrow(TypeError);
+    const err = refusalOf(() => assertListComparandShapes({ id: { $in: lookAlike } }, undefined, 'where', ADMIT));
+    expect(envelopeOf(err), how).toEqual(ENVELOPE);
+  };
+
+  it('a field that is an accessor is refused: a getter may answer one recipient to the seam and another to innerRead', () => {
+    let reads = 0;
+    const lookAlike = Object.freeze(Object.defineProperties({}, {
+      object: { value: 'account', enumerable: true },
+      recipient: { get: () => (reads++ === 0 ? 'u1' : 'u2'), enumerable: true },
+      [SHARED_RECORD_IDS_BRAND]: { value: true },
+    }));
+    refusedEverywhere(lookAlike, 'a getter recipient');
+  });
+
+  it('fields inherited from a mutable prototype are refused: assigning on the prototype would re-point the leaf', () => {
+    const prototype = { object: 'account', recipient: 'u1' };
+    const lookAlike = Object.freeze(Object.defineProperty(Object.create(prototype), SHARED_RECORD_IDS_BRAND, { value: true }));
+    refusedEverywhere(lookAlike, 'inherited object and recipient');
+  });
+
+  it('an inherited accessLevels is refused: no reading may take a read form for a write form with an empty level list', () => {
+    const prototype = { accessLevels: Object.freeze([]) };
+    const lookAlike = Object.freeze(Object.defineProperties(Object.create(prototype), {
+      object: { value: 'account', enumerable: true },
+      recipient: { value: 'u1', enumerable: true },
+      [SHARED_RECORD_IDS_BRAND]: { value: true },
+    }));
+    refusedEverywhere(lookAlike, 'an inherited empty accessLevels');
+  });
+
+  it('a non-enumerable own string key is refused, whether a key the leaf never carries or one of its own three', () => {
+    const extra = Object.defineProperty({ object: 'account', recipient: 'u1' }, 'organization', { value: 'org_a' });
+    Object.defineProperty(extra, SHARED_RECORD_IDS_BRAND, { value: true });
+    refusedEverywhere(Object.freeze(extra), 'a non-enumerable organization key');
+    const hidden = Object.defineProperties({ object: 'account' }, {
+      recipient: { value: 'u1', enumerable: false },
+      [SHARED_RECORD_IDS_BRAND]: { value: true },
+    });
+    refusedEverywhere(Object.freeze(hidden), 'a non-enumerable recipient, which JSON would drop');
+  });
+
   it('a value carrying another leaf\'s brand beside its own is not a SharedRecordIds leaf: one brand, one meaning', () => {
     const both = Object.defineProperty({ object: 'account', recipient: 'u1' }, SHARED_RECORD_IDS_BRAND, { value: true });
     Object.defineProperty(both, READABLE_IDS_BRAND, { value: true });
@@ -248,7 +300,8 @@ describe('the comparand-shape door admits the leaf only for a caller that names 
   });
 
   it('refuses the same branded leaf for every caller that names no brand — the refusal that existed before the leaf', () => {
-    for (const options of [undefined, {}, { admitFixedReadLeaves: [] }, { admitReadableIds: true }, { admitFixedReadLeaves: true as never }] as const) {
+    // `null` is off-type, and is refused exactly as `undefined` is: INVALID_FILTER / 400, never a TypeError.
+    for (const options of [undefined, null as never, {}, { admitFixedReadLeaves: [] }, { admitReadableIds: true }, { admitFixedReadLeaves: true as never }] as const) {
       const err = refusalOf(() => assertListComparandShapes({ id: { $in: read } }, undefined, 'where', options));
       expect(envelopeOf(err), JSON.stringify(options)).toEqual(ENVELOPE);
       expect(err.message).toMatch(/^Operator "\$in" on field "id" requires an ARRAY of values\. Received object/);

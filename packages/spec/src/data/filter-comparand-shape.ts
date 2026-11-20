@@ -1096,10 +1096,11 @@ export function assertListComparandShapes(
  * Is `comparand` an engine-internal leaf this caller admits as `$in`'s
  * comparand? A branded `ReadableIds` leaf under `admitReadableIds` (ADR-0139
  * D1), or a fixed-read leaf of a brand named in `admitFixedReadLeaves`
- * (ADR-0155 D4). Without options, nothing.
+ * (ADR-0155 D4). Without options, nothing; an off-type `null` is no options
+ * either, so it keeps the INVALID_FILTER / 400 refusal rather than a TypeError.
  */
 function admitsEngineLeaf(comparand: unknown, options: ListComparandShapeOptions | undefined): boolean {
-  if (options === undefined) return false;
+  if (options == null) return false;
   if (options.admitReadableIds === true && isReadableIds(comparand)) return true;
   const brands = options.admitFixedReadLeaves;
   return brands !== undefined && isFixedReadLeaf(comparand, brands);
