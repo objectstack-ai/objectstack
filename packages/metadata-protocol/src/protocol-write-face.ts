@@ -304,8 +304,57 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
             }
             issues.push({ code: 'currency_field_repointed', field: fname, message });
         }
+        // [ADR-0158 Open item 9 point 7] A stored field declared a unit code
+        // field — the siblings of `currency_mode_to_record`, on the same face,
+        // lifted by the same `force`, reading no row. A quantity switched to
+        // `unitMode: 'record'` reads each row's unit from its `unitField`, whose
+        // stored text predates the declaration; a `text` field marked
+        // `unitMode: 'code'` (Open item 8) holds that text itself. The write
+        // check (U5) admits only a member code from then on, so each finding
+        // names the run that converts the stored text (`os migrate unit-codes`).
+        if (isStored(prevField) && nextField?.type === 'number' && unitModeOf(nextField) === 'record' && unitModeOf(prevField) !== 'record') {
+            const unitField = nextField.unitConfig.unitField;
+            const named = typeof unitField === 'string' && unitField !== '' ? unitField : undefined;
+            issues.push({
+                code: 'unit_mode_to_record',
+                field: fname,
+                message: `Field '${fname}' switched to unitMode 'record' — every row already stored reads its unit from `
+                    + `${named === undefined ? 'its unit code field' : `'${named}'`}, and a quantity edited beside a value there that is `
+                    + 'free text (stored before this declaration) or blank is refused until the row holds a unit code; once saved, '
+                    + 'convert the stored text with ' + unitCodeBackfillRemedy(objectName, named ?? '<unit code field>'),
+            });
+        }
+        if (isStored(prevField) && nextField?.type === 'text' && unitModeOf(nextField) === 'code' && unitModeOf(prevField) !== 'code') {
+            issues.push({
+                code: 'unit_mode_to_code',
+                field: fname,
+                message: `Field '${fname}' declared unitMode 'code' — rows already stored keep the text they were written with, `
+                    + 'which is no unit code until converted, and every later write of the field must hold a unit code; once saved, '
+                    + 'convert the stored text with ' + unitCodeBackfillRemedy(objectName, fname),
+            });
+        }
     }
     return issues;
+}
+
+/** A field's `unitConfig.unitMode`, as written. */
+function unitModeOf(field: any): unknown {
+    return field?.unitConfig?.unitMode;
+}
+
+/**
+ * [ADR-0158 Open item 9 point 7] The run that converts a unit code field's
+ * stored free text into codes: the CLI command, then the tenant-admin REST
+ * door beside it, as `recordCurrencyCodeBackfillRemedy` names the currency
+ * one. The engine's refusal of a resting value names the same run
+ * (`@objectstack/objectql`, `unitCodeBackfillRemedy`).
+ */
+function unitCodeBackfillRemedy(objectName: string, fieldName: string): string {
+    return `\`os migrate unit-codes --object ${objectName} --field ${fieldName} --map-file <mapping file>\``
+        + ' (a dry run listing each stored value with its row count; add --apply to write), or, with no shell, as an '
+        + `organization admin with \`POST /api/v1/meta/_migrate-unit-codes\` and the body \`{ "object": "${objectName}", "field": `
+        + `"${fieldName}", "mapping": { "<stored text>": "<unit code>" } }\``
+        + ' (a preview of your current organization\'s rows; add "apply": true to write).';
 }
 
 /**

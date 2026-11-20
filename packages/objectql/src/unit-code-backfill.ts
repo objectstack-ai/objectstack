@@ -291,7 +291,7 @@ export async function backfillUnitCodes(
 
   const preview = await walkUnitCodes(engine, logger, options, source, mapping, units, organizationColumn, false);
   if (scoped === null && options.allOrganizations !== true) {
-    const named = preview.organizations.filter((o) => o.organizationId !== null);
+    const named = preview.report.organizations.filter((o) => o.organizationId !== null);
     if (named.length > 1) throw organizationsRefusal(preview, named.length);
   }
   // An organization code is judged in each organization the run would write it in.
