@@ -164,9 +164,9 @@ export const InboxMessage = ObjectSchema.create({
         // The bell's window read (and the `mine` view): one user's rows,
         // newest first, top 20, on every poll. Without it the read sorts the
         // user's whole history each time; with it the read walks the index
-        // backwards and stops at the window. `id` is the driver's pagination
-        // tie-breaker, in the last key's direction, so no sort step remains.
-        { fields: ['user_id', 'created_at', 'id'] },
+        // backwards and stops at the window (the driver's `id` tie-breaker
+        // only orders rows sharing a `created_at`, so it costs no full sort).
+        { fields: ['user_id', 'created_at'] },
     ],
 
     enable: {
