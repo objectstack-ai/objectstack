@@ -274,7 +274,7 @@ export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
 // and the request it carries. Carriers that do not import this package spell
 // the key `Symbol.for`, as it does.
 export { AGGREGATE_ORDER_CUT } from './aggregate-order-cut.js';
-export type { AggregateOrderCutRequest, AggregateOrderKey, AggregateOrderCutOutcome, AggregateOrderCutDecline } from './aggregate-order-cut.js';
+export type { AggregateOrderCutRequest, AggregateOrderKey, AggregateOrderCutOutcome } from './aggregate-order-cut.js';
 // "Each X with its latest Y": the engine-internal read option a door carries
 // to `find` for one row per group, and the request it carries. The carriers
 // that do not import this package spell the key `Symbol.for`, as it does.
