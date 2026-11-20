@@ -45,9 +45,9 @@ export const SeedData = [statusSeed, categorySeed];
 | Field | Default | Purpose |
 |:------|:--------|:--------|
 | `object` | derived | Auto-set from `objectDef.name` — never write manually |
-| `externalId` | `'name'` | Stable business key (or field list) every mode matches on |
+| `externalId` | `'name'` | Stable business key (or field list) every mode matches on; required in every record (below) |
 | `mode` | `'ignore'` | Import strategy (see below) |
-| `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
+| `columns` | — | Per-column write policy, keyed by field (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
 | `locale` | — (every locale) | BCP-47 tags it loads for; a locale no set of the object names gets none |
 | `fallback` | — | `true` on ONE `locale` set per object: also loads for a locale no set names |
@@ -94,6 +94,11 @@ defineSeed(Invoice, {
 
 **Never use `id`** for generated UUIDs — they
 differ across environments.
+
+Every record carries a value for each `externalId` field (each field of a
+list; `name` when the seed names none). One left blank (no value, `null` or
+`''`; whitespace is a value) is refused at load in every mode: the result names
+the object, record index, field and fix, and the other records still load.
 
 | Scenario | Key |
 |:---------|:----|
@@ -165,13 +170,10 @@ produce byte-identical `dist/objectstack.json`.
 
 ### Seed best practices
 
-| Practice | Why |
-|:---------|:----|
-| TypeScript: `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checks otherwise |
+In TypeScript use `defineSeed()`, never `SeedSchema.parse()`: it loses compile-time field checks.
 
 **Fictional is fine; malformed is not.** A seed row passes the same field
-validation as a user's insert; a refused value leaves the table short or empty
-while sibling rows point at records that do not exist.
+validation as a user's insert; a refused value drops the row its siblings point at.
 `os validate` / `os build` refuse such a value first, at the
 record's field — run them before trusting the load. So never mask or
 placeholder a sample value: no `138****4207`,

@@ -62,6 +62,16 @@
       }
     },
     {
+      "id": 34,
+      "prompt": "Our `sales_team` seed is `upsert`, keyed on `externalId: 'code'`. Two of its ten records have no `code` yet; we want to load all ten now and fill those two codes in later. Write the seed.",
+      "expected_output": "Redirects: the two records cannot load without a `code`. Every record carries a value for each `externalId` field, and a record that leaves one blank (no value, `null` or `''`) is refused at load: the load result names the object, the record index, the blank field and the fix, and the other eight records still load. So the answer gives those two records a real `code` now (`defineSeed(SalesTeam, { externalId: 'code', mode: 'upsert', records })` with ten codes), or keys the seed on a field every record carries. It does not write `code: ''` or `code: null`, does not pad the key with whitespace to pass, and does not switch the mode: `ignore`, `upsert` and `update` all refuse the record.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSeed", "externalId", "refused"],
+        "must_not_contain": ["code: ''", "code: null"]
+      }
+    },
+    {
       "id": 5,
       "prompt": "Finance may edit a contract's legal terms (`governing_law`, `liability_cap`) while it is a draft, not once approved, signing or active; legal still edits them.",
       "expected_output": "Row-conditioned field permission entries on the finance set — `'clm_contract.governing_law': { readable: true, editable: false, when: \"status in ['approved', 'signing', 'active']\" }`, likewise `liability_cap`; legal keeps its edit grant.",
