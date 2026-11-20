@@ -92,6 +92,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta",
         helpText: "Texto del encabezado de la sección del grupo."
       },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+      },
       "fieldGroups.icon": {
         label: "Icono",
         helpText: "Nombre de icono Lucide que se muestra junto al encabezado en la página de detalle del registro (p. ej., \"banknote\"). El formulario de entrada no lo muestra."

@@ -92,6 +92,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "顯示名稱",
         helpText: "該分組所在分割區的標題文字。"
       },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+      },
       "fieldGroups.icon": {
         label: "圖示",
         helpText: "在記錄詳細資料頁面的標題旁顯示的 Lucide 圖示名稱（例如 \"banknote\"）。輸入表單不顯示它。"

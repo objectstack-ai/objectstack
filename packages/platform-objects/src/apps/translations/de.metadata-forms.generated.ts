@@ -92,6 +92,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Bezeichnung",
         helpText: "Überschrift des Abschnitts der Gruppe."
       },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+      },
       "fieldGroups.icon": {
         label: "Symbol",
         helpText: "Name des Lucide-Symbols, das neben der Überschrift auf der Datensatz-Detailseite angezeigt wird (z. B. „banknote“). Das Eingabeformular zeigt es nicht."

@@ -92,6 +92,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "레이블",
         helpText: "그룹 섹션의 헤더 텍스트입니다."
       },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+      },
       "fieldGroups.icon": {
         label: "아이콘",
         helpText: "레코드 상세 페이지에서 헤더 옆에 표시되는 Lucide 아이콘 이름(예: \"banknote\")입니다. 입력 양식에는 표시되지 않습니다."

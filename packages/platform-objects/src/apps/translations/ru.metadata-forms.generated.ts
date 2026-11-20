@@ -92,6 +92,10 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Метка",
         helpText: "Текст заголовка раздела группы."
       },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+      },
       "fieldGroups.icon": {
         label: "Значок",
         helpText: "Имя значка Lucide, показываемого рядом с заголовком на странице записи (например, \"banknote\"). Форма ввода его не показывает."

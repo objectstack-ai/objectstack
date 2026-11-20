@@ -72,6 +72,8 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.hook.fields.texts.message.label": "2af15199795c25b9",
   "metadataForms.hook.label": "248bb1cdc692252d",
   "metadataForms.object.fields.description.label": "779a4342c8eb6707",
+  "metadataForms.object.fields.fieldGroups.fields.helpText": "c63503d01551c816",
+  "metadataForms.object.fields.fieldGroups.fields.label": "f316ec6025047133",
   "metadataForms.object.fields.fields.description.label": "779a4342c8eb6707",
   "metadataForms.object.fields.fields.expression.label": "cd1b52ad1588075e",
   "metadataForms.object.fields.fields.max.label": "8081d808ef64ff91",

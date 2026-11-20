@@ -51,6 +51,8 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.hook.fields.refusals.status.label": "64a420165247654b",
   "metadataForms.hook.label": "248bb1cdc692252d",
   "metadataForms.object.fields.enable.feeds.label": "669c64671f632139",
+  "metadataForms.object.fields.fieldGroups.fields.helpText": "c63503d01551c816",
+  "metadataForms.object.fields.fieldGroups.fields.label": "f316ec6025047133",
   "metadataForms.object.fields.lifecycle.storage.shards.label": "739988affb36b2e0",
   "metadataForms.object.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.object.fields.userActions.import.label": "05c80d3a61ec3290",

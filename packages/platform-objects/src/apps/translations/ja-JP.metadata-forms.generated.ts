@@ -92,6 +92,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "表示名",
         helpText: "グループのセクションの見出しテキスト。"
       },
+      "fieldGroups.fields": {
+        label: "Fields",
+        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+      },
       "fieldGroups.icon": {
         label: "アイコン",
         helpText: "レコード詳細ページで見出しの横に表示される Lucide アイコン名（例：\"banknote\"）。入力フォームには表示されません。"

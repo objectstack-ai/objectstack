@@ -92,6 +92,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "显示名称",
         helpText: "该分组所在分区的标题文字。"
       },
+      "fieldGroups.fields": {
+        label: "字段",
+        helpText: "该分组显示的字段及其顺序（字段名）。填写后，它决定分组内的顺序，不移动任何字段。这里列出的字段，其自身的分组设置不能指向别的分组；一个字段只能被一个分组列出。不能与关联列表同时使用。"
+      },
       "fieldGroups.icon": {
         label: "图标",
         helpText: "在记录详情页的标题旁显示的 Lucide 图标名称（例如 \"banknote\"）。录入表单不显示它。"
