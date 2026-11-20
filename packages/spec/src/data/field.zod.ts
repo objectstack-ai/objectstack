@@ -789,6 +789,206 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
 }).superRefine(refuseFixedCurrencyWithoutCode).superRefine(refuseRecordModeKeyMismatch));
 
 /**
+ * Address Schema — structured address for the `address` field type.
+ *
+ * DECLARED in `./field-value.zod` since #7127 (it IS the enforced address
+ * VALUE contract, ADR-0104 D1) and re-exported here for compatibility. The
+ * move is what lets THIS file import the value-contract module for its
+ * `defaultValue` gate without closing a runtime ESM cycle: `field-value.zod`
+ * dereferenced `AddressSchema` at module-eval time, and that top-level read
+ * was the one runtime edge back into this file (its remaining `FieldType`
+ * import is type-only, erased at runtime).
+ */
+export { AddressSchema };
+
+/**
+ * Field Schema - Best Practice Enterprise Pattern
+ */
+/**
+ * Field Definition Schema
+ * Defines the properties, type, and behavior of a single field (column) on an object.
+ * 
+ * @example Lookup Field
+ * {
+ *   name: "account_id",
+ *   label: "Account",
+ *   type: "lookup",
+ *   reference: "accounts",
+ *   required: true
+ * }
+ * 
+ * @example Select Field
+ * {
+ *   name: "status",
+ *   label: "Status",
+ *   type: "select",
+ *   options: [
+ *     { label: "Open", value: "open" },
+ *     { label: "Closed", value: "closed" }
+ *   ],
+ *   defaultValue: "open"
+ * }
+ */
+/**
+ * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
+ * §Terminology) **on the FIELD surface**: the error must carry the vocabulary
+ * and, for the two predictable near-misses (`'tenant'`, `'org'`), name
+ * `'organization'` explicitly — a typo must be a loud, fixable parse error,
+ * never a silent scope change. Declared before `UniqueScopeSchema` because
+ * `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
+ *
+ * ⚠️ **Field-surface only — the parenthetical below is FALSE on a declared
+ * index, and that is why this map is not shared.** "`'organization'` … the
+ * explicit spelling of true" holds here (`FieldSchema.unique`), where bare
+ * `true` resolves per-organization. On `IndexSchema.unique` bare `true` was the
+ * positional spelling of `'global'` (the #4986 trap) and is REFUSED since
+ * protocol 18 (#5082) — so a shared message read at the one moment an author
+ * is looking for the accepted spelling prescribed a value that CHANGES
+ * materialization on an index that may already exist, which is the
+ * unannounced reinterpretation the #8323 ruling (maintainer, 2026-08-13)
+ * exists to prevent. `object.zod.ts` therefore carries its own sibling map,
+ * `declaredIndexUniqueScopeError`, pinned against this one on accept/reject by
+ * `unique-scope-message.test.ts`: the index surface accepts this vocabulary
+ * minus bare `true`, and nothing else may differ. Keep the two vocabularies in
+ * step; only the parentheticals and the bare-`true` row may differ.
+ *
+ * ⚠️ **One of the two hand-written `$ZodErrorMap`s in `packages/spec`, and the
+ * pair stays a pair.** This docblock used to say "pattern of
+ * `strictCapabilitiesError`"; #6805 folded that sibling into the shared
+ * `strictObject` template and the pointer would have gone stale, so it is
+ * replaced by the reason this map is NOT following it. The fold's channel is
+ * `unrecognized_keys` — an unknown KEY, answered from a per-key `guidance`
+ * table. This map answers `invalid_union`, a VALUE-level verdict on a key the
+ * schema declares, which `strictObject` does not address at any level. Folding
+ * it would be a category error, and `alias-integrity.test.ts`'s class pin
+ * (`NO module outside the shared helpers writes its own unrecognized_keys
+ * map`) is scoped by `issue.code` precisely so this site is out of class by
+ * measurement rather than by an exemption — that pin reads this file as a live
+ * control, and the index-surface sibling is out of class by the same
+ * measurement rather than by an added exemption.
+ */
+const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
+  if (issue.code !== 'invalid_union') return undefined;
+  const input = (issue as { input?: unknown }).input;
+  const spelled = typeof input === 'string' ? `'${input}'` : String(input);
+  const nearMiss =
+    input === 'tenant' || input === 'org'
+      ? ` ${spelled} is not accepted and is not an alias — the per-organization scope is spelled 'organization' (ADR-0120: "tenant" is overloaded across deployment topologies, and the platform spells the word out).`
+      : '';
+  return (
+    `Invalid unique scope ${spelled}. Allowed: true/false, 'organization' ` +
+    `(one holder per organization — the explicit spelling of true), or 'global' ` +
+    `(one holder across the whole installation).${nearMiss}`
+  );
+};
+
+/**
+ * Uniqueness scope for a `unique` constraint (#3696, ADR-0120 D1).
+ *
+ * The vocabulary is `boolean | 'global' | 'organization'` — the scope of a
+ * unique constraint is *said*, never inferred from where the declaration sits.
+ *
+ * `unique: true` on an organization-scoped object materializes as a COMPOSITE
+ * unique index `(organization key part, field)` — "unique within the
+ * organization" — matching how every other tenant-aware subsystem already
+ * behaves (reads are RLS-filtered, writes stamp the tenant column, and the
+ * autonumber sequence table is keyed by `(object, tenant_id, field, scope)` so
+ * each organization counts from 1). A single-column global index contradicted
+ * that: two organizations each issuing `PROD-00001` collided on an index
+ * neither of them could see, and the resulting UNIQUE violation doubled as a
+ * cross-tenant existence oracle (a rejected insert told org B that *somebody
+ * else* holds the value).
+ *
+ * `unique: 'organization'` is the EXPLICIT spelling of that same
+ * per-organization scope (ADR-0120 D1) — a synonym of `true` at field level,
+ * with identical materialization. Non-normative guidance: official examples,
+ * scaffolding, and generators emit `'organization'` in new code so intent is
+ * legible without knowing the positional default; bare `true` stays valid
+ * indefinitely (it has exactly one documented meaning here and no trap).
+ *
+ * `unique: 'global'` opts into installation-wide uniqueness for the genuinely
+ * platform-wide identifiers where it is correct: an external provider id
+ * (`stripe_customer_id`), a DNS hostname, a globally reserved slug, a device
+ * identity. Global uniqueness is the special case and has to say so.
+ *
+ * NULL-safety of the per-organization scope (ADR-0120 D3, #5030): SQL UNIQUE
+ * is NULL-distinct, so a raw-column composite `(organization_id, field)`
+ * enforces nothing between rows whose `organization_id` is NULL — and under
+ * 17.x a single-organization stack wrote every row that way. The organization
+ * key part therefore materializes NULL-safe as
+ * `COALESCE(organization_id, '__global__')` (driver-side, #5030): NULL-org
+ * rows collapse into one bucket, unique among themselves; non-NULL rows are
+ * untouched. Since ADR-0131 D9 every write on a tenant-column object carries
+ * its organization or is refused wherever the organization object is
+ * registered, so there a NULL-org row is residue an earlier release wrote,
+ * never a new one. On an object with no tenant column at all
+ * (`tenancy.enabled: false`) both per-organization spellings degrade to the
+ * listed column alone.
+ *
+ * Rejected words (ADR-0120 §Terminology): `'tenant'` and `'org'` are not
+ * accepted and are NOT aliases — "tenant" is overloaded across deployment
+ * topologies and the platform spells the noun out (`organization_id`). The
+ * parse error names `'organization'` so the fix ships inside the rejection.
+ *
+ * ⚠️ **This schema is the FIELD surface's.** The vocabulary above is shared
+ * with `IndexSchema.unique`, but the *meaning of bare `true`* is not: on a
+ * declared index it was the positional spelling of `'global'`, not of
+ * `'organization'` (the #4986 trap), and since protocol 18 (#5082) the index
+ * surface REFUSES it. The index surface therefore declares its own union with
+ * its own rejection text in `object.zod.ts` — this vocabulary minus bare
+ * `true`, and otherwise accepting and rejecting exactly what this one does,
+ * pinned by `unique-scope-message.test.ts`. Widening or narrowing the member
+ * list here is a change to BOTH surfaces: make it in both places or the pin
+ * fails.
+ */
+export const UniqueScopeSchema = lazySchema(() =>
+  z.union([z.boolean(), z.literal('global'), z.literal('organization')], {
+    error: uniqueScopeError,
+  }),
+);
+
+/** @see UniqueScopeSchema */
+export type UniqueScope = boolean | 'global' | 'organization';
+
+/**
+ * Does this `unique` declaration ask for platform-wide (cross-tenant)
+ * uniqueness? Single source of truth for every driver that materializes a
+ * unique constraint (SQL DDL, Mongo index sync) so they cannot drift.
+ */
+export function isGlobalUnique(unique: unknown): boolean {
+  return unique === 'global';
+}
+
+/**
+ * Does this `unique` declaration ask for a unique constraint at all?
+ * `true`, `'global'` and `'organization'` do; `false`/absent do not.
+ * `'organization'` counts from the moment the word exists (ADR-0120 D1) —
+ * a scope the vocabulary accepts but no driver reads would be
+ * declarable-but-inert, the exact ADR-0078 class this vocabulary closes.
+ */
+export function isUniqueDeclared(unique: unknown): boolean {
+  return unique === true || unique === 'global' || unique === 'organization';
+}
+
+/**
+ * Is this the EXPLICIT `'organization'` spelling (ADR-0120 D1)?
+ *
+ * Deliberately narrow — it detects the word, not the scope. At field level,
+ * bare `true` also means per-organization (the positional default;
+ * `isUniqueDeclared(u) && !isGlobalUnique(u)` is that question), so field
+ * consumers need no new predicate. This helper exists for the DECLARED-index
+ * side, where the two spellings differ: `'organization'` asks the driver to
+ * prepend the NULL-safe organization key part at registration, while
+ * `'global'` stays verbatim (bare `true`, its positional spelling, is refused
+ * on a declared index since protocol 18, and stored metadata converts it to
+ * `'global'`). Single source of truth so SQL and Mongo index sync cannot drift
+ * on the distinction.
+ */
+export function isOrganizationUnique(unique: unknown): boolean {
+  return unique === 'organization';
+}
+
+/**
  * Why this shape refuses an unknown key — the `history` its refusals carry.
  * The shape is new, so no stored row ever carried another key here.
  */
@@ -994,206 +1194,6 @@ const UNIT_CONFIG_MODES_BY_FIELD_TYPE: Readonly<Record<string, readonly string[]
   number: Object.freeze(['fixed', 'record']),
   text: Object.freeze(['code']),
 });
-
-/**
- * Address Schema — structured address for the `address` field type.
- *
- * DECLARED in `./field-value.zod` since #7127 (it IS the enforced address
- * VALUE contract, ADR-0104 D1) and re-exported here for compatibility. The
- * move is what lets THIS file import the value-contract module for its
- * `defaultValue` gate without closing a runtime ESM cycle: `field-value.zod`
- * dereferenced `AddressSchema` at module-eval time, and that top-level read
- * was the one runtime edge back into this file (its remaining `FieldType`
- * import is type-only, erased at runtime).
- */
-export { AddressSchema };
-
-/**
- * Field Schema - Best Practice Enterprise Pattern
- */
-/**
- * Field Definition Schema
- * Defines the properties, type, and behavior of a single field (column) on an object.
- * 
- * @example Lookup Field
- * {
- *   name: "account_id",
- *   label: "Account",
- *   type: "lookup",
- *   reference: "accounts",
- *   required: true
- * }
- * 
- * @example Select Field
- * {
- *   name: "status",
- *   label: "Status",
- *   type: "select",
- *   options: [
- *     { label: "Open", value: "open" },
- *     { label: "Closed", value: "closed" }
- *   ],
- *   defaultValue: "open"
- * }
- */
-/**
- * Prescriptive rejection for a mis-spelled `unique` scope (ADR-0120
- * §Terminology) **on the FIELD surface**: the error must carry the vocabulary
- * and, for the two predictable near-misses (`'tenant'`, `'org'`), name
- * `'organization'` explicitly — a typo must be a loud, fixable parse error,
- * never a silent scope change. Declared before `UniqueScopeSchema` because
- * `OS_EAGER_SCHEMAS=1` evaluates the factory at module load (TDZ).
- *
- * ⚠️ **Field-surface only — the parenthetical below is FALSE on a declared
- * index, and that is why this map is not shared.** "`'organization'` … the
- * explicit spelling of true" holds here (`FieldSchema.unique`), where bare
- * `true` resolves per-organization. On `IndexSchema.unique` bare `true` was the
- * positional spelling of `'global'` (the #4986 trap) and is REFUSED since
- * protocol 18 (#5082) — so a shared message read at the one moment an author
- * is looking for the accepted spelling prescribed a value that CHANGES
- * materialization on an index that may already exist, which is the
- * unannounced reinterpretation the #8323 ruling (maintainer, 2026-08-13)
- * exists to prevent. `object.zod.ts` therefore carries its own sibling map,
- * `declaredIndexUniqueScopeError`, pinned against this one on accept/reject by
- * `unique-scope-message.test.ts`: the index surface accepts this vocabulary
- * minus bare `true`, and nothing else may differ. Keep the two vocabularies in
- * step; only the parentheticals and the bare-`true` row may differ.
- *
- * ⚠️ **One of the two hand-written `$ZodErrorMap`s in `packages/spec`, and the
- * pair stays a pair.** This docblock used to say "pattern of
- * `strictCapabilitiesError`"; #6805 folded that sibling into the shared
- * `strictObject` template and the pointer would have gone stale, so it is
- * replaced by the reason this map is NOT following it. The fold's channel is
- * `unrecognized_keys` — an unknown KEY, answered from a per-key `guidance`
- * table. This map answers `invalid_union`, a VALUE-level verdict on a key the
- * schema declares, which `strictObject` does not address at any level. Folding
- * it would be a category error, and `alias-integrity.test.ts`'s class pin
- * (`NO module outside the shared helpers writes its own unrecognized_keys
- * map`) is scoped by `issue.code` precisely so this site is out of class by
- * measurement rather than by an exemption — that pin reads this file as a live
- * control, and the index-surface sibling is out of class by the same
- * measurement rather than by an added exemption.
- */
-const uniqueScopeError: z.core.$ZodErrorMap = (issue) => {
-  if (issue.code !== 'invalid_union') return undefined;
-  const input = (issue as { input?: unknown }).input;
-  const spelled = typeof input === 'string' ? `'${input}'` : String(input);
-  const nearMiss =
-    input === 'tenant' || input === 'org'
-      ? ` ${spelled} is not accepted and is not an alias — the per-organization scope is spelled 'organization' (ADR-0120: "tenant" is overloaded across deployment topologies, and the platform spells the word out).`
-      : '';
-  return (
-    `Invalid unique scope ${spelled}. Allowed: true/false, 'organization' ` +
-    `(one holder per organization — the explicit spelling of true), or 'global' ` +
-    `(one holder across the whole installation).${nearMiss}`
-  );
-};
-
-/**
- * Uniqueness scope for a `unique` constraint (#3696, ADR-0120 D1).
- *
- * The vocabulary is `boolean | 'global' | 'organization'` — the scope of a
- * unique constraint is *said*, never inferred from where the declaration sits.
- *
- * `unique: true` on an organization-scoped object materializes as a COMPOSITE
- * unique index `(organization key part, field)` — "unique within the
- * organization" — matching how every other tenant-aware subsystem already
- * behaves (reads are RLS-filtered, writes stamp the tenant column, and the
- * autonumber sequence table is keyed by `(object, tenant_id, field, scope)` so
- * each organization counts from 1). A single-column global index contradicted
- * that: two organizations each issuing `PROD-00001` collided on an index
- * neither of them could see, and the resulting UNIQUE violation doubled as a
- * cross-tenant existence oracle (a rejected insert told org B that *somebody
- * else* holds the value).
- *
- * `unique: 'organization'` is the EXPLICIT spelling of that same
- * per-organization scope (ADR-0120 D1) — a synonym of `true` at field level,
- * with identical materialization. Non-normative guidance: official examples,
- * scaffolding, and generators emit `'organization'` in new code so intent is
- * legible without knowing the positional default; bare `true` stays valid
- * indefinitely (it has exactly one documented meaning here and no trap).
- *
- * `unique: 'global'` opts into installation-wide uniqueness for the genuinely
- * platform-wide identifiers where it is correct: an external provider id
- * (`stripe_customer_id`), a DNS hostname, a globally reserved slug, a device
- * identity. Global uniqueness is the special case and has to say so.
- *
- * NULL-safety of the per-organization scope (ADR-0120 D3, #5030): SQL UNIQUE
- * is NULL-distinct, so a raw-column composite `(organization_id, field)`
- * enforces nothing between rows whose `organization_id` is NULL — and under
- * 17.x a single-organization stack wrote every row that way. The organization
- * key part therefore materializes NULL-safe as
- * `COALESCE(organization_id, '__global__')` (driver-side, #5030): NULL-org
- * rows collapse into one bucket, unique among themselves; non-NULL rows are
- * untouched. Since ADR-0131 D9 every write on a tenant-column object carries
- * its organization or is refused wherever the organization object is
- * registered, so there a NULL-org row is residue an earlier release wrote,
- * never a new one. On an object with no tenant column at all
- * (`tenancy.enabled: false`) both per-organization spellings degrade to the
- * listed column alone.
- *
- * Rejected words (ADR-0120 §Terminology): `'tenant'` and `'org'` are not
- * accepted and are NOT aliases — "tenant" is overloaded across deployment
- * topologies and the platform spells the noun out (`organization_id`). The
- * parse error names `'organization'` so the fix ships inside the rejection.
- *
- * ⚠️ **This schema is the FIELD surface's.** The vocabulary above is shared
- * with `IndexSchema.unique`, but the *meaning of bare `true`* is not: on a
- * declared index it was the positional spelling of `'global'`, not of
- * `'organization'` (the #4986 trap), and since protocol 18 (#5082) the index
- * surface REFUSES it. The index surface therefore declares its own union with
- * its own rejection text in `object.zod.ts` — this vocabulary minus bare
- * `true`, and otherwise accepting and rejecting exactly what this one does,
- * pinned by `unique-scope-message.test.ts`. Widening or narrowing the member
- * list here is a change to BOTH surfaces: make it in both places or the pin
- * fails.
- */
-export const UniqueScopeSchema = lazySchema(() =>
-  z.union([z.boolean(), z.literal('global'), z.literal('organization')], {
-    error: uniqueScopeError,
-  }),
-);
-
-/** @see UniqueScopeSchema */
-export type UniqueScope = boolean | 'global' | 'organization';
-
-/**
- * Does this `unique` declaration ask for platform-wide (cross-tenant)
- * uniqueness? Single source of truth for every driver that materializes a
- * unique constraint (SQL DDL, Mongo index sync) so they cannot drift.
- */
-export function isGlobalUnique(unique: unknown): boolean {
-  return unique === 'global';
-}
-
-/**
- * Does this `unique` declaration ask for a unique constraint at all?
- * `true`, `'global'` and `'organization'` do; `false`/absent do not.
- * `'organization'` counts from the moment the word exists (ADR-0120 D1) —
- * a scope the vocabulary accepts but no driver reads would be
- * declarable-but-inert, the exact ADR-0078 class this vocabulary closes.
- */
-export function isUniqueDeclared(unique: unknown): boolean {
-  return unique === true || unique === 'global' || unique === 'organization';
-}
-
-/**
- * Is this the EXPLICIT `'organization'` spelling (ADR-0120 D1)?
- *
- * Deliberately narrow — it detects the word, not the scope. At field level,
- * bare `true` also means per-organization (the positional default;
- * `isUniqueDeclared(u) && !isGlobalUnique(u)` is that question), so field
- * consumers need no new predicate. This helper exists for the DECLARED-index
- * side, where the two spellings differ: `'organization'` asks the driver to
- * prepend the NULL-safe organization key part at registration, while
- * `'global'` stays verbatim (bare `true`, its positional spelling, is refused
- * on a declared index since protocol 18, and stored metadata converts it to
- * `'global'`). Single source of truth so SQL and Mongo index sync cannot drift
- * on the distinction.
- */
-export function isOrganizationUnique(unique: unknown): boolean {
-  return unique === 'organization';
-}
 
 /**
  * Partial-masking presets (#8993, maintainer ruling 2026-08-16, Option A).

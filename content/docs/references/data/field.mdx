@@ -1,7 +1,7 @@
 ---
 title: Field schema — Data Protocol reference
 navTitle: Field
-description: "Field schemas of the ObjectStack Data Protocol: CurrencyConfig, Field and 8 more — each property with its type, default and a TypeScript example."
+description: "Field schemas of the ObjectStack Data Protocol: CurrencyConfig, Field and 9 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Field schemas of the ObjectStack Data Protocol: CurrencyConfig, Fi
 ## TypeScript Usage
 
 ```typescript
-import { CurrencyConfigSchema, FieldSchema, FieldMaskingKeepSchema, FieldMaskingRuleSchema, FieldType, InlineGridColumnSchema, LocationCoordinatesSchema, LookupFilterRecordReferenceSchema, SelectOptionSchema, UniqueScopeSchema } from '@objectstack/spec/data';
-import type { CurrencyConfig, Field, FieldMaskingKeep, FieldMaskingRule, FieldType, InlineGridColumn, LocationCoordinates, LookupFilterRecordReference, SelectOption, UniqueScope } from '@objectstack/spec/data';
+import { CurrencyConfigSchema, FieldSchema, FieldMaskingKeepSchema, FieldMaskingRuleSchema, FieldType, InlineGridColumnSchema, LocationCoordinatesSchema, LookupFilterRecordReferenceSchema, SelectOptionSchema, UniqueScopeSchema, UnitConfigSchema } from '@objectstack/spec/data';
+import type { CurrencyConfig, Field, FieldMaskingKeep, FieldMaskingRule, FieldType, InlineGridColumn, LocationCoordinates, LookupFilterRecordReference, SelectOption, UniqueScope, UnitConfig } from '@objectstack/spec/data';
 
 // Validate data
 const result = CurrencyConfigSchema.parse(data);
@@ -103,6 +103,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **language** | `string` | optional | Programming language for syntax highlighting (e.g., javascript, python, sql) |
 | **step** | `number` | optional | Step increment for slider (default: 1) |
 | **currencyConfig** | `{ currencyMode?: Enum<'dynamic' \| 'fixed' \| 'record'>; defaultCurrency?: string; currencyField?: string; homeAmount?: object }` | optional | Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record's currency (`currencyMode: 'record'` naming this object's own code field). A summary that rolls up an amount in the home currency (a child `currency` field in `dynamic` mode, a stored home amount included) declares `currencyMode: 'dynamic'`, with no `defaultCurrency`, and shows in the organization's home currency. A summary may otherwise declare only `currencyMode: 'fixed'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary. |
+| **unitConfig** | `{ unitMode: 'fixed'; unit: Enum<'KGM' \| 'GRM' \| 'MGM' \| 'TNE' \| 'LBR' \| 'ONZ' \| 'MTR' \| 'MMT' \| 'CMT' \| 'KMT' \| …> } \| { unitMode: 'record'; unitField: string; unitDimension?: Enum<'mass' \| 'length' \| 'area' \| 'volume' \| 'time' \| 'count' \| 'package'> } \| { unitMode: 'code'; unitDimension?: Enum<'mass' \| 'length' \| 'area' \| 'volume' \| 'time' \| 'count' \| 'package'> }` | optional | Which unit a quantity is in, or that a text field holds a unit code (units of measure). On a `number` field: `{ unitMode: 'fixed', unit }`, one standard UN/ECE Recommendation 20 code checked at build (e.g. `KGM`, `MTR`, `H87`), or `{ unitMode: 'record', unitField, unitDimension? }`, where each record names its own unit in the sibling `text` field `unitField` names. On a `text` field that holds a unit code with no quantity pointing at it: `{ unitMode: 'code', unitDimension? }`. The quantity stays a bare number; a record stores the unit CODE in exact uppercase, never an id. At write, a code must be a standard code or one of the organization's own non-retired units (`sys_unit`), of the restricted dimension when one is declared, and a quantity beside a blank code is refused. Refused on every other field type, `formula` and `summary` included. Absent: the number has no unit. |
 | **dimensions** | `integer` | optional | Vector dimensionality (e.g., 1536 for OpenAI embeddings) |
 | **trackHistory** | `boolean` | optional | Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field. |
 | **group** | `string` | optional | Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system") |
@@ -271,6 +272,28 @@ const result = CurrencyConfigSchema.parse(data);
 | **defaultCurrency** | `string` | optional | The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own. |
 | **currencyField** | `string` | optional | `record` mode only, and required there: the name of the field on the same object that holds each record's currency — a `text` field declaring `valueDomain: 'iso_4217_currency'` (conventionally `currency_code`). On a `master_detail` child it may instead be a two-segment path, `PARENT_FIELD.CODE_FIELD`: a `master_detail` field of this object (never a `lookup`), one dot, and that code field on the parent it references, so the child follows its parent's currency and stores no code of its own (ADR-0144 D2, amended). Refused under `dynamic` and `fixed`, and never empty. |
 | **homeAmount** | `{ field: string; rateDate: string; rateField: string }` | optional | `record` mode only, optional: where the engine stores this amount converted into the organization's home currency (the `localization.currency` setting) at write, at the rate of the record's document date, and the rate it used. `field` names a `dynamic`-mode `currency` field, `rateDate` a `date` / `datetime` field and `rateField` a `number` field, all on the same object; all three are required, and the home and rate fields declare `readonly: true` because only the engine writes them. Consolidated totals aggregate the home field. Refused under `dynamic` and `fixed`. |
+
+### Nested Shape: `Field.unitConfig[unitMode='fixed']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **unitMode** | `'fixed'` | ✅ | `fixed`: the field has one unit, `unit`, a standard code checked at build. |
+| **unit** | `Enum<'KGM' \| 'GRM' \| 'MGM' \| 'TNE' \| 'LBR' \| 'ONZ' \| 'MTR' \| 'MMT' \| 'CMT' \| 'KMT' \| …>` | ✅ | The field's one unit: a standard UN/ECE Recommendation 20 code from `STANDARD_UNITS`, in exact uppercase (e.g. `KGM`, `MTR`, `H87`). Required under `fixed`; checked at build, so an unknown or lowercase code never parses. |
+
+### Nested Shape: `Field.unitConfig[unitMode='record']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **unitMode** | `'record'` | ✅ | `record`: each record names its own unit, in the field `unitField` names. |
+| **unitField** | `string` | ✅ | The name of the `text` field on the same object that holds each record's unit code, in exact uppercase (conventionally `unit_code`; the name is a convention, never a contract). One segment: a unit cannot follow a parent through `master_detail` yet. Required under `record`. |
+| **unitDimension** | `Enum<'mass' \| 'length' \| 'area' \| 'volume' \| 'time' \| 'count' \| 'package'>` | optional | Optional restriction: the dimension every record's unit must have (`mass`, `length`, `area`, `volume`, `time`, `count` or `package`). A write naming a unit of another dimension is refused. Absent: any dimension. |
+
+### Nested Shape: `Field.unitConfig[unitMode='code']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **unitMode** | `'code'` | ✅ | `code`: this `text` field holds a unit code itself, with no quantity beside it. |
+| **unitDimension** | `Enum<'mass' \| 'length' \| 'area' \| 'volume' \| 'time' \| 'count' \| 'package'>` | optional | Optional restriction: the dimension every unit this field holds must have. A write naming a unit of another dimension is refused. Absent: any dimension. |
 
 ### Nested Shape: `Field.conditionalFormatting[number]`
 
@@ -486,6 +509,93 @@ Type: `'global'`
 #### Option 3
 
 Type: `'organization'`
+
+---
+
+
+---
+
+## UnitConfig
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **unitMode** | `'fixed'` | ✅ | `fixed`: the field has one unit, `unit`, a standard code checked at build. |
+| **unit** | `Enum<'KGM' \| 'GRM' \| 'MGM' \| 'TNE' \| 'LBR' \| 'ONZ' \| 'MTR' \| 'MMT' \| 'CMT' \| 'KMT' \| 'INH' \| 'FOT' \| 'YRD' \| 'MTK' \| 'CMK' \| 'MMK' \| 'FTK' \| 'MTQ' \| 'LTR' \| 'MLT' \| … +21 more>` | ✅ | The field's one unit: a standard UN/ECE Recommendation 20 code from `STANDARD_UNITS`, in exact uppercase (e.g. `KGM`, `MTR`, `H87`). Required under `fixed`; checked at build, so an unknown or lowercase code never parses. |
+
+### Allowed Values: `UnitConfig[unitMode='fixed'].unit`
+
+* `KGM`
+* `GRM`
+* `MGM`
+* `TNE`
+* `LBR`
+* `ONZ`
+* `MTR`
+* `MMT`
+* `CMT`
+* `KMT`
+* `INH`
+* `FOT`
+* `YRD`
+* `MTK`
+* `CMK`
+* `MMK`
+* `FTK`
+* `MTQ`
+* `LTR`
+* `MLT`
+* `GLL`
+* `SEC`
+* `MIN`
+* `HUR`
+* `DAY`
+* `WEE`
+* `H87`
+* `PR`
+* `DZN`
+* `XBG`
+* `XBE`
+* `XBO`
+* `XBX`
+* `XCT`
+* `XCS`
+* `XCR`
+* `XDR`
+* `XPK`
+* `XPX`
+* `XRO`
+* `XSA`
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **unitMode** | `'record'` | ✅ | `record`: each record names its own unit, in the field `unitField` names. |
+| **unitField** | `string` | ✅ | The name of the `text` field on the same object that holds each record's unit code, in exact uppercase (conventionally `unit_code`; the name is a convention, never a contract). One segment: a unit cannot follow a parent through `master_detail` yet. Required under `record`. |
+| **unitDimension** | `Enum<'mass' \| 'length' \| 'area' \| 'volume' \| 'time' \| 'count' \| 'package'>` | optional | Optional restriction: the dimension every record's unit must have (`mass`, `length`, `area`, `volume`, `time`, `count` or `package`). A write naming a unit of another dimension is refused. Absent: any dimension. |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **unitMode** | `'code'` | ✅ | `code`: this `text` field holds a unit code itself, with no quantity beside it. |
+| **unitDimension** | `Enum<'mass' \| 'length' \| 'area' \| 'volume' \| 'time' \| 'count' \| 'package'>` | optional | Optional restriction: the dimension every unit this field holds must have. A write naming a unit of another dimension is refused. Absent: any dimension. |
 
 ---
 
