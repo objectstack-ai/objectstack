@@ -1478,10 +1478,12 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
       'local another name. `var input = …` is not a redeclaration and compiles.',
     'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
       'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
-      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ on regular ' +
-      'expressions, so a regular-expression literal the host refuses is reported as a warning rather than ' +
-      'refused. Syntax the host accepts and QuickJS does not is not caught here; at run time such an ' +
-      'action answers a 500 that names the action and the compile error.',
+      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ inside the ' +
+      'pattern of a regular expression (duplicate named groups, modifier groups), so a pattern the host ' +
+      'refuses is reported as a warning rather than refused. A literal that never closes on its line, or ' +
+      'whose flags are not a flag set, is refused like any other compile error: QuickJS refuses it too. ' +
+      'Syntax the host accepts and QuickJS does not is not caught here; at run time such an action answers ' +
+      'a 500 that names the action and the compile error.',
   ],
 };
 

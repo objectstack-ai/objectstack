@@ -22,6 +22,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, act, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ListViewSchema, ViewItemSchema } from '@objectstack/spec/ui';
@@ -178,13 +181,15 @@ async function optionLabels(key: string): Promise<string[]> {
   return labels;
 }
 
-/** Create a chart view through the view switcher's New view; return the saved body. */
+/** Create a chart view through the Create View dialog; return the saved body. */
 async function createChartViewThroughTheSwitcher() {
   mount({ [`${OBJECT_NAME}.all`]: { name: `${OBJECT_NAME}.all`, label: 'All', type: 'grid', columns: ['name'] } });
   await settle();
-  // New view, from the page title's view switcher (objectstack#27594).
+  // The Create View dialog, from the view switcher's Manage views (its
+  // 「Add view」 creates in place since objectstack#35553).
   fireEvent.click(screen.getByTestId('list-view-switcher'));
-  fireEvent.click(screen.getByTestId('list-view-switcher-new'));
+  fireEvent.click(screen.getByTestId('list-view-switcher-manage'));
+  fireEvent.click(await screen.findByTestId('manage-views-add'));
   const card = await screen.findByTestId('create-view-type-chart');
   await waitFor(() => expect((card as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(card);

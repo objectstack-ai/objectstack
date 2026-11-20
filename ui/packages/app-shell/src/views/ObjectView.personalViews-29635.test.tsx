@@ -11,9 +11,10 @@
  * WHAT IS PINNED.
  *  - The My views section lists the reader's own rows of this object, read
  *    through the data API filtered by object and owner, and no one else's.
- *  - Save as my view creates a row whose `config` is a spec `ListView` for
- *    this object carrying the list on screen, and opens it: its body reaches
- *    the list's query.
+ *  - Save as my view (since objectstack#35553 the dropdown's 「Add view」
+ *    card, personal by default) creates a row whose `config` is a spec
+ *    `ListView` for this object carrying the list on screen, and opens it:
+ *    its body reaches the list's query.
  *  - Rename goes through the data API's update; Delete through the owner's
  *    door, `DELETE /api/v1/personal-views/:id`, never the data API's delete.
  *  - 📌 on a personal row is the reader's default: it writes the per-object
@@ -24,7 +25,7 @@
  *    the list paints while the read is still out. It waits only for a pinned
  *    view it does not hold yet.
  *  - A refused read (no grant on the object) draws neither the section nor
- *    Save as my view, and the list is unaffected.
+ *    「Add view」, and the list is unaffected.
  *  - objectstack#30034 — a personal view opened by its address is not seeded
  *    from, and its address bar never carries, the default view's stored list
  *    state, whichever of the two reads (the reader's own views, the list
@@ -33,6 +34,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import {
   MemoryRouter,
@@ -213,6 +217,18 @@ const openSwitcher = () => {
   fireEvent.click(switcher());
   return screen.getByTestId('list-view-switcher-menu');
 };
+/**
+ * Save the list on screen as one of the reader's own views: the dropdown's
+ * 「Add view」 turns into the in-place create card (objectstack#35553, which
+ * folded Save as my view into it), personal by default.
+ */
+const saveAsMyView = async (menu: HTMLElement, name: string) => {
+  await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-new')).toBeInTheDocument());
+  fireEvent.click(within(menu).getByTestId('list-view-switcher-new'));
+  const card = await screen.findByTestId('create-view-card');
+  fireEvent.change(within(card).getByTestId('create-view-card-name'), { target: { value: name } });
+  return card;
+};
 const sectionRowIds = (testId: string) =>
   Array.from(screen.getByTestId(testId).querySelectorAll('[data-testid^="view-switcher-row-"]')).map((el) =>
     el.getAttribute('data-testid')!.replace('view-switcher-row-', ''));
@@ -268,13 +284,11 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     const { dataSource } = mountLeads(`/apps/crm/crm_lead/view/v1?uf__sort=${sort}`);
     await listToolbar();
 
-    const menu = openSwitcher();
-    await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument());
-    fireEvent.click(within(menu).getByTestId('list-view-switcher-save-mine'));
-    const dialog = await screen.findByTestId('personal-view-name-dialog');
-    fireEvent.change(within(dialog).getByTestId('personal-view-name-input'), { target: { value: '  Hot leads  ' } });
+    const card = await saveAsMyView(openSwitcher(), '  Hot leads  ');
+    // The list holds a sort its view does not: the card offers to keep it, on.
+    expect(within(card).getByTestId('create-view-card-include-current')).toBeChecked();
     const readsBefore = leadReads(dataSource).length;
-    fireEvent.click(within(dialog).getByTestId('personal-view-name-submit'));
+    fireEvent.click(within(card).getByTestId('create-view-card-submit'));
 
     await waitFor(() => expect(dataSource.create).toHaveBeenCalledTimes(1));
     const [resource, row] = dataSource.create.mock.calls[0];
@@ -289,7 +303,7 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     // It opens at once, on an address that carries no list state of its own,
     // so the sort the list then reads by is the stored body's.
     await waitFor(() => expect(switcher()).toHaveTextContent('Hot leads'));
-    await waitFor(() => expect(screen.queryByTestId('personal-view-name-dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('create-view-card')).toBeNull());
     await waitFor(() => expect(leadReads(dataSource).length).toBeGreaterThan(readsBefore));
     expect(leadReads(dataSource).at(-1).$orderby).toEqual([{ field: 'status', order: 'desc' }]);
   });
@@ -318,6 +332,26 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
       { url: '/api/v1/personal-views/pv_mine', method: 'DELETE' },
     ]));
     expect(dataSource.delete).not.toHaveBeenCalled();
+  });
+
+  it('Options names the open personal view and renames it in place through the data API\'s update (objectstack#35551)', async () => {
+    const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
+    await listToolbar();
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const name = await screen.findByTestId('options-view-name-input');
+    expect(name).toHaveValue('Paris leads');
+    fireEvent.change(name, { target: { value: 'Paris only' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    expect(dataSource.update.mock.calls[0].slice(0, 3)).toEqual(['sys_personal_view', 'pv_mine', { label: 'Paris only' }]);
+  });
+
+  it('CONTROL: on a package view a reader who is no admin sees its name, not a rename', async () => {
+    mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    await screen.findByTestId('view-settings-content');
+    expect(screen.queryByTestId('options-view-name-input')).toBeNull();
   });
 
   it('📌 on a personal row is the reader\'s default: it writes the pin, and the next open of the bare address opens it', async () => {
@@ -377,7 +411,7 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     const menu = openSwitcher();
     await new Promise((r) => setTimeout(r, 0));
     expect(within(menu).queryByTestId('list-view-switcher-mine')).toBeNull();
-    expect(within(menu).queryByTestId('list-view-switcher-save-mine')).toBeNull();
+    expect(within(menu).queryByTestId('list-view-switcher-new')).toBeNull();
     expect(sectionRowIds('list-view-switcher-all')).toEqual(['v1', 'v2']);
   });
 
@@ -387,9 +421,10 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     mountLeads('/apps/crm/crm_lead/view/v1');
     await listToolbar();
     const menu = openSwitcher();
-    // The reader's own views were read: the section is drawn, Save is not.
+    // The reader's own views were read: the section is drawn, 「Add view」 is
+    // not (a reader who is no admin creates only views of their own).
     await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-mine')).toBeInTheDocument());
-    expect(within(menu).queryByTestId('list-view-switcher-save-mine')).toBeNull();
+    expect(within(menu).queryByTestId('list-view-switcher-new')).toBeNull();
   });
 
   it('CONTROL: with the same loaded grants and the list\'s object readable, Save as my view is offered', async () => {
@@ -398,7 +433,7 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     await listToolbar();
     const menu = openSwitcher();
     await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-mine')).toBeInTheDocument());
-    expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument();
+    expect(within(menu).getByTestId('list-view-switcher-new')).toBeInTheDocument();
   });
 });
 
@@ -604,6 +639,48 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(lastLeadRead(dataSource)).not.toContain('Paris');
   });
 
+  it('Options offers the same 保存 beside 恢复默认 (objectstack#35551): it writes the panel into that view', async () => {
+    const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
+    await listToolbar();
+    await screen.findByTestId('list-personalized-marker');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const reset = await screen.findByTestId('display-reset-button');
+    expect(reset).toBeEnabled();
+    fireEvent.click(screen.getByTestId('display-save-button'));
+
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    const [resource, id, patch] = dataSource.update.mock.calls[0];
+    expect([resource, id, Object.keys(patch)]).toEqual(['sys_personal_view', 'pv_mine', ['config']]);
+    expect(patch.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
+    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
+    // Nothing differs from the view now: no 保存, and 恢复默认 is dimmed.
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    await waitFor(() => expect(screen.getByTestId('display-reset-button')).toBeDisabled());
+    expect(screen.queryByTestId('display-save-button')).toBeNull();
+  });
+
+  it('Options\' 恢复默认 is the marker\'s reset: the view opens as its own again', async () => {
+    const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
+    await listToolbar();
+    await screen.findByTestId('list-personalized-marker');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    fireEvent.click(await screen.findByTestId('display-reset-button'));
+    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
+    await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
+    expect(dataSource.update).not.toHaveBeenCalled();
+  });
+
+  it('a reader without update on their views is offered no 保存 in Options either', async () => {
+    grants.isLoaded = true;
+    grants.denied.add('sys_personal_view:update');
+    mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
+    await listToolbar();
+    await screen.findByTestId('list-personalized-marker');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    expect(await screen.findByTestId('display-reset-button')).toBeEnabled();
+    expect(screen.queryByTestId('display-save-button')).toBeNull();
+  });
+
   it('a reader without update on their views is not offered 保存', async () => {
     grants.isLoaded = true;
     grants.denied.add('sys_personal_view:update');
@@ -651,12 +728,8 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     await listToolbar();
     await screen.findByTestId('list-personalized-marker');
 
-    const menu = openSwitcher();
-    await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument());
-    fireEvent.click(within(menu).getByTestId('list-view-switcher-save-mine'));
-    const dialog = await screen.findByTestId('personal-view-name-dialog');
-    fireEvent.change(within(dialog).getByTestId('personal-view-name-input'), { target: { value: 'Rome leads' } });
-    fireEvent.click(within(dialog).getByTestId('personal-view-name-submit'));
+    const card = await saveAsMyView(openSwitcher(), 'Rome leads');
+    fireEvent.click(within(card).getByTestId('create-view-card-submit'));
 
     await waitFor(() => expect(first.dataSource.create).toHaveBeenCalledTimes(1));
     expect(first.dataSource.create.mock.calls[0][1].config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);

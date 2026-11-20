@@ -127,7 +127,7 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
     const props = { viewDefaults: { rowHeight: 'tall' as const }, onRestoreViewDefaults };
     const { rerender } = mount({ rowHeight: 'compact', onDensityChange } as Partial<ListViewSchema>, props);
     const content = await openDisplay();
-    expect(within(content).getByTestId('view-settings-density-cycle')).toHaveTextContent('Compact');
+    expect(within(content).getByTestId('options-row-row-height-value')).toHaveTextContent('Compact');
 
     fireEvent.click(within(content).getByTestId('display-reset-button'));
     expect(onRestoreViewDefaults).toHaveBeenCalledTimes(1);
@@ -138,7 +138,7 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
     // The host clears the stored density: `schema.rowHeight` is the view's own again.
     rerender({ rowHeight: 'tall', onDensityChange } as Partial<ListViewSchema>, props);
     await waitFor(() =>
-      expect(within(screen.getByTestId('view-settings-content')).getByTestId('view-settings-density-cycle')).toHaveTextContent('Spacious'),
+      expect(within(screen.getByTestId('view-settings-content')).getByTestId('options-row-row-height-value')).toHaveTextContent('Spacious'),
     );
     expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
     expect(onDensityChange).not.toHaveBeenCalled();
@@ -203,7 +203,10 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
     const onRestoreViewDefaults = vi.fn();
     mount({}, { viewDefaults: {}, onRestoreViewDefaults, defaultRowNumbers: true });
     const content = await openDisplay();
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
+    // Row numbers sit on the menu's More level; the reset is on the menu itself.
+    fireEvent.click(within(content).getByTestId('options-row-more'));
+    fireEvent.click(await within(content).findByTestId('display-row-numbers-toggle'));
+    fireEvent.click(within(content).getByTestId('options-back'));
     await waitFor(() => expect(within(content).getByTestId('display-reset-button')).toBeEnabled());
     fireEvent.click(within(content).getByTestId('display-reset-button'));
     expect(onRestoreViewDefaults).not.toHaveBeenCalled();

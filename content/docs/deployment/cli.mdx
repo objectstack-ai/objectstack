@@ -3038,7 +3038,8 @@ os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   
    in memory and they are still exercised. One whose engine has no in-memory
    stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
    and its objects are `skipped` as `managed datasource "NAME" (driver
-   "DRIVER"): not exercised`. With `--rls`, a second fresh boot proves the
+   "DRIVER"): not exercised`. Only verify's own writes are withheld: the app's
+   seed, hooks and flows still write to that real database. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
    the run. With `--reference-shapes`, another fresh boot proves that every

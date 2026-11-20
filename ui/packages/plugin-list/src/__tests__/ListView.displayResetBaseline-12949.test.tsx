@@ -110,7 +110,7 @@ describe('a host that lays the user\'s preference over the view resets to the vi
       { viewDefaults: { rowHeight: 'tall' } },
     );
     const content = await openDisplay();
-    expect(within(content).getByTestId('view-settings-density-cycle')).toHaveTextContent('Compact');
+    expect(within(content).getByTestId('options-row-row-height-value')).toHaveTextContent('Compact');
     expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('1');
     const reset = within(content).getByTestId('display-reset-button');
     expect(reset).toBeEnabled();
@@ -119,7 +119,7 @@ describe('a host that lays the user\'s preference over the view resets to the vi
     await waitFor(() => expect(onDensityChange).toHaveBeenCalledWith('spacious'));
     expect(onDensityChange).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('toolbar-display-count')).toBeNull());
-    expect(within(content).getByTestId('view-settings-density-cycle')).toHaveTextContent('Spacious');
+    expect(within(content).getByTestId('options-row-row-height-value')).toHaveTextContent('Spacious');
   });
 
   it('both differ: the count reads 2', async () => {
@@ -154,11 +154,14 @@ describe('CONTROL: a host passing no `viewDefaults` compares against `schema`, a
     const onDensityChange = vi.fn();
     mount({ rowHeight: 'tall', onDensityChange } as Partial<ListViewSchema>);
     const content = await openDisplay();
-    fireEvent.click(within(content).getByTestId('view-settings-density-cycle'));
+    // objectstack#35551 — Row height is a level of the Options menu.
+    fireEvent.click(within(content).getByTestId('options-row-row-height'));
+    fireEvent.click(within(content).getByTestId('options-row-height-compact'));
     await waitFor(() => expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('1'));
     await waitFor(() => expect(onDensityChange).toHaveBeenCalledTimes(1));
     expect(onDensityChange).not.toHaveBeenLastCalledWith('spacious');
 
+    fireEvent.click(within(content).getByTestId('options-back'));
     fireEvent.click(within(content).getByTestId('display-reset-button'));
     await waitFor(() => expect(onDensityChange).toHaveBeenLastCalledWith('spacious'));
     await waitFor(() => expect(screen.queryByTestId('toolbar-display-count')).toBeNull());

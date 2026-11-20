@@ -120,7 +120,8 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
   // A managed SQL or memory datasource runs on verify's stand-in, so its
   // objects are exercised (`verify.managed-datasource-stand-in.test.ts`). One
   // whose engine has no stand-in keeps its real driver, so verify withholds
-  // its objects instead of writing through.
+  // its own writes from its objects; the app's seed, hooks and flows still
+  // reach that real store, and the reason says so.
   it('exercises an object on a managed SQL datasource, and withholds one on an engine with no stand-in', () => {
     const config = {
       datasources: [
@@ -139,7 +140,8 @@ describe('deriveCrudCases — objects on an external datasource are not exercise
     expect(cases.find((x) => x.object === 'pg_task')?.blocked).toBeFalsy();
     expect(cases.find((x) => x.object === 'doc_task')?.blocked).toBe(
       'managed datasource "docs" (driver "mongodb"): not exercised — verify has no ephemeral stand-in for ' +
-        'this engine and never writes through to the real one',
+        "this engine, so it withholds its own writes; the app's seed, hooks and flows still write to the " +
+        'real database',
     );
     expect(cases.find((x) => x.object === 'plug_task')?.blocked).toContain(
       'managed datasource "plug" (driver "acme-plugin-driver"): not exercised',
