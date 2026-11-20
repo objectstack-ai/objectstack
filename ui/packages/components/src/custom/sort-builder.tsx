@@ -152,7 +152,7 @@ export function SortBuilder({
   // handle drags it to another place, and ArrowUp / ArrowDown on the focused
   // handle move it one place.
   const dragFrom = React.useRef<number | null>(null);
-  const handleRefs = React.useRef(new Map<string, HTMLButtonElement>());
+  const handleRefs = React.useRef(new Map<string, HTMLElement>());
   const moveItem = (from: number, to: number) => {
     if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return;
     const next = items.slice();
@@ -189,14 +189,18 @@ export function SortBuilder({
               dragFrom.current = null;
             }}
           >
-             <button
-               type="button"
+             {/* A `span`, not a `<button>`: Firefox starts no HTML5 drag from a
+                 button. It is a keyboard control all the same (role, tab stop,
+                 arrows). */}
+             <span
+               role="button"
+               tabIndex={items.length > 1 ? 0 : -1}
+               aria-disabled={items.length < 2 || undefined}
                ref={(node) => {
                  if (node) handleRefs.current.set(item.id, node);
                  else handleRefs.current.delete(item.id);
                }}
                draggable={items.length > 1}
-               disabled={items.length < 2}
                onDragStart={(event) => {
                  event.stopPropagation();
                  dragFrom.current = index;
@@ -216,11 +220,11 @@ export function SortBuilder({
                }}
                aria-label={t('sortBuilder.reorder')}
                title={t('sortBuilder.reorder')}
-               className="inline-flex h-9 w-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-40 max-sm:col-start-1 max-sm:row-start-1 max-sm:row-span-3 max-sm:h-auto"
+               className="inline-flex h-9 w-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-default aria-disabled:opacity-40 max-sm:col-start-1 max-sm:row-start-1 max-sm:row-span-3 max-sm:h-auto"
                data-testid="sort-builder-handle"
              >
                <GripVertical className="h-4 w-4" aria-hidden="true" />
-             </button>
+             </span>
              <span className="text-sm font-medium w-16 text-muted-foreground max-sm:col-start-2 max-sm:col-span-2 max-sm:w-auto">
                {index === 0 ? t('sortBuilder.sortBy') : t('sortBuilder.thenBy')}
              </span>

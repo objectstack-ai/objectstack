@@ -52,11 +52,15 @@ function mount(initial: SortItem[]) {
 const fieldsOf = (items: SortItem[]) => items.map((i) => `${i.field}:${i.order}`);
 
 describe('SortBuilder — reordering the levels (objectstack#35876)', () => {
-  it('every level has a named handle', () => {
+  it('every level has a named handle: a keyboard control that is not a <button>, so Firefox can drag it', () => {
     mount(THREE);
     const handles = screen.getAllByRole('button', { name: 'Drag to reorder' });
     expect(handles).toHaveLength(3);
-    for (const h of handles) expect(h).toHaveAttribute('draggable', 'true');
+    for (const h of handles) {
+      expect(h).toHaveAttribute('draggable', 'true');
+      expect(h).toHaveAttribute('tabindex', '0');
+      expect(h.tagName).not.toBe('BUTTON');
+    }
   });
 
   it('ArrowUp on the second handle makes it the first level; ArrowDown on the first moves it down', () => {
@@ -98,7 +102,8 @@ describe('SortBuilder — reordering the levels (objectstack#35876)', () => {
   it('a single level: the handle is drawn but disabled, and drags nothing', () => {
     mount([THREE[0]]);
     const handle = screen.getByTestId('sort-builder-handle');
-    expect(handle).toBeDisabled();
+    expect(handle).toHaveAttribute('aria-disabled', 'true');
+    expect(handle).toHaveAttribute('tabindex', '-1');
     expect(handle).toHaveAttribute('draggable', 'false');
   });
 });

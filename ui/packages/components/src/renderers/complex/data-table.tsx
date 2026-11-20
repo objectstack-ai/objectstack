@@ -2482,11 +2482,12 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setContextMenu({ x: e.clientX, y: e.clientY, columnKey });
   };
 
-  // objectstack#35876 — under `GridHeaderMenu` a sortable header opens the
-  // column menu below itself (a click, or Enter / Space / ArrowDown while it
-  // has focus) and never sorts; the sort is the entry chosen in the menu. A
-  // click on the header whose menu is open shuts it.
-  const headerMenuOn = (col: TableColumn) => headerOpensMenu && isColumnSortable(col);
+  // objectstack#35876 — under `GridHeaderMenu` every header opens the column
+  // menu below itself (a click, or Enter / Space / ArrowDown while it has
+  // focus) and never sorts; the sort is the entry chosen in the menu, which
+  // offers sort entries only where `isColumnSortable` does. A click on the
+  // header whose menu is open shuts it.
+  const headerMenuOn = (_col: TableColumn) => headerOpensMenu;
   const openHeaderMenu = (header: HTMLElement, columnKey: string, byKeyboard: boolean) => {
     columnMenuReturnFocusRef.current = header;
     columnMenuByKeyboardRef.current = byKeyboard;
@@ -2520,6 +2521,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     : undefined;
 
   const hideColumn = (columnKey: string) => {
+    // The header the menu came from is about to go: focus returns to the
+    // header beside it (the next one, else the previous), when that one is a
+    // tab stop.
+    const from = columnMenuReturnFocusRef.current?.closest('th');
+    if (from && from.getAttribute('data-column-key') === columnKey) {
+      const beside = [from.nextElementSibling, from.previousElementSibling].find(
+        (el): el is HTMLElement => el instanceof HTMLElement && el.hasAttribute('data-column-key') && el.tabIndex >= 0,
+      );
+      columnMenuReturnFocusRef.current = beside ?? null;
+    }
     setColumns(prev => prev.filter(c => c.accessorKey !== columnKey));
     setContextMenu(null);
   };
@@ -4226,7 +4237,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                     data-column-key={col.accessorKey}
                     className={cn(
                       col.className,
-                      isColumnSortable(col) && 'cursor-pointer select-none',
+                      (isColumnSortable(col) || headerMenuOn(col)) && 'cursor-pointer select-none',
                       // A header that opens the column menu is a tab stop (objectstack#35876).
                       headerMenuOn(col) && 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                       isDragging && 'opacity-50',
@@ -4270,9 +4281,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         }
                       : {})}
                     onClick={(e) => {
-                      if (!isColumnSortable(col)) return;
-                      if (headerOpensMenu) openHeaderMenu(e.currentTarget, col.accessorKey, false);
-                      else handleSort(col.accessorKey);
+                      if (headerMenuOn(col)) openHeaderMenu(e.currentTarget, col.accessorKey, false);
+                      else if (isColumnSortable(col)) handleSort(col.accessorKey);
                     }}
                     onContextMenu={(e) => handleColumnContextMenu(e, col.accessorKey)}
                   >

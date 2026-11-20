@@ -318,7 +318,7 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     expect(await slotHeight(page)).toBe(0);
   });
 
-  test('sort: Sort → Descending → Amount is three clicks; chips come before filter chips; a drag reorders; a header menu pick shows as a chip; Reset restores', async ({ page }) => {
+  test('sort: Sort → Descending → Amount is three clicks; chips come before filter chips; a drag reorders; a handle in a chip panel reorders; a header menu pick shows as a chip; Reset restores', async ({ page }) => {
     test.setTimeout(120_000);
     await mount(page);
     await expect.poll(() => count(page)).toBe('12');
@@ -354,6 +354,15 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     // a real drag: the second sort chip onto the first
     await page.getByTestId('sort-chip-stage').dragTo(page.getByTestId('sort-chip-amount'));
     expect(await sortNow(page)).toEqual(['stage:asc', 'amount:desc']);
+    // a chip opens every level in one panel (objectstack#35876); a real drag of
+    // the second level's handle onto the first row puts it first
+    await click(page, 'sort-chip-open-stage');
+    const panel = page.getByTestId('sort-chip-panel');
+    await expect(panel.getByTestId('sort-builder-handle')).toHaveCount(2);
+    expect(await sortNow(page)).toEqual(['stage:asc', 'amount:desc']);
+    await panel.getByTestId('sort-builder-handle').nth(1).dragTo(panel.getByTestId('sort-builder-row').first());
+    await expect.poll(() => sortNow(page)).toEqual(['amount:desc', 'stage:asc']);
+    await page.keyboard.press('Escape');
     // Reset puts the list back as saved: no sort, no filter
     await click(page, 'condition-reset');
     expect(await sortNow(page)).toEqual([]);

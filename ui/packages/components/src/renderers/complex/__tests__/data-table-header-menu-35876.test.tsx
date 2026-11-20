@@ -7,10 +7,11 @@
  */
 
 /**
- * objectstack#35876 — under `GridHeaderMenu` a sortable column header opens
- * the column menu (sort ascending, sort descending, hide) and never sorts by
- * itself; the keyboard reaches the same menu from the focused header. Without
- * the provider the header still sorts on a click.
+ * objectstack#35876 — under `GridHeaderMenu` every column header opens the
+ * column menu (sort ascending, sort descending, hide; a header that does not
+ * sort offers hide alone) and never sorts by itself; the keyboard reaches the
+ * same menu from the focused header. Without the provider the header still
+ * sorts on a click.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, within, act, waitFor } from '@testing-library/react';
@@ -119,12 +120,24 @@ describe('data-table — the header opens the column menu (objectstack#35876)', 
     await waitFor(() => expect(th).toHaveFocus());
   });
 
-  it('a header that does not sort opens no menu on a click and takes no focus', () => {
+  it('a header that does not sort opens a menu with Hide column alone, and changes no sort', () => {
     const { onSortChange } = renderManual({ headerMenu: true, statusSortable: false });
+    expect(header('status')).toHaveAttribute('tabindex', '0');
+    expect(header('status')).toHaveAttribute('aria-haspopup', 'menu');
     fireEvent.click(header('status'));
-    expect(menu()).toBeNull();
-    expect(header('status')).not.toHaveAttribute('tabindex');
-    expect(header('status')).not.toHaveAttribute('aria-haspopup');
+    expect(within(menu()!).getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Hide column']);
+    expect(onSortChange).not.toHaveBeenCalled();
+  });
+
+  it('Hide column from the keyboard gives focus to the header beside the hidden one', async () => {
+    const { onSortChange } = renderManual({ headerMenu: true });
+    act(() => header('name').focus());
+    await userEvent.keyboard('{Enter}');
+    const items = within(menu()!).getAllByRole('menuitem');
+    await waitFor(() => expect(items[0]).toHaveFocus());
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+    expect(header('name')).toBeNull();
+    await waitFor(() => expect(header('status')).toHaveFocus());
     expect(onSortChange).not.toHaveBeenCalled();
   });
 
