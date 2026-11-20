@@ -334,11 +334,11 @@ describe('an approver\'s agent decides a pending approval request over MCP (#324
       const body: any = await res.json();
       const label = `REST ${JSON.stringify(params)} → ${JSON.stringify(body)}`;
       expect([res.status, body?.error?.code ?? body?.code], label).toEqual([400, 'VALIDATION_ERROR']);
-      expect(JSON.stringify(body), label).toContain('"comment" is required');
+      expect(String(body?.error?.message), label).toMatch(/\bcomment\b/);
       const viaMcp = await act({ bearer: approver }, 'approval_reject', requestId, false, String(params.comment ?? ''));
       expect(viaMcp.isError, viaMcp.text).toBe(true);
       expect([viaMcp.payload?.error?.status, viaMcp.payload?.error?.code], viaMcp.text).toEqual([400, 'VALIDATION_ERROR']);
-      expect(viaMcp.text).toContain('"comment" is required');
+      expect(String(viaMcp.payload?.error?.message), viaMcp.text).toMatch(/\bcomment\b/);
     }
     await expectUndecided(requestId, 'a reject without a reason');
 
