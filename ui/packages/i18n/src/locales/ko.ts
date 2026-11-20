@@ -1477,6 +1477,13 @@ const ko = {
     timeline: "활동",
     relatedColumn: "오른쪽 열",
     timelineComposer: "메모 작성… @로 멘션",
+    streamToday: "오늘",
+    streamYesterday: "어제",
+    viewApproval: "승인 보기",
+    replyToComment: "답글",
+    attachmentsDropHint: "여기에 파일을 놓거나",
+    attachmentsChooseFile: "파일 선택",
+    attachmentActions: "{{name}} 추가 작업",
     // objectstack#27055 — the record page v3.
     emptySections: "빈 섹션 {{count}}개",
     emptySections_one: "빈 섹션 {{count}}개",

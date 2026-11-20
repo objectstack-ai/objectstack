@@ -1477,6 +1477,13 @@ const de = {
     timeline: "Aktivität",
     relatedColumn: "Rechte Spalte",
     timelineComposer: "Notiz schreiben… @ zum Erwähnen",
+    streamToday: "Heute",
+    streamYesterday: "Gestern",
+    viewApproval: "Genehmigung ansehen",
+    replyToComment: "Antworten",
+    attachmentsDropHint: "Dateien hier ablegen oder",
+    attachmentsChooseFile: "Datei auswählen",
+    attachmentActions: "Mehr für {{name}}",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} leere Abschnitte",
     emptySections_one: "{{count}} leerer Abschnitt",

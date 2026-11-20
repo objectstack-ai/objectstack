@@ -1382,6 +1382,13 @@ const ru = {
     timeline: "Активность",
     relatedColumn: "Правая колонка",
     timelineComposer: "Написать заметку… @ — упомянуть",
+    streamToday: "Сегодня",
+    streamYesterday: "Вчера",
+    viewApproval: "Открыть согласование",
+    replyToComment: "Ответить",
+    attachmentsDropHint: "Перетащите файлы сюда или",
+    attachmentsChooseFile: "выберите файл",
+    attachmentActions: "Ещё для {{name}}",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} пустых разделов",
     emptySections_one: "{{count}} пустой раздел",

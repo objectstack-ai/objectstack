@@ -1519,6 +1519,13 @@ const fr = {
     timeline: "Activité",
     relatedColumn: "Colonne de droite",
     timelineComposer: "Écrire une note… @ pour mentionner",
+    streamToday: "Aujourd’hui",
+    streamYesterday: "Hier",
+    viewApproval: "Voir l’approbation",
+    replyToComment: "Répondre",
+    attachmentsDropHint: "Déposez des fichiers ici, ou",
+    attachmentsChooseFile: "choisissez un fichier",
+    attachmentActions: "Plus pour {{name}}",
     // objectstack#27055 — the record page v3.
     emptySections: "{{count}} sections vides",
     emptySections_one: "{{count}} section vide",
