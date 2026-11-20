@@ -136,6 +136,21 @@ describe('RecordPageColumns — details | the right column (objectstack#27524, T
   });
 });
 
+describe('RecordPageColumns — the tab row follows the header (objectstack#35745)', () => {
+  // Measured in the browser (1280, Expense Report): the header's bottom at 92,
+  // the tab row at 140 — the host scroller's 24px top padding and this root's
+  // 24px stacked. The host's scroller pads no top now (RecordDetailView), and
+  // this root's top is 12px at every width; the sides and foot keep the page's.
+  it("the root's top padding is 12px at every width, its sides and foot the page's", () => {
+    const { container } = render(<RecordPageColumns tier="wide" columns={columns} />);
+    const root = container.querySelector('[data-page-type="record"]')!;
+    const classes = root.className.split(/\s+/);
+    expect(classes).toContain('pt-3');
+    expect(classes.filter((c) => /^(?:\w+:)?(?:p|pt|py)-/.test(c) && c !== 'pt-3')).toEqual([]);
+    expect(classes).toEqual(expect.arrayContaining(['px-3', 'md:px-4', 'lg:px-6', 'pb-3', 'md:pb-4', 'lg:pb-6']));
+  });
+});
+
 describe('RecordPageColumns — the stack (< 760, objectstack#27524, Target 6)', () => {
   it('ONE column: the details and their footer, then the rail — no tabs without a host', () => {
     const { container } = render(
