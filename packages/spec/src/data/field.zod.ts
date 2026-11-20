@@ -34,6 +34,8 @@ import {
 } from './default-value-shape';
 import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES, SINGLE_OPTION_TYPES } from './field-value.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
+// The standard unit table (ADR-0158 U1). Imports nothing, so no cycle.
+import { STANDARD_UNITS, UNIT_DIMENSIONS, standardUnitOf } from './standard-units';
 import { SystemObjectName } from '../system/constants/system-names';
 
 /**
@@ -987,6 +989,213 @@ export function isOrganizationUnique(unique: unknown): boolean {
 }
 
 /**
+ * Why this shape refuses an unknown key — the `history` its refusals carry.
+ * The shape is new, so no stored row ever carried another key here.
+ */
+const UNIT_CONFIG_HISTORY =
+  'This shape was closed from the day it was declared — an unknown key here was never accepted, so a '
+  + 'misspelled unit or pointer cannot parse and leave a quantity in no unit.';
+
+/**
+ * The codes a `fixed` unit may name: the own keys of the standard unit table
+ * (ADR-0158 U1), in exact uppercase. The same set {@link standardUnitOf}
+ * answers, so the build-time check and the write-time check cannot drift into
+ * two opinions (`field-unit-config.test.ts` pins the equality).
+ */
+const STANDARD_UNIT_CODE_LIST = Object.keys(STANDARD_UNITS) as [string, ...string[]];
+
+/** The refusal of a `fixed` config with no `unit`, or with a code the standard table does not hold. */
+function fixedUnitMessage(input: unknown): string {
+  if (input === undefined) {
+    return '`unitMode: \'fixed\'` needs `unit`, the field\'s one unit: a standard UN/ECE Recommendation 20 code '
+      + 'in exact uppercase (e.g. `unit: \'KGM\'`). Use `unitMode: \'record\'` with `unitField` when each '
+      + 'record names its own unit.';
+  }
+  const shown = typeof input === 'string' ? `'${input}'` : JSON.stringify(input) ?? String(input);
+  if (typeof input === 'string' && input !== input.toUpperCase().trim() && standardUnitOf(input.toUpperCase().trim())) {
+    return `\`unit: ${shown}\` is not a unit code: codes are exact uppercase with no spaces. `
+      + `Write \`unit: '${input.toUpperCase().trim()}'\`.`;
+  }
+  if (input === 'C62' || input === 'EA') {
+    return `\`unit: ${shown}\` is not a standard unit: the piece is \`H87\`, and its near-synonyms \`C62\` and \`EA\` `
+      + 'are not admitted (ADR-0158 U2). Write `unit: \'H87\'`.';
+  }
+  return `\`unit: ${shown}\` is not a standard unit code. A \`fixed\` unit is checked against the standard unit table `
+    + '(`STANDARD_UNITS` in `@objectstack/spec/data`), for example `KGM`, `MTR`, `LTR`, `HUR`, `H87` or `XBX`; '
+    + 'an organization\'s own unit cannot be a field\'s fixed unit. Use `unitMode: \'record\'` with `unitField` when '
+    + 'each record names its unit, an organization unit included.';
+}
+
+/** The refusal of a `record` config with no pointer, or an empty one. */
+const UNIT_FIELD_REQUIRED =
+  '`unitMode: \'record\'` needs `unitField`: name the `text` field on this object that holds each record\'s unit '
+  + 'code, conventionally `unit_code`. Use `unitMode: \'fixed\'` with `unit` when the field has one unit.';
+const UNIT_FIELD_EMPTY =
+  '`unitField` names a field: an empty name points at nothing — name the `text` field on this object that holds '
+  + 'each record\'s unit code, conventionally `unit_code`.';
+
+/** One closed dimension restriction (ADR-0158 U4: "An optional dimension restriction is allowed"). */
+const unitDimensionSchema = () => z.enum(UNIT_DIMENSIONS, {
+  error: (iss) =>
+    `\`unitDimension: ${JSON.stringify(iss.input)}\` is not a unit dimension: write one of `
+    + `${UNIT_DIMENSIONS.map((d) => `\`${d}\``).join(', ')}.`,
+});
+
+/** The guidance every variant gives the key that belongs to another mode. */
+const UNIT_FIELD_OFF_MODE =
+  '`unitField` is read only under `unitMode: \'record\'`, where it names the sibling `text` field holding each '
+  + 'record\'s unit code: set `unitMode: \'record\'`, or delete `unitField`.';
+const UNIT_OFF_MODE =
+  '`unit` is read only under `unitMode: \'fixed\'`, where it is the field\'s one standard unit: under '
+  + '`\'record\'` each record names its own unit in the field `unitField` names, and a `\'code\'` field holds the '
+  + 'code itself. Delete `unit`, or use `unitMode: \'fixed\'`.';
+
+/**
+ * [ADR-0158 U4, L3] A `fixed` quantity: one standard unit for every record,
+ * written in metadata and checked at build against the standard table (U1).
+ * No `unitDimension`: the standard table already gives the code its dimension.
+ */
+const FixedUnitConfigSchema = strictObject({
+  surface: 'this fixed-unit configuration',
+  history: UNIT_CONFIG_HISTORY,
+  aliases: { mode: 'unitMode', defaultUnit: 'unit', unitCode: 'unit', code: 'unit', uom: 'unit' },
+  guidance: {
+    unitField: UNIT_FIELD_OFF_MODE,
+    unitDimension:
+      '`unitDimension` is not read under `unitMode: \'fixed\'`: the standard unit table already gives `unit` its '
+      + 'dimension (`KGM` is a mass). Delete `unitDimension`.',
+  },
+}, {
+  unitMode: z.literal('fixed').describe('`fixed`: the field has one unit, `unit`, a standard code checked at build.'),
+  unit: z.enum(STANDARD_UNIT_CODE_LIST, { error: (iss) => fixedUnitMessage(iss.input) })
+    .describe('The field\'s one unit: a standard UN/ECE Recommendation 20 code from `STANDARD_UNITS`, in exact uppercase (e.g. `KGM`, `MTR`, `H87`). Required under `fixed`; checked at build, so an unknown or lowercase code never parses.'),
+});
+
+/**
+ * [ADR-0158 U4, L3] A `record` quantity: each record names its own unit in a
+ * sibling `text` field, the code stored in exact uppercase and never an id.
+ * What the pointer names is the object's to judge (object.zod.ts), because
+ * only the object holds the field map; a two-segment pointer through a
+ * `master_detail` is refused there (L3: reserved, not admitted).
+ */
+const RecordUnitConfigSchema = strictObject({
+  surface: 'this record-unit configuration',
+  history: UNIT_CONFIG_HISTORY,
+  aliases: { mode: 'unitMode', field: 'unitField', codeField: 'unitField', dimension: 'unitDimension' },
+  guidance: { unit: UNIT_OFF_MODE },
+}, {
+  unitMode: z.literal('record').describe('`record`: each record names its own unit, in the field `unitField` names.'),
+  unitField: z.string({ error: UNIT_FIELD_REQUIRED }).min(1, UNIT_FIELD_EMPTY)
+    .describe('The name of the `text` field on the same object that holds each record\'s unit code, in exact uppercase (conventionally `unit_code`; the name is a convention, never a contract). One segment: a unit cannot follow a parent through `master_detail` yet. Required under `record`.'),
+  unitDimension: unitDimensionSchema().optional()
+    .describe('Optional restriction: the dimension every record\'s unit must have (`mass`, `length`, `area`, `volume`, `time`, `count` or `package`). A write naming a unit of another dimension is refused. Absent: any dimension.'),
+});
+
+/**
+ * [ADR-0158 Open item 8, ruled A: 「可以单独声明」] A `text` field that holds a
+ * unit code with no quantity beside it — a material's base unit, a pack
+ * table's unit column — declares itself a unit field. The write path judges it
+ * as it judges a `record` quantity's unit field (U5); the picker and the
+ * backfill reach it. A unit marker, not a fourth value domain (U1 keeps
+ * `ValueDomainSchema` at three members): the membership it asks is
+ * asynchronous and reads the organization's `sys_unit` rows, which no pure
+ * value-domain predicate can.
+ *
+ * Only on a field no quantity points at: a field a `record` quantity's
+ * `unitField` names is declared by that pointer (L3, "the pointer is the
+ * declaration"), and the object door refuses a second declaration on it.
+ */
+const CodeUnitConfigSchema = strictObject({
+  surface: 'this unit-code field configuration',
+  history: UNIT_CONFIG_HISTORY,
+  aliases: { mode: 'unitMode', dimension: 'unitDimension' },
+  guidance: {
+    unit: UNIT_OFF_MODE,
+    unitField:
+      '`unitField` is not read under `unitMode: \'code\'`: this field holds the unit code itself and points at '
+      + 'nothing. Delete `unitField`.',
+  },
+}, {
+  unitMode: z.literal('code').describe('`code`: this `text` field holds a unit code itself, with no quantity beside it.'),
+  unitDimension: unitDimensionSchema().optional()
+    .describe('Optional restriction: the dimension every unit this field holds must have. A write naming a unit of another dimension is refused. Absent: any dimension.'),
+});
+
+/** The refusal of a `unitConfig` whose `unitMode` is missing or not one of the three. */
+function unitModeMessage(input: unknown): string {
+  const config = input !== null && typeof input === 'object' ? input as Record<string, unknown> : undefined;
+  if (config && config.unitMode === undefined && 'mode' in config) {
+    return '`mode` is spelled `unitMode` in a unit configuration: write `unitMode: \'fixed\'`, `\'record\'` or `\'code\'`.';
+  }
+  const head = config?.unitMode === undefined
+    ? '`unitConfig` needs `unitMode`, and it has no default: the platform never guesses a unit.'
+    : `\`unitMode: ${JSON.stringify(config.unitMode)}\` is not a unit mode.`;
+  return `${head} On a \`number\` field write \`'fixed'\` (one standard unit, \`unit\`) or \`'record'\` (each `
+    + 'record\'s code in the `text` field `unitField` names); on a `text` field that holds a unit code itself, '
+    + 'write `\'code\'`.';
+}
+
+/**
+ * Unit Configuration Schema — the unit of a quantity, or the declaration of a
+ * unit code field (ADR-0158 U4, settled under its L3; Open item 8 ruled A).
+ *
+ * The keys mirror `currencyConfig` (ADR-0144): `unitConfig`, `unitMode` and
+ * `unitField` are `currencyConfig`, `currencyMode` and `currencyField`, and
+ * `fixed` / `record` mean what they mean there. The value of a quantity stays
+ * a bare number (ADR-0104 D1); a record stores a unit CODE, never an id, in
+ * exact uppercase (U4). Three modes, one per variant, each a closed shape:
+ *
+ * - `fixed` (on `number`): `unit`, a standard code (U1), checked at build.
+ * - `record` (on `number`): `unitField`, the sibling `text` field holding each
+ *   record's code, and an optional `unitDimension`.
+ * - `code` (on `text`): this field holds a unit code itself (Open item 8), with
+ *   an optional `unitDimension`.
+ *
+ * Where it diverges from `currencyConfig`, and why:
+ *
+ * - `unitMode` is REQUIRED with no default. `currencyMode` defaults to
+ *   `dynamic` because an absent config already means the tenant currency; no
+ *   tenant unit exists, and the platform does not guess one (L3).
+ * - `unit`, not `defaultUnit`: under `fixed` it is the field's one unit, never a
+ *   default (L3; `defaultCurrency` is the recorded misnomer).
+ * - `unitDimension`, not `dimension`: the bare word is a group-by axis in the
+ *   analytics schemas (L3).
+ * - A discriminated union of three closed shapes, not one shape with a
+ *   cross-key `superRefine`: the discriminator is required here, so each
+ *   mode's keys are its variant's, and the rule reaches the published JSON
+ *   Schema (`oneOf`) instead of being enforced only at runtime (the
+ *   dropped-refinement ratchet). `currencyConfig` cannot take this form,
+ *   because its discriminator has a default.
+ *
+ * Which field TYPE may carry which mode (`number`: `fixed` / `record`;
+ * `text`: `code`; every other type: none, `formula` and `summary` included
+ * until a reader exists, U8) is `FieldSchema`'s to judge; what a `record`
+ * pointer names, and a `code` field no quantity points at, are the object's
+ * (`object.zod.ts`). The write path's reader is the engine's unit membership
+ * check (`@objectstack/objectql`, U5).
+ */
+export const UnitConfigSchema = lazySchema(() => z.discriminatedUnion('unitMode', [
+  FixedUnitConfigSchema,
+  RecordUnitConfigSchema,
+  CodeUnitConfigSchema,
+], { error: (iss) => unitModeMessage(iss.input) }));
+
+export type UnitConfig = z.input<typeof UnitConfigSchema>;
+/** Post-parse shape of {@link UnitConfig} — defaults applied, transforms run (ADR-0122). */
+export type UnitConfigParsed = z.infer<typeof UnitConfigSchema>;
+
+/**
+ * The field types that may carry each unit mode (ADR-0158 U4, Open item 8):
+ * a quantity is a `number`, and a unit code field is a `text` field. Every
+ * other type carries no `unitConfig`: a `currency` amount's unit is its
+ * currency, and a `formula` or `summary` has no reader yet (U8).
+ */
+const UNIT_CONFIG_MODES_BY_FIELD_TYPE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  number: Object.freeze(['fixed', 'record']),
+  text: Object.freeze(['code']),
+});
+
+/**
  * Partial-masking presets (#8993, maintainer ruling 2026-08-16, Option A).
  *
  * A CLOSED enum, deliberately: free-form format strings are exactly where
@@ -1473,6 +1682,27 @@ export const FieldSchema = lazySchema(() => {
     // only way this channel can cover a family, and `not_null` was the spelling
     // it would have missed.
     tracked: '`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).',
+    // [ADR-0158 L3] The natural spellings of a quantity's unit on the field
+    // itself, answered in prose because the targets are NESTED keys of
+    // `unitConfig` — the form the `currency` answer above takes. None of them
+    // is, or ever was, a field key.
+    unit:
+      '`unit` is not a field key — a quantity\'s one standard unit is declared as `unitConfig: '
+      + '{ unitMode: \'fixed\', unit: \'KGM\' }` on the `number` field; when each record names its own unit, '
+      + 'as `unitConfig: { unitMode: \'record\', unitField: \'unit_code\' }`.',
+    uom:
+      '`uom` is not a field key — a quantity\'s unit is declared in `unitConfig` on the `number` field: '
+      + '`{ unitMode: \'fixed\', unit: \'KGM\' }` for one standard unit, or `{ unitMode: \'record\', '
+      + 'unitField: \'unit_code\' }` when each record names its own. A `text` field that holds a unit code with no '
+      + 'quantity beside it declares `unitConfig: { unitMode: \'code\' }`.',
+    unitCode:
+      '`unitCode` is not a field key — a `text` field that holds a unit code declares `unitConfig: '
+      + '{ unitMode: \'code\' }` (or is named by a quantity\'s `unitConfig.unitField`); a quantity\'s one unit is '
+      + '`unitConfig: { unitMode: \'fixed\', unit: \'KGM\' }` on the `number` field.',
+    dimension:
+      '`dimension` is not a field key — a quantity\'s dimension restriction is `unitConfig.unitDimension` '
+      + '(`mass`, `length`, `area`, `volume`, `time`, `count` or `package`). The vector length of an '
+      + 'embedding is `dimensions`.',
     // Prose rather than a rename, because this surface declares BOTH forms and
     // the two answers have opposite polarity: renaming onto `visibleWhen` sends
     // `visible: false` to a slot that wants a CEL string, and renaming onto
@@ -1679,7 +1909,7 @@ export const FieldSchema = lazySchema(() => {
   // (batch #218 item 2, letter 乙) words. The describe names the type set the
   // key still applies to, for the same reason as above.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it — a `formula` whose `returnType` is `percent` counts the places of its displayed percentage, as a `percent` field does, so a fraction result is rounded to `scale + 2` places. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -1746,7 +1976,7 @@ export const FieldSchema = lazySchema(() => {
    * header chips. The liveness row is `live` and names the relay sites that
    * carry the key to that renderer.
    */
-  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field, or a `formula` whose `returnType` is `percent`, is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
@@ -2112,7 +2342,8 @@ export const FieldSchema = lazySchema(() => {
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
    *   - `true` / absent  → shown as an auxiliary panel on the parent's record
-   *                       page. There is no count-based auto-split.
+   *                       page (absent on a `master_detail` field: see below).
+   *                       There is no count-based auto-split.
    *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): shown as
    *                       a full-width table in the record's detail body, not
    *                       as an auxiliary panel. A field group's `relatedList`
@@ -2125,10 +2356,12 @@ export const FieldSchema = lazySchema(() => {
    * How the record page lays these out is ADR-0085's to define; this key states
    * the relationship's role, not the page's chrome.
    *
-   * Absent on a `master_detail` field that sets `inlineEdit`, the list is
-   * `'primary'` by default: line items edited inside the parent's form are part
-   * of its main content (a quote's lines belong under the quote, not beside
-   * it). Write `relatedList: true` to keep such a list an auxiliary panel.
+   * Absent on a `master_detail` field, the list is `'primary'` by default
+   * (#35597, amending #27069 which also required `inlineEdit`): rows the parent
+   * owns are part of its main content (a quote's lines belong under the quote,
+   * not beside it), whether or not the parent's form edits them inline. Write
+   * `relatedList: true` to keep such a list an auxiliary panel, or `false` to
+   * hide it. Absent on a `lookup` field, the list stays an auxiliary panel.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -2141,7 +2374,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). true = an auxiliary panel on the record page; absent = \'primary\' (a body table) on a master_detail field, an auxiliary panel on a lookup field; false = hidden: the child object is not shown on the parent record page; \'primary\' = a body table: part of the record\'s main content, shown as a full-width table in the record\'s detail body. Write true on a master_detail field to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
@@ -2372,7 +2605,8 @@ export const FieldSchema = lazySchema(() => {
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
    * measures, display formatting, validation — read a declared type instead of
    * re-parsing the expression. Authoring stamps it from the inferred CEL type;
-   * absent when the type can't be proven (an ambiguous/`dyn` expression).
+   * absent when the type can't be proven (an ambiguous/`dyn` expression),
+   * except that a declared `percent` or `currency` stays (below).
    *
    * `currency` (#22727): the result is an amount of money. It carries its
    * currency exactly the way a `currency` field does — through the formula's
@@ -2381,10 +2615,30 @@ export const FieldSchema = lazySchema(() => {
    * expression references at read time: "taken from the source field" happens
    * at AUTHORING, where `@objectstack/formula`'s `inferFormulaReturn` proves the
    * result is money and answers the source's currency for the stamp to copy.
-   * The value itself is a bare number, as a currency field's is.
+   * The value itself is a bare number, as a currency field's is. Authoring
+   * stamps `currency`, with the currency the source amounts are in, when that
+   * verdict proves money, and withdraws a declared `currency` — for `number`,
+   * with no `currencyConfig` — when an edit leaves it answering `number`: the
+   * expression no longer computes money.
+   *
+   * `percent` (#35047): the result is a ratio, read exactly as a `percent`
+   * field reads its stored value — one convention, never a second one. The
+   * value is a FRACTION (`0.25` reads `25%`), unless the formula declares a
+   * `max` above 1, the percent field's own whole-percent statement
+   * (`percentScaleOf`), when it is percentage points. Its `scale` counts the
+   * decimal places of the displayed percentage, as on a `percent` field
+   * (absent ⇒ 0), so the engine rounds a fraction to `scale + 2` places and a
+   * whole percentage to `scale`. It is DECLARED, never inferred: no CEL type
+   * proves a quotient is a percentage, so authoring keeps a declared `percent`
+   * under every verdict that proves no other type — where it would stamp
+   * `number`, and where the type is unproven (a field-over-field quotient such
+   * as `record.spent / record.budget` types `dyn`), which would otherwise
+   * clear it. A declared `percent` is kept under a money verdict too: it is
+   * never re-stamped `currency`. A declared `currency` is kept under an
+   * unproven verdict the same way. A verdict that proves `text`, `boolean` or `date` still stamps.
    */
-  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency']).optional()
-    .describe('Inferred value type of a formula field (number/text/boolean/date/currency). `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency).'),
+  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency', 'percent']).optional()
+    .describe('Value type of a formula field (number/text/boolean/date/currency/percent). Authoring stamps `number`, `text`, `boolean` or `date` from the expression\'s inferred type and leaves it absent when none is proven; `percent` is declared by the author, and a verdict that proves no other type (`number`, or none) keeps it, as does a money verdict: a declared `percent` is never re-stamped `currency`. Otherwise `currency` is stamped when the expression provably computes money, and withdrawn for `number` (its `currencyConfig` dropped) when an edit leaves it a plain number; an unproven verdict keeps it. `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face.'),
   summaryOperations: strictObject({
     surface: 'this roll-up summary',
     history: FIELD_HISTORY,
@@ -2447,6 +2701,13 @@ export const FieldSchema = lazySchema(() => {
   // Currency config — read for a `currency` field and for a `formula` whose
   // `returnType` is `currency` (#22727): one shape for both, never a second one.
   currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary that rolls up an amount in the home currency (a child `currency` field in `dynamic` mode, a stored home amount included) declares `currencyMode: \'dynamic\'`, with no `defaultCurrency`, and shows in the organization\'s home currency. A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary.'),
+  // [ADR-0158 U4, L3; Open item 8 ruled A] The unit of a quantity (`number`:
+  // `fixed` / `record`), or the declaration of a unit code field (`text`:
+  // `code`). Which type carries which mode is the superRefine below; what a
+  // `record` pointer names is `ObjectSchema`'s. Read at write by the engine's
+  // unit membership check (`@objectstack/objectql`, U5): the key ships with
+  // its reader (U8).
+  unitConfig: UnitConfigSchema.optional().describe('Which unit a quantity is in, or that a text field holds a unit code (units of measure). On a `number` field: `{ unitMode: \'fixed\', unit }`, one standard UN/ECE Recommendation 20 code checked at build (e.g. `KGM`, `MTR`, `H87`), or `{ unitMode: \'record\', unitField, unitDimension? }`, where each record names its own unit in the sibling `text` field `unitField` names. On a `text` field that holds a unit code with no quantity pointing at it: `{ unitMode: \'code\', unitDimension? }`. The quantity stays a bare number; a record stores the unit CODE in exact uppercase, never an id. At write, a code must be a standard code or one of the organization\'s own non-retired units (`sys_unit`), of the restricted dimension when one is declared, and a quantity beside a blank code is refused. Refused on every other field type, `formula` and `summary` included. Absent: the number has no unit.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (read point recorded in
@@ -2873,6 +3134,60 @@ export const FieldSchema = lazySchema(() => {
   // key at the tail and break the byte-identity contract above.
   const shapeOrder = Object.keys(base.shape);
   return base.superRefine((field, ctx) => {
+  // [ADR-0158 U4, L3; Open item 8] `unitConfig` is read on two types only: a
+  // quantity is a `number` (`fixed` / `record`), and a unit code field is a
+  // `text` field (`code`). Every other type would parse a declaration nothing
+  // reads (ADR-0078): a `currency` amount's unit is its currency, and a
+  // `formula` or `summary` has no reader yet (U8), so a roll-up of a quantity
+  // shows a bare number until one ships.
+  if (field.unitConfig !== undefined) {
+    const mode = field.unitConfig.unitMode;
+    const admitted = Object.prototype.hasOwnProperty.call(UNIT_CONFIG_MODES_BY_FIELD_TYPE, field.type)
+      ? UNIT_CONFIG_MODES_BY_FIELD_TYPE[field.type]!
+      : [];
+    if (admitted.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['unitConfig'],
+        message:
+          `\`unitConfig\` is read on a \`number\` field (a quantity) and on a \`text\` field (a unit code) only, and `
+          + `this field is \`${field.type}\`: ${field.type === 'currency'
+            ? 'a currency amount\'s unit is its currency, declared in `currencyConfig`'
+            : field.type === 'formula' || field.type === 'summary'
+              ? 'a computed or rolled-up value has no unit reader yet, so the declaration would be inert (ADR-0158 U8)'
+              : 'nothing reads a unit on this type'}. Delete \`unitConfig\`, or declare it on the \`number\` field `
+          + 'that holds the quantity.',
+      });
+    } else if (!admitted.includes(mode)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['unitConfig', 'unitMode'],
+        message: field.type === 'text'
+          ? `\`unitMode: '${mode}'\` declares a quantity's unit, and this field is \`text\`: a quantity is a \`number\` `
+            + 'field. A `text` field that holds a unit code declares `unitConfig: { unitMode: \'code\' }`; '
+            + `put \`unitMode: '${mode}'\` on the \`number\` field holding the quantity.`
+          : '`unitMode: \'code\'` declares a `text` field that holds a unit code, and this field is a `number`, '
+            + 'a quantity: declare `unitMode: \'fixed\'` with `unit` (one standard unit) or `unitMode: \'record\'` '
+            + 'with `unitField` (each record\'s code in a sibling `text` field).',
+      });
+    } else if (mode === 'code' && field.valueDomain !== undefined) {
+      // A unit code field and a value domain are two vocabularies for one
+      // column (ADR-0158 U1 keeps the value domains at three, and a unit is
+      // not one of them). They are not disjoint — `MMK`, `XDR` and `PR` are in
+      // both — so the pair is refused for meaning two things at once, not for
+      // admitting nothing. The object door refuses the same pairing reached
+      // through a quantity's `unitField` (object.zod.ts).
+      ctx.addIssue({
+        code: 'custom',
+        path: ['unitConfig'],
+        message: `\`unitConfig: { unitMode: 'code' }\` declares that this field holds a unit code, and it also declares `
+          + `\`valueDomain: '${String(field.valueDomain)}'\`, another vocabulary. One column holds one kind of code: `
+          + 'declared as both, every write is judged against two lists, and a value passes only where they happen to '
+          + 'share a spelling (`MMK` is both a unit and an ISO 4217 currency code), meaning two things at once. '
+          + 'Delete one of the two.',
+      });
+    }
+  }
   // [#11339] `referenceVia` declares the id half of a polymorphic pointer
   // pair (ADR-0052 §5) — semantics only a plain `text` column carries. On a
   // relationship type it contradicts the type's own single static target, and

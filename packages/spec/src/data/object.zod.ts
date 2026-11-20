@@ -23,6 +23,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+import { suggestRename } from '../shared/rename-guess';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
@@ -63,6 +64,10 @@ import { resolveInjectedSystemColumns } from './injected-system-columns';
 // registry injects is judged by its type as a declared one is. The same cycle
 // as above, one module further: nothing here is called while a module evaluates.
 import { injectedSystemColumnDefs } from './injected-system-column-provenance';
+// [ruling 7000907189 point 1] Change Owner's structural test, read by the
+// `userActions.transfer` refusal. The same cycle as above, one module further
+// (it reads `resolveInjectedSystemColumns`): called only at parse time.
+import { transferIneligibilityReason } from './user-action-transfer';
 import {
   BOOLEAN_VALUE_TYPES,
   CALENDAR_DATE_TYPES,
@@ -1378,9 +1383,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * everywhere; a child that exists nowhere is refused at `defineStack` (save a
    * platform-prefixed name, left to the runtime) and by a metadata write that
    * names no package, and a write into a package stores it, placing nothing.
-   * It names a BODY TABLE only (`isBodyTableRelationship`, #27478): an inbound
-   * FK declaring `relatedList: 'primary'`, or a `master_detail` FK that sets
-   * `inlineEdit` and declares no `relatedList`. Body-ness is the FK's to
+   * It names a BODY TABLE only (`isBodyTableRelationship`, #27478, as amended
+   * by #35597): an inbound FK declaring `relatedList: 'primary'`, or a
+   * `master_detail` FK that declares no `relatedList`. Body-ness is the FK's to
    * decide; the group only positions it. A group naming a side card, or a list
    * its FK hides with `relatedList: false`, draws nothing at the group, so it
    * is refused wherever the child's fields are known: at `defineStack` and at
@@ -1391,7 +1396,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that sets inlineEdit and declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -2111,6 +2116,134 @@ function refuseDishonestRecordCurrencyField(
         message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object \`${objectName}\` `
           + `that does not declare \`valueDomain: 'iso_4217_currency'\`, so a write could store any string as the `
           + `currency. Add \`valueDomain: 'iso_4217_currency'\` to \`${target}\`, or point at another field. ${prescription}`,
+      });
+    }
+  }
+}
+
+/**
+ * [ADR-0158 U4, L3; Open item 8, ruled A] A `record`-mode quantity's
+ * `unitConfig.unitField` names the field THIS object declares that holds each
+ * row's unit code: a `text` field. The quantity stays a bare number (ADR-0104
+ * D1); the code field is the only place its unit lives, so a pointer into
+ * nothing or into a non-text field would parse and give the quantity a unit
+ * no write ever checks.
+ *
+ * `UnitConfigSchema` (field.zod.ts) sees one config at a time and refuses the
+ * half it can see; what the pointer names is judged here, beside
+ * {@link refuseDishonestRecordCurrencyField}, for the same reason: only the
+ * object holds the field map. One located issue per offending field at
+ * `['fields', <field>, 'unitConfig', <key>]`:
+ *
+ *  - a two-segment pointer: following a parent's unit through `master_detail`
+ *    is reserved, not admitted (L3: "a child cannot follow its parent's unit
+ *    yet");
+ *  - the name is not a declared field (or is the quantity itself);
+ *  - the field is not a `text` field;
+ *  - the field declares `unitConfig` itself. L3: "That field carries no
+ *    marker … the pointer is the declaration". Open item 8's marker
+ *    (`unitMode: 'code'`) is for a code field no quantity points at, so one
+ *    field never carries two declarations of what it holds;
+ *  - the field declares a `valueDomain`: a second vocabulary for the same
+ *    column, the pairing `FieldSchema` refuses beside the `code` marker;
+ *  - two quantities sharing one unit field declare different `unitDimension`
+ *    values (L3, the check {@link refuseDishonestHomeAmount} makes for amounts
+ *    sharing a rate field): one column holds one code per row, so it cannot
+ *    satisfy two dimensions.
+ *
+ * Judged against the AUTHORED field map. Not judged on
+ * `ObjectExtensionSchema`, for the reason
+ * {@link refuseDishonestRecordCurrencyField} gives.
+ */
+function refuseDishonestRecordUnitField(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  type UnitConfigView = { unitMode?: unknown; unitField?: unknown; unitDimension?: unknown };
+  const map = fields as Record<string, { type?: unknown; unitConfig?: UnitConfigView; valueDomain?: unknown } | null>;
+  const isText = (name: string): boolean => map[name]?.type === 'text';
+  const dimensionOwner = new Map<string, { quantity: string; dimension: string }>();
+  for (const [name, field] of Object.entries(map)) {
+    const config = field?.unitConfig;
+    if (config?.unitMode !== 'record' || typeof config.unitField !== 'string') continue;
+    const target = config.unitField;
+    const path = ['fields', name, 'unitConfig', 'unitField'];
+    const at = `\`${name}.unitConfig.unitField\` names \`${target}\``;
+    const candidates = Object.keys(map).filter(
+      (k) => k !== name && isText(k) && map[k]?.unitConfig === undefined && map[k]?.valueDomain === undefined,
+    );
+    const prescription =
+      '`unitField` must name a `text` field of this object that holds each record\'s unit code — '
+      + (candidates.length > 0
+        ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
+        : 'the object has none; declare one, conventionally `unit_code: Field.text()`.');
+    if (target.includes('.')) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a path, and a child cannot follow its parent's unit yet: \`unitField\` names one field of `
+          + 'this object. Give this object its own unit code field and point at it. The form '
+          + '`PARENT_FIELD.UNIT_FIELD` is reserved until an amendment of ADR-0158 admits it.',
+      });
+      continue;
+    }
+    if (target === name || !Object.prototype.hasOwnProperty.call(map, target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, but object \`${objectName}\` declares no other field \`${target}\`. ${prescription}`,
+      });
+      continue;
+    }
+    if (!isText(target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`${String(map[target]?.type)}\` field on object \`${objectName}\`; a unit is stored as its `
+          + `code (for example 'KGM'), never as a record id, in a \`text\` field. ${prescription}`,
+      });
+      continue;
+    }
+    if (map[target]?.unitConfig !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a field that declares \`unitConfig\` itself. The pointer is the declaration: a field a `
+          + `quantity points at holds that quantity's unit and carries no marker of its own. Delete \`unitConfig\` `
+          + `from \`${target}\`, and declare any \`unitDimension\` on \`${name}\`.`,
+      });
+      continue;
+    }
+    // The same pairing FieldSchema refuses on a `code` marker, reached through
+    // the pointer: a unit field and a value domain are two vocabularies for
+    // one column (L3: the field a quantity points at carries no marker).
+    if (map[target]?.valueDomain !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`text\` field that declares \`valueDomain: '${String(map[target]?.valueDomain)}'\`, another `
+          + 'vocabulary. One column holds one kind of code: as this quantity\'s unit field it would be judged against two '
+          + 'lists, and a value would pass only where they happen to share a spelling (`MMK` is both a unit and an ISO '
+          + '4217 currency code), meaning two things at once. A field a quantity points at carries no marker of its '
+          + `own: delete \`valueDomain\` from \`${target}\`, or point \`${name}\` at another field. ${prescription}`,
+      });
+      continue;
+    }
+    if (typeof config.unitDimension !== 'string') continue;
+    const holder = dimensionOwner.get(target);
+    if (holder === undefined) {
+      dimensionOwner.set(target, { quantity: name, dimension: config.unitDimension });
+    } else if (holder.dimension !== config.unitDimension) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fields', name, 'unitConfig', 'unitDimension'],
+        message: `\`${name}.unitConfig.unitDimension\` is \`'${config.unitDimension}'\`, but \`${holder.quantity}\` shares `
+          + `its unit field \`${target}\` and declares \`'${holder.dimension}'\`. One column holds one code per record, `
+          + `so it cannot be a unit of both. Declare the same \`unitDimension\` on both, or give \`${name}\` its own `
+          + 'unit field.',
       });
     }
   }
@@ -3450,6 +3583,52 @@ function refuseWriteLockedUserActions(
 }
 
 /**
+ * [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` may open the
+ * Change Owner action only on an object that is structurally eligible for it
+ * (`transferIneligibilityReason`, `user-action-transfer.ts`): the platform
+ * injects its reassignable `owner_id`, an owner is provable for it (an
+ * ADR-0015 `external` object declares `owner_id` or maps a remote column onto
+ * it), and the object does not declare that field read-only. One located issue
+ * at `['userActions', 'transfer']` for a bare `true`, or the object form with
+ * `enabled: true`, on any other object — the structure keeps the action off
+ * there whatever the switch says, so the entry would be a key nothing honours.
+ * The reason clause carries its own arm's prescription where one exists (drop
+ * `readonly`, set `ownership`, declare or map the external owner); the message
+ * ends with the one every arm shares, removing the entry or setting it to
+ * false. Closing it (`false`) restates the structure and is accepted, as is a
+ * predicate-only object form, which opens nothing.
+ *
+ * Refused at parse on every door, not only at `create()`: the key is new, so no
+ * stored object carries it. Kept in the existing callback beside
+ * {@link refuseWriteLockedUserActions} so it adds no check node the JSON Schema
+ * projection would have to drop.
+ */
+function refuseIneligibleUserActionTransfer(
+  object: { name?: unknown; userActions?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const userActions = object.userActions;
+  if (userActions === null || typeof userActions !== 'object') return;
+  const flag = (userActions as Record<string, unknown>).transfer;
+  const opens = flag === true
+    || (flag !== null && typeof flag === 'object' && (flag as { enabled?: unknown }).enabled === true);
+  if (!opens) return;
+  const reason = transferIneligibilityReason(object);
+  if (reason === undefined) return;
+  const name = typeof object.name === 'string' && object.name.length > 0 ? object.name : 'this object';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['userActions', 'transfer'],
+    message:
+      `Object '${name}' cannot offer the Change Owner action: ${reason}. ` +
+      'userActions.transfer turns the action on or off only on an object whose records have a reassignable ' +
+      'owner (the injected owner_id, on an object with ownership user or omitted, no managedBy and not a sys_ ' +
+      'name, provable on an external object, and not declared readonly), so true here is a switch nothing ' +
+      'honours. Otherwise remove the entry, or set it to false.',
+  });
+}
+
+/**
  * [ruling A on the read half of #32442] `enable.aiReadable` is declared only
  * where it has a reader: a `sys_*` object outside the stored-metadata family.
  * One located issue at `['enable', 'aiReadable']`; the family is judged before
@@ -3727,6 +3906,15 @@ const ObjectSchemaBase = strictObject(
    * `create`/`import` evaluate it once per toolbar against the record in
    * scope (#7692). Read that schema's docblock for what `record.*` binds to
    * in each position — they are different records.
+   *
+   * `transfer` is the Change Owner switch (ruling 7000907189 point 1), and it
+   * sits outside the {@link managedBy} matrix: it takes the same union as the
+   * four CRUD flags, but its default derives from `sharingModel` (on, except
+   * off on a `controlled_by_parent` detail), and it can open the action only
+   * on an object that is structurally eligible for it — see
+   * `user-action-transfer.ts` (`isTransferEligible`,
+   * `resolveUserActionTransfer`). Nothing reads it at runtime yet: the Change
+   * Owner endpoint and the console action are cards #35402 and #35403.
    */
   userActions: strictObject({
     surface: "this object's `userActions` block",
@@ -3744,6 +3932,8 @@ const ObjectSchemaBase = strictObject(
       update: 'edit',
       remove: 'delete',
       destroy: 'delete',
+      changeOwner: 'transfer',
+      reassign: 'transfer',
     },
     guidance: {
       // Wrong-LAYER, and the trap is that the key name is right somewhere else.
@@ -3757,27 +3947,27 @@ const ObjectSchemaBase = strictObject(
       sort:
         '`sort` is a VIEW `userActions` key, not an object one — the two blocks share a ' +
         'name and nothing else. The object block governs CRUD affordances ' +
-        '(create/import/edit/delete/exportCsv); toolbar controls ' +
+        '(create/import/edit/delete/exportCsv) and the Change Owner action (transfer); toolbar controls ' +
         '(sort/search/filter/refresh/rowHeight/editInline) live on the view.',
       search:
         '`search` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       filter:
         '`filter` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       editInline:
         '`editInline` is a VIEW `userActions` key. The object-level `edit` flag decides ' +
         'whether editing is offered AT ALL; how it is offered (inline vs form) is the ' +
         "view's call.",
       group:
         '`group` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       hideFields:
         '`hideFields` is a VIEW `userActions` key. This object block governs CRUD ' +
-        'affordances only — put toolbar controls on the view that renders the records.',
+        'affordances and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       rowColor:
         '`rowColor` is a VIEW `userActions` key. This object block governs CRUD ' +
-        'affordances only — put toolbar controls on the view that renders the records.',
+        'affordances and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       clone:
         '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
         'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',
@@ -3802,7 +3992,10 @@ const ObjectSchemaBase = strictObject(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
     exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
-  }).optional().describe('Per-object override of the resolved CRUD affordance matrix.'),
+    transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
+    ),
+  }).optional().describe('Per-object override of the resolved CRUD affordance matrix, plus the Change Owner switch (transfer).'),
 
   /**
    * System-field auto-injection control.
@@ -4732,6 +4925,10 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
   // ISO 4217 `text` sibling — the same door: only the object holds the map.
   refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
+  // [ADR-0158 U4, L3] A `record`-mode quantity's `unitField` names a declared
+  // `text` sibling with no marker of its own — the same door: only the object
+  // holds the map.
+  refuseDishonestRecordUnitField(object.name, object.fields, ctx);
   // [ADR-0144 D6, amended] A `summary` carries a currency only where one is
   // admitted; the half its own object can see — same door.
   refuseUnadmittedSummaryCurrency(object.name, object.fields, ctx);
@@ -4780,6 +4977,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0153 D4] `userActions` opens no write verb on a `synced` object. See
   // the helper's docblock.
   refuseWriteLockedUserActions(object.name, object.managedBy, object.userActions, ctx);
+  // [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` opens Change
+  // Owner only on a structurally eligible object. See the helper's docblock.
+  refuseIneligibleUserActionTransfer(object, ctx);
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
@@ -4887,40 +5087,6 @@ function snakeCaseToLabel(name: string): string {
     .join(' ');
 }
 
-/** Levenshtein edit distance — backs the "did you mean" hint for typo'd keys. */
-function editDistance(a: string, b: string): number {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
-    new Array<number>(b.length + 1).fill(0),
-  );
-  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[a.length][b.length];
-}
-
-/** Closest known key within a small edit distance, for typo hints (`indexs` → `indexes`). */
-function suggestKey(unknown: string, knownKeys: string[]): string | undefined {
-  let best: string | undefined;
-  let bestDist = Infinity;
-  for (const key of knownKeys) {
-    const d = editDistance(unknown.toLowerCase(), key.toLowerCase());
-    if (d < bestDist) {
-      bestDist = d;
-      best = key;
-    }
-  }
-  // Only suggest when the keys are genuinely close (guards against noise).
-  return best !== undefined && bestDist <= Math.max(2, Math.floor(unknown.length / 3))
-    ? best
-    : undefined;
-}
-
 /**
  * Builds a precise, fixable error for unknown top-level keys on
  * `ObjectSchema.create()` — the metadata-shape analogue of ADR-0032's "no
@@ -4933,7 +5099,10 @@ function unknownKeyError(objectName: unknown, unknownKeys: string[], knownKeys: 
   const lines = unknownKeys.map((key) => {
     const guidance = UNKNOWN_KEY_GUIDANCE[key];
     if (guidance) return `  • ${guidance}`;
-    const suggestion = suggestKey(key, knownKeys);
+    // The package's one rename rule (`shared/rename-guess.ts`): the same budget
+    // and short-key screen every `strictObject` refusal answers with, so a
+    // short key is never offered an unrelated one here either.
+    const suggestion = suggestRename(key, knownKeys);
     return suggestion
       ? `  • \`${key}\` is not an ObjectSchema field — did you mean \`${suggestion}\`?`
       : `  • \`${key}\` is not an ObjectSchema field.`;

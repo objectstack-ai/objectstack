@@ -5322,6 +5322,7 @@ export class ObjectQL implements IObjectQLEngine {
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
       composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
       find: (...a) => this.find(...a),
+      facade: this, logger: this.logger,
     };
     return count.call(host, object, query, options);
   }
@@ -6145,6 +6146,7 @@ export class ObjectQL implements IObjectQLEngine {
       get formulaHopReads() { return engine.formulaHopReads; },
       formulaOptionLabels: (...a) => engine.formulaOptionLabels(...a),
       hasObjectMiddleware: (...a) => engine.hasObjectMiddleware(...a),
+      get hooks() { return engine.hooks; },
       get i18nService() { return engine.i18nService; },
       get insertRecomputeListeners() { return engine.insertRecomputeListeners; },
       get logger() { return engine.logger; },

@@ -168,11 +168,11 @@ function renderGrid(ds: any, rows: any[]) {
   );
 }
 
-/** The n-th DATA cell of a row (`td[0]` is the row-number column). */
+/** The n-th DATA cell of a row (no row-number column, objectstack#35663). */
 function cellAt(container: HTMLElement, rowIndex: number, index: number): HTMLElement {
   const rowEl = container.querySelectorAll('tbody tr')[rowIndex] as HTMLElement;
   const tds = Array.from(rowEl.querySelectorAll('td')) as HTMLElement[];
-  return tds[index + 1];
+  return tds[index];
 }
 
 /** Single-click into a cell and hand back the widget's own trigger button. */

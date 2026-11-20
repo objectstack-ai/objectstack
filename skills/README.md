@@ -45,16 +45,17 @@ apps too).
 | Skill | Domain | What it covers |
 |:------|:-------|:---------------|
 | [Platform](./objectstack-platform/SKILL.md) | `platform` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, scaffolding), declaring platform capabilities (`requires:` — which service plugins boot), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
-| [Data](./objectstack-data/SKILL.md) | `data` | Design ObjectStack data schemas — objects, fields, relationships, validations, indexes, hooks, security, seeds and datasources. |
-| [Query](./objectstack-query/SKILL.md) | `query` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search. |
-| [UI](./objectstack-ui/SKILL.md) | `ui` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
-| [Automation](./objectstack-automation/SKILL.md) | `automation` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections. |
+| [Data](./objectstack-data/SKILL.md) | `data` | Design or change an ObjectStack data model, in a project or through MCP: objects, fields, relationships, validation rules, indexes, record hooks, permissions, seed / demo data, external datasources, and field `visibleWhen` / `requiredWhen` rules. |
+| [Query](./objectstack-query/SKILL.md) | `query` | Write an ObjectQL query over ObjectStack records: filter, sort, paginate, aggregate by group, expand related records, full-text search. |
+| [UI](./objectstack-ui/SKILL.md) | `ui` | Build what users see in an ObjectStack app, in a project or through MCP: list / form / kanban / calendar views, navigation, pages, dashboards, reports, charts, action buttons and package docs. |
+| [Automation](./objectstack-automation/SKILL.md) | `automation` | Automate an ObjectStack app, in a project or through MCP: act when a record is created or changes, on a schedule or from a webhook; approvals, notifications, assignment rules, and screen flows / wizards that branch between steps. |
 | [AI](./objectstack-ai/SKILL.md) | `ai` | Design ObjectStack AI skills, tools, knowledge sources, and the open-edition MCP server surface. |
 | [API](./objectstack-api/SKILL.md) | `api` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch contracts. |
-| [i18n](./objectstack-i18n/SKILL.md) | `i18n` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
-| [Formula](./objectstack-formula/SKILL.md) | `expression` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
+| [i18n](./objectstack-i18n/SKILL.md) | `i18n` | Translate an ObjectStack app, in a project or through MCP: object and field labels, select options, view, navigation and dashboard text, automation messages; add a locale, and find and fill missing keys (`os i18n check`). |
+| [Formula](./objectstack-formula/SKILL.md) | `expression` | Write a CEL expression wherever ObjectStack takes one, in a project or through MCP: formula fields, `visibleWhen` / `requiredWhen` rules, validation, sharing and visibility predicates, flow conditions, seed values, Salesforce formulas ported to CEL. |
 | [Upgrade](./objectstack-upgrade/SKILL.md) | `process` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
 | [Ask](./objectstack-ask/SKILL.md) | `process` | Answer a business question over a live ObjectStack environment through its MCP tools (list_datasets, query_dataset, list_objects, describe_object, query_records, aggregate_records): find the governed metric the question names, compute it and cite its source, or fall back to an object query and say so. |
+| [MCP Build](./objectstack-mcp-build/SKILL.md) | `process` | Build or change an ObjectStack app's metadata through its MCP draft door (list_metadata_items, get_metadata_item, save_metadata_draft, list_drafts, delete_metadata_draft), with no project files: read what exists, load the type's domain skill, save a draft, read the publish verdict the save answers, repair it, and hand the Studio review route to a person. |
 | [Project](./objectstack-project/SKILL.md) | `process` | Run an ObjectStack metadata-app project: decide whether a change belongs in the app or the platform, what to write before building, what the app tests and what the platform already checks, how a change is described for customers, released and upgraded. |
 | [ObjectUI](./objectui/SKILL.md) | `ui` | Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. |
 
@@ -120,9 +121,9 @@ A few common decision points where the right skill isn't obvious:
 - **Lifecycle hooks on data vs. business automation** — object-level hooks
   (`beforeInsert`, etc.) live in **objectstack-data**; cross-record orchestration,
   approvals, and scheduled work live in **objectstack-automation**.
-- **Screen flows vs. views** — interactive wizards / multi-step forms are
-  **automation** (screen flows). Static record / list / dashboard surfaces are
-  **ui**.
+- **Screen flows vs. views** — a stepped form over one object that never branches
+  is **ui** (a form view, `type: 'wizard'`); a screen flow that branches, or steps
+  across several objects, is **automation**. Static record / list / dashboard surfaces are **ui**.
 - **Any CEL expression** — load **objectstack-formula** alongside the host
   skill (data validations, automation guards, UI visibility).
 - **Kernel / plugin events vs. data lifecycle** — `PluginContext` lifecycle and
@@ -132,6 +133,8 @@ A few common decision points where the right skill isn't obvious:
 - **Upgrade vs. platform** — a protocol-major move is **objectstack-upgrade**.
 - **Writing metadata vs. running the project** — where a change belongs, what
   the app tests, releases and pin bumps are **objectstack-project**.
+- **Building over MCP, with no project files** — the order of work at the
+  draft door is **objectstack-mcp-build**; the shapes stay in the domain skills.
 - **Rendering this metadata** — the consuming UI is the `@object-ui/*`
   packages, and their own skill is [`objectui`](./objectui/SKILL.md) in this catalog.
 

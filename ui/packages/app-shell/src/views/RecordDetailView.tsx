@@ -8,10 +8,12 @@
  * (`buildDefaultPageSchema`).
  */
 
-import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
+import { createElement, useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
+import { getIcon } from '../utils/getIcon.js';
+import { isActingApprover } from '../utils/approvalDecisionFold.js';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
@@ -26,7 +28,7 @@ import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
-import { deriveRelatedLists } from '../utils/deriveRelatedLists.js';
+import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
@@ -36,6 +38,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -81,6 +84,7 @@ import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
+import { ApprovalBandOnceScope } from '@object-ui/plugin-detail';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
@@ -854,6 +858,20 @@ function readableRow<T>(
   return row;
 }
 
+/**
+ * objectstack#35593 — mounted beside the approval's button group wherever a
+ * record header draws it, so the page knows a header hosts the decisions and
+ * draws no fallback band. A count, not a flag: a phone draws the group in its
+ * bottom bar while the header's row may draw it too.
+ */
+function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => number) => void }) {
+  useLayoutEffect(() => {
+    onHosted((n) => n + 1);
+    return () => onHosted((n) => n - 1);
+  }, [onHosted]);
+  return null;
+}
+
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
 
   const params = useParams<{
@@ -1022,6 +1040,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   useEffect(() => {
     if (embedded && recordId) paneBar?.reportTitle(recordId, recordTitle);
   }, [embedded, paneBar, recordId, recordTitle]);
+  // objectstack#35593 — the page's top bar is the record's one header row: its
+  // two slots for the record header (`page:header` draws its name and tags,
+  // and its button group, into them), and whether a header holds the bar,
+  // which turns the bar's own 「› 记录名」 into 「/」 before the header's name.
+  // A pane's bar offers its own slots (`RecordStackDrawer`).
+  const [barTitleSlot, setBarTitleSlot] = useState<HTMLElement | null>(null);
+  const [barActionSlot, setBarActionSlot] = useState<HTMLElement | null>(null);
+  const [barClaimed, setBarClaimed] = useState(false);
+  const pageHeaderBar = useMemo<RecordHeaderBar>(
+    () => ({ titleSlot: barTitleSlot, actionSlot: barActionSlot, claim: setBarClaimed }),
+    [barTitleSlot, barActionSlot],
+  );
+  // The bar this record's header draws into: the page's, or the pane's (read
+  // from above). A record drawn in a host's plain overlay has none.
+  const paneHeaderBar = useContext(RecordHeaderBarContext);
 
   // Use the URL recordId as-is — it contains the actual record id.
   // Navigation code passes `record.id || record._id` directly into the URL
@@ -2323,6 +2356,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     openApproval: openApprovalOf(approvals),
     recordStatus: (pageRecord as any)?.approval_status,
   });
+  // objectstack#35599 — the record page's EDIT STATE (`recordEditState.tsx`):
+  // on a page that draws master-detail body tables, Edit turns the overview
+  // into a form — the fields become inputs, the body tables editable lines —
+  // and one Save writes all of it in one batch. `recordEditEligible` is
+  // set where the page's body tables are known (below the early returns,
+  // where no hook may run, so as a state update during render) and read by
+  // the header's Edit.
+  const [recordEditState, setRecordEditState] = useState(false);
+  const [recordEditSaving, setRecordEditSaving] = useState(false);
+  const recordEditControlRef = useRef<RecordEditStateControl | null>(null);
+  const recordEditEnterRef = useRef<RecordEditStateEntry | null>(null);
+  const [recordEditEligible, setRecordEditEligible] = useState(false);
+  const exitRecordEditState = useCallback(() => setRecordEditState(false), []);
+  const enterRecordEditState = useCallback(() => setRecordEditState(true), []);
+  useEffect(() => {
+    setRecordEditState(false);
+  }, [objectName, pureRecordId]);
   // How far the pending node's tally has got (objectstack#4478). Multi-approver
   // nodes — `quorum`, `unanimous`, `per_group` — do not finalize on one
   // decision, so an approver standing on the record needs the count to know
@@ -2360,9 +2410,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // off whether it is mounted: before the request's definition loads, or on a
   // backend too old to send a `viewer` block (every declared gate fails
   // closed), the bar draws no recall and the band stays the lever.
+  //
+  // objectstack#35593 — the bar is the record header's button group, and only
+  // a page whose layout has no `page:header` falls back to drawing it as a band
+  // of its own above the body (`approvalGroupHosts` counts the headers drawing
+  // it). Each reports what it draws into its own list, so the band's
+  // unmount, which reports "nothing", never clears what the header draws.
   const [approvalBarDrawn, setApprovalBarDrawn] = useState<string[]>([]);
+  const [approvalBandDrawn, setApprovalBandDrawn] = useState<string[]>([]);
+  const [approvalGroupHosts, setApprovalGroupHosts] = useState(0);
   const approvalRecallDrawnByHost =
-    approvalBarMounted && approvalBarDrawn.includes(APPROVAL_RECALL_ACTION);
+    approvalBarMounted
+    && (approvalGroupHosts > 0 ? approvalBarDrawn : approvalBandDrawn).includes(APPROVAL_RECALL_ACTION);
 
   // A decision landed through the declared-action bar (objectui#3055). The
   // action itself already POSTed and the runtime already toasted; what the HOST
@@ -4761,7 +4820,37 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClick: handleClaim,
       } as any);
     }
-    if (affordances.edit) {
+    // objectstack#35593 — a record an approval locks draws no Edit at all: the
+    // header's approval tag says why it cannot be changed. Every other reason
+    // for "off" keeps Edit drawn and greyed, as below.
+    // objectstack#35599 — in the edit state the Edit button's place holds the
+    // state's Cancel and Save, through the same system-action props.
+    if (affordances.edit && !approvalLocked && recordEditState) {
+      items.push({
+        name: 'sys_record_edit_cancel',
+        label: t('detail.cancel', { defaultValue: 'Cancel' }),
+        icon: 'x',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 99,
+        disabled: recordEditSaving,
+        onClick: () => recordEditControlRef.current?.cancel(),
+      } as any);
+      items.push({
+        name: 'sys_record_edit_save',
+        label: recordEditSaving
+          ? t('detail.saving', { defaultValue: 'Saving…' })
+          : t('detail.save', { defaultValue: 'Save' }),
+        icon: 'check',
+        type: 'script',
+        locations: ['record_header'],
+        order: 100,
+        disabled: recordEditSaving,
+        onClick: () => { void recordEditControlRef.current?.save(); },
+      } as any);
+    }
+    if (affordances.edit && !approvalLocked && !recordEditState) {
       const editOff = approvalLocked || editDisabledByPredicate || editLockedByState;
       // objectstack#35135 — the reason a predicate-disabled Edit gives. The
       // approval band and the state-lock badge explain their own locks, so
@@ -4794,7 +4883,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // the page:header renderer greys this CTA out so the classic form
         // can't be stacked on top of the draft (two competing edit sessions
         // with no reconciliation).
-        disableDuringInlineEdit: true,
+        //
+        // objectstack#35599, ruling B (「全部保留」) — on a page drawing body
+        // tables both modes stay: inline edit saves the record alone through
+        // the save bar, Edit → Save the record and its lines in one batch. So
+        // Edit stays pressable during an inline session there, and entering
+        // the edit state with unsaved inline changes asks first
+        // (`RecordEditStateController`'s discard confirm).
+        disableDuringInlineEdit: !recordEditEligible,
         // framework#3794 — an approval-LOCKED record refuses every write (the
         // server answers RECORD_LOCKED), so opening the form only to be
         // rejected on Save after filling a screen is wasted work. Disabled
@@ -4829,7 +4925,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The desktop row keeps it greyed in place for every reason, and an
         // Edit that is on is untouched.
         ...(phonePage && editOff ? { component: 'action:menu' } : {}),
-        onClick: () => onEdit({ id: pureRecordId }, objectName),
+        // objectstack#35599 — a page drawing body tables enters its edit state;
+        // every other page opens the record form, as before.
+        onClick: () => (recordEditEligible
+          ? (recordEditEnterRef.current ? recordEditEnterRef.current.requestEnter() : setRecordEditState(true))
+          : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
     // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
@@ -5094,19 +5194,40 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#27055, Target 8 — the related lists the synthesized page
   // places in its Details tab are the record's body tables (a page drawn as
   // its strip; the laid-out page reads the same off its details column).
+  // objectstack#35597 — an AUTHORED page's body tables are the related lists
+  // it places whose relationship is one (a `master_detail` FK with no
+  // `relatedList`, or `'primary'`): drawn when empty, with the server's totals.
   // A plain computation: this point is below the view's early returns, where
   // no hook may run.
-  const bodyTableIds = assignedPage || namedPageBlocked ? new Set<string>() : bodyTableIdsOf(renderedPage);
+  const bodyTableIds = namedPageBlocked
+    ? new Set<string>()
+    : assignedPage
+      ? authoredBodyTableIds(renderedPage, childRelations)
+      : bodyTableIdsOf(renderedPage);
+
+  // objectstack#35599 — the edit state's two inputs read off the body tables:
+  // Edit enters it on a page that draws one (and is otherwise the record form),
+  // and each table is drawn as an editor only when one batch can carry it
+  // (item 5, `bodyTablesSaveTogether`). The page itself is not rewritten: the
+  // edit state's controller draws the editors in the body tables' places
+  // (`RecordBodyTableEditorSlotContext`).
+  // A state update during render (not an effect: no hook may run here), so
+  // the header's Edit never reads a stale verdict; React re-renders before
+  // committing, and the update is a no-op once the value agrees.
+  if (recordEditEligible !== bodyTableIds.size > 0) setRecordEditEligible(bodyTableIds.size > 0);
+  const bodyTablesEditable = bodyTablesSaveTogether(objectDef, objects, bodyTableIds);
 
   // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
   // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
   // group (the page's own bar below; a pane's bar through
   // `RecordPaneBarToggles`), only where the tier has a right column and the
-  // page has a panel for it — never in the stack.
+  // page has a panel for it — never in the stack, and never in a drawer or
+  // pane, which draws no right rail (objectstack#35596).
   const panelToggleItems: PanelToggleItem[] = [];
   if (
     pageColumns
     && pageHasRightColumn
+    && !embedded
     && (pageColumns.timeline.length > 0 || pageColumns.related.length > 0)
   ) {
     panelToggleItems.push({
@@ -5136,6 +5257,28 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // to the list the page was opened from (or the object's list). Right, each
   // only where it applies: the counter and ↓ ↑ (a list context), ⊟, ⤡.
   const objectDefOf = (name: string) => objects.find((o: any) => o?.name === name);
+  // objectstack#35593 — where the record header draws the record's name and
+  // tags, after the crumb, and the 「/」 that separates the two once it does.
+  // Hidden while empty: a page with no `page:header` keeps 「› 记录名」.
+  // While a step reads the next record the header still holds the record
+  // left, so the bar names the route's record by its object until the page
+  // holds it (objectstack#35412), and the header's name waits hidden.
+  const barNamesRecord = barClaimed && holdsRouteRecord;
+  const barTitleSlotEl = (
+    <span
+      ref={setBarTitleSlot}
+      className="flex min-w-0 items-center empty:hidden"
+      hidden={barClaimed && !holdsRouteRecord}
+      data-record-bar-title=""
+    />
+  );
+  const barTitleSeparator = barNamesRecord ? (
+    <span aria-hidden="true" className="shrink-0 px-0.5 text-muted-foreground/70" data-record-bar-separator="">/</span>
+  ) : null;
+  const objectIconName = typeof (objectDef as any)?.icon === 'string' ? ((objectDef as any).icon as string) : undefined;
+  const objectIcon = barClaimed && objectIconName
+    ? createElement(getIcon(objectIconName), { className: 'h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
+    : null;
   const pageLeading = embedded ? null : pageTrail.length > 0 ? (
     <>
       {originFrom?.pathname && (
@@ -5166,15 +5309,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             </span>
           );
         })}
-        <span className="truncate" aria-current="page">{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
+        <span className="truncate" aria-current={barNamesRecord ? undefined : 'page'}>{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
       </nav>
+      {barTitleSeparator}
+      {barTitleSlotEl}
     </>
   ) : (
+    <>
     <nav
       aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
-      className="flex min-w-0 items-center gap-1"
+      className="flex min-w-0 shrink-0 items-center gap-1"
       data-testid="record-page-crumb"
     >
+      {objectIcon}
       {(() => {
         const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
         const objectCrumbClass = cn(crumbClass, 'shrink-0');
@@ -5206,11 +5353,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }
         return <span className="shrink-0 px-1">{plural}</span>;
       })()}
-      <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 truncate px-1 font-medium text-foreground" aria-current="page">
-        {recordCrumbName}
-      </span>
+      {!barNamesRecord && (
+        <>
+          <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate px-1 font-medium text-foreground" aria-current="page">
+            {recordCrumbName}
+          </span>
+        </>
+      )}
     </nav>
+    {barTitleSeparator}
+    {barTitleSlotEl}
+    </>
   );
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
@@ -5261,6 +5415,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       leadingTestId="record-page-leading"
       leading={pageLeading}
       stepper={pageStepper}
+      actionSlotRef={setBarActionSlot}
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
       frame={pageReturn.collapse ? <RecordDrawerReturnLink collapse={pageReturn.collapse} /> : undefined}
     />
@@ -5292,19 +5447,105 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // only), as the DetailView lock band draws the approval lock's. Not while
   // an approval lock already explains a disabled Edit.
   const stateLockLabel = t('detail.lockedByState', { defaultValue: 'Not editable in its current state' });
+  const stateLockChip = editLockedByState && !approvalLocked ? (
+    <span
+      role="status"
+      data-testid="record-state-lock"
+      title={stateLockLabel}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+    >
+      <Lock className="h-3 w-3" aria-hidden="true" />
+      <span>{stateLockLabel}</span>
+    </span>
+  ) : null;
+  // objectstack#35593 — the bar this record's header draws into: the page's
+  // own top bar, or the pane's. With one, the lock a state puts on the record
+  // is a tag beside the record's name instead of a floating chip.
+  const headerBarForRecord: RecordHeaderBar | null = embedded ? paneHeaderBar : phonePage ? null : pageHeaderBar;
+
+  // objectstack#35593 — the approval's short status tag in the header: 「待你
+  // 审批」 for the approver, 「审批中」 for everyone else while the request is
+  // pending (or the record lock says one is), 「已退回修改」 / 「已驳回」 for the
+  // latest request that ended there. It opens the approval's detail: today the
+  // approvals panel on this page (the 审批 tab takes it over).
+  const approvalTagText = approvals.pendingRequest
+    ? isActingApprover(approvals.pendingRequest)
+      ? t('approvalsInbox.awaitingYourDecision', { defaultValue: 'Awaiting your approval' })
+      : t('detail.approvalPending', { defaultValue: 'In approval' })
+    : lockedForReader
+      ? t('detail.approvalPending', { defaultValue: 'In approval' })
+      : approvals.latestRequest?.status === 'returned'
+        ? t('approvalsInbox.statusReturned', { defaultValue: 'Returned for revision' })
+        : approvals.latestRequest?.status === 'rejected'
+          ? t('approvalsInbox.statusRejected', { defaultValue: 'Rejected' })
+          : '';
+  const approvalTagTone = approvals.pendingRequest && isActingApprover(approvals.pendingRequest)
+    ? 'border-primary/30 bg-primary/10 text-primary'
+    : approvals.latestRequest?.status === 'rejected' && !approvals.pendingRequest && !lockedForReader
+      ? 'border-destructive/30 bg-destructive/10 text-destructive'
+      : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300';
+  const approvalTag = approvalTagText ? (
+    <button
+      type="button"
+      onClick={() => {
+        const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
+        if (panel) {
+          panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          return;
+        }
+        // objectstack#35595 — the approvals panel is the page's 审批 tab, not
+        // drawn on 概览: the tag opens that tab.
+        if (pageColumns) openEnlargedRelated('approvals');
+        else if (!hasApprovalsNode) handleTabChange('approvals');
+      }}
+      className={cn(
+        'inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        approvalTagTone,
+      )}
+      // The band draws no lock badge once this tag names the approval: the
+      // tag carries why the record is locked.
+      title={approvalLocked
+        ? t('detail.lockedTooltip', { defaultValue: 'This record has a pending approval request; editing is locked' })
+        : undefined}
+      data-record-approval-locked={approvalLocked ? '' : undefined}
+      data-testid="record-approval-tag"
+    >
+      {approvalTagText}
+    </button>
+  ) : null;
+  // objectstack#35593 — the record header's state: its tags, and its ONE
+  // button group, which is the pending request's levers when the viewer has
+  // any (`DeclaredActionsBar`'s header face says which) and the record's own
+  // row otherwise. Remind is the submitter's 「催办」 here, so it is not
+  // excluded as it was from the band (the approvals panel keeps its own).
+  const recordHeaderState: RecordHeaderState = {
+    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
+      <>
+        {approvalTag}
+        {headerBarForRecord ? stateLockChip : null}
+      </>
+    ) : undefined,
+    group: approvalBarMounted
+      ? (parts: RecordHeaderGroupParts) => (
+        <>
+        <ApprovalGroupBeacon onHosted={setApprovalGroupHosts} />
+        <DeclaredActionsBar
+          objectName={SYS_APPROVAL_REQUEST_OBJECT}
+          record={approvals.pendingRequest}
+          location={RECORD_APPROVAL_ACTION_LOCATION}
+          onDone={handleApprovalActionDone}
+          foldOverrides
+          headerParts={parts}
+          requireRejectReason
+          onDrawnActionsChange={setApprovalBarDrawn}
+        />
+        </>
+      )
+      : undefined,
+  };
   const sharedChrome = (
     <>
-      {editLockedByState && !approvalLocked && (
-        <span
-          role="status"
-          data-testid="record-state-lock"
-          title={stateLockLabel}
-          className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
-        >
-          <Lock className="h-3 w-3" aria-hidden="true" />
-          <span>{stateLockLabel}</span>
-        </span>
-      )}
+      {!headerBarForRecord && stateLockChip}
       {recordPresence.length > 0 && (
         <PresenceAvatars users={recordPresence} size="sm" maxVisible={3} showStatus />
       )}
@@ -5312,7 +5553,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     </>
   );
 
+  // objectstack#35595 — where a page drawn as written gets the panels it does
+  // not place: its tab strip's 审批 and 附件 tabs, not the page's foot.
+  const fallbackTabs = pageColumns
+    ? { page: renderedPage, approvals: false, attachments: false }
+    : withFallbackRecordTabs(renderedPage, {
+        approvals: pureRecordId && !hasApprovalsNode && approvals.requests.length > 0
+          ? { approvals: { available: approvals.available, requests: approvals.requests, pendingRequest: approvals.pendingRequest }, currentUserId: user?.id }
+          : null,
+        attachments: !!(filesEnabled && !hasAttachments && pureRecordId),
+      });
   const pageTree = (
+    <RecordHeaderBarContext.Provider value={headerBarForRecord}>
+    <RecordHeaderStateContext.Provider value={recordHeaderState}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
@@ -5389,9 +5642,35 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           approvalProgress={approvalProgress}
           approvalIsSubmitter={approvalIsSubmitter}
           approvalRecallDrawnByHost={approvalRecallDrawnByHost}
+          // objectstack#35593 — a header drawing the approval's group draws
+          // its tag too, which names the lock; the band drops its badge.
+          approvalTagDrawnByHost={approvalGroupHosts > 0}
           lockedReason={t('detail.lockedTooltip', {
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
+        >
+        <RecordEditStateController
+          active={recordEditState}
+          onExit={exitRecordEditState}
+          controlRef={recordEditControlRef}
+          enterRef={recordEditEnterRef}
+          onEnter={enterRecordEditState}
+          discardInlineTitle={t('form.discardTitle', { defaultValue: 'Discard changes?' })}
+          discardInlineMessage={t('detail.discardInlineEditsMessage', {
+            defaultValue: 'You have unsaved changes to this record\'s fields. Discard them to edit the whole record, or keep editing and save them first.',
+          })}
+          discardLabel={t('form.discard', { defaultValue: 'Discard' })}
+          keepEditingLabel={t('form.keepEditing', { defaultValue: 'Keep editing' })}
+          onSavingChange={setRecordEditSaving}
+          dataSource={dataSource}
+          objectName={objectName}
+          recordId={pureRecordId}
+          refresh={notifyRecordChanged}
+          bodyTableIds={bodyTableIds}
+          bodyTablesEditable={bodyTablesEditable}
+          bodyTablesReadOnly={bodyTableIds.size > 0 && !bodyTablesEditable}
+          readOnlyNotice={t('detail.bodyTablesReadOnlyBulk')}
+          unsavedMessage={t('form.unsavedChanges')}
         >
         <HighlightFieldsProvider>
         <DiscussionContextProvider
@@ -5509,45 +5788,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   </Button>
                 </div>
               )}
-              {/* The pending approval's DECISION ACTIONS (objectui#3055).
-                  `sys_approval_request` declares them as object metadata —
-                  approve / reject (with decision attachments) / reassign /
-                  send back / request info, plus the submitter's recall and
-                  resubmit — and this is the same bar, the same runtime and the
-                  same server-computed `visible` gate the approvals list runs
-                  them through. The record page adds no per-action code, so a
-                  ninth decision action ships as metadata alone.
+              {/* The pending approval's DECISION ACTIONS (objectui#3055) are no
+                  band of their own any more (objectstack#35593): they are the
+                  record header's ONE button group (`recordHeaderState` above),
+                  in the page's top bar, in a pane's bar, or in a phone's bottom
+                  bar. The step, the submitter and the tally the band's status
+                  line named are the approvals panel's to show until the
+                  审批 tab takes them.
 
-                  The dispatch record is the REQUEST row, not the business
-                  record: that is what makes `{id}` resolve to the request and
-                  what gives each action's `visible` the server's `viewer`
-                  block (`can_act` / `is_submitter` / `can_override`) to read.
-                  Placed above the page body rather than in the header for that
-                  reason — see the header-actions comment above — and above the
-                  fold, because a pending decision is why the approver opened
-                  the record.
-
-                  `approval_remind` is excluded: the approvals panel already
-                  renders a richer remind (throttle-aware copy, timeline
-                  refresh), and `exclude` is how a host keeps one of an
-                  object's declared actions in its own UI without the bar
-                  double-rendering it.
-
-                  objectstack#25877 — for an administrator who is NOT an
-                  approver, the override levers (approve / reject / reassign
-                  in their name, and recall) are the exception path, so
-                  `foldOverrides` collapses them into one status line and one
-                  marked menu; the approver's own bar is unchanged. While the
-                  bar draws the request's Recall, it is the page's one Recall:
-                  `onDrawnActionsChange` is how the page learns that and tells
-                  the DetailView band below to keep its lock badge only.
-
-                  objectstack#34361 (ruling A) — for the approver themselves,
-                  `foldDecisions` draws one band: a status line naming the
-                  task, the step and the submitter, the decisions as the only
-                  buttons, and every other lever in one menu. The request page
-                  (`ApprovalDecisionPanel`) draws the same band. */}
-              {approvalBarMounted && (
+                  The band below is the fallback for a page whose layout has
+                  no `page:header` to draw the group in: no header hosts it
+                  (`approvalGroupHosts`), so the decisions keep the band they
+                  had (objectstack#34361 ruling A), with remind left to the
+                  approvals panel. A header that mounts takes them over in
+                  its layout effect, before the page paints. */}
+              {approvalBarMounted && approvalGroupHosts === 0 && (
                 <DeclaredActionsBar
                   className="mb-4"
                   objectName={SYS_APPROVAL_REQUEST_OBJECT}
@@ -5557,7 +5812,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   onDone={handleApprovalActionDone}
                   foldOverrides
                   foldDecisions
-                  onDrawnActionsChange={setApprovalBarDrawn}
+                  requireRejectReason
+                  onDrawnActionsChange={setApprovalBandDrawn}
                 />
               )}
               {/* objectstack#27058 — on a phone the header's actions are drawn
@@ -5581,6 +5837,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                    page cannot hold two answers to "is this record frozen". */
                 parentRecord={pageRecord}
                 parentObjectFields={predicateFields}
+                /* objectstack#35599, ruling A (「一起锁」) — while an approval
+                   locks this record, its master-detail children draw no New,
+                   Edit or Delete: the server refuses each RECORD_LOCKED. */
+                serve={approvalLocked
+                  ? (bridge) => withDetailWritesWithheld(bridge, (child, fk) => isMasterDetailChild(objects, objectName, child, fk))
+                  : undefined}
               >
                 {/* objectstack#26678 / objectstack#27524 — the synthesized
                     page's blocks laid out by its width; `?tab=` addresses a
@@ -5596,6 +5858,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     tier={recordPageTier}
                     columns={pageColumns}
                     rightColumn={relatedSwitch === 'on'}
+                    // objectstack#35596 — a drawer (or pane) draws no right rail:
+                    // its 审批, 附件 and 动态 are its tabs.
+                    rail={!embedded}
                     relatedArrangement={relatedArrangement}
                     onRelatedArrangementChange={setRelatedArrangement}
                     enlargedRelated={enlargedRelatedParam}
@@ -5618,12 +5883,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // (frameless sections, the highlight grid); an authored page
                   // keeps its own face. Every `record:details` body, authored
                   // or not, draws the empty-sections line (objectstack#35019).
+                  //
+                  // objectstack#35595 — the approval and the attachments a page
+                  // does not place go into its tab strip, as the 审批 and 附件
+                  // tabs (`withFallbackRecordTabs`), not the page's foot; and
+                  // however many details nodes it places, it draws ONE approval
+                  // band (`ApprovalBandOnceScope`, objectstack#35483,
+                  // objectstack#35484).
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
                       {/* A page drawn as its strip is drawn as written: the
                           reader's arrangement belongs to the right column and
                           the tab row (objectstack#27524). */}
-                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      <ApprovalBandOnceScope>
+                        <SchemaRenderer schema={withPageTabsUrlSync(fallbackTabs.page, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      </ApprovalBandOnceScope>
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
@@ -5635,7 +5909,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   AUTHORED pages that don't place the node, so the read-gated
                   approval story is never lost to a custom layout. Renders
                   nothing when the record has no requests. */}
-              {pureRecordId && !hasApprovalsNode && (
+              {pureRecordId && !hasApprovalsNode && !fallbackTabs.approvals && (
                 <RecordApprovalsPanel
                   className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   approvals={approvals}
@@ -5649,7 +5923,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   `record:attachments` node beside the discussion feed
                   (objectstack#4358), so this bottom append fires only for
                   authored pages that omit the panel. */}
-              {filesEnabled && !hasAttachments && pureRecordId && (
+              {filesEnabled && !hasAttachments && pureRecordId && !fallbackTabs.attachments && (
                 <div
                   className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   ref={setAttachmentsFallbackEl}
@@ -5690,7 +5964,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               {/* Record-level inline-edit Save/Cancel bar (objectui#2407 P2) —
                   commits the whole draft (highlights + body) in ONE atomic OCC
                   update; renders (sticky) only while editing. */}
-              <InlineEditSaveBar
+              {/* objectstack#35599 — the edit state saves through the header's
+                  Save (`RecordEditStateController`), so the bar stands down. */}
+              {!recordEditState && <InlineEditSaveBar
                 dataSource={dataSource}
                 objectName={objectName}
                 recordId={pureRecordId}
@@ -5701,7 +5977,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 lockedHint={t('detail.lockedTooltip', {
                   defaultValue: 'This record has a pending approval request; editing is locked',
                 })}
-              />
+              />}
             </div>
             <MetadataPanel
               open={showDebug}
@@ -5726,6 +6002,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
+        </RecordEditStateController>
         </InlineEditProvider>
       </RecordContextProvider>
 
@@ -5776,6 +6053,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClose={() => setFlowRefusal(s => ({ ...s, open: false }))}
       />
     </div>
+    </RecordHeaderStateContext.Provider>
+    </RecordHeaderBarContext.Provider>
   );
   // A drawer draws this view embedded and is its own host. A page is the host
   // of the drawer its related rows and lookups open over it
@@ -5826,4 +6105,62 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {pageTree}
     </RecordPageDrawerHost>
   );
+}
+
+/**
+ * objectstack#35595 — a page drawn as written (an authored page, or a
+ * synthesized one whose strip cannot be laid out) that does not place the
+ * record's approval or attachments panel gets them as tabs of its FIRST
+ * `page:tabs` strip — 「附件」 then 「审批」, after its own tabs — instead of
+ * at the page's foot. A page with no strip keeps the foot (there is nowhere
+ * else to put them). Returns the page unchanged, by reference, when it adds
+ * nothing, and says which tab it added.
+ */
+export function withFallbackRecordTabs(
+  page: any,
+  add: { approvals: Record<string, unknown> | null; attachments: boolean },
+): { page: any; approvals: boolean; attachments: boolean } {
+  const none = { page, approvals: false, attachments: false };
+  if (!add.approvals && !add.attachments) return none;
+  const extra = (): any[] => [
+    ...(add.attachments
+      ? [{ label: 'Attachments', value: 'attachments', children: [{ type: 'record:attachments', properties: {} }] }]
+      : []),
+    ...(add.approvals
+      ? [{ label: 'Approvals', value: 'approvals', children: [{ type: 'record:approvals', properties: add.approvals }] }]
+      : []),
+  ];
+  let placed = false;
+  const visit = (node: any): any => {
+    if (placed || !node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) {
+      let changed = false;
+      const next = node.map((child) => {
+        const out = visit(child);
+        if (out !== child) changed = true;
+        return out;
+      });
+      return changed ? next : node;
+    }
+    if (node.type === 'page:tabs') {
+      const items = node.properties?.items ?? node.items;
+      if (!Array.isArray(items)) return node;
+      placed = true;
+      const nextItems = [...items, ...extra()];
+      return node.properties?.items
+        ? { ...node, properties: { ...node.properties, items: nextItems } }
+        : { ...node, items: nextItems };
+    }
+    let out = node;
+    for (const key of ['regions', 'components', 'children'] as const) {
+      const value = node[key];
+      if (value === undefined) continue;
+      const next = visit(value);
+      if (next !== value) out = { ...out, [key]: next };
+      if (placed) break;
+    }
+    return out;
+  };
+  const next = visit(page);
+  return placed ? { page: next, approvals: !!add.approvals, attachments: add.attachments } : none;
 }

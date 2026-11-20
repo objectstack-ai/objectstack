@@ -839,22 +839,23 @@ export const PageHeaderProps = strictObject({
    * evidence: the renderer has always read them and the schema had not caught
    * up. The header renderer (read points recorded in `liveness/page.json`, row `regions`) resolves
    * `schema?.maxVisible ?? schema?.properties?.maxVisible` (and the `mobile*`
-   * twin), the `?? 3` / `?? 1` are its own fallbacks, and its comment says out
-   * loud that both are "overridable on the page:header". Closing this shape
+   * twin), the fallbacks for an unset key are its own (they differ by host, as
+   * the two `.describe()` strings below state), and its comment says out loud
+   * that both are "overridable on the page:header". Closing this shape
    * without declaring them would turn an invited affordance into a hard
    * rejection — the lesson of commit 78f0be872, which is to enumerate by the RENDERER'S read
    * pattern rather than by the key list a previous ruling happened to quote.
    *
-   * Optional with NO schema default, deliberately: 3 and 1 are the renderer's
-   * fallbacks, and declaring them here would materialize a `maxVisible` on
+   * Optional with NO schema default, deliberately: the per-host numbers are the
+   * renderer's fallbacks, and declaring one here would materialize a `maxVisible` on
    * every parsed header — turning an unset key into an authored one, exactly
    * as the record picker's `limit` docblock records for its own 50.
    */
   maxVisible: z.number().int().positive().optional().describe(
-    'How many header actions render as inline buttons before the rest fold into the overflow menu (renderer default 3).',
+    'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 1 in a record page\'s one-row header bar, 3 on any other header.',
   ),
   mobileMaxVisible: z.number().int().positive().optional().describe(
-    'The `maxVisible` budget on mobile viewports (renderer default 1).',
+    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, 1 on any other header.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -1861,6 +1862,23 @@ export const RecordRelatedListProps = strictObject({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
+
+/**
+ * How many of an object's declared `highlightFields` (ADR-0085), after the
+ * record's title field leaves the list, the DEFAULT record page draws in its
+ * header strip. The Details body leaves those fields out, so an entry past
+ * this count is drawn in the body instead.
+ *
+ * The one source both readers ask: the record page synthesizer in
+ * `@object-ui/plugin-detail` cuts the strip with it, and the
+ * `field-group-shadowed` lint in `@objectstack/lint` judges with it which
+ * field groups the strip empties on the record page. A second literal on
+ * either side is how the lint came to judge four while the page drew six.
+ *
+ * Not the bound of an authored `record:highlights` block's `fields`
+ * ({@link RecordHighlightsProps}): an authored page writes its own strip.
+ */
+export const RECORD_HIGHLIGHTS_MAX = 6;
 
 /**
  * ⚠️ The object arm is CLOSED, and closing a union arm is a different act from
@@ -6957,7 +6975,7 @@ function buildObjectFormRuntimeField() {
     minLength: FieldSchema.shape.minLength.describe('Minimum character count — the native control\'s `minlength`'),
     maxLength: FieldSchema.shape.maxLength.describe('Maximum character count — the control\'s ceiling (a textarea also draws its counter)'),
     pattern: z.string().optional().describe('Regular expression the value must match, as a string — the native control\'s `pattern`, enforced by the browser at submit'),
-    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency)'),
+    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency / percent)'),
     summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
     columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
     // [#21768] The `grid` widget's eight field-level keys, camelCase since

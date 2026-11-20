@@ -26,7 +26,7 @@ import {
 // since commit aa4b90d9a (the full-envelope ruling: no per-site subset contracts). Annotating the
 // implementations with a narrower shape is what forced this file to cast its
 // way out of its own contract to read fields the caller had already supplied.
-import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITY_PROVIDERS, type ExecutionContext } from '@objectstack/spec/kernel';
 // [commit 3f64fe6c6] The engine's own answer to "which column is this object walled
 // by?" — the twin of `SqlDriver.computeTenantField`, so the organization a grant
 // is stamped from is read off the SAME column the wall scopes the record by.
@@ -444,6 +444,30 @@ export const PHANTOM_ANCHOR_WRITE_DENY_NOTICE =
   'declare the real remote owner column or change the sharing model';
 
 /**
+ * [ADR-0057] The provider of the `hierarchy-security` capability, read from the
+ * capability registry so this line names the SAME package `os validate`,
+ * `os verify` and `os serve` name for the token.
+ */
+const HIERARCHY_SECURITY_PROVIDER =
+  PLATFORM_CAPABILITY_PROVIDERS['hierarchy-security'].package;
+
+/**
+ * [ADR-0057] Logged ONCE per service instance (one per boot), the first time a
+ * hierarchy scope (`own_and_reports` / `unit` / `unit_and_below`) is asked for
+ * while no `hierarchy-scope-resolver` service is registered — the moment
+ * {@link SharingService.resolveOwnerScopeIds} falls back to owner-only. A
+ * functional degradation (the scope is narrower, nothing is lost), hence WARN.
+ * The CLI says the same at `os serve` start; this is the line a runtime booted
+ * without the CLI prints.
+ */
+export const HIERARCHY_RESOLVER_ABSENT_NOTICE =
+  '[sharing] hierarchy scope NOT widened: capability "hierarchy-security" has no provider — ' +
+  `no hierarchy-scope-resolver service is registered (${HIERARCHY_SECURITY_PROVIDER} provides it), ` +
+  'so the hierarchy scopes (`own_and_reports`, `unit`, `unit_and_below`) behave as owner-only. ' +
+  `Install ${HIERARCHY_SECURITY_PROVIDER} and add its plugin to \`plugins[]\` to widen them. ` +
+  'Logged once per boot.';
+
+/**
  * [#27662] The second silent cause of the same refusal: a federated object
  * whose owner column is NOT the phantom anchor — the author mapped a remote
  * column onto `owner_id` through `external.columnMap`, or declared `owner_id`
@@ -681,6 +705,20 @@ export class SharingService implements ISharingService {
    * its own line rather than inheriting this instance's silence.
    */
   private readonly phantomAnchorNotified = new Set<string>();
+
+  /**
+   * [ADR-0057] Has {@link HIERARCHY_RESOLVER_ABSENT_NOTICE} been logged?
+   *
+   * One boolean per service instance. The plugin builds ONE service at
+   * `kernel:ready`, so this is once per boot, while the fallback it reports
+   * runs on every read, write and share-management gate. The condition is a
+   * property of the composition, not of the caller or the object, so no key
+   * finer than the instance adds anything but repeats. Set only when the
+   * fallback is TAKEN: an app that never asks for a hierarchy scope logs
+   * nothing. It records no verdict — the resolver is still looked up on every
+   * call, so the returned ids never depend on it.
+   */
+  private hierarchyResolverAbsenceNoted = false;
 
   constructor(options: SharingServiceOptions) {
     this.engine = options.engine;
@@ -2474,7 +2512,23 @@ export class SharingService implements ISharingService {
     const me = String(context.userId);
     if (!scope || scope === 'own' || scope === 'org') return [me];
     const resolver = this.hierarchyResolver?.();
-    if (!resolver) return [me];
+    if (!resolver) {
+      if (!this.hierarchyResolverAbsenceNoted) {
+        // Latch BEFORE the log, so a throwing logger cannot turn one line
+        // into one throw per request (#6783's ordering).
+        this.hierarchyResolverAbsenceNoted = true;
+        try {
+          this.logger?.warn?.(HIERARCHY_RESOLVER_ABSENT_NOTICE, {
+            capability: 'hierarchy-security',
+            provider: HIERARCHY_SECURITY_PROVIDER,
+            scope,
+          });
+        } catch {
+          /* a diagnostic must never fail, or change, an access verdict */
+        }
+      }
+      return [me];
+    }
 
     const organizationId = activeOrganizationId(context);
     if (organizationId === null && this.organizationScopeRequired()) {

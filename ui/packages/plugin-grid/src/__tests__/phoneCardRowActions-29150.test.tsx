@@ -164,14 +164,16 @@ afterEach(() => {
 describe('objectstack#29150 · a phone list card offers its row actions', () => {
   it('at 390 px each card\'s menu lists the desktop row\'s actions, in the same order', async () => {
     const desktop = await desktopRowActions();
-    // The desktop reference is the full set: Edit, Delete, the primary, then
-    // the secondaries, the gated one only where its predicate holds.
+    // The desktop reference is the full set: Edit, the primary, then the
+    // secondaries (the gated one only where its predicate holds), and Delete
+    // last (objectstack#35554).
     expect(desktop.Acme).toEqual([
       'row-action-builtin-edit',
-      'row-action-builtin-delete',
       'row-action-promote',
       'row-action-submit_review',
       'row-action-archive',
+      // objectstack#35554: Delete closes the menu, after a separator.
+      'row-action-builtin-delete',
     ]);
     expect(desktop.Globex).not.toContain('row-action-submit_review');
 

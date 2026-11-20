@@ -348,3 +348,51 @@ describe('[#33694] an in-product AI call is marked on the action_invocation row 
     for (const key of PERFORMER_KEYS) expect(meta).not.toHaveProperty(key);
   });
 });
+
+/**
+ * [#34292 — seat ruling 7000299515, maintainer 「B 仍记成功,加行数」] An
+ * answered aggregate bulk call keeps `outcome: 'succeeded'` and its row adds
+ * the per-row counts the door read off the handler's resolve value; a value
+ * that could not be read adds one mark and no succeeded count. Read back
+ * through a real engine.
+ */
+describe('[#34292] an aggregate bulk call\'s row records its per-row counts', () => {
+  const BULK: ActionInvocationAuditEvent = {
+    context: { userId: 'usr_1', tenantId: 'org_1', surface: 'rest' },
+    actionName: 'merge_leads', objectName: 'crm_lead', branch: 'script', outcome: 'succeeded',
+  };
+
+  it('a partial run stays succeeded and records selected / succeeded / failed / unconfirmed', async () => {
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation({ ...BULK, bulk: { selected: 3, succeeded: 1, failed: 1, unconfirmed: 1 } });
+
+    const [row] = await ledgerRows(engine);
+    expect(JSON.parse(row.metadata)).toEqual({
+      surface: 'rest', action_name: 'merge_leads', branch: 'script', outcome: 'succeeded',
+      bulk_selected: 3, bulk_succeeded: 1, bulk_failed: 1, bulk_unconfirmed: 1,
+    });
+  });
+
+  it('an unreadable resolve value records one mark and no succeeded count', async () => {
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation({ ...BULK, bulk: { unreadable: true } });
+
+    const [row] = await ledgerRows(engine);
+    expect(JSON.parse(row.metadata)).toEqual({
+      surface: 'rest', action_name: 'merge_leads', branch: 'script', outcome: 'succeeded', bulk_unreadable: true,
+    });
+  });
+
+  it('control: a call with no reading records no bulk key; a failed row records none either', () => {
+    const keys = (event: ActionInvocationAuditEvent) =>
+      Object.keys(JSON.parse(String(buildActionInvocationAuditRow(event).metadata))).filter((k) => k.startsWith('bulk_'));
+    expect(keys(BULK)).toEqual([]);
+    expect(keys({
+      ...BULK, outcome: 'failed', status: 409, bulk: { selected: 3, succeeded: 1, failed: 1, unconfirmed: 1 },
+    })).toEqual([]);
+  });
+});

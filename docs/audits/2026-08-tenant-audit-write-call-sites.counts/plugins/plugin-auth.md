@@ -28,9 +28,9 @@ a row or a number here — fix the code, or the census, and regenerate.
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 28 |
 | …and decidably tenancy-enabled | 16 |
-| Threading a decidably elevated (`isSystem`) context | 42 |
+| Threading a decidably elevated (`isSystem`) context | 41 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 45 |
+| Threading a context of undecidable elevation | 46 |
 | Receiver carried a readable engine type | 76 |
 | Receiver erased, placed by the object NAME | 24 |
 | Receiver erased, placed by an `object: string` PARAMETER | 1 |
@@ -123,5 +123,5 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/user-ban-write.ts` | `update` | `sys_user` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/user-ban-write.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/user-session-admission.ts` | `update` | `sys_user` | enabled | elevated | 2 |

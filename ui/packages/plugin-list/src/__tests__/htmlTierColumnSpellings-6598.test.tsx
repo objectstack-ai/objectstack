@@ -100,6 +100,9 @@ const dataSource = {
   onMutation: () => () => {},
 } as any;
 
+// The grid's old `#` row-number column. objectstack#35663 took it off every
+// list, so no header reads it now; it is still filtered out of `dataHeaders`
+// and still refused as the whole header row, the reported symptom.
 const INDEX_COLUMN = '#';
 
 interface Rendered {
@@ -161,7 +164,7 @@ describe("#6598 — all eight reported `columns` spellings on a kind:'html' page
       const r = await renderSpelling(`<list-view data={{provider:'object',object:'${OBJECT}'}} columns={['name','amount']} />`);
 
       expectNotTheReportedSymptom(r);
-      expect(r.headers).toEqual([INDEX_COLUMN, 'Opportunity Name', 'Amount']);
+      expect(r.headers).toEqual(['Opportunity Name', 'Amount']);
       expect(r.headers).not.toContain('Stage');
       expect(r.text).toContain('23 records');
     });
@@ -172,7 +175,7 @@ describe("#6598 — all eight reported `columns` spellings on a kind:'html' page
       );
 
       expectNotTheReportedSymptom(r);
-      expect(r.headers).toEqual([INDEX_COLUMN, 'Opportunity Name', 'Amount']);
+      expect(r.headers).toEqual(['Opportunity Name', 'Amount']);
       expect(r.headers).not.toContain('Stage');
     });
   });

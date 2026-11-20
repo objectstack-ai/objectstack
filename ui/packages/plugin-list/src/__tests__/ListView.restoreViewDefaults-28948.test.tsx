@@ -30,6 +30,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRendererProvider } from '@object-ui/react';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, type ListViewProps } from '../ListView';
+import { openAdvancedSort } from './conditionPanels';
 
 const RECORDS = [{ id: '1', name: 'Acme', stage: 'won', amount: 3 }];
 const OBJECT_DEF = {
@@ -90,7 +91,7 @@ async function openSort(dataSource: ReturnType<typeof makeDataSource>) {
   await screen.findByTestId('grid-stub');
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-  await screen.findByText('Sort Records');
+  await openAdvancedSort();
 }
 
 beforeEach(() => {
@@ -127,7 +128,7 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
     const props = { viewDefaults: { rowHeight: 'tall' as const }, onRestoreViewDefaults };
     const { rerender } = mount({ rowHeight: 'compact', onDensityChange } as Partial<ListViewSchema>, props);
     const content = await openDisplay();
-    expect(within(content).getByTestId('view-settings-density-cycle')).toHaveTextContent('Compact');
+    expect(within(content).getByTestId('options-row-row-height-value')).toHaveTextContent('Compact');
 
     fireEvent.click(within(content).getByTestId('display-reset-button'));
     expect(onRestoreViewDefaults).toHaveBeenCalledTimes(1);
@@ -138,7 +139,7 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
     // The host clears the stored density: `schema.rowHeight` is the view's own again.
     rerender({ rowHeight: 'tall', onDensityChange } as Partial<ListViewSchema>, props);
     await waitFor(() =>
-      expect(within(screen.getByTestId('view-settings-content')).getByTestId('view-settings-density-cycle')).toHaveTextContent('Spacious'),
+      expect(within(screen.getByTestId('view-settings-content')).getByTestId('options-row-row-height-value')).toHaveTextContent('Spacious'),
     );
     expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
     expect(onDensityChange).not.toHaveBeenCalled();
@@ -201,9 +202,15 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
 
   it('CONTROL: settings outside the preference reset as before and name nothing', async () => {
     const onRestoreViewDefaults = vi.fn();
-    mount({}, { viewDefaults: {}, onRestoreViewDefaults, defaultRowNumbers: true });
+    mount(
+      { userActions: { ...BASE.userActions, rowColor: true }, rowColor: { field: 'stage', colors: {} } } as Partial<ListViewSchema>,
+      { viewDefaults: {}, onRestoreViewDefaults },
+    );
     const content = await openDisplay();
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
+    // The row colour sits on the menu's Color level; the reset is on the menu itself.
+    fireEvent.click(within(content).getByTestId('options-row-color'));
+    fireEvent.click(await within(content).findByTestId('options-color-clear'));
+    fireEvent.click(within(content).getByTestId('options-back'));
     await waitFor(() => expect(within(content).getByTestId('display-reset-button')).toBeEnabled());
     fireEvent.click(within(content).getByTestId('display-reset-button'));
     expect(onRestoreViewDefaults).not.toHaveBeenCalled();

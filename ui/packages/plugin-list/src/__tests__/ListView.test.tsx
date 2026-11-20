@@ -2766,21 +2766,18 @@ describe('ListView — viewType normalization (AI-authored views)', () => {
   });
 });
 
-describe('ListView — inline-edit toggle drives grid editability', () => {
-  // Regression: clicking 行内编辑 flipped the toggle's own highlight but the grid
-  // did NOT enter edit mode. The grid schema is built in a useMemo that embeds
-  // `editable: inlineEdit`, but `inlineEdit` was missing from the memo's deps —
-  // so the emitted `editable` stayed stale until some *other* dep changed (a data
-  // refetch), lagging the toggle by one interaction. The spy grid below records
-  // the `editable` prop it is rendered with on each toggle.
+describe('ListView — the grid is editable with no mode and no toggle (objectstack#35684)', () => {
+  // Migrated from "inline-edit toggle drives grid editability": the toggle and
+  // the session mode it flipped are retired. The spy grid records the
+  // `editable` it is handed and the select-first host prop.
   let prevObjectGrid: ReturnType<typeof ComponentRegistry.get>;
-  let editableCalls: Array<boolean | undefined>;
+  let gridCalls: Array<{ editable: unknown; cellSelection: unknown }>;
 
   beforeAll(() => {
     prevObjectGrid = ComponentRegistry.get('object-grid');
     ComponentRegistry.register('object-grid', (props: any) => {
-      editableCalls.push(props.editable);
-      return <div data-testid="grid-editable">{String(!!props.editable)}</div>;
+      gridCalls.push({ editable: props.schema?.editable ?? props.editable, cellSelection: props.cellSelection });
+      return <div data-testid="grid-editable">{String(!!(props.schema?.editable ?? props.editable))}</div>;
     });
   });
   afterAll(() => {
@@ -2791,70 +2788,34 @@ describe('ListView — inline-edit toggle drives grid editability', () => {
     }
   });
   beforeEach(() => {
-    editableCalls = [];
+    gridCalls = [];
   });
 
-  it('toggling 行内编辑 immediately propagates editable to the grid (no one-toggle lag)', async () => {
-    mockDataSource.find.mockResolvedValue([
-      { id: '1', name: 'Alice', email: 'alice@test.com' },
-    ]);
-    const onInlineEditChange = vi.fn();
-    const schema: ListViewSchema = {
-      type: 'list-view',
-      compactToolbar: false,
-      objectName: 'contacts',
-      viewType: 'grid',
-      fields: ['name', 'email'],
-      // The toggle is offered by default since objectui#12086 (the v18 spec
-      // default, on). This case is about the toggle, so the view declares it
-      // explicitly and starts out of edit mode.
-      userActions: { editInline: true },
-    };
-
-    renderWithProvider(
-      <ListView schema={schema} dataSource={mockDataSource} onInlineEditChange={onInlineEditChange} />,
-    );
-
-    // Starts non-editable (wait for the initial data fetch to paint the grid).
-    expect(await screen.findByTestId('grid-editable')).toHaveTextContent('false');
-
-    // One click on the toggle must make the grid editable on the SAME interaction.
-    fireEvent.click(screen.getByTestId('toolbar-inline-edit-toggle'));
-
-    expect(onInlineEditChange).toHaveBeenCalledWith(true);
-    expect(screen.getByTestId('grid-editable')).toHaveTextContent('true');
-    // The last schema the grid received must carry editable:true.
-    expect(editableCalls.at(-1)).toBe(true);
-
-    // Toggling back off must return to non-editable, again on the same click.
-    fireEvent.click(screen.getByTestId('toolbar-inline-edit-toggle'));
-    expect(screen.getByTestId('grid-editable')).toHaveTextContent('false');
-    expect(editableCalls.at(-1)).toBe(false);
+  const view = (extra: Partial<ListViewSchema> = {}): ListViewSchema => ({
+    type: 'list-view',
+    compactToolbar: false,
+    objectName: 'contacts',
+    viewType: 'grid',
+    fields: ['name', 'email'],
+    ...extra,
   });
 
-  it('the toggle announces its state with aria-pressed (objectui#11816)', async () => {
+  it('a view that declares nothing hands the grid editable cells and the select-first model, and draws no toggle', async () => {
     mockDataSource.find.mockResolvedValue([{ id: '1', name: 'Alice', email: 'alice@test.com' }]);
-    const schema: ListViewSchema = {
-      type: 'list-view',
-      compactToolbar: false,
-      objectName: 'contacts',
-      viewType: 'grid',
-      fields: ['name', 'email'],
-      // Declared explicitly, as in the case above.
-      userActions: { editInline: true },
-    };
+    renderWithProvider(<ListView schema={view()} dataSource={mockDataSource} />);
+    expect(await screen.findByTestId('grid-editable')).toHaveTextContent('true');
+    expect(gridCalls.at(-1)).toEqual({ editable: true, cellSelection: true });
+    expect(screen.queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
+  });
 
-    renderWithProvider(
-      <ListView schema={schema} dataSource={mockDataSource} onInlineEditChange={vi.fn()} />,
-    );
-    await screen.findByTestId('grid-editable');
-
-    const toggle = screen.getByTestId('toolbar-inline-edit-toggle');
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  it.each([
+    ['userActions.editInline: false', { userActions: { editInline: false } }],
+    ['inlineEdit: false (folded into editInline)', { inlineEdit: false }],
+  ] as const)('%s hands the grid read-only cells, still select-first', async (_label, extra) => {
+    mockDataSource.find.mockResolvedValue([{ id: '1', name: 'Alice', email: 'alice@test.com' }]);
+    renderWithProvider(<ListView schema={view(extra as Partial<ListViewSchema>)} dataSource={mockDataSource} />);
+    expect(await screen.findByTestId('grid-editable')).toHaveTextContent('false');
+    expect(gridCalls.at(-1)).toEqual({ editable: false, cellSelection: true });
   });
 });
 

@@ -102,6 +102,8 @@
  *    refused with the writable packages named. A judgement that fails after
  *    the save landed is said beside the saved identity, never as a refused
  *    save.
+ *  - [#34774] `save_metadata_draft`'s optional `clientSpecVersion` is judged
+ *    first ({@link clientSpecVersionVerdict}).
  *  - `delete_metadata_draft` discards a pending draft through `deleteMetaItem`
  *    with `state: 'draft'`, never an active item.
  *  - Both ask the `/meta` type-level write admission (`metaTypeWriteRefusal`,
@@ -136,6 +138,7 @@
  * and their names never meet.
  */
 
+import { createRequire } from 'node:module';
 import { resolveUserAuthzGrants, userTextLocalesOf } from '@objectstack/core';
 import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import {
@@ -149,6 +152,7 @@ import {
     type MetaReadGateCaller,
 } from '@objectstack/rest';
 import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import type { ErrorCode, ListDraftsResponse, MetadataProtocol, RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
@@ -168,6 +172,46 @@ const VALIDATION_ERROR: ErrorCode = 'VALIDATION_ERROR';
 const RESOURCE_NOT_FOUND: ErrorCode = 'RESOURCE_NOT_FOUND';
 const SERVICE_UNAVAILABLE: ErrorCode = 'SERVICE_UNAVAILABLE';
 const INTERNAL_ERROR: ErrorCode = 'INTERNAL_ERROR';
+
+/** [#34774] The `@objectstack/spec` this process resolves (the version `initialize` states). */
+const SERVER_SPEC_VERSION: string | undefined = (() => {
+    try {
+        const { version } = createRequire(import.meta.url)('@objectstack/spec/package.json') as { version?: unknown };
+        return typeof version === 'string' && version ? version : undefined;
+    } catch {
+        return undefined;
+    }
+})();
+
+/**
+ * [#34774] The save's judgement of the client's declared spec version (#34659
+ * ruling D4 = A), before anything is written: another major is refused with the
+ * install line (`refusal`), another minor is saved with an `advisory`, and none
+ * or the same major and minor says nothing. The type's schema parse on the save
+ * stays the final gate either way.
+ */
+function clientSpecVersionVerdict(declared: unknown, server = SERVER_SPEC_VERSION): { refusal?: string; advisory?: string } {
+    if (declared === undefined) return {};
+    if (typeof declared !== 'string' || !SEMVER_2_0_0_VERSION_PATTERN.test(declared)) {
+        return { refusal: '`clientSpecVersion` is the `@objectstack/spec` version you built against, in SemVer form (e.g. 18.6.0).' };
+    }
+    if (!server) return { advisory: `This server could not read its own @objectstack/spec version, so ${declared} was not compared.` };
+    const [clientMajor, clientMinor] = declared.split('.').map(Number);
+    const [serverMajor, serverMinor] = server.split('.').map(Number);
+    const install = `npm i -D @objectstack/spec@${server}`;
+    if (clientMajor !== serverMajor) {
+        return {
+            refusal: `This server runs @objectstack/spec ${server}, and you built against ${declared}, another major: what `
+                + 'that major lets an item say is not what this server accepts. Nothing was saved. Install the server\'s '
+                + `version, rebuild the item against it and save again: ${install}`,
+        };
+    }
+    if (clientMinor === serverMinor) return {};
+    return {
+        advisory: `This server runs @objectstack/spec ${server}, and you built against ${declared}: the same major, so the `
+            + `draft was saved, but a key or value one of the two minors adds may be refused or not understood. ${install}`,
+    };
+}
 
 /** The lifecycle selector the item reads take. */
 const STATES = ['active', 'draft'] as const;
@@ -279,6 +323,14 @@ const WRITE_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                     type: 'string',
                     minLength: 1,
                     description: 'Optional: the `version` a read or a save answered. The save is refused if the draft changed since.',
+                },
+                clientSpecVersion: {
+                    type: 'string',
+                    minLength: 1,
+                    description: 'Recommended: the `@objectstack/spec` version you built the item against (SemVer, e.g. 18.6.0). '
+                        + 'This server\'s version is the `Authoring contract` line of its instructions. Another major is '
+                        + 'refused before anything is saved, naming the version to install; another minor is saved and '
+                        + 'advised. The saved item is still validated either way.',
                 },
             },
             required: ['type', 'name', 'item'],
@@ -706,6 +758,10 @@ export function createOpenAuthoringRegistry(opts: {
                         if (input.ifMatch !== undefined && !ifMatch) {
                             return refuse(VALIDATION_ERROR, '`ifMatch` is the `version` a read or a save answered.', 400);
                         }
+                        // [#34774] The client's spec version, judged before anything is written.
+                        const specVerdict = clientSpecVersionVerdict(input.clientSpecVersion);
+                        if (specVerdict.refusal) return refuse(VALIDATION_ERROR, specVerdict.refusal, 400);
+                        const advised = specVerdict.advisory ? { specVersionAdvisory: specVerdict.advisory } : {};
                         // The `/meta` type-level write admission, before anything is written.
                         const typeWriteRefused = await typeAdmission('PUT', type);
                         if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
@@ -739,7 +795,7 @@ export function createOpenAuthoringRegistry(opts: {
                         // `/meta` type-level read admission admits this human.
                         const typeReadRefused = await typeAdmission('read', type);
                         if (typeReadRefused) {
-                            return answer({ saved: identity, verdict: null, verdictWithheld: typeReadRefused, review });
+                            return answer({ saved: identity, verdict: null, verdictWithheld: typeReadRefused, review, ...advised });
                         }
                         let judgement: OpenAuthoringDraftJudgement;
                         try {
@@ -747,9 +803,9 @@ export function createOpenAuthoringRegistry(opts: {
                         } catch (error) {
                             // The draft is saved; only its verdict is missing, and the
                             // reply says so rather than reading as a refused save.
-                            return answer({ saved: identity, verdict: null, verdictError: verdictErrorOf(error), review });
+                            return answer({ saved: identity, verdict: null, verdictError: verdictErrorOf(error), review, ...advised });
                         }
-                        return answer({ saved: identity, verdict: verdictOf(judgement), review });
+                        return answer({ saved: identity, verdict: verdictOf(judgement), review, ...advised });
                     }
                     case 'delete_metadata_draft': {
                         if (typeof protocol?.deleteMetaItem !== 'function') return unavailable();

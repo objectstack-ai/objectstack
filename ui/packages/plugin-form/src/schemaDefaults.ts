@@ -152,6 +152,8 @@ type SeedFieldLike = NonNullable<NonNullable<FieldDefaultsSchemaLike['fields']>[
   options?: unknown;
   multiple?: unknown;
   currencyConfig?: unknown;
+  required?: unknown;
+  valueDomain?: unknown;
 };
 
 /**
@@ -199,6 +201,31 @@ export interface SeedContext {
    * explicit value, and the server never fills one in. Unset seeds nothing.
    */
   homeCurrency?: string | null;
+  /**
+   * The organization's time zone (`localization.timezone`, via
+   * `useLocalization().timezone`), or null/undefined when none is known. A
+   * REQUIRED `iana_time_zone` text field with no declared default opens
+   * pre-filled with it ({@link isOrganizationZoneSeedField}), so a create form
+   * shows the zone a create that leaves the field out would be given
+   * (ADR-0157 D7) instead of refusing a blank. Unknown seeds nothing.
+   */
+  homeTimeZone?: string | null;
+}
+
+/**
+ * Whether a field opens on the organization's time zone: a `required` text
+ * field whose `valueDomain` is `iana_time_zone` (ADR-0157 D7). Required only:
+ * on an optional zone field a blank is a legal answer ("take the parent's",
+ * as on a business unit), and a pre-filled value would replace it with an
+ * explicit zone the user never chose. On a required one a blank is refused
+ * anyway, so the seed only turns that refusal into a visible, editable value.
+ */
+function isOrganizationZoneSeedField(f: SeedFieldLike | undefined): boolean {
+  return (
+    f?.required === true &&
+    (f.type === undefined || f.type === 'text') &&
+    f.valueDomain === 'iana_time_zone'
+  );
 }
 
 /**
@@ -349,6 +376,10 @@ export function schemaDefaultValues(
       // VALUE the user submits (or changes), so the stored code is always
       // explicit; a declared `defaultValue` is the author's and wins.
       else if (codeFields?.has(name) && ctx?.homeCurrency) defaults[name] = ctx.homeCurrency;
+      // ADR-0157 D7 — a required time-zone field with no declared default
+      // opens on the organization's zone, the one the server gives a create
+      // that leaves it out; the user submits it (or another zone) explicitly.
+      else if (ctx?.homeTimeZone && isOrganizationZoneSeedField(f)) defaults[name] = ctx.homeTimeZone;
     }
   }
   return defaults;

@@ -658,3 +658,47 @@ describe('one source: the door is mounted exactly when /auth/config advertises i
     expect((await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct`)).status).toBe(404);
   });
 });
+
+describe('the post-logout return: the state an identity provider echoes on the door is accepted and never read', () => {
+  // Under `afterSignOut: 'identity-provider'` the door is the post-logout
+  // redirect URI, and the provider appends the `state` the `/sign-out` body
+  // carried to its logout (OpenID Connect RP-Initiated Logout 1.0 §3).
+  it('starts the same sign-in with or without the echoed state, and forwards none of it', async () => {
+    const plain = fakeHost();
+    const echoed = fakeHost();
+    const without = await runDirectSignIn(door('?callbackURL=%2Fx'), plain.host);
+    const withState = await runDirectSignIn(door('?callbackURL=%2Fx&state=rp-opaque-abc'), echoed.host);
+    expect(withState.status).toBe(302);
+    expect(withState.headers.get('location')).toBe(without.headers.get('location'));
+    expect(echoed.dispatched).toHaveLength(1);
+    expect(echoed.dispatched[0].body).toEqual(plain.dispatched[0].body);
+    expect(JSON.stringify(echoed.dispatched[0].body)).not.toContain('rp-opaque-abc');
+  });
+
+  it('the bare return the Console registers, with only the echoed state, starts the identity provider', async () => {
+    const { app } = mount({ provider: PLATFORM_IDP, afterSignOut: 'identity-provider' });
+    const res = await app.request(`${ORIGIN}/api/v1/auth/sign-in/direct?state=rp-opaque-abc`);
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get('location')!);
+    expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/${PLATFORM_IDP}/authorize`);
+    // A fresh start carries the vendor's own state, never the echoed one.
+    expect(location.searchParams.get('state')).toBeTruthy();
+    expect(res.headers.get('location')).not.toContain('rp-opaque-abc');
+  });
+
+  it('refuses a repeated state with 400 VALIDATION_ERROR, starting nothing', async () => {
+    const { host, dispatched } = fakeHost();
+    const res = await runDirectSignIn(door('?callbackURL=%2Fx&state=a&state=b'), host);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toEqual({ code: 'VALIDATION_ERROR', message: repeatedQueryParamMessage('state', 2) });
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it('CONTROL: an unknown name beside the state is still refused 400, starting nothing', async () => {
+    const { host, dispatched } = fakeHost();
+    const res = await runDirectSignIn(door('?state=a&next=%2F'), host);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('VALIDATION_ERROR');
+    expect(dispatched).toHaveLength(0);
+  });
+});

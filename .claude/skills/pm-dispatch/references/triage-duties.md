@@ -15,7 +15,7 @@
 - UTC 3 倍数时的轮次记录报 24h 流量:卡新建/关闭/净增,合并 PR 数,open p1,引 L2 审核新卡数。
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`area:*`);② `pm:queue` 无 `area:*`(仅多车道仓);
 - ③ `area:*` 无 pm-state;④ `pm:queue`+`area:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
-- 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
+- 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 与 `eval-run` 记录。
 - 析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟,谁打都首触;人定的级只补不改。
 - 首触定级与五析取 sweep 每 fire 跑到清空,先于旧卡重验:⛔ 无每轮预算、无逐卡豁免评论。
 - 五析取由 `node scripts/pm/first-touch-sweep.mjs --since=ISO` 照原文全量跑,⛔ 不手敲窄化或截断。
@@ -75,6 +75,7 @@
 - 父单已有子结构的:父单挂 `tracking`,分诊逐个展开子卡路由、补 `Blocked-by:` 排序。
 - 跨层功能点(≥2 层)的协调父单挂 `area:*`+`tracking`、⛔ 非 `pm:epic`;逐层子单各自定级。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
+- 审计评论可另带 `Fold-with: #N` 行提议折叠;采纳与否照 `execution-duties.md` 折叠五门。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
 - ADR/技能文本携带注记 ⛔ 不挂实施卡,每实施 PR 一 `domain:skills` 卡;ADR 由落地席合并后立。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
@@ -102,7 +103,7 @@
 - 新增维护面(协议键、元数据类型、门禁、依赖、服务、车道);≥3 卡串行或占槽超一日。
 - 不呈:实现细节、不升级类、记账类、p3 排序、CI 重跑、分支清理、patch 依赖、既裁执行。
 - 不呈四门同立:无产品可见行为变化、无契约变化、可回滚、有门禁兑底;呈裁卡注判据。
-- 例外一:`readings-*.md` 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。
+- 例外一:`readings-*.md` 增量抬上限到落地字节,免决策卡,PR 正文引本条与实测增量。
 - 例外二:AGENTS.md 报告态翻转,须①不删门不跳测;②同笔附两红 run 入下批待决;③否即翻回。
 - 条件:席位验收评论逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排。
 - 请示纪律:方向性授权覆盖整条执行链一并做完,⛔ 不逐项回问。

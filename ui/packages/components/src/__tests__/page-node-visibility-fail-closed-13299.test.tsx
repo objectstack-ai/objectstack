@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, cleanup, screen } from '@testing-library/react';
+import { render, cleanup, screen, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import {
   RecordContextProvider,
@@ -31,6 +31,9 @@ import { __resetVisibilityPredicateWarnings } from '../../../react/src/utils/vis
 import { RelatedCountStore } from '../hooks/related-count-store';
 // Module-scope import (not `beforeAll`) — objectui#3010/#3021.
 import '../renderers';
+// `react-page` reaches this dynamically; load it during collection, not in a
+// clocked case (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const RECORD_OBJECT = 'zz13299_env';
 const PARENT_ID = 'ENV-13299';
@@ -117,22 +120,24 @@ describe('objectui#13299 (e) — the tab badge does not count a node withheld by
     expect(lines[0]).toContain('WITHHELD');
   });
 
+  // objectstack#35595 — one table, one count: with both lists drawn the tab
+  // merges two tables and names no number, so the CONTROL reads the probes.
   it('CONTROL: a gate that evaluates to true is counted', async () => {
-    const { findByLabelText, ds } = renderTabs({
+    const { queryByLabelText, ds } = renderTabs({
       children: [relatedList(WITHHELD_CHILD, cel("record.plan == 'free'")), relatedList(SHOWN_CHILD)],
     });
 
-    expect((await findByLabelText('5 items')).textContent).toBe('5');
-    expect(probedObjects(ds)).toEqual([WITHHELD_CHILD, SHOWN_CHILD].sort());
+    await waitFor(() => expect(probedObjects(ds)).toEqual([WITHHELD_CHILD, SHOWN_CHILD].sort()));
+    expect(queryByLabelText(/items$/)).toBeNull();
   });
 
   it('CONTROL: a blank gate declares nothing and is counted', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { findByLabelText } = renderTabs({
+    const { ds } = renderTabs({
       children: [relatedList(WITHHELD_CHILD, ''), relatedList(SHOWN_CHILD)],
     });
 
-    expect((await findByLabelText('5 items')).textContent).toBe('5');
+    await waitFor(() => expect(probedObjects(ds)).toEqual([WITHHELD_CHILD, SHOWN_CHILD].sort()));
   });
 });
 

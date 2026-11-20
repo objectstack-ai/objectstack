@@ -103,6 +103,54 @@
           "pnpm changeset"
         ]
       }
+    },
+    {
+      "id": 7,
+      "prompt": "Add an attachments table to our ObjectStack app: `ticket_attachment` with the file name, size, uploader, upload time and a lookup to `ticket`, plus the upload and download endpoints.",
+      "expected_output": "Does not create the object or the endpoints: the platform catalog (objectstack-project §0, question 3) lists `sys_file` and `sys_attachment` as what the platform ships for exactly this. Sets `enable: { files: true }` on `ticket`, which opens the Attachments panel on the record page and lets attachments target the object; uploads go through the platform's storage API and the rows carry the uploader and time already. A single typed document the business names (a signed contract) is a `file` field on `ticket` instead. Names the catalog as where it looked.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "sys_attachment",
+          "files: true"
+        ],
+        "must_not_contain": [
+          "name: 'ticket_attachment'",
+          "ticket_attachment: ObjectSchema"
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "Our ObjectStack app's case SLA must count business hours only. Add a `business_hours_calendar` object (weekday ranges per organization) and a `holiday` table, and make the SLA formula read them.",
+      "expected_output": "Checks the platform catalog first: working calendars are in its Planned section, marked not available, so there is nothing to declare today. This is a missing capability, not a defect, so §3 does not apply: the app is not blocked and no workaround language is used. A second app would copy a calendar, so it files or links the platform card at objectstack-ai/objectstack, and may build the smallest calendar the SLA needs meanwhile, with the objects and the formula marked `// PLATFORM-CANDIDATE: <link to the card>` so the bump sweep (§5 step 4) replaces them when the platform ships calendars. It does not present the app's calendar as the platform's.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "PLATFORM-CANDIDATE",
+          "objectstack-ai/objectstack"
+        ],
+        "must_not_contain": [
+          "Blocked by",
+          "PLATFORM-GAP"
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "Users of our ObjectStack app need to see who changed which field on a record and when. Create an `audit_entry` object (object name, record id, field, old value, new value, user, time) and hooks on every object that fill it.",
+      "expected_output": "Does not build it: the platform catalog lists `sys_audit_log` (every write is recorded) and `sys_activity` (the record timeline, `enable.activities`, on by default) as what the platform ships for change history, read through the record page's activity stream and the data API. Leaves `activities` on, sets `trackHistory` where field-level history is wanted, and points the users at the timeline; `view_all_audit_log` is the capability for rows a reader could not otherwise open. No `audit_entry` object and no hooks.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "sys_audit_log",
+          "sys_activity"
+        ],
+        "must_not_contain": [
+          "name: 'audit_entry'",
+          "event: 'afterUpdate'"
+        ]
+      }
     }
   ]
 }

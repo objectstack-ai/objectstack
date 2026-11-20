@@ -460,6 +460,10 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'declines to declare the __search companion column on an object the sync seam issues no DDL for; it reads no row',
   },
+  // The update stamps an all-dropped update leaves unwritten: a set of payload KEYS, judged
+  // against the payload in hand, never a column read.
+  'engine-update.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
+  'engine-update.ts#<module> :: updated_by': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
   'having-filter.ts#declaredReferenceNames :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
@@ -512,6 +516,10 @@ const READERS: Record<string, Row> = {
   'assignment-rules.ts#authoredRules :: organization_id': {
     disposition: 'not-a-read',
     why: "keys an organization's sys_assignment_rule rows, a platform table plugin-sharing owns",
+  },
+  'validation/unit-code-membership.ts#organizationUnitRowsOf :: organization_id': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_unit rows, a platform table platform-objects owns (ADR-0158 U3), never a federated object's column",
   },
   'assignment-rules.ts#organizationMemberStanding :: organization_id': {
     disposition: 'not-a-read',
@@ -574,6 +582,14 @@ const READERS: Record<string, Row> = {
   'tenancy/system-write-organization.ts#buildRefusalMessage :: organization_id': {
     disposition: 'not-a-read',
     why: 'names the column in refusal text',
+  },
+  // ADR-0157 D2: a calendar or exception update may not change the row's organization.
+  'work-calendar-service.ts#refuseOrganizationChange :: organization_id': {
+    disposition: 'row-value',
+    why:
+      'compares the update payload in hand with the stored row the engine passed the hook, and names the column ' +
+      'in the refusal; it reads no storage, and its objects, sys_work_calendar and sys_work_calendar_exception, ' +
+      'are platform objects, never federated',
   },
   'federated-object.ts#isFederatedUnprovisionedInjectedColumn :: isFederatedObject()': {
     disposition: 'definition',

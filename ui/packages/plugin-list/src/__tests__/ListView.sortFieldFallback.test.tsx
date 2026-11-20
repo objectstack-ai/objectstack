@@ -34,6 +34,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { ListView } from '../ListView';
 import type { ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
+import { openAdvancedFilter, openAdvancedSort } from './conditionPanels';
 
 const objectDef = {
   name: 'projects',
@@ -110,12 +111,12 @@ async function renderList(overrides: Record<string, unknown>) {
 
 async function openSortPanel() {
   fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-  await screen.findByText('Sort Records');
+  await openAdvancedSort();
 }
 
 async function openFilterPanel() {
   fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-  await screen.findByText('Filter Records');
+  await openAdvancedFilter();
 }
 
 /**

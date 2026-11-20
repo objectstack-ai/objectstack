@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
+import { Search, Funnel, ArrowUpDown, X, EyeOff, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
@@ -25,6 +25,7 @@ import {
   useBelowSm,
 } from './components/ViewSettingsPopover';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
+import { ConditionChipRow, FilterPanel, SortPanel } from './conditions/ListConditionControls';
 import {
   TOOLBAR_ROW,
   TOOLBAR_ROW_LEADING_PHONE,
@@ -35,6 +36,7 @@ import {
   TOOLBAR_USER_FILTERS_LEADING_PHONE,
   TOOLBAR_CLUSTER,
   TOOLBAR_CLUSTER_LEADING_PHONE,
+  TOOLBAR_TEXT_TRIGGER,
 } from './listToolbarRow';
 import {
   calendarWindowCovers,
@@ -45,7 +47,7 @@ import {
   type CalendarVisibleRange,
   type CalendarWindow,
 } from './calendarWindow';
-import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, isPermissionError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
+import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, isPermissionError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote, OwnWritesContext, createOwnWrites } from '@object-ui/react';
 import type { LoadErrorKind, AnsweredLoadFailure } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
@@ -67,7 +69,7 @@ import { canonicalAstOperator, isVirtualSearchField, platformProvisionsStorage, 
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
-import { resolveBulkActions, useBulkActionItems, useUndeclaredActionNamesWarning } from '@object-ui/plugin-grid';
+import { resolveBulkActions, useBulkActionItems, useUndeclaredActionNamesWarning, readListScrollState } from '@object-ui/plugin-grid';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
@@ -300,7 +302,6 @@ export type ListPersonalizationPart =
   | 'density'
   | 'layout'
   | 'rowColor'
-  | 'rowNumbers'
   | 'inlineEdit';
 
 export interface ListViewProps {
@@ -379,11 +380,9 @@ export interface ListViewProps {
    */
   onAddedFieldsChange?: (added: string[]) => void;
   /**
-   * Called when the user toggles inline record editing. Wiring it is also what
-   * offers the wide toolbar's toggle. The toggle switches the grid's edit MODE,
-   * which `ListView` keeps in its own state. A host should not persist it into
-   * the view's `inlineEdit`: that key is the author's permission, and it folds
-   * into `userActions.editInline` (objectui#5144).
+   * @deprecated Never called since objectstack#35684: a list has no inline-edit
+   * mode and no toggle. Its grid is editable wherever the reader may edit and
+   * the view does not declare `userActions.editInline: false`.
    */
   onInlineEditChange?: (next: boolean) => void;
   /** Called when the user resizes/reorders columns in the underlying grid. */
@@ -453,16 +452,12 @@ export interface ListViewProps {
    * header, so the list draws none. Without it the list draws the description
    * itself, as an info control at the start of the toolbar row — never as a
    * row of its own, so the toolbar sits at one height with or without one.
+   *
+   * It may be a function of the list's state (objectstack#35548): the
+   * console's view switcher reads, inside its one trigger, how many records
+   * the list holds and which layout it draws.
    */
-  toolbarLeading?: React.ReactNode;
-  /**
-   * Whether the grid opens with row numbers in its leading cell — the opening
-   * state of the Display control's session-only switch, and what its "Reset to
-   * view default" returns to. Default `true`. A HOST prop, never a schema key:
-   * the console's Setup app opens its lists without them (objectui#12606), a
-   * posture of the console, not of the view.
-   */
-  defaultRowNumbers?: boolean;
+  toolbarLeading?: React.ReactNode | ((state: ListToolbarLeadingState) => React.ReactNode);
   /**
    * A host-drawn node beside each row's title in the grid (objectui#13330),
    * handed to `ObjectGrid`'s `rowAdornment`: the cell of the object's declared
@@ -567,10 +562,11 @@ export interface ListViewProps {
    * search (the Filter panel's finished conditions, the user-filter chips, the
    * "In a queue" toggle; the view's declared `filter` is never one); `search`
    * is a term the list applies. The Display-only settings (`layout`,
-   * `rowColor`, `rowNumbers`, `inlineEdit`) are those the Display control
-   * counts. The gallery card size is not a part: it is kept per object, not
-   * per view. `columns` is never reported here, since the column layout is
-   * the host's own stored state; it is in the type so a host can add it.
+   * `rowColor`) are those the Display control counts. The gallery card size
+   * is not a part: it is kept per object, not per view. `columns` is never
+   * reported here, since the column layout is the host's own stored state; it
+   * is in the type so a host can add it. Nor is `inlineEdit` since
+   * objectstack#35684, which retired the mode it named.
    *
    * When it is passed the host owns the reset, so the Display control draws
    * no "Reset to view default" of its own. The sort popover's reset and the
@@ -579,6 +575,31 @@ export interface ListViewProps {
    * keeps its reset, exactly as before.
    */
   onPersonalizationChange?: (parts: ReadonlyArray<ListPersonalizationPart>) => void;
+  /**
+   * Rename the open view from the options menu's first row, its name
+   * (`schema.label`, objectstack#35551). Wired only for a reader who may
+   * rename the view: the owner of one of their own views, or someone who may
+   * edit a shared one; without it the name row is read-only. Resolve `false`
+   * on a refused rename and the field reverts. A HOST prop, never a schema
+   * key. The name row is drawn for a host that wires this or
+   * `onPersonalizationChange` (a host that shows views), and a label.
+   */
+  onRenameView?: (label: string) => boolean | Promise<boolean>;
+  /**
+   * 保存 in the options menu (objectstack#35551, the 「已个性化」 marker's
+   * save, objectstack#30073): the list on screen becomes the open view's
+   * stored body. A host wires it only for a view the reader owns and may
+   * update, and only while the list differs from the view. Absent ⇒ none.
+   */
+  onSaveView?: () => void;
+  /**
+   * The host's full reset (the 「已个性化」 marker's), drawn as the options
+   * menu's 恢复默认 in place of the list's own reset. A host that reports
+   * `onPersonalizationChange` and wires this only while the list differs
+   * from the view gives the reset its home in the menu. Absent ⇒ the list's
+   * own reset, or, under `onPersonalizationChange`, 恢复默认 dimmed.
+   */
+  onResetView?: () => void;
   /**
    * Draw the COMPACT posture (objectui#12703): a header with the list's title
    * and record count over two-line rows (the view's first visible column, its
@@ -672,6 +693,19 @@ export interface ListViewProps {
    * notification. A HOST prop, never a schema key.
    */
   onPageChange?: (page: number) => void;
+  /**
+   * Fields whose conditions in `schema.filter` the HOST draws itself as its
+   * own tags (objectstack#35727) — the data page's 「Filtered by」 row for the
+   * conditions its address carries. The list still filters on them; its
+   * condition row draws no locked chip for them, so each condition shows
+   * once, and 「Reset」 (which never clears the view's filter) is not offered
+   * for them.
+   *
+   * A HOST prop, never a schema key: which surface draws a condition is the
+   * page's layout, not anything an author writes. Absent ⇒ every condition of
+   * the view's filter is a locked chip, exactly as before.
+   */
+  hostDrawnConditionFields?: ReadonlyArray<string>;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -1469,15 +1503,13 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.toolbar.densityCycleShortHint': 'Click to cycle',
   // The toolbar's Display control (objectui#12423).
   'list.display': 'Display',
+  'list.options': 'Options',
   'list.layout': 'Layout',
-  'list.rowNumbers': 'Row numbers',
   'list.resetToViewDefault': 'Reset to view default',
   // The Display control's Open records section (objectstack#26681).
   'list.recordOpen': 'Open records',
   'list.recordOpenDrawer': 'Drawer',
   'list.recordOpenPage': 'Full page',
-  'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
-  'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
   // The draft preview's note on a sort or filter it left out (objectstack#34807).
   'list.draftOnlyQueryDropped': 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
   // The note on view fields a disabled package withholds (objectstack#34901).
@@ -2037,6 +2069,19 @@ function ListOptionPicker({
 }
 
 /**
+ * What a function `toolbarLeading` is called with (objectstack#35548).
+ * `recordCount` is the count the record-count bar says — the server's total
+ * under paging and while the list loads as it scrolls (objectstack#35554: the
+ * matching rows, not the rows loaded so far), the rows otherwise, a paged board's view total — or `null`
+ * while the list says none (loading, a windowed calendar, `showRecordCount:
+ * false`). `layout` is the visualization on screen.
+ */
+export interface ListToolbarLeadingState {
+  recordCount: number | null;
+  layout: string;
+}
+
+/**
  * Imperative handle exposed by ListView via React.forwardRef.
  * Allows parent components to trigger a data refresh programmatically.
  *
@@ -2064,7 +2109,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onHiddenFieldsChange,
   addedFields,
   onAddedFieldsChange,
-  onInlineEditChange,
   onColumnStateChange,
   onRowClick,
   showViewSwitcher: showViewSwitcherProp,
@@ -2073,7 +2117,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialFilters,
   initialSearchTerm,
   toolbarLeading,
-  defaultRowNumbers = true,
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
@@ -2084,9 +2127,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   viewDefaults,
   onRestoreViewDefaults,
   onPersonalizationChange,
+  onRenameView,
+  onSaveView,
+  onResetView,
   recordOpen,
   page,
   onPageChange,
+  hostDrawnConditionFields,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
   // The switcher can be enabled either by the host component (prop) or by
@@ -2523,15 +2570,21 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // `refreshTrigger` is provided is required, not redundant. Form/delete flows
   // also bump refreshTrigger; the extra refetch that produces is harmless
   // because find() coalesces concurrent identical reads into one round-trip.
+  //
+  // objectstack#35685 — except a cell save the select-first grid makes and
+  // redraws from its own answer: it holds its record in `ownWrites` (provided
+  // to the grid below) for the length of the write, so that write re-reads no
+  // row here or on the bus, and the edited row keeps its place.
+  const ownWrites = React.useMemo(createOwnWrites, []);
   React.useEffect(() => {
     if (!dataSource?.onMutation || !schema.objectName) return;
     const unsub = dataSource.onMutation((event: any) => {
-      if (event.resource === schema.objectName) {
-        setRefreshKey(k => k + 1);
-      }
+      if (event.resource !== schema.objectName) return;
+      if (ownWrites.absorbs({ objectName: event.resource, recordId: event.id != null ? String(event.id) : undefined })) return;
+      setRefreshKey(k => k + 1);
     });
     return unsub;
-  }, [dataSource, schema.objectName]);
+  }, [dataSource, schema.objectName, ownWrites]);
 
   // Dynamic page size state (wired from pageSizeOptions selector)
   const [dynamicPageSize, setDynamicPageSize] = React.useState<number | undefined>(undefined);
@@ -2554,6 +2607,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // call it from closures taken renders ago. A move to the page already shown
   // tells the host nothing.
   const [ownPage, setOwnPage] = React.useState(1);
+  // objectstack#35554 — the infinite list's windows (see `infiniteScroll`).
+  // The key the list's scroll position is kept under: this list as the
+  // address bar names it, read once.
+  const [scrollRestoreKey] = React.useState(() =>
+    typeof window === 'undefined'
+      ? undefined
+      : `${schema.objectName ?? ''}|${window.location.pathname}${window.location.search}`,
+  );
+  const [restoreRows] = React.useState(() => readListScrollState(scrollRestoreKey)?.rows ?? null);
+  const [loadedWindows, setLoadedWindows] = React.useState<number | null>(null);
+  const infiniteAppendSkipRef = React.useRef<number | null>(null);
   const pageControlled = page !== undefined;
   const serverPage = pageControlled ? page : ownPage;
   const pageMoveRef = React.useRef({ controlled: pageControlled, current: serverPage, onPageChange });
@@ -2756,8 +2820,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (message) console.warn(message);
   }, [dynamicPageSize, authoredPageSize, schema.objectName, paginate]);
 
-  const fetchSkip = paginate ? (serverPage - 1) * effectivePageSize : 0;
+  // objectstack#35554 — a grid list with no DECLARED `pagination` loads as it
+  // scrolls: no pager, the next window is asked for as the table nears its
+  // end (`onLoadMore` below) and appended. A view that declares `pagination`
+  // keeps its pager. Spec `pagination` is optional with no default
+  // (`view.zod.ts`), so its presence is the declaration. The capped posture
+  // (a page block's bounded list) keeps its one window.
+  const infiniteScroll = paginate && !cappedWindow && schema.pagination === undefined;
+  // How many windows the list holds. `null` until the reader scrolls: then
+  // it is the windows needed to cover the rows a kept position was taken over
+  // (`readListScrollState`), so a return to the list loads back to the row it
+  // left from, in one request.
+  const loadedWindowCount = loadedWindows ?? Math.max(1, Math.ceil((restoreRows ?? 0) / effectivePageSize));
+  const fetchSkip = infiniteScroll
+    ? (loadedWindowCount - 1) * effectivePageSize
+    : paginate ? (serverPage - 1) * effectivePageSize : 0;
   const serverTotal = paginate ? fetchedTotal : null;
+  const hasMoreRows = infiniteScroll && (
+    serverTotal != null ? data.length < serverTotal : dataLimitReached
+  );
+  const loadMoreRows = React.useCallback(() => {
+    // The window this ask appends: the effect below appends it to the rows on
+    // screen only when it is the one asked for here, so any other re-run with
+    // several windows held (a refresh after a write) re-reads them all.
+    infiniteAppendSkipRef.current = loadedWindowCount * effectivePageSize;
+    setLoadedWindows(loadedWindowCount + 1);
+  }, [loadedWindowCount, effectivePageSize]);
 
   // Row color state (initialized from schema, user can configure via popover)
   const [rowColorConfig, setRowColorConfig] = React.useState(schema.rowColor);
@@ -2943,38 +3031,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
   const [showHideFields, setShowHideFields] = React.useState(false);
 
-  // Inline-edit MODE: session state, seeded from the view's `inlineEdit` on each
-  // load (objectui#5144, ruling E). The toolbar toggle flips it here and reports
-  // it through `onInlineEditChange`. The console writes nothing back, because
-  // `inlineEdit` is the author's permission key, so the mode is not remembered
-  // across loads. Whether the toggle is offered at all is `inlineEditOffered`
-  // below.
-  const [inlineEdit, setInlineEdit] = React.useState<boolean>(() => !!schema.inlineEdit);
-  React.useEffect(() => {
-    setInlineEdit(!!schema.inlineEdit);
-  }, [schema.inlineEdit]);
-  // Setter that also notifies the host.
-  const updateInlineEdit = React.useCallback(
-    (next: boolean) => {
-      setInlineEdit(next);
-      onInlineEditChange?.(next);
-    },
-    [onInlineEditChange]
-  );
-
-  // Row numbers on the grid's leading cell — the Display control's switch
-  // (objectui#12423). Session-only and in memory: nothing stores it, and it
-  // opens on the host's `defaultRowNumbers` (on unless a host says otherwise)
-  // with every list.
-  const [rowNumbers, setRowNumbers] = React.useState(defaultRowNumbers);
-
-  // objectui#12528 — the grid's column summaries, drawn at the right of the
-  // record-count row instead of a second footer row of the grid's own. The
-  // grid reports them through its `onColumnSummaryChange` host channel (by
-  // content, `null` when it draws none), and draws no summary row itself.
-  const [gridSummaries, setGridSummaries] = React.useState<
-    ReadonlyArray<{ key: string; header: string; label: string }> | null
-  >(null);
 
   // Export State
   const [showExport, setShowExport] = React.useState(false);
@@ -3149,70 +3205,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
 
   /**
-   * [#4647] Is the grid toolbar's inline-edit toggle offered at all?
+   * Is the grid editable in place? (objectstack#35684: there is no mode and no
+   * toggle; the grid IS editable wherever this says so, and a click selects a
+   * cell rather than editing it.)
    *
-   * Two gaps closed together, because both end at this one render condition.
+   * [#4647] The permission gate: the object's resolved affordance — ADR-0103
+   * bucket ∧ `userActions.edit` ∧ the server's effective API operations
+   * (objectstack#3391) — AND the current principal's grant (#4096), the
+   * `listInlineEdit` row of the affordance-to-grant map, the same question the
+   * record body's in-place editing asks. `can()` answers `true` with no
+   * `PermissionProvider`, so standalone embeds and the Studio designer keep
+   * their behavior.
    *
-   * ## Gap 1 — the permission gate
-   *
-   * The toggle used to render on the sole conditions "grid view", "the host
-   * wired `onInlineEditChange`" and "not the compact toolbar" — and every host
-   * passes that callback unconditionally. It was the ONE affordance on this
-   * toolbar with no permission check: New and Import are hidden for an account
-   * without the grant, the bulk-delete entry directly above ANDs
-   * `can(obj, 'delete')`, and inline edit alone stayed available to a read-only
-   * principal, who could flip it, edit cells and press "Save all" to earn a
-   * server 403. No data ever landed (the server gate is solid), but the UI
-   * walked the user through a round-trip guaranteed to fail.
-   *
-   * The gate is `permittedBulkActions`' verbatim, with the operation moved from
-   * `delete` to `update`: the object's resolved affordance — ADR-0103 bucket ∧
-   * `userActions.edit` ∧ the server's effective API operations (objectstack#3391) — AND
-   * the CURRENT PRINCIPAL's grant (#4096). The first half is spelled
-   * `isObjectInlineEditable`, which IS
-   * `resolveEffectiveCrudAffordances(...).edit` under the name that says what
-   * this surface is asking; it is the same helper the record body's
-   * double-click/pencil affordances read, so a list and a record page cannot
-   * disagree about whether an object's rows are editable in place.
-   *
-   * `can()` answers `true` with no `PermissionProvider`, so standalone embeds
-   * and the Studio designer keep today's behavior — the same fail-open the
-   * bulk gate above relies on.
-   *
-   * ## Gap 2 — the declared `userActions.editInline`, with the spec's default
-   *
-   * `ListViewSchema.userActions.editInline` defaults to `true`: a list view is
-   * editable in place by default, under the gate above, and
-   * `editInline: false` is the opt-out (the maintainer's v18 ruling,
-   * objectstack#22605, which flipped the earlier `.default(false)`). It is read
-   * here with that default (`!== false`), so a view that declares nothing is
-   * offered inline editing wherever the gate admits the principal. The ADR-0047
-   * interface page reads the same default.
-   *
-   * A view's `inlineEdit` reaches this read through the fold, not around it
-   * (objectui#5144). `normalizeListViewSchema` folds a boolean `inlineEdit`
-   * into `userActions.editInline` when the view declares no `editInline` of its
-   * own. So:
-   *  - a view with `inlineEdit: true` offers the toggle;
-   *  - a view with `inlineEdit: false` reads off;
-   *  - an explicit `editInline` wins over `inlineEdit`, either way;
-   *  - a view with neither key offers the toggle and opens out of edit mode.
-   *
-   * Both keys are the author's permission. This gate decides whether the toggle
-   * is offered. Whether the grid is in edit mode is the `inlineEdit` state above:
-   * session state, seeded from the view's `inlineEdit` on each load, and flipped
-   * by the toggle. The console no longer persists the toggle into the view
-   * (objectui#5144, ruling E). That write made the toggle one-way, because
-   * switching it off stored `inlineEdit: false`, which this gate then read as
-   * "not offered". A view with `editInline: true` and no `inlineEdit` offers the
-   * toggle and opens out of edit mode, the same as a view with neither key.
-   *
-   * ⚠️ A list that is read-only by nature declares
-   * `userActions.editInline: false`. Two costs are recorded with the
-   * objectui#5144 ruling. The edit mode is not remembered across loads. A view
-   * or overlay that already stores `inlineEdit: false`, written by the old
-   * toggle, still reads off; that is existing data, it is not migrated, and
-   * declaring `userActions.editInline: true` brings the toggle back.
+   * The view's opt-out: `ListViewSchema.userActions.editInline` defaults to
+   * `true` (objectstack#22605), read here with that default (`!== false`), and
+   * `editInline: false` turns editing off for the view. A view's boolean
+   * `inlineEdit` reaches this read through the fold (objectui#5144):
+   * `normalizeListViewSchema` folds it into `userActions.editInline` when the
+   * view declares no `editInline` of its own, so a view or overlay that stores
+   * `inlineEdit: false` (written by the console's old toggle) reads off, and
+   * `userActions.editInline: true` turns it back on.
    */
   const inlineEditOffered = React.useMemo(() => {
     if ((schema.userActions as Record<string, boolean | undefined> | undefined)?.editInline === false) {
@@ -3227,10 +3239,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * Whether the rows this list fetches must carry their concurrency token
    * (objectui#12292): exactly when the grid it hands them to is editable in
    * place — the same expression as that grid's `editable` below. The grid's
-   * save sends each row's `updated_at` as `If-Match`, so the fetch projects it;
-   * turning the mode on re-reads the rows with it.
+   * save sends each row's `updated_at` as `If-Match`, so the fetch projects it.
+   * Every view of the list asks for it, not the grid alone, so a switch
+   * between the grid and another view re-reads nothing (objectui#7394).
    */
-  const rowsCarryConcurrencyToken = inlineEdit && inlineEditOffered;
+  const rowsCarryConcurrencyToken = inlineEditOffered;
 
   // Normalize exportOptions: support both ObjectUI object format and spec string[] format
   const resolvedExportOptions = React.useMemo(() => {
@@ -3315,6 +3328,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       try { window.localStorage.setItem(galleryDensityKey, next); } catch { /* ignore */ }
       return next;
     });
+  }, [galleryDensityKey]);
+  // The options menu's Row height level picks a gallery card size by name.
+  const setGalleryDensityMode = React.useCallback((mode: 'compact' | 'comfortable' | 'spacious') => {
+    const next: GalleryCardSize = mode === 'compact' ? 'small' : mode === 'comfortable' ? 'medium' : 'large';
+    try { window.localStorage.setItem(galleryDensityKey, next); } catch { /* ignore */ }
+    setGalleryCardSize(next);
   }, [galleryDensityKey]);
 
   const handlePullRefresh = React.useCallback(async () => {
@@ -3675,7 +3694,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // this effect's query.
   const listFetchesForItself =
     !Array.isArray(schema.data) && (schema.data as any)?.provider !== 'value';
-  const invalidationNonce = useDataInvalidation(listFetchesForItself ? schema.objectName || undefined : undefined);
+  // objectstack#35685 — nor a cell save the grid holds in `ownWrites` (above).
+  const invalidationNonce = useDataInvalidation(listFetchesForItself ? schema.objectName || undefined : undefined, undefined, ownWrites);
 
   /**
    * The calendar's date bindings, for the fetch effect's window
@@ -3782,33 +3802,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     [conditionalFormattingRaw, rowActionDefsRaw, bulkActionDefsRaw],
   );
 
+  // objectstack#35536 — the ONE thing the fetch effect reads off `schema.data`:
+  // the rows a host handed in whole (`schema.data` as an array, the shorthand,
+  // or a `provider: 'value'` block's `items`), else `null` and this component
+  // reads them itself. The effect names THIS, not `schema.data`: every other
+  // data block (`provider: 'object'` and the rest) changes nothing the read
+  // sends — the query is built from `schema.objectName` and the view's keys —
+  // so a new block of any content (a host re-serving the same view, e.g. on a
+  // late `/meta/view` answer) must not re-arm the read. The rows themselves
+  // stay compared by identity: a host that hands in new rows re-runs the
+  // effect.
+  const inlineRows: readonly unknown[] | null = Array.isArray(schema.data)
+    ? schema.data
+    : schema.data && typeof schema.data === 'object'
+        && (schema.data as { provider?: unknown }).provider === 'value'
+        && Array.isArray((schema.data as { items?: unknown }).items)
+      ? (schema.data as { items: unknown[] }).items
+      : null;
+
   // Fetch data effect — supports schema.data (ViewDataSchema) provider modes
   React.useEffect(() => {
     let isMounted = true;
     const requestId = ++fetchRequestIdRef.current;
 
-    // Check for inline data via schema.data provider: 'value'
-    if (schema.data && typeof schema.data === 'object' && !Array.isArray(schema.data)) {
-      const dataConfig = schema.data as any;
-      if (dataConfig.provider === 'value' && Array.isArray(dataConfig.items)) {
-        let items = dataConfig.items;
-        if (searchTerm) {
-          const q = searchTerm.toLowerCase();
-          items = items.filter((row: any) =>
-            Object.values(row).some(
-              (v) => v != null && String(v).toLowerCase().includes(q),
-            ),
-          );
-        }
-        setData(items);
-        setLoading(false);
-        setDataLimitReached(false);
-        return;
-      }
-    }
-    // Also support schema.data as a plain array (shorthand for value provider)
-    if (Array.isArray(schema.data)) {
-      let items = schema.data as any[];
+    // Rows handed in whole (`inlineRows`, above): no read, the search applied here.
+    if (inlineRows) {
+      let items = inlineRows as any[];
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
         items = items.filter((row: any) =>
@@ -4310,7 +4329,18 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // this effect's dependency list, so what reaches the wire and what
         // re-runs this effect are the same number — there is no second
         // spelling free to drift from it.
-        const skip = fetchSkip;
+        // objectstack#35554 — an infinite list appends the window `loadMoreRows`
+        // asked for; any other run with several windows held (a refresh, the
+        // first load back to a kept position) re-reads them all from the top,
+        // ONE WINDOW PER REQUEST: a host caps a read's `$top`
+        // (`OS_DATA_MAX_PAGE_SIZE`, refused with 400 MAX_RECORDS_EXCEEDED, never
+        // clamped), so the held rows are never asked for in one read.
+        const appendWindow = infiniteScroll && fetchSkip > 0 && infiniteAppendSkipRef.current === fetchSkip;
+        infiniteAppendSkipRef.current = null;
+        const skip = infiniteScroll && !appendWindow ? 0 : fetchSkip;
+        const rereadWindows = infiniteScroll && !appendWindow ? fetchSkip / effectivePageSize + 1 : 1;
+        // Every row this run asks for, across its windows.
+        const windowSize = rereadWindows * effectivePageSize;
 
         // Hoisted out of the `find` call so the exact params that produced this
         // window can be handed down with it (objectui#4501). One object, one
@@ -4357,13 +4387,24 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           windowCeiling = applyNonGridRowCeiling(walked);
           results = walked;
           items = windowCeiling.rows;
+        } else if (rereadWindows > 1) {
+          // objectstack#35554 — the held windows, each its own read (above).
+          const objectName = schema.objectName;
+          const windows = await Promise.all(
+            Array.from({ length: rereadWindows }, (_, w) =>
+              dataSource.find(objectName, w === 0 ? findParams : { ...findParams, $skip: w * effectivePageSize })),
+          );
+          if (!isCurrentRequest()) return;
+          results = windows[0];
+          items = windows.flatMap((w) => readListRows(w));
         } else {
           results = await dataSource.find(schema.objectName, findParams);
           if (!isCurrentRequest()) return;
           items = readListRows(results);
         }
 
-        setData(items);
+        if (appendWindow) setData((held) => [...held, ...items]);
+        else setData(items);
         if (windowCeiling) {
           const truncated = windowCeiling.truncated;
           setHeldCalendarWindow((held) => (held.truncated === truncated ? held : { ...held, truncated }));
@@ -4405,7 +4446,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // Without a numeric total the grid is never handed a pager (the
         // `serverTotal != null` gate on the handoff), so no page past 1 is
         // reachable to clamp from.
-        if (skip > 0 && items.length === 0 && knownTotal !== null) {
+        if (!infiniteScroll && skip > 0 && items.length === 0 && knownTotal !== null) {
           const lastReachablePage = Math.max(1, Math.ceil(knownTotal / effectivePageSize));
           const requestedPage = Math.floor(skip / effectivePageSize) + 1;
           if (lastReachablePage < requestedPage) {
@@ -4423,7 +4464,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         // A calendar's window is walked to its end, so it hides no reachable
         // row behind a batch: when the ceiling stops it, the a′ footnote says
         // so instead (objectui#12081).
-        setDataLimitReached(!calendarWindowNode && items.length >= effectivePageSize);
+        setDataLimitReached(!calendarWindowNode && items.length >= windowSize);
       } catch (err) {
         // Only log + surface errors from the latest request. A failed fetch is
         // NOT an empty result — record it so the render shows an error panel
@@ -4522,13 +4563,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // not cover, and on a switch into or out of a windowed calendar — the one
     // switch whose query changes — and on nothing else (objectui#7394).
     //
+    // objectstack#35536 — `inlineRows`, not `schema.data`: see its declaration
+    // above. The array is the prop's own, so this stays discard-immune.
+    //
     // ⚠️ The directive below governs the NEXT LINE. Anything written between it
     // and the dependency array detaches it from the array and turns it into an
     // unused directive — which `eslint .` reports as an ERROR, and which also
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, queryDropFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, inlineRows, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, infiniteScroll, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, queryDropFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -4546,6 +4590,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (prevPageResetSignature.current !== pageResetSignature) {
       prevPageResetSignature.current = pageResetSignature;
       setServerPage(1);
+      // objectstack#35554 — and an infinite list starts again from its first window.
+      setLoadedWindows(1);
     }
   }, [pageResetSignature]);
 
@@ -5080,14 +5126,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             ? { columns: effectiveFields }
             : { fields: undefined, columns: undefined }),
           ...(schema.conditionalFormatting ? { conditionalFormatting: schema.conditionalFormatting } : {}),
-          // [#4647] The MODE, not just its toggle. Gating only the toggle would
-          // leave the issue's own consequence reachable by a different door: a
-          // stored view carrying `inlineEdit: true` (authored, or left by the
-          // console's old toggle) drops a read-only principal straight into editable cells
-          // with no toggle to press, and "Save all" still earns the 403. The
-          // toggle can only ever be the cheapest entrance to this state; the
-          // state is what needs the grant.
-          editable: inlineEdit && inlineEditOffered,
+          // [#4647] Editable exactly where the reader may edit and the view
+          // does not opt out (`inlineEditOffered`); objectstack#35684 retired
+          // the mode that used to gate this as well.
+          editable: inlineEditOffered,
           ...(schema.wrapHeaders != null ? { wrapHeaders: schema.wrapHeaders } : {}),
           ...(schema.resizable != null ? { resizable: schema.resizable } : {}),
           ...(schema.selection ? { selection: schema.selection } : {}),
@@ -5656,7 +5698,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -6414,8 +6456,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     density: toolbarFlags.showDensity && (currentView === 'gallery'
       ? galleryCardSize !== authoredGalleryCardSize
       : density.mode !== viewDefaultDensity),
-    rowNumbers: currentView === 'grid' && rowNumbers !== defaultRowNumbers,
-    inlineEdit: currentView === 'grid' && inlineEditOffered && inlineEdit !== !!schema.inlineEdit,
   };
   const displayChangedCount = Object.values(displayDeviation).filter(Boolean).length;
 
@@ -6450,8 +6490,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   if (displayDeviation.density && currentView !== 'gallery') personalizationParts.push('density');
   if (displayDeviation.layout) personalizationParts.push('layout');
   if (displayDeviation.color) personalizationParts.push('rowColor');
-  if (displayDeviation.rowNumbers) personalizationParts.push('rowNumbers');
-  if (displayDeviation.inlineEdit) personalizationParts.push('inlineEdit');
   const personalizationKey = personalizationParts.join(',');
   const onPersonalizationChangeRef = React.useRef(onPersonalizationChange);
   React.useEffect(() => {
@@ -6490,8 +6528,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         density.setMode(viewDefaultDensity);
       }
     }
-    if (displayDeviation.rowNumbers) setRowNumbers(defaultRowNumbers);
-    if (displayDeviation.inlineEdit) updateInlineEdit(!!schema.inlineEdit);
     if (onRestoreViewDefaults && restoredParts.length > 0) onRestoreViewDefaults(restoredParts);
   };
 
@@ -6586,14 +6622,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const showDescriptionInfo =
     !!viewDescription && schema.appearance?.showDescription !== false && !hasToolbarLeading;
 
-  // objectui#12528 — the footer row's two halves. The summaries only ever come
-  // from the grid (`gridSummaries`), so they are read only while it is the view
-  // on screen; the row draws for either half, so `showRecordCount: false` does
-  // not take the summaries down with the count.
+  // The footer row: the record count (objectui#12528 drew the grid's column
+  // summaries here too; since objectstack#35548 the grid draws them in its own
+  // table, each under its column).
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
   const dataLimitWarningShown =
-    recordCountShown && dataLimitReached && !(paginate && serverTotal != null);
+    recordCountShown && dataLimitReached && !(paginate && serverTotal != null) && !infiniteScroll;
   // objectui#12619 — a board that pages its own lanes draws every record of the
   // view, a page per lane at a time, so the footer counts the VIEW: the total
   // this component's own query answered, which is the sum of the board's lane
@@ -6601,10 +6636,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // total the footer says nothing rather than count its own window.
   const boardRecordCountShown =
     kanbanLanesPaged && !loading && data.length > 0 && typeof fetchedTotal === 'number' && schema.showRecordCount !== false;
-  const footerSummaryText =
-    currentView === 'grid' && gridSummaries && gridSummaries.length > 0
-      ? gridSummaries.map((s) => `${s.header}: ${s.label}`).join(' · ')
-      : '';
+  // objectstack#35548 — the count the view switcher shows beside the view's
+  // name: the record-count bar's own figure, and none where that bar says none.
+  const leadingRecordCount: number | null = boardRecordCountShown
+    ? (fetchedTotal as number)
+    : !loading && surfaceDrawsFetchedRows && schema.showRecordCount !== false && !calendarWindowed && !kanbanLanesPaged
+      ? (serverTotal ?? data.length)
+      : null;
+  const drawnToolbarLeading = typeof toolbarLeading === 'function'
+    ? toolbarLeading({ recordCount: leadingRecordCount, layout: currentView })
+    : toolbarLeading;
 
   // objectui#12703 — the compact posture a narrow page region asks for (the
   // `compact` host prop). Only over a paged grid that draws the rows this
@@ -6750,8 +6791,84 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // Display panel there. Without a Display panel the Sort trigger stays on the
   // bar at every width. Either way it follows `userActions.sort`.
   const sortInDisplay = toolbarFlags.showSort && displayOffered;
-  // The Sort panel: the toolbar Sort popover draws it, and so does the
-  // Display panel below `sm` (`sortInDisplay`).
+  // The condition controls (objectstack#35549, objectstack#35550): the Filter
+  // and Sort triggers open the shared field list, and the condition row under
+  // the view bar draws the sort and filter chips. The fields the view shows,
+  // in column order, lead the field list.
+  const shownFieldNames = React.useMemo(
+    () => effectiveFields.map((column) => columnIdentity(column)).filter((name): name is string => !!name),
+    [effectiveFields],
+  );
+  const applyPanelFilters = React.useCallback((next: FilterBuilderRowGroup) => {
+    // The panel keeps every row; the host stores only the filter that
+    // applies (objectstack#27520).
+    setCurrentFilters(next);
+    if (onFilterChange) onFilterChange(appliedFilterGroup(next));
+  }, [onFilterChange]);
+  const applySort = React.useCallback((next: SortItem[]) => {
+    // `setCurrentSort` takes the array WHOLE (the in-use exception depends on
+    // it); `emitSortChange` is what the host persists.
+    setCurrentSort(next);
+    setServerPage(1);
+    emitSortChange(next);
+  }, [emitSortChange, setServerPage]);
+  // 「Reset」 on the condition row: the reader's filter and sort back to the
+  // view as saved. Search stays, and so does the view's own filter, which is
+  // never the reader's (`handleClearReaderQuery` clears search too). The
+  // 「Personalized」 badge keeps its own reset.
+  const conditionsDifferFromView =
+    hasFilters || sortDiffersFromDeclared || appliedUserFilterConditions.length > 0 || sittingInQueueOnly;
+  const handleResetConditions = React.useCallback(() => {
+    const cleared: FilterBuilderRowGroup = { ...currentFilters, conditions: [] };
+    setCurrentFilters(cleared);
+    onFilterChange?.(cleared);
+    userFiltersRef.current?.clear();
+    setSittingInQueueOnly(false);
+    if (sortDiffersFromDeclared) handleResetSort();
+  }, [currentFilters, onFilterChange, sortDiffersFromDeclared, handleResetSort]);
+  // The advanced panel behind the Filter panel's footer and an OR group's
+  // chip: the panel the Filter trigger opened before, today's `FilterBuilder`
+  // with its props unchanged. The Sort panel's advanced step is
+  // `sortPanelBody`, below.
+  const advancedFilterBuilder = () => (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between border-b pb-2">
+        <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
+      </div>
+      <FilterBuilder
+        fields={filterFields}
+        value={currentFilters}
+        extraOperators={LIST_VIEW_EXTRA_OPERATORS}
+        onChange={applyPanelFilters}
+      />
+    </div>
+  );
+  // Under the Sort panel's field list: why a linked column is not listed
+  // (objectui#12528), and that a picked one sorts by the stored ID.
+  const sortPanelNote = (sortHasRelationalField || sortPicksRelationalField) ? (
+    <div className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
+      {sortHasRelationalField && (
+        <span
+          role="img"
+          tabIndex={0}
+          title={t('list.sortRelationalHint')}
+          aria-label={t('list.sortRelationalHint')}
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="sort-relational-info"
+        >
+          <Info className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      )}
+      {sortPicksRelationalField && (
+        <p className="truncate" data-testid="sort-relational-picked">
+          {t('list.sortRelationalPicked')}
+        </p>
+      )}
+    </div>
+  ) : undefined;
+  // The Sort panel: every sort level at once. The toolbar Sort popover draws
+  // it as the shared field list's advanced step (objectstack#35550), and the
+  // Display panel draws it below `sm` (`sortInDisplay`).
   const sortPanelBody = (
     <div className="space-y-4">
       <div className="flex items-center justify-between border-b pb-2">
@@ -6819,6 +6936,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
 
   return (
+    <OwnWritesContext.Provider value={ownWrites}>
     <div
       ref={pullRef}
       className={cn('flex flex-col h-full bg-background relative min-w-0 overflow-hidden', className)}
@@ -6876,7 +6994,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           )}
           {hasToolbarLeading && (
             <div className={TOOLBAR_LEADING} data-testid="list-toolbar-leading">
-              {toolbarLeading}
+              {drawnToolbarLeading}
             </div>
           )}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
@@ -6944,30 +7062,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               />
               <div className="h-4 w-px bg-border/60 mx-0.5" />
             </>
-          )}
-          {/* Inline edit — toggle record editing for this (grid) view, for the
-              session (objectui#5144, ruling E). Reported via onInlineEditChange.
-              [#4647] `inlineEditOffered` carries BOTH the `can(obj,'update')`
-              permission gate this affordance was missing and the declared
-              `userActions.editInline` switch — see its definition above. */}
-          {currentView === 'grid' && onInlineEditChange && !toolbarFlags.compactToolbar && inlineEditOffered && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => updateInlineEdit(!inlineEdit)}
-              // A toggle button announces its state (objectui#11816): the
-              // `text-primary` tint below was the mode's only signal.
-              aria-pressed={inlineEdit}
-              className={cn(
-                "hidden sm:inline-flex h-7 px-2 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                inlineEdit && "text-primary"
-              )}
-              title={t('list.inlineEditLabel', { defaultValue: 'Edit records inline (click a cell to edit)' })}
-              data-testid="toolbar-inline-edit-toggle"
-            >
-              <Pencil className="h-3.5 w-3.5 mr-1.5" />
-              <span className="hidden sm:inline">{t('list.inlineEditShort', { defaultValue: 'Edit inline' })}</span>
-            </Button>
           )}
           {/* Hide Fields — hidden on mobile (collapsed into ViewSettingsPopover) */}
           {toolbarFlags.showHideFields && !toolbarFlags.compactToolbar && (
@@ -7060,21 +7154,23 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  TOOLBAR_TEXT_TRIGGER,
                   PHONE_TOUCH_TARGET,
                   hasFilters && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-filter-trigger"
-                // Filter, Sort and Display are icon buttons at every width
-                // (objectui#12695), so the name rides on `aria-label` and
-                // `title` — with the active-filter count, which the badge
-                // would otherwise be alone in carrying (objectui#12500).
+                // From `sm` up Filter, Sort and Options are named text buttons
+                // (objectstack#35548); below `sm` they stay icons
+                // (objectui#12695). `aria-label` carries the active-filter
+                // count, which the badge would otherwise be alone in carrying
+                // (objectui#12500).
                 aria-label={hasFilters
                   ? t('list.filterActive', { count: shownFilterCount })
                   : t('list.filter')}
                 title={t('list.filter')}
               >
-                <Funnel className="h-3.5 w-3.5" />
+                <Funnel className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('list.filter')}</span>
                 {hasFilters && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
                     {shownFilterCount}
@@ -7082,23 +7178,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
-                </div>
-                <FilterBuilder
-                  fields={filterFields}
-                  value={currentFilters}
-                  extraOperators={LIST_VIEW_EXTRA_OPERATORS}
-                  onChange={(newFilters) => {
-                    // The panel keeps every row; the host stores only the
-                    // filter that applies (objectstack#27520).
-                    setCurrentFilters(newFilters);
-                    if (onFilterChange) onFilterChange(appliedFilterGroup(newFilters));
-                  }}
-                />
-              </div>
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
+              <FilterPanel
+                fields={filterFields}
+                shownFields={shownFieldNames}
+                value={currentFilters}
+                onChange={applyPanelFilters}
+                renderAdvanced={advancedFilterBuilder}
+              />
             </PopoverContent>
           </Popover>
           )}
@@ -7163,7 +7250,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  TOOLBAR_TEXT_TRIGGER,
                   PHONE_TOUCH_TARGET,
                   // On a phone an active sort keeps this trigger, with its
                   // level count, on the bar: the Display panel holds the
@@ -7173,12 +7260,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
-                // Icon-only (objectui#12695): no visible label carries the
-                // name, so `aria-label` and `title` do.
+                // Named from `sm` up (objectstack#35548), an icon below it
+                // (objectui#12695): `aria-label` and `title` name it there.
                 aria-label={t('list.sort')}
                 title={t('list.sort')}
               >
-                <ArrowUpDown className="h-3.5 w-3.5" />
+                <ArrowUpDown className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+                <span className="hidden sm:inline">{t('list.sort')}</span>
                 {currentSort.length > 0 && (
                   <span className="flex h-4 min-w-[16px] items-center justify-center text-[10px] font-medium text-muted-foreground tabular-nums">
                     {currentSort.length}
@@ -7186,8 +7274,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
-              {sortPanelBody}
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-auto max-w-[calc(100vw-2rem)] p-0">
+              <SortPanel
+                fields={sortFields}
+                shownFields={shownFieldNames}
+                value={currentSort}
+                onChange={applySort}
+                onDone={() => setShowSort(false)}
+                footer={sortPanelNote}
+                renderAdvanced={() => sortPanelBody}
+              />
             </PopoverContent>
           </Popover>
           )}
@@ -7325,6 +7421,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             <ViewSettingsPopover
               t={t as any}
               allFields={allFields as any}
+              fieldType={(name) => {
+                const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
+                return typeof type === 'string' ? type : undefined;
+              }}
               layout={viewSwitcherOffered ? (closeMenu) => (
                 <ViewSwitcherDropdown
                   currentView={currentView}
@@ -7350,6 +7450,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 ? {
                     mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
                     cycle: cycleGalleryDensity,
+                    setMode: setGalleryDensityMode,
                   }
                 : density as any}
               showHideFields={toolbarFlags.showHideFields}
@@ -7357,21 +7458,24 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               updateHiddenFields={updateListedFields}
               addableFields={addableFields}
               onAddField={addListedField}
-              rowNumbers={rowNumbers}
-              setRowNumbers={currentView === 'grid' ? setRowNumbers : undefined}
-              /* [#4647] The Display panel's inline-edit entry — the SECOND
-                 render site for this affordance, and the one with no gate at
-                 all: it never even required `onInlineEditChange`. Same
-                 `inlineEditOffered` verdict as the wide toolbar's toggle, or a
-                 read-only principal would keep the entry here after losing it
-                 there. */
-              showInlineEdit={currentView === 'grid' && inlineEditOffered}
-              inlineEdit={inlineEdit}
-              setInlineEdit={updateInlineEdit}
               changedCount={displayChangedCount}
+              // objectstack#35551 — the view's name and its rename head the
+              // menu; the field order is the grid's column order, the state
+              // the header's column drag writes.
+              viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
+                ? { label: schema.label, onRename: onRenameView }
+                : undefined}
+              fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
+              onFieldOrderChange={currentView === 'grid' && onColumnStateChange
+                ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
+                : undefined}
               // objectstack#28950 — a host that marks a personalized list owns
-              // the one reset; the Display control then offers none of its own.
-              onReset={onPersonalizationChange ? undefined : resetDisplayToViewDefault}
+              // the one reset. It hands it over while there is something to
+              // restore, and the menu draws it as 恢复默认, dimmed between
+              // times (objectstack#35551); the list offers none of its own.
+              onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
+              resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
+              onSave={onSaveView}
               onRefresh={toolbarFlags.showRefresh ? () => setRefreshKey(k => k + 1) : undefined}
               refreshing={loading}
               exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
@@ -7519,7 +7623,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   variant="ghost"
                   size="sm"
                   className={cn(
-                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                    "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
                     searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
                   )}
                   data-testid="search-icon-button"
@@ -7651,6 +7755,38 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       </div>
       )}
 
+      {/* The condition row under the view bar (objectstack#35548): the slot
+          the filter and sort conditions are drawn in. Empty, it takes no
+          height (`empty:hidden`). */}
+      {listChromeShown && (
+        <div
+          data-slot="list-condition-row"
+          data-testid="list-condition-row"
+          className="empty:hidden flex flex-wrap items-center gap-1.5 border-b px-4 py-1.5 bg-background"
+        >
+          {/* objectstack#35549 / #35550: sort chips, the view's own
+              conditions as locked chips, the reader's filter chips, then
+              「Add filter」 and 「Reset」. It draws nothing while there is
+              nothing to show, so the slot stays empty and takes no height.
+              objectstack#35727: a condition the host draws as its own tag is
+              no locked chip here, and 「Reset」 is drawn only while the
+              reader has something of their own to reset. */}
+          <ConditionChipRow
+            sort={currentSort}
+            sortFields={sortFields}
+            onSortChange={applySort}
+            filters={currentFilters}
+            filterFields={filterFields}
+            onFiltersChange={applyPanelFilters}
+            viewFilter={authoredFilter}
+            hostDrawnFields={hostDrawnConditionFields}
+            dataSource={dataSource}
+            shownFields={shownFieldNames}
+            renderAdvanced={advancedFilterBuilder}
+            onReset={conditionsDifferFromView ? handleResetConditions : undefined}
+          />
+        </div>
+      )}
 
       {/* Filters Panel - Removed as it is now in Popover */}
 
@@ -7998,13 +8134,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // it, so only the grid is handed it.
               ? { objectFields: objectDef.fields }
               : {})}
-            {...(viewComponentSchema.type === 'object-grid'
-              // objectui#12423 — the Display control's Row numbers switch, on
-              // the grid's host channel (a React prop, never a node key).
-              // objectui#12528 — and the column summaries, drawn in the
-              // record-count row below rather than in a row of the grid's own.
-              ? { showRowNumbers: rowNumbers, onColumnSummaryChange: setGridSummaries }
-              : {})}
             {...(onRowsChange && rowGroupsSource === 'grid' && viewComponentSchema.type === 'object-grid'
               // objectstack#28461 — the grouped grid's open groups and their
               // rows, on the grid's host channel (a React prop, never a node key).
@@ -8025,6 +8154,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // link, on the grid's host channel (a React prop, never a node key).
               ? { recordLinkAdornment }
               : {})}
+            {...(viewComponentSchema.type === 'object-grid'
+              // objectstack#35684 — the list page's grid selects a cell on a
+              // click and edits on double-click, Enter or typing, on the
+              // grid's host channel (a React prop, never a node key).
+              ? { cellSelection: true }
+              : {})}
             {...(ROW_OPENS_RECORD_VIEW_TYPES.has(viewComponentSchema.type) && rowOpensRecord !== undefined
               // objectstack#33317, objectstack#33548 — whether the host's row
               // click opens anything, on the view's host channel (a React
@@ -8036,18 +8171,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // own loading state only when it has nothing to draw.
             loading={calendarWindowed ? loading && data.length === 0 : loading}
             onRowSelect={setSelectedRows}
-            {...(paginate && serverTotal != null
+            {...((paginate && serverTotal != null) || infiniteScroll
               ? {
                   // Drive the flat grid's single (DataTable) pager from the
                   // server: it renders THIS window as the current page, the real
                   // total sets the page count, and turning the page asks ListView
                   // to refetch the next window. One pager, server-backed (objectstack-ai/objectstack#2212).
                   manualPagination: true,
-                  rowCount: serverTotal,
-                  page: serverPage,
-                  pageSize: effectivePageSize,
-                  onPageChange: (p: number) => setServerPage(p),
-                  onPageSizeChange: (n: number) => { setDynamicPageSize(n); setServerPage(1); },
+                  rowCount: serverTotal ?? data.length,
+                  ...(infiniteScroll
+                    ? {
+                        // objectstack#35554 — no pager: every loaded window is
+                        // one page of rows, the grid asks for the next as it
+                        // nears its end, and `rowCount` stays the match total.
+                        page: 1,
+                        pageSize: Math.max(data.length, effectivePageSize),
+                        onPageChange: () => {},
+                        onLoadMore: loadMoreRows,
+                        hasMoreRows,
+                        scrollRestoreKey,
+                      }
+                    : {
+                        page: serverPage,
+                        pageSize: effectivePageSize,
+                        onPageChange: (p: number) => setServerPage(p),
+                        onPageSizeChange: (n: number) => { setDynamicPageSize(n); setServerPage(1); },
+                      }),
                   // …and its sort from the same place (#3106). The column
                   // headers and the toolbar's sort builder are two controls over
                   // ONE `currentSort`, so a header click is a shortcut into the
@@ -8179,7 +8328,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
+      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -8241,15 +8390,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               />
             </div>
           )}
-          {footerSummaryText && (
-            <span
-              className="ml-auto min-w-0 truncate text-right font-medium"
-              title={footerSummaryText}
-              data-testid="record-count-summaries"
-            >
-              {footerSummaryText}
-            </span>
-          )}
         </div>
       )}
 
@@ -8298,6 +8438,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         </NavigationOverlay>
       )}
     </div>
+    </OwnWritesContext.Provider>
   );
 });
 

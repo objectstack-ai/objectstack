@@ -17,6 +17,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import { inferFormulaReturn } from '@objectstack/formula';
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
@@ -43,32 +47,61 @@ afterEach(() => {
 /** The card's repro shape: a source left open on a bracket or an operator. */
 const BROKEN = /[*+\-/&|=<>(]\s*$/;
 
-function stubEngine() {
+function stubEngine({ money = false }: { money?: boolean } = {}) {
   __setCelFormulaLoader(() =>
     Promise.resolve({
+      // objectstack#35631 — the money verdict is the engine's own, unstubbed;
+      // left out, the engine gives none (an engine without the export).
+      ...(money
+        ? {
+            inferFormulaReturn: (input: unknown, fields?: Readonly<Record<string, unknown>>) =>
+              inferFormulaReturn(input as Parameters<typeof inferFormulaReturn>[0], fields as Parameters<typeof inferFormulaReturn>[1]),
+          }
+        : {}),
       validateExpression: (_role: string, input: unknown) => {
         const src = typeof input === 'string' ? input : String((input as { source?: string })?.source ?? '');
         return BROKEN.test(src)
           ? { ok: false, errors: [{ message: 'Parse error: unexpected end of input' }], warnings: [] }
           : { ok: true, errors: [], warnings: [] };
       },
-      introspectScope: () => ({ fields: ['est_hours'], roots: ['record'], functions: ['has'] }),
+      introspectScope: () => ({ fields: ['est_hours', 'budget'], roots: ['record'], functions: ['has'] }),
       // A broken source proves no type, as the engine answers it.
       inferExpressionType: (input: unknown) => {
         const src = typeof input === 'string' ? input : '';
         if (BROKEN.test(src)) return 'unknown' as const;
         if (src.includes("'")) return 'text' as const;
         if (src.includes('+')) return 'unknown' as const;
+        // A field-over-field operator types `dyn`, as the engine answers it
+        // (formula-return.ts): the quotient's type is unproven.
+        if (/record\.\w+\s*\/\s*record\./.test(src)) return 'unknown' as const;
+        if (src.includes('>')) return 'boolean' as const;
         return 'number' as const;
       },
     }),
   );
 }
 
-function Harness({ onDef }: { onDef: (def: Record<string, unknown>) => void }) {
+function Harness({
+  onDef,
+  returnType = 'number',
+  extra = {},
+}: {
+  onDef: (def: Record<string, unknown>) => void;
+  returnType?: string;
+  extra?: Record<string, unknown>;
+}) {
   const [fields, setFields] = React.useState<Record<string, Record<string, unknown>>>({
     est_hours: { type: 'number' },
-    f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType: 'number' },
+    budget: { type: 'number' },
+    amount: { type: 'currency', currencyConfig: USD },
+    total: { type: 'summary', summaryOperations: { object: 'line', field: 'amount', function: 'sum' } },
+    fee_eur: { type: 'currency', currencyConfig: EUR },
+    home_amount: { type: 'currency' },
+    currency_code: { type: 'text' },
+    local_amount: { type: 'currency', currencyConfig: LOCAL },
+    // A formula that declares no `returnType`: its unit cannot be read.
+    subtotal: { type: 'formula', expression: 'record.est_hours * 3' },
+    f_total: { type: 'formula', label: 'F Total', expression: 'record.est_hours * 2', returnType, ...extra },
   });
   React.useEffect(() => {
     onDef(fields.f_total);
@@ -89,10 +122,14 @@ function Harness({ onDef }: { onDef: (def: Record<string, unknown>) => void }) {
   );
 }
 
-function renderFormula() {
-  stubEngine();
+const USD = { currencyMode: 'fixed', defaultCurrency: 'USD' } as const;
+const EUR = { currencyMode: 'fixed', defaultCurrency: 'EUR' } as const;
+const LOCAL = { currencyMode: 'record', currencyField: 'currency_code' } as const;
+
+function renderFormula(returnType?: string, { money = false, extra }: { money?: boolean; extra?: Record<string, unknown> } = {}) {
+  stubEngine({ money });
   const defs: Array<Record<string, unknown>> = [];
-  render(<Harness onDef={(def) => defs.push(def)} />);
+  render(<Harness onDef={(def) => defs.push(def)} returnType={returnType} extra={extra} />);
   const box = screen.getByText('Formula (CEL)').parentElement!.querySelector('[role="combobox"]') as HTMLTextAreaElement;
   const latest = () => defs.at(-1)!;
   return { box, latest };
@@ -122,5 +159,179 @@ describe('ObjectFieldInspector — a broken formula keeps the stored returnType 
     const { box, latest } = renderFormula();
     fireEvent.change(box, { target: { value: 'record.est_hours + record.est_hours' } });
     await waitFor(() => expect(latest().returnType).toBeUndefined(), { timeout: 3000 });
+  });
+});
+
+describe('ObjectFieldInspector — a declared percent survives a number verdict (objectstack#35047)', () => {
+  it('an edit the engine proves `number` keeps `percent`: nothing infers a percentage', async () => {
+    const { box, latest } = renderFormula('percent');
+    fireEvent.change(box, { target: { value: 'record.est_hours / 40' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+  });
+
+  it('a verdict that is not `number` still stamps over it', async () => {
+    const { box, latest } = renderFormula('percent');
+    fireEvent.change(box, { target: { value: "'hours: ' + string(record.est_hours)" } });
+    await waitFor(() => expect(latest().returnType).toBe('text'), { timeout: 3000 });
+  });
+
+  it('CONTROL — a declared `number` takes the `number` verdict, as before', async () => {
+    const { box, latest } = renderFormula();
+    fireEvent.change(box, { target: { value: 'record.est_hours / 40' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('number');
+  });
+});
+
+describe('ObjectFieldInspector — a declared percent or currency survives an unproven verdict (objectstack#35047)', () => {
+  const RATIO = 'record.est_hours / record.budget';
+
+  it("the spec's ratio shape: a field-over-field quotient proves no type and keeps `percent`", async () => {
+    const { box, latest } = renderFormula('percent');
+    fireEvent.change(box, { target: { value: RATIO } });
+    await waitFor(() => expect(latest().expression).toBe(RATIO), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+  });
+
+  it('the same quotient keeps a declared `currency`', async () => {
+    const { box, latest } = renderFormula('currency');
+    fireEvent.change(box, { target: { value: RATIO } });
+    await waitFor(() => expect(latest().expression).toBe(RATIO), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('with no money verdict from the engine, a `number` verdict keeps a declared `currency` too', async () => {
+    const { box, latest } = renderFormula('currency');
+    fireEvent.change(box, { target: { value: 'record.est_hours / 40' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / 40'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a verdict that proves another type still stamps over a declared `currency`', async () => {
+    const { box, latest } = renderFormula('currency');
+    fireEvent.change(box, { target: { value: 'record.est_hours > 40' } });
+    await waitFor(() => expect(latest().returnType).toBe('boolean'), { timeout: 3000 });
+  });
+
+  it('CONTROL — the same quotient still clears a declared `number`, as before', async () => {
+    const { box, latest } = renderFormula();
+    fireEvent.change(box, { target: { value: RATIO } });
+    await waitFor(() => expect(latest().returnType).toBeUndefined(), { timeout: 3000 });
+  });
+});
+
+describe('ObjectFieldInspector — the money verdict proves or withdraws a declared currency (objectstack#35631)', () => {
+  const MONEY = 'record.amount * 0.1';
+  const COUNT = 'record.est_hours * 2';
+  const asCurrency = (money = true) => renderFormula('currency', { money, extra: { expression: MONEY, currencyConfig: USD } });
+
+  it("the card's repro: an edit from a money expression to a count drops `currency` and its `currencyConfig`", async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: COUNT } });
+    await waitFor(() => expect(latest().returnType).toBe('number'), { timeout: 3000 });
+    expect(latest().expression).toBe(COUNT);
+    expect('currencyConfig' in latest()).toBe(false);
+  });
+
+  it('an edit that still proves money keeps `currency` and the currency it proves', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.amount * 0.2' } });
+    await waitFor(() => expect(latest().expression).toBe('record.amount * 0.2'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('a `number` formula edited into money is stamped `currency`, with the source amount\'s currency', async () => {
+    const { box, latest } = renderFormula('number', { money: true });
+    fireEvent.change(box, { target: { value: MONEY } });
+    await waitFor(() => expect(latest().returnType).toBe('currency'), { timeout: 3000 });
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('an unproven verdict (a field-over-field quotient) still keeps a declared `currency`', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.est_hours / record.budget' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / record.budget'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('a roll-up the proof cannot read as money is unproven, and keeps a declared `currency`', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.total * 0.9' } });
+    await waitFor(() => expect(latest().expression).toBe('record.total * 0.9'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('a new formula over an amount the proof cannot follow still stamps the proven CEL type', async () => {
+    const { box, latest } = renderFormula(undefined, { money: true, extra: { returnType: undefined } });
+    fireEvent.change(box, { target: { value: '100 / record.amount' } });
+    await waitFor(() => expect(latest().returnType).toBe('number'), { timeout: 3000 });
+    expect('currencyConfig' in latest()).toBe(false);
+  });
+
+  it('CONTROL — a declared `percent` is still kept under a `number` verdict', async () => {
+    // An edit to a DIFFERENT quantity expression than the harness default, so
+    // the stamp really runs and the verdict really is `number`.
+    const { box, latest } = renderFormula('percent', { money: true });
+    fireEvent.change(box, { target: { value: 'record.est_hours * 3' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours * 3'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+  });
+
+  it('a declared `percent` is kept under a money verdict too', async () => {
+    const { box, latest } = renderFormula('percent', { money: true });
+    fireEvent.change(box, { target: { value: 'record.amount * 0.2' } });
+    await waitFor(() => expect(latest().expression).toBe('record.amount * 0.2'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('percent');
+    expect('currencyConfig' in latest()).toBe(false);
+  });
+
+  it('a proven currency that moves updates the config: a USD amount to a EUR amount', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.fee_eur * 0.1' } });
+    await waitFor(() => expect(latest().currencyConfig).toEqual(EUR), { timeout: 3000 });
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a move to a dynamic amount removes the config: absent is the tenant default', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.home_amount * 0.1' } });
+    await waitFor(() => expect('currencyConfig' in latest()).toBe(false), { timeout: 3000 });
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a record-mode source stamps its own code field', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.local_amount * 0.1' } });
+    await waitFor(() => expect(latest().currencyConfig).toEqual(LOCAL), { timeout: 3000 });
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('a hand-declared `currency` over a formula with no `returnType` survives an expression edit', async () => {
+    const { box, latest } = renderFormula('currency', { money: true, extra: { expression: 'record.subtotal * 0.1' } });
+    fireEvent.change(box, { target: { value: 'record.subtotal * 0.12' } });
+    await waitFor(() => expect(latest().expression).toBe('record.subtotal * 0.12'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+  });
+
+  it('CONTROL — a verdict that proves text, boolean or date still stamps over a declared `currency`', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.amount > 40' } });
+    await waitFor(() => expect(latest().returnType).toBe('boolean'), { timeout: 3000 });
+    expect('currencyConfig' in latest()).toBe(false);
   });
 });

@@ -904,6 +904,35 @@ export const ERROR_CODE_LEDGER = {
     // Fixed by setting `localization.currency` — a different remedy from
     // `ERR_EXCHANGE_RATE_MISSING`, hence its own code.
     'ERR_HOME_CURRENCY_UNSET',
+    // [ADR-0158 U5, Open items 3 and 9] The unit-of-measure write check
+    // (`validation/unit-code-membership.ts`). Each is 400 and the driver is
+    // never asked to write the row; `field` names the unit code field and,
+    // for a quantity, `quantityField` the quantity. One code per remedy, the
+    // way `ERR_HOME_CURRENCY_UNSET` stands beside `ERR_EXCHANGE_RATE_MISSING`.
+    //
+    // A quantity would be stored beside a blank unit code (Open item 9 case 3,
+    // mirroring `ERR_CURRENCY_CODE_REQUIRED`). Fixed by writing the code in the
+    // same write, or leaving the quantity empty. The server never fills one in.
+    'ERR_UNIT_CODE_REQUIRED',
+    // The unit code is neither a standard code (U1) nor one of the
+    // organization's own units (`sys_unit`), in exact uppercase (cases 1 and 2).
+    // Fixed by writing a standard code, or adding the unit in Setup first.
+    'ERR_UNIT_CODE_UNKNOWN',
+    // The unit code names one of the organization's units that is retired
+    // (L1's delete, Open item 11). A retired code is never created again, so
+    // the remedy is moving the record to an existing unit.
+    'ERR_UNIT_CODE_RETIRED',
+    // The unit code is a member, of another dimension than the
+    // `unitConfig.unitDimension` the field declares (Open item 9, point 5).
+    // Fixed by writing a code of that dimension.
+    'ERR_UNIT_DIMENSION_MISMATCH',
+    // [ADR-0158 Open item 11; #35488's carried requirement] A delete of a
+    // `sys_unit` row, refused in every context — user, system and automation —
+    // before any middleware or hook runs (`delete()`, `engine-delete-and-aggregate.ts`).
+    // Retiring is the delete: a removed row would free its code to be created
+    // again with another dimension. 405, the status the data door answers the
+    // same verb on this object with (`apiMethods` serves no `delete`).
+    'ERR_UNIT_DELETE_REFUSED',
     // [#5320] Third EMITTER of the code (metadata-protocol and plugin-security
     // already register it) — the registration loop's `views:` tighten refuses a
     // non-container entry, and the `viewItems:` channel refuses an entry the
@@ -1943,6 +1972,18 @@ export const ERROR_CODE_LEDGER = {
     'STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT',    // `functions` authored in the map form by one stack and the array form by another
     'STACK_COMPOSE_KEY_CONFLICT',                // a single-valued top-level key is declared with different values by two stacks
     'STACK_COMPOSE_OBJECT_CONFLICT',             // the same object name is defined by more than one stack under the default `objectConflict: 'error'`
+    // [ADR-0157 D2, D7, D8, D10] The working-calendar refusals, every one
+    // `status: 400`. The codes are this package's constants
+    // (`data/work-calendar.ts`, where the provenance scan reads them); the three
+    // error classes that carry them are `@objectstack/formula`'s
+    // (`work-calendar.ts`). The calendar service (`@objectstack/objectql`) and
+    // the working-day formula functions throw them; the thrown value is the
+    // boundary on this tree (no HTTP door answers with them yet — the approval
+    // sweep that reads them skips and retries, ADR-0157 D9). No wall-clock
+    // answer stands in for any.
+    'ERR_WORK_CALENDAR_INVALID',                 // a stored calendar or exception row the arithmetic cannot read as written (a period crossing midnight, a zone that is not IANA, an `on` row without periods); `field` names the column
+    'ERR_WORK_CALENDAR_NOT_MAINTAINED',          // the computation needs a date outside the calendar's `maintained_from`..`maintained_through` span (D8); fixed by entering that span's holidays and moving the bound
+    'ERR_WORK_CALENDAR_UNRESOLVED',              // no calendar resolves under D2: the named code is absent, the organization has no default, more than one row answers, or no organization is named outside the `single` posture (`reason`)
   ],
   '@objectstack/lint': [
     // [#20206] `packagesOf` (`object-graph.ts`) refuses a present non-array

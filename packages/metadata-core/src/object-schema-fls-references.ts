@@ -623,6 +623,10 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     deleteBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
     relatedListTitle: keep, lookupPageSize: keep, allowCreate: keep, returnType: keep,
     language: keep, step: keep, currencyConfig: keep, dimensions: keep, trackHistory: keep,
+    // The unit of this quantity, or this field's unit-code marker (ADR-0158
+    // U4): kept as `currencyConfig` is, whose `currencyField` names a sibling
+    // the way `unitConfig.unitField` does.
+    unitConfig: keep,
     group: keep, widget: keep, hidden: keep, internal: keep, readonly: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
@@ -802,7 +806,9 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // when it mentions a denied field: server policy the caller cannot evaluate.
     membershipKeys: recordOf(ruleEntry),
     // Blocks.
-    userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep }),
+    // `transfer` (the Change Owner switch) is the same boolean-or-predicates union
+    // as the four CRUD flags, so it takes their disposition.
+    userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep, transfer: crudFlag }),
     external: block({
         remoteName: keep, remoteSchema: keep, writable: keep, introspectedAt: keep, ignoreColumns: keep,
         columnMap,

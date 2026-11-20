@@ -222,13 +222,11 @@ const search = () => screen.getByTestId('location-search').textContent;
 /** Open the row menu of the row showing `text`; answers the menu's item labels. */
 async function rowMenuItems(text: string): Promise<string[]> {
   const row = screen.getByText(text).closest('tr')!;
-  const trigger = await waitFor(() => {
-    const t = within(row).getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu');
-    expect(t).toBeDefined();
-    return t!;
-  }, { timeout: 5000 });
-  fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
-  const items = await screen.findAllByRole('menuitem', undefined, { timeout: 5000 });
+  // objectstack#35554 — the list page draws no "⋮" on the row: its menu is
+  // the row's context menu (right-click), the same items.
+  fireEvent.contextMenu(row.querySelector('td:last-child') ?? row, { button: 2, clientX: 40, clientY: 60 });
+  const menu = await screen.findByTestId('row-context-menu', undefined, { timeout: 5000 });
+  const items = await within(menu).findAllByRole('menuitem', undefined, { timeout: 5000 });
   return items.map((item) => (item.textContent ?? '').trim());
 }
 
@@ -236,6 +234,7 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
   it('a row click opens nothing: no `?recordId=`, no drawer, the list stays', async () => {
     await mountList(LIST_ONLY_OPERATIONS);
     fireEvent.click(screen.getByText('okta-staging'));
+    openWithTap('scim_ab12');
     await settle();
     expect(search()).toBe('');
     expect(pathname()).toBe(LIST_PATH);
@@ -273,17 +272,33 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
     expect(await rowMenuItems('okta-staging')).toContain('Revoke');
   });
 
-  it('CONTROL — the same object served with no restriction: the row click opens the drawer', async () => {
+  it('CONTROL — the same object served with no restriction: the name opens the drawer, and ⌘ on it is the browser\'s new tab', async () => {
     await mountList(undefined);
     expect(screen.getAllByTestId('record-open-as-page').length).toBeGreaterThan(0);
-    expect(screen.getByText('okta-staging').closest('tr')!.querySelector('a[href]')).not.toBeNull();
+    const anchor = screen.getByText('okta-staging').closest('tr')!.querySelector('a[href]') as HTMLElement;
+    expect(anchor).not.toBeNull();
+    // objectstack#35684: a ⌘-click on the name link keeps the browser's default
+    // (`fireEvent` answers false when it was prevented); on a data cell it opens nothing.
+    expect(fireEvent.click(anchor, { metaKey: true })).toBe(true);
     fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
-    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openSpy).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('okta-staging'));
     await waitFor(() => expect(search()).toBe('?recordId=c1'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
   });
 });
+
+/**
+ * objectstack#35684 — the list's other way to open a row: a click on a data
+ * cell selects it (and opens nothing), and a touch tap on a cell opens its
+ * record, as the row's click used to. (It was Space on the selected cell until
+ * objectstack#35685 made Space type into the cell, per the maintainer.)
+ */
+function openWithTap(text: string): void {
+  const cell = screen.getByText(text).closest('td') as HTMLElement;
+  fireEvent.pointerDown(cell.closest('tr') as HTMLElement, { pointerType: 'touch' });
+  fireEvent.click(cell);
+}
 
 async function mountDataPage(apiOperations: string[] | undefined, search = '') {
   findOne = vi.fn(async () => null);
@@ -320,6 +335,7 @@ describe('objectstack#33219 — the bare data page opens no record of a list-onl
     await mountDataPage(LIST_ONLY_OPERATIONS);
     fireEvent.click(screen.getByText('scim_ab12'));
     fireEvent.click(screen.getByText('scim_ab12'), { metaKey: true });
+    openWithTap('scim_ab12');
     await settle();
     expect(search()).toBe('');
     expect(openSpy).not.toHaveBeenCalled();
@@ -334,9 +350,9 @@ describe('objectstack#33219 — the bare data page opens no record of a list-onl
     expect(findOne).not.toHaveBeenCalled();
   });
 
-  it('CONTROL — the same object served with no restriction: the row click opens the drawer', async () => {
+  it('CONTROL — the same object served with no restriction: a touch tap on a cell opens the drawer', async () => {
     await mountDataPage(undefined);
-    fireEvent.click(screen.getByText('scim_ab12'));
+    openWithTap('scim_ab12');
     await waitFor(() => expect(search()).toBe('?recordId=c1'));
     expect(await screen.findByRole('dialog', undefined, { timeout: 5000 })).toBeTruthy();
   });

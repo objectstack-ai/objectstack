@@ -8,7 +8,7 @@
  * passed in; the component reads the returned callback.
  */
 
-import { useCallback, useRef, useState, lazy, Suspense, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
 import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
@@ -28,7 +28,6 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import type { DataSource } from '@object-ui/types';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
-import type { isSetupAppSegment } from '../console/setupApp.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
 import { substituteFilterTokens } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
@@ -40,7 +39,8 @@ import {
     kanbanViewOptions,
     isSameOptionsValue,
 } from './objectViewOptions.js';
-import { keepInlineEditModeForTheSession } from './objectViewChrome.js';
+import { useViewTabsFit } from './objectViewChrome.js';
+import { ListRecordCountContext } from './objectViewTitleSwitcher.js';
 import { OpenAsPageLink } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
@@ -73,7 +73,6 @@ export function withAddedListColumns(
 
 export function useObjectViewListRenderer({
     objectName,
-    inSetup,
     t,
     viewEmptyState,
     localizeActionTexts,
@@ -107,9 +106,9 @@ export function useObjectViewListRenderer({
     initialUfSelections,
     handleUserFilterSelectionsChange,
     viewPanelFilters,
+    listViewActions,
 }: {
     objectName: string | undefined;
-    inSetup: ReturnType<typeof isSetupAppSegment>;
     t: ReturnType<typeof useObjectTranslation>['t'];
     viewEmptyState: ReturnType<typeof useObjectLabel>['viewEmptyState'];
     localizeActionTexts: ReturnType<typeof useActionTextLocalizer>;
@@ -143,9 +142,10 @@ export function useObjectViewListRenderer({
     /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
     rowOpensRecord: boolean;
     /**
-     * objectstack#27058 — on a phone, the title's view switcher, drawn at the
-     * start of the list's toolbar row (`ListView`'s `toolbarLeading`) or above
-     * a chart; `null` elsewhere, where the page header draws it.
+     * The view switcher, drawn at the start of the list's toolbar row — its
+     * view bar (`ListView`'s `toolbarLeading`) — or above a chart, at every
+     * width (objectstack#27058 on a phone, objectstack#35548 everywhere);
+     * `null` with no view to switch.
      */
     phoneTitle: ReactNode;
     /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
@@ -160,7 +160,37 @@ export function useObjectViewListRenderer({
      * time, and the list judges its 「Personalized」 filters against them.
      */
     viewPanelFilters?: FilterBuilderRowGroup;
+    /**
+     * objectstack#35551 — the open view's rename, 保存 and full reset, for
+     * the list's options menu (`ListView`'s `onRenameView` / `onSaveView` /
+     * `onResetView`). Each is wired only when the reader may use it.
+     */
+    listViewActions?: {
+        rename?: (label: string) => boolean | Promise<boolean>;
+        save?: () => void;
+        reset?: () => void;
+    };
 }) {
+    // objectstack#35551 — the host hands fresh closures every render; the list
+    // reads the latest through a ref, and re-renders only when one appears or goes.
+    const listViewActionsRef = useRef(listViewActions);
+    listViewActionsRef.current = listViewActions;
+    const offersRename = !!listViewActions?.rename;
+    const offersSave = !!listViewActions?.save;
+    const offersReset = !!listViewActions?.reset;
+    // objectstack#27058 — below `sm` the title switcher is the phone's one
+    // view control, so the list offers no layout switcher of its own there.
+    const wideViewport = useViewTabsFit();
+    // objectstack#35548 — the switcher leads the view bar at every width. The
+    // page builds a new switcher element on every render; read through this
+    // store, it re-draws itself without re-rendering the list (a `?recordId=`
+    // step must leave the list alone, objectstack#27545 Target 5). The relay
+    // keys only on whether there is one.
+    const [leadStore] = useState(() => createLeadStore(phoneTitle));
+    useLayoutEffect(() => {
+        leadStore.set(phoneTitle);
+    });
+    const hasPhoneTitle = phoneTitle != null;
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -331,14 +361,20 @@ export function useObjectViewListRenderer({
          */
         if (viewDef.type === 'chart') {
             const chartConfig = viewDef.chart || {};
-            // The way back to the other views is the page title's view
-            // switcher (objectstack#27594), above every face, a chart included.
-            // On a phone the switcher heads the chart (objectstack#27058).
+            // The way back to the other views is the view switcher
+            // (objectstack#27594), which heads the chart in a bar of the
+            // list's view bar's height (objectstack#27058, objectstack#35548)
+            // and the list's view bar's padding (`TOOLBAR_ROW` in
+            // plugin-list's `listToolbarRow.ts`, objectstack#35729): from `sm`
+            // up 10px on the left puts the switcher's 6px-padded icon on the
+            // list page's 16px line (objectstack#35663), so switching between
+            // the list and the chart does not move it; below `sm` both bars
+            // keep `px-2`.
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
-                    {phoneTitle != null && (
-                        <div className="border-b px-2 py-1.5 flex items-center min-w-0 bg-background">
-                            {phoneTitle}
+                    {hasPhoneTitle && (
+                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center min-w-0 bg-background">
+                            <ViewBarLead store={leadStore} />
                         </div>
                     )}
                     {chartFace}
@@ -732,7 +768,7 @@ export function useObjectViewListRenderer({
             // objectstack#27058 — not on a phone: the title switcher is the
             // phone's one view control, and the Display menu drops its Layout
             // row there.
-            showViewSwitcher: phoneTitle == null
+            showViewSwitcher: (!hasPhoneTitle || wideViewport)
                 && ((viewDef.appearance ?? listSchema.appearance)?.allowedVisualizations?.length ?? 0) > 1,
             // Toolbar policy — one vocabulary (#2890). Stored views may still
             // carry the legacy bare `show*` flags, so each side is run through
@@ -1003,6 +1039,10 @@ export function useObjectViewListRenderer({
                 // for the 「Personalized」 marker, which then owns the one reset
                 // (the Display control draws none of its own).
                 onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
+                // objectstack#35551 — the view's rename, 保存 and full reset in the options menu.
+                onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
+                onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
+                onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1064,8 +1104,6 @@ export function useObjectViewListRenderer({
                 // the door that stores a change to them (see `persistAddedFields`).
                 addedFields={listColumns.addedFields}
                 onAddedFieldsChange={addedFieldsStored ? persistAddedFields : undefined}
-                // objectui#5144 (ruling E): session-only, writes nothing.
-                onInlineEditChange={keepInlineEditModeForTheSession}
                 onColumnStateChange={persistListColumnState}
                 userFilterSelections={initialUfSelections}
                 onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
@@ -1073,10 +1111,6 @@ export function useObjectViewListRenderer({
                 // a personal view's panel opens on the view's own conditions.
                 initialFilters={listSeed?.filters ?? viewPanelFilters}
                 initialSearchTerm={listSeed?.search}
-                // objectui#12606 — Setup's list opens without row numbers in
-                // the leading cell. A host prop, not a view key: a console
-                // posture, never metadata.
-                defaultRowNumbers={!inSetup}
                 // objectui#13330 — on a managed environment, the Users list
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.
@@ -1097,13 +1131,48 @@ export function useObjectViewListRenderer({
                 rowOpensRecord={rowOpensRecord}
                 // objectstack#26681 — the Display menu's Open records section.
                 recordOpen={recordOpen}
-                // objectstack#27058 — on a phone the toolbar row is the title
-                // row: the view switcher, then the filter / sort / display tools.
-                toolbarLeading={phoneTitle}
+                // The toolbar row is the view bar: the view switcher, then the
+                // filter / sort / options tools (objectstack#27058,
+                // objectstack#35548). The switcher shows the list's own record
+                // count and layout, which only the list knows.
+                toolbarLeading={hasPhoneTitle ? ({ recordCount, layout }) => (
+                    <ListRecordCountContext.Provider value={{ count: recordCount, layout }}>
+                        <ViewBarLead store={leadStore} />
+                    </ListRecordCountContext.Provider>
+                ) : null}
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
+}
+
+/** The page's current view-bar lead (the switcher), read by `ViewBarLead`. */
+interface LeadStore {
+    get: () => ReactNode;
+    set: (next: ReactNode) => void;
+    subscribe: (listener: () => void) => () => void;
+}
+
+function createLeadStore(initial: ReactNode): LeadStore {
+    let current = initial;
+    const listeners = new Set<() => void>();
+    return {
+        get: () => current,
+        set: (next) => {
+            if (Object.is(next, current)) return;
+            current = next;
+            listeners.forEach((listener) => listener());
+        },
+        subscribe: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+    };
+}
+
+/** Draws the store's lead, re-rendering on its own when the page hands a new one. */
+function ViewBarLead({ store }: { store: LeadStore }) {
+    return <>{useSyncExternalStore(store.subscribe, store.get, store.get)}</>;
 }

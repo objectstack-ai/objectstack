@@ -4422,5 +4422,201 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "Calendario laboral",
+    pluralLabel: "Calendarios laborales",
+    description: "Calendarios laborales: el horario semanal, la zona horaria en la que se aplica y hasta cuándo están mantenidos los festivos. Las fechas de vencimiento contadas en tiempo laborable los leen.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Código",
+        help: "Código de máquina con el que las fórmulas, las escalaciones de aprobación y los paquetes nombran este calendario, p. ej. cn_standard: letras minúsculas, dígitos y guiones bajos."
+      },
+      name: {
+        label: "Nombre"
+      },
+      timezone: {
+        label: "Zona horaria",
+        help: "Zona horaria IANA en la que se aplican las franjas de trabajo, p. ej. Asia/Shanghai. El formulario de creación se abre con la zona horaria de la organización (Ajustes → Localización), y una creación que la omite recibe la misma zona."
+      },
+      is_default: {
+        label: "Predeterminado",
+        help: "El calendario que usa una fecha de vencimiento cuando no indica ninguno. Uno por organización."
+      },
+      maintained_from: {
+        label: "Mantenido desde",
+        help: "Primera fecha desde la que se registran los festivos y los días laborables de recuperación. Se rechaza un cálculo que necesite una fecha anterior."
+      },
+      maintained_through: {
+        label: "Mantenido hasta",
+        help: "Última fecha hasta la que se registran los festivos y los días laborables de recuperación. Se rechaza un cálculo que necesite una fecha posterior: registra los festivos del año siguiente y luego mueve esta fecha."
+      },
+      monday_periods: {
+        label: "Lunes",
+        help: "Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      },
+      tuesday_periods: {
+        label: "Martes",
+        help: "Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      },
+      wednesday_periods: {
+        label: "Miércoles",
+        help: "Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      },
+      thursday_periods: {
+        label: "Jueves",
+        help: "Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      },
+      friday_periods: {
+        label: "Viernes",
+        help: "Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      },
+      saturday_periods: {
+        label: "Sábado",
+        help: "Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      },
+      sunday_periods: {
+        label: "Domingo",
+        help: "Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Todos",
+        emptyState: {
+          title: "Aún no hay calendarios laborales",
+          message: "Añade un calendario con su horario semanal y marca uno como predeterminado; después registra sus festivos y días laborables de recuperación."
+        }
+      },
+      needs_maintenance: {
+        label: "Requiere mantenimiento",
+        emptyState: {
+          title: "Todos los calendarios están mantenidos con antelación",
+          message: "Un calendario aparece aquí cuando sus festivos se acaban en los próximos 60 días; se rechazan las fechas de vencimiento posteriores a esa fecha."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "El código debe empezar por una letra minúscula y usar solo letras minúsculas, dígitos y guiones bajos, p. ej. cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Excepción de calendario",
+    pluralLabel: "Excepciones de calendario",
+    description: "Excepciones fechadas a un calendario laboral: festivos, días laborables de recuperación y cierres. Un día laborable lleva sus franjas de trabajo completas.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Calendario"
+      },
+      date: {
+        label: "Fecha"
+      },
+      kind: {
+        label: "Clase",
+        help: "Día libre: la fecha entera es libre. Día laborable: la fecha se trabaja con las franjas de abajo, p. ej. un día laborable de recuperación.",
+        options: {
+          off: "Día libre",
+          on: "Día laborable"
+        }
+      },
+      periods: {
+        label: "Franjas",
+        help: "Para un día laborable, todas las horas de esa fecha; nunca se toman del día de la semana. Franjas de trabajo de ese día en la zona horaria del calendario, HH:mm-HH:mm separadas por comas, p. ej. 09:00-12:00, 13:00-18:00. Una franja termina después de empezar, el mismo día; 24:00 es el final más tardío. Déjalo vacío para un día libre."
+      },
+      note: {
+        label: "Nota",
+        help: "Qué es la fecha, p. ej. la Fiesta Nacional o un día laborable de recuperación por el Festival de Primavera."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Todos",
+        emptyState: {
+          title: "Aún no hay excepciones de calendario",
+          message: "Añade una fila por cada festivo o día laborable de recuperación, o importa un año de ellos desde un archivo."
+        }
+      }
+    }
   }
 };

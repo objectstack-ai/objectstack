@@ -294,7 +294,40 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
     options: Parameters<NonNullable<StrategyContext['executeAggregate']>>[1],
     relations: readonly RelationGroupAggregateRelation[],
   ): Promise<RelationGroupAggregateAnswer>;
+  /**
+   * The data engine's aggregate of `objectName` ordered by `cut.orderBy` (the
+   * aggregated row's columns), cut to `cut.limit` groups and counted before
+   * the cut, all in the driver's own statement (objectql
+   * `aggregate-order-cut.ts`) — or `undefined` when the host cannot run it.
+   *
+   * `ObjectQLStrategy` reads a top-N through it first. The request is
+   * declinable: where the engine cannot serve the cut (a driver that compiles
+   * none, an aggregate it computes in memory, a `having`) it reads nothing and
+   * answers `served: false`, and the strategy reads every group and cuts in
+   * memory, as before. `AnalyticsServicePlugin` wires it only when it bridges
+   * `executeAggregate` itself, to the same engine. Declared HERE rather than on
+   * the spec's {@link StrategyContext} for the reason `getDatasetScope` is:
+   * nothing about it is an authorable surface.
+   */
+  executeOrderCutAggregate?(
+    objectName: string,
+    options: Parameters<NonNullable<StrategyContext['executeAggregate']>>[1],
+    cut: OrderCutAggregateRequest,
+  ): Promise<OrderCutAggregateAnswer>;
 }
+
+/** The order and cut a {@link DatasetScopedStrategyContext.executeOrderCutAggregate} asks of the engine. */
+export interface OrderCutAggregateRequest {
+  /** Aggregated-row columns (a group key's column, a measure's alias), in priority order. */
+  readonly orderBy: ReadonlyArray<{ readonly field: string; readonly order: 'asc' | 'desc' }>;
+  /** The most groups to answer, 1 or more. */
+  readonly limit: number;
+}
+
+/** The engine's answer: the cut rows and the count of groups before the cut, or why it declined (nothing read). */
+export type OrderCutAggregateAnswer =
+  | { readonly served: true; readonly rows: Record<string, unknown>[]; readonly totalGroups: number }
+  | { readonly served: false; readonly reason: string };
 
 /** One relation a {@link DatasetScopedStrategyContext.executeRelationGroupAggregate} groups through. */
 export interface RelationGroupAggregateRelation {

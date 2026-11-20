@@ -4422,5 +4422,201 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "Рабочий календарь",
+    pluralLabel: "Рабочие календари",
+    description: "Рабочие календари: еженедельный график работы, часовой пояс, в котором он действует, и дата, до которой внесены праздники. Сроки, отсчитываемые в рабочем времени, берутся из них.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Код",
+        help: "Машинный код, по которому формулы, эскалации согласований и пакеты ссылаются на этот календарь, например cn_standard: строчные латинские буквы, цифры и подчёркивания."
+      },
+      name: {
+        label: "Название"
+      },
+      timezone: {
+        label: "Часовой пояс",
+        help: "Часовой пояс IANA, в котором действуют рабочие интервалы, например Asia/Shanghai. Форма создания открывается с часовым поясом организации (Настройки → Локализация), и запись, созданная без него, получает тот же пояс."
+      },
+      is_default: {
+        label: "По умолчанию",
+        help: "Календарь, который используется для срока, если календарь не указан. Один на организацию."
+      },
+      maintained_from: {
+        label: "Ведётся с",
+        help: "Первая дата, начиная с которой внесены праздники и рабочие дни переноса. Расчёт, которому нужна более ранняя дата, отклоняется."
+      },
+      maintained_through: {
+        label: "Ведётся по",
+        help: "Последняя дата, по которую внесены праздники и рабочие дни переноса. Расчёт, которому нужна более поздняя дата, отклоняется: внесите праздники следующего года, затем передвиньте эту дату."
+      },
+      monday_periods: {
+        label: "Понедельник",
+        help: "Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      },
+      tuesday_periods: {
+        label: "Вторник",
+        help: "Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      },
+      wednesday_periods: {
+        label: "Среда",
+        help: "Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      },
+      thursday_periods: {
+        label: "Четверг",
+        help: "Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      },
+      friday_periods: {
+        label: "Пятница",
+        help: "Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      },
+      saturday_periods: {
+        label: "Суббота",
+        help: "Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      },
+      sunday_periods: {
+        label: "Воскресенье",
+        help: "Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Все",
+        emptyState: {
+          title: "Рабочих календарей пока нет",
+          message: "Добавьте календарь с еженедельным графиком и отметьте один как календарь по умолчанию, затем внесите его праздники и рабочие дни переноса."
+        }
+      },
+      needs_maintenance: {
+        label: "Требует обновления",
+        emptyState: {
+          title: "Все календари заполнены наперёд",
+          message: "Календарь появляется здесь, когда его праздники заканчиваются в ближайшие 60 дней; сроки после этой даты отклоняются."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "Код должен начинаться со строчной латинской буквы и содержать только строчные латинские буквы, цифры и подчёркивания, например cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Исключение календаря",
+    pluralLabel: "Исключения календаря",
+    description: "Датированные исключения из рабочего календаря: праздники, рабочие дни переноса и простои. Рабочий день содержит полный набор рабочих интервалов.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Календарь"
+      },
+      date: {
+        label: "Дата"
+      },
+      kind: {
+        label: "Тип",
+        help: "Выходной: вся дата нерабочая. Рабочий день: в эту дату работают по интервалам ниже, например рабочий день переноса.",
+        options: {
+          off: "Выходной",
+          on: "Рабочий день"
+        }
+      },
+      periods: {
+        label: "Интервалы",
+        help: "Для рабочего дня — все часы этой даты; они никогда не берутся из дня недели. Рабочие интервалы в этот день в часовом поясе календаря, HH:mm-HH:mm через запятую, например 09:00-12:00, 13:00-18:00. Интервал заканчивается позже, чем начинается, в тот же день; самое позднее окончание — 24:00. Оставьте пустым для выходного."
+      },
+      note: {
+        label: "Примечание",
+        help: "Что это за дата, например Национальный день или рабочий день переноса к Празднику весны."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Все",
+        emptyState: {
+          title: "Исключений календаря пока нет",
+          message: "Добавьте по строке на каждый праздник или рабочий день переноса либо импортируйте их за год из файла."
+        }
+      }
+    }
   }
 };

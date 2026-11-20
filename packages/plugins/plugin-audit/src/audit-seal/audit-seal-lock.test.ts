@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AUDIT_SEAL_LOCK_NAME, AUDIT_SEAL_LOCK_WAIT_MS, AUDIT_SEAL_PG_LOCK_KEY, holdAuditSealLock, type AuditSealLockEngine } from './seal-lock.js';
 import { AuditSealer } from './sealer.js';
 import { LocalCheckpointSigner } from './signer.js';
@@ -308,5 +308,85 @@ describe('B: where the database offers no session lock, an --apply run on a seal
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toMatch(/^--sealer-stopped: 'sys_audit_log' is rewritten without the audit seal lock/);
     await expect(hold.finish()).resolves.toEqual({ lost: false });
+  });
+});
+
+describe('a stalled connection cannot hang the hold\'s finish or a sealer pass: each lock step is bounded', () => {
+  // A connection stalled half-open — no reply and no reset — never fails a statement, nor finishes a close: it never
+  // answers. `stalls()` puts the database's every session in that state from then on.
+  const NEVER = () => new Promise<never>(() => {});
+  /** The bound, generously: a probe, then a close, each given up on after `DATABASE_SESSION_LOCK_ANSWER_MS` (10 s). */
+  const BOUNDED_MS = 60_000;
+
+  function stallingDatabase() {
+    const db = sessionLockDatabase();
+    let stalled = false;
+    const knex = db.face.getKnex() as {
+      client: { acquireRawConnection(): Promise<unknown>; destroyRawConnection(c: unknown): Promise<void> };
+      raw(sql: string, bindings?: readonly unknown[]): { connection(c: unknown): Promise<unknown> };
+    };
+    const stalling = {
+      client: {
+        acquireRawConnection: () => knex.client.acquireRawConnection(),
+        destroyRawConnection: (c: unknown) => (stalled ? NEVER() : knex.client.destroyRawConnection(c)),
+      },
+      raw: (sql: string, bindings: readonly unknown[] = []) => ({
+        connection: (c: unknown) => (stalled ? NEVER() : knex.raw(sql, bindings).connection(c)),
+      }),
+    };
+    return { ...db, face: { dialectName: db.face.dialectName, getKnex: () => stalling }, stall: () => { stalled = true; } };
+  }
+
+  /** What `step` answered by `ms` of fake time from now, or 'still waiting'. */
+  async function answerWithin<T>(step: Promise<T>, ms: number): Promise<T | 'still waiting'> {
+    let answer: T | 'still waiting' = 'still waiting';
+    void step.then((value) => { answer = value; });
+    await vi.advanceTimersByTimeAsync(ms);
+    return answer;
+  }
+
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('⛔ --apply: finish() on a session that stopped answering reports the lock lost, naming `os audit verify` — the line the command prints at error before it exits non-zero', async () => {
+    const db = stallingDatabase();
+    const hold = await holdAuditSealLock(engineOf([SEALED], { sys_audit_log: lockableStore(new MemoryStore(), db) }), {
+      objects: RUN, sealerStopped: false, warn: vi.fn(),
+    });
+    const sent = db.statements.length;
+    db.stall();
+    const finished = await answerWithin(hold.finish(), BOUNDED_MS);
+    expect(finished).not.toBe('still waiting');
+    expect(finished).toMatchObject({ lost: true });
+    expect(finished !== 'still waiting' && finished.lost && finished.line).toMatch(
+      /^The audit seal lock on the database of 'sys_audit_log' was lost during this run \(its database session ended, or stopped answering\).*Run `os audit verify`/,
+    );
+    // The stalled session got its probe and nothing more: no unlock waited on it; its close was given up on too.
+    expect(db.statements.length).toBe(sent);
+  });
+
+  it('a sealer pass whose lock\'s session stops answering mid-pass ends, writes no checkpoint, and says which lock lapsed', async () => {
+    const H = 60 * 60 * 1000;
+    const DAY0 = Date.UTC(2026, 10, 10);
+    const store = memoryEngine([SEALED]);
+    const db = stallingDatabase();
+    lockableStore(store.hot, db);
+    const crypto = bindingCrypto();
+    const logger = recordingLogger();
+    const sealer = new AuditSealer({
+      engine: store.engine, crypto, signer: () => new LocalCheckpointSigner({ engine: store.engine, crypto }), logger, now: () => DAY0 + 12 * H,
+    });
+    store.hot.table('sys_audit_log').push({ id: 'r1', created_at: new Date(DAY0 + 8 * H).toISOString(), tenant_id: 'org_a', new_value: '{}' });
+    const find = store.hot.find.bind(store.hot);
+    store.hot.find = async (object, query) => {
+      // The pass holds the lock and reads the window: the connection stalls now.
+      if (object === 'sys_audit_log' && query.limit === 500) db.stall();
+      return find(object, query);
+    };
+    expect(await answerWithin(sealer.runPass(), BOUNDED_MS)).toBe(0);
+    expect(store.hot.table('sys_audit_checkpoint')).toEqual([]);
+    expect(logger.lines.map((l) => l.message)).toContainEqual(
+      expect.stringMatching(/sealing 'sys_audit_log' FAILED .*the audit seal lock on the database of 'sys_audit_log' lapsed/),
+    );
   });
 });

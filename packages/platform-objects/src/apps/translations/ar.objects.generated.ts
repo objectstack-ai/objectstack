@@ -4422,5 +4422,201 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "تقويم العمل",
+    pluralLabel: "تقويمات العمل",
+    description: "تقويمات العمل: ساعات العمل الأسبوعية، والمنطقة الزمنية التي تُحسب بها، وإلى أي تاريخ أُدخلت العطلات. تقرؤها تواريخ الاستحقاق المحسوبة بوقت العمل.",
+    fields: {
+      id: {
+        label: "المعرّف"
+      },
+      code: {
+        label: "الرمز",
+        help: "الرمز الآلي الذي تُسمّي به الصيغ وتصعيدات الموافقة والحزم هذا التقويم، مثل cn_standard: أحرف صغيرة وأرقام وشرطات سفلية."
+      },
+      name: {
+        label: "الاسم"
+      },
+      timezone: {
+        label: "المنطقة الزمنية",
+        help: "منطقة IANA الزمنية التي تُحسب بها فترات العمل، مثل Asia/Shanghai. يُفتح نموذج الإنشاء على المنطقة الزمنية للمؤسسة (الإعدادات ← الترجمة والإعدادات المحلية)، وأي إنشاء يتركها فارغة يأخذ المنطقة نفسها."
+      },
+      is_default: {
+        label: "افتراضي",
+        help: "التقويم الذي يستخدمه تاريخ الاستحقاق عندما لا يحدد تقويمًا. واحد لكل مؤسسة."
+      },
+      maintained_from: {
+        label: "مُحدَّث من",
+        help: "أول تاريخ أُدخلت منه العطلات وأيام العمل التعويضية. يُرفض أي حساب يحتاج إلى تاريخ أسبق."
+      },
+      maintained_through: {
+        label: "مُحدَّث حتى",
+        help: "آخر تاريخ أُدخلت حتى نهايته العطلات وأيام العمل التعويضية. يُرفض أي حساب يحتاج إلى تاريخ لاحق: أدخل عطلات العام التالي، ثم انقل هذا التاريخ."
+      },
+      monday_periods: {
+        label: "الاثنين",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      tuesday_periods: {
+        label: "الثلاثاء",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      wednesday_periods: {
+        label: "الأربعاء",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      thursday_periods: {
+        label: "الخميس",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      friday_periods: {
+        label: "الجمعة",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      saturday_periods: {
+        label: "السبت",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      sunday_periods: {
+        label: "الأحد",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "الكل",
+        emptyState: {
+          title: "لا توجد تقويمات عمل بعد",
+          message: "أضف تقويمًا بساعات عمله الأسبوعية وحدّد أحدها تقويمًا افتراضيًا، ثم أدخل عطلاته وأيام العمل التعويضية."
+        }
+      },
+      needs_maintenance: {
+        label: "بحاجة إلى تحديث",
+        emptyState: {
+          title: "جميع التقويمات محدَّثة مسبقًا",
+          message: "يظهر التقويم هنا عندما تنتهي عطلاته المُدخلة خلال الـ 60 يومًا القادمة؛ وتُرفض تواريخ الاستحقاق التي تتجاوز ذلك التاريخ."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "يجب أن يبدأ الرمز بحرف صغير وأن يحتوي فقط على أحرف صغيرة وأرقام وشرطات سفلية، مثل cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "استثناء تقويم",
+    pluralLabel: "استثناءات التقويم",
+    description: "استثناءات مؤرّخة لتقويم العمل: العطلات الرسمية وأيام العمل التعويضية وأيام الإغلاق. يحمل يوم العمل فترات عمله كاملة.",
+    fields: {
+      id: {
+        label: "المعرّف"
+      },
+      calendar: {
+        label: "التقويم"
+      },
+      date: {
+        label: "التاريخ"
+      },
+      kind: {
+        label: "النوع",
+        help: "يوم إجازة: التاريخ كله إجازة. يوم عمل: يُعمل في التاريخ وفق الفترات أدناه، مثل يوم عمل تعويضي.",
+        options: {
+          off: "يوم إجازة",
+          on: "يوم عمل"
+        }
+      },
+      periods: {
+        label: "الفترات",
+        help: "ليوم العمل، كل ساعات ذلك التاريخ؛ ولا تُؤخذ أبدًا من يوم الأسبوع. فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      note: {
+        label: "ملاحظة",
+        help: "ما هو هذا التاريخ، مثل العيد الوطني أو يوم عمل تعويضي لعيد الربيع."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "الكل",
+        emptyState: {
+          title: "لا توجد استثناءات تقويم بعد",
+          message: "أضف صفًا لكل عطلة أو يوم عمل تعويضي، أو استورد سنة كاملة منها من ملف."
+        }
+      }
+    }
   }
 };

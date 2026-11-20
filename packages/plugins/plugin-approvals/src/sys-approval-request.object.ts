@@ -698,8 +698,17 @@ export const SysApprovalRequest = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       target: '/api/v1/approvals/requests/{id}/reject',
+      // A reject through `approval_reject` always carries its reason
+      // (maintainer requirement on the record page's Reject). `required: true`
+      // is enforced by the declared param contract (ADR-0104 D2,
+      // `validateActionParams`), which counts a blank or whitespace-only
+      // string as missing: the action door, MCP `run_action` and the console's
+      // param dialog all refuse a reject without one, before the target route
+      // is called. The target route judges it again: `ApprovalService.decide()`
+      // refuses a reject without a non-blank string reason, so a caller that
+      // skips this action is held to the same rule.
       params: [
-        { name: 'comment', label: 'Comment', type: 'textarea', required: false },
+        { name: 'comment', label: 'Comment', type: 'textarea', required: true },
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
       visible:
@@ -711,7 +720,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Reject a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. A rejection is final for every approver. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused. Ask the human to confirm before calling.',
+          'Reject a pending approval request (the record: a sys_approval_request id) on behalf of the user. The param comment, the reason for the rejection, is required: a call without one, or with a blank one, is refused. A rejection is final for every approver. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },

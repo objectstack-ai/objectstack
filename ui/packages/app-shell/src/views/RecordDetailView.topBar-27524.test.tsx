@@ -154,12 +154,16 @@ afterEach(() => {
 });
 
 describe('the page\'s top bar (objectstack#27524, Target 7)', () => {
-  it('opened directly: 「对象 › 记录名」 and ⊟, nothing else; the crumb row is gone', async () => {
+  it('opened directly: 「对象 / 记录名」 and ⊟, nothing else; the crumb row is gone', async () => {
     mountPage(`/apps/${APP}/${LEAD}/record/r-1`);
     await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
     const bar = pageBar()!;
     expect(bar).not.toBeNull();
-    await waitFor(() => expect(screen.getByTestId('record-page-crumb').textContent).toBe('LeadsRecord r-1'));
+    // objectstack#35593 — the record's header holds the bar: the crumb names
+    // the object, then 「/」 and the header's own H1.
+    await waitFor(() => expect(bar.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'));
+    expect(screen.getByTestId('record-page-crumb').textContent).toBe('Leads');
+    expect(bar.querySelector('[data-record-bar-separator]')?.textContent).toBe('/');
     const object = bar.querySelector('[data-record-crumb-object]') as HTMLAnchorElement;
     expect(object.getAttribute('href')).toBe(`/apps/${APP}/${LEAD}`);
     expect(bar.querySelector('[data-record-top-bar-step]')).toBeNull();
@@ -270,7 +274,11 @@ function deferredRead(held: string) {
 }
 
 describe('the breadcrumb while the record is read (objectstack#35412)', () => {
-  const crumbName = () => screen.getByTestId('record-page-crumb').querySelector('[aria-current="page"]')?.textContent;
+  // The record's name in the bar: the header's H1 once the header holds the
+  // bar (objectstack#35593), the crumb's own name until then.
+  const crumbName = () =>
+    document.querySelector('[data-record-bar-title]:not([hidden]) h1')?.textContent
+    ?? screen.getByTestId('record-page-crumb').querySelector('[aria-current="page"]')?.textContent;
 
   it('names the record by its object until the read lands, never by its id', async () => {
     const read = deferredRead('r-1');
@@ -324,8 +332,8 @@ function PaneHost({ dataSource }: { dataSource: unknown }) {
   );
 }
 
-describe('the pane\'s top bar holds the record\'s ⊟ and names it (objectstack#27524)', () => {
-  it('the record reports its title to the breadcrumb, and its ⊟ sits in the pane\'s bar, not the header', async () => {
+describe('the pane\'s top bar names the record (objectstack#27524)', () => {
+  it('the record\'s header names it in the pane\'s bar; a pane draws no right rail, so no ⊟ (objectstack#35596)', async () => {
     const dataSource = makeDataSource();
     render(
       <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}?recordId=r-1`]}>
@@ -334,18 +342,22 @@ describe('the pane\'s top bar holds the record\'s ⊟ and names it (objectstack#
         </MetadataCtx.Provider>
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('LeadsRecord r-1'), { timeout: 5000 });
-    const group = await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
-    expect(group.closest('[data-record-pane-toggles]')).not.toBeNull();
-    expect(group.closest('[data-record-top-bar]')).not.toBeNull();
-    expect(group.closest('[data-record-page-root]')).toBeNull();
+    // objectstack#35593 — the record's header holds the pane's bar: its H1 is
+    // the bar's name, with no object crumb, counter or ↓ ↑ beside it.
+    const paneTitle = () => document.querySelector('[data-record-bar-title] h1')?.textContent;
+    await waitFor(() => expect(paneTitle()).toBe('Record r-1'), { timeout: 5000 });
+    expect(screen.queryByTestId('record-drawer-crumb')).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-record-page-tier]')).not.toBeNull(), { timeout: 5000 });
+    expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
+    expect(document.querySelector('[data-record-column="right"]')).toBeNull();
     expect(document.querySelector('[data-page-header-trailing]')).toBeNull();
     // The pane draws its own bar; the record inside draws none.
     expect(document.querySelectorAll('[data-record-top-bar]')).toHaveLength(1);
-    expect(document.querySelector('[data-record-top-bar-position]')?.getAttribute('title')).toBe('1 of 3 in All leads');
+    expect(document.querySelector('[data-record-top-bar-position]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Next record' })).toBeNull();
 
-    // A step names the next record once it reports its title.
-    fireEvent.click(screen.getByRole('button', { name: 'Next record' }));
-    await waitFor(() => expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('LeadsRecord r-2'), { timeout: 5000 });
+    // The step keys stay: j names the next record once its header draws.
+    fireEvent.keyDown(document.body, { key: 'j' });
+    await waitFor(() => expect(paneTitle()).toBe('Record r-2'), { timeout: 5000 });
   });
 });

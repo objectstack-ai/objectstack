@@ -36,6 +36,7 @@ import type { DataSource, ListViewSchema } from '@object-ui/types';
 import type { FilterBuilderRow } from '@object-ui/components';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { ListView } from '../ListView';
+import { openAdvancedFilter, openAdvancedSort } from './conditionPanels';
 
 const OBJECT = 'task_27520';
 
@@ -100,14 +101,16 @@ describe('row 7: a filter row with no value is not a filter', () => {
   it('the badge counts the finished rows only', async () => {
     mount({}, { initialFilters: group(COMPLETE, NO_VALUE) });
     await waitFor(() => expect(filterTrigger()).toHaveAccessibleName('Filter, 1 active'));
-    expect(filterTrigger().textContent).toBe('1');
+    // The trigger reads its label, then the badge (objectstack#35548).
+    expect(filterTrigger().textContent).toBe('Filter1');
   });
 
   it('a group of unfinished rows only draws no badge and keeps the first-run copy', async () => {
     const { container } = mount({}, { initialFilters: group(NO_VALUE), onAddRecord: () => {} });
     const panel = await emptyState(container);
     expect(filterTrigger()).toHaveAccessibleName('Filter');
-    expect(filterTrigger().textContent).toBe('');
+    // The label alone: no badge (objectstack#35548 draws the label from `sm` up).
+    expect(filterTrigger().textContent).toBe('Filter');
     expect(panel.textContent).toMatch(/Nothing here yet/);
     expect(panel.textContent).not.toMatch(/No matching records/);
   });
@@ -121,7 +124,7 @@ describe('row 7: a filter row with no value is not a filter', () => {
     const onFilterChange = vi.fn();
     mount({}, { initialFilters: group(COMPLETE), onFilterChange });
     fireEvent.click(filterTrigger());
-    const panel = (await screen.findByText('Filter Records')).closest('[role="dialog"]') as HTMLElement;
+    const panel = (await openAdvancedFilter()).closest('[role="dialog"]') as HTMLElement;
     // The object definition is what lists the fields; wait for it.
     await waitFor(() => expect(within(panel).getByRole('button', { name: /add filter/i })).toBeEnabled());
     const rowsBefore = within(panel).getAllByRole('button', { name: /remove condition/i }).length;
@@ -144,7 +147,7 @@ describe('row 7: a filter row with no value is not a filter', () => {
 describe('row 7: a date sort reads as time', () => {
   async function openSort() {
     fireEvent.click(await screen.findByRole('button', { name: /^sort/i }));
-    const panel = (await screen.findByText('Sort Records')).closest('[role="dialog"]') as HTMLElement;
+    const panel = (await openAdvancedSort()).closest('[role="dialog"]') as HTMLElement;
     return panel;
   }
   const directionOf = (panel: HTMLElement) => within(panel).getAllByRole('combobox')[1];

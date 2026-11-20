@@ -1901,7 +1901,7 @@ export class ObjectStackProtocolImplementation implements
         return draftPublishVerdict.call(this.draftVerdictHost(), draft);
     }
 
-    /** [#34818, #34766] PUBLIC: this judgement with the gate's advisories; no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
+    /** [#34818, #34766] PUBLIC: this judgement with its advisories (the gate's, plus a flow's #35256 connector-probe finding); no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
     draftPublishJudgement(draft: {
         type: string; name: string; body?: unknown; packageId: string | null; member?: string;
         userTextLocales?: readonly (string | undefined)[];
@@ -1912,8 +1912,7 @@ export class ObjectStackProtocolImplementation implements
 
     /** The host both draft verdict bodies read: the promotion's own collaborators. */
     private draftVerdictHost(): ThisParameterType<typeof draftPublishJudgement> {
-        const readAuthoringChannel = () => this.authoringChannel;
-        const readEngine = () => this.engine;
+        const readAuthoringChannel = () => this.authoringChannel, readEngine = () => this.engine;
         const host: ThisParameterType<typeof draftPublishJudgement> = {
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
@@ -1930,6 +1929,7 @@ export class ObjectStackProtocolImplementation implements
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
+            servicesRegistry: () => this.getServicesRegistry,
         };
         return host;
     }
@@ -9077,9 +9077,9 @@ export class ObjectStackProtocolImplementation implements
      * Answered as the schema gate answers, with the envelope of
      * {@link unknownDatasourceSaveRefusal}: `422 INVALID_METADATA`, one finding
      * per missing member at `externalId` (`externalId.N` for a composite
-     * member), naming the field and the object. The boot loader
-     * never refuses; it warns once for a keyed dataset whose every record
-     * keys empty ({@link SeedLoaderService}).
+     * member), naming the field and the object. The boot loader refuses
+     * each keyed record that leaves a key field blank, one error per
+     * record, and loads the rest ({@link SeedLoaderService}).
      */
     private seedExternalIdSaveRefusal(
         singularType: string,

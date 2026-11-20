@@ -458,10 +458,11 @@ describe('the record page open waves (objectui#13010)', () => {
       const asked = pageLists(held).filter((l) => l.object === object);
       expect(asked.map((l) => l.top), `${object}\n${table}`).toEqual([3]);
     }
-    // The badge total is drawn from that read: quote 6 + line 7 + the
-    // filtered task probe's own 4.
+    // objectstack#35595 — one table, one count: the Related tab merges three
+    // tables, so it names no number (it summed quote 6 + line 7 + the filtered
+    // task probe's own 4 before).
     const relatedTab = screen.getByRole('tab', { name: /Related/ });
-    expect(relatedTab.textContent, table).toContain('17');
+    expect(relatedTab.textContent, table).toBe('Related');
     // The card rows are drawn from the same read: three rows each, and the
     // card's own total.
     for (const object of [QUOTE, LINE]) {
@@ -530,8 +531,8 @@ const FOUR_READS = [isActivityRead, isCommentRead, isUserListRead, isAttachmentL
 
 /**
  * Every element is on screen except the host's foot-of-page Attachments panel,
- * which is below the record's content until `scrollFallbackIntoView` says it
- * scrolled in.
+ * which stays below the record's content (a page with a tab strip has none
+ * since objectstack#35595: the panel is the strip's Attachments tab).
  */
 const offscreen: Array<{ cb: (entries: Array<{ isIntersecting: boolean }>) => void; live: boolean }> = [];
 class FoldObserver {
@@ -550,11 +551,6 @@ class FoldObserver {
   disconnect() {
     for (const entry of this.entries) entry.live = false;
   }
-}
-async function scrollFallbackIntoView() {
-  await act(async () => {
-    for (const entry of offscreen) if (entry.live) entry.cb([{ isIntersecting: true }]);
-  });
 }
 
 /** Open a tab the way a user does: Radix activates a trigger on mouse down. */
@@ -579,10 +575,11 @@ describe('the timeline, comments, attachments and user list wait for their panel
     const table = waveTable(held);
     expect(held.filter(isRecordRead).map((h) => h.wave), table).toEqual([1]);
     for (const isRead of FOUR_READS) expect(held.filter(isRead), table).toEqual([]);
-    // The foot panel is mounted and shows its loading state, not "no attachments".
-    const fallback = document.querySelector('[data-record-attachments-fallback]');
-    expect(fallback, table).not.toBeNull();
-    expect(fallback?.textContent ?? '', table).not.toContain('signed-contract.pdf');
+    // objectstack#35595 — the host's attachments panel is a tab of the page's
+    // strip, not a band at its foot.
+    expect(document.querySelector('[data-record-attachments-fallback]'), table).toBeNull();
+    expect(screen.getByRole('tab', { name: /^Attachments/ }), table).toBeTruthy();
+    expect(screen.queryByText('signed-contract.pdf'), table).toBeNull();
   });
 
   // The open's payload did not ask the feed (its block was not on screen), so
@@ -642,17 +639,20 @@ describe('the timeline, comments, attachments and user list wait for their panel
     expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
   });
 
-  // objectstack#28470 — the payload carries the attachments: the panel takes
-  // them once it scrolls into view, and reads nothing of its own.
-  it('the foot-of-page Attachments panel draws the payload\'s rows once it scrolls into view, and reads nothing', async () => {
+  // objectstack#28470 — the payload carries the attachments, so nothing reads
+  // them at open. objectstack#35595 — the host's panel is the strip's
+  // Attachments tab, drawn when it opens. (Under StrictMode the face's mount
+  // runs the panel's effect twice: the first run takes the payload's rows and
+  // is superseded, the second reads — a development-only re-read of
+  // `RecordAttachmentsPanel`'s take-once hand-off, not asserted here.)
+  it('the host\'s Attachments tab draws the record\'s files when it opens; nothing reads them at open', async () => {
     const { held, state } = await openRecordPage({ page: ACTIVITY_PAGE, object: filesObject, observer: FoldObserver });
     expect(pageStreams(held).attachments, waveTable(held)).toBe(100);
     expect(held.filter(isAttachmentRead), waveTable(held)).toEqual([]);
-    await scrollFallbackIntoView();
+    expect(screen.queryByText('signed-contract.pdf'), waveTable(held)).toBeNull();
+    await openTab('Attachments');
     await runWaves(held, state);
-    const table = waveTable(held);
-    expect(held.filter(isAttachmentRead), table).toEqual([]);
-    expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
+    expect(screen.getByText('signed-contract.pdf'), waveTable(held)).toBeTruthy();
   });
 
   it('CONTROL: a record opened on its Activity tab asks the feed with its page at open, and draws the same rows', async () => {
@@ -701,7 +701,8 @@ describe('the timeline, comments, attachments and user list wait for their panel
     const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver });
     const table = waveTable(held);
     expect(screen.queryByRole('tab', { name: /^Timeline/ }), table).toBeNull();
-    expect(document.querySelector('[data-record-timeline-panel]'), table).not.toBeNull();
+    // objectstack#35596 — the stream's newest rows are the 概览 rail's 最近动态 card.
+    expect(document.querySelector('[data-record-summary-card="timeline"]'), table).not.toBeNull();
     // objectstack#28737 — the panel draws its newest rows, and the page
     // payload serves the stream's count, so the activity part asks the
     // panel's rows only.
@@ -766,16 +767,16 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
     expect(screen.queryByRole('tab', { name: /^(Timeline|History)/ }), table).toBeNull();
     expect(held.filter(isAuditRead).map((h) => h.wave), table).toEqual([1]);
     expect(held.filter(isAuditUserLookup).map((h) => h.wave), table).toEqual([2]);
-    const panel = document.querySelector('[data-record-timeline-panel]') as HTMLElement;
+    const panel = document.querySelector('[data-record-summary-card="timeline"]') as HTMLElement;
     expect(panel.textContent, table).toMatch(/negotiation/);
   });
 
-  it('opening the 动态 tab from its panel reads nothing again, and draws the rows with their actor', async () => {
+  it('opening the 动态 tab from its rail card reads nothing again, and draws the rows with their actor', async () => {
     const { held, state } = await openHistory();
     const audit = () => held.filter(isAuditRead);
     expect(audit(), waveTable(held)).toHaveLength(1);
     await act(async () => {
-      fireEvent.click(document.querySelector('[data-record-timeline-panel-open]') as HTMLElement);
+      fireEvent.click(document.querySelector('[data-record-summary-card="timeline"] [data-record-summary-card-title]') as HTMLElement);
     });
     await runWaves(held, state);
     const table = waveTable(held);

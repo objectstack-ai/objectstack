@@ -4422,5 +4422,201 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "근무 캘린더",
+    pluralLabel: "근무 캘린더",
+    description: "근무 캘린더: 주간 근무 시간, 그 시간의 기준 시간대, 공휴일이 어디까지 관리되었는지를 담습니다. 근무 시간으로 계산하는 기한이 이를 참조합니다.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "코드",
+        help: "수식, 승인 에스컬레이션, 패키지가 이 캘린더를 가리킬 때 쓰는 기계 코드(예: cn_standard)로, 영문 소문자, 숫자, 밑줄만 사용합니다."
+      },
+      name: {
+        label: "이름"
+      },
+      timezone: {
+        label: "시간대",
+        help: "근무 시간대의 기준이 되는 IANA 시간대(예: Asia/Shanghai). 생성 양식에는 조직의 시간대(설정 → 현지화)가 미리 채워지며, 비워 두고 생성해도 같은 시간대가 적용됩니다."
+      },
+      is_default: {
+        label: "기본값",
+        help: "기한이 캘린더를 지정하지 않을 때 사용하는 캘린더입니다. 조직당 하나입니다."
+      },
+      maintained_from: {
+        label: "관리 시작일",
+        help: "공휴일과 대체 근무일이 입력되기 시작한 날짜입니다. 이보다 이른 날짜가 필요한 계산은 거부됩니다."
+      },
+      maintained_through: {
+        label: "관리 종료일",
+        help: "공휴일과 대체 근무일이 입력된 마지막 날짜입니다. 이보다 늦은 날짜가 필요한 계산은 거부됩니다. 다음 해 공휴일을 입력한 뒤 이 날짜를 옮기세요."
+      },
+      monday_periods: {
+        label: "월요일",
+        help: "캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      },
+      tuesday_periods: {
+        label: "화요일",
+        help: "캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      },
+      wednesday_periods: {
+        label: "수요일",
+        help: "캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      },
+      thursday_periods: {
+        label: "목요일",
+        help: "캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      },
+      friday_periods: {
+        label: "금요일",
+        help: "캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      },
+      saturday_periods: {
+        label: "토요일",
+        help: "캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      },
+      sunday_periods: {
+        label: "일요일",
+        help: "캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "전체",
+        emptyState: {
+          title: "아직 근무 캘린더 없음",
+          message: "주간 근무 시간과 함께 캘린더를 추가하고 하나를 기본값으로 지정한 다음, 공휴일과 대체 근무일을 입력하세요."
+        }
+      },
+      needs_maintenance: {
+        label: "관리 필요",
+        emptyState: {
+          title: "모든 캘린더가 미리 관리되어 있음",
+          message: "공휴일 입력이 60일 이내에 끝나는 캘린더가 여기에 표시됩니다. 그 날짜를 넘는 기한 계산은 거부됩니다."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "코드는 영문 소문자로 시작하고 영문 소문자, 숫자, 밑줄만 사용해야 합니다(예: cn_standard)."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "캘린더 예외",
+    pluralLabel: "캘린더 예외",
+    description: "근무 캘린더의 날짜별 재정의: 공휴일, 대체 근무일, 휴업일. 근무일에는 그날의 전체 근무 시간대를 입력합니다.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "캘린더"
+      },
+      date: {
+        label: "날짜"
+      },
+      kind: {
+        label: "종류",
+        help: "휴무일: 하루 종일 쉽니다. 근무일: 아래 시간대로 근무하는 날입니다(예: 대체 근무일).",
+        options: {
+          off: "휴무일",
+          on: "근무일"
+        }
+      },
+      periods: {
+        label: "근무 시간대",
+        help: "근무일이면 그날의 모든 근무 시간을 입력합니다. 요일 설정을 이어받지 않습니다. 캘린더 시간대 기준 그날의 근무 시간대로, HH:mm-HH:mm 형식을 쉼표로 구분합니다(예: 09:00-12:00, 13:00-18:00). 시간대는 같은 날 안에서 시작보다 늦게 끝나야 하며, 가장 늦은 종료는 24:00입니다. 쉬는 날은 비워 두세요."
+      },
+      note: {
+        label: "메모",
+        help: "해당 날짜가 무엇인지(예: 국경절, 춘절 대체 근무일)."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "전체",
+        emptyState: {
+          title: "아직 캘린더 예외 없음",
+          message: "공휴일이나 대체 근무일마다 한 행을 추가하거나, 파일에서 1년 치를 가져오세요."
+        }
+      }
+    }
   }
 };

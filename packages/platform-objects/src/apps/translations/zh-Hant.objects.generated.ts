@@ -4422,5 +4422,201 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "工作日曆",
+    pluralLabel: "工作日曆",
+    description: "工作日曆：每週的工作時段、時段所在的時區，以及假日維護到哪一天。依工作時間計算的到期日會讀取它們。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "代碼",
+        help: "公式、審批升級與套件用來指稱此日曆的機器代碼，如 cn_standard：僅限小寫字母、數字和底線。"
+      },
+      name: {
+        label: "名稱"
+      },
+      timezone: {
+        label: "時區",
+        help: "工作時段所在的 IANA 時區，如 Asia/Shanghai。新增表單會預填組織的時區（設定 → 在地化）；建立時留空也取同一時區。"
+      },
+      is_default: {
+        label: "預設",
+        help: "到期日未指定日曆時使用的日曆。每個組織一個。"
+      },
+      maintained_from: {
+        label: "維護起始日",
+        help: "假日與補班日從這一天開始登錄。需要更早日期的計算會被拒絕。"
+      },
+      maintained_through: {
+        label: "維護截止日",
+        help: "假日與補班日登錄到這一天為止。需要更晚日期的計算會被拒絕：請登錄下一年的假日，再順延此日期。"
+      },
+      monday_periods: {
+        label: "星期一",
+        help: "當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      },
+      tuesday_periods: {
+        label: "星期二",
+        help: "當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      },
+      wednesday_periods: {
+        label: "星期三",
+        help: "當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      },
+      thursday_periods: {
+        label: "星期四",
+        help: "當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      },
+      friday_periods: {
+        label: "星期五",
+        help: "當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      },
+      saturday_periods: {
+        label: "星期六",
+        help: "當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      },
+      sunday_periods: {
+        label: "星期日",
+        help: "當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "全部",
+        emptyState: {
+          title: "還沒有工作日曆",
+          message: "新增一個日曆並填寫每週工作時段，將其中一個設為預設，然後登錄它的假日與補班日。"
+        }
+      },
+      needs_maintenance: {
+        label: "待維護",
+        emptyState: {
+          title: "所有日曆都已提前維護",
+          message: "假日將在 60 天內用完的日曆會出現在這裡；超出該日期的到期日計算會被拒絕。"
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "代碼須以小寫字母開頭，且只能包含小寫字母、數字和底線，如 cn_standard。"
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "日曆例外",
+    pluralLabel: "日曆例外",
+    description: "工作日曆的依日期覆寫：國定假日、補班日與停工日。工作日須帶上當天完整的工作時段。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "日曆"
+      },
+      date: {
+        label: "日期"
+      },
+      kind: {
+        label: "類型",
+        help: "休息日：整天休息。工作日：當天依下方時段上班，如補班日。",
+        options: {
+          off: "休息日",
+          on: "工作日"
+        }
+      },
+      periods: {
+        label: "工作時段",
+        help: "工作日須填寫當天的全部工作時間，不會從對應星期的時段繼承。當天的工作時段，依日曆的時區計，格式為 HH:mm-HH:mm，多個時段以逗號分隔，如 09:00-12:00, 13:00-18:00。時段須在同一天內且結束晚於開始；最晚結束為 24:00。留空表示當天休息。"
+      },
+      note: {
+        label: "備註",
+        help: "該日期是什麼，如國慶日或春節補班日。"
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "全部",
+        emptyState: {
+          title: "還沒有日曆例外",
+          message: "每個假日或補班日登錄一列，或從檔案匯入一整年的資料。"
+        }
+      }
+    }
   }
 };

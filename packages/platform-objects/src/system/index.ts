@@ -37,6 +37,23 @@ export {
   EXCHANGE_RATE_SCALE,
   EXCHANGE_RATE_PRECISION,
 } from './sys-exchange-rate.object.js';
+// [ADR-0158 U3; Open items 2 and 11] The organization's own units of measure,
+// beside the standard unit table in the spec. Zero platform rows.
+export {
+  SysUnit,
+  UNIT_RATIO_DIRECTION,
+  UNIT_RATIO_EDIT_NOTICE,
+  UNIT_RATIO_SCALE,
+  UNIT_RATIO_PRECISION,
+  UNIT_DECIMAL_PLACES_MAX,
+} from './sys-unit.object.js';
+// [ADR-0157 D1] Working calendars and their dated exceptions, read by the
+// calendar service (`@objectstack/objectql`).
+export {
+  SysWorkCalendar,
+  WORK_CALENDAR_PERIODS_HELP,
+} from './sys-work-calendar.object.js';
+export { SysWorkCalendarException } from './sys-work-calendar-exception.object.js';
 export {
   readDataMigrationFlag,
   isDataMigrationVerified,

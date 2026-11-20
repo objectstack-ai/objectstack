@@ -28,6 +28,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { oracleDayBinding } from './sql-driver-oracle-dialect.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, canonicalTimeOfDay, normalizeSqliteDatetimeOutput, presentAuditTimestampOutput,
@@ -82,6 +83,94 @@ export function presentStoredBoolean(value: unknown): boolean {
  */
 export function sqliteBooleanBinding(value: boolean): '1' | '0' {
   return value ? '1' : '0';
+}
+
+/**
+ * The text spellings a SQLite boolean cell can hold, and the boolean each one
+ * is. ONE table, read by the write door ({@link sqliteBooleanWriteReading}) and
+ * by the boot convergence (`SQLITE_LEGACY_BOOLEAN_TEXT` and the `UPDATE` of
+ * `backfillCanonicalBooleans`, `sql-driver-schema-sync.ts`), so the driver never
+ * accepts a spelling on write that the convergence would not recognise, nor
+ * converges one it would refuse to write.
+ *
+ * `'1'` / `'0'` are canonical: what {@link sqliteBooleanBinding} binds, which
+ * the NUMERIC affinity of a column the driver created folds into the INTEGER
+ * `1` / `0` and a TEXT-affinity column (a `text` field retyped to `boolean`)
+ * keeps as that text. The other four are `legacy`: `'true'` / `'false'`, the
+ * readings the console's inline grid sent, and `'1.0'` / `'0.0'`, the REAL a JS
+ * number was bound as on a TEXT-affinity column. Compared by `SameValueZero`,
+ * so `'TRUE'`, `' true'` and `'yes'` are not here.
+ */
+export const SQLITE_BOOLEAN_TEXT_SPELLINGS: ReadonlyArray<{ readonly text: string; readonly value: boolean; readonly legacy: boolean }> = Object.freeze([
+  Object.freeze({ text: '1', value: true, legacy: false }),
+  Object.freeze({ text: '0', value: false, legacy: false }),
+  Object.freeze({ text: 'true', value: true, legacy: true }),
+  Object.freeze({ text: 'false', value: false, legacy: true }),
+  Object.freeze({ text: '1.0', value: true, legacy: true }),
+  Object.freeze({ text: '0.0', value: false, legacy: true }),
+]);
+
+/** Every value a SQLite boolean write door accepts, and the boolean it is stored as. */
+const SQLITE_BOOLEAN_WRITE_READINGS: ReadonlyMap<unknown, boolean> = new Map<unknown, boolean>([
+  [true, true], [false, false], [1, true], [0, false],
+  ...SQLITE_BOOLEAN_TEXT_SPELLINGS.map((s) => [s.text, s.value] as const),
+]);
+
+/**
+ * The boolean a value written to a declared scalar `Field.boolean` /
+ * `Field.toggle` on SQLite is stored as, or `undefined` when it spells none.
+ *
+ * Accepted: `true` / `false`, the numbers `1` / `0`, and every text spelling of
+ * {@link SQLITE_BOOLEAN_TEXT_SPELLINGS}. The engine's door already writes the
+ * boolean its validator judged, but a write that reaches the driver another
+ * way (a caller of the driver itself, or a `beforeInsert` / `beforeUpdate`
+ * hook's assignment, which lands after the engine's rewrite) carried the
+ * spelling as sent, and SQLite kept `'true'` as TEXT beside the INTEGER `1`.
+ * Every comparison runs against the raw cell, and SQLite holds a TEXT cell
+ * unequal to every INTEGER, so such a row answered `= true` false and
+ * `$ne: true` true. Anything outside the table is refused by `formatInput`
+ * ({@link unwritableBooleanError}) rather than stored as text no boolean
+ * filter, sort or group reads as a boolean.
+ */
+export function sqliteBooleanWriteReading(value: unknown): boolean | undefined {
+  return SQLITE_BOOLEAN_WRITE_READINGS.get(value);
+}
+
+/** The accepted text spellings, in pairs, for the refusal sentence: `'1' / '0', 'true' / 'false' and '1.0' / '0.0'`. */
+const ACCEPTED_BOOLEAN_TEXT_SENTENCE = (() => {
+  const pairs: string[] = [];
+  for (let i = 0; i < SQLITE_BOOLEAN_TEXT_SPELLINGS.length; i += 2) {
+    pairs.push(`'${SQLITE_BOOLEAN_TEXT_SPELLINGS[i].text}' / '${SQLITE_BOOLEAN_TEXT_SPELLINGS[i + 1].text}'`);
+  }
+  return `${pairs.slice(0, -1).join(', ')} and ${pairs[pairs.length - 1]}`;
+})();
+
+/** What a refused value is, without echoing it: a caller's value never reaches the error text or a log line. */
+function valueKind(value: unknown): string {
+  if (Array.isArray(value)) return 'an array';
+  if (value instanceof Date) return 'a date';
+  if (typeof value === 'object') return 'an object';
+  if (typeof value === 'string') return 'a string';
+  if (typeof value === 'number') return 'a number';
+  return `a ${typeof value}`;
+}
+
+/**
+ * The refusal of a value that spells no boolean, written to a declared scalar
+ * `Field.boolean` / `Field.toggle` on SQLite: `VALIDATION_ERROR` / 400, the
+ * family the write path refuses an unwritable value with (ADR-0112). Thrown
+ * before any statement is built, so the write stores nothing.
+ */
+function unwritableBooleanError(object: string, field: string, value: unknown): Error {
+  const err = new Error(
+    `The value written to the boolean field "${field}" on "${object}" is ${valueKind(value)} that spells no boolean, ` +
+      `so it was refused rather than stored. Write true or false; the numbers 1 / 0 and the text ` +
+      `${ACCEPTED_BOOLEAN_TEXT_SENTENCE} are stored as those booleans too. Any other value would stay in the ` +
+      `column as text, which no boolean filter, sort or group reads as true or false.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  return err;
 }
 
 export interface SqliteSerialisationHost {
@@ -329,14 +418,21 @@ export class SqliteSerialisationFacet {
     if (!this.isSqlite) return copy;
 
     // [#35341] A declared scalar boolean is bound as the text `'1'` / `'0'`.
-    // See {@link sqliteBooleanBinding}.
+    // See {@link sqliteBooleanBinding}. Whatever spelling it was written in:
+    // every accepted spelling is bound as the boolean it spells, and a value
+    // that spells none is refused before any statement is built. See
+    // {@link sqliteBooleanWriteReading}. `null` writes NULL, as before.
     const booleanFields = this.booleanFields[object];
     if (booleanFields && booleanFields.length > 0 && copy && typeof copy === 'object') {
       for (const field of booleanFields) {
+        // Own-property: a field name may be `constructor` / `valueOf`.
+        if (!Object.prototype.hasOwnProperty.call(copy, field)) continue;
         const v = copy[field];
-        if (typeof v !== 'boolean') continue;
+        if (v === undefined || v === null) continue;
+        const reading = sqliteBooleanWriteReading(v);
+        if (reading === undefined) throw unwritableBooleanError(object, field, v);
         if (!copied) { copy = { ...copy }; copied = true; }
-        copy[field] = sqliteBooleanBinding(v);
+        copy[field] = sqliteBooleanBinding(reading);
       }
     }
 

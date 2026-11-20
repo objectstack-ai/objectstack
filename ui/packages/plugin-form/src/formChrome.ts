@@ -82,6 +82,11 @@ const FORM_CHROME_DEFAULTS = {
   // The heading of the fields no declared field group claims
   // (`deriveFieldGroupSections`' trailing bucket).
   'common.ungroupedSection': 'Other',
+  // The record page's edit-state body table (`RecordBodyTableEditor`): its
+  // loading line, a failed read, and the label of a refused line.
+  'common.loading': 'Loading…',
+  'form.lineItems.loadFailed': 'Failed to load line items',
+  'detail.bodyTableRow': 'Row {{row}}',
 };
 
 /**

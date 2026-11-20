@@ -27,7 +27,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, within } from '@testing-library/react';
 import { GroupingConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
 import type { DataSource, ListViewSchema } from '@object-ui/types';
@@ -123,7 +123,9 @@ describe('ListView reports a user grouping change to its host (objectui#11860)',
     await vi.waitFor(() => expect(screen.getByTestId('view-settings-content')).toBeInTheDocument());
 
     const content = screen.getByTestId('view-settings-content');
-    fireEvent.click(content.querySelector('[data-testid="grouping-add"]')!);
+    // Grouping is a level of the Display menu.
+    fireEvent.click(within(content).getByTestId('options-row-group'));
+    fireEvent.click(await within(content).findByTestId('grouping-add'));
     expect(onGroupingChange).toHaveBeenCalledTimes(1);
     expectSpecShape(onGroupingChange.mock.calls[0][0]);
 

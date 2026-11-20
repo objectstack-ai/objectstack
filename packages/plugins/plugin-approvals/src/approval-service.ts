@@ -68,6 +68,7 @@ import {
   canServeApiOperation, isFileIdToken, referenceTargetOf, SINGLE_OPTION_TYPES, MULTI_OPTION_TYPES,
 } from '@objectstack/spec/data';
 import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/data';
+import { validateActionParams } from '@objectstack/spec/ui';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
 // header bars both a package-local string table and a second rendering
@@ -130,6 +131,15 @@ import {
   type SubmitterExclusionNote,
 } from './submitter-exclusion-note.js';
 import {
+  NO_APPROVER_NOTE_SNAPSHOT_KEY,
+  namesNoOneBut,
+  noApproverNoteOf,
+  noApproverNoteText,
+  noApproverSentence,
+  noApproverWho,
+  type NoApproverNote,
+} from './no-approver-note.js';
+import {
   localizeRequestLabels,
   negotiatedReaderLocale,
   readerLabelsFor,
@@ -149,7 +159,9 @@ import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from '
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import { APPROVAL_EMAIL_CHANNELS, EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
+import { enMessages } from './translations/messages.js';
 import {
+  approvalMessageKey,
   approvalNotificationText,
   subjectParams,
   type ApprovalKeyedText,
@@ -5090,6 +5102,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // snapshot stores and the approvals door renders in the reader's language
     // (`admin-rescue-note.ts`); the row's `comment` is its English.
     let adminRescueNote: AdminRescueNote | undefined;
+    // Set when the request opens on the slate that names no one: the remedy,
+    // written to its timeline and told to its submitter (`no-approver-note.ts`).
+    let noApproverNote: NoApproverNote | undefined;
     if (!slateNamesAPerson(approvers)) {
       const emptyPolicy = (input.config as any).onEmptyApprovers ?? 'admin_rescue';
       // Why a `fallback` node degraded to admin_rescue, for the reason below.
@@ -5249,6 +5264,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           slateSource = 'administrators';
         } else {
           slateSource = 'no_one';
+          const who = noApproverWho(approvers);
+          noApproverNote = { action_id: uid('aact'), ...(who ? { who } : {}) };
           // Break-glass stays break-glass (#3424): an organization whose
           // administrators' slate resolves to nobody opens the request on the
           // slate that names no one — the only option that neither waves the
@@ -5314,6 +5331,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       ? { action_id: uid('aact'), route: slateSource === 'approvers' ? 'remaining_approvers' : slateSource }
       : undefined;
     if (exclusionNote) configSnapshot[SUBMITTER_EXCLUSION_NOTE_SNAPSHOT_KEY] = exclusionNote;
+    if (noApproverNote) configSnapshot[NO_APPROVER_NOTE_SNAPSHOT_KEY] = noApproverNote;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -5387,6 +5405,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         step_name: input.nodeId, step_index: 0, action: 'comment',
         actor_id: null,
         comment: submitterExclusionNoteText(exclusionNote),
+        created_at: now,
+      }), { context: SYSTEM_CTX });
+    }
+    // And the remedy, when no one can decide it: the same shape again.
+    if (noApproverNote) {
+      await this.engine.insert('sys_approval_action', await this.actionRow(row, {
+        id: noApproverNote.action_id, request_id: id, organization_id: requestOrg,
+        step_name: input.nodeId, step_index: 0, action: 'comment',
+        actor_id: null,
+        comment: noApproverNoteText(noApproverNote),
         created_at: now,
       }), { context: SYSTEM_CTX });
     }
@@ -5512,6 +5540,25 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         about: { object: input.object, recordId: input.recordId },
         text: (subject) => approvalNotificationText({
           title: 'approvalRequestedTitle', body: 'approvalRequestedBody', params: subject,
+        }),
+      });
+    }
+    // A request no one can decide tells no approver, so its submitter is told
+    // instead, in the note's words: no one else can approve it yet, and what
+    // an organization administrator does about it. Under the thread's own
+    // topic, since the note is a comment on the request's thread; no actor,
+    // as no person wrote it.
+    if (noApproverNote && submitterId) {
+      const { id: body, params } = noApproverSentence(noApproverNote);
+      await this.notify({
+        topic: 'approval.comment',
+        organizationId: requestOrg,
+        audience: [String(submitterId)],
+        source: { object: 'sys_approval_request', id },
+        dedupKey: `approval-no-approver-${id}`,
+        about: { object: input.object, recordId: input.recordId },
+        text: (subject) => approvalNotificationText({
+          title: 'approvalNoApproverTitle', body, params: { ...subject, ...params },
         }),
       });
     }
@@ -5740,14 +5787,20 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // this is the one check every approval passes through. Refused before any
     // write. A rejection approves nothing, so it stays theirs to make.
     const decider = recordedActor(context);
+    // When no one but the submitter is on the slate, both refusals below name
+    // the remedy the request's timeline note names (`no-approver-note.ts`)
+    // instead of an approver who does not exist.
+    const noOneElse = namesNoOneBut(pendingApprovers, String(raw.submitter_id ?? ''));
+    const noApproverRemedy = noApproverNoteText({ who: noApproverWho(pendingApprovers) });
     if (
       input.decision === 'approve' && config.excludeSubmitter === true
       && raw.submitter_id && decider && decider === String(raw.submitter_id)
     ) {
       throw new Error(
         `FORBIDDEN: '${decider}' submitted this request, and its approval step sets excludeSubmitter, so they `
-        + `cannot approve it. Another approver on the step decides it; if the submitter holds the only slot, `
-        + `reassign it to someone else.`,
+        + `cannot approve it. ${noOneElse
+          ? noApproverRemedy
+          : 'Another approver on the step decides it; if the submitter holds the only slot, reassign it to someone else.'}`,
       );
     }
     // [Maintainer ruling 2026-11-17, option B] The #3424 override never
@@ -5762,8 +5815,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (input.decision === 'approve' && viaOverride && overrideApprovesOwnRequest(raw, decider)) {
       throw new Error(
         `FORBIDDEN: '${decider}' submitted this request and holds no slot on it, so they cannot approve it `
-        + `through the administrator override. An approver on the step decides it. To move it, reassign it `
-        + `to someone else, reject it, or recall it and send the record for approval again.`,
+        + `through the administrator override. ${noOneElse
+          ? `${noApproverRemedy} To withdraw it instead, reject it or recall it.`
+          : 'An approver on the step decides it. To move it, reassign it to someone else, reject it, or recall '
+            + 'it and send the record for approval again.'}`,
       );
     }
 
@@ -6427,12 +6482,31 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * [#24753] A decision that ends the approval process tells the submitter its
    * outcome (`approval.approved` / `approval.rejected`,
    * {@link ApprovalService.notifyDecisionOutcome}).
+   *
+   * A reject carries its reason: a missing or blank `comment`, or one that is
+   * not a string, is refused before anything is read or written —
+   * `400 VALIDATION_ERROR` with the sentence the `approval_reject` action door
+   * answers, judged by the same rules (`validateActionParams` over the
+   * `textarea` param that action declares). Every human door reaches this
+   * member (the REST route, the SDK, the action door that forwards to the
+   * route, the action link with its fixed text). The SLA sweep's auto-reject
+   * calls `decideAndResume` and the revision-limit reject writes its own row,
+   * so neither passes through here. An approve keeps its comment optional.
    */
   async decide(
     requestId: string,
     input: ApprovalDecisionInput,
     context: ExecutionContext,
   ): Promise<ApprovalDecisionResult> {
+    if (input?.decision === 'reject') {
+      const issues = validateActionParams([{ name: 'comment', required: true, type: 'textarea' }], { comment: input.comment });
+      if (issues.length > 0) {
+        throw Object.assign(
+          new Error(`Invalid action params: ${issues.map((i) => i.message).join('; ')}`),
+          { status: 400, code: 'VALIDATION_ERROR' },
+        );
+      }
+    }
     return this.decideAndResume(requestId, input, context, 'outcome');
   }
 
@@ -9364,6 +9438,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return slots.map((slot) => {
       const name = names.get(slot);
       if (name) return name;
+      // The platform administrators' slot names no person, so it reads by what it is.
+      if (isPlatformAdminAddress(slot)) return enMessages.approvalPlatformAdminSlotLabel;
       const isPerson = !!slot && !slot.includes(':');
       return failed && isPerson ? null : slot;
     });
@@ -9778,7 +9854,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   /**
    * Attach inbox display fields to rows so clients never render a raw
    * identifier: `record_title`, `submitter_name`, `object_label`,
-   * `pending_approver_names` (user-id approvers), `payload_display`
+   * `pending_approver_names` (user-id approvers, and the platform
+   * administrators' slot by its label), `payload_display`
    * (lookup foreign keys in the snapshot → referenced record titles), and
    * `payload_labels` (snapshot field keys → the target object's field labels).
    * Batched: one query per distinct object (target + referenced) plus one
@@ -9882,6 +9959,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
     }
     const names = await this.resolveUserNames(userIdentifiers);
+    // The platform administrators' slot, labelled in the reader's language.
+    const platformSlotLabel = this.readerLabels(context)
+      ?.sentence(approvalMessageKey('approvalPlatformAdminSlotLabel'), {}) ?? enMessages.approvalPlatformAdminSlotLabel;
 
     for (const r of rows as any[]) {
       const title = titles.get(`${r.object_name} ${r.record_id}`)
@@ -9896,6 +9976,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       for (const a of r.pending_approvers ?? []) {
         const n = names.get(String(a));
         if (n) approverNames[a] = n;
+        else if (isPlatformAdminAddress(String(a))) approverNames[a] = platformSlotLabel;
       }
       if (Object.keys(approverNames).length) r.pending_approver_names = approverNames;
 
@@ -11119,6 +11200,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (rescue) overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence));
     const exclusion = submitterExclusionNoteOf(snapshot);
     if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
+    const noApprover = noApproverNoteOf(snapshot);
+    if (noApprover) overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence));
   }
 
   /**

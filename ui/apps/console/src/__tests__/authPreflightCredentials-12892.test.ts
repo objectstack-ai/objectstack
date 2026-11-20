@@ -96,13 +96,20 @@ describe('the boot preflight carries the cookie (objectui#12892)', () => {
     expect((globalThis as unknown as Record<symbol, unknown>)[SLOT]).toBeUndefined();
   });
 
-  it('CONTROL: with no stored token nothing is sent and nothing is purged', async () => {
+  it('CONTROL: with no stored token the cookie session is asked without a Bearer, and nothing is purged (objectstack#35455)', async () => {
     localStorage.setItem(ORG_KEY, 'org_kept');
 
     await preflightAuth(AUTH_URL);
 
-    expect(fetchStub).not.toHaveBeenCalled();
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchStub.mock.calls[0]!;
+    expect(url).toBe(`${AUTH_URL}/get-session`);
+    expect(init?.credentials).toBe('include');
+    expect(new Headers(init?.headers).has('authorization')).toBe(false);
     expect(localStorage.getItem(ORG_KEY)).toBe('org_kept');
-    expect((globalThis as unknown as Record<symbol, unknown>)[SLOT]).toBeUndefined();
+    // The cookie session's answer is handed on, with no token.
+    const slot = (globalThis as unknown as Record<symbol, { token: string | null; body: string }>)[SLOT];
+    expect(slot?.token).toBeNull();
+    expect(JSON.parse(slot!.body)).toEqual(LIVE_COOKIE_SESSION);
   });
 });

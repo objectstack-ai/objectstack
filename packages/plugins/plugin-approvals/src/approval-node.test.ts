@@ -215,7 +215,7 @@ describe('Approval node bridge (ADR-0019)', () => {
     await automation.execute('deal_approval', { object: 'crm_deal', record: { id: 'd1' } });
     const request = (await fake.find('sys_approval_request', { where: { status: 'pending' } }))[0];
 
-    const out = await service.decide(request.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX);
+    const out = await service.decide(request.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX);
 
     expect(out).toMatchObject({ finalized: true, decision: 'reject', resumed: true });
     expect(marks).toEqual(['on_rejected']);

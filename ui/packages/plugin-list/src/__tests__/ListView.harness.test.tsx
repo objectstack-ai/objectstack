@@ -62,6 +62,7 @@ import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
+import { openAdvancedSort } from './conditionPanels';
 
 /**
  * Puts back, after the calling block's last test, what the block's hooks and
@@ -107,6 +108,215 @@ function restoreAfterBlock() {
     document.documentElement.removeAttribute('dir');
   });
 }
+
+// ── ListView.dataBlockNoReread-35536 ────────────────────────────────────────────
+
+/**
+ * objectstack#35536 — the read is armed by what the query reads, not by the
+ * identity of the view's `data` block. A host that hands the same view over
+ * again (a late view answer re-serving the active view) gives `ListView` a
+ * fresh `{ provider: 'object' }` block of equal content; nothing the read sends
+ * changed, so no second read. The CONTROLS: a sort or a filter change reads
+ * again with what changed, and rows handed in whole (`provider: 'value'`)
+ * still replace the shown rows when the host hands in new ones. A control
+ * asserts at least one more read carrying the change, never an exact count.
+ */
+describe('ListView.dataBlockNoReread-35536', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'task_35536';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Task',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      name: { name: 'name', type: 'text', label: 'Name' },
+      stage: { name: 'stage', type: 'text', label: 'Stage' },
+    },
+  };
+  // ONE columns array, so a re-render moves only the key a case names.
+  const COLUMNS = ['name', 'stage'];
+  const schemaWith = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: COLUMNS,
+      data: { provider: 'object', object: OBJECT },
+      ...extra,
+    }) as unknown as ListViewSchema;
+
+  function mount(schema: ListViewSchema) {
+    const ds = {
+      find: vi.fn(async () => ({ data: [{ id: 't1', name: 'Ada', stage: 'a' }], total: 1 })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => DEFINITION),
+    };
+    const onRowsChange = vi.fn();
+    const tree = (s: ListViewSchema) => (
+      <SchemaRendererProvider dataSource={ds as any}>
+        <ListView schema={s} dataSource={ds as any} onRowsChange={onRowsChange} />
+      </SchemaRendererProvider>
+    );
+    const utils = render(tree(schema));
+    return {
+      ds,
+      onRowsChange,
+      rerender: async (s: ListViewSchema) => {
+        utils.rerender(tree(s));
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      },
+    };
+  }
+
+  const reads = (ds: { find: ReturnType<typeof vi.fn> }) => ds.find.mock.calls.filter(([object]) => object === OBJECT);
+  const settled = async (ds: { find: ReturnType<typeof vi.fn> }) => {
+    await waitFor(() => expect(reads(ds)).toHaveLength(1));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  };
+
+  it('a new data block of equal content re-reads nothing', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith());
+    await host.rerender(schemaWith());
+    expect(reads(host.ds)).toHaveLength(1);
+  });
+
+  it('CONTROL: a sort change reads again, with the sort', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith({ sort: [{ field: 'name', order: 'desc' }] }));
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(reads(host.ds).at(-1)![1].$orderby).toEqual([{ field: 'name', order: 'desc' }]);
+  });
+
+  it('CONTROL: a filter change reads again, with the filter', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith({ filter: [['stage', '=', 'b']] }));
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(JSON.stringify(reads(host.ds).at(-1)![1].$filter)).toContain('"b"');
+  });
+
+  it('CONTROL: rows handed in whole are replaced when the host hands in new ones, with no read', async () => {
+    const valueSchema = (items: Array<{ id: string; name: string }>) =>
+      schemaWith({ data: { provider: 'value', items } });
+    const host = mount(valueSchema([{ id: 'v1', name: 'Ada' }]));
+    await waitFor(() => expect(host.onRowsChange.mock.calls.at(-1)?.[0]?.map((r: { id: string }) => r.id)).toEqual(['v1']));
+    await host.rerender(valueSchema([{ id: 'v2', name: 'Grace' }]));
+    await waitFor(() => expect(host.onRowsChange.mock.calls.at(-1)?.[0]?.map((r: { id: string }) => r.id)).toEqual(['v2']));
+    expect(reads(host.ds)).toHaveLength(0);
+  });
+});
+
+// ── ListView.hostDrawnConditions-35727 ──────────────────────────────────────────
+
+/**
+ * objectstack#35727 — a list opened from a record's 「↗」 showed its one
+ * condition twice: the data page's 「Filtered by」 tag, and under the view bar
+ * a locked chip printing the lookup's raw id beside a second 「Reset」.
+ *
+ * The host now names the fields it draws itself (`hostDrawnConditionFields`):
+ * the list still filters on them and draws no locked chip for them. A locked
+ * chip the list does draw for a lookup (a saved view filtered on one) names
+ * the record, read through the list's data source. 「Reset」 is drawn only
+ * while the reader has something of their own to reset.
+ */
+describe('ListView.hostDrawnConditions-35727', () => {
+  restoreAfterBlock();
+
+  const ZH = { defaultLanguage: 'zh', detectBrowserLanguage: false };
+  const EN = { defaultLanguage: 'en', detectBrowserLanguage: false };
+  const OBJECT = 'contact_35727';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Contact',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      account: { type: 'lookup', label: 'Account', reference: 'account_35727' },
+    },
+  };
+  const ACCOUNT_DEFINITION = { name: 'account_35727', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+
+  function mount(config: typeof ZH, props: Partial<React.ComponentProps<typeof ListView>> = {}) {
+    const ds = {
+      find: vi.fn(async (object: string) =>
+        object === 'account_35727'
+          ? { data: [{ id: 'acc_1', name: 'Globex' }], total: 1 }
+          : { data: [{ id: 'c1', name: 'Ada', account: 'acc_1' }], total: 1 },
+      ),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (object: string) =>
+        structuredClone(object === 'account_35727' ? ACCOUNT_DEFINITION : DEFINITION),
+      ),
+    };
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: [{ field: 'name' }, { field: 'account' }],
+      filter: [['account', '=', 'acc_1']],
+    } as unknown as ListViewSchema;
+    render(
+      <I18nProvider config={config}>
+        <SchemaRendererProvider dataSource={ds as any}>
+          <ListView schema={schema} dataSource={ds as any} {...props} />
+        </SchemaRendererProvider>
+      </I18nProvider>,
+    );
+    return ds;
+  }
+
+  const slot = () => screen.getByTestId('list-condition-row');
+  const recordReads = (ds: { find: ReturnType<typeof vi.fn> }) => ds.find.mock.calls.filter(([object]) => object === OBJECT);
+
+  beforeEach(() => window.localStorage.clear());
+
+  it.each([
+    ['zh', ZH],
+    ['en', EN],
+  ])('%s: a condition the host draws is no locked chip and no Reset, and still filters the records', async (_lang, config) => {
+    const ds = mount(config, { hostDrawnConditionFields: ['account'] });
+    await waitFor(() => expect(recordReads(ds).length).toBeGreaterThan(0));
+    await act(async () => {});
+    expect(JSON.stringify(recordReads(ds).at(-1)![1])).toContain('acc_1');
+    expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
+    expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
+    expect(slot()).toBeEmptyDOMElement();
+  });
+
+  it.each([
+    ['zh', ZH, '：', 'Account：= Globex'],
+    ['en', EN, ': ', 'Account: = Globex'],
+  ])('%s: a saved view filtered on a lookup locks a chip that names the record, not its id, and draws no Reset', async (_lang, config, _sep, text) => {
+    mount(config);
+    const chip = await within(slot()).findByTestId('view-condition-chip');
+    await waitFor(() => expect(chip.textContent).toBe(text));
+    expect(chip.textContent).not.toContain('acc_1');
+    expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
+  });
+
+  it.each([
+    ['zh', ZH, '重置'],
+    ['en', EN, 'Reset'],
+  ])('%s: once the reader adds a condition of their own, one Reset is drawn', async (_lang, config, label) => {
+    mount(config, {
+      hostDrawnConditionFields: ['account'],
+      initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'name', operator: 'contains', value: 'A' }] },
+    });
+    const reset = await within(slot()).findByTestId('condition-reset');
+    expect(reset).toHaveTextContent(label);
+    expect(within(slot()).getAllByTestId('condition-reset')).toHaveLength(1);
+    expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
+  });
+});
 
 // ── ListView.concurrencyTokenProjection-12292 ───────────────────────────────────
 
@@ -174,14 +384,15 @@ describe('ListView.concurrencyTokenProjection-12292', () => {
   afterEach(() => cleanup());
 
   describe('ListView — an inline-editable grid\'s rows carry their concurrency token (objectui#12292)', () => {
-    it('asks for `updated_at` when the grid opens in inline-edit mode, though no column shows it', async () => {
-      const { lastSelect } = await mount({ inlineEdit: true });
+    it('asks for `updated_at` when the grid is editable in place, though no column shows it', async () => {
+      // objectstack#35684 — a view that declares nothing is editable.
+      const { lastSelect } = await mount({});
       await waitFor(() => expect(lastSelect()).toContain('updated_at'));
       expect(lastSelect()).toEqual(expect.arrayContaining(['id', 'title', 'estimate_hours']));
     });
 
-    it('does not ask for it while the grid is not in inline-edit mode', async () => {
-      const { dataSource, lastSelect } = await mount({});
+    it('does not ask for it when the view turns in-place editing off', async () => {
+      const { dataSource, lastSelect } = await mount({ userActions: { editInline: false } });
       await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
       expect(dataSource.find.mock.calls.length).toBeGreaterThan(0);
       for (const call of dataSource.find.mock.calls) {
@@ -1931,6 +2142,8 @@ describe('ListView.draftOnlyColumn-34807', () => {
       viewType: 'grid',
       columns: ['title', 'priority'],
       compactToolbar: false,
+      // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+      userActions: { editInline: false },
       ...schemaExtra,
     } as unknown as ListViewSchema;
     render(
@@ -1968,7 +2181,13 @@ describe('ListView.draftOnlyColumn-34807', () => {
     const content = document.getElementById(trigger.getAttribute('aria-controls') ?? '');
     if (!content) throw new Error(`no popover content for "${text(trigger)}"`);
     try {
-      return await comboboxOptions(within(content).getAllByRole('combobox')[0]);
+      // The trigger opens the shared field list (objectstack#35549); its
+      // advanced step is the builder, whose first picker reads the same list.
+      // Both are read, so a field either offers is caught.
+      const listed = Array.from(content.querySelectorAll('[role="option"][data-field]')).map(text);
+      fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
+      const advanced = await within(content).findByTestId(/^(filter|sort)-panel-advanced$/);
+      return [...listed, ...(await comboboxOptions(within(advanced).getAllByRole('combobox')[0]))];
     } finally {
       fireEvent.click(trigger);
       await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
@@ -2231,8 +2450,9 @@ describe('ListView.switcherChrome-7547', () => {
 /**
  * objectui#12621 — the list toolbar's Display menu closes once a layout is
  * chosen, and on Escape, returning focus to the Display trigger. The panel's
- * toggles keep it open: the control below flips Row numbers and density and
- * finds the panel still drawn.
+ * own settings keep it open: the control below clears the row colour and
+ * picks a row height, and finds the panel still drawn. The panel is a menu whose rows open a second
+ * level; the Layout level lists every layout as a radio, at any count.
  */
 describe('ListView.displayMenuClose-12621', () => {
   restoreAfterBlock();
@@ -2308,22 +2528,27 @@ describe('ListView.displayMenuClose-12621', () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   }
 
+  /** Open the menu's Layout level and choose Kanban among its radios. */
+  async function chooseKanban(content: HTMLElement, layouts: string[]) {
+    fireEvent.click(within(content).getByTestId('options-row-layout'));
+    const list = await within(content).findByTestId('view-switcher-list');
+    expect(within(list).getAllByRole('radio').map((r) => r.textContent?.trim())).toEqual(layouts);
+    fireEvent.click(within(list).getByRole('radio', { name: 'Kanban' }));
+  }
+
   describe('the Display menu closes when its work is done (objectui#12621)', () => {
-    it('choosing Kanban in the segmented Layout row closes the menu and focuses the trigger', async () => {
+    it('choosing Kanban on the Layout level closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      const row = within(content).getByTestId('display-layout-row');
-      fireEvent.click(within(row).getByRole('tab', { name: 'Kanban' }));
+      await chooseKanban(content, ['Grid', 'Kanban']);
       await screen.findByTestId('object-kanban-stub');
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('choosing Kanban in the nested Layout dropdown closes the menu and focuses the trigger', async () => {
+    it('with five layouts the level is the same list, and choosing Kanban closes the menu and focuses the trigger', async () => {
       mount(FIVE);
       const { trigger, content } = await openDisplay();
-      const row = within(content).getByTestId('display-layout-row');
-      fireEvent.click(within(row).getByTestId('view-switcher-dropdown'));
-      fireEvent.click(await screen.findByRole('button', { name: 'Kanban' }));
+      await chooseKanban(content, ['Grid', 'Kanban', 'Gallery', 'Calendar', 'Timeline']);
       await screen.findByTestId('object-kanban-stub');
       await expectClosedWithFocusOn(trigger);
     });
@@ -2331,17 +2556,19 @@ describe('ListView.displayMenuClose-12621', () => {
     it('Escape closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      fireEvent.keyDown(within(content).getByTestId('display-row-numbers-toggle'), { key: 'Escape' });
+      fireEvent.keyDown(within(content).getByTestId('options-row-row-height'), { key: 'Escape' });
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('control: toggling Row numbers and cycling density keep the menu open', async () => {
-      mount(TWO);
+    it('control: clearing the row colour and choosing a row height keep the menu open', async () => {
+      // objectstack#35684 took the last switch (Edit inline) off the menu.
+      mount({ ...TWO, userActions: { rowColor: true }, rowColor: { field: 'stage', colors: {} } } as ListViewSchema);
       const { trigger, content } = await openDisplay();
-      const toggle = within(content).getByTestId('display-row-numbers-toggle');
-      fireEvent.click(toggle);
-      await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
-      fireEvent.click(within(content).getByTestId('view-settings-density-cycle'));
+      fireEvent.click(within(content).getByTestId('options-row-color'));
+      fireEvent.click(await within(content).findByTestId('options-color-clear'));
+      fireEvent.click(within(content).getByTestId('options-back'));
+      fireEvent.click(await within(content).findByTestId('options-row-row-height'));
+      fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
       await waitFor(() => expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('2'));
       expect(screen.getByTestId('view-settings-content')).toBe(content);
       expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -2559,7 +2786,8 @@ describe('ListView.nameFieldSelect-13116', () => {
     render(
       <SchemaRendererProvider dataSource={dataSource}>
         <ListView
-          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns } as any}
+          // Read-only: an editable list also asks for `updated_at` (concurrencyTokenProjection-12292 above).
+          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns, userActions: { editInline: false } } as any}
           dataSource={dataSource}
         />
       </SchemaRendererProvider>,
@@ -2698,12 +2926,15 @@ describe('ListView.recordDrawerCount-27545', () => {
       await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
     });
 
-    it('a record open in the drawer: the column summaries are drawn beside the count', async () => {
+    // objectstack#35548 — the column summaries left this bar: the grid draws
+    // them as its table's own last row, each under its column, so the list
+    // hands it no `onColumnSummaryChange` and the bar holds the count alone.
+    it('a record open in the drawer: the bar holds the count alone; the summaries are the grid\'s own row', async () => {
       renderList('a1');
       (await screen.findByTestId('grid-probe')).click();
       const bar = await screen.findByTestId('record-count-bar');
-      await waitFor(() => expect(within(bar).getByTestId('record-count-summaries')).toHaveTextContent('Number of Employees: Avg: 10'));
-      expect(within(bar).getByText('4 records')).toBeInTheDocument();
+      await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
+      expect(within(bar).queryByTestId('record-count-summaries')).toBeNull();
     });
   });
 });
@@ -2819,7 +3050,7 @@ describe('ListView.resetSortToDefaultNoProviderFallback', () => {
     );
     await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-    await screen.findByText('Sort Records');
+    await openAdvancedSort();
   }
 
   describe('ListView reset-sort control — English fallback with no provider (objectui#4396)', () => {
@@ -2936,11 +3167,11 @@ describe('ListView.rowAdornment-13330', () => {
 // ── ListView.setupChrome-12606 ──────────────────────────────────────────────────
 
 /**
- * objectui#12606 — the host prop the console's Setup app sets on its record
- * lists: `defaultRowNumbers` (the grid opens without the `#` numbers). A React
- * prop a host passes, never a view key. The Display control still draws (the
- * maintainer's ruling C on the card withdrew the Display hide rule). The
- * control mounts the same schema without the prop and reads today's shape.
+ * objectui#12606 — the console's Setup app opened its record lists without the
+ * `#` numbers through a host prop, `defaultRowNumbers`. objectstack#35663 took
+ * row numbers off every list, so the prop is gone: no list hands the grid row
+ * numbers, and the Display control still draws (the maintainer's ruling C on
+ * #12606 withdrew the Display hide rule).
  */
 describe('ListView.setupChrome-12606', () => {
   restoreAfterBlock();
@@ -2985,20 +3216,14 @@ describe('ListView.setupChrome-12606', () => {
     if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as any);
   });
 
-  describe('the list’s Setup chrome is one host prop (objectui#12606)', () => {
-    it('`defaultRowNumbers={false}` opens the grid without row numbers; Display still draws, and row numbers off is not a changed setting', async () => {
-      mount({ defaultRowNumbers: false });
-      await screen.findByTestId('grid-stub');
-      expect(gridProps?.showRowNumbers).toBe(false);
-      expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
-      expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
-    });
-
-    it('CONTROL — without the prop the grid numbers its rows and the bar draws Display', async () => {
+  describe('no list numbers its rows (objectui#12606, objectstack#35663)', () => {
+    it('the grid is handed no row numbers; Display still draws, and nothing counts as changed', async () => {
       mount();
       await screen.findByTestId('grid-stub');
-      expect(gridProps?.showRowNumbers).toBe(true);
+      expect(gridProps).toBeDefined();
+      expect(gridProps).not.toHaveProperty('showRowNumbers');
       expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
+      expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
     });
   });
 });
@@ -3106,12 +3331,13 @@ describe('ListView.groupPickerUnstored-32631', () => {
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });
 
-    it('the Display popover\'s Group section offers the same', async () => {
+    it('the Display popover\'s Group level offers the same', async () => {
       const { onGroupingChange } = mount({ compactToolbar: true });
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
       const content = await screen.findByTestId('view-settings-content');
-      fireEvent.click(within(content).getByTestId('grouping-add'));
+      fireEvent.click(within(content).getByTestId('options-row-group'));
+      fireEvent.click(await within(content).findByTestId('grouping-add'));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
       expect(await openOptions(within(content).getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });

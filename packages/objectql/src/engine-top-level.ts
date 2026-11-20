@@ -11,10 +11,11 @@
 // re-exports, by name, every declaration here it exported before, so every
 // importer of `./engine.js` reads what it read.
 
-import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, percentScaleOf, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import type { DroppedFieldsEvent, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryAliasSlot, RecycleBinClearedReference, ServiceObject } from '@objectstack/spec/data';
 import type { EngineFilterJudgement, ISecurityService } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
+import { collectFixedReadLeaves } from './fixed-read-leaf-position.js';
 import { assertResolvedTemporalTokensInRange, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import type { ResolvedTokenJudge } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
@@ -1054,6 +1055,10 @@ export function lowerWhereFilterArray<T extends object | undefined>(
   // reference into any other position is refused here by name, as the object
   // branch refuses it — first, before the doors below read it as a value.
   collectComposableReadableIds(object, operation, condition, 'where');
+  // [ADR-0155 D1] The same for a fixed-read leaf the lowering carried by
+  // reference: `parseFilterAST` refuses one as a `$in` comparand (400), and
+  // any other position is refused here by name, before the doors below.
+  collectFixedReadLeaves(object, operation, condition, 'where');
   // [#8296] Same door as the object branch above, on the LOWERED condition —
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
@@ -1424,10 +1429,25 @@ const MAX_FORMULA_SCALE = 100;
  * carries is a no-op request either way — so the rounding is skipped and the
  * value is returned whole.
  */
-function formulaRoundingScale(def: { scale?: unknown } | undefined): number | undefined {
+function formulaRoundingScale(
+  def: { type?: unknown; scale?: unknown; returnType?: unknown; max?: unknown } | undefined,
+): number | undefined {
   const scale = def?.scale;
   if (typeof scale !== 'number' || !Number.isInteger(scale) || scale < 0) return undefined;
-  return scale <= MAX_FORMULA_SCALE ? scale : undefined;
+  // [#35047] A percentage — a formula returning `percent`, or a stored
+  // `percent` field computed from its `expression` — declares its `scale` as
+  // the decimal places of the DISPLAYED percentage. So the value is rounded at
+  // the storage the percent field uses (`percentScaleOf`, the rule the write
+  // seam's `max_scale` allowance follows): a fraction carries `scale + 2`
+  // places (`scale: 1` keeps 0.417, which reads 41.7%), a whole percentage
+  // exactly `scale`. Rounding a fraction to `scale` itself turned 41.7% into
+  // 40.0%.
+  const percentage = def?.type === 'percent' || (def?.type === 'formula' && def.returnType === 'percent');
+  const places = percentage
+    && percentScaleOf({ type: 'percent', max: typeof def?.max === 'number' ? def.max : undefined }) === 'fraction'
+    ? scale + 2
+    : scale;
+  return places <= MAX_FORMULA_SCALE ? places : undefined;
 }
 
 /**
@@ -3720,6 +3740,23 @@ export function hookMatchesObject(
     if (hookTargetList(entry.excludeObjects).includes(objectName)) return false;
   }
   return true;
+}
+
+/**
+ * [ADR-0155 D4] Is `entry` a registration made for `objectName` BY NAME: one
+ * that {@link hookMatchesObject} dispatches for it AND whose `object` names it
+ * literally? A global registration (no `object`) or a `'*'` one covers the
+ * object without naming it, and is outside: the engine reads a registration
+ * by the object it names, and counts no global one, on the line
+ * `hasObjectMiddleware` draws for middleware. The dispatch half is
+ * {@link hookMatchesObject}'s alone, so an `excludeObjects` that subtracts the
+ * object takes it out here too.
+ */
+export function hookNamesObject(
+  entry: Pick<HookEntry, 'object' | 'excludeObjects'>,
+  objectName: string,
+): boolean {
+  return hookTargetList(entry.object).includes(objectName) && hookMatchesObject(entry, objectName);
 }
 
 /**

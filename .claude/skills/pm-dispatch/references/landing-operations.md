@@ -38,10 +38,10 @@
 - 该 op 实测离队见 `readings-queue.md`;在队受管面 PR 亦由落地席发(Prime Directive #14)。
 - 谁入队谁看护:冲突或自因被踢 ⇒ 一轮巡查内出队修复再入队;他人 flake 照四分支重投。
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `readings-ci.md`「红检查先读日志」。
-- 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
+- 挂 auto-merge/入队前读 K(PRBASE 至 origin/main 首父提交数)与任何 K 两腿,读 `landing-k.mjs --pr N`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
 - K ≥ 15 ⇒ 先 merge main 等重跑绿,`behind` 例外;任何 K 同:标签 PR 的 PRBASE 后 main 落新语种包;
-- 或共享预算 PR 遇 `git diff --name-only PRBASE..origin/main` 碰同本输入或账本;封闭两本,输入:账本:
+- 或共享预算 PR 遇 PRBASE 后 main 碰同本输入或账本;封闭两本,输入:账本:
 - `skills/**`:`scripts/check-skills-token-ratchet.mjs`;`ui/**/locales/en.ts`:`ui/scripts/check-eager-closure-budget.mjs`
 - 标签即 `check-generated-translation-bundles`、`check-no-new-untranslated-declared-labels` 所计显示标签。
 
@@ -74,11 +74,11 @@
 - 一态 = `pm:queue`+其车道 `domain:*`(归他车道即改域)/`pm:blocked`+`Blocked-by:`/hold+`Restart-when:`。
 - 同笔评论写清交付了什么、剩下归谁;摘态不补态由写门拒收(`state-machine.md` 跨状态通则)。
 - 每次合并后重拉一次车道盘点与预期状态对账,⛔ 不留给下轮巡检。
-- 取 open 卡清单对照预期 diff:预期之外从 open 消失的,就是被闭合关键词静默误关的卡。
+- 预期外从 open 消失的即被闭合关键词静默误关的卡;每次合并读 `sweep-closed-cards.mjs --pr N`。
 - 落地后再核一次落地判据本身:队列的合并同样走 os-regen,A 的静默吞并一样能发生。
 - 验收要 staging 读数:合并后经中继派 cloud `deploy-staging.yml` 一次,同合并仅一次,卡记运行号。
 - MERGED 不是终点:发版后义务见 `release-aftercare.md`。
-- PR 开出至 MERGED,每看一眼(唤醒/巡检/报告前)同读检查与 `mergeable_state`;`unknown` 即重读。
+- PR 至 MERGED 每看一眼(唤醒/巡检/报告前)读检查与 `mergeable_state`,`unknown` 重读:`pr-state.mjs`。
 - `dirty` ⇒ 当即合 `origin/main` 推新提交,⛔ 不等冲突通知;未见非 `dirty` ⛔ 不报无需你做。
   这一移 head 的撤挂与重挂照 `contract-review.md` head 后移例外条。
 - MERGED 或关闭即退订,同刻把 `mode:cloud` 派的会话 `archive_session`。

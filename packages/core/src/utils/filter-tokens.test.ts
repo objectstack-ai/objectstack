@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { PERIOD_KEY_TOKENS, ReadableIds, isReadableIds } from '@objectstack/spec/data';
+import { PERIOD_KEY_TOKENS, ReadableIds, SharedRecordIds, isFixedReadLeaf, isReadableIds } from '@objectstack/spec/data';
 import { bucketDateKey } from './datetime.js';
 import {
   resolveFilterToken,
@@ -455,6 +455,32 @@ describe('resolveFilterTokens — tree walk', () => {
     expect(out.owner).toBe('usr_1');
     expect(out.$or[0].record_id!.$in).toBe(leaf);
     expect(isReadableIds(out.$or[0].record_id!.$in)).toBe(true);
+  });
+
+  // [ADR-0155 D1] The same for a fixed-read leaf: a read scope is an `$or` of
+  // the owner match and the leaf, and an owner match spelled with a
+  // placeholder rebuilds the tree around the leaf.
+  it('returns a fixed-read leaf beside a resolved placeholder by reference, brand intact', () => {
+    const read = SharedRecordIds.read('cpz_doc', 'usr_1');
+    const write = SharedRecordIds.write('cpz_doc', 'usr_1', ['edit']);
+    const where = { $or: [{ owner: '{current_user_id}' }, { id: { $in: read } }], $and: [{ id: { $in: write } }] };
+    const out = resolveFilterTokens(where, ctx) as {
+      $or: Array<{ owner?: string; id?: { $in: unknown } }>;
+      $and: Array<{ id: { $in: unknown } }>;
+    };
+    // Control: the tree around the placeholder was rebuilt, so the leaf's identity is the walk's answer.
+    expect(out).not.toBe(where);
+    expect(out.$or[1]).not.toBe(where.$or[1]);
+    expect(out.$or[0].owner).toBe('usr_1');
+    expect(out.$or[1].id!.$in).toBe(read);
+    expect(out.$and[0].id.$in).toBe(write);
+    expect(isFixedReadLeaf(out.$or[1].id!.$in)).toBe(true);
+  });
+
+  it('reads no placeholder inside a fixed-read leaf: its inputs are data', () => {
+    const leaf = SharedRecordIds.read('cpz_doc', '{current_user_id}');
+    const where = { id: { $in: leaf } };
+    expect(resolveFilterTokens(where, ctx)).toBe(where);
   });
 });
 

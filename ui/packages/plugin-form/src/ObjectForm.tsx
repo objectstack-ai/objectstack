@@ -1222,14 +1222,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   const isCreateForm = isCreateFormMode(schema);
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   // [#5683] `currentUserId` lets the one client-resolvable token
   // (`current_user`) pre-fill with the id the server would stamp anyway;
   // null/unloaded seeds nothing and keeps the omit-and-let-the-engine-resolve
   // contract above.
   const schemaDefaults = React.useMemo(
-    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency }) : {}),
-    [objectSchema, isCreateForm, perms.userId, homeCurrency],
+    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency, homeTimeZone }) : {}),
+    [objectSchema, isCreateForm, perms.userId, homeCurrency, homeTimeZone],
   );
 
   // What the form OPENS with: the seeded defaults, overlaid with the caller's

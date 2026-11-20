@@ -13,6 +13,8 @@ import { resolveIcon } from '../action/resolve-icon';
 import { hasDeclaredVisibilityGate } from '../action/visibility-gate';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from '../action/disabled-reason';
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
+import { useGridCellSelection } from '../../context/gridCellSelection';
+import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey } from './dataTableCellSelection';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
@@ -31,6 +33,8 @@ import {
   TableCaption 
 } from '../../ui/table';
 import { Button } from '../../ui/button';
+import { Popover, PopoverContent } from '../../ui/popover';
+import { Anchor as PopoverAnchor } from '@radix-ui/react-popover';
 import { Input } from '../../ui/input';
 import { Checkbox } from '../../ui/checkbox';
 import { TriStateCheckbox } from '../../custom/tri-state-checkbox';
@@ -60,6 +64,8 @@ import {
   Plus,
   MoreHorizontal,
   AlertCircle,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -335,6 +341,14 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.openRecord': 'Open record',
   'table.cancelChanges': 'Cancel changes',
   'table.saveRow': 'Save row',
+  // objectstack#35684 — a selected cell that opens no editor, when its host
+  // gives no reason of its own.
+  'table.cellReadOnly': 'This cell can\'t be edited here.',
+  // objectstack#35685 — a list cell's own save state, and the way out of a
+  // rule the list cannot complete.
+  'table.cellSaving': 'Saving…',
+  'table.cellSaved': 'Saved',
+  'table.openRecordToFinish': 'Open the record to finish this change',
   'common.actions': 'Actions',
   // objectui#10625 — the inline date editors' notice for a stored value
   // written on a day that does not exist. The SAME keys `DateField` /
@@ -1000,6 +1014,32 @@ function resolveSelectionMode(selectable: DataTableSchema['selectable'] | 'none'
  * Frozen so a consumer that mutates the array it was handed cannot corrupt the
  * shared instance for every other table on the page.
  */
+/**
+ * The last frozen column's edge while the rows are scrolled sideways under it
+ * (objectstack#35548): a shadow, never a rule, and none at rest.
+ */
+const FROZEN_EDGE_SHADOW = 'shadow-[4px_0_6px_-4px_rgba(0,0,0,0.18)] dark:shadow-[4px_0_6px_-4px_rgba(0,0,0,0.6)]';
+
+/**
+ * The leading (selection / row-number) column's width, on every cell of that
+ * column: 40px at any viewport and any column count (objectstack#35663).
+ *
+ * The table lays its columns out automatically, so a width is a request, not a
+ * size. A plain `w-10` let the column shrink to its content once the columns
+ * overflowed (the checkbox, 16px, flush against the list's left edge), and on
+ * a table narrower than its box it took a share of the spare width with every
+ * other fixed-width column (94px measured). `min-w-10` holds the floor; the
+ * `1%` width makes it a percentage column, which auto layout sizes to its
+ * minimum and never hands spare width while a fixed or auto column takes it
+ * (the `fitContent` columns below use the same `1%`).
+ */
+const LEADING_CELL_WIDTH = 'w-[1%] min-w-10';
+/**
+ * The checkbox's place in the leading cell without row numbers: 16px in, the
+ * list page's one left edge, 8px before the first column (16 + 16 + 8 = 40).
+ */
+const LEADING_CELL_INSET = 'pl-4 pr-2';
+
 const EMPTY_COLUMNS = Object.freeze([]) as unknown as DataTableSchema['columns'];
 const EMPTY_ROWS = Object.freeze([]) as unknown as DataTableSchema['data'];
 
@@ -1119,6 +1159,17 @@ function keepsBrowserContextMenu(target: HTMLElement, row: HTMLElement): boolean
     || portalledFrom(target, row, '[role="alertdialog"]'),
   );
 }
+
+/**
+ * The scroll box's scrollbar while the table is wider than the box
+ * (objectstack#35446): drawn at rest in the theme's muted foreground, the
+ * colour the shared hover-only bar (`HOVER_SCROLLBAR_CLASSES`) turns on hover,
+ * and as thin. Marked important for the same reason that one is: a host may
+ * theme every scrollbar with an unlayered `*` rule. One complete literal:
+ * Tailwind builds only from scanned source text.
+ */
+const SIDEWAYS_SCROLLBAR_CLASSES =
+  '[scrollbar-width:thin]! [scrollbar-color:var(--color-muted-foreground)_transparent]!';
 
 /**
  * A right-pinned column: its sticky utilities arrive on `col.className` (the
@@ -1315,6 +1366,97 @@ function sameDrawnSizes(a: DrawnColumnSizes, b: DrawnColumnSizes): boolean {
  * @param {DataTableSchema} props.schema - Table schema configuration
  * @returns {JSX.Element} Rendered data table component
  */
+/**
+ * objectstack#35684 — why a selected cell opens no editor, drawn on the cell
+ * when an edit is asked of it. It takes no focus (typing carries on in the
+ * cell) and closes on the next key, press or selection.
+ */
+function CellNotice({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  return (
+    <Popover open onOpenChange={(open) => { if (!open) onDismiss(); }}>
+      <PopoverAnchor asChild>
+        <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-0" />
+      </PopoverAnchor>
+      <PopoverContent
+        role="status"
+        data-testid="cell-readonly-reason"
+        side="bottom"
+        align="start"
+        sideOffset={2}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        className="w-auto max-w-xs px-2.5 py-1.5 text-xs"
+      >
+        {text}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * objectstack#35685 — why a list cell's save was refused, said on that cell:
+ * the server's reasons, one line each, and, when the refusal names a field the
+ * list cannot edit, the way to the record where it can be finished.
+ */
+function CellSaveFailure({
+  lines,
+  title,
+  openRecordLabel,
+  onOpenRecord,
+  onDismiss,
+}: {
+  lines: readonly string[];
+  title: string;
+  openRecordLabel: string;
+  onOpenRecord?: (e: React.MouseEvent) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <Popover open onOpenChange={(open) => { if (!open) onDismiss(); }}>
+      <PopoverAnchor asChild>
+        <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-0" />
+      </PopoverAnchor>
+      <PopoverContent
+        role="alert"
+        data-testid="cell-save-failure"
+        side="bottom"
+        align="start"
+        sideOffset={2}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        className="w-auto max-w-xs space-y-1 px-2.5 py-1.5 text-xs"
+      >
+        <div className="flex items-start gap-1.5 text-destructive">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
+          {lines.length === 1 ? (
+            <span className="min-w-0 break-words">{title}: {lines[0]}</span>
+          ) : (
+            <div className="min-w-0 break-words">
+              <span>{title}:</span>
+              <ul className="list-disc pl-4">
+                {lines.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+        {onOpenRecord && (
+          <button
+            type="button"
+            data-testid="cell-save-open-record"
+            className="text-primary underline-offset-2 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenRecord(e);
+            }}
+          >
+            {openRecordLabel}
+          </button>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const {
     caption,
@@ -1346,7 +1488,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     reorderableColumns = true,
     editable = false,
     singleClickEdit = false,
-    keyboardNavigation = false,
+    keyboardNavigation: keyboardNavigationProp = false,
     rowClassName,
     rowStyle,
     className,
@@ -1357,6 +1499,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     borderless = false,
     disableInnerScroll = false,
     rowGroups,
+    summaryRow,
     isRowEditable,
     // Read ONLY to diagnose it. `data-table` does not resolve `bind` and the
     // objectui#6575 ruling is explicit that it must not start — see
@@ -1364,18 +1507,32 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     bind: authoredBind,
   } = schema;
 
+  // objectstack#35684 — the select-first cell model, when a host mounted one
+  // (`GridCellSelection`): a click selects a cell, an editor opens on
+  // double-click, Enter, F2 or typing (Space too), and each committed cell
+  // saves at once (objectstack#35685). It needs the
+  // arrow keys, so it turns the roving-cell navigation on.
+  const cellSelection = useGridCellSelection();
+  const selectFirst = cellSelection !== null;
+  // objectstack#35685 — the per-cell save needs a per-row save to call. A
+  // select-first table wired with `onBatchSave` alone keeps the staged save
+  // bar, so an edit is never held where nothing can send it.
+  const autosaves = selectFirst && typeof schema.onRowSave === 'function';
+  const keyboardNavigation = keyboardNavigationProp || selectFirst;
+
   // 'single' caps the selection at one row (replace-on-select) and drops the
   // select-all header; every truthy legacy value keeps meaning 'multiple'.
   const selectionMode = resolveSelectionMode(selectableProp);
   const selectable = selectionMode !== 'none';
   /**
    * objectui#12423 — the row's LEADING cell is one cell. With selection on it
-   * holds the checkbox, and the row number too when `showRowNumbers` is on:
-   * the number by default, the checkbox on row hover, on focus-within, on a
-   * coarse pointer (no hover to reveal it) and on every row while anything is
-   * selected. The two are swapped by CSS classes on one fixed-width cell,
-   * never mounted and unmounted, so nothing shifts. Without selection it is
-   * the row-number cell alone, as before.
+   * holds the checkbox, always shown (objectstack#35663: no host turns row
+   * numbers on by default any more). A host that opts into `showRowNumbers`
+   * gets the number too: the number by default, the checkbox on row hover, on
+   * focus-within, on a coarse pointer (no hover to reveal it) and on every row
+   * while anything is selected. The two are swapped by CSS classes on one
+   * fixed-width cell, never mounted and unmounted, so nothing shifts. Without
+   * selection it is the row-number cell alone, as before.
    */
   const leadingCellCount = selectable || showRowNumbers ? 1 : 0;
 
@@ -1687,9 +1844,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   // Sticky-left offsets for the leading pinned cells (checkbox, row number,
   // frozen data columns), measured from the REAL rendered header-cell widths.
-  // The table's auto layout does not guarantee the utility columns their
-  // declared `w-10`: the checkbox column can collapse to its ~28px min-content
-  // while the row-number column stretches past 40px. Hardcoded 40px offsets
+  // The table's auto layout does not guarantee a column its declared width
+  // (the leading column holds 40px through `LEADING_CELL_WIDTH` since
+  // objectstack#35663; a frozen data column has no such floor). Hardcoded 40px offsets
   // then leave an uncovered strip between pinned cells where horizontally
   // scrolled content shows through (titanwind-ehr#418), so pin each cell at
   // the cumulative measured width of the cells before it instead.
@@ -1865,6 +2022,33 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // kept under (objectui#12310) — tinted destructive so the author sees exactly
   // which rows didn't persist (no silent "phantom save").
   const [erroredRows, setErroredRows] = useState<Set<PendingRowKey>>(new Set());
+  // ── Per-cell autosave (objectstack#35685), the select-first model's save ──
+  // A committed cell sends its record's update at once; nothing waits for a
+  // save bar. A refused update keeps its edits pending, so the row's next
+  // commit sends them again together with the new cell, as one update.
+  //
+  // The refusal of a row's last save: its lines, and whether it named a field
+  // the list cannot edit (the record is where that change can be finished).
+  const [rowRefusals, setRowRefusals] = useState<Map<PendingRowKey, { lines: string[]; needsRecord: boolean }>>(new Map());
+  // Each cell's save state while it shows: in flight, or just saved.
+  const [cellSaveStates, setCellSaveStates] = useState<Map<PendingRowKey, Record<string, 'saving' | 'saved'>>>(new Map());
+  // The refused cell whose reason opens on its own as the refusal lands.
+  const [failureNotice, setFailureNotice] = useState<{ rowKey: PendingRowKey; columnKey: string } | null>(null);
+  // The rows a save updated in place since the rows last loaded, each as it
+  // sorted and filtered before that save: a client-side sort or search keeps
+  // reading these, so a saved row stays where it is until the next load.
+  const [sortBasis, setSortBasis] = useState<Map<PendingRowKey, any>>(new Map());
+  // The records whose save is running, those committed again meanwhile, and
+  // those whose commit is waiting for the render that holds it.
+  const runningSavesRef = useRef<Set<PendingRowKey>>(new Set());
+  const saveAgainRef = useRef<Set<PendingRowKey>>(new Set());
+  const autosaveDueRef = useRef<Set<PendingRowKey>>(new Set());
+  const [autosaveTick, setAutosaveTick] = useState(0);
+  const savedTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  useEffect(() => () => {
+    for (const timer of savedTimersRef.current) clearTimeout(timer);
+    savedTimersRef.current.clear();
+  }, []);
   // Column header context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; columnKey: string } | null>(null);
   // objectstack#28434 — the row context menu: which row it is open on, where,
@@ -1875,6 +2059,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // The last pointer that pressed a row: a touch long-press raises
   // `contextmenu` too, and touch keeps the row's "⋮" instead.
   const rowPointerTypeRef = useRef<string>('');
+  /** objectstack#35684 — a touch press opens the record and never selects or edits a cell. */
+  const isTouchPress = (e: React.MouseEvent) =>
+    ((e.nativeEvent as PointerEvent).pointerType || rowPointerTypeRef.current) === 'touch';
   // When the keyboard last opened the menu: the browser may raise its own
   // `contextmenu` for the same key press right after.
   const rowContextMenuKeyboardAtRef = useRef(Number.NEGATIVE_INFINITY);
@@ -1980,6 +2167,26 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // filter path, so leaving both active would not even be redundant: the client
   // pass would narrow the server's answer to whichever of its rows happen to
   // contain the term as rendered text.
+  // objectstack#35685 — a row a save updated in place is sorted and searched
+  // as it was before that save, until the rows load again (`sortBasis`).
+  const sortRowOf = (row: any): any => (sortBasis.size > 0 ? sortBasis.get(pendingRowKeyOf(row)) ?? row : row);
+  // A load is any held row that changed without a save of ours updating it:
+  // the basis then has nothing left to stand for.
+  const lastHeldRowsRef = useRef<Map<PendingRowKey, any> | null>(null);
+  useEffect(() => {
+    const held = new Map<PendingRowKey, any>();
+    for (const row of data) held.set(pendingRowKeyOf(row), row);
+    const before = lastHeldRowsRef.current;
+    lastHeldRowsRef.current = held;
+    if (sortBasis.size === 0 || before === null) return;
+    const loaded = held.size !== before.size
+      || Array.from(held).some(([key, row]) => before.get(key) !== row && !sortBasis.has(key));
+    if (loaded) setSortBasis(new Map());
+  }, [data]);
+  useEffect(() => {
+    setSortBasis((prev) => (prev.size === 0 ? prev : new Map()));
+  }, [sortColumn, sortDirection, searchQuery]);
+
   const filteredData = useMemo(() => {
     if (manualSearch) return data;
     if (!searchQuery) return data;
@@ -1990,11 +2197,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const searchedColumns = columns.filter((col) => !isMaskedColumnKey(rawColumns, col.accessorKey));
     return data.filter((row) =>
       searchedColumns.some((col) => {
-        const value = row[col.accessorKey];
+        const value = sortRowOf(row)[col.accessorKey];
         return value?.toString().toLowerCase().includes(searchQuery.toLowerCase());
       })
     );
-  }, [data, searchQuery, columns, rawColumns, manualSearch]);
+  }, [data, searchQuery, columns, rawColumns, manualSearch, sortBasis]);
 
   // Sorting — client-side, over the rows this table was handed.
   //
@@ -2020,14 +2227,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // the reader how it compares with every other row's.
     if (isMaskedColumnKey(rawColumns, sortColumn)) return filteredData;
 
-    const keyed = filteredData.map((row) => ({ row, key: getSortValue(row[sortColumn]) }));
+    const keyed = filteredData.map((row) => ({ row, key: getSortValue(sortRowOf(row)[sortColumn]) }));
     // Array#sort is stable, so rows with equal keys keep their incoming order.
     keyed.sort((a, b) => {
       const comparison = compareSortValues(a.key, b.key);
       return sortDirection === 'asc' ? comparison : -comparison;
     });
     return keyed.map((entry) => entry.row);
-  }, [filteredData, sortColumn, sortDirection, manualSorting, rawColumns]);
+  }, [filteredData, sortColumn, sortDirection, manualSorting, rawColumns, sortBasis]);
 
   // objectui#12620 — a grouped table keeps every row in its own band. The
   // sorted rows are partitioned back into their groups, in group order; the
@@ -2305,15 +2512,43 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
   };
 
-  const handleSelectRow = (rowId: any, checked: boolean) => {
+  // objectstack#35554 — Shift extends a selection over a range: the row the
+  // last plain toggle landed on is the anchor, and a Shift toggle sets every
+  // row between it and the clicked one (inclusive) to the clicked row's new
+  // state. Rows are counted in the order this table draws them
+  // (`paginatedData`). The leading cell records the Shift key on the way in
+  // (`shiftSelectRef`), because the checkbox's own change event carries no
+  // modifier.
+  const selectionAnchorRef = React.useRef<number | null>(null);
+  const shiftSelectRef = React.useRef(false);
+  const handleSelectRow = (rowId: any, checked: boolean, rowIndex?: number) => {
+    const extend = shiftSelectRef.current;
+    shiftSelectRef.current = false;
     // Single mode replaces the previous selection instead of accumulating —
     // the spec's 'single' must never hold two rows (#2941).
     const newSelected = new Set(selectionMode === 'single' ? [] : selectedRowIds);
-    if (checked) {
+    const anchor = selectionAnchorRef.current;
+    if (
+      extend
+      && selectionMode === 'multiple'
+      && rowIndex !== undefined
+      && anchor !== null
+      && anchor !== rowIndex
+      && anchor < paginatedData.length
+    ) {
+      const from = Math.min(anchor, rowIndex);
+      const to = Math.max(anchor, rowIndex);
+      for (let i = from; i <= to; i += 1) {
+        const id = getRowId(paginatedData[i], (effectivePage - 1) * pageSize + i);
+        if (checked) newSelected.add(id);
+        else newSelected.delete(id);
+      }
+    } else if (checked) {
       newSelected.add(rowId);
     } else {
       newSelected.delete(rowId);
     }
+    if (rowIndex !== undefined) selectionAnchorRef.current = rowIndex;
     setSelectedRowIds(newSelected);
     
     // Call callback if provided
@@ -2476,8 +2711,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // `editable`; a refused row reads exactly like a row of a read-only table.
   const rowMayEdit = (row: any): boolean => isRowEditable?.(row) !== false;
 
-  // Cell editing handlers
-  const startEdit = (row: any, columnKey: string) => {
+  // Cell editing handlers. `seed` (the select-first model's typing and
+  // Backspace, objectstack#35687) opens the editor on that value instead of
+  // the cell's; the cell's own value still decides what Escape restores.
+  const startEdit = (row: any, columnKey: string, seed?: { value: unknown }) => {
     if (!editable || !rowMayEdit(row)) return;
     const rowKey = pendingRowKeyOf(row);
 
@@ -2508,7 +2745,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // Check if there's a pending change for this cell, otherwise use current data value
     const rowChanges = pendingChanges.get(rowKey)?.changes;
     const currentValue = row[columnKey];
-    const valueToEdit = rowChanges?.[columnKey] ?? currentValue ?? '';
+    const valueToEdit = seed ? seed.value : rowChanges?.[columnKey] ?? currentValue ?? '';
     setEditValue(valueToEdit);
     // Snapshot the cell's pending state so Escape/cancel can revert an injected
     // widget edit (which stages on every change) back to exactly what it was.
@@ -2542,6 +2779,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const inFlight = inFlightRef.current.get(rowKey);
     setPendingChanges((prev) => stageCellChange(prev, rowKey, row, columnKey, valueToStage, inFlight));
     clearCellError(rowKey, columnKey);
+    // objectstack#35685 — the select-first model saves the commit at once.
+    requestAutosave(rowKey);
 
     // Call the legacy onCellChange callback if provided
     if (schema.onCellChange) {
@@ -2595,7 +2834,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     const active = editingCellRef.current;
     const snap = editRevertRef.current;
     editRevertRef.current = null;
-    if (revert && active && snap) {
+    if (revert && active && autosaves && !runningSavesRef.current.has(active.rowKey)) {
+      // objectstack#35685 — Esc goes back to the stored value, a kept
+      // (refused) edit of this cell included. While the row's save is on the
+      // wire it only takes back this edit (below), as Esc on the selected cell
+      // leaves a sent value alone.
+      discardCellChange(active.rowKey, active.columnKey);
+    } else if (revert && active && snap) {
       const { rowKey, columnKey } = active;
       setPendingChanges((prev) => {
         const cur = prev.get(rowKey);
@@ -2842,6 +3087,148 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     setSaveError(null);
   };
 
+  // ── Per-cell autosave (objectstack#35685) ────────────────────────────────
+  const setCellSaveState = (rowKey: PendingRowKey, columnKeys: readonly string[], state: 'saving' | 'saved' | null) => {
+    setCellSaveStates((prev) => {
+      const next = new Map(prev);
+      const cells = { ...(prev.get(rowKey) ?? {}) };
+      for (const key of columnKeys) {
+        if (state) cells[key] = state;
+        else delete cells[key];
+      }
+      if (Object.keys(cells).length > 0) next.set(rowKey, cells);
+      else next.delete(rowKey);
+      return next;
+    });
+  };
+  /** A just-saved cell says so for a moment, then goes quiet. */
+  const flashSaved = (rowKey: PendingRowKey, columnKeys: readonly string[]) => {
+    setCellSaveState(rowKey, columnKeys, 'saved');
+    const timer = setTimeout(() => {
+      savedTimersRef.current.delete(timer);
+      setCellSaveStates((prev) => {
+        const cells = prev.get(rowKey);
+        if (!cells || !columnKeys.some((key) => cells[key] === 'saved')) return prev;
+        const rest = { ...cells };
+        for (const key of columnKeys) if (rest[key] === 'saved') delete rest[key];
+        const next = new Map(prev);
+        if (Object.keys(rest).length > 0) next.set(rowKey, rest);
+        else next.delete(rowKey);
+        return next;
+      });
+    }, 1500);
+    savedTimersRef.current.add(timer);
+  };
+
+  /** Ask for a record's autosave; it runs once the render holding the commit lands. */
+  const requestAutosave = (rowKey: PendingRowKey) => {
+    if (!autosaves) return;
+    autosaveDueRef.current.add(rowKey);
+    setAutosaveTick((tick) => tick + 1);
+  };
+
+  /**
+   * Send one record's pending edits as one update. Every edit the record still
+   * holds goes, so a cell a refusal kept travels with the next commit on its
+   * row. A commit made while the record's save runs waits for it, and then
+   * sends what is left.
+   */
+  const autosaveRow = async (rowKey: PendingRowKey, pending: PendingRow | undefined) => {
+    if (!pending || Object.keys(pending.changes).length === 0 || !schema.onRowSave) return;
+    if (runningSavesRef.current.has(rowKey)) {
+      saveAgainRef.current.add(rowKey);
+      return;
+    }
+    runningSavesRef.current.add(rowKey);
+    const sentChanges = pending.changes;
+    const sentKeys = Object.keys(sentChanges);
+    const sent = new Map([[rowKey, sentChanges]]);
+    const row = heldRowOf(rowKey) ?? pending.row;
+    // The row sorts as it does now until the next load, whatever the save writes.
+    setSortBasis((prev) => (prev.has(rowKey) ? prev : new Map(prev).set(rowKey, row)));
+    setCellSaveState(rowKey, sentKeys, 'saving');
+    try {
+      await whileInFlight(sent, async () => {
+        await schema.onRowSave?.(rowIndexOf(rowKey), sentChanges, row);
+      });
+      setPendingChanges((prev) => removeSentEdits(prev, sent));
+      setRowCellErrors(rowKey, null);
+      setRowRefusals((prev) => {
+        if (!prev.has(rowKey)) return prev;
+        const next = new Map(prev);
+        next.delete(rowKey);
+        return next;
+      });
+      setFailureNotice((prev) => (prev?.rowKey === rowKey ? null : prev));
+      flashSaved(rowKey, sentKeys);
+    } catch (error) {
+      // The edits stay pending and the cells keep what was typed. Each cell the
+      // refusal names shows its own reason; a cell it does not name shows them
+      // all. A named field the list cannot edit sends the reader to the record.
+      console.error('Failed to save row:', error);
+      setCellSaveState(rowKey, sentKeys, null);
+      const lines = saveRefusalLines([error]);
+      const named = refusedCellsOf(error) ?? {};
+      const editableHere = (field: string) => {
+        const col = columns.find((c) => c.accessorKey === field);
+        return !!col && col.editable !== false && !col.masked;
+      };
+      const cells: Record<string, string> = {};
+      for (const [field, message] of Object.entries(named)) {
+        if (columns.some((c) => c.accessorKey === field)) cells[field] = message;
+      }
+      for (const key of sentKeys) if (!(key in cells)) cells[key] = lines.join(' ');
+      setRowCellErrors(rowKey, cells);
+      setRowRefusals((prev) => new Map(prev).set(rowKey, {
+        lines,
+        needsRecord: Object.keys(named).some((field) => !editableHere(field)),
+      }));
+      setFailureNotice({ rowKey, columnKey: sentKeys[0] });
+    } finally {
+      runningSavesRef.current.delete(rowKey);
+      if (saveAgainRef.current.delete(rowKey)) requestAutosave(rowKey);
+    }
+  };
+
+  useEffect(() => {
+    if (!autosaves || autosaveDueRef.current.size === 0) return;
+    const due = Array.from(autosaveDueRef.current);
+    autosaveDueRef.current.clear();
+    for (const rowKey of due) void autosaveRow(rowKey, pendingChanges.get(rowKey));
+  }, [autosaveTick, pendingChanges]);
+
+  /**
+   * Esc on a cell whose edit is kept: the edit is dropped and the cell shows
+   * the stored value again. The rest of the row's kept edits stay.
+   */
+  const discardCellChange = (rowKey: PendingRowKey, columnKey: string) => {
+    setPendingChanges((prev) => {
+      const cur = prev.get(rowKey);
+      if (!cur || !(columnKey in cur.changes)) return prev;
+      const next = new Map(prev);
+      const rest = { ...cur.changes };
+      delete rest[columnKey];
+      if (Object.keys(rest).length > 0) next.set(rowKey, { row: cur.row, changes: rest });
+      else next.delete(rowKey);
+      return next;
+    });
+    const kept = pendingChanges.get(rowKey)?.changes;
+    if (!kept || Object.keys(kept).every((key) => key === columnKey)) {
+      // Nothing of the row is kept any more, so nothing of its refusal stands.
+      setRowCellErrors(rowKey, null);
+      setRowRefusals((prev) => {
+        if (!prev.has(rowKey)) return prev;
+        const next = new Map(prev);
+        next.delete(rowKey);
+        return next;
+      });
+      setFailureNotice((prev) => (prev?.rowKey === rowKey ? null : prev));
+    } else {
+      clearCellError(rowKey, columnKey);
+      setFailureNotice((prev) => (prev?.rowKey === rowKey && prev?.columnKey === columnKey ? null : prev));
+    }
+  };
+
   // ── Keyboard navigation (objectui#11068) ──────────────────────────────────
   //
   // Arrow-key cell navigation on the WAI-ARIA grid pattern, behind
@@ -2882,6 +3269,20 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // (objectui#12708), the same one `ObjectGrid`'s grouped scroller and a
   // page's own table use. Only the shadow's PLACEMENT is this table's own.
   const overflowRight = useHorizontalOverflow(scrollBoxRef, { disabled: disableInnerScroll });
+  // objectstack#35548 — the frozen columns draw no rule of their own: their
+  // edge shadow shows only once the rows are scrolled sideways under them.
+  const [scrolledX, setScrolledX] = useState(false);
+  useLayoutEffect(() => {
+    const box = scrollBoxRef.current;
+    if (disableInnerScroll || !box || frozenColumns <= 0) {
+      setScrolledX(false);
+      return;
+    }
+    const read = () => setScrolledX(box.scrollLeft > 0);
+    read();
+    box.addEventListener('scroll', read, { passive: true });
+    return () => box.removeEventListener('scroll', read);
+  }, [disableInnerScroll, frozenColumns]);
   const [rightShadow, setRightShadow] = useState<{ right: number; bottom: number } | null>(null);
   useLayoutEffect(() => {
     const box = scrollBoxRef.current;
@@ -2917,6 +3318,30 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
     return () => observer?.disconnect();
   }, [overflowRight, columns, leadingCellCount, paginatedData.length]);
+
+  /**
+   * objectstack#35446 — while the table is wider than its box, the box draws
+   * its scrollbar at rest ({@link SIDEWAYS_SCROLLBAR_CLASSES}): columns out of
+   * view are announced by the bar itself, in a narrowed main area as anywhere,
+   * not only once the pointer is over the box. A table that fits keeps the
+   * shared hover-only bar (objectui#12708). A grouped sub-table
+   * (`disableInnerScroll`) scrolls in a shared ancestor and draws no bar.
+   */
+  const [scrollsSideways, setScrollsSideways] = useState(false);
+  useLayoutEffect(() => {
+    const box = scrollBoxRef.current;
+    if (disableInnerScroll || !box) {
+      setScrollsSideways(false);
+      return;
+    }
+    const read = () => setScrollsSideways(box.scrollWidth - box.clientWidth > 1);
+    read();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(read);
+    observer.observe(box);
+    if (tableRef.current) observer.observe(tableRef.current);
+    return () => observer.disconnect();
+  }, [disableInnerScroll, columns, paginatedData.length]);
 
   const [rovingCell, setRovingCell] = useState<{ rowIndex: number; colIndex: number }>({ rowIndex: 0, colIndex: 0 });
   const rovingRowIndex = Math.max(0, Math.min(rovingCell.rowIndex, paginatedData.length - 1));
@@ -2983,8 +3408,216 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
   };
 
+  // ── The select-first cell model (objectstack#35684, objectstack#35687) ──
+  //
+  // Behind `GridCellSelection` (a host's choice, never metadata). One cell is
+  // SELECTED: it carries an outline ring that moves no layout, and focus sits
+  // in an invisible text box inside it, the type catcher. An input method only
+  // composes into an editable element, so the box is what lets a composition
+  // that starts on a selected cell keep its first syllable: the composed text
+  // opens the editor when the input method hands it over, and the keys pressed
+  // while composing are never read as Enter, Esc, Tab or arrows. What is
+  // typed or pasted there opens the editor (or, pasted, writes the cell); the
+  // box itself never holds a value.
+  //
+  // Kept by record and column, like an edit (objectui#12310): a re-read that
+  // moves or drops the row moves or drops the selection with it. Focus moves
+  // to the catcher only after the reader acted on the grid
+  // (`focusSelectionRef`), never because the rows changed under it.
+  const [selectedCell, setSelectedCellKey] = useState<{ rowKey: PendingRowKey; columnKey: string } | null>(null);
+  const selectedRowIndex = selectedCell ? paginatedData.findIndex((r) => pendingRowKeyOf(r) === selectedCell.rowKey) : -1;
+  const selectedColIndex = selectedCell ? columns.findIndex((c) => c.accessorKey === selectedCell.columnKey) : -1;
+  const selectedPos = selectedRowIndex >= 0 && selectedColIndex >= 0
+    ? { rowIndex: selectedRowIndex, colIndex: selectedColIndex }
+    : null;
+  const setSelectedCell = (pos: { rowIndex: number; colIndex: number } | null) =>
+    setSelectedCellKey(pos ? { rowKey: pendingRowKeyOf(paginatedData[pos.rowIndex]), columnKey: columns[pos.colIndex].accessorKey } : null);
+  const focusSelectionRef = useRef(false);
+  useEffect(() => {
+    if (!focusSelectionRef.current || editingCell) return;
+    focusSelectionRef.current = false;
+    tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]')?.focus();
+  });
+  const [composing, setComposing] = useState(false);
+  const composingRef = useRef(false);
+  // Why the cell an edit was asked of opens no editor, drawn on that cell.
+  const [cellNotice, setCellNotice] = useState<{ rowIndex: number; colIndex: number; text: string } | null>(null);
+
+  const selectCell = (rowIndex: number, colIndex: number) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    setCellNotice(null);
+    // objectstack#35685 — a selected cell whose edit a refusal kept says why.
+    const rowKey = pendingRowKeyOf(row);
+    setFailureNotice(cellErrors.get(rowKey)?.[col.accessorKey] !== undefined ? { rowKey, columnKey: col.accessorKey } : null);
+    rove(rowIndex, colIndex);
+    if (selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex) {
+      // Selected already, so no render follows to move the focus: a click on
+      // the cell took it to the cell itself, where a typed key is lost.
+      focusSelectionRef.current = false;
+      tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]')?.focus();
+      return;
+    }
+    focusSelectionRef.current = true;
+    setSelectedCell({ rowIndex, colIndex });
+    cellSelection?.onCellSelect?.(row, col.accessorKey);
+  };
+
+  const factsOf = (row: any, col: TableColumn) => cellSelection?.describeCell?.(row, col.accessorKey) ?? null;
+
+  /** Why this cell opens no editor, or `null` when it opens one. */
+  const readOnlyReasonOf = (row: any, col: TableColumn): string | null => {
+    const reason = factsOf(row, col)?.readOnlyReason;
+    if (reason) return reason;
+    return editable && col.editable !== false && !col.masked && rowMayEdit(row) ? null : t('table.cellReadOnly');
+  };
+
+  /** Open the editor on a cell, or say on the cell why it opens none. */
+  const attemptEdit = (rowIndex: number, colIndex: number, seed?: { value: unknown }) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    const reason = readOnlyReasonOf(row, col);
+    if (reason) {
+      setCellNotice({ rowIndex, colIndex, text: reason });
+      return;
+    }
+    setCellNotice(null);
+    setSelectedCell({ rowIndex, colIndex });
+    startEdit(row, col.accessorKey, seed);
+  };
+
+  /** Write a value into a cell without an editor: the commit `saveEdit` makes. */
+  const commitCellValue = (row: any, columnKey: string, value: unknown) => {
+    const rowKey = pendingRowKeyOf(row);
+    const held = heldRowOf(rowKey) ?? row;
+    const inFlight = inFlightRef.current.get(rowKey);
+    setPendingChanges((prev) => stageCellChange(prev, rowKey, held, columnKey, value, inFlight));
+    clearCellError(rowKey, columnKey);
+    schema.onCellChange?.(rowIndexOf(rowKey), columnKey, value, held);
+    requestAutosave(rowKey);
+  };
+
+  /** What a cell does with a value it is handed rather than edited: a toggle or a paste. */
+  const writeCell = (rowIndex: number, colIndex: number, valueOf: (row: any, col: TableColumn) => unknown) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    const reason = readOnlyReasonOf(row, col);
+    if (reason) {
+      setCellNotice({ rowIndex, colIndex, text: reason });
+      return;
+    }
+    const value = valueOf(row, col);
+    if (value !== undefined) commitCellValue(row, col.accessorKey, value);
+  };
+
+  const togglesCell = (row: any, col: TableColumn) => factsOf(row, col)?.toggles ?? col.type === 'boolean';
+  const toggleCell = (rowIndex: number, colIndex: number) => writeCell(rowIndex, colIndex, (row, col) => {
+    const staged = pendingChanges.get(pendingRowKeyOf(row))?.changes;
+    const current = staged && col.accessorKey in staged ? staged[col.accessorKey] : row[col.accessorKey];
+    return current !== true;
+  });
+  const pasteIntoCell = (rowIndex: number, colIndex: number, text: string) => writeCell(rowIndex, colIndex, (row, col) => {
+    const fromText = factsOf(row, col)?.fromText;
+    return fromText ? fromText(text) : defaultValueFromText(col, text);
+  });
+
+  /** Text typed or composed on the selected cell. */
+  const typeIntoCell = (rowIndex: number, colIndex: number, text: string) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (text === '' || row === undefined || col === undefined) return;
+    const facts = factsOf(row, col);
+    if ((facts?.typing ?? defaultTyping(col)) === 'open') {
+      attemptEdit(rowIndex, colIndex);
+      return;
+    }
+    const converted = facts?.fromText ? facts.fromText(text) : defaultValueFromText(col, text);
+    attemptEdit(rowIndex, colIndex, { value: converted !== undefined ? converted : text });
+  };
+
+  /** After Enter or Tab committed the selected cell's edit: the cell it moves to. */
+  const moveSelection = (direction: 'down' | 'right' | 'left') => {
+    if (!selectedPos) return;
+    const { rowIndex, colIndex } = selectedPos;
+    if (direction === 'down') selectCell(Math.min(paginatedData.length - 1, rowIndex + 1), colIndex);
+    else selectCell(rowIndex, Math.max(0, Math.min(columns.length - 1, colIndex + (direction === 'right' ? 1 : -1))));
+  };
+
+  /** The selected cell's keys, while no editor is open (an open editor owns every key). */
+  const handleSelectFirstKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => {
+    if (isImeKey(e) || editingCell) return;
+    // The cell or its catcher, not a widget inside it: a record link keeps Enter.
+    const target = e.target as HTMLElement;
+    const onCatcher = target.matches('[data-slot="cell-type-catcher"]');
+    if (target !== e.currentTarget && !onCatcher) return;
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (e.key === 'Escape') {
+      const rowKey = pendingRowKeyOf(row);
+      if (cellNotice) setCellNotice(null);
+      else if (autosaves && pendingChanges.get(rowKey)?.changes && col.accessorKey in pendingChanges.get(rowKey)!.changes && !runningSavesRef.current.has(rowKey)) {
+        // objectstack#35685 — a kept (refused) edit: Esc drops it.
+        e.preventDefault();
+        discardCellChange(rowKey, col.accessorKey);
+      } else if (selectedPos) {
+        e.preventDefault();
+        focusGridCell(rowIndex, colIndex);
+        setSelectedCell(null);
+      }
+      return;
+    }
+    setCellNotice(null);
+    const next = navigationTarget(e, rowIndex, colIndex);
+    if (next) {
+      e.preventDefault();
+      selectCell(next.rowIndex, next.colIndex);
+      return;
+    }
+    if (e.key === 'Tab' && bare) {
+      // Along the row, then on to the next one; at either end of the page
+      // Tab leaves the grid, as it does any widget.
+      const at = rowIndex * columns.length + colIndex + (e.shiftKey ? -1 : 1);
+      if (at < 0 || at >= paginatedData.length * columns.length) return;
+      e.preventDefault();
+      selectCell(Math.floor(at / columns.length), at % columns.length);
+      return;
+    }
+    if (!onCatcher) {
+      // Focus on the bare cell (after Esc): the first key selects it again.
+      if (bare && (isPrintableKey(e) || e.key === 'Enter' || e.key === 'F2')) {
+        e.preventDefault();
+        selectCell(rowIndex, colIndex);
+      }
+      return;
+    }
+    if ((e.key === 'Enter' || e.key === 'F2') && bare && !e.shiftKey) {
+      e.preventDefault();
+      attemptEdit(rowIndex, colIndex);
+    } else if (e.key === ' ' && bare && togglesCell(row, col)) {
+      // A two-state cell flips; on any other cell Space is typed like any key
+      // and opens the editor (the catcher reads it).
+      e.preventDefault();
+      toggleCell(rowIndex, colIndex);
+    } else if ((e.key === 'Backspace' || e.key === 'Delete') && bare) {
+      // An empty editor; nothing is written until it commits.
+      e.preventDefault();
+      attemptEdit(rowIndex, colIndex, { value: '' });
+    }
+    // A printable key lands in the catcher, which reads it (`typeIntoCell`).
+  };
+
   const handleCellKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number, columnKey: string) => {
-    if (keyboardNavigation) {
+    if (selectFirst) {
+      if (!isCommandLetter(e, 'c')) {
+        handleSelectFirstKeyDown(e, rowIndex, colIndex);
+        return;
+      }
+    } else if (keyboardNavigation) {
       // An edit in this cell that the key now bubbling through it just ended
       // (Enter committed it, Escape cancelled it): `editingCellRef` is cleared
       // synchronously by the editor's own handler, while `editingCell` is still
@@ -3005,8 +3638,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       }
     }
 
-    // Copy cell value with Ctrl+C / Cmd+C
-    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !editingCell) {
+    // Copy cell value with Ctrl+C / Cmd+C, CapsLock on or off.
+    if (isCommandLetter(e, 'c') && !editingCell) {
       // objectui#13188 — text the viewer selected in this cell is what they
       // copy: the browser's own copy runs. A masked cell never gets here
       // with its default intact — the mask rule below goes first.
@@ -3032,7 +3665,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       return;
     }
 
-    if (!editable || !rowMayEdit(paginatedData[rowIndex])) return;
+    if (selectFirst || !editable || !rowMayEdit(paginatedData[rowIndex])) return;
     
     const column = columns.find(col => col.accessorKey === columnKey);
     if (column?.editable === false) return;
@@ -3044,24 +3677,51 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   };
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+    // A key the input method owns picks or moves a candidate (objectstack#35687).
+    if (isImeKey(e)) return;
+    if (e.key === 'Enter' || (selectFirst && e.key === 'Tab')) {
       e.preventDefault();
       // Already saving here; suppress the redundant save the ensuing blur triggers.
       skipBlurSaveRef.current = true;
       saveEdit(true);
+      // The select-first model: Enter saves and moves down, Tab right, Shift+Tab left.
+      if (selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
     } else if (e.key === 'Escape') {
       e.preventDefault();
+      focusSelectionRef.current = selectFirst;
       cancelEdit();
     }
   };
 
-  // Auto-focus on edit input when entering edit mode
+  // Auto-focus on edit input when entering edit mode. The select-first model
+  // keeps what was typed or what the cell held, caret after it.
   useEffect(() => {
     if (editingCell && editInputRef.current) {
       editInputRef.current.focus();
-      editInputRef.current.select();
+      if (selectFirst) caretToEnd(editInputRef.current);
+      else editInputRef.current.select();
     }
   }, [editingCell]);
+
+  // …and an injected editor takes the caret the same way (objectstack#35687):
+  // its first control, once it has drawn one (a lazily loaded picker draws it
+  // a few frames late). Before this the caret stayed on the cell.
+  useEffect(() => {
+    if (!selectFirst || !editingCell) return undefined;
+    let frame = 0;
+    let frames = 0;
+    const place = () => {
+      const host = injectedEditorElRef.current;
+      if (!host || host.contains(document.activeElement)) return;
+      const control = firstEditorControl(host);
+      if (control) {
+        control.focus({ preventScroll: true });
+        caretToEnd(control);
+      } else if (++frames < 30) frame = requestAnimationFrame(place);
+    };
+    place();
+    return () => cancelAnimationFrame(frame);
+  }, [editingCell, selectFirst]);
 
   // Commit a host-injected widget editor on click-outside (objectui#2321).
   //
@@ -3222,6 +3882,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     (Array.isArray(schema.rowActionDefs) && schema.rowActionDefs.length > 0 && schema.onRowActionDef)
   );
   const rowActionsColumnIsEditOnly = editable && !!(schema.onRowSave || schema.onBatchSave) && !rowMenuDeclared;
+  // objectstack#35685 — a table that saves each cell as it is committed never
+  // draws the edit-only column: a list ends on its last data column
+  // (objectstack#35554). A select-first table that stages (no `onRowSave`)
+  // shows it only while a row has pending changes, as objectstack#35684 did.
+  const drawRowActionsColumn = rowActions
+    && !(autosaves && rowActionsColumnIsEditOnly)
+    && !(selectFirst && !autosaves && rowActionsColumnIsEditOnly && !hasPendingChanges);
 
   /**
    * objectstack#28434 — the items ONE row's context menu opens with, or `null`
@@ -3308,7 +3975,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   // The span of a row drawn as one cell across the table: the leading utility
   // cell, every column, the row-actions cell and the add-column cell.
-  const fullRowColSpan = columns.length + leadingCellCount + (rowActions ? 1 : 0) + (addColumnEnabled ? 1 : 0);
+  const fullRowColSpan = columns.length + leadingCellCount + (drawRowActionsColumn ? 1 : 0) + (addColumnEnabled ? 1 : 0);
 
   // What the body draws, in order. Flat: the data rows. Grouped (objectui#12620):
   // per group, its band, its data rows and its optional footer. A data row
@@ -3346,7 +4013,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           </div>
           
           <div className="flex flex-wrap items-center gap-2">
-            {hasPendingChanges && (
+            {/* objectstack#35685 — the select-first model saves each cell, so it draws no save bar. */}
+            {hasPendingChanges && !autosaves && (
               <>
                 <div className="text-sm text-muted-foreground">
                   {t('table.modified', { count: pendingChanges.size })}
@@ -3394,7 +4062,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           {/* The last save's refusal, on a line of its own and said whole —
               one line per reason (objectstack-ai/objectstack#27520). The
               cells it names are marked in the table below. */}
-          {hasPendingChanges && saveError && (
+          {hasPendingChanges && !autosaves && saveError && (
             <div
               role="alert"
               data-testid="table-save-refusal"
@@ -3435,7 +4103,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         // sub-tables share one horizontal scrollbar with aligned columns.
         disableInnerScroll
           ? "overflow-visible"
-          : ["flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]", HOVER_SCROLLBAR_CLASSES],
+          : ["flex-1 min-h-0 overflow-auto [-webkit-overflow-scrolling:touch]", scrollsSideways ? SIDEWAYS_SCROLLBAR_CLASSES : HOVER_SCROLLBAR_CLASSES],
         !borderless && "rounded-md border",
       )}>
         {/* This div is already the (bounded) scroll container for BOTH axes —
@@ -3456,7 +4124,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           <TableHeader className="sticky top-0 bg-background z-10">
             <TableRow ref={headerRowRef}>
               {selectable && (
-                <TableHead className={cn("w-10 bg-background", showRowNumbers ? "px-0" : "px-3", frozenColumns > 0 && "sticky left-0 z-20")}>
+                <TableHead className={cn(LEADING_CELL_WIDTH, "bg-background", showRowNumbers ? "px-0" : LEADING_CELL_INSET, frozenColumns > 0 && "sticky left-0 z-20")}>
                   {/* Select-all is a multi-select affordance; a 'single' view
                       keeps the column (alignment) but offers no way to select
                       more than one row (#2941). */}
@@ -3481,7 +4149,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               {/* With selection on, the row number shares the select-all
                   column's cell (objectui#12423), so `#` heads it only alone. */}
               {showRowNumbers && !selectable && (
-                <TableHead className={cn("w-10 bg-background text-center px-3", frozenColumns > 0 && "sticky left-0 z-20")}>
+                <TableHead className={cn(LEADING_CELL_WIDTH, "bg-background text-center px-3", frozenColumns > 0 && "sticky left-0 z-20")}>
                   <span className="text-xs text-muted-foreground">#</span>
                 </TableHead>
               )}
@@ -3540,7 +4208,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       // keeps it, and bump above body pinned cells (z-10).
                       isPinnedRight && 'sticky right-0 z-20',
                       isFrozen && 'sticky z-20',
-                      isFrozen && index === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
+                      isFrozen && index === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
                     )}
                     style={{ 
                       width: columnWidth,
@@ -3574,7 +4242,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         )}
                         {/* The full label on hover wherever the cell is too narrow
                             for it and the ellipsis cuts it (objectstack#29945). */}
-                        <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
+                        <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
                         {fieldAuthoring?.columnMarks?.[col.accessorKey]}
                         {isColumnSortable(col) && getSortIcon(col.accessorKey)}
                         {editColumnEnabled && (
@@ -3628,10 +4296,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                   </TableHead>
                 );
               })}
-              {/* The label sits in the same `text-xs` muted span every data
+              {/* The label sits in the same 13px muted span every data
                   column's header label uses (objectui#11816): a bare string
                   here took the cell's larger default type. */}
-              {rowActions && (rowActionsColumnIsEditOnly ? (
+              {drawRowActionsColumn && (rowActionsColumnIsEditOnly ? (
                 <TableHead
                   className="w-24 text-right bg-background"
                   title={t('table.edit')}
@@ -3642,7 +4310,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                 </TableHead>
               ) : (
                 <TableHead className="w-24 text-right bg-background">
-                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
+                  <span className="text-[13px] font-medium text-muted-foreground whitespace-nowrap">{t('common.actions')}</span>
                 </TableHead>
               ))}
               {addColumnEnabled && (
@@ -3835,9 +4503,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // The open record's row, frozen cells included.
                         "data-[active-record]:bg-primary/10 data-[active-record]:[--os-row-tint:color-mix(in_oklab,var(--color-primary)_10%,transparent)]",
                         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-                        schema.onRowClick && "cursor-pointer",
-                        rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
-                        rowErrored && "bg-destructive/10 dark:bg-destructive/15 ring-1 ring-inset ring-destructive/40",
+                        !selectFirst && schema.onRowClick && "cursor-pointer",
+                        // objectstack#35685 — the select-first model marks the cell, never the row.
+                        !autosaves && rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
+                        !autosaves && rowErrored && "bg-destructive/10 dark:bg-destructive/15 ring-1 ring-inset ring-destructive/40",
                         rowClassName && rowClassName(row, rowIndex)
                       )}
                       style={rowStyle ? rowStyle(row, rowIndex) : undefined}
@@ -3905,19 +4574,24 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                           // alone: on a tall row the box is a small target
                           // and a near miss used to open the record. The
                           // checkbox itself handles its own clicks.
+                          onClickCapture={(e) => { shiftSelectRef.current = e.shiftKey; }}
                           onClick={(e) => {
                             if ((e.target as HTMLElement).closest('[role="checkbox"]')) return;
-                            handleSelectRow(rowId, !isSelected);
+                            // Shift+click on a cell would also extend the
+                            // browser's text selection across the rows.
+                            if (e.shiftKey) window.getSelection?.()?.removeAllRanges();
+                            handleSelectRow(rowId, !isSelected, rowIndex);
                           }}
-                          className={cn(cellClassName, "w-10 relative cursor-pointer", showRowNumbers ? "px-0 text-center" : "px-3", frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}
+                          className={cn(cellClassName, LEADING_CELL_WIDTH, "relative cursor-pointer", showRowNumbers ? "px-0 text-center" : LEADING_CELL_INSET, frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}
                         >
                           {/* objectui#12423 — the leading cell (see
-                              `leadingCellCount`): the row number by default,
-                              the checkbox on hover / focus-within / a coarse
-                              pointer, and on every row while any is selected.
-                              The checkbox is hidden by OPACITY only, so it
-                              stays in the tab order and reachable by assistive
-                              tech; focusing it reveals it. */}
+                              `leadingCellCount`). With row numbers on: the row
+                              number by default, the checkbox on hover /
+                              focus-within / a coarse pointer, and on every row
+                              while any is selected; hidden by OPACITY only, so
+                              it stays in the tab order and reachable by
+                              assistive tech. Without them (the default,
+                              objectstack#35663): the checkbox, always shown. */}
                           {showRowNumbers && (
                             <span
                               data-slot="row-number"
@@ -3937,7 +4611,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             className={cn(
                               "flex items-center transition-opacity",
                               showRowNumbers && "absolute inset-0 justify-center",
-                              !selectionActive
+                              // objectstack#35663 — the swap is row numbers'
+                              // alone: without them the checkbox is always shown.
+                              showRowNumbers && !selectionActive
                                 && "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 pointer-coarse:opacity-100",
                             )}
                           >
@@ -3946,14 +4622,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 (objectui#11690). */}
                             <Checkbox
                               checked={isSelected}
-                              onCheckedChange={(checked) => handleSelectRow(rowId, checked as boolean)}
+                              onCheckedChange={(checked) => handleSelectRow(rowId, checked as boolean, rowIndex)}
                               aria-label={t('table.selectRow')}
                             />
                           </span>
                         </TableCell>
                       )}
                       {showRowNumbers && !selectable && (
-                        <TableCell className={cn("text-center w-10 relative", cellClassName, frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}>
+                        <TableCell className={cn("text-center relative", cellClassName, LEADING_CELL_WIDTH, frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}>
                           <span className={cn("text-xs text-muted-foreground tabular-nums select-none", !selectable && schema.onRowClick && "group-hover/row:invisible")}>
                             {globalIndex + 1}
                           </span>
@@ -4040,6 +4716,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // the host's per-row verdict refuses (objectstack#27365).
                         const isEditable = editable && col.editable !== false && !col.masked && rowMayEdit(row);
                         const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;
+                        // objectstack#35684 — the selected cell of the select-first model.
+                        const isSelectedCell = selectFirst && selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex;
                         const frozenOffset = isFrozen
                           ? measuredStickyLefts?.[leadingCellCount + colIndex]
                             ?? columns.slice(0, colIndex).reduce((sum, c, i) => {
@@ -4056,17 +4734,21 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             key={colIndex} 
                             className={cn(
                               col.cellClassName,
-                              col.align === 'right' && 'text-right',
+                              // Figures line up digit under digit (objectstack#35548).
+                              col.align === 'right' && 'text-right tabular-nums',
                               col.align === 'center' && 'text-center',
                               // `fitContent` cells must not clip their inline
                               // content (row-action buttons); every other column
                               // keeps overflow-hidden for truncation.
                               isFit ? 'whitespace-nowrap' : 'overflow-hidden',
-                              isEditable && !isEditing && "cursor-text hover:bg-muted/50",
-                              hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
+                              !selectFirst && isEditable && !isEditing && "cursor-text hover:bg-muted/50",
+                              // A ring that moves no layout (outline, not border).
+                              isSelectedCell && "outline-2 -outline-offset-2 outline-primary",
+                              selectFirst && !isFrozen && "relative",
+                              !autosaves && hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
-                              isFrozen && colIndex === frozenColumns - 1 && 'border-r-2 border-border shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]',
+                              isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
                             )}
                             style={{
                               width: columnWidth,
@@ -4081,7 +4763,23 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // where its column does.
                               ...(pinnedRightOffset ? { right: pinnedRightOffset } : {}),
                             }}
+                            onMouseDown={selectFirst ? (e) => {
+                              // The double-click is the edit gesture here, so its second
+                              // press does not select the word under the pointer.
+                              if (e.detail > 1 && !isEditing && !isCellWidgetTarget(e.target, e.currentTarget)) e.preventDefault();
+                            } : undefined}
                             onDoubleClick={(e) => {
+                              if (selectFirst) {
+                                // objectstack#35684 — a double-click on the cell (not on a
+                                // link it draws) edits; a two-state cell already flipped on
+                                // the second click. A touch never edits in place. A word the
+                                // browser selected on the way is not a text selection.
+                                if (isEditing || isTouchPress(e) || isCellWidgetTarget(e.target, e.currentTarget)) return;
+                                window.getSelection?.()?.removeAllRanges();
+                                e.stopPropagation();
+                                if (!togglesCell(row, col)) attemptEdit(rowIndex, colIndex);
+                                return;
+                              }
                               // Entering edit mode must NOT also fire the row's
                               // onRowClick (record-detail drawer). The row heuristic
                               // can't see the editor yet (the <input> only renders
@@ -4093,6 +4791,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               }
                             }}
                             onClick={(e) => {
+                              if (selectFirst) {
+                                // objectstack#35684 — a click SELECTS the cell; it neither
+                                // edits nor opens the record. A link or button the cell
+                                // draws keeps its own click, and a touch tap still opens
+                                // the record through the row.
+                                if (isTouchPress(e) || isCellWidgetTarget(e.target, e.currentTarget)) return;
+                                e.stopPropagation();
+                                if (isEditing) return;
+                                const wasSelected = isSelectedCell;
+                                selectCell(rowIndex, colIndex);
+                                if (wasSelected && togglesCell(row, col)) toggleCell(rowIndex, colIndex);
+                                return;
+                              }
                               if (isEditable && singleClickEdit && !hasTextSelectionIn(e.currentTarget)) {
                                 e.stopPropagation();
                                 startEdit(row, col.accessorKey);
@@ -4104,16 +4815,95 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             // `handleCellKeyDown`); every cell its own stop when
                             // it is off, exactly as before. The address and the
                             // focus tracking exist only in the first case.
-                            tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex ? 0 : -1) : 0}
+                            tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex && !isSelectedCell ? 0 : -1) : 0}
                             data-grid-cell={keyboardNavigation ? `${rowIndex}:${colIndex}` : undefined}
                             onFocus={keyboardNavigation ? () => rove(rowIndex, colIndex) : undefined}
                             aria-invalid={cellError !== undefined || undefined}
                             // objectstack#28434 — a cell in edit mode keeps the
                             // browser's context menu (`keepsBrowserContextMenu`).
                             data-editing-cell={isEditing ? '' : undefined}
+                            data-selected-cell={isSelectedCell ? '' : undefined}
+                            aria-selected={selectFirst ? isSelectedCell : undefined}
                             data-cell-error={cellError}
                             title={cellError}
                           >
+                            {isSelectedCell && !isEditing && (
+                              <input
+                                data-slot="cell-type-catcher"
+                                // The selected cell's focus (see `selectedCell`).
+                                type="text"
+                                defaultValue=""
+                                autoComplete="off"
+                                spellCheck={false}
+                                aria-label={typeof col.header === 'string' ? col.header : col.accessorKey}
+                                className={cn(
+                                  "absolute inset-0 h-full w-full min-w-0 border-0 bg-transparent px-3 py-0 text-transparent caret-transparent outline-none pointer-events-none",
+                                  // An open composition is drawn over the cell, so its
+                                  // text shows where it is typed.
+                                  composing && "z-20 bg-background text-foreground caret-current",
+                                )}
+                                onCompositionStart={() => {
+                                  composingRef.current = true;
+                                  setComposing(true);
+                                  setCellNotice(null);
+                                }}
+                                onCompositionEnd={(e) => {
+                                  composingRef.current = false;
+                                  setComposing(false);
+                                  const text = e.currentTarget.value;
+                                  e.currentTarget.value = '';
+                                  typeIntoCell(rowIndex, colIndex, text);
+                                }}
+                                onChange={(e) => {
+                                  if (composingRef.current || (e.nativeEvent as InputEvent).isComposing) return;
+                                  const text = e.currentTarget.value;
+                                  e.currentTarget.value = '';
+                                  typeIntoCell(rowIndex, colIndex, text);
+                                }}
+                                onPaste={(e) => {
+                                  const text = e.clipboardData?.getData('text/plain') ?? '';
+                                  e.preventDefault();
+                                  if (text !== '') pasteIntoCell(rowIndex, colIndex, text);
+                                }}
+                              />
+                            )}
+                            {cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex && (
+                              <CellNotice text={cellNotice.text} onDismiss={() => setCellNotice(null)} />
+                            )}
+                            {selectFirst && !isEditing && cellError !== undefined
+                              && failureNotice?.rowKey === rowKey && failureNotice?.columnKey === col.accessorKey
+                              && !(cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex) && (() => {
+                                // objectstack#35685 — the refusal, on the cell it kept.
+                                const refusal = rowRefusals.get(rowKey);
+                                const lines = refusal && cellError === refusal.lines.join(' ') ? refusal.lines : [cellError];
+                                return (
+                                  <CellSaveFailure
+                                    lines={lines}
+                                    title={t('table.saveFailed')}
+                                    openRecordLabel={t('table.openRecordToFinish')}
+                                    onOpenRecord={refusal?.needsRecord && schema.onRowClick ? (e) => schema.onRowClick?.(row, e) : undefined}
+                                    onDismiss={() => setFailureNotice(null)}
+                                  />
+                                );
+                              })()}
+                            {selectFirst && !isEditing && cellSaveStates.get(rowKey)?.[col.accessorKey] && (() => {
+                              // objectstack#35685 — the cell's own save state, drawn over its
+                              // edge so nothing moves.
+                              const state = cellSaveStates.get(rowKey)?.[col.accessorKey];
+                              return (
+                                <span
+                                  data-slot="cell-save-state"
+                                  data-state={state}
+                                  role="status"
+                                  aria-label={t(state === 'saving' ? 'table.cellSaving' : 'table.cellSaved')}
+                                  className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
+                                >
+                                  {state === 'saving'
+                                    ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                    : <Check className="h-3 w-3 text-primary" aria-hidden="true" />}
+                                </span>
+                              );
+                            })()}
                             {isEditing ? (
                               (() => {
                                 // Type-aware inline editor. `col.type` is forwarded
@@ -4177,7 +4967,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     // textarea it's left alone so Enter opens the
                                     // dropdown / inserts a newline as usual.
                                     //
-                                    // Tab is deliberately NOT in that list, and
+                                    // Outside the select-first model, Tab is
+                                    // deliberately NOT in that list, and
                                     // tabbing out therefore does not leave edit
                                     // mode — measured, `64d937c53`. It costs
                                     // nothing: the widget has already staged
@@ -4193,14 +4984,25 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                         className="w-full"
                                         onKeyDown={(e) => {
                                           if (!e.currentTarget.contains(e.target as Node)) return;
-                                          if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+                                          // The input method's keys (objectstack#35687).
+                                          if (isImeKey(e)) return;
+                                          const tag = (e.target as HTMLElement).tagName;
+                                          // The select-first model (objectstack#35687): in a
+                                          // multi-line editor Ctrl/Cmd+Enter commits, and Tab
+                                          // commits and moves, superseding the Tab-stays rule.
+                                          const commits = (e.key === 'Enter' && (tag === 'INPUT'
+                                            || (selectFirst && tag === 'TEXTAREA' && (e.ctrlKey || e.metaKey))))
+                                            || (selectFirst && e.key === 'Tab');
+                                          if (commits) {
                                             e.preventDefault();
                                             // A commit-on-blur widget stages
                                             // on this blur (objectui#12664).
                                             flushInjectedEditor();
                                             saveEdit(true);
+                                            if (selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
                                           } else if (e.key === 'Escape') {
                                             e.preventDefault();
+                                            focusSelectionRef.current = selectFirst;
                                             exitEdit(true);
                                           }
                                         }}
@@ -4346,10 +5148,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                           </TableCell>
                         );
                       })}
-                      {rowActions && (
+                      {drawRowActionsColumn && (
                         <TableCell className={cn("text-right", cellClassName)}>
                           <div className="flex items-center justify-end gap-1">
-                            {rowHasChanges && (schema.onRowSave || schema.onBatchSave) ? (
+                            {rowHasChanges && !autosaves && (schema.onRowSave || schema.onBatchSave) ? (
                               <>
                                 <Button
                                   variant="ghost"
@@ -4409,6 +5211,56 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               </>
             )}
           </TableBody>
+          {/* The summary row (objectstack#35548): the table's own last row,
+              held at the bottom of the scroll box, each figure in its
+              column's cell — so it lines up with its column at any width and
+              scrolls sideways with it; a frozen column's cell stays frozen. */}
+          {summaryRow && (
+            <tfoot className="sticky bottom-0 z-10 bg-background" data-testid="data-table-summary-row">
+              <TableRow className="border-t border-b-0 hover:bg-transparent">
+                {leadingCellCount > 0 && (
+                  <TableCell className={cn(LEADING_CELL_WIDTH, "h-8 py-0 bg-background", frozenColumns > 0 && "sticky left-0 z-20")} />
+                )}
+                {columns.map((col, colIndex) => {
+                  const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;
+                  const isPinnedRight = isPinnedRightColumn(col);
+                  const pinnedRightOffset = isPinnedRight ? measuredStickyRights?.[col.accessorKey] : undefined;
+                  const figure = summaryRow.cells[col.accessorKey];
+                  const lead = colIndex === 0 ? summaryRow.lead : undefined;
+                  return (
+                    <TableCell
+                      key={col.accessorKey}
+                      data-column-key={col.accessorKey}
+                      data-testid={figure != null ? `data-table-summary-${col.accessorKey}` : undefined}
+                      className={cn(
+                        "h-8 px-3 py-0 whitespace-nowrap text-[13px] font-medium text-muted-foreground tabular-nums bg-background",
+                        col.align === 'right' && 'text-right',
+                        col.align === 'center' && 'text-center',
+                        isFrozen && 'sticky z-20',
+                        isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
+                        isPinnedRight && 'sticky right-0 z-20',
+                      )}
+                      style={{
+                        ...(isFrozen && { left: measuredStickyLefts?.[leadingCellCount + colIndex] }),
+                        ...(pinnedRightOffset ? { right: pinnedRightOffset } : {}),
+                      }}
+                    >
+                      {lead != null && figure != null ? (
+                        <span className="flex items-center justify-between gap-3">
+                          <span data-testid="data-table-summary-lead">{lead}</span>
+                          <span>{figure}</span>
+                        </span>
+                      ) : lead != null ? (
+                        <span data-testid="data-table-summary-lead">{lead}</span>
+                      ) : figure}
+                    </TableCell>
+                  );
+                })}
+                {drawRowActionsColumn && <TableCell className="w-24 h-8 py-0 bg-background" />}
+                {addColumnEnabled && <TableCell aria-hidden className="w-10 h-8 py-0" />}
+              </TableRow>
+            </tfoot>
+          )}
         </Table>
       </div>
       {rightShadow && (

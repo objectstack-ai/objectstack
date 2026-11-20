@@ -130,6 +130,27 @@ describe('Action.texts — a key the body asks for literally is refused at save 
     expect(ActionSchema.safeParse({ ...base, body: body(source), texts: TEXTS }).success).toBe(true);
   });
 
+  // The optional-call shape is a literal ask too, read by the one key reader
+  // the hook door shares. (An action's door reads `body.source` alone: it has
+  // no handler path.)
+  const SHAPES = [
+    ['ctx.text?.(', (k: string) => `ctx.text?.('${k}')`],
+    ['await ctx.text?.(', (k: string) => `await ctx.text?.('${k}', { subject: input.subject })`],
+  ] as const;
+
+  it.each(SHAPES)('refuses an undeclared key asked for as %s at save, with the same sentence', (_shape, ask) => {
+    const r = ActionSchema.safeParse({ ...base, body: body(`const line = ${ask('email_body')};`), texts: TEXTS });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredActionTextKeyAtSave('email_body', ['email_subject']));
+  });
+
+  it.each(SHAPES)('CONTROL: a declared key asked for as %s, and a computed key in that shape, pass the save', (_shape, ask) => {
+    const computed = ask('email_subject').replace("'email_subject'", 'k');
+    const source = `${ask('email_subject')};\nconst k = pick(); ${computed};`;
+    expect(ActionSchema.safeParse({ ...base, body: body(source), texts: TEXTS }).success).toBe(true);
+  });
+
   it('CONTROL: an action that declares no texts is not read for ctx.text calls (the run-time fault names it)', () => {
     expect(ActionSchema.safeParse({ ...base, body: body("await ctx.text('anything');") }).success).toBe(true);
     expect(undeclaredActionTextAtRun('send_email', 'anything', [])).toMatch(/^action 'send_email' asked for text 'anything'.*declared: none/);

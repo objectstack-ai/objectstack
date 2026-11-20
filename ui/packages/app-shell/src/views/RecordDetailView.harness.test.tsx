@@ -1305,15 +1305,15 @@ describe('RecordDetailView.pageHeaderTitleFls-10499', () => {
       // email, and the readable name was on screen nowhere. The H1 now reads the
       // same row: it shows the name, and the hidden `name` row is its duplicate,
       // as on a backend that strips `email`. The name is in the record once, in
-      // the H1; it does not come back as a body row. The top bar's crumb
-      // 「对象 › 记录名」 (objectstack#27524) names the record with the same
-      // gated title, never the denied email.
+      // the H1; it does not come back as a body row. The H1 is the top bar's
+      // record name (objectstack#35593: one header row, 「对象 / 记录名」), with
+      // the same gated title, never the denied email.
       await renderRecordPage({ titleFormat: '{email}' }, denying('email'), 'Ada Lovelace');
       const bar = document.querySelector('[data-record-top-bar]');
-      expect(bar?.textContent).toContain('Ada Lovelace');
+      await waitFor(() => expect(bar?.querySelector('h1')?.textContent).toContain('Ada Lovelace'));
       expect(bar?.textContent).not.toContain(EMAIL);
       const text = document.body.textContent ?? '';
-      expect(text.split('Ada Lovelace').length - 1 - ((bar?.textContent ?? '').split('Ada Lovelace').length - 1)).toBe(1);
+      expect(text.split('Ada Lovelace').length - 1).toBe(1);
       expect(text).toContain('555-0100');
     });
 
@@ -1649,7 +1649,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
 
   function renderDetail(dataSource: any) {
     return render(
-      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
+      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
           <RecordDetailView
             dataSource={dataSource}
@@ -1848,12 +1848,14 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
       ...(relatedLists ? { relatedLists } : {}),
       fields: BASE_FIELDS,
     },
+    // `relatedList: true` keeps the owned child a side card here
+    // (objectstack#35597: a master_detail with no relatedList is a body table).
     {
       name: 'showcase_task',
       label: 'Task',
       pluralLabel: 'Tasks',
       managedBy: 'platform',
-      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
     },
     {
       name: 'showcase_note',
@@ -1905,10 +1907,11 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
     );
   }
 
+  // objectstack#35595 — every side list is a tab of its own, in this order.
   const cardOrder = (container: HTMLElement) =>
-    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
-      el.getAttribute('data-related-card-id'),
-    );
+    Array.from(container.querySelectorAll('[role="tab"][data-record-tab]'))
+      .map((el) => el.getAttribute('data-record-tab'))
+      .filter((id): id is string => !!id && id.includes('.'));
 
   beforeEach(() => {
     cleanup();
@@ -1932,7 +1935,7 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
     vi.restoreAllMocks();
   });
 
-  describe('RecordDetailView — the related cards follow the object\'s relatedLists (objectstack#27069)', () => {
+  describe('RecordDetailView — the related lists\' tabs follow the object\'s relatedLists (objectstack#27069, objectstack#35595)', () => {
     it('without relatedLists: the derived order — the owned child first, then the lookups in declaration order', async () => {
       const { container } = renderPage(objectsWith());
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
@@ -2041,10 +2044,11 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
     );
   }
 
+  // objectstack#35595 — every side list is a tab of its own, in this order.
   const cardOrder = (container: HTMLElement) =>
-    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
-      el.getAttribute('data-related-card-id'),
-    );
+    Array.from(container.querySelectorAll('[role="tab"][data-record-tab]'))
+      .map((el) => el.getAttribute('data-record-tab'))
+      .filter((id): id is string => !!id && id.includes('.'));
 
   beforeEach(() => {
     cleanup();
@@ -2088,24 +2092,47 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
       expect(detailsText(container)).toContain('Lines');
     });
   });
+
+  describe('RecordDetailView — the relation type decides, not inlineEdit (objectstack#35597)', () => {
+    it('a master_detail with NO inlineEdit and no relatedList is a body table: drawn in the details, no card', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+      // Drawn even with no rows (the data source answers every list empty).
+      await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      expect(container.querySelector('[data-record-column="details"] [data-body-table-empty]')).not.toBeNull();
+    });
+
+    it('relatedList: false hides it: neither a body table nor a card', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: false }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+      await waitFor(() => expect(detailsText(container)).toContain('Lines'), { timeout: 5000 });
+      expect(detailsText(container)).not.toContain('Tasks');
+    });
+
+    it('relatedList: true keeps it a side card', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_task.quote', 'showcase_note.quote']);
+      expect(detailsText(container)).not.toContain('Tasks');
+    });
+  });
 });
 
 // ── RecordDetailView.relatedCountsFirst-27056 ───────────────────────────────
 
 /**
- * objectstack#27056 — the record page's related panels load counts first,
- * then the first rows of only the cards in view, and never blocks the details.
- *
- * The REAL page, at a desktop width (the column tiers), over a data source
- * that holds every related read until the test answers it. The record has six
- * related lists. Measured:
+ * objectstack#27056, as objectstack#35595/#35596 lay the page out — the related
+ * lists load counts first and never block the details. Every list is a tab;
+ * the 概览 tab's right rail lists, under 「其他相关」, the lists that have
+ * records, with their first three rows. Measured:
  *
  *  - the details draw from the record read alone, while every related read is
- *    still out, and the right column shows one placeholder per card;
+ *    still out, with every list's tab drawn (no number yet) and no rail card;
  *  - the six counts go out as ONE request set, before any of them answers;
- *  - once they answer, rows are read for the two counted cards in view only,
- *    three rows each — never for a card counted at 0 (in view too), never for
- *    the cards below the fold.
+ *  - once they answer, rows are read for the lists counted above 0 only, three
+ *    rows each — never for a list counted at 0.
  */
 
 describe('RecordDetailView.relatedCountsFirst-27056', () => {
@@ -2234,7 +2261,6 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
   }
 
   const isCount = (r: HeldRead) => r.query.$count === true && r.query.$skip === undefined;
-  const isRows = (r: HeldRead) => r.query.$skip !== undefined;
   const column = (container: HTMLElement, name: string) =>
     container.querySelector(`[data-record-column="${name}"]`) as HTMLElement | null;
 
@@ -2262,8 +2288,12 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
     vi.restoreAllMocks();
   });
 
-  describe('RecordDetailView — the related column loads counts first (objectstack#27056)', () => {
-    it('draws the details before any related read answers, with one placeholder per card', async () => {
+  describe('RecordDetailView — the related lists load counts first (objectstack#27056, objectstack#35596)', () => {
+    const tabIds = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll('[role="tab"][data-record-tab]')).map((el) => el.getAttribute('data-record-tab'));
+    const isRowRead = (r: HeldRead) => r.query.$count !== true;
+
+    it('draws the details and every list\'s tab before any related read answers', async () => {
       const { container } = renderPage();
       await idle();
       expect(reads.length).toBeGreaterThan(0);
@@ -2273,46 +2303,47 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
       expect(container.textContent).toContain('Acme');
       expect(container.textContent).toContain('Retail');
       expect(column(container, 'details')?.textContent).toContain(RECORD_ID);
-      const related = column(container, 'right')!;
-      expect(related.querySelectorAll('[data-related-card-pending]')).toHaveLength(CHILDREN.length);
-      expect(related.querySelector('[data-related-card-row]')).toBeNull();
+      // Every list has its tab already, with no number yet.
+      expect(tabIds(container).filter((id) => id?.includes('.'))).toEqual(CHILDREN.map((c) => `${c}.account`));
+      for (const c of CHILDREN) {
+        expect(container.querySelector(`[data-record-tab="${c}.account"] [data-record-tab-count]`)).toBeNull();
+      }
+      // No rail card for a list before its count says it has records.
+      expect(container.querySelector('[data-record-summary-other]')).toBeNull();
     });
 
-    it('asks the six counts as one request set, then the rows of the two counted cards in view only', async () => {
+    it('asks the six counts as one request set, then three rows of each list counted above 0 only', async () => {
       const { container } = renderPage();
       await idle();
       // One request set: every list's count, all out before any answered, and
       // nothing else of theirs.
       expect(reads.filter(isCount).map((r) => r.object).sort()).toEqual([...CHILDREN].sort());
-      expect(reads.filter(isRows)).toEqual([]);
+      expect(reads.filter(isRowRead)).toEqual([]);
       expect(reads.filter(isCount).every((r) => r.query.$top === 1)).toBe(true);
 
       await act(async () => {
         for (const r of reads.filter((read) => !read.answered)) r.answer();
       });
       await idle();
-      const rowReads = reads.filter(isRows);
-      // The counted cards in view: the first and the third. The second is in
-      // view but counted at 0; the last three are below the fold.
-      expect(rowReads.map((r) => r.object).sort()).toEqual([C1, C3].sort());
-      for (const r of rowReads) {
-        expect(r.query.$top).toBe(3);
-        expect(r.query.$select).toEqual(['id', 'name', 'status']);
-      }
-      // Two round trips in all: the counts, then the rows.
-      expect(reads).toHaveLength(CHILDREN.length + 2);
+      const rowReads = reads.filter(isRowRead);
+      // Every list counted above 0; never the second, counted at 0.
+      const withRecords = CHILDREN.filter((c) => TOTALS[c] > 0);
+      expect(rowReads.map((r) => r.object).sort()).toEqual([...withRecords].sort());
+      for (const r of rowReads) expect(r.query.$top).toBe(3);
+      expect(reads.some((r) => r.object === C2 && isRowRead(r))).toBe(false);
 
       await act(async () => {
         for (const r of reads.filter((read) => !read.answered)) r.answer();
       });
       await idle();
-      const related = column(container, 'right')!;
-      expect(related.querySelector(`[data-related-card-id="${C1}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(3);
-      expect(related.querySelector(`[data-related-card-id="${C3}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(2);
-      expect(related.querySelector('[data-related-card-pending]')).toBeNull();
-      // Still nothing for the empty card, nor for the cards out of view.
-      expect(reads.filter(isRows).map((r) => r.object).sort()).toEqual([C1, C3].sort());
-      expect(reads.some((r) => r.object === C2 && isRows(r))).toBe(false);
+      const rail = column(container, 'right')!;
+      const rowsOf = (c: string) =>
+        rail.querySelector(`[data-record-summary-card="${c}.account"]`)?.querySelectorAll('[data-record-summary-row]') ?? [];
+      expect(rowsOf(C1)).toHaveLength(3);
+      expect(rowsOf(C3)).toHaveLength(2);
+      // CONTROL: the list counted at 0 has no rail card at all, but keeps its tab.
+      expect(rail.querySelector(`[data-record-summary-card="${C2}.account"]`)).toBeNull();
+      expect(container.querySelector(`[data-record-tab="${C2}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(true);
     });
   });
 });
@@ -2379,7 +2410,9 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
       label: 'Task',
       pluralLabel: 'Tasks',
       managedBy: 'platform',
-      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+      // `relatedList: true` keeps it a side list with a tab: a plain
+      // master_detail FK is an overview body table since objectstack#35597.
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
     },
     {
       name: 'showcase_note',
@@ -2809,5 +2842,352 @@ describe('RecordDetailView.objectRouteAbsence-34740', () => {
     expect(withheld).toContain(sentence(lang, WITHHELD));
     expect(missing).toContain(sentence(lang, MISSING));
     expect(withheld.replaceAll(WITHHELD, 'NAME')).toBe(missing.replaceAll(MISSING, 'NAME'));
+  });
+});
+
+// ── RecordDetailView.recordEditState-35599 ──────────────────────────────────
+
+/**
+ * objectstack#35599 — the record page's EDIT STATE, on a page that draws
+ * master-detail body tables: Edit turns the fields into inputs and the body
+ * tables into editable lines, the header shows Cancel / Save, and ONE Save
+ * writes the record and every table in one `batchTransaction` (one
+ * `POST /api/v1/batch`). A refused batch keeps every edit and places the
+ * reason on the line it is about; Cancel puts everything back.
+ *
+ * Also pinned: ruling B (「全部保留」, recorded on the card) — inline edit stays
+ * on a page with body tables and saves the record alone through the save bar;
+ * the two modes run one at a time (the edit state offers no inline edit, and
+ * Edit over unsaved inline changes asks to discard them first, CONTROL: no
+ * changes, no question); ruling A's client half — a record an approval locks
+ * draws no New on its master-detail body table (CONTROL: the same page
+ * unlocked does); item 5 — a child without `bulk` keeps its table read-only
+ * in the edit state, with a notice saying why.
+ *
+ * Fixtures: the `bodyTablePredicate-27478` harness at 1440 px.
+ */
+describe('RecordDetailView.recordEditState-35599', () => {
+  restoreAfterBlock();
+
+  const PARENT = 'showcase_quote';
+  const RECORD_ID = 'q-1';
+  const fk = { type: 'master_detail', reference: PARENT, label: 'Quote' };
+
+  const objectsWith = ({ lineEnable }: { lineEnable?: Record<string, unknown> } = {}) => [
+    {
+      name: PARENT,
+      label: 'Quote',
+      pluralLabel: 'Quotes',
+      fields: { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' }, summary: { type: 'text', label: 'Summary' } },
+    },
+    {
+      name: 'showcase_line',
+      label: 'Line',
+      pluralLabel: 'Lines',
+      ...(lineEnable ? { enable: lineEnable } : {}),
+      fields: { id: { type: 'text', label: 'Id' }, product: { type: 'text', label: 'Product' }, quantity: { type: 'number', label: 'Quantity' }, quote: fk },
+    },
+    {
+      name: 'showcase_task',
+      label: 'Task',
+      pluralLabel: 'Tasks',
+      fields: { id: { type: 'text', label: 'Id' }, subject: { type: 'text', label: 'Subject' }, quote: fk },
+    },
+    {
+      name: 'showcase_note',
+      label: 'Note',
+      pluralLabel: 'Notes',
+      fields: { id: { type: 'text', label: 'Id' }, body: { type: 'text', label: 'Body' }, quote: { type: 'lookup', reference: PARENT, label: 'Quote' } },
+    },
+  ];
+
+  const ROWS: Record<string, Array<Record<string, unknown>>> = {
+    showcase_line: [
+      { id: 'l1', product: 'Anvil', quantity: 1, quote: RECORD_ID },
+      { id: 'l2', product: 'Bolt', quantity: 2, quote: RECORD_ID },
+    ],
+    showcase_task: [{ id: 't1', subject: 'Call', quote: RECORD_ID }],
+  };
+
+  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean } = {}) {
+    const metadata = {
+      objects, pages: [], loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
+    } as never;
+    const dataSource = {
+      find: vi.fn(async (o: string) => {
+        const data = opts.emptyTables ? [] : (ROWS[o] ?? []).map((r) => ({ ...r }));
+        return { data, total: data.length };
+      }),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      findOne: vi.fn(async (_o: string, recordId: string) => ({ id: recordId, name: `Quote ${recordId}`, summary: 'First' })),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: vi.fn(async (o: string) => objects.find((d) => d.name === o) ?? null),
+      batchTransaction: vi.fn(async (ops: unknown[]) => ({ results: ops.map(() => ({})) })),
+    };
+    const onEdit = vi.fn();
+    const view = render(
+      <MemoryRouter initialEntries={[`/apps/demo/${PARENT}/record/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <NavigationProvider>
+            <Routes>
+              {/* The app route: the related-record bridge offers New only under an app. */}
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={<RecordDetailView dataSource={dataSource as never} objects={objects} onEdit={onEdit} />}
+              />
+            </Routes>
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ...view, dataSource, onEdit };
+  }
+
+  const jsonResponse = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+  /** `locked`: the approvals read answers a pending `lock_record` request (the `approvalLock-25934` shape). */
+  function stubApi({ locked = false }: { locked?: boolean } = {}) {
+    const request = {
+      id: 'req-1', process_name: 'flow:quote_review', object_name: PARENT, record_id: RECORD_ID,
+      status: 'pending', submitter_id: 'u_submitter', current_step: 'manager_review',
+      pending_approvers: ['u_manager'], lock_record: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (locked && u.includes('/approvals/requests?object=')) return jsonResponse(200, { data: [request] });
+      if (locked && u.endsWith('/approvals/requests/req-1')) return jsonResponse(200, request);
+      return jsonResponse(200, { data: [] });
+    }));
+  }
+
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    RelatedCountStore._reset();
+    stubApi();
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: 1440, bottom: 800, width: 1440, height: 800, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const headerButton = (label: string) =>
+    (Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === label) as HTMLButtonElement | undefined) ?? null;
+  const pencils = (container: HTMLElement) => container.querySelectorAll('button[aria-label="Double-click to edit"]').length;
+  const editor = (container: HTMLElement, id: string) => container.querySelector(`[data-body-table-editor="${id}"]`) as HTMLElement | null;
+  const cells = (scope: HTMLElement, label: string) => Array.from(scope.querySelectorAll(`input[aria-label="${label}"]`)) as HTMLInputElement[];
+  const summaryInput = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).find((i) => i.value === 'First') ?? null;
+
+  async function enterEditState(view: ReturnType<typeof renderPage>) {
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_line.quote')!, 'Product').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_task.quote')!, 'Subject').length).toBeGreaterThanOrEqual(1), { timeout: 5000 });
+  }
+
+  /** Edit the record and both tables: one changed line, one new line, one removed line, one changed task. */
+  function editEverything(container: HTMLElement) {
+    fireEvent.change(summaryInput(container)!, { target: { value: 'Second' } });
+    const lines = editor(container, 'showcase_line.quote')!;
+    fireEvent.change(cells(lines, 'Quantity')[0], { target: { value: '5' } });
+    fireEvent.click(lines.querySelectorAll('button[aria-label="Remove row"]')[1] as HTMLElement);
+    const products = cells(lines, 'Product');
+    fireEvent.change(products[products.length - 1], { target: { value: 'Crate' } });
+    const tasks = editor(container, 'showcase_task.quote')!;
+    fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
+  }
+
+  /** The pencil of the Summary field (the inline-edit entry), on the details column. */
+  const summaryPencil = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Double-click to edit"]')) as HTMLElement[])
+      .find((b) => (b.closest('.group')?.textContent ?? '').includes('Summary')) ?? null;
+  const saveBar = () => document.querySelector('[role="region"][aria-label="Edit fields"]') as HTMLElement | null;
+  const detailInputValues = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).map((i) => i.value);
+
+  it('ruling B (「全部保留」): a page drawing body tables keeps inline edit, which saves the record alone through the save bar; the edit state offers none', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    // Inline edit is the field alone: the body tables stay tables, no editor.
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Inline' } });
+    const barSave = Array.from(saveBar()!.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Save')!;
+    await act(async () => { fireEvent.click(barSave); });
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0].slice(0, 3)).toEqual([PARENT, RECORD_ID, { summary: 'Inline' }]);
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+    // The edit state: Edit opens it (not the record form), and there inline edit is not offered.
+    await waitFor(() => expect(saveBar()).toBeNull(), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    expect(view.onEdit).not.toHaveBeenCalled();
+    expect(pencils(view.container)).toBe(0);
+    expect(saveBar()).toBeNull();
+    expect(headerButton('Save')).not.toBeNull();
+    expect(headerButton('Cancel')).not.toBeNull();
+    expect(headerButton('Edit')).toBeNull();
+  });
+
+  it('one mode at a time: Edit with unsaved inline changes asks first — Keep editing stays inline, Discard enters the edit state with the stored values', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Inline' } });
+    expect(headerButton('Edit')?.disabled).toBe(false);
+    // The question is the page's own dialog, never the browser's.
+    const nativeConfirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', nativeConfirm);
+    fireEvent.click(headerButton('Edit')!);
+    const dialog = await waitFor(() => {
+      const el = document.querySelector('[data-record-edit-discard-inline]') as HTMLElement | null;
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(dialog.textContent).toContain('Discard changes?');
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    // Keep editing: the dialog closes, the inline draft stays, no edit state.
+    fireEvent.click(Array.from(dialog.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Keep editing')!);
+    await waitFor(() => expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    expect(detailInputValues(view.container)).toContain('Inline');
+    // Discard: the draft goes, the edit state opens over the stored record.
+    fireEvent.click(headerButton('Edit')!);
+    const again = await waitFor(() => {
+      const el = document.querySelector('[data-record-edit-discard-inline]') as HTMLElement | null;
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.click(Array.from(again.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Discard')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    expect(detailInputValues(view.container)).not.toContain('Inline');
+    expect(headerButton('Save')).not.toBeNull();
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(view.dataSource.update).not.toHaveBeenCalled();
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — an inline session with no changes is simply ended: Edit enters the edit state without asking', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull();
+  });
+
+  it('one Save sends ONE batch carrying the record and both body tables', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update).not.toHaveBeenCalled();
+    expect(view.dataSource.create).not.toHaveBeenCalled();
+    expect(view.dataSource.delete).not.toHaveBeenCalled();
+    const ops = view.dataSource.batchTransaction.mock.calls[0][0] as Array<Record<string, any>>;
+    expect(ops[0]).toEqual({ object: PARENT, action: 'update', id: RECORD_ID, data: { summary: 'Second' } });
+    const rest = ops.slice(1).map((o) => [o.object, o.action, o.id ?? null]);
+    expect(rest).toEqual(expect.arrayContaining([
+      ['showcase_line', 'create', null],
+      ['showcase_line', 'update', 'l1'],
+      ['showcase_line', 'delete', 'l2'],
+      ['showcase_task', 'update', 't1'],
+    ]));
+    expect(rest).toHaveLength(4);
+    expect(ops.find((o) => o.action === 'create')?.data).toMatchObject({ product: 'Crate', quote: RECORD_ID });
+    expect(ops.find((o) => o.id === 'l1')?.data).toEqual({ quantity: 5 });
+    expect(ops.find((o) => o.id === 't1')?.data).toEqual({ subject: 'Visit' });
+    // Saved: the page leaves its edit state.
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+  });
+
+  it('a refused batch keeps every edit and places the reason on its line; Cancel then restores', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    view.dataSource.batchTransaction.mockRejectedValueOnce(
+      Object.assign(new Error('Validation failed'), {
+        details: { error: 'Validation failed', fields: [{ field: 'product', message: 'Unknown product' }] },
+      }),
+    );
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.container.querySelector('[data-body-table-row-error]')).not.toBeNull(), { timeout: 5000 });
+    expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1);
+    const lines = editor(view.container, 'showcase_line.quote')!;
+    const rowError = lines.querySelector('[data-body-table-row-error]')!;
+    // The new line is the second line drawn (the removed one is gone).
+    expect(rowError.getAttribute('data-body-table-row-error')).toBe('1');
+    expect(rowError.textContent).toContain('Unknown product');
+    expect(view.container.querySelector('[data-record-edit-error]')?.textContent).toBe('Validation failed');
+    // Every edit is still there, still in the edit state.
+    expect(summaryInput(view.container)).toBeNull();
+    expect((Array.from(view.container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).some((i) => i.value === 'Second')).toBe(true);
+    expect(cells(lines, 'Quantity')[0].value).toBe('5');
+    expect(cells(lines, 'Product').map((i) => i.value)).toContain('Crate');
+    expect(headerButton('Save')).not.toBeNull();
+
+    fireEvent.click(headerButton('Cancel')!);
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1);
+    // Back in: the lines and the record read as stored, not as edited.
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_line.quote') ?? document.body, 'Product').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+    const again = editor(view.container, 'showcase_line.quote')!;
+    expect(cells(again, 'Quantity')[0].value).toBe('1');
+    expect(cells(again, 'Product').map((i) => i.value)).toEqual(expect.arrayContaining(['Anvil', 'Bolt']));
+    expect(cells(again, 'Product').map((i) => i.value)).not.toContain('Crate');
+    expect(summaryInput(view.container)).not.toBeNull();
+  });
+
+  it('item 5: a child without bulk keeps its table read-only in the edit state, with the notice', async () => {
+    const view = renderPage(objectsWith({ lineEnable: { apiMethods: ['get', 'list', 'create', 'update', 'delete'] } }));
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(view.container.querySelector('[data-record-edit-tables-read-only]')).not.toBeNull(), { timeout: 5000 });
+    expect(view.container.querySelector('[data-body-table-editor]')).toBeNull();
+    // The record's own fields still edit and save, through the plain update.
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0]).toEqual([PARENT, RECORD_ID, { summary: 'Second' }]);
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+  });
+
+  it('ruling A client half: a locked record\'s body table draws no New; the same page unlocked does (CONTROL)', async () => {
+    const control = renderPage(objectsWith(), { emptyTables: true });
+    await waitFor(() => expect(control.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(2), { timeout: 5000 });
+    cleanup();
+    stubApi({ locked: true });
+    const view = renderPage(objectsWith(), { emptyTables: true });
+    await waitFor(() => expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-row]').length).toBe(2), { timeout: 5000 });
+    // The lock has been read (no Edit is drawn on a locked record) before the absence is read.
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).toBeNull(), { timeout: 5000 });
+    expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(0);
   });
 });

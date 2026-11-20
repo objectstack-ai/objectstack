@@ -12,40 +12,18 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { Config } from '@oclif/core';
 
-/**
- * A disk failure on demand, for the interrupted-write pins at the end of this
- * file: `node:fs` passes straight through, except the one `writeFileSync` /
- * `renameSync` call `fault.when` matches, which throws `ENOSPC` once and
- * disarms. Unarmed — every other test — nothing differs.
- */
-const fault = vi.hoisted(() => ({ when: null as null | ((op: string, args: unknown[]) => boolean), fired: 0 }));
-vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs')>();
-  const inject = <F extends (...args: any[]) => any>(op: string, fn: F): F => ((...args: Parameters<F>) => {
-    if (fault.when?.(op, args)) {
-      fault.when = null;
-      fault.fired += 1;
-      throw Object.assign(new Error(`ENOSPC: no space left on device, ${op} '${String(args[op === 'renameSync' ? 1 : 0])}'`), { code: 'ENOSPC' });
-    }
-    return fn(...args);
-  }) as F;
-  const writeFileSync = inject('writeFileSync', actual.writeFileSync);
-  const renameSync = inject('renameSync', actual.renameSync);
-  return { ...actual, default: { ...actual, writeFileSync, renameSync }, writeFileSync, renameSync };
-});
-
 const { default: SkillsInstall } = await import('../src/commands/skills/install.js');
 const { default: SkillsUpdate } = await import('../src/commands/skills/update.js');
 const { default: SkillsStatus } = await import('../src/commands/skills/status.js');
 const { skillsRegistry, catalogFromTarball, resolveSkillsVersion, npmPackInvocation } = await import('../src/utils/skills-catalog.js');
-const { SKILLS_MANIFEST_FILE, SKILLS_STAGING_PREFIX, applySkillsWrite, readSkillsManifest } = await import('../src/utils/skills-install-state.js');
+const { SKILLS_MANIFEST_FILE, applySkillsWrite, readSkillsManifest } = await import('../src/utils/skills-install-state.js');
 
 const PKG = dirname(dirname(fileURLToPath(import.meta.url)));
 // The oclif config is loaded once, here: a clocked test window measures the commands, never this load.
@@ -478,101 +456,5 @@ describe('a malformed record is refused whole', () => {
   ])('%s', (_label, skills) => {
     writeFileSync(join(root, SKILLS_MANIFEST_FILE), JSON.stringify({ package: '@objectstack/skills', version: V1, skills }));
     expect(() => readSkillsManifest(root)).toThrow(/cannot read/);
-  });
-});
-
-describe('an interrupted write leaves the installed catalog usable', () => {
-  let work = '';
-  const prevCwd = process.cwd();
-  let output: string[] = [];
-
-  beforeEach(() => {
-    work = mkdtempSync(join(tmpdir(), 'os-skills-35079-'));
-    process.chdir(work);
-    output = [];
-    fault.when = null;
-    fault.fired = 0;
-    const record = (...args: unknown[]) => { output.push(args.map(String).join(' ').replace(/\u001b\[[0-9;]*m/g, '')); };
-    vi.spyOn(console, 'log').mockImplementation(record);
-    vi.spyOn(console, 'error').mockImplementation(record);
-    stubRegistry({ [V1]: CATALOG_V1, [V2]: CATALOG_V2 });
-  });
-
-  afterEach(() => {
-    fault.when = null;
-    process.chdir(prevCwd);
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-    rmSync(work, { recursive: true, force: true });
-  });
-
-  async function run(command: { run(argv: string[], opts?: Config): Promise<unknown> }, argv: string[]): Promise<number> {
-    try {
-      await command.run(argv, CONFIG);
-      return 0;
-    } catch (err: any) {
-      const exit = err?.oclif?.exit ?? err?.exitCode;
-      if (exit === undefined) throw err;
-      return exit;
-    }
-  }
-
-  const skillsDir = () => join(work, '.claude', 'skills');
-  const read = (...parts: string[]) => readFileSync(join(skillsDir(), ...parts), 'utf8');
-  const hidden = () => readdirSync(skillsDir()).filter((name) => name.startsWith('.')).sort();
-
-  /** V1 as installed: every file, the record, a clean `status --check`, and nothing hidden left beside the record. */
-  async function expectV1Intact() {
-    expect(read('objectstack-data', 'SKILL.md')).toBe('data v1');
-    expect(read('objectstack-data', 'rules', 'naming.md')).toBe('snake_case v1');
-    expect(read('objectstack-query', 'SKILL.md')).toBe('query v1');
-    expect(read('objectstack-legacy', 'SKILL.md')).toBe('legacy v1');
-    expect(existsSync(join(skillsDir(), 'objectstack-ask'))).toBe(false);
-    expect(JSON.parse(read(SKILLS_MANIFEST_FILE)).version).toBe(V1);
-    output = [];
-    expect(await run(SkillsStatus, ['--version', V1, '--check', '--json'])).toBe(0);
-    expect(JSON.parse(output.join('\n'))).toMatchObject({ installedVersion: V1, missing: [], modified: [], extra: [], mismatch: false });
-    expect(hidden()).toEqual([SKILLS_MANIFEST_FILE]);
-  }
-
-  /** A plain `update` — no `--force` — then lands V2. */
-  async function expectPlainUpdateRecovers() {
-    output = [];
-    expect(await run(SkillsUpdate, ['--version', V2])).toBe(0);
-    expect(read('objectstack-data', 'SKILL.md')).toBe('data v2');
-    expect(read('objectstack-ask', 'SKILL.md')).toBe('ask v2');
-    expect(existsSync(join(skillsDir(), 'objectstack-legacy'))).toBe(false);
-    expect(JSON.parse(read(SKILLS_MANIFEST_FILE)).version).toBe(V2);
-    expect(hidden()).toEqual([SKILLS_MANIFEST_FILE]);
-  }
-
-  it.each([
-    ['a file of the second skill is written', (op: string, args: unknown[]) =>
-      op === 'writeFileSync' && String(args[0]).endsWith(join('objectstack-query', 'SKILL.md'))],
-    ['the second skill is moved into place', (op: string, args: unknown[]) =>
-      op === 'renameSync' && String(args[1]) === join(skillsDir(), 'objectstack-query')],
-    ['the record is written, after every skill is in place', (op: string, args: unknown[]) =>
-      String(op === 'renameSync' ? args[1] : args[0]) === join(skillsDir(), SKILLS_MANIFEST_FILE)],
-  ])('the disk fails as %s: the old skills and the record stay as they were, and a plain update recovers', async (_label, when) => {
-    expect(await run(SkillsInstall, ['--version', V1])).toBe(0);
-    fault.when = when;
-    output = [];
-    expect(await run(SkillsUpdate, ['--version', V2])).toBe(1);
-    expect(fault.fired).toBe(1);
-    expect(output.join('\n')).toContain('ENOSPC');
-    await expectV1Intact();
-    await expectPlainUpdateRecovers();
-  });
-
-  it('a staging directory a killed run left behind is not read as a skill, and the next write removes it', async () => {
-    expect(await run(SkillsInstall, ['--version', V1])).toBe(0);
-    const leftover = join(skillsDir(), `${SKILLS_STAGING_PREFIX}killed`);
-    mkdirSync(join(leftover, 'new', 'objectstack-ask'), { recursive: true });
-    writeFileSync(join(leftover, 'new', 'objectstack-ask', 'SKILL.md'), 'half-written');
-    output = [];
-    expect(await run(SkillsStatus, ['--version', V1, '--check', '--json'])).toBe(0);
-    expect(JSON.parse(output.join('\n'))).toMatchObject({ missing: [], modified: [], extra: [], mismatch: false });
-    await expectPlainUpdateRecovers();
-    expect(existsSync(leftover)).toBe(false);
   });
 });

@@ -58,6 +58,19 @@ export * from './readable-ids';
 // [ADR-0139 D3] Canonical conformance cases for the composed `ReadableIds` leaf
 // — the per-driver case-set a driver compiles (measured) or refuses (recorded).
 export * from './readable-ids-conformance';
+// [ADR-0155 D1] `SharedRecordIds` — the branded comparand value meaning "the
+// ids of object X's records that sys_record_share grants to user U", every
+// level (the read form) or the levels it names (the write form). Its own brand
+// on ADR-0139 D1's device; no operator, so no request can spell it. Nothing
+// writes it until plugin-sharing's switch (ADR-0155 plan step 6).
+export * from './shared-record-ids';
+// [ADR-0155 D4] What `SharedRecordIds` shares with ADR-0147's leaf, built once in
+// the two-leaf shape: the fixed inner read's description, and the brand
+// dispatch the comparand door's `admitFixedReadLeaves` option reads.
+export * from './fixed-read-leaf';
+// [ADR-0155 D4] One conformance case-set for the fixed-read leaves, a set of
+// cases per leaf: what an evaluator answers, and what the engine seam admits.
+export * from './fixed-read-leaf-conformance';
 // [#8371] The FILTER axis' dotted-path verdict — ONE head-type classification
 // consumed by both doors (metadata-protocol's ingress gate and objectql's
 // engine seam), so the two cannot drift into answering one spelling two ways.
@@ -173,6 +186,13 @@ export * from './date-macros.zod';
 // rule (#8690 C half). `ui/dashboard.zod.ts` re-exports the vocabulary.
 export * from './date-range-presets';
 export * from './calendar-day';
+// [ADR-0157 D11, open point 3] The wall-clock → instant primitive (the one
+// daylight-saving rule), below `@objectstack/formula` so the working-calendar
+// arithmetic there and every other reader convert through one rule;
+// `@objectstack/core` re-exports it. Beside it, the working calendar's codes,
+// column names and resolved-calendar types (the arithmetic is formula's).
+export * from './wall-clock';
+export * from './work-calendar';
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
 // FilterCondition` lowering the seams run once, after the comparand doors and
 // after filter-token resolution: the `$between` split, the whole-day upper
@@ -213,6 +233,11 @@ export * from './field-customization';
 // home currency's CLDR fraction digits with it, from this one table rather
 // than a second copy or a runtime `Intl` probe.
 export * from './currency-fraction-digits';
+// [ADR-0158 U1, U2; Open item 1] The standard unit table: the closed set of
+// UN/ECE Recommendation 20 codes with each one's dimension and its ratio to the
+// dimension's base unit, kept apart from the value-domain vocabulary the way
+// the CLDR digits table is, and the organization unit code namespace (U3).
+export * from './standard-units';
 // The credential read mask (ADR-0100) — the ONE string a masked read serves, in
 // place of the two byte-identical literals objectql and service-settings each
 // declared until #7572. Both now import this one, so the mask a console sees on
@@ -413,6 +438,13 @@ export * from './record-surface';
 // `applySystemFields` and by author-time tooling that must resolve a reference
 // to one but cannot load a runtime.
 export * from './injected-system-columns';
+
+// [ruling 7000907189 point 1] Which objects offer the Change Owner action: the
+// structural test (`isTransferEligible`) and the switch `userActions.transfer`
+// resolved onto its sharingModel default (`resolveUserActionTransfer`) — the one
+// answer the server's Change Owner endpoint (#35402) and the console's action
+// (#35403) will read; neither exists yet.
+export * from './user-action-transfer';
 
 // injected-system-column DEFINITIONS + the #7865 provenance marker (#8116) —
 // WHAT each injected column looks like, and whether storage actually backs it

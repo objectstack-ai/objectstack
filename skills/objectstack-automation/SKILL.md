@@ -1,14 +1,12 @@
 ---
 name: objectstack-automation
 description: >
-  Design ObjectStack automation — Flows (visual logic), Triggers, Approvals,
-  state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`)
-  stack collections. Use when the user is adding `*.flow.ts`, wiring an
-  event-driven rule, modelling an approval chain, or building an interactive
-  screen flow / wizard (objectstack-ui routes those here). Do not use for data
-  lifecycle hooks at the object layer (see objectstack-data) or for kernel
-  / plugin events (see objectstack-platform). CEL expressions in flow
-  conditions / edge guards: load objectstack-formula alongside.
+  Automate an ObjectStack app, in a project or through MCP: act when a record is
+  created or changes, on a schedule or from a webhook; approvals, notifications,
+  assignment rules, and screen flows / wizards that branch between steps. Use
+  when the request is "when X happens, do Y" or you are editing `*.flow.ts`. Not
+  for validation rules or record hooks on an object (objectstack-data), or
+  kernel / plugin events (objectstack-platform).
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
@@ -42,6 +40,8 @@ Also vendor-integration callbacks and **assignment rules**.
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative` |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
 | `api` | Inbound **webhook** (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
+
+**A stepped form over one object that never branches** is no flow: an **objectstack-ui** form view, `type: 'wizard'`.
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring

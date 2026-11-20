@@ -35,6 +35,18 @@ import { hasCellValue } from './emptiness';
 import { useDefaultRecordPage } from './defaultRecordPage';
 import { dropFieldPredicateHidden, lazyPredicateRecord } from './fieldPredicateVisibility';
 
+/**
+ * The field type a `formula` reads as, when its declared `returnType` is one
+ * the spec reads AS a field type: `currency` ("an amount of money … as a
+ * currency field declares it") and `percent` ("read and displayed as a
+ * `percent` field reads its stored value"). `undefined` for any other field
+ * or return type.
+ */
+function formulaReadsAsFieldType(type: string | undefined, returnType: unknown): 'currency' | 'percent' | undefined {
+  if (type !== 'formula') return undefined;
+  return returnType === 'currency' || returnType === 'percent' ? returnType : undefined;
+}
+
 export interface HeaderHighlightProps {
   fields: HighlightField[];
   data?: any;
@@ -256,12 +268,17 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // coerceToSafeValue() so even object/array data is safe (no error #310).
             const CellRenderer = getCellRenderer(drawnType);
 
+            // A `formula` declaring a return type the spec reads AS a field
+            // type (`currency`, `percent`) is a figure of that type, drawn by
+            // that type's cell, so it is a KPI chip as that field is. Every
+            // other formula keeps its own type here.
+            const valueType = formulaReadsAsFieldType(resolvedType, objectDefField?.returnType) ?? resolvedType;
             const isKpi =
-              resolvedType === 'number' ||
-              resolvedType === 'integer' ||
-              resolvedType === 'currency' ||
-              resolvedType === 'percent' ||
-              resolvedType === 'decimal';
+              valueType === 'number' ||
+              valueType === 'integer' ||
+              valueType === 'currency' ||
+              valueType === 'percent' ||
+              valueType === 'decimal';
             // Two independent reasons a chip needs the wide basis, kept
             // separate because only one of them is a shared table:
             //  1. long-text DISPLAY types, whose value simply does not fit a

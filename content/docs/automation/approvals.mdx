@@ -486,7 +486,11 @@ deployment declares in `OS_PLATFORM_OWNER_EMAIL`. It takes no `value` and no
 - **Nobody is told.** The slot names no person, so opening the request sends
   no notification, and the slot grants no read of the record. The request does
   not count as an empty slate, so `onEmptyApprovers` never replaces it with
-  the organization's administrators.
+  the organization's administrators. On a deployment where no one holds
+  platform-administrator standing, no one can take the slot and the request
+  waits with no warning, so give someone that standing before a package whose
+  flow uses this type goes live. The request lists the slot as *Platform
+  administrators*, in the reader's language on the approvals door.
 - **Only the deployment's own packaged flows may use it.** The approval node
   opens on this type only when the flow body it runs ships in a package the
   deployment registers in code (registry `source: 'code'`). The origin is
@@ -580,8 +584,12 @@ and an administrator can reassign it to them.
 To name the person who should decide instead, declare
 `onEmptyApprovers: 'fallback'` with `fallbackApprovers`. Only an organization
 with no administrator, or a request with no organization, still opens on the
-slate that names no one: the server logs a warning, no one is told, and only the
-admin override decides it.
+slate that names no one, and so does a request whose organization's only
+administrator is its submitter on a step that sets `excludeSubmitter`. The
+server logs a warning, and the request's timeline and a notice to its submitter
+say that no one else can approve it yet and that an organization administrator
+must add a member who can (one who holds the unstaffed position, when the slate
+names one). Only the admin override decides it, and never its submitter's own.
 
 ### The approver finds it in their queue
 
@@ -763,7 +771,8 @@ curl -b cookies.txt -X POST \
   https://your-app.example.com/api/v1/approvals/requests/req_456/approve \
   -H "Content-Type: application/json" \
   -d '{ "comment": "Within budget." }'
-# POST .../reject for the other direction; body: { actorId?, comment? }
+# POST .../reject for the other direction; body: { actorId?, comment }
+# a reject's comment is its reason: required, a non-blank string
 ```
 
 `actorId` defaults to the caller, who takes the first slot in
@@ -860,7 +869,7 @@ continuity levers on the same request. All are `POST
 
 | Verb | Route | Who | Effect |
 |:---|:---|:---|:---|
-| `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment`, `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
+| `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment` (a reject's reason — required at every human door, see below), `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
 | `reassign` | `/reassign` | pending approver | Hands one slot to another user (`to`); the request stays pending. |
 | `revise` (send back) | `/revise` | pending approver | Ends this round as **`returned`**, unlocks the record for rework (ADR-0044). |
 | `request-info` | `/request-info` | pending approver | Asks the submitter for more info; the request **stays pending**. `comment` required. |
@@ -926,7 +935,14 @@ renders and executes them wherever the object is surfaced — the **Approvals
 inbox** included — so a decision (comment, a file-upload for `attachments`, the
 reassign user-picker) is collected by the generic action dialog with **no
 per-action UI code**. New decision capabilities ship as backend metadata, not
-hand-written buttons.
+hand-written buttons. Every human reject carries its reason: `approval_reject`
+declares its `comment` param required, so the action door, MCP `run_action` and the
+dialog refuse a reject whose `comment` is missing or blank (`400`, the declared
+param contract's `required` refusal), and `ApprovalService.decide()`, behind the
+`/reject` route and the SDK's `client.approvals.reject`, refuses one the same
+way (`400 VALIDATION_ERROR`); the inbox keeps Reject disabled until a reason is typed. The one
+exception is the email action link, which still records the fixed text "Via
+action link" instead of the approver's reason (tracked in #35722).
 
 On the record itself, a record with approval requests grows an **Approvals** tab
 beside Details and Related, with a request-count badge: the current step, decision

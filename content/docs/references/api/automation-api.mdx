@@ -424,7 +424,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +369 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +377 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -575,6 +575,14 @@ const result = AutomationApiErrorCode.parse(data);
 * `ERR_SUMMARY_RECOMPUTE`
 * `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`
 * `ERR_TRANSACTION_UNSUPPORTED`
+* `ERR_UNIT_CODE_REQUIRED`
+* `ERR_UNIT_CODE_RETIRED`
+* `ERR_UNIT_CODE_UNKNOWN`
+* `ERR_UNIT_DELETE_REFUSED`
+* `ERR_UNIT_DIMENSION_MISMATCH`
+* `ERR_WORK_CALENDAR_INVALID`
+* `ERR_WORK_CALENDAR_NOT_MAINTAINED`
+* `ERR_WORK_CALENDAR_UNRESOLVED`
 * `EXECUTION_ERROR`
 * `EXPIRED_OR_REVOKED`
 * `EXPIRY_IN_PAST`

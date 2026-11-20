@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
 import { EmptySectionsFold, EmptySectionsLine } from './EmptySectionsFold';
-import { ApprovalBandContext, EmptySectionsLineContext, useDefaultRecordPage } from './defaultRecordPage';
+import { ApprovalBandContext, EmptySectionsLineContext, useApprovalBandOnce, useDefaultRecordPage } from './defaultRecordPage';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';
@@ -328,7 +328,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
   const isPrintPage = usePrintPage() !== null;
   // objectstack#35253 — `false` on every details part of a split default page
   // but the first: the approval band is the record's, drawn once per page.
+  // objectstack#35483 / objectstack#35484 — and on a page drawn as written,
+  // the first body to reach the band's place draws it (`ApprovalBandOnceScope`).
   const drawsApprovalBand = React.useContext(ApprovalBandContext);
+  const approvalBandOnce = useApprovalBandOnce();
   // objectstack#27055, objectstack#35019 — a record page's details body folds
   // its entirely empty sections into one line (`EmptySectionsLine`): every
   // `record:details` body, authored page or synthesized default page alike,
@@ -1744,8 +1747,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
 
           objectstack#35253 — and once per page: a default page split around a
           body table draws it on its first details part only
-          (`ApprovalBandContext`). */}
-      {inlineEdit && schema.showHeader === false && !isPrintPage && drawsApprovalBand && (() => {
+          (`ApprovalBandContext`), and on a page drawn as written by its
+          first details body (`ApprovalBandOnceScope`). */}
+      {inlineEdit && schema.showHeader === false && !isPrintPage && drawsApprovalBand && approvalBandOnce.mark}
+      {inlineEdit && schema.showHeader === false && !isPrintPage && drawsApprovalBand && approvalBandOnce.draws && (() => {
         // Two independent facts, not one (objectui#2902):
         //
         //   isPending — an approval is running on this record.
@@ -1838,6 +1843,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
         <div className="flex flex-col items-end gap-1">
           {isPending && (
             <div className="flex items-center justify-end gap-2">
+              {/* objectstack#35593 — a host whose header names the approval
+                  (its 「待你审批」 / 「审批中」 tag) has said why the record is
+                  locked; an APPROVAL lock draws no second badge here. */}
+              {!(isLocked && inline?.approvalTagDrawnByHost) && (
               <span
                 role="status"
                 className={
@@ -1852,6 +1861,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 {isLocked ? <Lock className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
                 <span>{t(pendingLabelKey)}</span>
               </span>
+              )}
               {/* Recall belongs to the approval, not to the lock: an editable
                   pending approval is just as recallable as a locked one.
 

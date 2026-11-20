@@ -1478,10 +1478,53 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
       'local another name. `var input = …` is not a redeclaration and compiles.',
     'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
       'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
-      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ on regular ' +
-      'expressions, so a regular-expression literal the host refuses is reported as a warning rather than ' +
-      'refused. Syntax the host accepts and QuickJS does not is not caught here; at run time such an ' +
-      'action answers a 500 that names the action and the compile error.',
+      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ inside the ' +
+      'pattern of a regular expression (duplicate named groups, modifier groups), so a pattern the host ' +
+      'refuses is reported as a warning rather than refused. A literal that never closes on its line, or ' +
+      'whose flags are not a flag set, is refused like any other compile error: QuickJS refuses it too. ' +
+      'Syntax the host accepts and QuickJS does not is not caught here; at run time such an action answers ' +
+      'a 500 that names the action and the compile error.',
+  ],
+};
+
+/** Shared by the hook and job compile rules: the two bodies run in one wrapper. */
+const CTX_BODY_COMPILE: readonly string[] = [
+  'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
+    'with this host\'s JavaScript engine and without running it, and reads the failure the way ' +
+    '`action-body-does-not-compile` does: a regular-expression pattern the host refuses is a warning, ' +
+    'because the runtime\'s QuickJS accepts some patterns the host does not; every other compile failure, ' +
+    'a literal that never closes or whose flags are not a flag set included, is refused. Syntax the host ' +
+    'accepts and QuickJS does not is not caught here.',
+];
+
+const HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'hook-body-does-not-compile',
+  covers: 'the wrapper a hook body is compiled in',
+  paragraphs: [
+    'A hook body is not a script of its own. The runtime pastes `body.source` into the body of ' +
+      '`(async (ctx) => { … })` and calls it with the hook\'s context, so the statements share a scope with ' +
+      'a parameter the author never wrote. A source that is valid on its own can fail to compile there, and ' +
+      'then every run of the hook fails before any statement runs.',
+    'The common cases are declaring the parameter again (`const ctx = …`, `let ctx`), declaring any name ' +
+      'twice with `let` / `const`, and grammar errors. Use `ctx` as it is, or give the local another name ' +
+      '(`const input = ctx.input || {}`).',
+    ...CTX_BODY_COMPILE,
+    'The parse check on the same body (`hook-body-source-unparseable`) uses a parser, which reports no ' +
+      'redeclaration and no other early error, so it passes most bodies this rule refuses.',
+  ],
+};
+
+const JOB_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'job-body-does-not-compile',
+  covers: 'the wrapper a job body is compiled in',
+  paragraphs: [
+    'A job body runs in the hook\'s wrapper, `(async (ctx) => { … })`: a job has no input to hand in, so ' +
+      '`ctx` is its whole surface. A source that is valid on its own can fail to compile there, and then ' +
+      'every scheduled run of the job fails before any statement runs.',
+    'The common cases are declaring the parameter again (`const ctx = …`, `let ctx`), declaring any name ' +
+      'twice with `let` / `const`, and grammar errors. Use `ctx` as it is, or give the local another name ' +
+      '(`const api = ctx.api`).',
+    ...CTX_BODY_COMPILE,
   ],
 };
 
@@ -1566,6 +1609,27 @@ const FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
     'To fix it, derive the value in a `beforeUpdate` hook on the record\'s own object, or make sure the ' +
       'node only targets records whose `readonlyWhen` predicate is FALSE; otherwise remove the field from ' +
       'the `update_record` node. The warning never blocks a build.',
+  ],
+};
+
+const FLOW_UPDATE_SUMMARY_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'flow-update-summary-field',
+  covers: 'why a roll-up summary field write is dropped',
+  paragraphs: [
+    FLOW_FIELDS_CALLER_PAYLOAD,
+    'A roll-up `summary` field is computed by the engine from its child records, so the engine treats it ' +
+      'as `readonly: true` on create and on update whether or not the field declares it. A value a ' +
+      'non-system write sends for it is dropped, the rest of the write lands, the step still reports ' +
+      'success and the drop is reported as `readonly`; under `strictReadonlyWrites` the whole write is ' +
+      'refused. A created record starts the column as if no child record existed: `0` for `count` and ' +
+      '`sum`, empty for `min`, `max` and `avg`.',
+    'Reported as a warning, so it never blocks a build. A roll-up that declares `readonly: true` is ' +
+      'reported as `flow-update-readonly-field` instead, which does. A `runAs: \'system\'` flow writes the ' +
+      'column and is not reported, and neither is a create on a platform object, which the create-side ' +
+      'strip does not judge.',
+    'To fix it, remove the field from the node: the engine recomputes the value whenever a child record ' +
+      'is created, changed or deleted. To change what it adds up, change the child records or the ' +
+      'roll-up\'s `summaryOperations`.',
   ],
 };
 
@@ -2691,8 +2755,9 @@ const DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'Before those refusals the group key reached the driver as a column that does not exist, or an ' +
       'engine that aggregates in memory put every row into one null group while the answer looked served.',
     'Denormalise the value: make it a stored field of its own on the object, of the formula\'s ' +
-      '`returnType` (`number`, `text`, `boolean`, `date` or `currency`) and carrying the same `expression`, ' +
-      'which the engine computes and stores on every write, and point the dimension at that stored field. ' +
+      '`returnType` (`number`, `text`, `boolean`, `date`, `currency` or `percent`) and carrying the same ' +
+      '`expression`, which the engine computes and stores on every write, and point the dimension at that ' +
+      'stored field. ' +
       'This rule makes the same ' +
       'refusal where the author is standing. A dotted path is judged on the leaf\'s own declaration.',
     ANALYTICS_MEMBER_WALK,
@@ -6338,7 +6403,8 @@ const STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION: RuleExplanation = {
       'empty `initialStates` list is the same as none: the engine reads it as no entry contract.',
     '`initialStates` lists the states a record may be created in, and the server refuses an insert in any ' +
       'other. Seed rows are exempt from the machine on purpose, so curated sample data can start mid-process. ' +
-      'A machine with `active: false` is not run, so it is not reported.',
+      'A machine with `active: false` is not run, so it is not reported; nor is one whose `events` leave out ' +
+      '`insert`, because the engine never runs it on create and would never read its `initialStates`.',
   ],
 };
 
@@ -6418,11 +6484,14 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
   [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
   [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
+  [HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION,
+  [JOB_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: JOB_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_UPDATE_READONLY_FIELD_EXPLANATION.rule]: FLOW_UPDATE_READONLY_FIELD_EXPLANATION,
   [FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
+  [FLOW_UPDATE_SUMMARY_FIELD_EXPLANATION.rule]: FLOW_UPDATE_SUMMARY_FIELD_EXPLANATION,
   [HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION,
   [HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
   [ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,

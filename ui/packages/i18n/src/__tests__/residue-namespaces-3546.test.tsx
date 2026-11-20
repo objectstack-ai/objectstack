@@ -389,8 +389,9 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     }
     // PageView uses it twice on the same button (title + aria-label) and
     // RelatedList four times in four different affordances (the picker title,
-    // the compact card's icon-only ＋ and the full list's Add button,
-    // objectstack#27055; the enlarged face's toolbar Add, objectstack#27524) —
+    // the compact card's icon-only ＋, objectstack#27055; the enlarged face's
+    // toolbar Add, objectstack#27524; the related tab's one 「+ 添加」 entry,
+    // whose picker and New branches share one fallback, objectstack#35601) —
     // the counts are pinned so a silent drop of one of them is visible. AppContent's two record-save toast
     // sites share one message builder since objectstack-ai/objectstack#26172,
     // so its fallback label is written once.

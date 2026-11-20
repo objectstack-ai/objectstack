@@ -1,0 +1,41 @@
+{
+  "skill_name": "objectstack-mcp-build",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm connected to our ObjectStack environment over MCP and have no repository. Add a `renewal_date` date field to the contract object.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Through the ObjectStack app's MCP server, build a small asset-tracking app: an asset object, a list view and an app entry. Save it for our admin to review.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我只连了 ObjectStack 环境的 MCP,没有项目代码。帮我建一个请假审批流,存成草稿,等管理员在 Studio 里发布。",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "In this ObjectStack project, add a `due_date` date field to `src/objects/task.object.ts` and run `os validate`.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "I'm connected to our ObjectStack environment over MCP. How many open opportunities do we have this quarter, by stage?",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "In our ObjectStack project, which metadata key keeps an authored skill from being offered to MCP clients?",
+      "should_trigger": false,
+      "files": []
+    }
+  ]
+}
