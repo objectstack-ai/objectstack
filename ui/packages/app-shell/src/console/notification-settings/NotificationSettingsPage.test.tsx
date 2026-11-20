@@ -78,7 +78,8 @@ function host(
   adapter: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> },
   slackFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => json(NO_SLACK_INSTALL),
 ) {
-  const routed = (url: string, init?: RequestInit) => (url.startsWith(SLACK_LINK_URL) ? slackFetch(url, init) : apiFetch(url, init));
+  const prefsFetch = apiFetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+  const routed = (url: string, init?: RequestInit) => (url.startsWith(SLACK_LINK_URL) ? slackFetch(url, init) : prefsFetch(url, init));
   return ({ children }: { children: ReactNode }) => (
     <AdapterCtx.Provider value={adapter as never}>
       <SchemaRendererProvider dataSource={adapter as never} apiFetch={routed as never}>

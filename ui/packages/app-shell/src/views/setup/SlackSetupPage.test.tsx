@@ -200,7 +200,7 @@ describe('Setup names the page', () => {
 
   it('every built-in locale carries the same Slack keys and placeholders', () => {
     type Pack = Record<string, Record<string, string> | undefined>;
-    const packs = builtInLocales as Record<string, Pack>;
+    const packs = builtInLocales as unknown as Record<string, Pack>;
     const placeholders = (s: string) => (s.match(/\{\{\w+\}\}/g) ?? []).sort();
     for (const section of ['slackLink', 'slackSetup']) {
       const en = packs.en[section]!;
