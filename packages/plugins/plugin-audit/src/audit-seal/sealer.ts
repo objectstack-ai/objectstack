@@ -392,8 +392,8 @@ export class AuditSealer {
             'have no canonical rule';
         } else if (!Object.prototype.hasOwnProperty.call(fields, chainField)) {
           // S3: a chain is the row's own chain column (D10 note: `seal.chainField`, default `tenant_id`); without
-          // it every organization would share one. A NAMED column the object lacks is refused at authoring; this
-          // stays for the default, and for a definition that reached the registry without the parse.
+          // it every organization would share one. A chain column the object lacks, named or the default, is
+          // refused at authoring; this stays for a definition that reached the registry without the parse.
           reason = `it has no '${chainField}' field, the column its rows are chained by per organization`;
         }
       } catch (err) {
