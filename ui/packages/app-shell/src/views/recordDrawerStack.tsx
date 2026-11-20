@@ -43,6 +43,7 @@
 import {
   Fragment,
   createContext,
+  createElement,
   useCallback,
   useContext,
   useEffect,
@@ -57,6 +58,7 @@ import {
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Minimize2 } from 'lucide-react';
+import { getIcon } from '../utils/getIcon.js';
 import {
   NavigationOverlay,
   RecordTopBarButton,
@@ -567,6 +569,12 @@ export function RecordStackDrawer({
   const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  // objectstack#35593 — with the record's header in the bar, the drawer's row
+  // leads with the object's icon (no object name, as the full page's crumb has).
+  const rootIconName = current ? (defOf(current.objectName) as { icon?: unknown } | undefined)?.icon : undefined;
+  const rootIcon = typeof rootIconName === 'string'
+    ? createElement(getIcon(rootIconName), { className: 'mr-1.5 h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
+    : null;
   const headerTitleSlotEl = (
     <span ref={setHeaderTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
   );
@@ -605,6 +613,7 @@ export function RecordStackDrawer({
       </span>
     </nav>
     )}
+    {headerClaimed && rootIcon}
     {headerTitleSlotEl}
     </>
   );

@@ -203,7 +203,7 @@ describe('console record header — a record whose state locks every edit-form f
   // objectstack#35593 — under an approval lock the header draws no Edit at all
   // (it was drawn disabled): the approval tag in the header and the lock band
   // say why, and the state's lock badge still stays out of it.
-  it('the approval lock speaks alone: no Edit, no state badge, the approval tag and the lock band', async () => {
+  it('the approval lock speaks alone: no Edit, no state badge, no lock badge, the approval tag', async () => {
     // A locking approval request on the record, answered by the approvals list.
     const request = {
       id: 'req_1',
@@ -228,16 +228,18 @@ describe('console record header — a record whose state locks every edit-form f
     );
 
     // Writable record under the lock: no Edit once the approvals read lands.
+    // objectstack#35593: the header's approval tag names the lock (its title
+    // says why), so the band draws no 「Locked for approval」 badge of its own.
     await mountRecordPage(DRAFT, LOCKED_FIELDS);
-    await waitFor(() => expect(screen.getByText('Locked for approval')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('record-approval-tag')).toHaveAttribute('data-record-approval-locked'));
     await waitFor(() => expect(headerEditButton()).toBeNull());
-    expect(screen.getByTestId('record-approval-tag')).toBeInTheDocument();
+    expect(screen.queryByText('Locked for approval')).toBeNull();
     expect(stateLockBadge()).toBeNull();
 
     // Every field also state-locked: still the approval lock alone that speaks.
     cleanup();
     await mountRecordPage(APPROVED, LOCKED_FIELDS);
-    await waitFor(() => expect(screen.getByText('Locked for approval')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('record-approval-tag')).toHaveAttribute('data-record-approval-locked'));
     await waitFor(() => expect(headerEditButton()).toBeNull());
     expect(stateLockBadge()).toBeNull();
   });

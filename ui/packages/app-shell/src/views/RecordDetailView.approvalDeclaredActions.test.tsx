@@ -34,9 +34,13 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-// The header stub below reads `@object-ui/components` inside its mock factory;
-// pay that load at collection, not inside a clocked case.
-import '@object-ui/components';
+// The header stub reads the record header's state context. It is handed to the
+// stub through `headerHost.stateContext` at module top, never imported inside
+// the `@object-ui/react` mock factory: `@object-ui/components` imports
+// `@object-ui/react` itself, so importing it from that factory awaits the very
+// module the factory is building, and the file hangs at collection with no
+// test clock running.
+import { RecordHeaderStateContext } from '@object-ui/components';
 
 const authFetchSpy = vi.fn(async () =>
   new Response(JSON.stringify({ data: {} }), {
@@ -116,12 +120,14 @@ vi.mock('../utils/consoleServerAction', () => ({
 // record's header state and draws the tags and the ONE group the view hands
 // it, around a record row of its own. Without it no header draws, which is a
 // page whose layout has no `page:header`: the view keeps its fallback band.
-const headerHost = vi.hoisted(() => ({ on: false }));
+const headerHost = vi.hoisted(() => ({
+  on: false,
+  stateContext: null as React.Context<any> | null,
+}));
 vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/react')>();
-  const { RecordHeaderStateContext } = await import('@object-ui/components');
   const HeaderStub = ({ schema }: any) => {
-    const state = React.useContext(RecordHeaderStateContext);
+    const state = React.useContext(headerHost.stateContext!);
     if (!headerHost.on || schema?.type !== 'page:header') return null;
     const recordRow = <span data-testid="stub-record-row" />;
     const recordMenuItems = <div role="menuitem" data-testid="stub-record-menu-item">Delete</div>;
@@ -136,6 +142,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   };
   return { ...actual, SchemaRenderer: HeaderStub };
 });
+
+headerHost.stateContext = RecordHeaderStateContext;
 
 import { MetadataCtx } from '@object-ui/react';
 import { RecordDetailView } from './RecordDetailView';

@@ -5417,6 +5417,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         'inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         approvalTagTone,
       )}
+      // The band draws no lock badge once this tag names the approval: the
+      // tag carries why the record is locked.
+      title={approvalLocked
+        ? t('detail.lockedTooltip', { defaultValue: 'This record has a pending approval request; editing is locked' })
+        : undefined}
+      data-record-approval-locked={approvalLocked ? '' : undefined}
       data-testid="record-approval-tag"
     >
       {approvalTagText}
@@ -5541,6 +5547,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           approvalProgress={approvalProgress}
           approvalIsSubmitter={approvalIsSubmitter}
           approvalRecallDrawnByHost={approvalRecallDrawnByHost}
+          // objectstack#35593 — a header drawing the approval's group draws
+          // its tag too, which names the lock; the band drops its badge.
+          approvalTagDrawnByHost={approvalGroupHosts > 0}
           lockedReason={t('detail.lockedTooltip', {
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
