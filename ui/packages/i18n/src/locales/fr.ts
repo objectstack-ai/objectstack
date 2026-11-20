@@ -642,6 +642,13 @@ const fr = {
       avg: "Moyenne",
       min: "Min",
       max: "Max",
+      earliest: "Plus ancienne",
+      latest: "Plus récente",
+      pageName: "{{label}} (cette page)",
+      calculate: "Calculer",
+      none: "Aucun",
+      menuPercentEmpty: "Pourcentage vide",
+      menuPercentFilled: "Pourcentage rempli",
     },
     toolbar: {
       densityMode: "Densité",

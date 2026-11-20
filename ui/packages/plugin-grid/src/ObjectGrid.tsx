@@ -102,7 +102,11 @@ import { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
 import { useObjectGridRowLoad } from './objectGridRowLoad';
 import { useObjectGridGrouping } from './objectGridGrouping';
 import { temporalCellText } from './temporalCellFace';
-import { useObjectGridSummaries } from './objectGridSummaries';
+import { useObjectGridSummaries, declaredColumnSummaryKey } from './objectGridSummaries';
+import { SummaryCellPicker } from './objectGridSummaryPicker';
+import {
+  offeredColumnSummaries, isTemporalSummaryField, useSummaryTranslation, type ColumnSummaryType,
+} from './useColumnSummary';
 import { useObjectGridRowHeightSync } from './objectGridRowHeight';
 import { useObjectGridColumnState } from './objectGridColumnState';
 import { useObjectGridMobile } from './objectGridMobile';
@@ -241,6 +245,22 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * of identity. A RUNTIME prop, never authored metadata.
    */
   onColumnSummaryChange?: (summaries: readonly ObjectGridFooterSummary[] | null) => void;
+  /**
+   * [objectstack#35702] Draw the footer row on a flat table even when no
+   * column declares a calculation: the record count in its first cell, each
+   * column's calculation, if any, under it. A HOST prop (the list page), never
+   * authored metadata.
+   */
+  residentSummaryRow?: boolean;
+  /**
+   * [objectstack#35702] Wired only for a reader who may change the view: each
+   * footer cell becomes the menu that picks the column's calculation (`null` =
+   * None). The grid draws the pick at once; the host saves it on the view and
+   * hands it back as the column's `summary`.
+   */
+  onColumnSummaryPick?: (field: string, summary: ColumnSummaryType | null) => void;
+  /** [objectstack#35702] Whether the resident footer row is drawn (it carries the record count). */
+  onResidentSummaryRowChange?: (drawn: boolean) => void;
   /**
    * [objectstack#28461] The rows a GROUPED grid shows, group by group: every
    * open leaf group on the current page of groups, in display order, with its
@@ -746,6 +766,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   objectFields: hostObjectFields,
   showRowNumbers: hostShowRowNumbers,
   onColumnSummaryChange,
+  residentSummaryRow,
+  onColumnSummaryPick,
+  onResidentSummaryRowChange,
   onRowGroupsChange,
 }) => {
   const [data, setData] = useState<any[]>([]);
@@ -1535,13 +1558,36 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // The fan-out query, the resolved match total and the column summaries, in
   // hook order (`./objectGridSummaries`).
+  // objectstack#35702 — the reader's footer picks, each held until the view
+  // the host hands back declares it.
+  const [summaryPicks, setSummaryPicks] = useState<Readonly<Record<string, ColumnSummaryType | null>>>({});
   const {
-    bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary,
+    bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary, summaryTypes,
   } = useObjectGridSummaries({
     schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data, hasInlineData,
     externalManualPagination, hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
-    fetchWindow, serverGroupedFetch, isGrouped,
+    fetchWindow, serverGroupedFetch, isGrouped, summaryPicks,
   });
+  const declaredSummaryKey = declaredColumnSummaryKey(schema.columns);
+  useEffect(() => {
+    setSummaryPicks((picks) => {
+      const declared = new Map(declaredSummaryKey.split('|').filter(Boolean).map((e) => e.split('=') as [string, string]));
+      const kept = Object.entries(picks).filter(([field, pick]) => (declared.get(field) ?? null) !== pick);
+      return kept.length === Object.keys(picks).length ? picks : Object.fromEntries(kept);
+    });
+    // Keyed on the declared calculations' content, never the columns' identity.
+  }, [declaredSummaryKey]);
+  const pickColumnSummary = useCallback((field: string, summary: ColumnSummaryType | null) => {
+    setSummaryPicks((picks) => ({ ...picks, [field]: summary }));
+    onColumnSummaryPick?.(field, summary);
+  }, [onColumnSummaryPick]);
+  const { t: summaryT } = useSummaryTranslation();
+  // A host's resident row is drawn with no calculation too, and under a
+  // reader who may change the view each cell is its picker.
+  const residentRowDrawn = !!residentSummaryRow && !onColumnSummaryChange && !isGrouped && !useCardView;
+  useEffect(() => {
+    onResidentSummaryRowChange?.(residentRowDrawn);
+  }, [onResidentSummaryRowChange, residentRowDrawn]);
 
   // objectstack#35554 — tell the page bar whether a selection is open and how
   // many rows the list's query matches (the count beside the view name).
@@ -2963,12 +3009,30 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectstack#35548 — the column summaries as the table's own last row, each
   // under its column, led by the count of the records they summarise. A host
   // that draws them itself (`onColumnSummaryChange`) gets no row here.
-  const summaryRow: ObjectGridDataTableSchema['summaryRow'] = hasSummary && !onColumnSummaryChange
+  const summaryRow: ObjectGridDataTableSchema['summaryRow'] = (hasSummary || residentRowDrawn) && !onColumnSummaryChange
     ? {
         lead: t('grid.summary.countLead', {
           value: (typeof resolvedTotalMatching === 'number' ? resolvedTotalMatching : data.length).toLocaleString(displayLocale),
         }),
-        cells: Object.fromEntries(Array.from(summaries, ([key, summary]) => [key, summary.label])),
+        cells: residentRowDrawn
+          ? Object.fromEntries(tableColumns.flatMap((col: { accessorKey: string }) => {
+              const field = col.accessorKey;
+              const def = objectFields?.[field] as Parameters<typeof offeredColumnSummaries>[0];
+              const summary = summaries.get(field);
+              if (!def && !summary) return [];
+              return [[field, (
+                <SummaryCellPicker
+                  field={field}
+                  figure={summary}
+                  current={summaryTypes.get(field)}
+                  offered={offeredColumnSummaries(def)}
+                  temporal={isTemporalSummaryField(def)}
+                  onPick={onColumnSummaryPick && def ? pickColumnSummary : undefined}
+                  t={summaryT}
+                />
+              )]];
+            }))
+          : Object.fromEntries(Array.from(summaries, ([key, summary]) => [key, summary.label])),
       }
     : undefined;
   // objectstack#35685 — a row a select-first save redrew, in place of the row

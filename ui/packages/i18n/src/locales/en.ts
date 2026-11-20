@@ -876,6 +876,13 @@ const en = {
       avg: 'Avg',
       min: 'Min',
       max: 'Max',
+      earliest: 'Earliest',
+      latest: 'Latest',
+      pageName: '{{label}} (this page)',
+      calculate: 'Calculate',
+      none: 'None',
+      menuPercentEmpty: 'Percent empty',
+      menuPercentFilled: 'Percent filled',
     },
     toolbar: {
       densityMode: 'Density',

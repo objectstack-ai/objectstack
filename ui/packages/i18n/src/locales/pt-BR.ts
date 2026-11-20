@@ -642,6 +642,13 @@ const pt = {
       avg: "Média",
       min: "Mín.",
       max: "Máx.",
+      earliest: "Mais antiga",
+      latest: "Mais recente",
+      pageName: "{{label}} (esta página)",
+      calculate: "Calcular",
+      none: "Nenhum",
+      menuPercentEmpty: "Percentual vazio",
+      menuPercentFilled: "Percentual preenchido",
     },
     toolbar: {
       densityMode: "Densidade",
