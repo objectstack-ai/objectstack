@@ -45,6 +45,12 @@ import { BANNED_USER_CODE, causeBannedUserRefusal } from './banned-user-refusal-
 import type { AuthManager } from './auth-manager.js';
 import { refusalCodeOf } from './auth-session-audit.js';
 import { passwordSignInDoorOf } from './auth-manager-sign-in-lockout.js';
+import {
+  endSessionsAfterCredentialWrite,
+  refuseSignInAcrossCredentialChange,
+  RESET_DOOR_PATHS,
+  RESET_DOOR_SUBJECT,
+} from './credential-change-ends-prior-access.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
@@ -166,8 +172,74 @@ async function refusedAfterTheCredential(returned: unknown): Promise<boolean> {
   return after.includes(code);
 }
 
+/**
+ * What a wrong password answers at `door`: better-auth's own refusal there
+ * (1.7.12), its code read off the vendor's own tables — `BASE_ERROR_CODES` for
+ * the email door, the phone-number plugin's `$ERROR_CODES` for the phone door —
+ * so no code is minted here.
+ */
+async function wrongPasswordAt(ctx: any, door: 'email' | 'phone'): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const { BASE_ERROR_CODES } = await import('@better-auth/core/error');
+  const phoneCodes = door === 'phone' ? ctx?.context?.getPlugin?.('phone-number')?.$ERROR_CODES : undefined;
+  const phoneRefusal = phoneCodes?.INVALID_PHONE_NUMBER_OR_PASSWORD;
+  return APIError.from('UNAUTHORIZED', phoneRefusal ?? BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
+}
+
+/** Whether the endpoint answered a success (no `APIError` on `returned`). */
+async function endpointSucceeded(ctx: any): Promise<boolean> {
+  try {
+    const { isAPIError } = await import('better-auth/api');
+    return !isAPIError(ctx?.context?.returned);
+  } catch {
+    return !(ctx?.context?.returned instanceof Error);
+  }
+}
+
+/**
+ * A door that ends the account's sessions when it sets the password ends them
+ * again now that the password is written (`credential-change-ends-prior-
+ * access.ts`): both reset doors, and `/change-password` asked to end the other
+ * sessions, which keeps the session it installed.
+ */
+async function endSessionsOnceThePasswordIsWritten(this: Pick<AfterHookHost, 'logDurabilityDegradation'>, ctx: any): Promise<void> {
+  const resetDoor = RESET_DOOR_PATHS.has(ctx?.path);
+  const changeDoor = ctx?.path === '/change-password' && ctx?.body?.revokeOtherSessions === true;
+  if (!resetDoor && !changeDoor) return;
+  if (!(await endpointSucceeded(ctx))) return;
+  const internal = ctx?.context?.internalAdapter;
+  const subject: unknown = resetDoor ? ctx?.context?.[RESET_DOOR_SUBJECT] : actingUserIdOf(ctx);
+  const installed: unknown = ctx?.context?.returned?.token;
+  if (typeof subject !== 'string' || !subject || !internal || (changeDoor && (typeof installed !== 'string' || !installed))) {
+    this.logDurabilityDegradation(
+      'AuthManager: a password was set by a door that ends the account\'s sessions, but the sessions were NOT '
+        + 'ended again once the password was written: the account it set could not be named. The door ended '
+        + 'them before the write, as it always has. Remedy: none per request; report it, the next such door '
+        + 'ends them again.',
+      new Error('the account of a session-ending password door could not be named'),
+      { object: 'sys_session', path: String(ctx?.path) },
+    );
+    return;
+  }
+  await endSessionsAfterCredentialWrite(internal, subject, changeDoor ? (installed as string) : undefined);
+}
+
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
 export async function globalAfterHook(this: AfterHookHost, ctx: any) {
+  // ── A credential change ends access issued before it ──────────────
+  // FIRST: a password sign-in during which the account's password changed
+  // is refused, its session ended and the response left without one, ahead
+  // of every after-hook that reads the new session — the second-factor
+  // plugin's among them, which then opens no challenge. Its refusal is what
+  // a wrong password answers at that door; the lockout settlement below
+  // reads it as one, and it is thrown once that settlement has run.
+  // `credential-change-ends-prior-access.ts` states the rule.
+  const signInDoor = passwordSignInDoorOf(ctx);
+  const signInAcrossChange = signInDoor
+    ? await refuseSignInAcrossCredentialChange(ctx, () => wrongPasswordAt(ctx, signInDoor.door))
+    : undefined;
+  if (signInAcrossChange) ctx.context.returned = signInAcrossChange;
+
   // ── #8243: impersonation must actually take effect for a bearer ──
   // FIRST among the after-hooks that touch the response, because the
   // bearer plugin's own after-hook runs behind this one and must see
@@ -311,11 +383,16 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
     // on a match, so it stays after the settlement and the refusal's
     // `login_failed` row above. The phone door goes on to the hooks below,
     // as before.
+    if (signInAcrossChange) throw signInAcrossChange;
     if (door === 'email') {
       await causeBannedUserRefusal(ctx);
       return;
     }
   }
+
+  // ── A credential change ends access issued before it ──────────────
+  // Ahead of the password-change after-effects below, which return.
+  await endSessionsOnceThePasswordIsWritten.call(this, ctx);
 
   // ── ADR-0069 D1: on a successful change/reset — stamp
   //    password_changed_at (expiry) and commit password history.

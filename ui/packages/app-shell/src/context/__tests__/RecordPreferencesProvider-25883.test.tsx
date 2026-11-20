@@ -194,3 +194,25 @@ describe('RecordPreferencesProvider — the record page remembers "show empty fi
     expect(result.current?.get('account')).toEqual({});
   });
 });
+
+/**
+ * objectstack#35601 — the related tab's header sort and column widths ride in
+ * the same row, per list (`CHILD.FK`); what the row holds is kept only well
+ * formed.
+ */
+describe('RecordPreferencesProvider — the related tab\'s remembered sort and widths (objectstack#35601)', () => {
+  it('keeps a well-formed sort and column state per list and drops the rest', () => {
+    expect(sanitizeRecordPreference({
+      relatedLists: {
+        'task.project': { sort: { field: 'due_date', order: 'desc' }, columnState: { order: ['subject', 7], widths: { subject: 240, due_date: -1 } } },
+        'note.project': { sort: { field: 'title', order: 'sideways' } },
+        'bad.entry': 'x',
+      },
+    })).toEqual({
+      relatedLists: {
+        'task.project': { sort: { field: 'due_date', order: 'desc' }, columnState: { order: ['subject'], widths: { subject: 240 } } },
+      },
+    });
+    expect(sanitizeRecordPreference({ relatedLists: ['x'] })).toEqual({});
+  });
+});

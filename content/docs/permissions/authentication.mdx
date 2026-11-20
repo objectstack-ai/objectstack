@@ -326,6 +326,22 @@ code still outstanding for that user: a completed reset, the user's own
 what one that was never issued answers (`400 INVALID_TOKEN` at
 `reset-password`); a link or code requested after the change works as usual.
 
+A change to a user's password also ends the following, issued before it. An
+email-change link minted before the change answers what a link that was never
+issued answers at `GET /api/v1/auth/verify-email` (`401 INVALID_TOKEN`, or the
+`error=INVALID_TOKEN` redirect to its callback), and a second-factor challenge
+opened by a password sign-in before the change answers what a challenge that
+was never opened answers; the person asks again. A door that ends the
+account's sessions — a completed reset, `change-password` with
+`revokeOtherSessions: true` (the session it installs is kept) and the one-step
+invitation acceptance — ends every session opened before its password write,
+and a password sign-in during which the password changes is refused with what
+a wrong password answers. The change's moment is the last time the account's
+local password was written over, so an administrator's `set-user-password`
+counts too, and an account's first password is not a change; an email-change
+link carries its issue time in whole seconds, so one minted in the same second
+as the change is refused as well.
+
 #### Setting a first local password
 
 `POST /api/v1/auth/set-initial-password` sets an **initial** local password for a

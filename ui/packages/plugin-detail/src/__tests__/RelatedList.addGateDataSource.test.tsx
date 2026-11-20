@@ -66,6 +66,8 @@ const ADD = {
 };
 
 const makeDS = () => ({
+  // The picker's add is one transactional batch (objectstack#35601); a source without it offers no picker.
+  batchTransaction: vi.fn(async () => ({ results: [] })),
   find: vi.fn(async () => [{ id: 'ps_1', label: 'Admin' }]),
   getObjectSchema: vi.fn(async (name: string) => ({ name, fields: {} })),
 });
