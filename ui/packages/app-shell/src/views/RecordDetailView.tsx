@@ -38,6 +38,7 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, swapBodyTablesForEditors, withDetailWritesWithheld, type RecordEditStateControl } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
@@ -2354,6 +2355,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     openApproval: openApprovalOf(approvals),
     recordStatus: (pageRecord as any)?.approval_status,
   });
+  // objectstack#35599 — the record page's EDIT STATE (`recordEditState.tsx`):
+  // on a page that draws master-detail body tables, Edit turns the overview
+  // into a form — the fields become inputs, the body tables editable lines —
+  // and one Save writes all of it in one batch. `recordEditEligibleRef` is
+  // written where the page's body tables are known (below the early returns,
+  // where no hook may run) and read by the header's Edit click.
+  const [recordEditState, setRecordEditState] = useState(false);
+  const [recordEditSaving, setRecordEditSaving] = useState(false);
+  const recordEditControlRef = useRef<RecordEditStateControl | null>(null);
+  const recordEditEligibleRef = useRef(false);
+  const exitRecordEditState = useCallback(() => setRecordEditState(false), []);
+  useEffect(() => {
+    setRecordEditState(false);
+  }, [objectName, pureRecordId]);
   // How far the pending node's tally has got (objectstack#4478). Multi-approver
   // nodes — `quorum`, `unanimous`, `per_group` — do not finalize on one
   // decision, so an approver standing on the record needs the count to know
@@ -4804,7 +4819,34 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#35593 — a record an approval locks draws no Edit at all: the
     // header's approval tag says why it cannot be changed. Every other reason
     // for "off" keeps Edit drawn and greyed, as below.
-    if (affordances.edit && !approvalLocked) {
+    // objectstack#35599 — in the edit state the Edit button's place holds the
+    // state's Cancel and Save, through the same system-action props.
+    if (affordances.edit && !approvalLocked && recordEditState) {
+      items.push({
+        name: 'sys_record_edit_cancel',
+        label: t('detail.cancel', { defaultValue: 'Cancel' }),
+        icon: 'x',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 99,
+        disabled: recordEditSaving,
+        onClick: () => recordEditControlRef.current?.cancel(),
+      } as any);
+      items.push({
+        name: 'sys_record_edit_save',
+        label: recordEditSaving
+          ? t('detail.saving', { defaultValue: 'Saving…' })
+          : t('detail.save', { defaultValue: 'Save' }),
+        icon: 'check',
+        type: 'script',
+        locations: ['record_header'],
+        order: 100,
+        disabled: recordEditSaving,
+        onClick: () => { void recordEditControlRef.current?.save(); },
+      } as any);
+    }
+    if (affordances.edit && !approvalLocked && !recordEditState) {
       const editOff = approvalLocked || editDisabledByPredicate || editLockedByState;
       // objectstack#35135 — the reason a predicate-disabled Edit gives. The
       // approval band and the state-lock badge explain their own locks, so
@@ -4872,7 +4914,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The desktop row keeps it greyed in place for every reason, and an
         // Edit that is on is untouched.
         ...(phonePage && editOff ? { component: 'action:menu' } : {}),
-        onClick: () => onEdit({ id: pureRecordId }, objectName),
+        // objectstack#35599 — a page drawing body tables enters its edit state;
+        // every other page opens the record form, as before.
+        onClick: () => (recordEditEligibleRef.current
+          ? setRecordEditState(true)
+          : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
     // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
@@ -5128,7 +5174,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // included). `null` for an authored
   // page and for a page whose strip the partition cannot read, which is drawn
   // as written, tabs and all.
-  const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(renderedPage) : null;
   // The child objects' field definitions this view already holds, for the
   // related counts asked up front (objectstack#27056): the relationship's
   // arity is read off them instead of a schema read first.
@@ -5147,6 +5192,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     : assignedPage
       ? authoredBodyTableIds(renderedPage, childRelations)
       : bodyTableIdsOf(renderedPage);
+
+  // objectstack#35599 — the edit state's two inputs read off the body tables:
+  // Edit enters it on a page that draws one (and is otherwise the record form),
+  // and each table is drawn as an editor only when one batch can carry it
+  // (item 5, `bodyTablesSaveTogether`). The page the layout draws is the
+  // rendered page with those tables swapped; every other read of the page
+  // (highlights, tabs, approvals) keeps reading `renderedPage`.
+  recordEditEligibleRef.current = bodyTableIds.size > 0;
+  const bodyTablesEditable = bodyTablesSaveTogether(objectDef, objects, bodyTableIds);
+  const layoutPage = recordEditState && bodyTablesEditable
+    ? swapBodyTablesForEditors(renderedPage, bodyTableIds)
+    : renderedPage;
+  const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(layoutPage) : null;
+  // objectstack#35599, ruling B — OPEN, built on the recommended option: a page
+  // that draws master-detail body tables edits through Edit → Save only, so it
+  // offers no per-field inline edit (no pencils, no double-click) outside its
+  // edit state; a page with none keeps inline edit. Its own term of the
+  // `canEdit` conjunction below, so a different ruling flips this one line.
+  const inlineEditOffForBodyTables = bodyTableIds.size > 0 && !recordEditState;
 
   // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
   // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
@@ -5547,6 +5611,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             && editVisible
             && !editDisabledByPredicate
             && !editLockedByState
+            && !inlineEditOffForBodyTables
           }
           locked={approvalLocked}
           approvalPending={approvalPending}
@@ -5560,6 +5625,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           lockedReason={t('detail.lockedTooltip', {
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
+        >
+        <RecordEditStateController
+          active={recordEditState}
+          onExit={exitRecordEditState}
+          controlRef={recordEditControlRef}
+          onSavingChange={setRecordEditSaving}
+          dataSource={dataSource}
+          objectName={objectName}
+          recordId={pureRecordId}
+          refresh={notifyRecordChanged}
+          bodyTablesEditable={bodyTablesEditable}
+          bodyTablesReadOnly={bodyTableIds.size > 0 && !bodyTablesEditable}
+          readOnlyNotice={t('detail.bodyTablesReadOnlyBulk')}
+          unsavedMessage={t('form.unsavedChanges')}
         >
         <HighlightFieldsProvider>
         <DiscussionContextProvider
@@ -5726,6 +5805,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                    page cannot hold two answers to "is this record frozen". */
                 parentRecord={pageRecord}
                 parentObjectFields={predicateFields}
+                /* objectstack#35599, ruling A (「一起锁」) — while an approval
+                   locks this record, its master-detail children draw no New,
+                   Edit or Delete: the server refuses each RECORD_LOCKED. */
+                serve={approvalLocked
+                  ? (bridge) => withDetailWritesWithheld(bridge, (child, fk) => isMasterDetailChild(objects, objectName, child, fk))
+                  : undefined}
               >
                 {/* objectstack#26678 / objectstack#27524 — the synthesized
                     page's blocks laid out by its width; `?tab=` addresses a
@@ -5768,7 +5853,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                       {/* A page drawn as its strip is drawn as written: the
                           reader's arrangement belongs to the right column and
                           the tab row (objectstack#27524). */}
-                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      <SchemaRenderer schema={withPageTabsUrlSync(layoutPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
@@ -5835,7 +5920,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               {/* Record-level inline-edit Save/Cancel bar (objectui#2407 P2) —
                   commits the whole draft (highlights + body) in ONE atomic OCC
                   update; renders (sticky) only while editing. */}
-              <InlineEditSaveBar
+              {/* objectstack#35599 — the edit state saves through the header's
+                  Save (`RecordEditStateController`), so the bar stands down. */}
+              {!recordEditState && <InlineEditSaveBar
                 dataSource={dataSource}
                 objectName={objectName}
                 recordId={pureRecordId}
@@ -5846,7 +5933,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 lockedHint={t('detail.lockedTooltip', {
                   defaultValue: 'This record has a pending approval request; editing is locked',
                 })}
-              />
+              />}
             </div>
             <MetadataPanel
               open={showDebug}
@@ -5871,6 +5958,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
+        </RecordEditStateController>
         </InlineEditProvider>
       </RecordContextProvider>
 

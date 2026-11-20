@@ -1,0 +1,374 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * The record page's EDIT STATE — "Edit" turns the overview into a form: the
+ * record's fields become inputs (the record-level inline-edit session), the
+ * master-detail body tables become editable lines, and ONE Save writes the
+ * record's changes and every table's creates / updates / deletes in one
+ * `POST /api/v1/batch`, one transaction: all of it lands, or none of it does.
+ *
+ * Pieces, each consumed by `RecordDetailView`:
+ *
+ *   - {@link swapBodyTablesForEditors} — in the edit state each body-table
+ *     `record:related_list` node of the page is drawn as a
+ *     `record:body_table_editor` node instead, which is `@object-ui/plugin-form`'s
+ *     `RecordBodyTableEditor`. A host-written node: the type is registered here,
+ *     out of the public contract, and no page author writes it.
+ *   - {@link RecordEditStateController} — mounted under the page's
+ *     `InlineEditProvider`; enters the session, owns Save / Cancel (the header's
+ *     two buttons call it), places a refused save's reasons on the field or line
+ *     they are about, and registers the unsaved edits with the shell's
+ *     leave guard.
+ *   - {@link bodyTablesSaveTogether} — whether the batch path can carry the
+ *     tables at all (the card's item 5, see there).
+ *   - {@link withDetailWritesWithheld} — ruling A's client half: a locked
+ *     record's master-detail children draw no New / Edit / Delete.
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ComponentRegistry, runBatchTransaction } from '@object-ui/core';
+import {
+  RecordBodyTableEditor,
+  RecordEditSessionContext,
+  attributeRecordEditRefusal,
+  buildRecordEditBatch,
+  type BodyTableEditHandle,
+  type RecordEditSession,
+} from '@object-ui/plugin-form';
+import { useInlineEdit, type RelatedRecordActionsValue } from '@object-ui/react';
+import { canServeApiOperation } from '@objectstack/spec/data';
+import { useRegisterUnsavedEdits } from '../chrome/unsavedEdits.js';
+
+/** The node type a body table is drawn as in the edit state. */
+export const BODY_TABLE_EDITOR_TYPE = 'record:body_table_editor';
+
+const BodyTableEditorNode: React.FC<{ schema: any }> = ({ schema }) => (
+  <RecordBodyTableEditor
+    objectName={schema?.objectName}
+    relationshipField={schema?.relationshipField}
+    title={typeof schema?.title === 'string' ? schema.title : undefined}
+  />
+);
+
+// Namespaced, so it is outside the public component manifest
+// (`getPublicConfigs` takes no namespaced key): a host-written node only.
+ComponentRegistry.register('body_table_editor', BodyTableEditorNode, {
+  namespace: 'record',
+  skipFallback: true,
+  label: 'Body table editor',
+  category: 'record',
+  inputs: [
+    { name: 'objectName', type: 'string', description: 'The body table\'s child object.' },
+    { name: 'relationshipField', type: 'string', description: 'The child\'s master-detail field back to the record.' },
+    { name: 'title', type: 'string', description: 'The table heading, as read mode drew it.' },
+  ],
+});
+
+type PageNode = Record<string, any>;
+
+const isNode = (v: unknown): v is PageNode => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The page with each body table (`record:related_list` whose `child.fk` id is
+ * in `bodyTableIds`) replaced by an editor node, everything else as it was.
+ * Pure; hands the page back untouched when there is nothing to swap.
+ */
+export function swapBodyTablesForEditors<T>(page: T, bodyTableIds: ReadonlySet<string>): T {
+  if (bodyTableIds.size === 0) return page;
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      let changed = false;
+      const next = value.map((item) => {
+        const w = walk(item);
+        if (w !== item) changed = true;
+        return w;
+      });
+      return changed ? next : value;
+    }
+    if (!isNode(value)) return value;
+    if (value.type === 'record:related_list') {
+      const props = { ...value, ...(isNode(value.properties) ? value.properties : {}) };
+      const id = `${props.objectName}.${props.relationshipField}`;
+      if (typeof props.objectName === 'string' && typeof props.relationshipField === 'string' && bodyTableIds.has(id)) {
+        const title = typeof props.title === 'string' ? props.title : undefined;
+        return {
+          type: BODY_TABLE_EDITOR_TYPE,
+          ...(value.id !== undefined ? { id: value.id } : {}),
+          properties: {
+            objectName: props.objectName,
+            relationshipField: props.relationshipField,
+            ...(title ? { title } : {}),
+          },
+        };
+      }
+      return value;
+    }
+    let changed = false;
+    const out: PageNode = {};
+    for (const [k, v] of Object.entries(value)) {
+      const w = walk(v);
+      if (w !== v) changed = true;
+      out[k] = w;
+    }
+    return changed ? out : value;
+  };
+  return walk(page) as T;
+}
+
+/**
+ * Can ONE batch carry this record's body tables (the card's item 5)?
+ *
+ * `POST /api/v1/batch` is a bulk surface: every object it writes must grant the
+ * `bulk` primitive AND the write it performs (`bulk ∧ child`, the REST batch
+ * route's gate, read here through the same spec derivation
+ * `canServeApiOperation`). The record needs `bulk ∧ update`; each body table's
+ * child `bulk ∧ create / update / delete`. When any is refused the page does
+ * not offer an edit it cannot save: the tables stay read-only in the edit state
+ * with a notice saying why, and the record's own fields save through the plain
+ * update they always used. Decided from the objects' `enable` blocks the page
+ * already holds — no request.
+ */
+export function bodyTablesSaveTogether(
+  objectDef: { enable?: unknown } | null | undefined,
+  objects: ReadonlyArray<any> | null | undefined,
+  bodyTableIds: ReadonlySet<string>,
+): boolean {
+  if (bodyTableIds.size === 0) return false;
+  if (!canServeApiOperation(objectDef?.enable as any, 'bulk', { bulkChild: 'update' })) return false;
+  for (const id of bodyTableIds) {
+    const child = id.slice(0, id.indexOf('.'));
+    const def = (objects ?? []).find((o) => o?.name === child);
+    for (const op of ['create', 'update', 'delete'] as const) {
+      if (!canServeApiOperation(def?.enable, 'bulk', { bulkChild: op })) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Is `childObject.fk` a master-detail child of `parentObject` — a detail row
+ * ruling A's lock holds? Read off the child's own field definition.
+ */
+export function isMasterDetailChild(
+  objects: ReadonlyArray<any> | null | undefined,
+  parentObject: string | undefined,
+  childObject: string,
+  fk: string | undefined,
+): boolean {
+  if (!parentObject || !fk) return false;
+  const def = (objects ?? []).find((o) => o?.name === childObject);
+  const field = def?.fields?.[fk];
+  return field?.type === 'master_detail' && (field.reference === parentObject || field.referenceTo === parentObject);
+}
+
+/**
+ * Ruling A, client half (「一起锁」): what the related-record bridge serves while
+ * the record is held by a locking approval — its master-detail children's
+ * lists and body tables draw no New, Edit or Delete, because the server refuses
+ * each of them `RECORD_LOCKED`. Everything else the bridge serves, and every
+ * other child, is untouched. Handed to `RelatedRecordActionsBridge`'s existing
+ * `serve` prop.
+ */
+export function withDetailWritesWithheld(
+  bridge: RelatedRecordActionsValue,
+  isDetail: (childObject: string, fk: string | undefined) => boolean,
+): RelatedRecordActionsValue {
+  return {
+    ...bridge,
+    resolve: (input) => {
+      const handlers = bridge.resolve(input);
+      if (!isDetail(input.objectName, input.relationshipField)) return handlers;
+      const { onCreate: _create, onEdit: _edit, onDelete: _delete, ...rest } = handlers;
+      return rest;
+    },
+  };
+}
+
+/** What the header's Cancel / Save call. */
+export interface RecordEditStateControl {
+  save: () => Promise<void>;
+  cancel: () => void;
+}
+
+export interface RecordEditStateControllerProps {
+  /** The page is in its edit state. */
+  active: boolean;
+  /** Leave the edit state (after a save, or a cancel). */
+  onExit: () => void;
+  /** Filled each render with the controller's Save / Cancel. */
+  controlRef: React.MutableRefObject<RecordEditStateControl | null>;
+  /** A save started or settled — the header greys its two buttons meanwhile. */
+  onSavingChange: (saving: boolean) => void;
+  dataSource: any;
+  objectName: string | undefined;
+  recordId: string | number | null | undefined;
+  /** Re-read the record after a save. */
+  refresh: () => void | Promise<void>;
+  /** The body tables are edited (one batch can carry them) — see {@link bodyTablesSaveTogether}. */
+  bodyTablesEditable: boolean;
+  /** The page draws body tables that stay read-only (the batch cannot carry them). */
+  bodyTablesReadOnly: boolean;
+  /** The notice shown when they do. */
+  readOnlyNotice: string;
+  /** The question asked before unsaved edits are dropped. */
+  unsavedMessage: string;
+  children: React.ReactNode;
+}
+
+export const RecordEditStateController: React.FC<RecordEditStateControllerProps> = ({
+  active,
+  onExit,
+  controlRef,
+  onSavingChange,
+  dataSource,
+  objectName,
+  recordId,
+  refresh,
+  bodyTablesEditable,
+  bodyTablesReadOnly,
+  readOnlyNotice,
+  unsavedMessage,
+  children,
+}) => {
+  const inline = useInlineEdit();
+  const tablesRef = useRef(new Map<string, BodyTableEditHandle>());
+  const [dirtyTables, setDirtyTables] = useState<ReadonlySet<string>>(() => new Set());
+  const [saving, setSaving] = useState(false);
+  // Stable by construction (a `useState` initializer), never a memo's identity
+  // (ui AGENTS.md #10): the editors key their registration effect on these.
+  const [api] = useState(() => ({
+    register: (handle: BodyTableEditHandle) => {
+      tablesRef.current.set(handle.id, handle);
+      return () => {
+        if (tablesRef.current.get(handle.id) === handle) tablesRef.current.delete(handle.id);
+      };
+    },
+    reportDirty: (id: string, dirty: boolean) => {
+      setDirtyTables((prev) => {
+        if (prev.has(id) === dirty) return prev;
+        const next = new Set(prev);
+        if (dirty) next.add(id); else next.delete(id);
+        return next;
+      });
+    },
+  }));
+  const session: RecordEditSession = { register: api.register, reportDirty: api.reportDirty, saving };
+
+  // Enter the record-level session once the edit state opens (the provider's
+  // `canEdit` admits it on the render that set `active`), and leave the edit
+  // state if the session ends some other way.
+  const editing = !!inline?.editing;
+  const canEdit = !!inline?.canEdit;
+  const enter = inline?.enter;
+  const enteredRef = useRef(false);
+  useEffect(() => {
+    if (!active) {
+      enteredRef.current = false;
+      return;
+    }
+    if (!enteredRef.current && canEdit && !editing) {
+      enteredRef.current = true;
+      enter?.();
+    }
+  }, [active, canEdit, editing, enter]);
+  const wasEditingRef = useRef(false);
+  useEffect(() => {
+    if (active && wasEditingRef.current && !editing && !saving) onExit();
+    wasEditingRef.current = editing;
+  }, [active, editing, saving, onExit]);
+  useEffect(() => {
+    if (!active) setDirtyTables((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [active]);
+
+  useEffect(() => { onSavingChange(saving); }, [saving, onSavingChange]);
+
+  const draftKeys = inline ? Object.keys(inline.draft) : [];
+  const dirty = active && (draftKeys.length > 0 || dirtyTables.size > 0);
+  useRegisterUnsavedEdits(dirty, unsavedMessage);
+
+  const finish = useCallback(async () => {
+    inline?.reset();
+    setDirtyTables(new Set());
+    onExit();
+    await refresh();
+  }, [inline, onExit, refresh]);
+
+  const save = useCallback(async () => {
+    if (!inline || saving || !dataSource || !objectName || recordId == null) return;
+    const draft = inline.draft;
+    const handles = [...tablesRef.current.values()];
+    inline.setError(null);
+    inline.setFieldErrors(null);
+    for (const h of handles) h.setErrors(null);
+    const tables = bodyTablesEditable
+      ? handles.flatMap((h) => {
+          const snap = h.snapshot();
+          return snap ? [{ id: h.id, ...snap }] : [];
+        })
+      : [];
+    const built = buildRecordEditBatch(objectName, String(recordId), draft, tables);
+    // An untouched record writes no update of its own: op 0 goes when the draft is empty.
+    const hasDraft = Object.keys(draft).length > 0;
+    const ops = hasDraft ? built.ops : built.ops.slice(1);
+    const owners = hasDraft ? built.owners : built.owners.slice(1);
+    if (ops.length === 0) {
+      await finish();
+      return;
+    }
+    setSaving(true);
+    inline.setSaving(true);
+    try {
+      if (tables.length === 0) {
+        // The record alone — the plain update the inline session always used.
+        await dataSource.update(objectName, recordId, draft);
+      } else {
+        await runBatchTransaction(dataSource, ops);
+      }
+      await finish();
+    } catch (err) {
+      const refusal = attributeRecordEditRefusal(err, ops, owners);
+      inline.setFieldErrors(refusal.fieldErrors);
+      inline.setError(refusal.message);
+      for (const h of handles) {
+        h.setErrors(refusal.rowErrors[h.id] ?? null, refusal.tableErrors[h.id] ?? null);
+      }
+    } finally {
+      inline.setSaving(false);
+      setSaving(false);
+    }
+  }, [inline, saving, dataSource, objectName, recordId, bodyTablesEditable, finish]);
+
+  const cancel = useCallback(() => {
+    inline?.cancel();
+    setDirtyTables(new Set());
+    onExit();
+  }, [inline, onExit]);
+
+  controlRef.current = active ? { save, cancel } : null;
+
+  return (
+    <RecordEditSessionContext.Provider value={active && bodyTablesEditable ? session : null}>
+      {children}
+      {active && (inline?.error || bodyTablesReadOnly) && (
+        <div
+          className="sticky bottom-0 z-30 mt-4 space-y-1 rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm"
+          data-record-edit-state=""
+          data-fab-yield=""
+        >
+          {bodyTablesReadOnly && (
+            <p className="text-muted-foreground" data-record-edit-tables-read-only="">{readOnlyNotice}</p>
+          )}
+          {inline?.error && (
+            <p role="alert" className="text-destructive" data-record-edit-error="">{inline.error}</p>
+          )}
+        </div>
+      )}
+    </RecordEditSessionContext.Provider>
+  );
+};
