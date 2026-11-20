@@ -14,8 +14,11 @@
  * `summary` (read-only on both verbs whether or not it declares `readonly`),
  * answered success with no `droppedFields`, and the record in the answer
  * carried the caller's dropped value wherever the write result did not
- * overwrite it: always on update, and on create for a column the stored row
- * leaves out.
+ * overwrite it. Measured on update: the answer carried `biggest: 99` and
+ * `locked: 'forged'` over the stored `5` and `'kept'`. On create the real
+ * engine's write result names every declared field (`null` where nothing was
+ * stored), so it overwrites the echo here; the create assertions hold the
+ * answer for any write result that leaves such a key out.
  *
  * ## What is real here
  *
