@@ -4685,7 +4685,7 @@ const pt = {
     actor: 'Ator',
     auto: 'Auto',
     overrideHint: 'ex.: role:sales_manager. Deixe em branco para usar a identidade detectada.',
-    comment: 'Comentário (opcional)',
+    comment: 'Comentário',
     approve: 'Aprovar',
     approving: 'Aprovando…',
     reject: 'Rejeitar',

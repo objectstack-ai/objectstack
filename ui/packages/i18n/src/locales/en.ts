@@ -5537,7 +5537,7 @@ const en = {
     actor: 'Actor',
     auto: 'Auto',
     overrideHint: 'e.g. role:sales_manager. Leave blank to use the auto-detected identity.',
-    comment: 'Comment (optional)',
+    comment: 'Comment',
     approve: 'Approve',
     approving: 'Approving…',
     reject: 'Reject',

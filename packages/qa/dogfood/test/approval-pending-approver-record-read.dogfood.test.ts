@@ -161,7 +161,8 @@ describe('the approver a pending step waits on reads its record (#26180)', () =>
           return (body.records ?? body.data ?? []).map((r) => String(r.id)).sort();
         };
         const decide = async (token: string, requestId: string, verb: 'approve' | 'reject') => {
-          const res = await stack.apiAs(token, 'POST', `/approvals/requests/${requestId}/${verb}`, {});
+          // A reject carries its reason (the approvals route refuses one without it).
+          const res = await stack.apiAs(token, 'POST', `/approvals/requests/${requestId}/${verb}`, verb === 'reject' ? { comment: 'Over budget.' } : {});
           expect(res.status, `${verb} ${requestId}: ${await res.clone().text()}`).toBe(200);
         };
 
