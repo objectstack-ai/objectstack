@@ -64,6 +64,7 @@ import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objec
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { idsOfReadableScope } from './security-plugin-authz-middleware.js';
+import { predicateWriteFloorDropIds } from './security-plugin-sharing-verdicts.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
@@ -599,5 +600,51 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
     expect(await changedRows(DEAL, inside.ids, 'update')).toEqual(['r1', 'r2', 'r3', 'r4']);
     expect(await changedRows(DEAL, outside.ids, 'update')).toEqual([]);
     expect((await storedDeal(inside.ids.r4))?.owner_id).toBe(BOB);
+  });
+});
+
+describe('[#35802] predicateWriteFloorDropIds: the by-id floor decision, asked per row', () => {
+  // A double of the by-id decision that answers like a write authority with an
+  // `edit` share on every row: the floor is replaced for an update, never for
+  // a delete. It records what it was asked, as `verb:id:delegated`.
+  const shareHolder = (log: string[]) => ({
+    resolvePreImageFloorDrop: async (op: string, _object: string, id: string, _ctx: unknown, _sets: unknown, delegated: boolean) => {
+      log.push(`${op}:${id}:${delegated}`);
+      return op === 'update';
+    },
+  });
+
+  it('asks the verb it is handed, about each row, and answers the rows whose floor that verb replaces', async () => {
+    const log: string[] = [];
+    expect(await predicateWriteFloorDropIds.call(shareHolder(log) as never, 'update', DEAL, ['a', 'b'], {}, [], false)).toEqual(['a', 'b']);
+    expect(await predicateWriteFloorDropIds.call(shareHolder(log) as never, 'delete', DEAL, ['a', 'b'], {}, [], false)).toEqual([]);
+    expect(log).toEqual(['update:a:false', 'update:b:false', 'delete:a:false', 'delete:b:false']);
+  });
+
+  it('asks nothing for a delegated write', async () => {
+    const log: string[] = [];
+    expect(await predicateWriteFloorDropIds.call(shareHolder(log) as never, 'update', DEAL, ['a', 'b'], {}, [], true)).toEqual([]);
+    expect(log).toEqual([]);
+  });
+
+  it('asks about every candidate exactly once, at most 25 at a time, and keeps each id as it came', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const asked: string[] = [];
+    const host = {
+      resolvePreImageFloorDrop: async (_op: string, _object: string, id: string) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        asked.push(id);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        inFlight -= 1;
+        return Number(id) % 2 === 0;
+      },
+    };
+    const ids = Array.from({ length: 60 }, (_, i) => i);
+    const dropped = await predicateWriteFloorDropIds.call(host as never, 'update', DEAL, ids, {}, [], false);
+    expect(asked).toEqual(ids.map(String));
+    expect(dropped).toEqual(ids.filter((i) => i % 2 === 0));
+    expect(peak).toBe(25);
   });
 });
