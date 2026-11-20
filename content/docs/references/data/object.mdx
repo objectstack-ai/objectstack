@@ -121,7 +121,7 @@ const result = ApiMethod.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **valueFields** | `string[]` | ✅ | Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never carries their values; every other declared column enters in clear. Each must name a declared field other than `id` and `created_at`, which order the leaves. |
-| **chainField** | `string` | optional | The column whose value names the organization chain each sealed row joins (default `tenant_id`); a row whose value is empty seals into the deployment chain. It must name a declared field or a column the platform injects, such as the tenant column `organization_id`, whose value is one text on every store (not a number, boolean, date, datetime, JSON or multi-value column); not `id` or `created_at`, which order the leaves; and not a `valueFields` member. Fixed once the object has checkpoints. |
+| **chainField** | `string` | optional | The column whose value names the organization chain each sealed row joins (default `tenant_id`); a row whose value is empty seals into the deployment chain. It must name a declared field or a column the platform injects, such as the tenant column `organization_id`, whose value is one text on every store (not a number, boolean, date, datetime, JSON or multi-value column); not `id` or `created_at`, which order the leaves; and not a `valueFields` member. Absent, the default `tenant_id` is held to the same rules, and the registry does not inject it: a seal that names no chain column needs a declared text or lookup `tenant_id` field. Fixed once the object has checkpoints. |
 
 
 ---

@@ -489,5 +489,63 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Criado em"
       }
     }
+  },
+  sys_channel_account: {
+    label: "Conta de canal",
+    pluralLabel: "Contas de canal",
+    description: "A instalação de um app de chat por uma organização, como o próprio app do Slack, com o token de bot emitido para ela.",
+    fields: {
+      channel_id: {
+        label: "Canal"
+      },
+      display_name: {
+        label: "Espaço de trabalho"
+      },
+      external_id: {
+        label: "ID do espaço de trabalho"
+      },
+      bot_token: {
+        label: "Token do bot"
+      },
+      status: {
+        label: "Status",
+        options: {
+          active: "Ativa",
+          revoked: "Revogada"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Vínculo de usuário do canal",
+    pluralLabel: "Vínculos de usuário do canal",
+    description: "O vínculo de uma pessoa com o próprio usuário em um espaço de trabalho de chat: proposto pela correspondência de e-mail, passa a entregar quando a pessoa o confirma.",
+    fields: {
+      account_id: {
+        label: "Conta"
+      },
+      user_id: {
+        label: "Usuário"
+      },
+      external_user_id: {
+        label: "ID do usuário no chat"
+      },
+      external_display_name: {
+        label: "Nome do usuário no chat"
+      },
+      state: {
+        label: "Estado",
+        options: {
+          proposed: "Proposto",
+          confirmed: "Confirmado"
+        }
+      },
+      confirmed_at: {
+        label: "Confirmado em"
+      },
+      proposal_email_hash: {
+        label: "Hash do e-mail da proposta"
+      }
+    }
   }
 };

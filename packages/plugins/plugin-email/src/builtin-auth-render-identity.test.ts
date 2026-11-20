@@ -53,6 +53,14 @@ const DATA = {
   // the timezone the render names (UTC below) so the bytes never follow the
   // machine's zone.
   expiresAt: '2031-03-04T05:06:07.000Z',
+  // What a password change leaves active (`auth.password_changed_notice`):
+  // each list arrives prepared, beside its count.
+  apiKeyCount: 2,
+  apiKeys: 'ci & <deploy>, laptop',
+  signInAccountCount: 1,
+  signInAccounts: 'github',
+  authorizedAppCount: 1,
+  authorizedApps: 'Claude <Desktop>',
 };
 
 /**
@@ -236,6 +244,30 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
     html: 'c6abe9c3fc761d1dc88b0517ee65bce3dcedb01a425e6cdd3daebdd77aff1a00',
     text: '7d65c60ed0e8b415fe7aae7aff5c544318f81e3ab6c87525067af112a30d238b',
   },
+  // `auth.password_changed_notice` has no row-path render to match: it was
+  // added after the row path was deleted, and these are its registry renders
+  // captured in the commit that last changed it (its authorized-apps line), so
+  // any later byte change is seen.
+  'auth.password_changed_notice@en-US': {
+    subject: 'Your Acme & <Co> password was changed: your API keys, linked sign-ins and authorized apps stay active',
+    html: '3060bd37b8f5cf3428b28f04b7656009bde51c6e693e07a077ba469d2c4b94f5',
+    text: 'a47cc839cf4c908e07310185813ea1e3df2aac3395a60dda354ac08e148a92e5',
+  },
+  'auth.password_changed_notice@zh-CN': {
+    subject: '您的 Acme & <Co> 密码已修改：API 密钥、已关联的登录方式与已授权的应用仍然有效',
+    html: 'd8ad4c508eb44a134a84a0df0792f7bf0246a83249c231c00fec83d555b819e3',
+    text: '9fdf7c969c9088a4ad5a8becd67593c9d4d447e6e3a2b0f8e51c3c521dbc718b',
+  },
+  'auth.password_changed_notice@ja-JP': {
+    subject: 'Acme & <Co> のパスワードが変更されました: API キー、連携済みのサインイン、承認済みのアプリは引き続き有効です',
+    html: '57472af661af23a2f3b98113ba4aa712d95b7d0bd260c8dd6b555a024680babd',
+    text: '99bb63c26573aeb1a9972543978dd73c834fb60557e19237da3833da78f1795d',
+  },
+  'auth.password_changed_notice@es-ES': {
+    subject: 'Se ha cambiado tu contraseña de Acme & <Co>: tus claves de API, inicios de sesión vinculados y aplicaciones autorizadas siguen activos',
+    html: '0639752d56436a06d1f9acf17d6cc6cf64b0d01597be69fc57ea76b674117432',
+    text: '1fc0078261a1de130614a59ac9eb8c462e2fc884e7b086cc3d90a116aea86899',
+  },
 };
 
 /** What the expiry instant is replaced with before a face is digested. */
@@ -297,7 +329,7 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
       };
     }
 
-    expect(Object.keys(rendered)).toHaveLength(32);
+    expect(Object.keys(rendered)).toHaveLength(36);
     expect(rendered).toEqual(RENDERED);
   });
 });

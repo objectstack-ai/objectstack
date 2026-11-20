@@ -610,7 +610,11 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     <RelatedEnlargeContext.Provider value={onEnlargeRelated ?? null}>
     <DetailsColumnCapContext.Provider value={sideBySide && !wide ? 2 : 3}>
       <div
-        className={cn('w-full bg-background p-3 md:p-4 lg:p-6', className)}
+        // objectstack#35745 — the top is 12px at every width: the header sits
+        // right above, and the host's scroller adds no top padding of its own,
+        // so the tab row follows the header as a list's view bar follows its
+        // page bar. The sides and the foot keep the page's padding.
+        className={cn('w-full bg-background px-3 pb-3 pt-3 md:px-4 md:pb-4 lg:px-6 lg:pb-6', className)}
         data-page-type="record"
         data-record-page-tier={tier}
       >

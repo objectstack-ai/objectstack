@@ -1,8 +1,8 @@
 ## State Machines & Approvals
 
 A record's **state machine** locks the legal transitions of its status field
-so that automation — increasingly AI-generated — cannot drive a record into an
-illegal state. Unmarked blocks are fragments.
+so that automation cannot drive a record into an illegal state. Unmarked
+blocks are fragments.
 
 ### State Machine — a `state_machine` validation rule (ADR-0020)
 
@@ -36,10 +36,11 @@ const rule: StateMachineValidation = {
 Notes:
 - **One rule per field.** Parallel lifecycles (e.g. `status` + `payment_status`)
   are N separate `state_machine` rules.
-- **`initialStates`** (optional) gates INSERT: a record created with its
-  state field outside this list is rejected. `transitions` only governs
-  updates, so without it a record can be born mid-flow (e.g. created already
-  `resolved`). Omit to keep the legacy no-check-on-insert behavior.
+- **`initialStates`** gates INSERT: a record created with its state field
+  outside this list is rejected. `transitions` only governs updates, so a
+  machine that runs on insert without it is refused at publish
+  (`state-machine-no-initial-states`); an update-only machine
+  (`events: ['update']`) needs none.
 - **Conditional transitions / side effects are NOT part of the machine.** A
   guard is expressed as a sibling `script` / `conditional` validation rule;
   "do something when the state changes" is a **record-triggered Flow**
@@ -63,8 +64,7 @@ Since **ADR-0019** there is no standalone approval-process type. An approval is
 authored as an **Approval node** (`type: 'approval'`) on an ordinary flow — the
 run **suspends** when it reaches the node and **resumes** down the node's
 `approve` / `reject` out-edge once a decision is recorded. Multi-step review is
-just successive Approval nodes wired together on the canvas, so the whole review
-is one diagram a reviewer (or AI) can read end-to-end.
+successive Approval nodes.
 
 > There is no `approvals: [...]` stack collection. The approval *state* (`sys_approval_request` /
 > `sys_approval_action`, the record lock, the status mirror, approver
@@ -142,7 +142,7 @@ Three pieces author it:
    the approval node MUST be typed `'back'`. This is the *only* thing that
    legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
    as a DAG, so an **unmarked** cycle is rejected. At
-   run time a back-edge traverses normally (it just re-enters the node).
+   run time a back-edge traverses normally.
 3. **`maxRevisions`** on the approval `config` (default `3`) — the budget of
    send-backs per run; exceeding it **auto-rejects** (resumes down the `reject`
    edge). `maxRevisions: 0` disables send-back, so never pair `0` with a `revise`
@@ -355,7 +355,9 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 These are wired on the **graph**, not in node config:
 
 - **On approve / on reject** — wire downstream nodes (`update_record`,
-  `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
+  `http`, a `notify` node, …) to out-edges labelled exactly `approve` and
+  `reject`. With only one, or another spelling (`Approved`), publish refuses
+  the flow (`flow-approval-decision-unrouted`): both branches would run.
 - **A write on that branch that may be refused** (a record hook, a validation
   rule, a permission) — draw a `fault` edge from that step to a handler
   (SKILL.md § Failure routing): the refusal takes it and the decision answers

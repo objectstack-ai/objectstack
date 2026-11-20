@@ -1468,7 +1468,7 @@ export class MessagingService {
         //     delivery. With no organization from the producer or the event
         //     row the read stays unscoped, as before.
         const payload = input.payload ?? {};
-        const targets = await this.preferences.filter(recipients, channels, {
+        let targets = await this.preferences.filter(recipients, channels, {
             topic: input.topic,
             organizationId: owned.organizationId,
             severity: input.severity,
@@ -1477,6 +1477,16 @@ export class MessagingService {
             this.ctx.logger.info(`[messaging] emit: topic '${input.topic}' suppressed for all recipients by preference`);
             return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed };
         }
+
+        // 3c) Per-recipient reach (ADR-0013 addendum, step 2): a channel that
+        //     addresses only some people (Slack: a confirmed link) skips the
+        //     rest here, before a row exists — never a dead-lettered delivery.
+        const reached = await this.dropUnreachable(targets, owned.organizationId);
+        if (reached.length === 0) {
+            this.ctx.logger.info(`[messaging] emit: topic '${input.topic}' reaches no recipient on its remaining channels`);
+            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0, suppressed };
+        }
+        targets = reached;
 
         // 4) Either enqueue durable deliveries (P1 outbox) or fan out inline (P0).
         if (this.outbox) {
@@ -1612,6 +1622,46 @@ export class MessagingService {
             else suppressed.push({ channel: id, reason: answer.reason });
         }
         return { available, suppressed };
+    }
+
+    /**
+     * Drop each `(recipient × channel)` pair whose channel answers, through
+     * {@link MessagingChannel.reachableRecipients}, that it cannot address that
+     * recipient, and every target left with no channel. Asked once per
+     * channel per emit, with every recipient still on it. A probe that throws
+     * keeps every recipient (fail-open, said at `warn`): the channel's own
+     * `send()` answers an unaddressable recipient then.
+     */
+    private async dropUnreachable(targets: PreferenceTarget[], organizationId: string | undefined): Promise<PreferenceTarget[]> {
+        const asked = new Map<string, Set<string>>();
+        for (const { recipient, channels } of targets) {
+            for (const id of channels) {
+                if (!this.getChannel(id)?.reachableRecipients) continue;
+                let set = asked.get(id);
+                if (!set) asked.set(id, (set = new Set()));
+                set.add(recipient);
+            }
+        }
+        const unreachable = new Map<string, Set<string>>();
+        for (const [id, recipients] of asked) {
+            const channel = this.getChannel(id);
+            let reachable: ReadonlySet<string>;
+            try {
+                reachable = await channel!.reachableRecipients!(this.ctx, { organizationId, recipients: [...recipients] });
+            } catch (err) {
+                this.ctx.logger.warn(
+                    `[messaging] channel '${id}' recipient probe threw (${(err as Error)?.message ?? String(err)}); ` +
+                    'fanning out to every recipient as before',
+                );
+                continue;
+            }
+            const out = [...recipients].filter((r) => !reachable.has(r));
+            if (out.length > 0) unreachable.set(id, new Set(out));
+        }
+        if (unreachable.size === 0) return targets;
+        return targets
+            .map((t) => ({ ...t, channels: t.channels.filter((c) => !unreachable.get(c)?.has(t.recipient)) }))
+            .filter((t) => t.channels.length > 0);
     }
 
     /**

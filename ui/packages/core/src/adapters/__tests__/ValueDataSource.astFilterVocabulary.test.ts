@@ -48,6 +48,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { runInNewContext } from 'node:vm';
 import { VIEW_FILTER_OPERATORS } from '@objectstack/spec/ui';
 import {
   canonicalAstOperator,
@@ -616,6 +617,91 @@ describe('the nested-relation node is refused by name in both dialects', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(await selectedIds(['created', '>', new Date('2026-02-01T00:00:00Z')], rows))
       .toEqual(['a']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The AST arm's null-ness operators carry no flag: direction comes from the
+ * operator NAME, and the value slot is never read. That is the spec's own
+ * reading, so this face needs no flag door of its own: `parseFilterAST`
+ * hands `['f', 'is_null', <anything>]` back as `{ f: { $null: true } }`. The
+ * flag door sits where a flag exists, on the `$` arm and in the converter,
+ * which refuses a non-boolean before it can lower one.
+ */
+describe('the AST null-ness operators read no flag, as the spec reads them', () => {
+  const ROWS = [
+    { id: 'has', ts: 't' },
+    { id: 'null', ts: null },
+    { id: 'missing' },
+  ];
+
+  it.each([['no'], [{ owner: 'u1' }], [false], [0]])(
+    '`is_null` with %j in the value slot is the spec’s `$null: true`, with nothing logged',
+    async (slot) => {
+      expect(parseFilterAST(['ts', 'is_null', slot] as never)).toEqual({ ts: { $null: true } });
+      expect(parseFilterAST(['ts', 'is_not_null', slot] as never)).toEqual({ ts: { $null: false } });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['ts', 'is_null', slot], ROWS)).toEqual(['null', 'missing']);
+      expect(await selectedIds(['ts', 'is_not_null', slot], ROWS)).toEqual(['has']);
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+});
+
+/**
+ * The shared comparand builder on the AST arm: a `{ $now, addDays }` anchor, a
+ * `$`-keyed object that is no `{ $field }` reference and a plain object of
+ * another realm are refused under every operator that reads the slot, and a
+ * class instance under an equality, membership or text operator.
+ */
+describe('object comparands the AST arm cannot compare are refused by name', () => {
+  class Amount {
+    readonly units: number;
+    constructor(units: number) {
+      this.units = units;
+    }
+    valueOf(): number {
+      return this.units;
+    }
+  }
+
+  it.each([
+    ['<', { $now: true, addDays: 7 }, 'is a { $now, addDays } date anchor'],
+    ['=', { $now: true, addDays: 0 }, 'is a { $now, addDays } date anchor'],
+    ['!=', { $foo: 1 }, "is an object carrying the key '$foo'"],
+    ['>', runInNewContext('({ id: "u1" })'), 'is a plain object from another realm'],
+    ['!=', runInNewContext('({ id: "u1" })'), 'is a plain object from another realm'],
+    ['=', new Amount(25), 'is a Amount instance'],
+    ['!=', new Amount(25), 'is a Amount instance'],
+    ['not_contains', new Amount(25), 'is a Amount instance'],
+    ['starts_with', new Amount(25), 'is a Amount instance'],
+    // Neither is a plain object from another realm: one structural test with
+    // the converter (foreign-realm-object.ts).
+    ['>', Object.create(Object.create(null) as object) as object, 'is an object of an unrecognised type, which'],
+    ['=', Object.create({ id: 'u1' }) as object, 'is a Object instance, which'],
+  ] as const)('`%s` refuses %j', async (operator, comparand, words) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['age', operator, comparand])).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain(`filter comparand on field 'age' ${words}`);
+  });
+
+  it.each([
+    ['in', [new Amount(25), 30]],
+    ['nin', [new Amount(25)]],
+    ['in', [{ $now: true, addDays: 1 }]],
+    ['between', [runInNewContext('({})'), 30]],
+  ] as const)('`%s` refuses such an object as a list member', async (operator, list) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['age', operator, list])).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("filter comparand on field 'age' is ");
+  });
+
+  it('CONTROL: a class instance under `between` compares through valueOf, with nothing logged', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await selectedIds(['age', 'between', [new Amount(22), new Amount(28)]])).toEqual(['b']);
     expect(warn).not.toHaveBeenCalled();
   });
 });

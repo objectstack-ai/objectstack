@@ -1141,7 +1141,9 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       'whose value is empty seals into the deployment chain. It must name a declared field or a column the ' +
       'platform injects, such as the tenant column `organization_id`, whose value is one text on every store ' +
       '(not a number, boolean, date, datetime, JSON or multi-value column); not `id` or `created_at`, which ' +
-      'order the leaves; and not a `valueFields` member. Fixed once the object has checkpoints.',
+      'order the leaves; and not a `valueFields` member. Absent, the default `tenant_id` is held to the same ' +
+      'rules, and the registry does not inject it: a seal that names no chain column needs a declared text or ' +
+      'lookup `tenant_id` field. Fixed once the object has checkpoints.',
     ),
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
@@ -3231,6 +3233,108 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
 }
 
 /**
+ * [ADR-0154 D10, note on `chainField`] The chain column a seal that names no
+ * `chainField` reads: the sealer's default (`AUDIT_SEAL_DEFAULT_CHAIN_FIELD`
+ * in `@objectstack/plugin-audit`).
+ */
+const SEAL_DEFAULT_CHAIN_FIELD = 'tenant_id';
+
+/** Why a column cannot be a sealed object's chain column ({@link sealChainColumnFaults}). */
+type SealChainColumnFault =
+  | { kind: 'not-a-field' }
+  | { kind: 'leaf-order' }
+  | { kind: 'value-field' }
+  | { kind: 'non-text'; type: string };
+
+/**
+ * The faults that keep `name` from being this sealed object's chain column, in
+ * the order they are judged; empty when it can be. One judgement for a named
+ * `chainField` and for the default `tenant_id`
+ * ({@link refuseUnknownSealChainField}): a column the object does not have
+ * stops the judgement, and so does a leaf-order column; a `valueFields` member
+ * and a column whose value is not one text on every store are each a fault.
+ *
+ * "Has" means the AUTHORED field map plus the injected plan, as the
+ * `valueFields` check reads it. A column contributed only by an
+ * `objectExtensions` entry is not counted, so a sealed object whose chain
+ * column (named, or the default `tenant_id`) reaches it only that way is
+ * refused here, although the sealer, which reads the registry's folded field
+ * map, would seal it. That false refusal is accepted: the fix is to declare
+ * the column on the object itself.
+ */
+function sealChainColumnFaults(
+  object: { fields?: unknown },
+  seal: { valueFields?: unknown },
+  name: string,
+): SealChainColumnFault[] {
+  const declared = (object.fields !== null && typeof object.fields === 'object' ? object.fields : {}) as Record<string, unknown>;
+  const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
+  if (!isDeclared && !resolveInjectedSystemColumns(object).names.has(name)) return [{ kind: 'not-a-field' }];
+  if (isSealLeafOrderColumn(name)) return [{ kind: 'leaf-order' }];
+  const faults: SealChainColumnFault[] = [];
+  if (Array.isArray(seal.valueFields) && seal.valueFields.includes(name)) faults.push({ kind: 'value-field' });
+  const nonText = nonTextChainColumnType(isDeclared ? declared[name] : injectedSystemColumnDefs(object)[name]);
+  if (nonText !== null) faults.push({ kind: 'non-text', type: nonText });
+  return faults;
+}
+
+/** The message of a refused NAMED `chainField`. */
+function namedSealChainFieldMessage(name: string, fault: SealChainColumnFault): string {
+  switch (fault.kind) {
+    case 'not-a-field':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, which is not a field of this object. `
+        + 'The sealer chains each row by that column\'s value, one chain per organization, so it must name a '
+        + 'declared field or a column the platform injects (the tenant column is `organization_id`); declare '
+        + 'the field, name another, or remove the key to chain by `tenant_id` (ADR-0154 D10).';
+    case 'leaf-order':
+      return `\`lifecycle.seal.chainField\` cannot name \`${name}\`: it orders each sealed leaf, and it names no `
+        + 'organization. Name the column that holds the organization id of each row, such as `organization_id` '
+        + '(ADR-0154 D10).';
+    case 'value-field':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, which \`lifecycle.seal.valueFields\` also lists. `
+        + 'A value field enters each sealed leaf as a salted commitment so a checkpoint never carries it, but '
+        + 'the chain value travels in clear in every checkpoint and proof bundle of its chain; remove it from '
+        + '`valueFields`, or name another chain column (ADR-0154 D1, D9, D10).';
+    case 'non-text':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, a \`${fault.type}\` column, whose value is not one text on `
+        + 'every store. The sealer reads a row\'s chain as a non-empty text only, so the rows would seal into '
+        + 'the deployment chain with no report; name a text or lookup column that holds the organization id, '
+        + 'such as `organization_id` (ADR-0154 D10).';
+  }
+}
+
+/**
+ * The message of a refused DEFAULT chain column. `fix` names the chain column
+ * to name instead: the injected tenant column where the registry injects it,
+ * otherwise a declared column — on an object that opts out of the tenant
+ * column, `organization_id` would itself be refused.
+ */
+function defaultSealChainColumnMessage(fault: SealChainColumnFault, injectsTenantColumn: boolean): string {
+  const name = SEAL_DEFAULT_CHAIN_FIELD;
+  const lead = `\`lifecycle.seal\` names no \`chainField\`, so the sealer chains each row by the default chain column \`${name}\``;
+  const other = injectsTenantColumn
+    ? 'name the chain column with `chainField`, such as `organization_id`, the tenant column the platform injects'
+    : 'name a declared text or lookup column that holds it with `chainField`';
+  switch (fault.kind) {
+    case 'not-a-field':
+    case 'leaf-order': // never for `tenant_id`; judged alike so the switch stays total
+      return `${lead}, which is not a field of this object. The sealer cannot chain the rows per organization `
+        + 'without that column, so it would seal none of them and only report the object at run time; '
+        + `declare a \`${name}\` text or lookup field that holds each row's organization id, or ${other} `
+        + '(ADR-0154 D10).';
+    case 'value-field':
+      return `${lead}, which \`lifecycle.seal.valueFields\` also lists. A value field enters each sealed leaf as a `
+        + 'salted commitment so a checkpoint never carries it, but the chain value travels in clear in every '
+        + `checkpoint and proof bundle of its chain; remove \`${name}\` from \`valueFields\`, or ${other} `
+        + '(ADR-0154 D1, D9, D10).';
+    case 'non-text':
+      return `${lead}, a \`${fault.type}\` column, whose value is not one text on every store. The sealer reads a `
+        + 'row\'s chain as a non-empty text only, so the rows would seal into the deployment chain with no report; '
+        + `declare \`${name}\` as a text or lookup field that holds the organization id, or ${other} (ADR-0154 D10).`;
+  }
+}
+
+/**
  * [ADR-0154 D10, note on `chainField`] A `lifecycle.seal.chainField` the
  * author names is a field the object has: one it declares, or a column the
  * registry injects into it ({@link resolveInjectedSystemColumns} — above all
@@ -3245,15 +3349,21 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
  * one text on every store ({@link nonTextChainColumnType}), judged by the
  * declared field or, for an injected column, by the definition the registry
  * injects ({@link injectedSystemColumnDefs}). Each is one located issue at
- * `['lifecycle', 'seal', 'chainField']`. Every refusal here needs the key, which
- * did not exist before it, so none refuses a declaration that parsed before.
+ * `['lifecycle', 'seal', 'chainField']`.
  *
- * Only a NAMED chain column is judged here. An object that names none chains
- * by `tenant_id`, as before the key existed, and one without that column is
- * reported by the sealer at `error`, as before. The injected plan is read with
- * no deployment, as every author-time caller reads it; a deployment that
- * declares the object platform-global withholds the tenant column, and the
- * sealer reports that object the same way.
+ * An object that names NO chain column chains by its default, `tenant_id`, and
+ * that column is held to the same rules ({@link sealChainColumnFaults}, one
+ * judgement for both): it must be a field of the object, its value one text on
+ * every store, and not a `valueFields` member. The registry injects no
+ * `tenant_id` (its tenant column is `organization_id`), so in practice the
+ * default must be declared. Each refusal of the default is one located issue at
+ * `['lifecycle', 'seal']`, the block the author wrote: there is no
+ * `chainField` to point at, and naming one is half of every fix. Before this
+ * rule such an object parsed and the sealer reported it at `error` and sealed
+ * none of its rows, which it still does for a definition that skips the parse.
+ * The injected plan is read with no deployment, as every author-time caller
+ * reads it; a deployment that declares the object platform-global withholds
+ * the tenant column, and the sealer reports that object the same way.
  *
  * `injected-system-columns` imports this module (for `isTenancyDisabled`), so
  * the two form an import cycle. Each side calls the other only from inside a
@@ -3263,59 +3373,22 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
 function refuseUnknownSealChainField(object: { lifecycle?: unknown; fields?: unknown }, ctx: z.RefinementCtx): void {
   const lifecycle = object.lifecycle;
   if (lifecycle === null || typeof lifecycle !== 'object') return;
-  const seal = (lifecycle as { seal?: { chainField?: unknown } }).seal;
-  if (!seal || typeof seal.chainField !== 'string') return;
-  const name = seal.chainField;
-  const path = ['lifecycle', 'seal', 'chainField'];
-  const declared = (object.fields !== null && typeof object.fields === 'object' ? object.fields : {}) as Record<string, unknown>;
-  const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
-  if (!isDeclared && !resolveInjectedSystemColumns(object).names.has(name)) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` names \`${name}\`, which is not a field of this object. `
-        + 'The sealer chains each row by that column\'s value, one chain per organization, so it must name a '
-        + 'declared field or a column the platform injects (the tenant column is `organization_id`); declare '
-        + 'the field, name another, or remove the key to chain by `tenant_id` (ADR-0154 D10).',
-    });
+  const seal = (lifecycle as { seal?: { chainField?: unknown; valueFields?: unknown } }).seal;
+  if (!seal || typeof seal !== 'object') return;
+  if (typeof seal.chainField === 'string') {
+    const name = seal.chainField;
+    for (const fault of sealChainColumnFaults(object, seal, name)) {
+      ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal', 'chainField'], message: namedSealChainFieldMessage(name, fault) });
+    }
     return;
   }
-  if (isSealLeafOrderColumn(name)) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` cannot name \`${name}\`: it orders each sealed leaf, and it names no `
-        + 'organization. Name the column that holds the organization id of each row, such as `organization_id` '
-        + '(ADR-0154 D10).',
-    });
-    return;
-  }
-  const valueFields = (seal as { valueFields?: unknown }).valueFields;
-  if (Array.isArray(valueFields) && valueFields.includes(name)) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` names \`${name}\`, which \`lifecycle.seal.valueFields\` also lists. `
-        + 'A value field enters each sealed leaf as a salted commitment so a checkpoint never carries it, but '
-        + 'the chain value travels in clear in every checkpoint and proof bundle of its chain; remove it from '
-        + '`valueFields`, or name another chain column (ADR-0154 D1, D9, D10).',
-    });
-  }
-  const def = isDeclared ? declared[name] : injectedSystemColumnDefs(object)[name];
-  const nonText = nonTextChainColumnType(def);
-  if (nonText !== null) {
-    ctx.addIssue({
-      code: 'custom',
-      path,
-      message:
-        `\`lifecycle.seal.chainField\` names \`${name}\`, a \`${nonText}\` column, whose value is not one text on `
-        + 'every store. The sealer reads a row\'s chain as a non-empty text only, so the rows would seal into '
-        + 'the deployment chain with no report; name a text or lookup column that holds the organization id, '
-        + 'such as `organization_id` (ADR-0154 D10).',
-    });
+  // A `chainField` of another type is the key's own type refusal; only an absent one reads the default.
+  if (seal.chainField !== undefined) return;
+  const faults = sealChainColumnFaults(object, seal, SEAL_DEFAULT_CHAIN_FIELD);
+  if (faults.length === 0) return;
+  const injectsTenantColumn = resolveInjectedSystemColumns(object).tenant;
+  for (const fault of faults) {
+    ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal'], message: defaultSealChainColumnMessage(fault, injectsTenantColumn) });
   }
 }
 
