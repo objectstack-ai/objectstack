@@ -628,7 +628,41 @@ describe('a plain-object comparand under a `$` operator is refused as the AST ar
     },
   );
 
+  const EMPTY_REFUSAL =
+    "filter comparand on field 'owner' is an empty object ({}), which is neither "
+    + 'a comparison value nor a nested relation constraint';
+
+  it.each(COMPARAND_OPERATORS)(
+    '`%s` refuses an EMPTY plain-object whole comparand in its own sentence',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({ owner: { [operator]: {} } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(EMPTY_REFUSAL);
+    },
+  );
+
+  it.each([...LIST_OPERATORS])(
+    '`%s` refuses an EMPTY plain-object list member in its own sentence',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({ owner: { [operator]: [{}, 'zzz'] } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(EMPTY_REFUSAL);
+    },
+  );
+
+  it('`{}` as a field\'s WHOLE condition keeps the converter\'s zero-key refusal', async () => {
+    const { ids, lines } = await refusalOf({ owner: {} });
+    expect(ids).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('filter rule refused as it is lowered');
+    expect(lines[0]).not.toContain(EMPTY_REFUSAL);
+  });
+
   it.each([
+    ['$ne {}', { owner: { $ne: {} } }],
+    ['$nin [{}]', { owner: { $nin: [{}] } }],
     ['$ne', { owner: { $ne: NESTED } }],
     ['$notContains', { owner: { $notContains: NESTED } }],
     ['$gt', { owner: { $gt: NESTED } }],

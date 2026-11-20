@@ -124,10 +124,15 @@ const AST_NO_COMPARAND_OPERATORS = new Set(['is_null', 'is_not_null', 'is_empty'
 
 /**
  * The `$` operators whose comparand slot holds a FLAG, not a value: the `$`
- * twins of {@link AST_NO_COMPARAND_OPERATORS}. The rest of the spec's
- * `FILTER_OPERATORS` ({@link DOLLAR_COMPARAND_OPERATORS}) read a comparand.
+ * twins of {@link AST_NO_COMPARAND_OPERATORS}.
  */
 const DOLLAR_FLAG_OPERATORS = new Set(['$null', '$exists', '$empty']);
+
+/**
+ * ALL of the spec's `FILTER_OPERATORS`, the three flag operators included. A
+ * caller asking which operators read a comparand subtracts
+ * {@link DOLLAR_FLAG_OPERATORS} at its call site.
+ */
 const DOLLAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(FILTER_OPERATORS);
 
 /**
@@ -526,8 +531,30 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The nested-relation refusal for one comparand, or `undefined` when the
- * comparand is not a nested relation condition. ONE builder for both arms:
+ * The refusal for an EMPTY plain object, `{}`, in comparand position. There is
+ * no key to name, and it is neither a comparison value nor a relation
+ * constraint, so it gets a sentence of its own. `{ field: {} }` as a field's
+ * WHOLE condition is a different position: an operator map with no operators,
+ * refused by the converter (see {@link loweringConditionRefusal}).
+ */
+function emptyObjectComparandRefusalReason(field: string): string {
+  return `filter comparand on field '${field}' is an empty object ({}), which is `
+    + `neither a comparison value nor a nested relation constraint`;
+}
+
+/** {@link plainObjectComparandRefusal} for one value: a whole comparand or one list member. */
+function plainObjectValueRefusal(field: string, value: unknown): string | undefined {
+  const key = nestedRelationComparandKey(value);
+  if (key !== undefined) return nestedRelationRefusalReason(field, key);
+  if (isPlainObject(value) && Object.keys(value).length === 0) {
+    return emptyObjectComparandRefusalReason(field);
+  }
+  return undefined;
+}
+
+/**
+ * The refusal for a comparand that is a PLAIN object with no `$` key, empty or
+ * not, or `undefined` when the comparand is not one. ONE builder for both arms:
  * {@link matchesComparisonNode} calls it for every AST operator that reads the
  * value slot, and {@link matchesDollarOperator} for every `$` operator of the
  * spec's `FILTER_OPERATORS` that reads a comparand.
@@ -541,21 +568,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * (`normalizeFilterComparandTypes`) refuses the same comparand in both
  * positions, so a `provider: 'value'` list refuses where the platform does.
  *
- * Only a plain object with no `$` key is one (see
- * {@link nestedRelationComparandKey}): a `Date`, a class instance and a
- * `{ $field }` reference are still compared.
+ * A NON-EMPTY one is a nested relation condition and gets
+ * {@link nestedRelationRefusalReason}, which names its first key. An EMPTY one,
+ * `{}`, has no key to name and gets {@link emptyObjectComparandRefusalReason}.
+ * A `Date`, a class instance and a `{ $field }` reference are not plain objects
+ * with no `$` key, so they are still compared.
  */
-function nestedRelationComparandRefusal(
+function plainObjectComparandRefusal(
   field: string,
   rawTarget: unknown,
   listOperator: boolean,
 ): string | undefined {
-  const wholeKey = nestedRelationComparandKey(rawTarget);
-  if (wholeKey !== undefined) return nestedRelationRefusalReason(field, wholeKey);
+  const whole = plainObjectValueRefusal(field, rawTarget);
+  if (whole !== undefined) return whole;
   if (listOperator && Array.isArray(rawTarget)) {
     for (const member of rawTarget) {
-      const memberKey = nestedRelationComparandKey(member);
-      if (memberKey !== undefined) return nestedRelationRefusalReason(field, memberKey);
+      const refusal = plainObjectValueRefusal(field, member);
+      if (refusal !== undefined) return refusal;
     }
   }
   return undefined;
@@ -617,12 +646,13 @@ function matchesComparisonNode(
   // condition object by reference: no row matched and nothing was logged, while
   // the object form of the same filter is refused by name. Checked for every
   // operator that reads the slot, so `!=` cannot answer it as every row, and
-  // for each member of a list comparand, so `nin` cannot either.
+  // for each member of a list comparand, so `nin` cannot either. An EMPTY plain
+  // object, `{}`, is refused by the same builder in a sentence of its own.
   if (!AST_NO_COMPARAND_OPERATORS.has(operator)) {
-    const nestedRefusal = nestedRelationComparandRefusal(
+    const plainRefusal = plainObjectComparandRefusal(
       field, rawTarget, AST_LIST_COMPARAND_OPERATORS.has(operator),
     );
-    if (nestedRefusal !== undefined) return refuseFilterNode(refusals, nestedRefusal);
+    if (plainRefusal !== undefined) return refuseFilterNode(refusals, plainRefusal);
   }
 
   // objectui#8515 — a `{ $field }` reference as the WHOLE comparand. Resolved
@@ -901,9 +931,10 @@ function matchesDollarOperator(
     return refuseListMemberFieldReference(refusals, field, operator);
   }
 
-  // A plain object with no `$` key as the comparand, whole or as a list
-  // member: the AST arm's nested-relation refusal, from the same builder, so
-  // `$ne` / `$notContains` / `$nin` cannot answer it as every row. Judged for
+  // A plain object with no `$` key as the comparand, NON-EMPTY or EMPTY (`{}`),
+  // whole or as a list member: the AST arm's refusals, from the same builder,
+  // so `$ne` / `$notContains` / `$nin` cannot answer it as every row. A
+  // non-empty one gets the nested-relation sentence, `{}` its own. Judged for
   // every declared operator that reads a comparand. The three flag operators
   // are not: `$empty` refuses a non-boolean flag on its own arm, and `$null` /
   // `$exists` read their flag's truthiness, as their lowering does. Keys
@@ -912,10 +943,10 @@ function matchesDollarOperator(
     DOLLAR_COMPARAND_OPERATORS.has(operator)
     && !DOLLAR_FLAG_OPERATORS.has(operator)
   ) {
-    const nestedRefusal = nestedRelationComparandRefusal(
+    const plainRefusal = plainObjectComparandRefusal(
       field, rawTarget, DOLLAR_LIST_COMPARAND_OPERATORS.has(operator),
     );
-    if (nestedRefusal !== undefined) return refuseFilterNode(refusals, nestedRefusal);
+    if (plainRefusal !== undefined) return refuseFilterNode(refusals, plainRefusal);
   }
 
   // objectui#8515 — a `{ $field }` reference as the WHOLE comparand.
