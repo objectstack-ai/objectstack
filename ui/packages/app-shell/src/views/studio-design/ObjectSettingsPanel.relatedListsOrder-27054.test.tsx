@@ -173,11 +173,14 @@ describe('ObjectSettingsPanel — relatedLists is an ordered list of the inbound
     // unlisted side list shows no tab (objectstack#35897).
     expect(pageOrder(['event.related_to'])).toEqual(['event.related_to', 'note.lead']);
 
-    // The add picker offers exactly the tail, spelled as entries.
+    // The add picker offers the built-in tabs not listed (no attachments: the
+    // lead does not enable files), then exactly the tail, spelled as entries.
     fireEvent.keyDown(screen.getByTestId('related-lists-add-select'), { key: 'ArrowDown' });
     const options = within(await screen.findByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
     expect(options).toEqual([
       t('engine.studio.settings.relatedListsAdd', 'en-US'),
+      'Approvals (sys_approval_request)',
+      'Activity (sys_activity)',
       'Note (note)',
       'Task (task)',
       'Event · Who (event.who_id)',

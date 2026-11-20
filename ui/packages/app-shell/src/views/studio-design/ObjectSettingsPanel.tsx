@@ -94,6 +94,7 @@ function SettingsPicker({
   disabled,
   className,
   testId,
+  ariaLabel,
 }: {
   value: string;
   options: ReadonlyArray<{ value: string; label: string }>;
@@ -101,6 +102,8 @@ function SettingsPicker({
   disabled?: boolean;
   className: string;
   testId: string;
+  /** The trigger's accessible name, when nothing around it gives one. */
+  ariaLabel?: string;
 }) {
   const at = options.findIndex((o) => o.value === value);
   return (
@@ -113,7 +116,7 @@ function SettingsPicker({
       }}
       disabled={disabled}
     >
-      <SelectTrigger data-testid={testId} className={className}>
+      <SelectTrigger data-testid={testId} className={className} aria-label={ariaLabel}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -407,6 +410,7 @@ export function ObjectSettingsPanel({
               renderAdd={(options, add) => (
                 <SettingsPicker
                   testId="related-lists-add-select"
+                  ariaLabel={t('engine.studio.settings.relatedListsAdd', locale)}
                   value=""
                   onPick={(v) => {
                     if (v) add(v);
