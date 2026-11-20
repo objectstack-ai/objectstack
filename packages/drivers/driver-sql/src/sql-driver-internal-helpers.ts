@@ -165,7 +165,9 @@ export class InternalHelpersFacet {
    *   this builder: today's read of the table carries none, and the subquery
    *   carries none either. `scripts/check-tenant-chokepoint.mjs` records the
    *   absence as an exemption citing that ruling. The OUTER statement's wall is
-   *   untouched: it is applied to the outer builder as on every read.
+   *   untouched: it is applied to the outer builder as on every read. Unlike
+   *   `readableIdsSubquery` above, which IS walled (ADR-0139 D3): the two
+   *   differ on purpose.
    * - **Same datasource.** The table is resolved by `getBuilder`, on this
    *   driver, as a read of it is; the engine's seam refuses an object bound to
    *   another datasource before any driver is called.
