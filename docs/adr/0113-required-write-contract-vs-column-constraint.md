@@ -384,6 +384,23 @@ is not a parse refusal like the Q1 rider, because the protocol-17
 `field-required-notnull-explicit` conversion stamped `storage.notNull` onto every
 older `required` field; for those fields this amendment changes nothing on create.
 
+> **Note (2026-11-20, #35731) — the formula warning fires only for a formula the form cannot
+> compute.** The paragraph above warns on a `required` field's `visibleWhen` that reads any
+> `formula` field. Since PR #35475 (`7702f091`, #35190) the lint rule
+> (`packages/lint/src/required-visible-when-formula-issue.ts`) and the Studio field-inspector
+> advisory (`requiredVisibleWhenReference.ts`, the same verdict) warn only when a formula the
+> predicate reads is one the form cannot compute, because the form now computes the object's
+> formulas over the record being edited (`planObjectFormulas`) and judges the value the server
+> judges. Two arms still warn, each with its own message: a formula that reads through a
+> reference, calls `label()` or calls `current_user.can()`, or reads such a formula at any depth,
+> which the write path cannot compute either, so the predicate counts as shown and the field stays
+> required on every write; and a formula that reads `os`, or reads such a formula, which the
+> server computes and may waive while the form keeps the field required. A formula the form can
+> compute draws nothing, and so do a formula that reads the acting user and one served without its
+> expression. The other two warnings (a read through a reference field, and `storage.notNull`) are
+> unchanged. Still a warning, never a refusal. The paragraph is left as written; read its formula
+> warning with this note.
+
 **Not in scope.** Only the object field's own `visibleWhen`. A field group's
 `visibleWhen`, a form view's field or section predicate, a hidden tab and static
 `hidden` are not read: the validator does not consume view metadata (ruled on

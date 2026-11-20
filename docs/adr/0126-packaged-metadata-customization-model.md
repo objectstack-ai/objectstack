@@ -87,6 +87,22 @@ them into three tiers by flags × item provenance (`packages/metadata-protocol/s
 | **B — runtime-create only** | object, hook, seed, mapping, page, app, action, dataset, flow, datasource, external_catalog, doc, book, permission, position, tool, skill | **not customized at all** — writes against the packaged item answer 403 `NOT_OVERRIDABLE`; only brand-new sibling items can be authored |
 | **C — code-only** | field, job, api, capability, agent | nothing — no runtime write channel exists |
 
+> **Note (2026-11-20, #35731) — `capability` is no longer code-only.** The table above, measured
+> when this record was written, puts `capability` in tier C, with no runtime write channel; §2,
+> §3 and §9 repeat it. Since PR #35261 (`6ffa816e`, part of #35157) `capability` is
+> runtime-creatable and overlay-closed: its `DEFAULT_METADATA_TYPE_REGISTRY` entry
+> (`packages/spec/src/kernel/metadata-plugin.zod.ts`) reads `allowRuntimeCreate: true`,
+> `allowEnvironmentOverlay: false` and `supportsOverlay: false`, the tier-B posture. A brand-new
+> capability can be saved in the environment, and a packaged declaration cannot be re-declared or
+> re-scoped there. The save door refuses a platform capability name and a name another holder
+> already declares before anything is stored, and judges the body by `CapabilityDeclarationSchema`
+> (`packages/metadata-protocol/src/protocol-save-door-refusals.ts`). An unmanaged copy (ADR-0131
+> D6) copies an app's capabilities and renames them with the copy when it takes a new namespace
+> (`packages/metadata-protocol/src/package-namespace-rename.ts`). Ruled by the maintainer on
+> #35157: option A, record 6999763503 (「同意」), and the bound of record 7000639892
+> (「接受现有边界」). The code-only set is now field, job, api, agent. The table is left as
+> written.
+
 Three real mechanisms operate across those tiers, each invented separately:
 
 - **Org overlay** (ADR-0005): tier A only. Per-org rows for any other type are **phantom writes**
@@ -160,6 +176,12 @@ the artifact are live at once, or when a customization is wrong?**
   disable switch** — the same posture as `job`. The registry flags are untouched: authoring a
   brand-new sibling hook stays open, exactly as today.
 
+  > **Note (2026-11-20, #35731).** `capability` has left this list: since PR #35261 (`6ffa816e`)
+  > it is runtime-creatable and overlay-closed, on the maintainer's ruling 6999763503 on #35157
+  > (option A, with the bound of record 7000639892). Customizing a packaged capability is still
+  > not possible; a new one can be authored in the environment. See the note under §1.1. The
+  > bullet is left as written.
+
 A **new metadata type** (or newly admitted dynamic kind) must declare its regime at admission,
 in its registry-entry comment, using this rule. A customization mechanism that fits none of the
 three regimes is not a gap in this ADR — it is a signal the mechanism is wrong (Prime Directive
@@ -178,6 +200,12 @@ From the survey's per-type table; classes are the survey's measurements, not asp
 | **E — extend** | object (fields/validations/indexes via `objectExtensions`) · app (navigation via ADR-0029 D7 contributions) | Already live. No ledger involvement: the customization IS a package, and package identity supplies provenance and upgrade isolation. |
 | **outside** | field, job, api, capability, agent (code-only) · **hook** (amendment ruling 1 — package code maintaining the package's own invariants; no ledger row, no disable switch; sibling authoring open as today) · seed, external_catalog (one-shot / derived — nothing durable to customize) · datasource (origin-gated: code-defined read-only, runtime-created free) | Recorded so their absence from the regimes reads as decided, not overlooked. |
 | **unassigned, deliberately** | page, dataset, doc, book, mapping | Presentational/content tier-B types with no measured customization pull beyond re-authoring a sibling. Today's posture (locked base + free sibling authoring) stands. First real pull picks a regime **by the D1 rule** — likely O via the ADR-0005 admission pair (page/dataset/book) — and does so in an ADR-0005 revision, not ad hoc. |
+
+> **Note (2026-11-20, #35731).** The **outside** row above lists `capability` as code-only.
+> Since PR #35261 (`6ffa816e`) it is runtime-creatable and overlay-closed (ruling 6999763503 on
+> #35157, option A, with the bound of record 7000639892): a packaged declaration stays locked, and
+> a new capability can be authored in the environment. The ruling assigned it no regime, and
+> this note assigns none. See the note under §1.1. The row is left as written.
 
 Two clarifications the survey forces:
 
@@ -495,6 +523,10 @@ callers first, or don't), and preserves "packaged code calls what it names".
   clone's references stay pointed at what the original pointed at, and the surface tells the
   admin so).
 - Reopening any code-only type (field, job, api, capability, agent).
+  > **Note (2026-11-20, #35731).** For `capability` this item was reopened: the maintainer's
+  > ruling 6999763503 on #35157 (option A, 「同意」) made it runtime-creatable, overlay stays
+  > closed, and PR #35261 (`6ffa816e`) implements it. The other four code-only types stay as this
+  > item says. See the note under §1.1. The item is left as written.
 - Any edit to `packages/spec` for the ledger itself (it is a platform object; §4).
 
 ## 10. Consequences
