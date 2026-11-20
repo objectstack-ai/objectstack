@@ -283,6 +283,12 @@ function columnSet(value: unknown): SealedColumnSet {
  * A checkpoint's signed body, validated and in canonical form. Accepts a body
  * or a stored row (whose JSON columns are text); anything outside the body —
  * `id`, `chain_key`, `signature` — is ignored here.
+ *
+ * Exported from the package entry for a checkpoint sink off the host (D11):
+ * read from a stored `sys_audit_checkpoint` row, it answers the body the sink
+ * was handed, whose RFC 8785 form is the bytes the row's `signature` covers.
+ *
+ * @public
  */
 export function checkpointBodyFromRow(row: Readonly<Record<string, unknown>>): CheckpointSignedBody {
   const rowIds = json(row, 'row_ids');
@@ -373,7 +379,15 @@ export function checkpointLeafHashesFromRow(row: Readonly<Record<string, unknown
 
 // ── amendment ────────────────────────────────────────────────────────────────
 
-/** An amendment's signed body, validated and in canonical form, from a body or a stored row. */
+/**
+ * An amendment's signed body, validated and in canonical form, from a body or a stored row.
+ *
+ * Exported from the package entry for a checkpoint sink off the host (D11):
+ * read from a stored `sys_audit_amendment` row, it answers the body the sink
+ * was handed, whose RFC 8785 form is the bytes the row's `signature` covers.
+ *
+ * @public
+ */
 export function amendmentBodyFromRow(row: Readonly<Record<string, unknown>>): AmendmentSignedBody {
   const common = {
     sealed_object: text(row, 'sealed_object'),
