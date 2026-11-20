@@ -824,7 +824,7 @@ export class HonoHttpServer implements IHttpServer {
         this.app = new Hono();
         this.installErrorEnvelopeSeam();
         this.installResponseCompressionSeam();
-        this.installRequestSessionReadScope();
+        this.installSessionReadIsolationSeam();
         // Inside the compression seam, ahead of every other middleware and
         // route, so every reader of a request body reads through the limit.
         installRequestBodyLimit(this.app, () => this.maxRequestBodyBytes);
@@ -880,7 +880,7 @@ export class HonoHttpServer implements IHttpServer {
      * built from the same request, so nothing held on either could carry the
      * limiter's read to the route.
      */
-    private installRequestSessionReadScope(): void {
+    private installSessionReadIsolationSeam(): void {
         this.app.use('*', (_c, next) => withoutRequestSessionRead(() => next()));
     }
 
