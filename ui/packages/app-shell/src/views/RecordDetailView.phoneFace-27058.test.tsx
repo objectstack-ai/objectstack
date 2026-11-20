@@ -15,7 +15,8 @@
  *    knows its rows; no ⊟ (the stack has no right column), no ⤡ (no drawer
  *    to collapse to);
  *  - Target 4, the header: the subtitle from the first two declared text
- *    highlights, then at most four highlights;
+ *    highlights (the strip of four that followed is gone since
+ *    objectstack#35891);
  *  - Target 7, the bottom bar: the header's actions drawn below the body, in
  *    their bar face — the host's Edit, the primary and the `⋯`, however many
  *    actions the page declares (objectstack#34595; this file pinned Edit
@@ -301,7 +302,7 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(pageBar()!.querySelector('[data-record-top-bar-position]')).toBeNull();
   });
 
-  it('the header: the subtitle from the first two declared text highlights, then at most four highlights', async () => {
+  it('the header: the subtitle from the first two declared text highlights; no strip under it (objectstack#35891)', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`]);
     const subtitle = await waitFor(
       () => {
@@ -312,17 +313,12 @@ describe('the record page on a phone (objectstack#27058)', () => {
       { timeout: 5000 },
     );
     expect(subtitle.textContent).toBe('Atlas Construction · Director of Sales');
-    const strip = document.querySelector('[data-highlights-face]') as HTMLElement;
-    expect(strip).toBeTruthy();
-    const text = strip.textContent ?? '';
-    // Email, Status, Phone, City: four, after the subtitle's two; the fifth
-    // declared one (Website) is in the sections.
-    expect(strip.children).toHaveLength(4);
-    expect(text).toContain('mira@atlas.test');
-    expect(text).toContain('Austin');
-    expect(text).not.toContain('Atlas Construction');
-    expect(text).not.toContain('atlas.test/');
-    expect(text).not.toContain('https://atlas.test');
+    // Until objectstack#35891 a strip of four highlights (Email, Status,
+    // Phone, City) followed. The default page draws no strip now, on a phone
+    // as on a desktop; those fields read in their groups.
+    expect(document.querySelector('[data-highlights-face]')).toBeNull();
+    await waitFor(() => expect(document.body.textContent).toContain('mira@atlas.test'));
+    expect(document.body.textContent).toContain('Austin');
   });
 
   it('the bottom bar: [Edit][Convert Lead][⋯] with the declared second action in the ⋯; the header draws no action row (objectstack#34595)', async () => {
