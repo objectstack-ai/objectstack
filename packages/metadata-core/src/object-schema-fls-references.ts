@@ -787,7 +787,10 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // `object.field` for one of that child's FKs to this object, never a field
     // of this object, so nothing here is this object's to deny. Read as
     // unclassified it would over-mask an entry whose child shares a denied
-    // field's name.
+    // field's name. [#35899] An object entry's `columns` name fields of that
+    // CHILD, so they are kept like `lookupColumns`: the child's own projection
+    // governs them, and the list's rows are read through it. Its `label` is
+    // author text, and the built-in tab names (`sys_attachment`, …) name objects.
     relatedLists: keep,
     // Expressions.
     titleFormat: expression,
