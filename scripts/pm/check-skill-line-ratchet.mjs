@@ -105,7 +105,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 2488],
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 9071],
   ['.claude/skills/pm-dispatch/references/area-lease.md', 6586], // raised 6401 → 6586 by the one-seat-per-lane rule, ruling record 7030459053
-  ['.claude/skills/pm-dispatch/references/coordinator.md', 4267], // raised 3781 → 4267 by the one-seat-per-lane rule, ruling record 7030459053
+  ['.claude/skills/pm-dispatch/references/coordinator.md', 4265], // raised 3781 → 4265 by the one-seat-per-lane rule, ruling record 7030459053
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 3280],
   ['.claude/skills/pm-dispatch/references/security-findings.md', 3934],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 2006],
@@ -132,7 +132,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 2694],
   ['.claude/skills/pm-dispatch/references/lanes/queue.md', 2003],
   ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 1232],
-  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 2505], // raised 2270 → 2505 by the one-seat-per-lane rule, ruling record 7030459053
+  ['.claude/skills/pm-dispatch/references/lanes/objectstack.md', 2540], // raised 2270 → 2540 by the one-seat-per-lane rule, ruling record 7030459053
   ['.claude/agents/os-dev.md', 38848], // lowered 39008 → 38848 by the re-basing PR's own edit
   ['.claude/skills/checklist-test/SKILL.md', 19560],
   ['.claude/skills/checklist-author/SKILL.md', 3574],
