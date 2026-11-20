@@ -65,6 +65,7 @@ import * as actionExec from './action-execution.js';
 import type { ActionExecutionDeps } from './action-execution.js';
 import {
     actionInvocationBranch,
+    actionInvocationBulkReading,
     actionInvocationForwardedFrom,
     actionInvocationTarget,
     recordActionInvocation,
@@ -248,6 +249,12 @@ export interface AdmittedActionCall {
     objectName: string;
     actionName: string;
     recordId: unknown;
+    /**
+     * [#34292] The params bag the call was admitted with, read for its
+     * `_selectedIds` by the invocation row's bulk counts
+     * (`actionInvocationBulkReading`).
+     */
+    params: Record<string, unknown>;
 }
 
 /** What {@link runResolvedAction} answers. */
@@ -305,7 +312,10 @@ export async function runResolvedAction(
     }
     const outcome = await dispatchAdmittedAction(deps, requestContext, call, admission);
     return {
-        admitted: { actionDef: admission.actionDef, objectName: call.objectName, actionName: call.actionName, recordId: admission.recordId },
+        admitted: {
+            actionDef: admission.actionDef, objectName: call.objectName, actionName: call.actionName,
+            recordId: admission.recordId, params: admission.params,
+        },
         outcome,
     };
 }
@@ -961,6 +971,11 @@ export async function runResolvedActionAsRest(
         // An api forward's two rows name each other (`action-invocation-audit.ts`).
         target: actionInvocationTarget(actionDef, actionExec.isDeclarativeUpdateAction(actionDef)),
         forwardedFrom: actionInvocationForwardedFrom(requestContext, actionExec.API_FORWARD_MARK_HEADER),
+        // [#34292] An answered call that carried `_selectedIds`: the per-row
+        // counts its resolve value reads as. The outcome stays `succeeded`.
+        bulk: ok && run.outcome.kind === 'answered'
+            ? actionInvocationBulkReading(run.admitted.params, run.outcome.result)
+            : undefined,
     });
     return { handled: true, response };
 }
