@@ -37,7 +37,7 @@
  *     unknown operation).
  */
 
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 
 /** What changed. `objectName: '*'` means "unknown — treat everything as stale". */
 export interface DataChange {
@@ -102,6 +102,11 @@ export function dataChangeMatches(
  * const invalidationNonce = useDataInvalidation(objectName, recordId);
  * useEffect(() => { void load(); }, [objectName, recordId, invalidationNonce]);
  * ```
+ *
+ * `ownWrites` (objectstack#35685): the registry of the writes this reader
+ * draws itself; a change naming a record held there does not move the nonce.
+ * Pass a stable registry (`useMemo(createOwnWrites, [])`): a new one
+ * resubscribes.
  */
 export function useDataInvalidation(
   objectName?: string,
@@ -109,17 +114,15 @@ export function useDataInvalidation(
   ownWrites?: OwnWrites | null,
 ): number {
   const [nonce, setNonce] = useState(0);
-  const ownWritesRef = useRef(ownWrites);
-  ownWritesRef.current = ownWrites;
   useEffect(() => {
     if (!objectName) return;
     return subscribeDataChanges((change) => {
-      if (ownWritesRef.current?.absorbs(change)) return;
+      if (ownWrites?.absorbs(change)) return;
       if (dataChangeMatches(change, objectName, recordId)) {
         setNonce((n) => n + 1);
       }
     });
-  }, [objectName, recordId]);
+  }, [objectName, recordId, ownWrites]);
   return nonce;
 }
 
