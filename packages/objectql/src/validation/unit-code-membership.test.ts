@@ -200,10 +200,18 @@ describe('Open item 9, case 2: a quantity written beside a resting code that is 
     },
   );
 
-  it('refuses the quantity edit beside free text stored before the declaration, and the remedy moves the record', async () => {
+  it('refuses the quantity edit beside free text stored before the declaration; the remedy moves the record or converts the field', async () => {
     const e = await judge({ uom: 'kg', weight: 5 }, 'update', { weight: 5 });
     expect(envelope(e)).toEqual({ code: 'ERR_UNIT_CODE_UNKNOWN', status: 400, httpStatus: 400, field: 'uom' });
     expect(e!.message).toContain("in the same write as 'weight'");
+    // [Open item 9 point 7] …and names the run that converts every such row.
+    expect(e!.message).toContain('`os migrate unit-codes --object material --field uom --map-file <mapping file>`');
+    expect(e!.message).toContain('`POST /api/v1/meta/_migrate-unit-codes`');
+    expect(e!.message).not.toContain("'kg'");
+    // The control: a code the write carried is the writer's own, and names no conversion run.
+    expect((await judge({ uom: 'kg', weight: 5 }, 'update', { uom: 'kg', weight: 5 }))!.message).not.toContain('os migrate unit-codes');
+    // A retired unit is a unit, not stored free text: moved, never converted.
+    expect((await judge({ uom: 'SACK_50', weight: 5 }, 'update', { weight: 5 }))!.message).not.toContain('os migrate unit-codes');
   });
 
   it('admits the same edit once the write moves the record to a member code', async () => {
@@ -232,6 +240,15 @@ describe('Open item 9, case 3: a quantity beside a blank code', () => {
 
   it('an update clearing the code beside a resting quantity touches the pair, and is refused', async () => {
     expect((await judge({ uom: null, weight: 2 }, 'update', { uom: null }))?.code).toBe('ERR_UNIT_CODE_REQUIRED');
+  });
+
+  it('[Open item 9 point 7] a quantity edit beside a resting blank names the conversion run and its "" entry; a write that blanks it does not', async () => {
+    const e = await judge({ uom: null, weight: 2 }, 'update', { weight: 2 });
+    expect(envelope(e)).toEqual({ code: 'ERR_UNIT_CODE_REQUIRED', status: 400, httpStatus: 400, field: 'uom' });
+    expect(e!.message).toContain('`os migrate unit-codes --object material --field uom --map-file <mapping file>`');
+    expect(e!.message).toContain('an entry "" gives a blank unit beside a quantity its code');
+    expect((await judge({ uom: null, weight: 2 }, 'update', { uom: null }))!.message).not.toContain('os migrate unit-codes');
+    expect((await judge({ uom: null, weight: 2 }, 'insert'))!.message).not.toContain('os migrate unit-codes');
   });
 
   it('an update of a quantity whose pair it does not touch leaves the other quantity unjudged', async () => {
@@ -301,17 +318,21 @@ describe('the organization read: once per organization per write, never for a st
   });
 });
 
-describe('Requirement 1 (7030061316): a `sys_unit` row is never deleted', () => {
+describe('Requirement 1 (7030061316): a `sys_unit` row is never deleted on its own', () => {
   it('refuses a delete of `sys_unit`, ERR_UNIT_DELETE_REFUSED / 405, and no other object', () => {
     let thrown: unknown;
     try {
-      refuseOrganizationUnitDelete('sys_unit');
+      refuseOrganizationUnitDelete('sys_unit', false);
     } catch (e) {
       thrown = e;
     }
     expect(thrown).toMatchObject({ code: 'ERR_UNIT_DELETE_REFUSED', status: 405, httpStatus: 405 });
-    expect(() => refuseOrganizationUnitDelete('sys_exchange_rate')).not.toThrow();
-    expect(() => refuseOrganizationUnitDelete('material')).not.toThrow();
+    expect(() => refuseOrganizationUnitDelete('sys_exchange_rate', false)).not.toThrow();
+    expect(() => refuseOrganizationUnitDelete('material', false)).not.toThrow();
+  });
+
+  it('[ruling 7035627429, option B] admits only the delete the engine recognised as its organization\'s removal', () => {
+    expect(() => refuseOrganizationUnitDelete('sys_unit', true)).not.toThrow();
   });
 });
 

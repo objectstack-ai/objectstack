@@ -71,6 +71,7 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { isPhoneTabRoute } from './PhoneAppNavBar.js';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
@@ -449,10 +450,15 @@ export function AppHeader({
   // landing, so the chrome cannot offer a second, contradicting "home".
   const homePath = useHomePath();
   useGoHomeShortcut(isApp, homePath);
-  // objectstack#34594 — on a phone inside an app the menu is the bottom bar
-  // (its 「More」 opens the drawer), so the bar's leftmost control goes back
-  // to the environment's home instead of opening the drawer.
+  // objectstack#35881 — on a phone inside an app the menu is the app's home
+  // page. On that page and the two inbox pages the bottom bar opens
+  // (`isPhoneTabRoute`), the bar's left is the app pill with the app's name,
+  // which switches apps, and the bottom bar carries the search and the inbox,
+  // so the top bar does not repeat them. On every page below them the bar's
+  // leftmost control is 「‹」 back to the app's home.
   const phone = usePhoneViewport();
+  const phoneTab = isApp && phone && isPhoneTabRoute(location.pathname);
+  const phoneAppHome = `/apps/${params.appName ?? activeAppName ?? ''}`;
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
   // synthetic `⌘K` KeyboardEvent re-dispatch that did nothing under automation.
@@ -888,19 +894,21 @@ export function AppHeader({
             collapse/expand toggle for the sidebar and its icon rail from
             768 px up. It is the bar's leftmost control inside an app, so it
             never moves when the sidebar collapses; the sidebar itself carries
-            no trigger. On a phone that slot goes back to the environment's
-            home, and the drawer opens from the bottom menu bar's 「More」
-            (objectstack#34594). */}
+            no trigger. On a phone that slot goes back to the app's home, the
+            app's menu (objectstack#35881), and on the app's home and the two
+            inbox pages it is not drawn: the app pill comes first there. */}
         {isApp && phone ? (
+          phoneTab ? null : (
           <Link
-            to={homePath}
+            to={phoneAppHome}
             data-testid="app-bar-phone-home"
-            aria-label={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
-            title={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            aria-label={t('layout.appSwitcher.backToAppHome', { defaultValue: 'Back to the app menu' })}
+            title={t('layout.appSwitcher.backToAppHome', { defaultValue: 'Back to the app menu' })}
             className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronLeft className="h-5 w-5" aria-hidden />
           </Link>
+          )
         ) : isApp ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
@@ -996,6 +1004,7 @@ export function AppHeader({
                   onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange(segment))}
                   designInStudioPath={studioEntry?.path ?? null}
                   studioPosture={studioEntry?.posture}
+                  showNameOnPhone={phoneTab}
                 />
               </div>
             ) : appName ? (
@@ -1021,9 +1030,11 @@ export function AppHeader({
                 (objectstack#27058), so the bar draws no view dropdown. No
                 margin of its own: the pill's padding already parts the two,
                 and the width goes to the label (objectstack#34596). */}
-            <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
-              {lastSegmentLabel}
-            </span>
+            {!phoneTab && (
+              <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
+                {lastSegmentLabel}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -1069,7 +1080,7 @@ export function AppHeader({
 
         {/* Group 1: Search */}
         {/* Only where a palette is mounted (objectui#11912) — see `hasCommandPalette`. */}
-        {hasCommandPalette && (
+        {hasCommandPalette && !phoneTab && (
           <div
             data-topbar-group
             data-topbar-search
@@ -1155,6 +1166,7 @@ export function AppHeader({
           {/* objectui#12980 — the open intent that starts the Activity read.
               `contents` keeps the wrapper out of the bar's flex layout; the
               events still reach it from the bell inside. */}
+          {!phoneTab && (
           <span
             className="contents"
             data-testid="inbox-bell-intent"
@@ -1174,6 +1186,7 @@ export function AppHeader({
               onApprovalDecided={refreshPendingApprovals}
             />
           </span>
+          )}
 
           {/* AI Assistant — only when the runtime serves AI (hidden on
               Community Edition so it can't dead-end on an agent-less chat).

@@ -2047,10 +2047,12 @@ const zh = {
       launcherLabel: '应用启动台',
       menuLabel: '应用导航',
       menuEmpty: '此应用没有你可以打开的导航项。',
-      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      // objectstack#35882 — the phone's bottom bar: Home, Notifications, Approvals, search.
       phoneBarLabel: '应用菜单栏',
-      searchMenu: '搜索菜单',
-      phoneBarHint: '点星标把菜单项固定到底部栏，底部栏显示前 4 个。',
+      phoneHome: '首页',
+      phoneNotifications: '通知',
+      phoneApprovals: '审批',
+      phoneSearch: '搜索',
       itemMenu: '{{name}} 的更多操作',
       openInNewTab: '在新标签页打开',
       copyLink: '复制链接',
@@ -3520,6 +3522,13 @@ const zh = {
   layout: {
     appSwitcher: {
       switchApplication: '切换应用',
+      currentApp: '当前应用',
+      otherApps: '其他应用',
+      yourApps: '你的应用',
+      searchApps: '搜索应用…',
+      noAppsMatch: '没有匹配的应用',
+      chooseApp: '选择应用',
+      backToAppHome: '返回应用菜单',
       appsAvailable: '共 {{count}} 个可用应用',
       allApps: '所有应用',
       editAppInStudio: '在 Studio 中编辑 {{app}}',
@@ -5052,6 +5061,7 @@ const zh = {
     newestFirst: '最新 → 最早',
     addSort: '添加排序',
     removeSort: '删除排序',
+    reorder: '拖动以调整先后',
   },
   collaboration: {
     commentCount: '{{count}} 条评论',

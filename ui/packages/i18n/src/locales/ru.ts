@@ -2953,10 +2953,12 @@ const ru = {
       launcherLabel: "Панель приложений",
       menuLabel: "Навигация приложения",
       menuEmpty: "В этом приложении нет доступных для открытия элементов навигации.",
-      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      // objectstack#35882 — the phone's bottom bar: Home, Notifications, Approvals, search.
       phoneBarLabel: "Панель меню приложения",
-      searchMenu: "Поиск в меню",
-      phoneBarHint: "Отметьте пункт звёздочкой, чтобы добавить его на нижнюю панель. На панели показываются первые четыре.",
+      phoneHome: "Главная",
+      phoneNotifications: "Уведомления",
+      phoneApprovals: "Согласования",
+      phoneSearch: "Поиск",
       itemMenu: "Другие действия для {{name}}",
       openInNewTab: "Открыть в новой вкладке",
       copyLink: "Копировать ссылку",
@@ -3613,6 +3615,13 @@ const ru = {
     },
     appSwitcher: {
       switchApplication: "Сменить приложение",
+      currentApp: "Текущее приложение",
+      otherApps: "Другие приложения",
+      yourApps: "Ваши приложения",
+      searchApps: "Поиск приложений…",
+      noAppsMatch: "Нет подходящих приложений",
+      chooseApp: "Выберите приложение",
+      backToAppHome: "Назад к меню приложения",
       appsAvailable: "Доступно приложений: {{count}}",
       allApps: "Все приложения",
       editAppInStudio: "Редактировать {{app}} в Studio",
@@ -5296,6 +5305,7 @@ const ru = {
     newestFirst: "Сначала новые",
     addSort: "Добавить сортировку",
     removeSort: "Удалить сортировку",
+    reorder: 'Перетащите, чтобы изменить порядок',
   },
   collaboration: {
     commentCount: "Комментариев: {{count}}",

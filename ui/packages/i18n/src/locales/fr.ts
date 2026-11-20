@@ -2868,10 +2868,12 @@ const fr = {
       launcherLabel: "Lanceur d'applications",
       menuLabel: "Navigation de l'application",
       menuEmpty: "Cette application n'a aucune entrée de navigation que vous pouvez ouvrir.",
-      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      // objectstack#35882 — the phone's bottom bar: Home, Notifications, Approvals, search.
       phoneBarLabel: "Barre de menu de l'application",
-      searchMenu: "Rechercher dans le menu",
-      phoneBarHint: "Ajoutez une étoile à une entrée pour la placer dans la barre du bas. La barre affiche les quatre premières.",
+      phoneHome: "Accueil",
+      phoneNotifications: "Notifications",
+      phoneApprovals: "Validations",
+      phoneSearch: "Rechercher",
       itemMenu: "Plus d'actions pour {{name}}",
       openInNewTab: "Ouvrir dans un nouvel onglet",
       copyLink: "Copier le lien",
@@ -3525,6 +3527,13 @@ const fr = {
     },
     appSwitcher: {
       switchApplication: "Changer d'application",
+      currentApp: "Application actuelle",
+      otherApps: "Autres applications",
+      yourApps: "Vos applications",
+      searchApps: "Rechercher une application…",
+      noAppsMatch: "Aucune application ne correspond",
+      chooseApp: "Choisissez une application",
+      backToAppHome: "Retour au menu de l'application",
       appsAvailable: "{{count}} applications disponibles",
       allApps: "Toutes les applications",
       editAppInStudio: "Modifier {{app}} dans Studio",
@@ -5136,6 +5145,7 @@ const fr = {
     newestFirst: "Plus récent → Plus ancien",
     addSort: "Ajouter un tri",
     removeSort: "Supprimer le tri",
+    reorder: 'Faire glisser pour réorganiser',
   },
   collaboration: {
     commentCount: "{{count}} commentaires",

@@ -3095,10 +3095,12 @@ const ar = {
       launcherLabel: "مشغّل التطبيقات",
       menuLabel: "تنقّل التطبيق",
       menuEmpty: "لا توجد في هذا التطبيق عناصر تنقّل يمكنك فتحها.",
-      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      // objectstack#35882 — the phone's bottom bar: Home, Notifications, Approvals, search.
       phoneBarLabel: "شريط قائمة التطبيق",
-      searchMenu: "البحث في القائمة",
-      phoneBarHint: "ضع نجمة على عنصر لإضافته إلى الشريط السفلي. يعرض الشريط أول أربعة عناصر.",
+      phoneHome: "الرئيسية",
+      phoneNotifications: "الإشعارات",
+      phoneApprovals: "الموافقات",
+      phoneSearch: "بحث",
       itemMenu: "المزيد من الإجراءات لـ {{name}}",
       openInNewTab: "فتح في علامة تبويب جديدة",
       copyLink: "نسخ الرابط",
@@ -3758,6 +3760,13 @@ const ar = {
     },
     appSwitcher: {
       switchApplication: "تبديل التطبيق",
+      currentApp: "التطبيق الحالي",
+      otherApps: "تطبيقات أخرى",
+      yourApps: "تطبيقاتك",
+      searchApps: "ابحث عن تطبيق…",
+      noAppsMatch: "لا توجد تطبيقات مطابقة",
+      chooseApp: "اختر تطبيقًا",
+      backToAppHome: "العودة إلى قائمة التطبيق",
       appsAvailable: "{{count}} من التطبيقات المتاحة",
       allApps: "جميع التطبيقات",
       editAppInStudio: "تعديل {{app}} في Studio",
@@ -5579,6 +5588,7 @@ const ar = {
     newestFirst: "الأحدث → الأقدم",
     addSort: "إضافة ترتيب",
     removeSort: "إزالة الترتيب",
+    reorder: 'اسحب لإعادة الترتيب',
   },
   collaboration: {
     // objectui#11445 — `commentCount` and `reactionCount` below are count

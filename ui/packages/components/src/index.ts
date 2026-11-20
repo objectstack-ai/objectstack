@@ -180,6 +180,13 @@ export {
   type GridCellFacts,
 } from './context/gridCellSelection';
 
+// The header that opens the column menu instead of sorting (objectstack#35876):
+// a host opts a data-table into it by wrapping the table in the provider.
+export {
+  GridHeaderMenuProvider,
+  useGridHeaderMenu,
+} from './context/gridHeaderMenu';
+
 // Export raw Shadcn UI components
 export * from './ui';
 export * from './custom';

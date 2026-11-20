@@ -381,4 +381,61 @@ describe('sys_unit on a real stack: member read, administrator write, and the ru
       expect((await materials({ id: resting!.id }))[0]).toMatchObject({ title: 'renamed-resting', uom: 'JIN1', weight: 2 });
     });
   });
+
+  // [ruling 7035627429, option B] Deleting an organization deletes its units:
+  // the one exemption from the delete refusal above, carried by the engine's
+  // own cascade, which names the organization explicitly, so a system writer
+  // acting in another organization removes every unit of the deleted one.
+  describe("an organization's delete removes its units, and only its delete does", () => {
+    const GONE = 'org_units_gone';
+    const KEPT = 'org_units_kept';
+    const inOrg = (organizationId: string) => ({ isSystem: true, tenantId: organizationId }) as const;
+    const unitsOf = async (organizationId: string) =>
+      (await ql.find(OBJ, { where: { organization_id: organizationId }, context: inOrg(organizationId) } as never)) as Row[];
+    const organizations = async (ids: string[]) =>
+      ((await ql.find('sys_organization', { where: { id: { $in: ids } }, context: { isSystem: true } } as never)) as Row[]).map((r) => r.id);
+
+    beforeAll(async () => {
+      for (const [id, slug] of [[GONE, 'units-gone'], [KEPT, 'units-kept']]) {
+        await ql.insert('sys_organization', { id, name: slug, slug }, { context: { isSystem: true } } as never);
+        await ql.insert(OBJ, { code: 'BALE_1', label: 'Bale', dimension: 'mass', ratio: 200 }, { context: inOrg(id) } as never);
+        const retired = (await ql.insert(OBJ, { code: 'DRUM_1', label: 'Drum', dimension: 'volume', ratio: 0.2 }, { context: inOrg(id) } as never)) as Row;
+        await ql.update(OBJ, { retired: true }, { where: { id: retired.id }, context: inOrg(id) } as never);
+      }
+      await ql.insert(MATERIAL, { title: 'owned', uom: 'BALE_1', weight: 1 }, { context: inOrg(KEPT) } as never);
+    });
+
+    it('an organization holding units, one retired, and no other record deletes, and no unit of it is left', async () => {
+      const others = (await stored({})).filter((r) => r.organization_id !== GONE).map((r) => r.id).sort();
+      expect((await unitsOf(GONE)).map((r) => [r.code, r.retired])).toEqual([['BALE_1', false], ['DRUM_1', true]]);
+
+      await expect(ql.delete('sys_organization', { where: { id: GONE }, context: SYS } as never)).resolves.toBe(true);
+
+      expect(await organizations([GONE])).toEqual([]);
+      expect(await unitsOf(GONE)).toEqual([]);
+      expect((await stored({})).map((r) => r.id).sort()).toEqual(others);
+    });
+
+    it('an organization holding units and another record is refused 409 DELETE_RESTRICTED, and keeps every unit', async () => {
+      const err = await refusal(() => ql.delete('sys_organization', { where: { id: KEPT }, context: SYS } as never));
+      expect(err).toEqual({ status: 409, code: 'DELETE_RESTRICTED' });
+      expect(await organizations([KEPT])).toEqual([KEPT]);
+      expect((await unitsOf(KEPT)).map((r) => [r.code, r.retired])).toEqual([['BALE_1', false], ['DRUM_1', true]]);
+    });
+
+    for (const [who, ctx] of [['a system writer', () => inOrg(KEPT)], ['a system automation run', () => ({ ...AUTOMATION, tenantId: KEPT })]] as const) {
+      it(`${who} still deletes no unit of that organization directly: 405 ERR_UNIT_DELETE_REFUSED, by id and batched`, async () => {
+        const [unit] = await unitsOf(KEPT);
+        expect(await refusal(() => ql.delete(OBJ, { where: { id: unit!.id }, context: ctx() } as never))).toEqual({
+          status: 405,
+          code: 'ERR_UNIT_DELETE_REFUSED',
+        });
+        expect(await refusal(() => ql.delete(OBJ, { where: { code: 'BALE_1' }, multi: true, context: ctx() } as never))).toEqual({
+          status: 405,
+          code: 'ERR_UNIT_DELETE_REFUSED',
+        });
+        expect(await unitsOf(KEPT)).toHaveLength(2);
+      });
+    }
+  });
 });
