@@ -118,7 +118,8 @@ const OBJECTS = [
     label: 'Task',
     pluralLabel: 'Tasks',
     managedBy: 'platform',
-    fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+    // `relatedList: true`: a side list with a tab (objectstack#35597 makes a plain master_detail FK an overview body table).
+    fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
   },
   {
     name: 'showcase_note',

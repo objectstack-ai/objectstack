@@ -22,8 +22,8 @@
  *     part of the record's MAIN CONTENT (objectstack#27069) — a body table
  *     rather than a side card; under the tabbed page it gets its own tab (the
  *     tab-vs-Related split is decided downstream in `buildDefaultTabs`). Absent
- *     on a `master_detail` FK that sets `inlineEdit`, the list is primary by
- *     default; `relatedList: true` keeps it a side card.
+ *     on a `master_detail` FK (objectstack#35597: with or without `inlineEdit`)
+ *     the list is primary by default; `relatedList: true` keeps it a side card.
  *   - `relatedListTitle` / `relatedListColumns` on the FK field override the
  *     derived title / columns (columns default to the child object's own list
  *     columns when omitted — resolved by the renderer).
@@ -121,9 +121,9 @@ export interface DerivedRelatedList {
   /**
    * True when the list is part of the record's MAIN CONTENT — a body table: the
    * FK declares `relatedList: 'primary'`, or it is a `master_detail` FK that
-   * sets `inlineEdit` and declares no `relatedList` at all (objectstack#27069 —
-   * line items edited inside the parent's form are drawn under it, not beside
-   * it). The verdict is `@objectstack/spec`'s `isBodyTableRelationship`
+   * declares no `relatedList` at all (objectstack#27069, objectstack#35597 —
+   * the rows the parent owns are drawn under it, not beside it, whether or
+   * not its form edits them inline). The verdict is `@objectstack/spec`'s `isBodyTableRelationship`
    * (objectstack#27478), the one predicate the spec's refusal of a field group
    * naming a side card reads too.
    * A placement, not an order: the body draws primary lists as full-width
@@ -439,4 +439,52 @@ export function deriveRelatedLists(
     }
     return rest;
   });
+}
+
+/**
+ * The relationship ids (`object.field`) of the BODY TABLES an AUTHORED record
+ * page draws (objectstack#35597): every `record:related_list` placed anywhere
+ * in the page's tree whose relationship the record page counts as a body table
+ * (`isPrimary` on its derived list — `@objectstack/spec`'s
+ * `isBodyTableRelationship`, the one predicate). A master-detail list an author
+ * places gets the body-table treatment the synthesized page gives it: drawn
+ * when empty, a server totals row, the row cap and 「显示全部」.
+ *
+ * The synthesized page reads its body tables off its Details tab instead
+ * (`bodyTableIdsOf` in `@object-ui/plugin-detail`): there the placement IS
+ * the verdict. An authored page places lists where its author chose, so the
+ * relationship decides. A node is read the way the related-list renderer reads
+ * it: the ADR-0089 D3a `properties` bag over the node's own keys; a node that
+ * names no `relationshipField` is no body table.
+ */
+export function authoredBodyTableIds(
+  page: unknown,
+  relations: ReadonlyArray<Pick<DerivedRelatedList, 'childObject' | 'referenceField' | 'isPrimary'>>,
+): Set<string> {
+  const bodies = new Set(
+    relations.filter((relation) => relation.isPrimary).map((relation) => `${relation.childObject}.${relation.referenceField}`),
+  );
+  const ids = new Set<string>();
+  if (bodies.size === 0) return ids;
+  const seen = new Set<unknown>();
+  const walk = (value: unknown): void => {
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    const node = value as Record<string, unknown>;
+    if (node.type === 'record:related_list') {
+      const bag = node.properties && typeof node.properties === 'object' ? (node.properties as Record<string, unknown>) : {};
+      const props = { ...node, ...bag };
+      if (typeof props.objectName === 'string' && typeof props.relationshipField === 'string') {
+        const id = `${props.objectName}.${props.relationshipField}`;
+        if (bodies.has(id)) ids.add(id);
+      }
+    }
+    for (const child of Object.values(node)) walk(child);
+  };
+  walk(page);
+  return ids;
 }
