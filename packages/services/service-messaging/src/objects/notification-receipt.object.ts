@@ -113,6 +113,14 @@ export const NotificationReceipt = ObjectSchema.create({
     indexes: [
         { fields: ['notification_id', 'user_id', 'channel'], unique: 'global' },
         { fields: ['user_id', 'state'] },
+        // The inbox feed's window read: one user's `inbox` receipts, newest
+        // first, top 20, on every bell poll. Without `created_at` in a key the
+        // read collects and sorts that user's whole receipt history each time;
+        // with it the read walks the index backwards and stops at the window.
+        // The driver's pagination tie-breaker (`id`, in the last key's
+        // direction) rides along as the trailing key, so the walk needs no
+        // sort step at all.
+        { fields: ['user_id', 'channel', 'created_at', 'id'] },
     ],
 
     enable: {

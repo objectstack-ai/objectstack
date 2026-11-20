@@ -81,6 +81,11 @@ export const InboxMessage = ObjectSchema.create({
             label: 'Recipient User',
             required: true,
             searchable: true,
+            // A `sys_user.id`, the width of the physical id column driver-sql
+            // creates (varchar(255)); the bound `sys_notification_receipt.user_id`
+            // carries for the same value. Keyed by the declared index below, so
+            // the column must be bounded (scripts/check-keyed-text-bounds.mjs).
+            maxLength: 255,
         }),
 
         // FK → `sys_notification`: the event this row materializes. Read-state
@@ -154,6 +159,15 @@ export const InboxMessage = ObjectSchema.create({
                 'The catalog keys and params the title and body were rendered from at delivery. A read re-renders the title and body from them in the reader\'s language; null when the notification carried no keys, and the stored title and body are then served as written.',
         }),
     },
+
+    indexes: [
+        // The bell's window read (and the `mine` view): one user's rows,
+        // newest first, top 20, on every poll. Without it the read sorts the
+        // user's whole history each time; with it the read walks the index
+        // backwards and stops at the window. `id` is the driver's pagination
+        // tie-breaker, in the last key's direction, so no sort step remains.
+        { fields: ['user_id', 'created_at', 'id'] },
+    ],
 
     enable: {
         // [#32444, ADR-0103] Engine-owned: written only by the inbox channel
