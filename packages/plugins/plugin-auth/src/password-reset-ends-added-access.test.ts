@@ -609,6 +609,19 @@ describe('an MCP access token issued before the account\'s password changed is r
     mcpConsentAdmits(s.auth.adapter, { clientId, userId: s.userId }, iat, s.auth.internalAdapter);
   const nowS = () => Math.floor(Date.now() / 1000);
 
+  it('with no clock to read, the grant read answers no, and throws nothing', async () => {
+    const store = {
+      findOne: async () => ({ clientId: SERVER_CLIENT, skipConsent: true, disabled: false }),
+      findMany: async () => [],
+      delete: async () => undefined,
+      deleteMany: async () => undefined,
+    };
+    const clock = { findCredentialAccount: async () => null };
+    // The control: the same server-only app, its clock readable, admits.
+    await expect(mcpConsentAdmits(store, { clientId: SERVER_CLIENT, userId: 'someone' }, nowS(), clock)).resolves.toBe(true);
+    await expect(mcpConsentAdmits(store, { clientId: SERVER_CLIENT, userId: 'someone' }, nowS(), undefined)).resolves.toBe(false);
+  });
+
   it('a completed self-service reset: a token issued before it is refused; one issued a second after admits', async () => {
     const s = await stage({ plugins: { oidcProvider: true } });
     await apps(s);
