@@ -433,6 +433,18 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // [ADR-0158 U4, U5; Open item 8] A quantity's unit declaration is read at
+  // write from the day it ships (the engine's unit membership check), but the
+  // designer's control for it is the unit picker's card (#35490), which owns
+  // the Setup face and its locale strings. Until then the key is authored in
+  // the package source, as `homeAmount` was.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'unitConfig',
+    why: "authored in the package source until the unit picker's card offers it — the declaration is validated at parse (a `fixed` unit is one standard code, a `record` pointer names a `text` sibling, a `code` marker sits on a `text` field) and read at every write by the engine's unit membership check, but the field designer's control, the unit picker and their labels ship with the display card. A control offered before it would ask an author for a unit code with no picker and no list of the organization's units",
+  },
   // cloud#3652 ruling D3 — a field's rename declaration lands spec-first the
   // same way: `planned` in the liveness ledger, read by no upgrade until the
   // rename execution card. Offering the key in the field form first would be

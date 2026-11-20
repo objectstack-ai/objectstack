@@ -59,6 +59,20 @@
 //     not land → WARNING (advisory). A templated object name or a non-literal
 //     `fields` map is not statically knowable → skipped, no guess.
 //
+//   • A roll-up `summary` field WITHOUT `readonly: true` is read-only on both
+//     verbs all the same: the engine reads every roll-up as `readonly: true` in
+//     the create and the update strip (`withSummaryRollUpsReadonly`, objectql's
+//     `engine-top-level.ts`), so a non-system write of one is dropped exactly as
+//     a declared one is. Reported under its own id, `flow-update-summary-field`,
+//     as a WARNING by the area ruling on the card (claim amendment 7035408057,
+//     option B): a flow that writes a roll-up passed `os build` before the
+//     engine lock landed, and ERROR would refuse that build, a narrowing the
+//     ruling did not take. The branch is THIS rule's (`summaryFieldIndex`): the
+//     shared `buildReadonlyIndex` and the hook and action rules do not read it.
+//     A roll-up that also declares `readonly: true` is the static branch's,
+//     at ERROR, as before. Same gates as the static branch: `runAs:'system'`
+//     writes it, and a create on an insert-strip-exempt object is not judged.
+//
 // A pure `(stack) => Finding[]` rule (ADR-0019): no I/O, no runtime. Shared by
 // the CLI and any other consumer (AI authoring), so hand-authored and generated
 // flows are held to the same bar.
@@ -93,6 +107,12 @@ export interface ReadonlyFlowWriteFinding {
 // suppression, docs and counts in two.
 export const FLOW_UPDATE_READONLY_FIELD = 'flow-update-readonly-field';
 export const FLOW_UPDATE_READONLY_WHEN_FIELD = 'flow-update-readonly-when-field';
+/**
+ * A non-system `create_record` / `update_record` write to a roll-up `summary`
+ * field that does not declare `readonly: true` (the header's last bullet). One
+ * id for both verbs, as the static id is.
+ */
+export const FLOW_UPDATE_SUMMARY_FIELD = 'flow-update-summary-field';
 
 /**
  * [#22161] The clauses the three readonly write rules' one-line verdicts share
@@ -267,6 +287,28 @@ export function buildInsertStripExemptObjects(objects: AnyRec[]): Set<string> {
 }
 
 /**
+ * object name → the names of its roll-up `summary` fields, over the objects as
+ * served (the fold {@link buildServedReadonlyIndex} reads, tied fields left
+ * out). Flow-local on purpose: the engine reads a roll-up as read-only on both
+ * verbs whether or not it declares `readonly: true`, and only THIS rule reports
+ * that implicit lock, at its own id and severity; the shared readonly index
+ * keeps answering what the author declared.
+ */
+function summaryFieldIndex(stack: AnyRec): Map<string, Set<string>> {
+  const idx = new Map<string, Set<string>>();
+  for (const obj of objectsWithoutTiedFields(objectsAsServed(stack))) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const summaries = new Set<string>();
+    for (const field of recordsOf(obj.fields)) {
+      if (typeof field.name === 'string' && field.type === 'summary') summaries.add(field.name);
+    }
+    if (summaries.size > 0) idx.set(name, summaries);
+  }
+  return idx;
+}
+
+/**
  * The target object of an `update_record` / `create_record` node, when
  * statically knowable. Both node configs anchor the object on the same key
  * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema` in
@@ -300,6 +342,7 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
   // and stays on the declared objects.
   const roIndex = buildServedReadonlyIndex(stack);
   const insertStripExempt = buildInsertStripExemptObjects(objects);
+  const summaryIndex = summaryFieldIndex(stack);
 
   flows.forEach((flow, flowIndex) => {
     // `runAs` defaults to 'user' (schema default). Only an explicit 'system'
@@ -335,6 +378,8 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
       // A platform object is outside the create-side strip entirely (see
       // `buildInsertStripExemptObjects`); the update branch is not.
       if (isCreate && insertStripExempt.has(objectName)) return;
+
+      const summaryFields = summaryIndex.get(objectName);
 
       const fields = config.fields;
       // A non-literal write map (templated string, spread, array) is not
@@ -393,6 +438,22 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
                   `or through a subflow node), or remove '${fieldName}' from this update_record node`
                 : `Declare the flow runAs:'system' if automation maintains '${fieldName}', or remove it from this ` +
                   `update_record node`,
+          });
+        } else if (summaryFields?.has(fieldName) && !isSystemRun) {
+          // The implicit roll-up lock (header, last bullet): a certain drop on
+          // both verbs, reported as a warning by the area ruling. A roll-up
+          // declaring `readonly: true` took the static branch above instead.
+          findings.push({
+            severity: 'warning',
+            rule: FLOW_UPDATE_SUMMARY_FIELD,
+            where,
+            path: `${nodePath}.config.fields.${fieldName}`,
+            message:
+              `writes roll-up summary field '${fieldName}' of object '${objectName}', which the engine computes and ` +
+              `drops from a runAs:'${runAs}' write on create and update alike`,
+            hint:
+              `Remove '${fieldName}' from this ${nodeType} node; the engine recomputes it whenever a child record ` +
+              `changes`,
           });
         } else if (meta.readonlyWhen && !isCreate) {
           // `!isCreate`: the conditional lock has no prior record to evaluate on

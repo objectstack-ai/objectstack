@@ -3795,33 +3795,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     [conditionalFormattingRaw, rowActionDefsRaw, bulkActionDefsRaw],
   );
 
+  // objectstack#35536 — the ONE thing the fetch effect reads off `schema.data`:
+  // the rows a host handed in whole (`schema.data` as an array, the shorthand,
+  // or a `provider: 'value'` block's `items`), else `null` and this component
+  // reads them itself. The effect names THIS, not `schema.data`: every other
+  // data block (`provider: 'object'` and the rest) changes nothing the read
+  // sends — the query is built from `schema.objectName` and the view's keys —
+  // so a new block of any content (a host re-serving the same view, e.g. on a
+  // late `/meta/view` answer) must not re-arm the read. The rows themselves
+  // stay compared by identity: a host that hands in new rows re-runs the
+  // effect.
+  const inlineRows: readonly unknown[] | null = Array.isArray(schema.data)
+    ? schema.data
+    : schema.data && typeof schema.data === 'object'
+        && (schema.data as { provider?: unknown }).provider === 'value'
+        && Array.isArray((schema.data as { items?: unknown }).items)
+      ? (schema.data as { items: unknown[] }).items
+      : null;
+
   // Fetch data effect — supports schema.data (ViewDataSchema) provider modes
   React.useEffect(() => {
     let isMounted = true;
     const requestId = ++fetchRequestIdRef.current;
 
-    // Check for inline data via schema.data provider: 'value'
-    if (schema.data && typeof schema.data === 'object' && !Array.isArray(schema.data)) {
-      const dataConfig = schema.data as any;
-      if (dataConfig.provider === 'value' && Array.isArray(dataConfig.items)) {
-        let items = dataConfig.items;
-        if (searchTerm) {
-          const q = searchTerm.toLowerCase();
-          items = items.filter((row: any) =>
-            Object.values(row).some(
-              (v) => v != null && String(v).toLowerCase().includes(q),
-            ),
-          );
-        }
-        setData(items);
-        setLoading(false);
-        setDataLimitReached(false);
-        return;
-      }
-    }
-    // Also support schema.data as a plain array (shorthand for value provider)
-    if (Array.isArray(schema.data)) {
-      let items = schema.data as any[];
+    // Rows handed in whole (`inlineRows`, above): no read, the search applied here.
+    if (inlineRows) {
+      let items = inlineRows as any[];
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
         items = items.filter((row: any) =>
@@ -4557,13 +4556,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // not cover, and on a switch into or out of a windowed calendar — the one
     // switch whose query changes — and on nothing else (objectui#7394).
     //
+    // objectstack#35536 — `inlineRows`, not `schema.data`: see its declaration
+    // above. The array is the prop's own, so this stays discard-immune.
+    //
     // ⚠️ The directive below governs the NEXT LINE. Anything written between it
     // and the dependency array detaches it from the array and turns it into an
     // unused directive — which `eslint .` reports as an ERROR, and which also
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, infiniteScroll, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, queryDropFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, inlineRows, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, infiniteScroll, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, queryDropFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to

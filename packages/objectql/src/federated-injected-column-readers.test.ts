@@ -517,6 +517,10 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: "keys an organization's sys_assignment_rule rows, a platform table plugin-sharing owns",
   },
+  'validation/unit-code-membership.ts#organizationUnitRowsOf :: organization_id': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_unit rows, a platform table platform-objects owns (ADR-0158 U3), never a federated object's column",
+  },
   'assignment-rules.ts#organizationMemberStanding :: organization_id': {
     disposition: 'not-a-read',
     why: 'keys the sys_member row a user target is a member by, a platform table',

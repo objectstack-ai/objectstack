@@ -24,13 +24,13 @@
  * first rows and 「显示全部 N 条」 expands in place; 「↗」 opens the child's list;
  * an empty body table draws its headers and one empty row with the add entry.
  */
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { RecordContextProvider } from '@object-ui/react';
 import { LocalizationProvider } from '@object-ui/i18n';
-import { RelatedList } from '../RelatedList';
+import { BODY_TABLE_DENSITY, RelatedList, bodyTableColumnsThatFit } from '../RelatedList';
 import { RecordBodyTablesContext, RelatedEnlargeContext } from '../relatedListCompact';
 
 beforeAll(() => {
@@ -447,16 +447,23 @@ describe('RelatedList — which body-table columns are totalled (objectstack#299
 
 /**
  * objectstack#29945 — a body table wider than the details column it sits in
- * (ADR-0085 keeps it there) says so: the table's right-edge shadow while
- * columns remain to the right, its first column pinned as the row's identity,
- * and ⤢ offered in words. A table that fits shows none of it.
+ * (ADR-0085 keeps it there) says so, and ⤢ is offered in words. A table that
+ * fits shows none of it.
  *
- * jsdom lays nothing out, so the scroll box's widths are stubbed: each column
- * header is 120 px wide inside a 680 px details column.
+ * objectstack#35742 — never a half-cut column: the table draws the leading
+ * run of its columns, in their priority order, that fits whole in the column,
+ * and leaves the rest to ⤢ 「全部列」. Only a table whose FIRST column is wider
+ * than the box still scrolls inside it, that column pinned as the row's
+ * identity, with the table's right-edge shadow (objectstack#29945).
+ *
+ * jsdom lays nothing out, so the scroll box's widths are stubbed: each drawn
+ * column header is 120 px of scroll width inside a details column of
+ * `detailsPx` (680 px unless a case narrows it). The width each column asks
+ * for is the inline width the table gives its header.
  */
-describe('RelatedList — a body table wider than its column (objectstack#29945)', () => {
+describe('RelatedList — a body table wider than its column (objectstack#29945, objectstack#35742)', () => {
   const COLUMN_PX = 120;
-  const DETAILS_PX = 680;
+  let detailsPx = 680;
   const proto = HTMLElement.prototype;
   const saved = {
     scrollWidth: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'),
@@ -472,7 +479,7 @@ describe('RelatedList — a body table wider than its column (objectstack#29945)
     Object.defineProperty(proto, 'clientWidth', {
       configurable: true,
       get(this: HTMLElement) {
-        return this.hasAttribute('data-table-scroll-box') ? DETAILS_PX : 0;
+        return this.hasAttribute('data-table-scroll-box') ? detailsPx : 0;
       },
     });
   });
@@ -481,6 +488,9 @@ describe('RelatedList — a body table wider than its column (objectstack#29945)
       if (descriptor) Object.defineProperty(proto, key, descriptor);
       else delete (proto as any)[key];
     }
+  });
+  afterEach(() => {
+    detailsPx = 680;
   });
 
   const wideFields: Record<string, { type: string; label: string }> = {
@@ -519,17 +529,31 @@ describe('RelatedList — a body table wider than its column (objectstack#29945)
   }
   const host = () => document.querySelector('[data-body-table-overflow]') as HTMLElement | null;
   const headerCells = () => Array.from(document.querySelectorAll('thead th')) as HTMLElement[];
+  const headerKeys = () => headerCells().map((th) => th.getAttribute('data-column-key'));
+  const askedWidth = (th: HTMLElement) => parseFloat(th.style.minWidth);
   const shadow = () => document.querySelector('[data-testid="data-table-scroll-shadow-right"]');
   const enlarge = () => document.querySelector('[data-related-card-enlarge]') as HTMLElement | null;
 
-  it('eight columns in the details column: shadow, a pinned first column, ⤢ offered in words', async () => {
-    const onEnlarge = renderVersions(Object.keys(wideFields));
+  it('eight columns in the details column: the leading ones that fit whole are drawn, the rest wait behind ⤢ in words', async () => {
+    const all = Object.keys(wideFields);
+    const onEnlarge = renderVersions(all);
     await waitFor(() => expect(screen.getByText('V1')).toBeInTheDocument());
-    await waitFor(() => expect(host()?.getAttribute('data-body-table-overflow')).toBe('true'));
-    expect(shadow()).not.toBeNull();
-    const [first, second] = headerCells();
-    expect(first.className).toMatch(/\bsticky\b/);
-    expect(second.className).not.toMatch(/\bsticky\b/);
+    await waitFor(() => expect(host()?.getAttribute('data-body-table-columns-omitted')).not.toBeNull());
+    const drawn = headerKeys();
+    // The leading run, in priority order — never a column picked from the middle.
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.length).toBeLessThan(all.length);
+    expect(drawn).toEqual(all.slice(0, drawn.length));
+    expect(host()?.getAttribute('data-body-table-columns-omitted')).toBe(String(all.length - drawn.length));
+    // Width containment: what is drawn fits whole in the column — no column
+    // cut at the right edge, so nothing scrolls, nothing is pinned, no shadow.
+    expect(headerCells().reduce((sum, th) => sum + askedWidth(th), 0)).toBeLessThanOrEqual(detailsPx);
+    expect(host()?.getAttribute('data-body-table-overflow')).toBe('true');
+    // The table re-reads its box on a resize of its content, which jsdom
+    // never reports; a scroll event asks it the same question.
+    fireEvent.scroll(document.querySelector('[data-table-scroll-box]') as HTMLElement);
+    await waitFor(() => expect(shadow()).toBeNull());
+    expect(headerCells().some((th) => /\bsticky\b/.test(th.className))).toBe(false);
     expect(enlarge()?.getAttribute('data-overflow')).toBe('true');
     // Named by its visible label, not an icon-only aria-label.
     expect(enlarge()?.textContent?.trim()).not.toBe('');
@@ -540,25 +564,73 @@ describe('RelatedList — a body table wider than its column (objectstack#29945)
     expect(screen.getByTitle('Business owner')).toBeInTheDocument();
   });
 
-  it('scrolled to the end, the trailing shadow clears and the pinned column stays', async () => {
+  it('a first column wider than the box still scrolls inside it: pinned, shadowed, and the shadow clears at the end', async () => {
+    detailsPx = 60;
     renderVersions(Object.keys(wideFields));
     await waitFor(() => expect(shadow()).not.toBeNull());
+    // Never fewer than one column.
+    expect(headerKeys()).toEqual(['name']);
+    expect(headerCells()[0].className).toMatch(/\bsticky\b/);
     const box = document.querySelector('[data-table-scroll-box]') as HTMLElement;
-    Object.defineProperty(box, 'scrollLeft', { configurable: true, value: 8 * COLUMN_PX - DETAILS_PX });
+    Object.defineProperty(box, 'scrollLeft', { configurable: true, value: COLUMN_PX - detailsPx });
     fireEvent.scroll(box);
     await waitFor(() => expect(shadow()).toBeNull());
     expect(headerCells()[0].className).toMatch(/\bsticky\b/);
     expect(host()?.getAttribute('data-body-table-overflow')).toBe('true');
   });
 
-  it('CONTROL — three columns that fit: no shadow, no pinned column, the icon-only ⤢', async () => {
+  it('CONTROL — three columns that fit: every column drawn, no shadow, no pinned column, the icon-only ⤢', async () => {
     renderVersions(['name', 'file', 'status']);
     await waitFor(() => expect(screen.getByText('V1')).toBeInTheDocument());
     expect(host()?.getAttribute('data-body-table-overflow')).toBe('false');
+    expect(host()?.hasAttribute('data-body-table-columns-omitted')).toBe(false);
+    expect(headerKeys()).toEqual(['name', 'file', 'status']);
     expect(shadow()).toBeNull();
     expect(headerCells().some((th) => /\bsticky\b/.test(th.className))).toBe(false);
     expect(enlarge()?.hasAttribute('data-overflow')).toBe(false);
     expect(enlarge()?.textContent?.trim()).toBe('');
     expect(enlarge()?.hasAttribute('aria-label')).toBe(true);
+  });
+});
+
+describe('bodyTableColumnsThatFit — the leading columns that fit whole (objectstack#35742)', () => {
+  const widths = new Map([['a', 200], ['b', 150], ['c', 150], ['d', 100]]);
+
+  it('counts the leading run whose widths sum to no more than the room', () => {
+    expect(bodyTableColumnsThatFit(['a', 'b', 'c', 'd'], widths, 520)).toBe(3);
+    expect(bodyTableColumnsThatFit(['a', 'b', 'c', 'd'], widths, 500)).toBe(3);
+    expect(bodyTableColumnsThatFit(['a', 'b', 'c', 'd'], widths, 499)).toBe(2);
+  });
+
+  it('never fewer than one column, and none left out when every column fits', () => {
+    expect(bodyTableColumnsThatFit(['a', 'b'], widths, 100)).toBe(1);
+    expect(bodyTableColumnsThatFit(['a', 'b', 'c', 'd'], widths, 600)).toBeNull();
+  });
+
+  it('a column not yet measured leaves nothing out, so the table draws it and measures again', () => {
+    expect(bodyTableColumnsThatFit(['a', 'x', 'b'], widths, 250)).toBeNull();
+  });
+});
+
+describe('RelatedList — a body table draws the list\'s dense rows (objectstack#35742)', () => {
+  // The table's root: the box's ancestor the table lays out at full height.
+  const tableRoot = () => document.querySelector('[data-testid="data-table-scroll-box"]')?.closest('.h-full') as HTMLElement | null;
+
+  it('33px data rows (a 32px cell over the row line) under a 32px header, as the list\'s compact rows', async () => {
+    renderList(true);
+    await waitFor(() => expect(screen.getByText('Widget')).toBeInTheDocument());
+    const classes = (tableRoot()?.className ?? '').split(/\s+/);
+    expect(BODY_TABLE_DENSITY.split(' ').every((c) => classes.includes(c))).toBe(true);
+    // The measures `object-grid` draws a compact row and its header with.
+    expect(BODY_TABLE_DENSITY).toContain('[&_tbody_td]:h-8');
+    expect(BODY_TABLE_DENSITY).toContain('[&_tbody_td]:py-0');
+    expect(BODY_TABLE_DENSITY).toContain('[&_thead_th]:h-8');
+    expect(BODY_TABLE_DENSITY).toContain('[&_thead_th]:py-0');
+  });
+
+  it('CONTROL — the same list outside the body-table set keeps the table\'s own row height', async () => {
+    renderList(false);
+    await waitFor(() => expect(screen.getByText('Widget')).toBeInTheDocument());
+    expect(tableRoot()?.className ?? '').not.toContain('[&_tbody_td]:h-8');
   });
 });
