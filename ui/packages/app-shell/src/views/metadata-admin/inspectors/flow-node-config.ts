@@ -30,7 +30,7 @@
  */
 
 import type { FlowTriggerKind } from '@objectstack/spec/automation';
-import type { DeclaredConfigKey } from './json-schema-to-fields.js';
+import { SIBLING_GATES, type DeclaredConfigKey } from './json-schema-to-fields.js';
 import type { RegistryAndDataValueSource, RegistryValueSource } from '../../../utils/approverValueSources.js';
 import { flowFieldZh, isZhLocale } from '../i18n.js';
 
@@ -1163,6 +1163,23 @@ const FLOW_NODE_CONFIG: Record<string, FlowConfigField[]> = {
     // same: the rule is keyed by path, not declared here.
     { id: 'escalation.enabled', path: ['config', 'escalation', 'enabled'], label: 'SLA escalation', kind: 'boolean', defaultValue: 'true', help: 'Escalate when a decision is not recorded within the timeout.' },
     { id: 'escalation.timeoutHours', path: ['config', 'escalation', 'timeoutHours'], label: 'Timeout (hours)', kind: 'number', placeholder: '24', showWhen: { field: 'escalation.enabled', equals: ['true'] } },
+    // ADR-0157 D5: how the timeout's hours count. `defaultValue` mirrors the
+    // spec's `.default('wall_clock')` (held by the spec-reconciliation test).
+    // The calendar shows only under working time (`SIBLING_GATES`).
+    {
+      id: 'escalation.clock', path: ['config', 'escalation', 'clock'], label: 'Count hours as', kind: 'select', defaultValue: 'wall_clock',
+      options: [
+        { value: 'wall_clock', label: 'Wall-clock hours' },
+        { value: 'working_time', label: 'Working hours' },
+      ],
+      help: 'Wall-clock hours count nights, weekends and holidays. Working hours count only the working periods of a working calendar.',
+      showWhen: { field: 'escalation.enabled', equals: ['true'] },
+    },
+    {
+      id: 'escalation.calendar', path: ['config', 'escalation', 'calendar'], label: 'Working calendar', kind: 'text', placeholder: 'Organization default',
+      help: "The code of the working calendar that counts the hours. Leave it empty to use the organization's default calendar.",
+      showWhen: SIBLING_GATES['escalation.calendar'],
+    },
     {
       id: 'escalation.action', path: ['config', 'escalation', 'action'], label: 'On timeout', kind: 'select', defaultValue: 'notify',
       options: [

@@ -489,7 +489,17 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     'escalation.enabled': { label: 'SLA 升级', help: '在超时内未做决策时升级。' },
     'escalation.timeoutHours': {
       label: '超时(小时)',
-      help: '请求最多等多少小时后执行升级。按日历小时计算,夜间、周末和节假日都算在内;平台没有工作时间日历:周五 17:00 发起、设为 4 小时的请求会在当天 21:00 升级。',
+      help: '请求从提交起最多等多少小时后执行升级。小时怎么算由「计时方式」决定:按自然小时(默认)时夜间、周末和节假日都算在内,周五 17:00 发起、设为 4 小时的请求会在当天 21:00 升级;按工作时间时只计算工作日历中的工作时段。',
+    },
+    'escalation.clock': {
+      label: '计时方式',
+      help: '自然小时把夜间、周末和节假日都算在内;工作时间只计算工作日历中的工作时段。',
+      opts: { wall_clock: '自然小时', working_time: '工作时间' },
+    },
+    'escalation.calendar': {
+      label: '工作日历',
+      help: '用来计算工作时间的工作日历编码。留空则使用组织的默认日历。',
+      placeholder: '组织默认日历',
     },
     'escalation.action': {
       label: '超时动作',

@@ -393,3 +393,39 @@ for (const source of SOURCES) {
     });
   });
 }
+
+/* ── ADR-0157 D5: the escalation's clock, and the working calendar it reads.
+ * The calendar is read only under `clock: 'working_time'`, so it is on screen
+ * only there, from both descriptor sources (`SIBLING_GATES`). ── */
+const CLOCK_LABELS: Record<'offline' | 'engine', { clock: string; calendar: string }> = {
+  offline: { clock: 'Count hours as', calendar: 'Working calendar' },
+  engine: { clock: 'Clock', calendar: 'Calendar' },
+};
+
+for (const source of SOURCES) {
+  const l = CLOCK_LABELS[source.name];
+
+  describe(`${source.name} descriptors: the working calendar shows only under working time (ADR-0157 D5)`, () => {
+    beforeEach(() => source.install());
+
+    it('an escalation on the default clock shows the clock and hides the calendar', () => {
+      mount(draftWith({ approvers: APPROVERS, escalation: { timeoutHours: 4 } }));
+      expect(screen.queryByText(l.clock)).not.toBeNull();
+      expect(screen.queryByText(l.calendar)).toBeNull();
+    });
+
+    it("an explicit 'wall_clock' hides the calendar too", () => {
+      mount(draftWith({ approvers: APPROVERS, escalation: { timeoutHours: 4, clock: 'wall_clock' } }));
+      expect(screen.queryByText(l.calendar)).toBeNull();
+    });
+
+    it("'working_time' shows the calendar, and a code typed there round-trips through ApprovalNodeConfigSchema", () => {
+      const { latest } = mount(draftWith({ approvers: APPROVERS, escalation: { timeoutHours: 4, clock: 'working_time' } }));
+      expect(screen.queryByText(l.calendar)).not.toBeNull();
+      fireEvent.change(controlLabelled(l.calendar), { target: { value: 'cn_standard' } });
+      const after = configOf(latest())!;
+      expect(after.escalation).toEqual({ timeoutHours: 4, clock: 'working_time', calendar: 'cn_standard' });
+      expect(ApprovalNodeConfigSchema.safeParse(after).success).toBe(true);
+    });
+  });
+}
