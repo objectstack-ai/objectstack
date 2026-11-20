@@ -997,9 +997,9 @@ export const AUTH_EXISTING_ACCOUNT_SIGN_UP_TEMPLATES: EmailTemplate[] = [
 /**
  * Sent to the account's own address when its password was CHANGED
  * (`POST /change-password`, which proves the current password) and the
- * account still holds an API key or a linked sign-in account. A password
- * reset ends both; a change ends neither, so the owner is reminded what
- * stayed active, and told that a reset is the way to end it all.
+ * account still holds an API key, a linked sign-in account or an authorized
+ * app. A password reset ends them; a change ends none, so the owner is
+ * reminded what stayed active, and told that a reset is the way to end it all.
  *
  * The template engine has no loops or conditionals, so each list arrives as
  * one prepared string (names joined with commas, or a dash when empty) beside
@@ -1013,6 +1013,8 @@ const PASSWORD_CHANGED_NOTICE_VARIABLES: EmailTemplate['variables'] = [
   { name: 'apiKeys', type: 'string', required: true, description: 'Their names, comma-separated, or a dash when there are none' },
   { name: 'signInAccountCount', type: 'number', required: true, description: 'How many sign-in accounts other than the password are still linked' },
   { name: 'signInAccounts', type: 'string', required: true, description: 'Their providers, comma-separated, or a dash when there are none' },
+  { name: 'authorizedAppCount', type: 'number', required: true, description: 'How many apps the account authorized are still authorized' },
+  { name: 'authorizedApps', type: 'string', required: true, description: 'Their names, comma-separated, or a dash when there are none' },
   { name: 'appName', type: 'string', required: false, description: 'Product/app name (brand override)' },
 ];
 
@@ -1020,7 +1022,7 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE: EmailTemplate = {
   name: 'auth.password_changed_notice',
   label: 'Password Changed Notice (what stays active)',
   locale: 'en-US',
-  subject: 'Your {{appName}} password was changed: your API keys and linked sign-ins stay active',
+  subject: 'Your {{appName}} password was changed: your API keys, linked sign-ins and authorized apps stay active',
   bodyHtml: wrap(
     'Your password was changed',
     `
@@ -1029,9 +1031,10 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE: EmailTemplate = {
 <ul>
 <li>API keys ({{apiKeyCount}}): {{apiKeys}}</li>
 <li>Linked sign-in accounts ({{signInAccountCount}}): {{signInAccounts}}</li>
+<li>Authorized apps ({{authorizedAppCount}}): {{authorizedApps}}</li>
 </ul>
-<p>Revoke any API key you do not use from the API Keys list, and unlink any sign-in account you do not recognise.</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>If you did not change your password, reset it.</strong> A password reset ends every API key and every linked sign-in account of the account, as well as its sessions. Then contact your {{appName}} administrator.</p>
+<p>Revoke any API key you do not use from the API Keys list, unlink any sign-in account you do not recognise, and withdraw any app you no longer use.</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>If you did not change your password, reset it.</strong> A password reset ends every API key, every linked sign-in account and every authorized app of the account, as well as its sessions. Then contact your {{appName}} administrator.</p>
 `,
     'You received this email because the password of your {{appName}} account was changed.',
   ),
@@ -1043,23 +1046,24 @@ active:
 
 - API keys ({{apiKeyCount}}): {{apiKeys}}
 - Linked sign-in accounts ({{signInAccountCount}}): {{signInAccounts}}
+- Authorized apps ({{authorizedAppCount}}): {{authorizedApps}}
 
-Revoke any API key you do not use from the API Keys list, and unlink any
-sign-in account you do not recognise.
+Revoke any API key you do not use from the API Keys list, unlink any sign-in
+account you do not recognise, and withdraw any app you no longer use.
 
 If you did not change your password, reset it. A password reset ends every API
-key and every linked sign-in account of the account, as well as its sessions.
-Then contact your {{appName}} administrator.`,
+key, every linked sign-in account and every authorized app of the account, as
+well as its sessions. Then contact your {{appName}} administrator.`,
   variables: PASSWORD_CHANGED_NOTICE_VARIABLES,
   active: true,
-  description: 'Sent to the account when its password was changed and it still holds API keys or linked sign-in accounts, which a change, unlike a reset, does not end. Notification only.',
+  description: 'Sent to the account when its password was changed and it still holds API keys, linked sign-in accounts or authorized apps, which a change, unlike a reset, does not end. Notification only.',
 };
 
 export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
   ...AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE,
   locale: 'zh-CN',
   label: '密码修改通知（仍然有效的访问）',
-  subject: '您的 {{appName}} 密码已修改：API 密钥与已关联的登录方式仍然有效',
+  subject: '您的 {{appName}} 密码已修改：API 密钥、已关联的登录方式与已授权的应用仍然有效',
   bodyHtml: wrap(
     '您的密码已修改',
     `
@@ -1068,9 +1072,10 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
 <ul>
 <li>API 密钥（{{apiKeyCount}}）：{{apiKeys}}</li>
 <li>已关联的登录账号（{{signInAccountCount}}）：{{signInAccounts}}</li>
+<li>已授权的应用（{{authorizedAppCount}}）：{{authorizedApps}}</li>
 </ul>
-<p>请在 API 密钥列表中撤销不再使用的密钥，并解除您不认识的登录账号的关联。</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>如果不是您本人修改了密码，请重置密码。</strong>重置密码会结束账号的全部 API 密钥、全部已关联的登录账号以及全部会话。随后请联系您的 {{appName}} 管理员。</p>
+<p>请在 API 密钥列表中撤销不再使用的密钥，解除您不认识的登录账号的关联，并撤回不再使用的应用的授权。</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>如果不是您本人修改了密码，请重置密码。</strong>重置密码会结束账号的全部 API 密钥、全部已关联的登录账号、全部已授权的应用以及全部会话。随后请联系您的 {{appName}} 管理员。</p>
 `,
     '您收到本邮件，是因为您的 {{appName}} 账号密码已修改。',
   ),
@@ -1081,19 +1086,21 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ZH_CN: EmailTemplate = {
 
 - API 密钥（{{apiKeyCount}}）：{{apiKeys}}
 - 已关联的登录账号（{{signInAccountCount}}）：{{signInAccounts}}
+- 已授权的应用（{{authorizedAppCount}}）：{{authorizedApps}}
 
-请在 API 密钥列表中撤销不再使用的密钥，并解除您不认识的登录账号的关联。
+请在 API 密钥列表中撤销不再使用的密钥，解除您不认识的登录账号的关联，并撤回不再
+使用的应用的授权。
 
 如果不是您本人修改了密码，请重置密码。重置密码会结束账号的全部 API 密钥、全部
-已关联的登录账号以及全部会话。随后请联系您的 {{appName}} 管理员。`,
-  description: '账号密码被修改且账号仍持有 API 密钥或已关联的登录账号时发送：与重置不同，修改密码不会结束它们。仅为通知。',
+已关联的登录账号、全部已授权的应用以及全部会话。随后请联系您的 {{appName}} 管理员。`,
+  description: '账号密码被修改且账号仍持有 API 密钥、已关联的登录账号或已授权的应用时发送：与重置不同，修改密码不会结束它们。仅为通知。',
 };
 
 export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
   ...AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE,
   locale: 'ja-JP',
   label: 'パスワード変更のお知らせ（引き続き有効なアクセス）',
-  subject: '{{appName}} のパスワードが変更されました: API キーと連携済みのサインインは引き続き有効です',
+  subject: '{{appName}} のパスワードが変更されました: API キー、連携済みのサインイン、承認済みのアプリは引き続き有効です',
   bodyHtml: wrap(
     'パスワードが変更されました',
     `
@@ -1102,9 +1109,10 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
 <ul>
 <li>API キー（{{apiKeyCount}}）: {{apiKeys}}</li>
 <li>連携済みのサインイン アカウント（{{signInAccountCount}}）: {{signInAccounts}}</li>
+<li>承認済みのアプリ（{{authorizedAppCount}}）: {{authorizedApps}}</li>
 </ul>
-<p>使用していない API キーは API キー一覧から失効させ、心当たりのないサインイン アカウントは連携を解除してください。</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>パスワードを変更した覚えがない場合は、パスワードをリセットしてください。</strong>パスワードのリセットでは、アカウントのすべての API キー、すべての連携済みサインイン アカウント、およびすべてのセッションが終了します。そのうえで {{appName}} の管理者へご連絡ください。</p>
+<p>使用していない API キーは API キー一覧から失効させ、心当たりのないサインイン アカウントは連携を解除し、使用していないアプリは承認を取り消してください。</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>パスワードを変更した覚えがない場合は、パスワードをリセットしてください。</strong>パスワードのリセットでは、アカウントのすべての API キー、すべての連携済みサインイン アカウント、すべての承認済みアプリ、およびすべてのセッションが終了します。そのうえで {{appName}} の管理者へご連絡ください。</p>
 `,
     '{{appName}} アカウントのパスワードが変更されたため、本メールをお送りしています。',
   ),
@@ -1116,21 +1124,23 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_JA_JP: EmailTemplate = {
 
 - API キー（{{apiKeyCount}}）: {{apiKeys}}
 - 連携済みのサインイン アカウント（{{signInAccountCount}}）: {{signInAccounts}}
+- 承認済みのアプリ（{{authorizedAppCount}}）: {{authorizedApps}}
 
 使用していない API キーは API キー一覧から失効させ、心当たりのないサインイン
-アカウントは連携を解除してください。
+アカウントは連携を解除し、使用していないアプリは承認を取り消してください。
 
 パスワードを変更した覚えがない場合は、パスワードをリセットしてください。パスワードの
 リセットでは、アカウントのすべての API キー、すべての連携済みサインイン アカウント、
-およびすべてのセッションが終了します。そのうえで {{appName}} の管理者へご連絡ください。`,
-  description: 'パスワードが変更され、アカウントが API キーまたは連携済みのサインイン アカウントを保持しているときに送信されます。リセットと異なり、変更ではこれらは終了しません。通知のみです。',
+すべての承認済みアプリ、およびすべてのセッションが終了します。そのうえで {{appName}}
+の管理者へご連絡ください。`,
+  description: 'パスワードが変更され、アカウントが API キー、連携済みのサインイン アカウント、または承認済みのアプリを保持しているときに送信されます。リセットと異なり、変更ではこれらは終了しません。通知のみです。',
 };
 
 export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ES_ES: EmailTemplate = {
   ...AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE,
   locale: 'es-ES',
   label: 'Aviso de cambio de contraseña (lo que sigue activo)',
-  subject: 'Se ha cambiado tu contraseña de {{appName}}: tus claves de API e inicios de sesión vinculados siguen activos',
+  subject: 'Se ha cambiado tu contraseña de {{appName}}: tus claves de API, inicios de sesión vinculados y aplicaciones autorizadas siguen activos',
   bodyHtml: wrap(
     'Se ha cambiado tu contraseña',
     `
@@ -1139,9 +1149,10 @@ export const AUTH_PASSWORD_CHANGED_NOTICE_TEMPLATE_ES_ES: EmailTemplate = {
 <ul>
 <li>Claves de API ({{apiKeyCount}}): {{apiKeys}}</li>
 <li>Cuentas de inicio de sesión vinculadas ({{signInAccountCount}}): {{signInAccounts}}</li>
+<li>Aplicaciones autorizadas ({{authorizedAppCount}}): {{authorizedApps}}</li>
 </ul>
-<p>Revoca desde la lista de claves de API las que no uses y desvincula las cuentas de inicio de sesión que no reconozcas.</p>
-<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>Si no has cambiado tu contraseña, restablécela.</strong> Al restablecer la contraseña se cierran todas las claves de API y todas las cuentas de inicio de sesión vinculadas de la cuenta, además de sus sesiones. Después, ponte en contacto con el administrador de {{appName}}.</p>
+<p>Revoca desde la lista de claves de API las que no uses, desvincula las cuentas de inicio de sesión que no reconozcas y retira la autorización a las aplicaciones que ya no uses.</p>
+<p style="margin:24px 0;padding:16px;background:#fef2f2;border-left:4px solid #dc2626;border-radius:4px"><strong>Si no has cambiado tu contraseña, restablécela.</strong> Al restablecer la contraseña se cierran todas las claves de API, todas las cuentas de inicio de sesión vinculadas y todas las aplicaciones autorizadas de la cuenta, además de sus sesiones. Después, ponte en contacto con el administrador de {{appName}}.</p>
 `,
     'Recibes este correo porque se ha cambiado la contraseña de tu cuenta de {{appName}}.',
   ),
@@ -1153,15 +1164,17 @@ siguen activas:
 
 - Claves de API ({{apiKeyCount}}): {{apiKeys}}
 - Cuentas de inicio de sesión vinculadas ({{signInAccountCount}}): {{signInAccounts}}
+- Aplicaciones autorizadas ({{authorizedAppCount}}): {{authorizedApps}}
 
-Revoca desde la lista de claves de API las que no uses y desvincula las cuentas
-de inicio de sesión que no reconozcas.
+Revoca desde la lista de claves de API las que no uses, desvincula las cuentas
+de inicio de sesión que no reconozcas y retira la autorización a las
+aplicaciones que ya no uses.
 
 Si no has cambiado tu contraseña, restablécela. Al restablecer la contraseña se
-cierran todas las claves de API y todas las cuentas de inicio de sesión
-vinculadas de la cuenta, además de sus sesiones. Después, ponte en contacto con
-el administrador de {{appName}}.`,
-  description: 'Se envía a la cuenta cuando se cambia su contraseña y aún tiene claves de API o cuentas de inicio de sesión vinculadas, que un cambio, a diferencia de un restablecimiento, no cierra. Solo notificación.',
+cierran todas las claves de API, todas las cuentas de inicio de sesión
+vinculadas y todas las aplicaciones autorizadas de la cuenta, además de sus
+sesiones. Después, ponte en contacto con el administrador de {{appName}}.`,
+  description: 'Se envía a la cuenta cuando se cambia su contraseña y aún tiene claves de API, cuentas de inicio de sesión vinculadas o aplicaciones autorizadas, que un cambio, a diferencia de un restablecimiento, no cierra. Solo notificación.',
 };
 
 /**

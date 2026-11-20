@@ -3929,9 +3929,9 @@ export class AuthManager {
 
   /**
    * Mail the account whose password just changed what the change left active:
-   * its API keys and its linked sign-in accounts
+   * its API keys, its linked sign-in accounts and the apps it authorized
    * (`password-reset-ends-added-access.ts`). A password change, unlike a
-   * reset, ends neither, so the account's owner is reminded of both. Sent
+   * reset, ends none of them, so the account's owner is reminded of each. Sent
    * only when there is something to list, to the account's own address, in
    * its own stored language first (the ladder `sendChangeEmailNotice`
    * follows).
@@ -3942,7 +3942,7 @@ export class AuthManager {
    */
   private sendPasswordChangeReminder(
     to: { email: string; name?: string; id?: string },
-    kept: { apiKeys: readonly string[]; signInAccounts: readonly string[] },
+    kept: { apiKeys: readonly string[]; signInAccounts: readonly string[]; authorizedApps: readonly string[] },
     requestSource?: unknown,
   ): Promise<void> {
     const readConfig = () => this.config;

@@ -574,8 +574,8 @@ describe('#25060 — auth.existing_account_sign_up renders its own text in each 
 
 /**
  * The reminder an account is sent when its password was CHANGED and it still
- * holds API keys or linked sign-in accounts, which a change, unlike a reset,
- * does not end (`plugin-auth`'s `password-reset-ends-added-access.test.ts`
+ * holds API keys, linked sign-in accounts or authorized apps, which a change,
+ * unlike a reset, does not end (`plugin-auth`'s `password-reset-ends-added-access.test.ts`
  * owns the sender half). Same discipline as above: every expectation is an
  * independent literal.
  */
@@ -586,22 +586,34 @@ const PASSWORD_CHANGED_DATA = {
   apiKeys: 'ci-deploy, laptop',
   signInAccountCount: 1,
   signInAccounts: 'github',
+  authorizedAppCount: 1,
+  authorizedApps: 'Claude Desktop',
   appName: 'Acme',
 };
 
 const PASSWORD_CHANGED_SUBJECT: Record<Locale, string> = {
-  'en-US': 'Your Acme password was changed: your API keys and linked sign-ins stay active',
-  'zh-CN': '您的 Acme 密码已修改：API 密钥与已关联的登录方式仍然有效',
-  'ja-JP': 'Acme のパスワードが変更されました: API キーと連携済みのサインインは引き続き有効です',
-  'es-ES': 'Se ha cambiado tu contraseña de Acme: tus claves de API e inicios de sesión vinculados siguen activos',
+  'en-US': 'Your Acme password was changed: your API keys, linked sign-ins and authorized apps stay active',
+  'zh-CN': '您的 Acme 密码已修改：API 密钥、已关联的登录方式与已授权的应用仍然有效',
+  'ja-JP': 'Acme のパスワードが変更されました: API キー、連携済みのサインイン、承認済みのアプリは引き続き有効です',
+  'es-ES': 'Se ha cambiado tu contraseña de Acme: tus claves de API, inicios de sesión vinculados y aplicaciones autorizadas siguen activos',
 };
 
 /** What stays active, and the road that ends it — the reader who did not change the password needs both. */
 const PASSWORD_CHANGED_PHRASES: Record<Locale, string[]> = {
-  'en-US': ['API keys (2): ci-deploy, laptop', 'Linked sign-in accounts (1): github', 'A password reset ends every API key'],
-  'zh-CN': ['API 密钥（2）：ci-deploy, laptop', '已关联的登录账号（1）：github', '重置密码会结束账号的全部 API 密钥'],
-  'ja-JP': ['API キー（2）: ci-deploy, laptop', '連携済みのサインイン アカウント（1）: github', 'すべての API キー'],
-  'es-ES': ['Claves de API (2): ci-deploy, laptop', 'Cuentas de inicio de sesión vinculadas (1): github', 'se cierran todas las claves de API'],
+  'en-US': [
+    'API keys (2): ci-deploy, laptop',
+    'Linked sign-in accounts (1): github',
+    'Authorized apps (1): Claude Desktop',
+    'A password reset ends every API key',
+  ],
+  'zh-CN': ['API 密钥（2）：ci-deploy, laptop', '已关联的登录账号（1）：github', '已授权的应用（1）：Claude Desktop', '重置密码会结束账号的全部 API 密钥'],
+  'ja-JP': ['API キー（2）: ci-deploy, laptop', '連携済みのサインイン アカウント（1）: github', '承認済みのアプリ（1）: Claude Desktop', 'すべての API キー'],
+  'es-ES': [
+    'Claves de API (2): ci-deploy, laptop',
+    'Cuentas de inicio de sesión vinculadas (1): github',
+    'Aplicaciones autorizadas (1): Claude Desktop',
+    'se cierran todas las claves de API',
+  ],
 };
 
 describe('auth.password_changed_notice is a registered built-in in all four locales', () => {

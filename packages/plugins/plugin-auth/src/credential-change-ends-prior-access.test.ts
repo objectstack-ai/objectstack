@@ -686,18 +686,20 @@ describe('the predicate and its clock', () => {
     expect(issuedBeforeCredentialChange(Number.NaN, 1_000)).toBe(true);
   });
 
-  it('the clock is the last write over the credential row; its creation and no row are no change', async () => {
-    const reader = (account: unknown) =>
-      ({ findCredentialAccount: async () => account, findUserById: async () => ({ createdAt: '2026-01-01T00:00:00.000Z' }) }) as never;
+  it("the clock is the last write over the credential row; an account's first password and no row are no change", async () => {
+    const reader = (account: unknown) => ({ findCredentialAccount: async () => account }) as never;
     const created = '2026-01-01T00:00:00.000Z';
+    // `u`'s first password: the row carries the account's own id.
+    const first = (updatedAt: unknown, createdAt: unknown = created) => reader({ id: 'u', createdAt, updatedAt });
     expect(await readCredentialChangedAt(reader(null), 'u')).toBeUndefined();
-    expect(await readCredentialChangedAt(reader({ createdAt: created, updatedAt: created }), 'u')).toBeUndefined();
-    expect(await readCredentialChangedAt(reader({ createdAt: created, updatedAt: '2026-01-01T00:00:00.900Z' }), 'u')).toBeUndefined();
-    expect(await readCredentialChangedAt(reader({ createdAt: created, updatedAt: '2026-02-01T00:00:00.000Z' }), 'u')).toBe(
-      Date.parse('2026-02-01T00:00:00.000Z'),
-    );
+    expect(await readCredentialChangedAt(first(created), 'u')).toBeUndefined();
+    // The vendor takes the row's two stamps separately, in one write.
+    expect(await readCredentialChangedAt(first('2026-01-01T00:00:00.900Z'), 'u')).toBeUndefined();
+    expect(await readCredentialChangedAt(first('2026-02-01T00:00:00.000Z'), 'u')).toBe(Date.parse('2026-02-01T00:00:00.000Z'));
+    // Both sides are bounded: an update stamp before the creation stamp is no creation.
+    expect(await readCredentialChangedAt(first('2025-12-31T23:59:59.999Z'), 'u')).toBe(Date.parse('2025-12-31T23:59:59.999Z'));
     // The adapter answers `Date` values.
-    expect(await readCredentialChangedAt(reader({ createdAt: new Date(created), updatedAt: new Date('2026-02-01T00:00:00.000Z') }), 'u')).toBe(
+    expect(await readCredentialChangedAt(first(new Date('2026-02-01T00:00:00.000Z'), new Date(created)), 'u')).toBe(
       Date.parse('2026-02-01T00:00:00.000Z'),
     );
     await expect(
@@ -705,21 +707,51 @@ describe('the predicate and its clock', () => {
     ).rejects.toThrow('down');
   });
 
-  it("a credential row created onto an account that was already there is a change at its creation; one created with it is not", async () => {
-    const row = { createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z' };
-    const on = (account: unknown) =>
-      ({ findCredentialAccount: async () => row, findUserById: async () => account }) as never;
-    // Created with the account, as a sign-up with a password creates it.
-    expect(await readCredentialChangedAt(on({ createdAt: '2026-01-31T23:59:59.700Z' }), 'u')).toBeUndefined();
-    // Created a month after the account: the account's first password, set onto it, is a change.
-    expect(await readCredentialChangedAt(on({ createdAt: '2026-01-01T00:00:00.000Z' }), 'u')).toBe(Date.parse(row.updatedAt));
-    // An account whose creation cannot be read is judged as one that was already there.
-    expect(await readCredentialChangedAt(on({}), 'u')).toBe(Date.parse(row.updatedAt));
-    expect(await readCredentialChangedAt(on(null), 'u')).toBe(Date.parse(row.updatedAt));
-    await expect(
-      readCredentialChangedAt({ findCredentialAccount: async () => row, findUserById: async () => { throw new Error('down'); } } as never, 'u'),
-    ).rejects.toThrow('down');
+  it("a credential row that does not carry its account's id is a change at its creation", async () => {
+    const at = '2026-02-01T00:00:00.000Z';
+    const read = (account: unknown) => readCredentialChangedAt({ findCredentialAccount: async () => account } as never, 'u');
+    // Created onto an account that was already there, outside a request, or before the rule shipped.
+    expect(await read({ id: 'some-other-id', createdAt: at, updatedAt: at })).toBe(Date.parse(at));
+    expect(await read({ createdAt: at, updatedAt: at })).toBe(Date.parse(at));
+    // A row whose creation cannot be read is judged written over.
+    expect(await read({ id: 'u', updatedAt: at })).toBe(Date.parse(at));
   });
+});
+
+describe("an account's first password is told by the request that created the account, not by elapsed time", () => {
+  /** A host database hook that holds its write past a second. */
+  const hold = () => new Promise<void>((resolve) => setTimeout(resolve, 1_200));
+
+  it('a host hook holds the credential row: the sign-up still creates the first password, and the verification link it mails signs in', async () => {
+    const s = await stage({
+      emailVerification: { autoSignInAfterVerification: true, sendOnSignUp: true },
+      databaseHooks: { account: { create: { before: hold } } },
+    });
+    expect(await s.changedAt(), 'the password the sign-up created is the first one').toBeUndefined();
+    await s.engine.update('sys_user', { id: s.userId, email_verified: false }, SYS);
+    const link = s.mail.find((m) => m.template === 'auth.verify_email' && m.to?.address === EMAIL);
+    expect(link, 'the sign-up mailed its verification link').toBeTruthy();
+    expect(await s.verifyEmail(String(link!.data.token))).toMatchObject({ status: 200, opensSession: true });
+
+    // The control: the same hook, on a first password a later request sets onto the account, reads a change.
+    await s.dropLocalPassword();
+    const set = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: SECOND, mustChangePassword: false, revokeSessionsAndKeys: false },
+      s.bearer(s.adminBearer),
+    );
+    expect(set.status, await set.clone().text()).toBe(200);
+    expect(await s.changedAt()).toBeDefined();
+  }, 60_000);
+
+  it("a host hook holds the account's creation: an administrator's create-user still creates the first password", async () => {
+    const s = await stage({ databaseHooks: { user: { create: { after: hold } } } });
+    const res = await s.fire('/admin/create-user', { email: 'held@example.com', name: 'Held', password: SECOND }, s.bearer(s.adminBearer));
+    expect(res.status, await res.clone().text()).toBe(200);
+    const internal: any = (await s.manager.getAuthContext()).internalAdapter;
+    const id = String((await internal.findUserByEmail('held@example.com'))?.user?.id);
+    expect(await readCredentialChangedAt(internal, id)).toBeUndefined();
+  }, 60_000);
 });
 
 describe("a door that creates the account's first password is a credential change", () => {
@@ -875,5 +907,57 @@ describe('a link that signs its holder in, minted before a credential change, an
 
     // The control: a link minted after the change signs its holder in.
     expect(await open(await magicLink())).toMatchObject({ redirectError: null, opensSession: true });
+  }, 60_000);
+});
+
+describe('a sign-in code texted before a credential change answers what a code never sent answers', () => {
+  async function phoneStage() {
+    const s = await stage({ plugins: { phoneNumber: true }, phoneOtp: { cooldownSeconds: 0 } });
+    await s.engine.update('sys_user', { id: s.userId, phone_number: PHONE, phone_number_verified: true }, SYS);
+    /** The code `/phone-number/send-otp` texts the number. */
+    const sendCode = async (): Promise<string> => {
+      const before = s.texts.length;
+      const res = await s.fire('/phone-number/send-otp', { phoneNumber: PHONE });
+      expect(res.status, `send-otp: ${await res.clone().text()}`).toBe(200);
+      await vi.waitFor(() => expect(s.texts.length).toBe(before + 1));
+      return String(s.texts[before].templateParams?.code ?? '');
+    };
+    /** What `/phone-number/verify` answers, and whether it hands out a session. */
+    const verify = async (code: string, extra: Record<string, unknown> = {}, phoneNumber = PHONE) => {
+      const res = await s.fire('/phone-number/verify', { phoneNumber, code, ...extra });
+      return { ...(await answer(res)), handsOutSession: handsOutSession(res) };
+    };
+    // A number no code was ever texted to.
+    const neverSent = await verify('000000', {}, '+15550199');
+    expect(neverSent).toMatchObject({ status: 400, code: 'OTP_NOT_FOUND', handsOutSession: false });
+    const change = async () => {
+      const user = await s.signIn(EMAIL, FIRST);
+      advanceTheClock();
+      const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, s.bearer(user.bearer!));
+      expect(changed.status, await changed.clone().text()).toBe(200);
+    };
+    return { s, sendCode, verify, neverSent, change };
+  }
+
+  it('at /phone-number/verify: no session; a code texted after the change signs in', async () => {
+    const { sendCode, verify, neverSent, change } = await phoneStage();
+    const before = await sendCode();
+    await change();
+
+    expect(await verify(before)).toEqual(neverSent);
+
+    // The control: a code texted after the change signs its holder in.
+    expect(await verify(await sendCode())).toMatchObject({ status: 200, handsOutSession: true });
+  }, 60_000);
+
+  it('a wrong attempt that writes the code again after the change does not date it after the change', async () => {
+    const { sendCode, verify, neverSent, change } = await phoneStage();
+    const before = await sendCode();
+    await change();
+    // A request that signs nobody in is not judged; its wrong attempt writes the code's row again.
+    const wrong = String((Number(before) + 1) % 1_000_000).padStart(before.length, '0');
+    expect(await verify(wrong, { disableSession: true })).toMatchObject({ status: 400, code: 'INVALID_OTP' });
+
+    expect(await verify(before)).toEqual(neverSent);
   }, 60_000);
 });

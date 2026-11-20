@@ -68,6 +68,7 @@ import { passwordSignInDoorOf, recordLockoutRequest } from './auth-manager-sign-
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import {
   endMagicLinkIssuedBeforeCredentialChange,
+  endPhoneCodeIssuedBeforeCredentialChange,
   endTwoFactorChallengeIssuedBeforeCredentialChange,
   endVerifyEmailLinkIssuedBeforeCredentialChange,
   noteSignInCredential,
@@ -267,13 +268,14 @@ export async function globalBeforeHook(
   // An email-change link, a verification link that signs its holder in and
   // a magic link minted before the account's last credential change answer
   // what a link never issued answers, and a second-factor challenge opened
-  // before it is ended. `credential-change-ends-prior-access.ts` states the
+  // before it, and a sign-in code texted before it, are ended. `credential-change-ends-prior-access.ts` states the
   // rule and its one predicate.
   const endedVerifyLink = await endVerifyEmailLinkIssuedBeforeCredentialChange(ctx);
   if (endedVerifyLink) return endedVerifyLink;
   const endedMagicLink = await endMagicLinkIssuedBeforeCredentialChange(ctx);
   if (endedMagicLink) return endedMagicLink;
   await endTwoFactorChallengeIssuedBeforeCredentialChange(ctx);
+  await endPhoneCodeIssuedBeforeCredentialChange(ctx);
 
   // ── [#33203] Cloud-managed: no reset door sets a local password ──
   // A hosted environment sets no local password for anyone, a platform

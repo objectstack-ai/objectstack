@@ -55,6 +55,7 @@ import {
   recordUnlinkTombstone,
 } from './implicit-account-linking.js';
 import { withSystemReadContext } from './objectql-adapter.js';
+import { firstPasswordMark, noteAccountCreatedInRequest } from './credential-change-ends-prior-access.js';
 import { emitAuthSessionAuditEvent, loginEventFor, logoutEventFor, signInClientFingerprint } from './auth-session-audit.js';
 import { ipAllowListRefusalEventFor, ipRefusalAuditBoundFor } from './ip-allow-list-refusal-audit.js';
 import { sessionPolicyHoldFor, withSessionPolicyHold } from './session-policy-hold.js';
@@ -131,10 +132,19 @@ export function composeDatabaseHooks(
   // [ADR-0151 D2] An AI service account holds no password and no sign-in
   // provider link. Asked FIRST, before the host's own `create.before`, for
   // every writer of a credential row. See service-account-identity.ts.
+  // An account's first password — the credential row created in the request
+  // that created the account — is born with the account's own id, the mark
+  // the credential clock reads (credential-change-ends-prior-access.ts, "An
+  // account's first password"). Asked after the host's hook, whose `false`
+  // (refuse the row) is honoured first and whose fields it keeps.
   const hostAccountBefore = (host as any)?.account?.create?.before;
   const accountBefore = async (account: any, ctx: any) => {
     await refuseAgentAccountCredential(this.config.dataEngine, account);
-    return hostAccountBefore ? hostAccountBefore(account, ctx) : undefined;
+    const hostResult = hostAccountBefore ? await hostAccountBefore(account, ctx) : undefined;
+    if (hostResult === false) return false;
+    const hostData = hostResult && typeof hostResult === 'object' && 'data' in hostResult ? (hostResult as any).data : undefined;
+    const mark = await firstPasswordMark({ ...account, ...(hostData ?? {}) }, ctx);
+    return mark ? { data: { ...(hostData ?? {}), ...mark } } : hostResult;
   };
   const hostAccountAfter = (host as any)?.account?.create?.after;
   const after = hostAccountAfter
@@ -548,6 +558,7 @@ export function composeDatabaseHooks(
       }
     }
     const email = typeof draft?.email === 'string' ? draft.email : '';
+    noteAccountCreatedInRequest(ctx, email);
     if (email && this.takeOwnerVerifiedStamp(email)) {
       return { data: { ...draft, emailVerified: true } };
     }

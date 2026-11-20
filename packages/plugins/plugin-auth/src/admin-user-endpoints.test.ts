@@ -1164,7 +1164,11 @@ describe('set-user-password: the revoke-sessions-and-keys switch (#23287)', () =
           { id: 'sess_expired', expires_at: PAST() },
         ];
       }
-      if (object === 'sys_api_key') return q?.where?.revoked === false && q?.where?.user_id === 'user-9' ? [{ id: 'key_1' }, { id: 'key_2' }] : [];
+      // Every key the admission seam would admit: a `revoked` flag false or null.
+      if (object === 'sys_api_key') {
+        const live = JSON.stringify(q?.where?.$or) === JSON.stringify([{ revoked: false }, { revoked: null }]);
+        return live && q?.where?.user_id === 'user-9' ? [{ id: 'key_1' }, { id: 'key_2' }] : [];
+      }
       return [];
     });
     m.deps.getDataEngine = () => ({ update: m.engineUpdate, insert: m.engineCreate, find });

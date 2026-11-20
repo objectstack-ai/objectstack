@@ -173,13 +173,15 @@ export async function revokeSessionsAndApiKeys(
     const keys = rowsOf(
       await engine.find(
         SystemObjectName.API_KEY,
-        { where: { user_id: userId, revoked: false }, fields: ['id'], limit: maxScan + 1 },
+        // Every key the admission seam would admit: a `revoked` flag that is
+        // false or null (it refuses only `true`/`1`, and a null reads as live).
+        { where: { user_id: userId, $or: [{ revoked: false }, { revoked: null }] }, fields: ['id', 'revoked'], limit: maxScan + 1 },
         { context: SYSTEM_CTX },
       ),
     );
     if (keys.length > maxScan) incomplete = true;
     for (const row of keys.slice(0, maxScan)) {
-      if (!row.id) continue;
+      if (!row.id || row.revoked === true || row.revoked === 1) continue;
       try {
         await engine.update(
           SystemObjectName.API_KEY,
@@ -200,7 +202,7 @@ export async function revokeSessionsAndApiKeys(
     const accounts = rowsOf(
       await engine.find(
         SystemObjectName.ACCOUNT,
-        { where: { user_id: userId }, fields: ['id', 'provider_id'], limit: maxScan + 1 },
+        { where: { user_id: userId, provider_id: { $ne: CREDENTIAL_PROVIDER_ID } }, fields: ['id', 'provider_id'], limit: maxScan + 1 },
         { context: SYSTEM_CTX },
       ),
     );

@@ -232,7 +232,7 @@ export async function sendChangeEmailNotice(
 export async function sendPasswordChangeReminder(
   this: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'>,
   to: { email: string; name?: string; id?: string },
-  kept: { apiKeys: readonly string[]; signInAccounts: readonly string[] },
+  kept: { apiKeys: readonly string[]; signInAccounts: readonly string[]; authorizedApps: readonly string[] },
   requestSource?: unknown,
 ): Promise<void> {
   try {
@@ -250,6 +250,8 @@ export async function sendPasswordChangeReminder(
         apiKeys: list(kept.apiKeys),
         signInAccountCount: kept.signInAccounts.length,
         signInAccounts: list(kept.signInAccounts),
+        authorizedAppCount: kept.authorizedApps.length,
+        authorizedApps: list(kept.authorizedApps),
         appName: this.getAppName(),
       },
       relatedObject: 'sys_user',

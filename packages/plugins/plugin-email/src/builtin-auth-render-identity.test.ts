@@ -59,6 +59,8 @@ const DATA = {
   apiKeys: 'ci & <deploy>, laptop',
   signInAccountCount: 1,
   signInAccounts: 'github',
+  authorizedAppCount: 1,
+  authorizedApps: 'Claude <Desktop>',
 };
 
 /**
@@ -244,26 +246,27 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
   },
   // `auth.password_changed_notice` has no row-path render to match: it was
   // added after the row path was deleted, and these are its registry renders
-  // captured in the commit that added it, so any later byte change is seen.
+  // captured in the commit that last changed it (its authorized-apps line), so
+  // any later byte change is seen.
   'auth.password_changed_notice@en-US': {
-    subject: 'Your Acme & <Co> password was changed: your API keys and linked sign-ins stay active',
-    html: 'c912c9ad9f2dfad8fd0a04c6f13fc1d2e4b35a7e43cdcf51bbd47f184d2cee56',
-    text: '5fdf147da742ec9a375176721616b52c0adf54bba86d63e55ed4c6e00703738d',
+    subject: 'Your Acme & <Co> password was changed: your API keys, linked sign-ins and authorized apps stay active',
+    html: '3060bd37b8f5cf3428b28f04b7656009bde51c6e693e07a077ba469d2c4b94f5',
+    text: 'a47cc839cf4c908e07310185813ea1e3df2aac3395a60dda354ac08e148a92e5',
   },
   'auth.password_changed_notice@zh-CN': {
-    subject: '您的 Acme & <Co> 密码已修改：API 密钥与已关联的登录方式仍然有效',
-    html: '5b62c053ba6d9c8b8516e4373cba3ea9e67665bf8034558b2cca165d1f18f089',
-    text: '7d4493e6100427ae60b02d8d62d6876abb0ba4d1dcc84017c26fb57a3c4a4cc5',
+    subject: '您的 Acme & <Co> 密码已修改：API 密钥、已关联的登录方式与已授权的应用仍然有效',
+    html: 'd8ad4c508eb44a134a84a0df0792f7bf0246a83249c231c00fec83d555b819e3',
+    text: '9fdf7c969c9088a4ad5a8becd67593c9d4d447e6e3a2b0f8e51c3c521dbc718b',
   },
   'auth.password_changed_notice@ja-JP': {
-    subject: 'Acme & <Co> のパスワードが変更されました: API キーと連携済みのサインインは引き続き有効です',
-    html: '1ee2fc7327eca1c050c46c5b422c801b872b6f709a06adc17dc93afd4f4c9359',
-    text: '8b4ad3bc74b33b1b2419da645830814b7d57696e04911af17d8bf98c7fb41700',
+    subject: 'Acme & <Co> のパスワードが変更されました: API キー、連携済みのサインイン、承認済みのアプリは引き続き有効です',
+    html: '57472af661af23a2f3b98113ba4aa712d95b7d0bd260c8dd6b555a024680babd',
+    text: '99bb63c26573aeb1a9972543978dd73c834fb60557e19237da3833da78f1795d',
   },
   'auth.password_changed_notice@es-ES': {
-    subject: 'Se ha cambiado tu contraseña de Acme & <Co>: tus claves de API e inicios de sesión vinculados siguen activos',
-    html: 'b66c66f4543f6a18f689c917aceae8de1010bfc2ccc11dec1a6b77295633fedd',
-    text: 'a72a6650cdfffed5217afe7f3fcda7a9e895c969339f832e06aeb0a0728baff5',
+    subject: 'Se ha cambiado tu contraseña de Acme & <Co>: tus claves de API, inicios de sesión vinculados y aplicaciones autorizadas siguen activos',
+    html: '0639752d56436a06d1f9acf17d6cc6cf64b0d01597be69fc57ea76b674117432',
+    text: '1fc0078261a1de130614a59ac9eb8c462e2fc884e7b086cc3d90a116aea86899',
   },
 };
 

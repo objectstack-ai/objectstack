@@ -283,6 +283,7 @@ describe('a password change’s after-effects land on the account it changed, an
       stampPasswordChangedAt: vi.fn(async () => {}),
       recordPasswordHistory: vi.fn(async () => {}),
       logDurabilityDegradation: vi.fn(),
+      getDataEngine: () => undefined,
     };
     const run = (ctx: unknown) => globalAfterHook.call(host as unknown as AfterHookHost, ctx);
     return { host, run };
@@ -323,7 +324,13 @@ describe('a password change’s after-effects land on the account it changed, an
 
   it('a reset carries no session: its after-effects land on the reset token’s account, as before', async () => {
     const { host, run } = afterHookOf();
-    await run(changeCtx(undefined, 'user_reset', '/reset-password'));
+    const resetCtx = changeCtx(undefined, 'user_reset', '/reset-password');
+    // The account the reset door named, and the store its sessions and links are ended through.
+    Object.assign(resetCtx.context, {
+      __osResetDoorUserId: 'user_reset',
+      internalAdapter: { deleteUserSessions: vi.fn(async () => {}), findAccounts: vi.fn(async () => []) },
+    });
+    await run(resetCtx);
     expect(host.stampPasswordChangedAt).toHaveBeenCalledWith('user_reset');
     expect(host.recordPasswordHistory).toHaveBeenCalledWith('user_reset', 'hash:old');
   });
