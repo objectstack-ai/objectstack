@@ -1167,7 +1167,9 @@ export async function runAdminSetUserPassword(
   }
   const mustChangePassword = body.mustChangePassword !== false; // default true
   // [#23287 — ruling C′ item 2] The forced reset's explicit revocation switch:
-  // revoke the user's sessions and API keys. ON by default, because the act
+  // revoke the user's sessions and API keys, and unlink the sign-in accounts
+  // linked to it other than its password, as a self-service reset does
+  // (`password-reset-ends-added-access.ts`). ON by default, because the act
   // records no reason and the ruling sets the default for a suspected
   // compromise — the case where a surviving key is the hole the reset was meant
   // to close. An administrator doing a routine reset turns it off explicitly
@@ -1274,6 +1276,7 @@ export async function runAdminSetUserPassword(
         ? {
             revokedSessions: revocation.sessions,
             revokedApiKeys: revocation.apiKeys,
+            revokedSignInAccounts: revocation.signInAccounts,
             revocationComplete: revocation.complete,
           }
         : {}),

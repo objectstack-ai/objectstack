@@ -32,9 +32,18 @@
  *   is the one in question. A key already revoked before the reset is not
  *   written, so its reason (none) stays truthful.
  *
+ * - Every sign-in account linked to the user other than its password
+ *   (`sys_account` rows of a provider other than `credential`: a social,
+ *   generic OAuth or single-sign-on link) is deleted, as a completed
+ *   self-service reset deletes them (`password-reset-ends-added-access.ts`):
+ *   a reset ends what the account added before it, and a link someone else
+ *   added is a way in that would outlive the reset. The password row the
+ *   reset just wrote is never touched.
+ *
  * Unlike the posture refusal (ruling item 4, "the refusal is not a
  * revocation"), this IS a revocation: a revoked key stays revoked after the
- * password change, and the owner mints a replacement.
+ * password change, and the owner mints a replacement; an unlinked provider is
+ * linked again by its owner.
  *
  * ## The outcome is the CALLER's, and it is never silent
  *
@@ -60,10 +69,14 @@ const DEFAULT_MAX_ROW_SCAN = 500;
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
+/** The provider id of the account's local password row, which the revocation never touches. */
+const CREDENTIAL_PROVIDER_ID = 'credential';
+
 /** The slice of the data engine this module uses. */
 export interface ForcedResetRevocationEngine {
   find?(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
   update(object: string, doc: Record<string, unknown>, opts?: unknown): Promise<unknown>;
+  delete?(object: string, options?: unknown): Promise<unknown>;
 }
 
 /** What the revocation did. Counts are rows really written. */
@@ -72,6 +85,8 @@ export interface ForcedResetRevocationOutcome {
   sessions: number;
   /** API keys revoked. */
   apiKeys: number;
+  /** Linked sign-in accounts (any provider but `credential`) deleted. */
+  signInAccounts: number;
   /** Rows the revocation meant to write and could not (read or write refused). */
   failed: number;
   /**
@@ -98,7 +113,8 @@ function isLiveSession(row: Record<string, any>, now: number): boolean {
 }
 
 /**
- * Revoke every live session and every unrevoked API key of `userId`. Never
+ * Revoke every live session and every unrevoked API key of `userId`, and
+ * unlink every sign-in account linked to it other than its password. Never
  * throws; the outcome says what landed.
  */
 export async function revokeSessionsAndApiKeys(
@@ -106,10 +122,11 @@ export async function revokeSessionsAndApiKeys(
   userId: string,
   opts: { logger?: { warn(msg: string): void }; maxRowScan?: number } = {},
 ): Promise<ForcedResetRevocationOutcome> {
-  const outcome: ForcedResetRevocationOutcome = { sessions: 0, apiKeys: 0, failed: 0, complete: false };
+  const outcome: ForcedResetRevocationOutcome = { sessions: 0, apiKeys: 0, signInAccounts: 0, failed: 0, complete: false };
   if (!engine || typeof engine.find !== 'function' || !userId) {
     opts.logger?.warn(
-      '[AuthPlugin] forced reset: the user\'s sessions and API keys were NOT revoked — the data '
+      '[AuthPlugin] forced reset: the user\'s sessions, API keys and linked sign-in accounts were NOT '
+        + 'revoked — the data '
         + 'engine offers no read surface, so they could not be found. The password reset itself landed. '
         + 'Remedy: wire the ObjectQL engine into the auth plugin.',
     );
@@ -178,15 +195,43 @@ export async function revokeSessionsAndApiKeys(
     incomplete = true;
   }
 
+  // ── Linked sign-in accounts ─────────────────────────────────────────────
+  try {
+    const accounts = rowsOf(
+      await engine.find(
+        SystemObjectName.ACCOUNT,
+        { where: { user_id: userId }, fields: ['id', 'provider_id'], limit: maxScan + 1 },
+        { context: SYSTEM_CTX },
+      ),
+    );
+    if (accounts.length > maxScan) incomplete = true;
+    for (const row of accounts.slice(0, maxScan)) {
+      if (row.provider_id === CREDENTIAL_PROVIDER_ID) continue;
+      if (!row.id || typeof engine.delete !== 'function') {
+        outcome.failed += 1;
+        continue;
+      }
+      try {
+        await engine.delete(SystemObjectName.ACCOUNT, { where: { id: String(row.id) }, context: SYSTEM_CTX });
+        outcome.signInAccounts += 1;
+      } catch {
+        outcome.failed += 1;
+      }
+    }
+  } catch {
+    incomplete = true;
+  }
+
   outcome.complete = !incomplete && outcome.failed === 0;
   if (!outcome.complete) {
     opts.logger?.warn(
       `[AuthPlugin] forced reset for user ${userId}: revocation INCOMPLETE — ${outcome.sessions} session(s) `
-        + `and ${outcome.apiKeys} API key(s) revoked, ${outcome.failed} write(s) refused`
+        + `and ${outcome.apiKeys} API key(s) revoked, ${outcome.signInAccounts} linked sign-in account(s) `
+        + `unlinked, ${outcome.failed} write(s) refused`
         + (incomplete ? ', and a read did not finish or more rows exist than were scanned' : '')
         + '. The password reset itself landed; credentials that were not revoked still work. '
-        + 'Remedy: revoke the remaining sessions and keys by hand, and check write access on '
-        + 'sys_session / sys_api_key.',
+        + 'Remedy: revoke the remaining sessions and keys and unlink the remaining sign-in accounts by '
+        + 'hand, and check write access on sys_session / sys_api_key / sys_account.',
     );
   }
   return outcome;

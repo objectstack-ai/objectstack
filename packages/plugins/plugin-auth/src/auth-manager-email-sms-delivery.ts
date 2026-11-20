@@ -48,6 +48,10 @@
  * there in place for a module split out of it stays off the published
  * surface.) Nothing re-exports this module, so the published surface does not
  * move.
+ *
+ * Added here since, in the same shape: the reminder a password change sends
+ * of what it left active (`sendPasswordChangeReminder`,
+ * `password-reset-ends-added-access.ts`).
  */
 
 import type { StandardErrorCode } from '@objectstack/spec/api';
@@ -219,6 +223,44 @@ export async function sendChangeEmailNotice(
     // a notice was lost; never rethrown, so the change-email flow cannot be
     // taken down by its own security notification.
     this.config.logger?.warn?.('AuthManager: change-email notice to the previous address failed', {
+      error: (err as Error)?.message,
+    });
+  }
+}
+
+/** The body of `AuthManager#sendPasswordChangeReminder`; the method's docblock there is its contract. */
+export async function sendPasswordChangeReminder(
+  this: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'>,
+  to: { email: string; name?: string; id?: string },
+  kept: { apiKeys: readonly string[]; signInAccounts: readonly string[] },
+  requestSource?: unknown,
+): Promise<void> {
+  try {
+    const email = this.getEmailService();
+    if (!email || !to.email) return;
+    const storedLocale = to.id ? await this.storedRecipientLocale({ id: to.id }) : undefined;
+    const list = (items: readonly string[]) => (items.length > 0 ? items.join(', ') : '—');
+    await email.sendTemplate({
+      template: 'auth.password_changed_notice',
+      to: { address: to.email, ...(to.name ? { name: to.name } : {}) },
+      ...this.emailLocaleArg(requestSource, storedLocale),
+      data: {
+        user: { name: to.name || to.email, email: to.email, ...(to.id ? { id: to.id } : {}) },
+        apiKeyCount: kept.apiKeys.length,
+        apiKeys: list(kept.apiKeys),
+        signInAccountCount: kept.signInAccounts.length,
+        signInAccounts: list(kept.signInAccounts),
+        appName: this.getAppName(),
+      },
+      relatedObject: 'sys_user',
+      ...(to.id ? { relatedId: to.id } : {}),
+      // A notice to the account holder: identity mail (ADR-0131 D7, Q2 A).
+      identityMail: true,
+    });
+  } catch (err) {
+    // Best-effort, as the change-email notice: a reminder that cannot be sent
+    // never fails the password change it follows.
+    this.config.logger?.warn?.('AuthManager: the password-change reminder could not be sent', {
       error: (err as Error)?.message,
     });
   }

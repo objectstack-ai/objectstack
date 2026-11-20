@@ -209,6 +209,7 @@ import {
   getOtpSendGuard,
   renderPhoneSmsBody,
   sendChangeEmailNotice,
+  sendPasswordChangeReminder,
   sendPhoneInviteSms,
   storedRecipientLocale,
   type EmailSmsDeliveryHost,
@@ -2238,6 +2239,7 @@ export class AuthManager {
       resolvePasswordHasher: (...a) => this.resolvePasswordHasher(...a),
       roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
       sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+      sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
       settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
@@ -3923,6 +3925,35 @@ export class AuthManager {
       storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
     };
     return sendChangeEmailNotice.call(host, from, newEmail, requestSource);
+  }
+
+  /**
+   * Mail the account whose password just changed what the change left active:
+   * its API keys and its linked sign-in accounts
+   * (`password-reset-ends-added-access.ts`). A password change, unlike a
+   * reset, ends neither, so the account's owner is reminded of both. Sent
+   * only when there is something to list, to the account's own address, in
+   * its own stored language first (the ladder `sendChangeEmailNotice`
+   * follows).
+   *
+   * ⛔ Never throws: like the change-email notice, a reminder that cannot be
+   * sent — no transport, no template, a failed delivery — is logged at warn
+   * and never fails the change.
+   */
+  private sendPasswordChangeReminder(
+    to: { email: string; name?: string; id?: string },
+    kept: { apiKeys: readonly string[]; signInAccounts: readonly string[] },
+    requestSource?: unknown,
+  ): Promise<void> {
+    const readConfig = () => this.config;
+    const host: Pick<EmailSmsDeliveryHost, 'config' | 'emailLocaleArg' | 'getAppName' | 'getEmailService' | 'storedRecipientLocale'> = {
+      get config() { return readConfig(); },
+      emailLocaleArg: (...a) => this.emailLocaleArg(...a),
+      getAppName: (...a) => this.getAppName(...a),
+      getEmailService: (...a) => this.getEmailService(...a),
+      storedRecipientLocale: (...a) => this.storedRecipientLocale(...a),
+    };
+    return sendPasswordChangeReminder.call(host, to, kept, requestSource);
   }
 
   /**

@@ -67,8 +67,9 @@ import { AuthManager } from './auth-manager.js';
 import { passwordSignInDoorOf, recordLockoutRequest } from './auth-manager-sign-in-lockout.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import {
-  endEmailChangeTokenIssuedBeforeCredentialChange,
+  endMagicLinkIssuedBeforeCredentialChange,
   endTwoFactorChallengeIssuedBeforeCredentialChange,
+  endVerifyEmailLinkIssuedBeforeCredentialChange,
   noteSignInCredential,
   RESET_DOOR_SUBJECT,
 } from './credential-change-ends-prior-access.js';
@@ -204,7 +205,7 @@ export async function globalBeforeHook(
   setShouldSkipSessionRefresh: typeof import('better-auth/api').setShouldSkipSessionRefresh,
 ): Promise<
   | ReturnType<typeof ssoDiscoveryCompanionContext>
-  | Awaited<ReturnType<typeof endEmailChangeTokenIssuedBeforeCredentialChange>>
+  | Awaited<ReturnType<typeof endVerifyEmailLinkIssuedBeforeCredentialChange>>
   | Response
   | void
 > {
@@ -263,12 +264,15 @@ export async function globalBeforeHook(
   await recordLockoutRequest.call(this, ctx);
 
   // ── A credential change ends access issued before it ──────────
-  // An email-change link minted before the account's last credential
-  // change answers what a link never issued answers, and a second-factor
-  // challenge opened before it is ended. `credential-change-ends-prior-
-  // access.ts` states the rule and its one predicate.
-  const endedEmailChange = await endEmailChangeTokenIssuedBeforeCredentialChange(ctx);
-  if (endedEmailChange) return endedEmailChange;
+  // An email-change link, a verification link that signs its holder in and
+  // a magic link minted before the account's last credential change answer
+  // what a link never issued answers, and a second-factor challenge opened
+  // before it is ended. `credential-change-ends-prior-access.ts` states the
+  // rule and its one predicate.
+  const endedVerifyLink = await endVerifyEmailLinkIssuedBeforeCredentialChange(ctx);
+  if (endedVerifyLink) return endedVerifyLink;
+  const endedMagicLink = await endMagicLinkIssuedBeforeCredentialChange(ctx);
+  if (endedMagicLink) return endedMagicLink;
   await endTwoFactorChallengeIssuedBeforeCredentialChange(ctx);
 
   // ── [#33203] Cloud-managed: no reset door sets a local password ──

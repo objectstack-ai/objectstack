@@ -26,10 +26,12 @@
  *   (`credential-change-ends-reset-tokens.ts`). The CLI holds no server cache,
  *   so it ends the token rows, as the raw adapter (handed no secondary storage)
  *   does.
- * - **Ends every session and revokes every API key** of the account, as an
- *   administrator's forced reset with revocation does
- *   (`forced-reset-revocation.ts`, `admin_password_reset`): the sessions and
- *   keys issued under the old password do not outlive it.
+ * - **Ends every session, revokes every API key and unlinks every sign-in
+ *   account other than the password** of the account, as an administrator's
+ *   forced reset with revocation does (`forced-reset-revocation.ts`,
+ *   `admin_password_reset`), and as a self-service reset does
+ *   (`password-reset-ends-added-access.ts`): the sessions, keys and links the
+ *   account held under the old password do not outlive it.
  *
  * It asks for no password change at the next sign-in: the operator chose the
  * password.
@@ -65,10 +67,11 @@ export type OperatorPasswordResetOutcome =
   | {
       outcome: 'set';
       userId: string;
-      /** Sessions ended and API keys revoked. */
+      /** Sessions ended, API keys revoked and linked sign-in accounts unlinked. */
       sessionsEnded: number;
       apiKeysRevoked: number;
-      /** `false` when a session or key could not be read or revoked; the password is set either way. */
+      signInAccountsUnlinked: number;
+      /** `false` when a session, key or sign-in account could not be read or revoked; the password is set either way. */
       revocationComplete: boolean;
     }
   | { outcome: 'refused'; reason: OperatorPasswordResetRefusalReason; message: string };
@@ -184,6 +187,7 @@ export async function setOperatorPassword(
     userId: user.id,
     sessionsEnded: revocation.sessions,
     apiKeysRevoked: revocation.apiKeys,
+    signInAccountsUnlinked: revocation.signInAccounts,
     revocationComplete: revocation.complete,
   };
 }

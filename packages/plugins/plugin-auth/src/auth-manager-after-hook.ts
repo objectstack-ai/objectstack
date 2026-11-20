@@ -52,6 +52,7 @@ import {
   RESET_DOOR_SUBJECT,
 } from './credential-change-ends-prior-access.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
+import { accessAPasswordChangeKeeps, endWhatTheAccountAddedBeforeAReset } from './password-reset-ends-added-access.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
 import { carryRefusalReasonOnCallback } from './oauth-callback-refusal-reason.js';
@@ -77,11 +78,13 @@ export interface AfterHookHost {
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   externalDirectoryDoorDeps: AuthManager['externalDirectoryDoorDeps'];
+  getDataEngine: AuthManager['getDataEngine'];
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
   settleSsoSignOutOfIdp: AuthManager['settleSsoSignOutOfIdp'];
@@ -221,6 +224,54 @@ async function endSessionsOnceThePasswordIsWritten(this: Pick<AfterHookHost, 'lo
     return;
   }
   await endSessionsAfterCredentialWrite(internal, subject, changeDoor ? (installed as string) : undefined);
+}
+
+/**
+ * A completed self-service reset ends what the account added before it, and a
+ * password change reminds the account what it keeps
+ * (`password-reset-ends-added-access.ts`). A reset's read or write that fails
+ * reaches the requester; the reminder never fails the change.
+ */
+async function endOrRemindWhatTheAccountAdded(
+  this: Pick<AfterHookHost, 'getDataEngine' | 'logDurabilityDegradation' | 'sendPasswordChangeReminder'>,
+  ctx: any,
+): Promise<void> {
+  const resetDoor = RESET_DOOR_PATHS.has(ctx?.path);
+  const changeDoor = ctx?.path === '/change-password';
+  if (!resetDoor && !changeDoor) return;
+  if (!(await endpointSucceeded(ctx))) return;
+  const internal = ctx?.context?.internalAdapter;
+  const engine = this.getDataEngine() as never;
+  if (resetDoor) {
+    const subject: unknown = ctx?.context?.[RESET_DOOR_SUBJECT];
+    if (typeof subject !== 'string' || !subject || !internal) {
+      this.logDurabilityDegradation(
+        'AuthManager: a password reset completed, but the API keys and linked sign-in accounts the account '
+          + 'held before it were NOT ended: the account it reset could not be named. They still work. '
+          + 'Remedy: the account\'s owner resets again, or an administrator resets it with revocation on.',
+        new Error('the account of a completed password reset could not be named'),
+        { object: 'sys_api_key', path: String(ctx?.path) },
+      );
+      return;
+    }
+    await endWhatTheAccountAddedBeforeAReset({ accounts: internal, apiKeys: engine }, subject);
+    return;
+  }
+  const user = ctx?.context?.session?.user as { id?: unknown; email?: unknown; name?: unknown } | undefined;
+  if (!internal || typeof user?.id !== 'string' || !user.id || typeof user.email !== 'string' || !user.email) return;
+  try {
+    const kept = await accessAPasswordChangeKeeps({ accounts: internal, apiKeys: engine }, user.id);
+    if (kept.apiKeys.length === 0 && kept.signInAccounts.length === 0) return;
+    await this.sendPasswordChangeReminder(
+      { email: user.email, id: user.id, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
+      kept,
+      ctx,
+    );
+  } catch (err) {
+    ctx?.context?.logger?.warn?.('AuthManager: the password-change reminder could not be read', {
+      error: (err as Error)?.message,
+    });
+  }
 }
 
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
@@ -392,6 +443,10 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // ── A credential change ends access issued before it ──────────────
   // Ahead of the password-change after-effects below, which return.
   await endSessionsOnceThePasswordIsWritten.call(this, ctx);
+  // ── A password reset ends what the account added before it ────────
+  // And a password change reminds the account what it keeps. Behind the
+  // sessions above, ahead of the after-effects below, which return.
+  await endOrRemindWhatTheAccountAdded.call(this, ctx);
 
   // ── ADR-0069 D1: on a successful change/reset — stamp
   //    password_changed_at (expiry) and commit password history.

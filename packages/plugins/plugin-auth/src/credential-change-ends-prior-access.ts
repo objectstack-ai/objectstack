@@ -13,6 +13,14 @@
  *    1.7.12, `routes/update-user.mjs`), any token carrying `updateTo` — minted
  *    before the change answers at `GET /verify-email` exactly what a token
  *    that was never issued answers;
+ *  - a verification link that signs its holder in — the token
+ *    `/send-verification-email` mails, on a deployment that turns
+ *    `emailVerification.autoSignInAfterVerification` on — answers there the
+ *    same; with auto-sign-in off the link signs nobody in, grants no access
+ *    and is the vendor's to judge;
+ *  - a magic link — the link `POST /sign-in/magic-link` mails — minted before
+ *    the change answers at `GET /magic-link/verify` what a link that was
+ *    never issued answers;
  *  - a second-factor challenge a password sign-in opened before the change is
  *    ended at its verify door, which then answers what a challenge that does
  *    not exist answers;
@@ -39,23 +47,47 @@
  * manager on the vendor's in-memory adapter reads it as well. Every door that
  * replaces a password writes that row — both reset doors, `/change-password`,
  * an administrator's `/admin/set-user-password`, the one-step invitation door
- * — whether or not it also stamps `sys_user.password_changed_at`. The row's
- * creation is the account's first password, not a change: a row written over
- * within {@link FIRST_CREDENTIAL_WINDOW_MS} of its creation reads as never
- * written over, and an account with no local credential has never changed
- * one. In either case nothing is refused.
+ * — whether or not it also stamps `sys_user.password_changed_at`.
  *
- * A token's issue time is the `iat` the vendor signs into it, whole seconds:
- * a token minted in the same second as the change, after it, is refused too.
- * Its owner asks for a new one.
+ * ## An account's first password
+ *
+ * A credential row that has not been written over since its creation (its
+ * update stamp within {@link FIRST_CREDENTIAL_WINDOW_MS} of its creation
+ * stamp: the row is written with the two stamps taken separately) is judged
+ * by WHEN it was created, against the account (`sys_user.created_at`, read
+ * through the same adapter's `findUserById`):
+ *
+ *  - created together with the account — within the same window of the
+ *    account's creation — it is the account's first password, not a change:
+ *    a sign-up with a password, and an administrator's create-user, an
+ *    import or a one-step invitation that creates the account and its
+ *    password in one request;
+ *  - created onto an account that was already there, it IS a change, at its
+ *    creation: the account held other access before it (a social or
+ *    single-sign-on link, a magic link, an invitation) and now holds a
+ *    password too. A reset that creates the account's first password (both
+ *    reset doors, better-auth's `resetCredentialPassword`), an
+ *    administrator's `/admin/set-user-password` and the one-step invitation
+ *    door setting the first password of an existing account all create the
+ *    row this way, and so does `/set-initial-password`, the signed-in
+ *    account's own first password.
+ *
+ * An account with no local credential has never changed one, and nothing is
+ * refused. An account whose creation cannot be read is judged as one that
+ * was already there: the check fails closed.
+ *
+ * A `/verify-email` token's issue time is the `iat` the vendor signs into it,
+ * whole seconds: a token minted in the same second as the change, after it, is
+ * refused too. Its owner asks for a new one. A magic link's and a
+ * second-factor challenge's issue time is their stored row's creation.
  *
  * Each check fails closed: a clock or a record that cannot be read refuses
  * what it was asked to admit.
  *
  * ## Where it is wired
  *
- *  - `/verify-email`, the second-factor verify doors, and the password
- *    sign-in doors' first reading: the global before-hook
+ *  - `/verify-email`, `/magic-link/verify`, the second-factor verify doors,
+ *    and the password sign-in doors' first reading: the global before-hook
  *    (`auth-manager-before-hook.ts`).
  *  - The sessions a reset door or `/change-password` ends again, and the
  *    sign-in's second reading: the global after-hook
@@ -71,6 +103,9 @@
 /** The path of better-auth's email verification door. */
 export const VERIFY_EMAIL_PATH = '/verify-email';
 
+/** The path of better-auth's magic-link door (1.7.12 `plugins/magic-link`). */
+export const MAGIC_LINK_VERIFY_PATH = '/magic-link/verify';
+
 /** better-auth's second-factor verify doors (1.7.12 `plugins/two-factor`). */
 export const TWO_FACTOR_VERIFY_PATHS: ReadonlySet<string> = new Set([
   '/two-factor/verify-totp',
@@ -84,12 +119,15 @@ const TWO_FACTOR_COOKIE = 'two_factor';
 /** The prefix of a challenge's attempt counter row, after which comes the challenge's identifier. */
 const TWO_FACTOR_ATTEMPTS_PREFIX = '2fa-attempts-';
 
+/** The prefix of a magic link's stored row, after which comes the stored token (1.7.12 `magicLinkIdentifier`). */
+const MAGIC_LINK_IDENTIFIER_PREFIX = 'magic-link:';
+
 /**
- * The token the verify door is handed in place of an ended one: a value no
- * signer issued, so the vendor answers it as it answers any token it cannot
- * verify, through its own path.
+ * The token a link door is handed in place of an ended one: a value no
+ * signer issued and no store holds, so the vendor answers it as it answers
+ * any token it cannot verify, through its own path.
  */
-export const ENDED_EMAIL_CHANGE_TOKEN = 'ended-by-a-credential-change';
+export const ENDED_LINK_TOKEN = 'ended-by-a-credential-change';
 
 /** The context keys the before-hook leaves for the after-hook. */
 const SIGN_IN_READING = '__osSignInCredentialReading';
@@ -120,30 +158,40 @@ function toMs(value: unknown): number | undefined {
 /**
  * The seam the clock reads through: better-auth's internal adapter, whose
  * `findCredentialAccount` answers the account's local credential row (provider
- * `credential`, `accountId` the user's id) with its `createdAt` / `updatedAt`.
+ * `credential`, `accountId` the user's id) with its `createdAt` / `updatedAt`,
+ * and whose `findUserById` answers the account itself with its `createdAt`.
  */
 export interface CredentialClockReader {
   findCredentialAccount(userId: string): Promise<{ createdAt?: unknown; updatedAt?: unknown } | null | undefined>;
+  findUserById(userId: string): Promise<{ createdAt?: unknown } | null | undefined>;
 }
 
 /**
- * How long after its creation a credential row's own write still counts as
- * its creation: the row is written with a creation and an update stamp taken
- * separately, and the first password is not a change.
+ * How far apart two stamps of one creation may fall and still be one
+ * creation: a credential row's own creation and update stamps, which are
+ * taken separately, and the account's creation and that of the credential
+ * row created in the same request (a sign-up with a password).
  */
 export const FIRST_CREDENTIAL_WINDOW_MS = 1_000;
 
 /**
  * The moment of the account's last credential change, in epoch ms, or
- * `undefined` when it has never had one. Throws when the record cannot be
- * read, so a caller refuses.
+ * `undefined` when it has never had one. A credential row created onto an
+ * account that was already there is a change at its creation; one created
+ * with the account is its first password (module header, "An account's first
+ * password"). Throws when a record cannot be read, so a caller refuses.
  */
 export async function readCredentialChangedAt(reader: CredentialClockReader, userId: string): Promise<number | undefined> {
   const account = await reader.findCredentialAccount(userId);
   const created = toMs(account?.createdAt);
   const updated = toMs(account?.updatedAt);
   if (updated === undefined) return undefined;
-  if (created !== undefined && updated - created <= FIRST_CREDENTIAL_WINDOW_MS) return undefined;
+  if (created === undefined || updated - created > FIRST_CREDENTIAL_WINDOW_MS) return updated;
+  // Not written over since its creation: the account's first password only
+  // when the account was created with it. An account whose creation cannot be
+  // read is judged as one that was already there.
+  const accountCreated = toMs((await reader.findUserById(userId))?.createdAt);
+  if (accountCreated !== undefined && created - accountCreated <= FIRST_CREDENTIAL_WINDOW_MS) return undefined;
   return updated;
 }
 
@@ -153,7 +201,7 @@ export async function readCredentialChangedAt(reader: CredentialClockReader, use
  */
 async function issuedBeforeChangeOf(ctx: any, userId: string, issuedAtMs: number): Promise<boolean> {
   const reader: CredentialClockReader | undefined = ctx?.context?.internalAdapter;
-  if (typeof reader?.findCredentialAccount !== 'function') return true;
+  if (typeof reader?.findCredentialAccount !== 'function' || typeof reader?.findUserById !== 'function') return true;
   try {
     return issuedBeforeCredentialChange(issuedAtMs, await readCredentialChangedAt(reader, userId));
   } catch {
@@ -161,15 +209,34 @@ async function issuedBeforeChangeOf(ctx: any, userId: string, issuedAtMs: number
   }
 }
 
+/** The before-hook context that hands a link door {@link ENDED_LINK_TOKEN} in place of the token it was given. */
+function endedLinkContext(ctx: any): { context: { query: Record<string, unknown> } } {
+  return { context: { query: { ...(ctx.query ?? {}), token: ENDED_LINK_TOKEN } } };
+}
+
 /**
- * `GET /verify-email`: an email-change token issued before the account's
- * credential change is replaced by {@link ENDED_EMAIL_CHANGE_TOKEN}, so the
+ * The account an address names, through the request's own internal adapter:
+ * its id, `null` when no account holds the address, or throws when the
+ * lookup cannot be made.
+ */
+async function accountAt(ctx: any, email: string): Promise<string | null> {
+  const found = await ctx.context.internalAdapter.findUserByEmail(email.toLowerCase());
+  const id: unknown = found?.user?.id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/**
+ * `GET /verify-email`: a link that grants access — an email-change token, or
+ * a verification token on a deployment that signs its holder in
+ * (`emailVerification.autoSignInAfterVerification`) — issued before the
+ * account's credential change is replaced by {@link ENDED_LINK_TOKEN}, so the
  * door answers it what it answers a token never issued, its callback check
  * included. Answers the before-hook context that does so, or `undefined` to
- * leave the request as it came. A token that does not decode, or carries no
- * `updateTo`, is the vendor's to judge.
+ * leave the request as it came. A token that does not decode, carries no
+ * address, or grants no access (a plain verification link with auto-sign-in
+ * off) is the vendor's to judge.
  */
-export async function endEmailChangeTokenIssuedBeforeCredentialChange(
+export async function endVerifyEmailLinkIssuedBeforeCredentialChange(
   ctx: any,
 ): Promise<{ context: { query: Record<string, unknown> } } | undefined> {
   if (ctx?.path !== VERIFY_EMAIL_PATH) return undefined;
@@ -182,20 +249,65 @@ export async function endEmailChangeTokenIssuedBeforeCredentialChange(
   } catch {
     return undefined;
   }
-  if (typeof claims.updateTo !== 'string' || typeof claims.email !== 'string') return undefined;
-  const ended = { context: { query: { ...(ctx.query ?? {}), token: ENDED_EMAIL_CHANGE_TOKEN } } };
-  let userId: string | undefined;
+  if (typeof claims.email !== 'string') return undefined;
+  const changeLink = typeof claims.updateTo === 'string';
+  const signInLink = ctx?.context?.options?.emailVerification?.autoSignInAfterVerification === true;
+  if (!changeLink && !signInLink) return undefined;
+  let userId: string | null;
   try {
-    const found = await ctx.context.internalAdapter.findUserByEmail(claims.email.toLowerCase());
-    const id: unknown = found?.user?.id;
-    userId = typeof id === 'string' && id.length > 0 ? id : undefined;
+    userId = await accountAt(ctx, claims.email);
   } catch {
-    return ended;
+    return endedLinkContext(ctx);
   }
   // No account at the address: the vendor's own refusal answers it.
   if (!userId) return undefined;
   const issuedAtMs = typeof claims.iat === 'number' ? claims.iat * 1000 : Number.NaN;
-  return (await issuedBeforeChangeOf(ctx, userId, issuedAtMs)) ? ended : undefined;
+  return (await issuedBeforeChangeOf(ctx, userId, issuedAtMs)) ? endedLinkContext(ctx) : undefined;
+}
+
+/**
+ * `GET /magic-link/verify`: a magic link minted before the credential change
+ * of the account it signs into is replaced by {@link ENDED_LINK_TOKEN}, so the
+ * door answers it what it answers a link never issued (its `INVALID_TOKEN`
+ * redirect). Its issue time is its stored row's creation. Answers the
+ * before-hook context that does so, or `undefined` to leave the request as it
+ * came. A link no row holds, a row that does not parse, and a link for an
+ * address no account holds (the link signs up a new account, which has
+ * changed nothing) are the vendor's to judge. A link stored under a digest
+ * (the plugin's `storeToken` other than plain, which the plugin list never
+ * sets) cannot be found here, so it is ended: the check fails closed.
+ */
+export async function endMagicLinkIssuedBeforeCredentialChange(
+  ctx: any,
+): Promise<{ context: { query: Record<string, unknown> } } | undefined> {
+  if (ctx?.path !== MAGIC_LINK_VERIFY_PATH) return undefined;
+  const token: unknown = ctx?.query?.token;
+  if (typeof token !== 'string' || token.length === 0) return undefined;
+  const storeToken: unknown = ctx?.context?.getPlugin?.('magic-link')?.options?.storeToken;
+  if (storeToken !== undefined && storeToken !== 'plain') return endedLinkContext(ctx);
+  let row: { value?: unknown; createdAt?: unknown } | null | undefined;
+  try {
+    row = await ctx.context.internalAdapter.findVerificationValue(`${MAGIC_LINK_IDENTIFIER_PREFIX}${token}`);
+  } catch {
+    return endedLinkContext(ctx);
+  }
+  if (!row || typeof row.value !== 'string') return undefined;
+  let email: unknown;
+  try {
+    email = (JSON.parse(row.value) as { email?: unknown } | null)?.email;
+  } catch {
+    return undefined;
+  }
+  if (typeof email !== 'string' || email.length === 0) return undefined;
+  let userId: string | null;
+  try {
+    userId = await accountAt(ctx, email);
+  } catch {
+    return endedLinkContext(ctx);
+  }
+  if (!userId) return undefined;
+  const issuedAtMs = toMs(row.createdAt) ?? Number.NaN;
+  return (await issuedBeforeChangeOf(ctx, userId, issuedAtMs)) ? endedLinkContext(ctx) : undefined;
 }
 
 /**
