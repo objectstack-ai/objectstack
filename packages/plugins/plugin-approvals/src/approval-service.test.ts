@@ -1435,6 +1435,13 @@ describe('ApprovalService (node era)', () => {
       expect([err?.status, err?.code], String(comment)).toEqual([400, 'VALIDATION_ERROR']);
       expect(err.message).toBe('Invalid action params: Action param "comment" is required');
     }
+    // Not a string is no reason either: the door's `textarea` value shape refuses it.
+    for (const comment of [0, false, [], {}]) {
+      const err: any = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment } as any, SYS)
+        .then(() => undefined, (e) => e);
+      expect([err?.status, err?.code], JSON.stringify(comment)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(err.message).toMatch(/^Invalid action params: Action param "comment" \(textarea\): /);
+    }
     const [row] = await engine.find('sys_approval_request', { where: { id: req.id } });
     expect(row.status).toBe('pending');
     expect((engine._tables['sys_approval_action'] ?? []).filter((a: any) => a.request_id === req.id && a.action === 'reject')).toEqual([]);

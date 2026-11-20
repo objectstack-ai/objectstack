@@ -6483,10 +6483,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * outcome (`approval.approved` / `approval.rejected`,
    * {@link ApprovalService.notifyDecisionOutcome}).
    *
-   * A reject carries its reason: a missing or blank `comment` is refused
-   * before anything is read or written — `400 VALIDATION_ERROR` with the
-   * sentence the `approval_reject` action door answers, judged by the same
-   * presence rule (`validateActionParams`). Every human door reaches this
+   * A reject carries its reason: a missing or blank `comment`, or one that is
+   * not a string, is refused before anything is read or written —
+   * `400 VALIDATION_ERROR` with the sentence the `approval_reject` action door
+   * answers, judged by the same rules (`validateActionParams` over the
+   * `textarea` param that action declares). Every human door reaches this
    * member (the REST route, the SDK, the action door that forwards to the
    * route, the action link with its fixed text). The SLA sweep's auto-reject
    * calls `decideAndResume` and the revision-limit reject writes its own row,
@@ -6498,7 +6499,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     context: ExecutionContext,
   ): Promise<ApprovalDecisionResult> {
     if (input?.decision === 'reject') {
-      const issues = validateActionParams([{ name: 'comment', required: true }], { comment: input.comment });
+      const issues = validateActionParams([{ name: 'comment', required: true, type: 'textarea' }], { comment: input.comment });
       if (issues.length > 0) {
         throw Object.assign(
           new Error(`Invalid action params: ${issues.map((i) => i.message).join('; ')}`),

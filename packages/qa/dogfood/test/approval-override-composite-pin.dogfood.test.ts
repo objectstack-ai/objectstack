@@ -370,12 +370,18 @@ describe('the override never approves its actor\'s own request, through the appr
   // [#35719] A reject carries its reason on the approvals route too, with the
   // answer the `approval_reject` action door gives: 400 VALIDATION_ERROR naming
   // `comment`, before anything is read or written.
-  it('refuses a reject with no reason, or a blank one, and leaves the request pending', async () => {
+  it('refuses a reject with no reason, a blank one or one that is not a string, and leaves the request pending', async () => {
     const id = await openRequest(memberToken, 'reasonless reject');
     for (const body of [{}, { comment: '' }, { comment: '   ' }, { comment: null }]) {
       const reject = await call(adminToken, 'POST', `/approvals/requests/${id}/reject`, body);
       expect([reject.status, reject.code], JSON.stringify(body)).toEqual([400, 'VALIDATION_ERROR']);
       expect(JSON.stringify(reject.body)).toContain('Action param \\"comment\\" is required');
+    }
+    // A comment that is not a string is no reason either (the door's `textarea` shape).
+    for (const body of [{ comment: 0 }, { comment: false }, { comment: [] }, { comment: {} }]) {
+      const reject = await call(adminToken, 'POST', `/approvals/requests/${id}/reject`, body);
+      expect([reject.status, reject.code], JSON.stringify(body)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(JSON.stringify(reject.body)).toContain('Action param \\"comment\\" (textarea): ');
     }
     expect((await requestRow(id)).status).toBe('pending');
     expect(await decisionsOn(id)).toEqual([]);
