@@ -1932,6 +1932,8 @@ describe('ListView.draftOnlyColumn-34807', () => {
       viewType: 'grid',
       columns: ['title', 'priority'],
       compactToolbar: false,
+      // Read-only: an editable grid also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+      userActions: { editInline: false },
       ...schemaExtra,
     } as unknown as ListViewSchema;
     render(
@@ -2569,7 +2571,8 @@ describe('ListView.nameFieldSelect-13116', () => {
     render(
       <SchemaRendererProvider dataSource={dataSource}>
         <ListView
-          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns } as any}
+          // Read-only: an editable grid also asks for `updated_at` (concurrencyTokenProjection-12292 above).
+          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns, userActions: { editInline: false } } as any}
           dataSource={dataSource}
         />
       </SchemaRendererProvider>,

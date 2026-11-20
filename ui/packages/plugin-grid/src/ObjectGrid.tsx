@@ -1146,7 +1146,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     update: canEdit || inlineEditable,
     delete: canDelete,
     // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
-    updateOnMount: inlineEditable,
+    // objectstack#35684 — select-first cells read it only when the reader acts
+    // on one, so they ask when a cell is first selected (`onCellSelect` below).
+    updateOnMount: inlineEditable && !hostCellSelection,
   });
 
   // objectstack#35684 — what the select-first table asks about a cell when
@@ -1178,7 +1180,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             ...(fromText ? { fromText } : {}),
           };
         },
-        onCellSelect: (row) => approvalLocks.probe(rowRecordId(row)),
+        onCellSelect: (row) => {
+          recordVerdict.requestVerdicts();
+          approvalLocks.probe(rowRecordId(row));
+        },
       }
     : null;
 

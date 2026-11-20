@@ -99,7 +99,8 @@ describe('data-table select-first — a click selects (objectstack#35684)', () =
   });
 
   it('control: without the provider the same click still opens the editor', () => {
-    const t = renderTable({ selection: null });
+    // `keyboardNavigation` only addresses the cells (`data-grid-cell`) the probe reads.
+    const t = renderTable({ selection: null, extra: { keyboardNavigation: true } });
     fireEvent.click(t.cell(0, 0));
     expect(t.editor()).not.toBeNull();
     expect(t.cell(0, 0)).not.toHaveAttribute('data-selected-cell');

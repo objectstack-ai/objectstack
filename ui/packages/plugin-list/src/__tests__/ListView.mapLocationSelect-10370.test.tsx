@@ -122,6 +122,8 @@ async function paramsFor(schemaExtra: Record<string, unknown>): Promise<Record<s
     objectName: OBJECT,
     viewType: 'map',
     columns: ['subject'],
+    // Read-only: an editable grid also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+    userActions: { editInline: false },
     ...schemaExtra,
   };
   render(

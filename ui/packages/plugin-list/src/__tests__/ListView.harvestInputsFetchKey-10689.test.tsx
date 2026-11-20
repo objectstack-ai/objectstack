@@ -71,6 +71,8 @@ const listSchema = (extra: Record<string, unknown> = {}): any => ({
   viewType: 'grid',
   columns: COLUMNS,
   pagination: PAGINATION,
+  // Read-only: an editable grid also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+  userActions: { editInline: false },
   ...extra,
 });
 
