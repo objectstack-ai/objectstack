@@ -98,7 +98,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
+import { agentSetOf, clockDates, CONFIRMATION_REQUIRED_CODE, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
@@ -395,8 +395,9 @@ export interface ConfirmTurnResult {
   /**
    * Why the confirmed write measured nothing: the replayed recording holds no
    * confirmation turn ({@link confirmationNotRecorded}), the replay of it
-   * was not faithful (`ReplayNotFaithfulError`), or the ask matches more than
-   * one row and no turn was sent ({@link confirmationAmbiguous}). Never a fail; the operation
+   * was not faithful (`ReplayNotFaithfulError`), the ask matches more than
+   * one row and no turn was sent ({@link confirmationAmbiguous}), or the door
+   * has no confirmation service ({@link noConfirmationService}). Never a fail; the operation
    * is then scored on its first turn alone, as before.
    */
   notMeasured?: string;
@@ -445,6 +446,24 @@ export const confirmationNotRecorded = 'the recording holds no confirmation turn
  * declares. The first turn, which asked, is graded as before.
  */
 export const confirmationAmbiguous = 'the ask matches more than one row and the confirmation words say no row, so no confirmation turn was sent';
+
+/**
+ * Why a confirmed write is not measured on a server with no pending-confirmation service: the action door answered
+ * the turn's confirm-gated call `428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`, and
+ * on such a server it answers every such call so, whatever the agent sends. The ask (the first turn) is graded as before.
+ */
+const noConfirmationService = 'the action door has no pending-confirmation service on this server (428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service), so no agent can apply the confirmed write';
+
+/** A write call answered by the confirmation gate of a server with no pending-confirmation service ({@link noConfirmationService}). */
+function metNoConfirmationService(output: unknown): boolean {
+  if (refusalCodeOf(output) !== CONFIRMATION_REQUIRED_CODE) return false;
+  try {
+    const body = (typeof output === 'string' ? JSON.parse(output) : output) as { error?: { details?: { reason?: unknown } } };
+    return body.error?.details?.reason === 'no_confirmation_service';
+  } catch {
+    return false;
+  }
+}
 
 export interface RunHalf {
   personas: Array<Omit<PersonaAccount, 'apiKey'>>;
@@ -1947,6 +1966,7 @@ export async function runHalf(
               const afterConfirm = (await app.listRows(op.object)).rows as Row[];
               confirmed.observation = observeConfirmedWrite(op, second, beforeConfirm, afterConfirm, clockDates(startedConfirm, new Date()));
               confirmed.grade = gradeConfirmedWrite(op, confirmed.observation, card.asOf !== undefined ? { asOf: card.asOf } : {});
+              if (writeCallsOn(second, op.object).some((c) => metNoConfirmationService(c.output))) confirmed.notMeasured = noConfirmationService;
             }
           } catch (e) {
             confirmed.error = errText(e);
