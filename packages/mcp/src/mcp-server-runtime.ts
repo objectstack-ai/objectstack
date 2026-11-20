@@ -1894,8 +1894,11 @@ function skillsInstallLine(version: string | undefined): string | undefined {
  * definition reader the request registers ({@link definitionReaderServed}),
  * and without one the answer says the configuration was not checked. Sent
  * only where both doc tools register ({@link packageDocToolsServed}).
+ * [#35633] Exported from the package barrel, so a host that writes its own
+ * `instructions` / `dataOnlyInstructions` carries this same text: it passes
+ * the reader its connection lists ({@link definitionReaderOf}) as a plain name.
  */
-function packageDocAnswerRule(definitionReader: string | undefined): string {
+export function packageDocAnswerRule(definitionReader?: string): string {
   const processStep = definitionReader
     ? `also read its real definition with ${definitionReader}; where the manual and the definition differ, the `
       + 'definition is what runs: answer from it and name the difference.'
@@ -1915,7 +1918,17 @@ function packageDocAnswerRule(definitionReader: string | undefined): string {
  * registry) and `get_metadata_item` (the open draft door's,
  * `mcp-authoring.ts` in `@objectstack/runtime`).
  */
-const DEFINITION_READER_TOOL_NAMES = ['describe_metadata', 'get_metadata_item'] as const;
+export const DEFINITION_READER_TOOL_NAMES = ['describe_metadata', 'get_metadata_item'] as const;
+
+/**
+ * [#35633] The definition reader among the tool names a connection lists, in
+ * {@link DEFINITION_READER_TOOL_NAMES} order, or `undefined`: the one pick the
+ * open server and a host with its own `initialize` text both make.
+ */
+export function definitionReaderOf(toolNames: Iterable<string>): string | undefined {
+  const names = new Set(toolNames);
+  return DEFINITION_READER_TOOL_NAMES.find((name) => names.has(name));
+}
 
 /**
  * [#35442] The definition reader this request registers, or `undefined`:
@@ -1928,8 +1941,7 @@ function definitionReaderServed(
   grantedScopes: readonly string[] | undefined,
 ): string | undefined {
   if (!authoringToolsServed(authoring, grantedScopes)) return undefined;
-  const names = new Set(authoring!.registry.getAll().map((tool) => tool.name));
-  return DEFINITION_READER_TOOL_NAMES.find((name) => names.has(name));
+  return definitionReaderOf(authoring!.registry.getAll().map((tool) => tool.name));
 }
 
 /**
