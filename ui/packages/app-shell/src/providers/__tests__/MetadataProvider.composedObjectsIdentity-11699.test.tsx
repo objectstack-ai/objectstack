@@ -45,8 +45,9 @@
  *     objectui#11699 and not changed here.
  *
  * The fixture makes both helpers wrap: `task` has a list view (merged into its
- * `listViews`), and its `project` field declares `inlineEdit`, so `project`
- * gets a derived form `subforms` entry.
+ * `listViews`), and `project`'s field group names `task` (objectstack#35889:
+ * the group, not the FK's `inlineEdit`, inlines a child), so `project` gets a
+ * derived form `subforms` entry.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -85,7 +86,7 @@ const OBJECTS = [
       project: { type: 'master_detail', reference: 'project', inlineEdit: true },
     },
   },
-  { name: 'project', label: 'Project', fields: { name: { type: 'text' } } },
+  { name: 'project', label: 'Project', fields: { name: { type: 'text' } }, fieldGroups: [{ key: 'tasks', relatedList: 'task' }] },
 ];
 const VIEWS = [
   { name: 'task.all', object: 'task', viewKind: 'list', label: 'All', isDefault: true, config: { type: 'grid', columns: ['title'] } },

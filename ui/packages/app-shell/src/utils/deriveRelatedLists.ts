@@ -75,7 +75,7 @@
  *     server-side; this closes the UI/DX gap.
  */
 
-import { isBodyTableRelationship } from '@objectstack/spec/data';
+import { fieldGroupsPlaceRelationship, isBodyTableRelationship, isGroupPlaceableRelationship } from '@objectstack/spec/data';
 import { convertSortToQueryParams } from '@object-ui/core';
 import { relatedListEntryNames } from '@object-ui/plugin-detail';
 
@@ -121,16 +121,23 @@ export interface DerivedRelatedList {
   /**
    * True when the list is part of the record's MAIN CONTENT — a body table: the
    * FK declares `relatedList: 'primary'`, or it is a `master_detail` FK that
-   * declares no `relatedList` at all (objectstack#27069, objectstack#35597 —
-   * the rows the parent owns are drawn under it, not beside it, whether or
-   * not its form edits them inline). The verdict is `@objectstack/spec`'s `isBodyTableRelationship`
-   * (objectstack#27478), the one predicate the spec's refusal of a field group
-   * naming a side card reads too.
+   * declares no `relatedList` AND one of the parent's field groups names it
+   * (`fieldGroups[].relatedList`, objectstack#35889: a master-detail child is a
+   * tab by default, superseding objectstack#35597's "body table by default").
+   * The verdict is `@objectstack/spec`'s `isBodyTableRelationship`
+   * (objectstack#27478), handed whether a parent group places the list.
    * A placement, not an order: the body draws primary lists as full-width
-   * tables, the tabbed page gives each its OWN tab, and non-primary lists are
-   * the side cards (a single "Related" tab on the tabbed page).
+   * tables, and every other list is a tab of its own.
    */
   isPrimary: boolean;
+  /**
+   * True when a field group of the parent MAY place this list
+   * (`@objectstack/spec`'s `isGroupPlaceableRelationship`): a `'primary'` FK,
+   * or a `master_detail` FK that declares no `relatedList` (objectstack#35889).
+   * What Studio's field-group inspector offers; the spec refuses a group naming
+   * any other list.
+   */
+  isPlaceable: boolean;
   /**
    * Default row order, INHERITED from the child object's default list view
    * `sort` (objectui#5795; ruled on objectstack#11345, maintainer 2026-08-23:
@@ -189,6 +196,11 @@ interface MergedObjectLike {
    * a child object name or `object.field`; see {@link resolveRelatedListOrder}.
    */
   relatedLists?: string[];
+  /**
+   * The spec's optional `fieldGroups`, read when this object is the parent: a
+   * group's `relatedList` names the related list it places (objectstack#35889).
+   */
+  fieldGroups?: Array<{ relatedList?: unknown } | null | undefined>;
   /** The spec's optional `pluralLabel`, read by a caller's `listLabel` only. */
   pluralLabel?: string;
   fields?: Record<string, any> | any[];
@@ -355,7 +367,6 @@ export function deriveRelatedLists(
 
   const canRead = options?.canRead;
   const listLabel = options?.listLabel;
-
   for (const child of objects) {
     if (!child?.name) continue;
     // An object the data API does not expose (`enable.apiEnabled: false`)
@@ -398,7 +409,12 @@ export function deriveRelatedLists(
         childLabel,
         referenceField: fieldName,
         isOwned: type === 'master_detail',
-        isPrimary: isBodyTableRelationship(fieldDef),
+        // objectstack#35889 — a plain master-detail child is a body table
+        // only where one of the parent's field groups names it.
+        isPrimary: isBodyTableRelationship(fieldDef, {
+          placedByGroup: fieldGroupsPlaceRelationship(objectDef.fieldGroups, child.name, fieldName),
+        }),
+        isPlaceable: isGroupPlaceableRelationship(fieldDef),
         ...(inheritedSort ? { sort: inheritedSort } : {}),
         ...(hidden ? { isHidden: true as const } : {}),
         _fkLabel: (typeof fieldDef.label === 'string' && fieldDef.label) || fieldName,
@@ -446,9 +462,11 @@ export function deriveRelatedLists(
  * page draws (objectstack#35597): every `record:related_list` placed anywhere
  * in the page's tree whose relationship the record page counts as a body table
  * (`isPrimary` on its derived list — `@objectstack/spec`'s
- * `isBodyTableRelationship`, the one predicate). A master-detail list an author
- * places gets the body-table treatment the synthesized page gives it: drawn
- * when empty, a server totals row, the row cap and 「显示全部」.
+ * `isBodyTableRelationship`, the one predicate: a `'primary'` list, or a
+ * master-detail list a field group of the parent places, objectstack#35889).
+ * Such a list an author places gets the body-table treatment the synthesized
+ * page gives it: drawn when empty, a server totals row, the row cap and
+ * 「显示全部」.
  *
  * The synthesized page reads its body tables off its Details tab instead
  * (`bodyTableIdsOf` in `@object-ui/plugin-detail`): there the placement IS

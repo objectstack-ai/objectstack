@@ -40,10 +40,11 @@ export const Product = ObjectSchema.create({
  * Invoice + Invoice Line — the canonical master-detail "header + line items"
  * shape. Unlike project↔task (a task is added to a project over time), an
  * invoice is meaningless without its lines: you enter the header AND its lines
- * together, in one atomic transaction. So `invoice_line.invoice` declares
- * `inlineEdit: 'grid'` — every standard New/Edit Invoice form renders an
- * editable line-item grid, and the invoice `total` rolls the line amounts up
- * server-side. This is where inline master-detail entry belongs.
+ * together, in one atomic transaction. So the invoice's `lines` field group
+ * names `showcase_invoice_line` — every standard New/Edit Invoice form renders
+ * an editable line-item grid (`invoice_line.invoice` picks the grid form
+ * factor with `inlineEdit: 'grid'`), and the invoice `total` rolls the line
+ * amounts up server-side. This is where inline master-detail entry belongs.
  */
 export const Invoice = ObjectSchema.create({
   name: 'showcase_invoice',
@@ -72,13 +73,24 @@ export const Invoice = ObjectSchema.create({
     delete: { visibleWhen: P`record.status != 'paid'` },
   },
 
+  // [#35889] The lines are part of the invoice: this group puts the
+  // `showcase_invoice_line` table in the invoice's record page after its
+  // fields, inlines it in the New / Edit Invoice form, and lets Edit on the
+  // record page save the invoice and its lines together. A master-detail
+  // child no group names is only a tab of the record page.
+  fieldGroups: [
+    { key: 'invoice', label: 'Invoice' },
+    { key: 'lines', label: 'Lines', relatedList: 'showcase_invoice_line' },
+  ],
+
   fields: {
-    name: Field.text({ label: 'Invoice Number', required: true, searchable: true, maxLength: 60 }),
+    name: Field.text({ label: 'Invoice Number', required: true, searchable: true, maxLength: 60, group: 'invoice' }),
     // Forward record-picker config (spec lookup* props). The renderer
     // auto-derives columns from the Account schema, but here we curate them and
     // — crucially — SCOPE the picker so a rep can't invoice a churned account.
     // `lookupFilters` is the structured, picker-honoured form of referenceFilters.
     account: Field.lookup('showcase_account', {
+      group: 'invoice',
       label: 'Account',
       required: true,
       descriptionField: 'industry',
@@ -103,6 +115,7 @@ export const Invoice = ObjectSchema.create({
     // chosen the picker has nothing to scope by; after switching accounts the
     // candidate list changes with it.
     contact: Field.lookup('showcase_contact', {
+      group: 'invoice',
       label: 'Contact',
       descriptionField: 'email',
       dependsOn: ['account'],
@@ -113,11 +126,12 @@ export const Invoice = ObjectSchema.create({
     // invoices; because `showcase_invoice_line` is `controlled_by_parent`, the
     // lines follow automatically (ADR-0055). Mirror of `project.owner`, and
     // labelled apart from the platform-injected `owner_id` lookup ("Owner").
-    owner: Field.text({ label: 'Owner Email', maxLength: 200 }),
+    owner: Field.text({ label: 'Owner Email', maxLength: 200, group: 'invoice' }),
     // Region the sale was booked in — the invoice-side target of the Revenue
     // Pulse dashboard's shared "region" filter (framework#2501): accounts map
     // the same filter to their own `sales_region` via `filterBindings`.
     region: Field.select({
+      group: 'invoice',
       label: 'Region',
       options: [
         { label: 'AMER', value: 'amer', default: true },
@@ -126,6 +140,7 @@ export const Invoice = ObjectSchema.create({
       ],
     }),
     status: Field.select({
+      group: 'invoice',
       label: 'Status',
       required: true,
       options: [
@@ -140,6 +155,7 @@ export const Invoice = ObjectSchema.create({
     // required marker + blocks submit, and the server's rule-validator enforces
     // the same predicate over the merged record — one rule, both ends agree.
     issued_on: Field.date({
+      group: 'invoice',
       label: 'Issued On',
       requiredWhen: P`record.status in ['sent', 'paid']`,
     }),
@@ -150,6 +166,7 @@ export const Invoice = ObjectSchema.create({
     // Header tax rate (percent). The line-item entry form reads it live to show
     // a Subtotal / Tax / Total stack under the grid as lines are entered.
     tax_rate: Field.number({
+      group: 'invoice',
       label: 'Tax Rate (%)',
       min: 0,
       max: 100,
@@ -161,6 +178,7 @@ export const Invoice = ObjectSchema.create({
     // pure client UX concern (the server has no visibility notion); the
     // `requiredWhen` half is enforced on both ends.
     paid_on: Field.date({
+      group: 'invoice',
       label: 'Paid On',
       visibleWhen: P`record.status == 'paid'`,
       requiredWhen: P`record.status == 'paid'`,
@@ -169,6 +187,7 @@ export const Invoice = ObjectSchema.create({
     // (child FK auto-detected: showcase_invoice_line.invoice). This is the line
     // subtotal; the tax-inclusive grand total is shown live during entry.
     total: Field.summary({
+      group: 'invoice',
       label: 'Subtotal',
       summaryOperations: { object: 'showcase_invoice_line', field: 'amount', function: 'sum' },
     }),
@@ -206,6 +225,7 @@ export const Invoice = ObjectSchema.create({
     // so a write can store only a real code. Optional: an invoice without a
     // currency has no `amount` yet (see below).
     currency_code: Field.text({
+      group: 'invoice',
       label: 'Currency',
       maxLength: 3,
       valueDomain: 'iso_4217_currency',
@@ -214,6 +234,7 @@ export const Invoice = ObjectSchema.create({
     // foreign amount needs a date to pick its rate, so a draft dated today is
     // convertible from its first save.
     invoice_date: Field.date({
+      group: 'invoice',
       label: 'Invoice Date',
       required: true,
       defaultValue: 'NOW()',
@@ -226,6 +247,7 @@ export const Invoice = ObjectSchema.create({
     // the one the invoice states (the seeded yen lines are whole yen, so a yen
     // total stays whole).
     amount: Field.currency({
+      group: 'invoice',
       label: 'Total incl. Tax',
       expression: cel`record.currency_code == null || record.currency_code == '' ? null : double(round((record.total == null ? 0 : record.total) * (1 + (record.tax_rate == null ? 0 : record.tax_rate) / 100) * 100)) / 100`,
       currencyConfig: {
@@ -237,12 +259,14 @@ export const Invoice = ObjectSchema.create({
     // Written by the engine only (`readonly`), in `dynamic` mode: it displays
     // in the home currency, so this metadata never names that currency.
     amount_home: Field.currency({
+      group: 'invoice',
       label: 'Total incl. Tax (Home Currency)',
       readonly: true,
     }),
     // The rate the conversion used, kept with every digit it was stored with
     // (no `scale`, so nothing rounds the rate a reader is shown).
     amount_rate: Field.number({
+      group: 'invoice',
       label: 'Exchange Rate',
       readonly: true,
     }),

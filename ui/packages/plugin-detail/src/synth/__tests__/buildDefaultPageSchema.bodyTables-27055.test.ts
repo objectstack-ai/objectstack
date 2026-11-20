@@ -21,7 +21,8 @@
  * list is a tab of its own (objectstack#35595, which retired the one `Related`
  * tab). A field group whose `relatedList` names a body table's
  * relationship places that table at the group's position instead
- * (objectstack#27069, objectstack#27241).
+ * (objectstack#27069, objectstack#27241), and the table keeps its tab too
+ * (objectstack#35889 item 4).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -171,6 +172,21 @@ describe('a field group places a body table at its position (objectstack#27069, 
     const tabs = buildDefaultTabs(placed('task'), { related: [LINES, TASKS] });
     expect(shape(items(tabs)[0].children)).toEqual(['details(basic,terms,notes)', 'table(quote_line_item)']);
     expect(tabOf(tabs, 'related:task.quote').children.map((n: any) => n.properties.objectName)).toEqual(['task']);
+  });
+
+  it('a table a group places keeps its tab, with its count; an unplaced body table takes none (objectstack#35889 item 4)', () => {
+    const tabs = buildDefaultTabs(placed('quote_line_item'), { related: [LINES, SCHEDULE, TASKS] });
+    expect(items(tabs).map((i: any) => i.value)).toEqual([
+      'details',
+      'related:quote_line_item.quote',
+      'related:task.quote',
+      'timeline',
+    ]);
+    expect(tabOf(tabs, 'related:quote_line_item.quote').children.map((n: any) => n.properties.objectName)).toEqual(['quote_line_item']);
+    // The Overview still draws it at the group, and the page still counts it a body table.
+    expect(shape(items(tabs)[0].children)).toContain('table(quote_line_item)');
+    const page = buildDefaultPageSchema(placed('quote_line_item'), { related: [LINES, TASKS] });
+    expect([...bodyTableIdsOf(page)]).toEqual(['quote_line_item.quote']);
   });
 
   it('the host-passed sections place the same way (the `{ group }` sections RecordDetailView passes)', () => {

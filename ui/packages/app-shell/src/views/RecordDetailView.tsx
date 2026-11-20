@@ -4342,9 +4342,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
       const childObjectDef = objects.find((o: any) => o.name === childObject);
       // objectstack#27055, Target 8 — the record's own BODY: a list the author
-      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring
-      // `inlineEdit` (the child is edited as part of the parent) and no
-      // `relatedList` — `relatedList: true` keeps it a side card. That is
+      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring no
+      // `relatedList` that one of this object's field groups places
+      // (objectstack#35889; unplaced, it is a tab). That is
       // `isPrimary`: `deriveRelatedLists` sets it from `@objectstack/spec`'s
       // `isBodyTableRelationship` (objectstack#27478), the one predicate the
       // spec's refusal of a field group naming a side card reads too, so no

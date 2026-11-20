@@ -22,6 +22,8 @@ import {
   NUMERIC_VALUE_TYPES,
   isAggregateCompatibleWithFieldType,
   isApiOperationAllowed,
+  fieldGroupsPlaceRelationship,
+  isGroupPlaceableRelationship,
   masterDetailRequiredOmitted,
   referenceCarrierOf,
   resolveEffectiveApiMethods,
@@ -216,19 +218,6 @@ function isAssociationName(name: string): boolean {
   return ASSOCIATION_TOKENS.some((t) => lc === t || lc.endsWith(`_${t}`) || lc.endsWith(`_${t}s`));
 }
 
-/**
- * Is this relationship edited inline within its parent's form at all?
- * `FieldSchema.inlineEdit` accepts `true` (auto-pick by child shape), `'grid'`
- * and `'form'`, and every reader — the console's inline subforms, the spec's
- * `isBodyTableRelationship` — treats all three as inline-edited; `false` and
- * absent are not. The one copy of that question in this file, so no rule can
- * read a single literal of the three.
- */
-function isInlineEdited(def: { inlineEdit?: unknown } | null | undefined): boolean {
-  const inlineEdit = def?.inlineEdit;
-  return inlineEdit === true || inlineEdit === 'grid' || inlineEdit === 'form';
-}
-
 interface FieldEntry {
   name: string;
   def: any;
@@ -296,9 +285,11 @@ const VALUE_DOMAIN_BY_FIELD_NAME: ReadonlyMap<string, ValueDomain> = new Map(
 export const RELATIONSHIP_INLINE_EDIT_NEEDS_BULK = 'relationship/inline-edit-needs-bulk';
 
 /**
- * An inline-edited relationship whose parent or child withholds `bulk`.
+ * A form-inlined relationship whose parent or child withholds `bulk`.
  *
- * The parent's form saves an `inlineEdit` child's rows together with the parent
+ * The parent's form saves the rows of a child one of its field groups places
+ * (`fieldGroups[].relatedList`, objectstack#35889: the group, not the FK's
+ * `inlineEdit`, decides that the form inlines it) together with the parent
  * in ONE cross-object `/api/v1/batch` (ADR-0035), and that route gates EVERY op
  * as `bulk` plus its own write on the op's own object
  * (`packages/rest/src/batch-routes.ts`). So a parent or child whose DECLARED
@@ -310,7 +301,9 @@ export const RELATIONSHIP_INLINE_EDIT_NEEDS_BULK = 'relationship/inline-edit-nee
  * A registry rule (`AUTHORING_RULES`), not a `lintDataModel` member: it
  * forecasts a refusal at run time rather than nudging a style, so `os lint`,
  * `os validate` and `os build` all report it. Advisory: a warning that refuses
- * nothing. One finding per object, however many inline children name it.
+ * nothing. One finding per object, however many inline children name it. The
+ * rule id keeps its name (`inline-edit-needs-bulk`), which every suppression
+ * and explanation already cites.
  */
 export function lintInlineEditBulk(objects: any[]): LocatedLintIssue[] {
   const issues: LocatedLintIssue[] = [];
@@ -324,9 +317,12 @@ export function lintInlineEditBulk(objects: any[]): LocatedLintIssue[] {
     if (!child?.name) continue;
     for (const { name: fieldName, def } of fieldEntries(child.fields)) {
       if (!RELATIONSHIP_TYPES.has(def?.type)) continue;
-      if (!isInlineEdited(def)) continue;
+      if (!isGroupPlaceableRelationship(def)) continue;
       const parent = refOf(def);
       if (!parent) continue;
+      const parentIndex = indexByName.get(parent);
+      if (parentIndex === undefined) continue;
+      if (!fieldGroupsPlaceRelationship(objects[parentIndex]?.fieldGroups, child.name, fieldName)) continue;
       for (const target of [parent, child.name]) {
         const j = indexByName.get(target);
         if (j === undefined || reported.has(target)) continue;
@@ -337,7 +333,8 @@ export function lintInlineEditBulk(objects: any[]): LocatedLintIssue[] {
           rule: RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
           where: objectWhere(objects[j]),
           message:
-            `inlineEdit on "${child.name}.${fieldName}" saves ${parent} and its ${child.name} rows in one ` +
+            `the field group of ${parent} that places "${child.name}.${fieldName}" puts its rows in ${parent}'s form, ` +
+            `which saves ${parent} and its ${child.name} rows in one ` +
             `/api/v1/batch, which needs 'bulk' on every object in it; "${target}" declares ` +
             `enable.apiMethods without 'bulk', so that save is refused 405 OBJECT_API_METHOD_NOT_ALLOWED`,
           path: `objects[${j}].enable.apiMethods`,
@@ -1011,6 +1008,15 @@ export function lintDataModel(objects: any[]): LintIssue[] {
       (childrenByParent[parent] ||= []).push({ child, fieldName, def });
     }
   }
+  // objectstack#35889 — a child is inlined in its parent's entry form only when
+  // one of the PARENT's field groups places it (`fieldGroups[].relatedList`),
+  // not by its FK's `inlineEdit`; R5 and R6 read that.
+  const fieldGroupsByObject = new Map<string, unknown>();
+  for (const o of objects) {
+    if (typeof o?.name === 'string' && !fieldGroupsByObject.has(o.name)) fieldGroupsByObject.set(o.name, o.fieldGroups);
+  }
+  const formInlines = (childName: string, fieldName: string, def: any, parent: string): boolean =>
+    isGroupPlaceableRelationship(def) && fieldGroupsPlaceRelationship(fieldGroupsByObject.get(parent), childName, fieldName);
 
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
@@ -1194,15 +1200,16 @@ export function lintDataModel(objects: any[]): LintIssue[] {
           });
         }
         // R5 — line-item children are usually entered inline with the parent.
-        // Any inline-edit mode the author already chose (`true`, 'grid' or
-        // 'form') satisfies it; only an absent or `false` inlineEdit is nudged.
-        if (isLineItemName(obj.name) && !isInlineEdited(def)) {
+        // A field group of the parent that places them satisfies it
+        // (objectstack#35889: that, not the FK's `inlineEdit`, inlines a child
+        // in the parent's form and its record page's body).
+        if (isLineItemName(obj.name) && !formInlines(obj.name, fieldName, def, parent)) {
           issues.push({
             severity: 'suggestion',
             rule: 'relationship/line-items-inline-edit',
-            message: `"${obj.name}" looks like line items of ${parent}; consider inlineEdit: true on "${fieldName}" so it is entered inline within the ${parent} form`,
-            path: `${fieldPath}.inlineEdit`,
-            fix: 'inlineEdit: true',
+            message: `"${obj.name}" looks like line items of ${parent}; consider a field group on ${parent} with relatedList: '${obj.name}' so its rows are entered inline within the ${parent} form and drawn in its record page`,
+            path: `${fieldPath}`,
+            fix: `add { key: '${obj.name}', relatedList: '${obj.name}' } to ${parent}.fieldGroups`,
           });
         }
       }
@@ -1219,14 +1226,14 @@ export function lintDataModel(objects: any[]): LintIssue[] {
       }
 
       // R6 — associations should NOT be inlined into the parent's entry form,
-      // in any inline-edit mode ('grid' and 'form' clutter it as `true` does).
-      if (isInlineEdited(def) && isAssociationName(obj.name)) {
+      // which a parent field group placing them does (objectstack#35889).
+      if (isAssociationName(obj.name) && formInlines(obj.name, fieldName, def, parent)) {
         issues.push({
           severity: 'warning',
           rule: 'relationship/association-inline-edit',
-          message: `"${obj.name}" is an association (comments/audit/activity), not line items — inlineEdit clutters the ${parent} entry form; surface it as a detail-page related list instead`,
-          path: `${fieldPath}.inlineEdit`,
-          fix: 'remove inlineEdit (use relatedList on the detail page)',
+          message: `"${obj.name}" is an association (comments/audit/activity), not line items — a field group of ${parent} placing it clutters the ${parent} entry form and record body; leave it a tab of the record page instead`,
+          path: `${fieldPath}`,
+          fix: `remove the ${parent} field group whose relatedList names ${obj.name}`,
         });
       }
     }

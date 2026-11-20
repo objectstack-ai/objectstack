@@ -787,7 +787,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "内嵌表格列",
-        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当本字段设置了 inlineEdit（在源码中编写）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
+        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当父对象的某个字段分组指向这张子表（fieldGroups[].relatedList）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
       },
       "inlineColumns.name": {
         label: "名称",

@@ -787,7 +787,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Inline Columns",
-        helpText: "Columns of the inline grid on the parent's form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
+        helpText: "Columns of the inline grid on the parent's form, in display order; used only when a field group of the parent names this child (fieldGroups[].relatedList). Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
       },
       "inlineColumns.name": {
         label: "Name",
