@@ -50,10 +50,15 @@ The bypass is **posture-gated for row-level security** (ADR-0066 D2 ①): RLS
 policies are short-circuited only on objects whose posture permits it —
 `access: { default: 'private' }`, `tenancy.enabled: false`
 (deployment-level: no organization column), or better-auth-managed. On an ordinary tenant business
-object, authored and baseline RLS still applies (e.g. `member_default`'s
-owner-scoped write policies keep `org_member` holders owner-scoped on
-`update`/`delete` even when another set grants `modifyAllRecords`), and the
-Layer 0 tenant wall always ANDs on top. See
+object, authored RLS still applies, and so does `member_default`'s creator-only
+write floor (`created_by == current_user.id`) for `org_member` holders, except
+where record sharing enforces writes (an object with an `owner_id` whose OWD is
+`private` or `public_read`): there the sharing service's `allow` for a row
+(ownership at the caller's write depth, `modifyAllRecords`, or, for an update,
+an `edit` share or the row's queue) replaces the floor for that row, on a by-id
+write and on a predicate write alike. Under `public_read_write`, or on an object
+with no `owner_id`, the floor stays, and an app-authored policy is never
+replaced. The Layer 0 tenant wall always ANDs on top. See
 [Sharing & OWD](/docs/permissions/sharing-rules#how-viewallrecords--modifyallrecords-interact-with-the-owd)
 and `plugin-security/src/security-plugin.ts` (`computeLayeredRlsFilter`).
 
