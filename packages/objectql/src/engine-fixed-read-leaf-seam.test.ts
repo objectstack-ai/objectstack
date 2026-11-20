@@ -26,6 +26,8 @@ import {
   SharedRecordIds,
   isComposedReadableIds,
   isFixedReadLeaf,
+  type EngineAggregateOptions,
+  type FilterCondition,
   type FixedReadLeafSeamCase,
 } from '@objectstack/spec/data';
 import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
@@ -136,17 +138,19 @@ function wireSecurity(engine: ObjectQL, scopes: Map<string, unknown>): void {
 /** Run one operation the way a case names it. */
 function run(engine: ObjectQL, c: Pick<FixedReadLeafSeamCase, 'operation' | 'object' | 'clause' | 'context'>, filter: unknown) {
   const context = c.context as any;
-  const where = c.clause === 'where' ? filter : undefined;
+  const where = c.clause === 'where' ? (filter as FilterCondition) : undefined;
   switch (c.operation) {
-    case 'find': return engine.find(c.object, { where } as any, { context });
-    case 'findOne': return engine.findOne(c.object, { where } as any, { context });
-    case 'count': return engine.count(c.object, { where } as any, { context });
-    case 'aggregate':
-      return engine.aggregate(c.object, {
+    case 'find': return engine.find(c.object, { where }, { context });
+    case 'findOne': return engine.findOne(c.object, { where }, { context });
+    case 'count': return engine.count(c.object, { where }, { context });
+    case 'aggregate': {
+      const query: EngineAggregateOptions = {
         ...(where !== undefined ? { where } : {}),
-        ...(c.clause === 'having' ? { having: filter, groupBy: ['owner'] } : {}),
+        ...(c.clause === 'having' ? { having: filter as FilterCondition, groupBy: ['owner'] } : {}),
         aggregations: [{ function: 'count', alias: 'n' }],
-      } as any, { context });
+      };
+      return engine.aggregate(c.object, query, { context });
+    }
     case 'update': return engine.update(c.object, { label: 'z' }, { where, multi: true, context } as any);
     case 'delete': return engine.delete(c.object, { where, multi: true, context } as any);
   }
@@ -293,7 +297,7 @@ describe('[ADR-0155 D4] a leaf the pipeline wrote meets the same seam at the bou
     await engine.find('srid_doc', { where }, { context: ASKER as any });
     await engine.findOne('srid_doc', { where }, { context: ASKER as any });
     await engine.count('srid_doc', { where }, { context: ASKER as any });
-    await engine.aggregate('srid_doc', { where, aggregations: [{ function: 'count', alias: 'n' }] } as any, { context: ASKER as any });
+    await engine.aggregate('srid_doc', { where, aggregations: [{ function: 'count', alias: 'n' }] }, { context: ASKER as any });
     expect(calls.map((c) => c.verb)).toEqual(['find', 'findOne', 'count', 'aggregate']);
     for (const call of calls) expect(leavesIn(call.ast.where), call.verb).toEqual([leaf]);
   });
@@ -346,16 +350,18 @@ describe('[ADR-0155 D1] the comparand door', () => {
 
   it('a leaf an array-form where lowers by reference into another position is refused by name, not as a value', async () => {
     const { engine, calls } = await bootEngine();
-    const err = await refusalOf(engine.find('srid_doc', { where: [['id', '=', SharedRecordIds.read('srid_doc', 'u1')]] } as any, { context: ASKER as any }));
+    const where = [['id', '=', SharedRecordIds.read('srid_doc', 'u1')]] as unknown as FilterCondition;
+    const err = await refusalOf(engine.find('srid_doc', { where }, { context: ASKER as any }));
     expect(envelopeOf(err)).toEqual(REFUSED);
     expect(calls).toEqual([]);
   });
 
   it('a leaf in an aggregation\'s own filter is refused', async () => {
     const { engine, calls } = await bootEngine();
+    const filter = { id: { $in: SharedRecordIds.read('srid_doc', 'u1') } } as unknown as FilterCondition;
     const err = await refusalOf(engine.aggregate('srid_doc', {
-      aggregations: [{ function: 'count', alias: 'n', filter: { id: { $in: SharedRecordIds.read('srid_doc', 'u1') } } }],
-    } as any, { context: ASKER as any }));
+      aggregations: [{ function: 'count', alias: 'n', filter }],
+    }, { context: ASKER as any }));
     expect(envelopeOf(err)).toEqual(REFUSED);
     expect(calls).toEqual([]);
   });
