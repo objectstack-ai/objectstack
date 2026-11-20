@@ -57,6 +57,7 @@ import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-f
 import type { ServiceObject } from '../data/object.zod';
 import type { Hook, HookContext } from '../data/hook.zod';
 import type { BaseEngineOptions, EngineQueryOptions } from '../data/data-engine.zod';
+import type { FixedReadLeaf } from '../data/fixed-read-leaf';
 
 /**
  * The engine's schema-registry view — the members reached through the
@@ -279,6 +280,23 @@ export type EngineFilterJudgement =
     | { ok: false; code: string; status: number; message: string };
 
 /**
+ * The answer of {@link IObjectQLEngine.fixedReadLeafClassOf} (ADR-0155 D4):
+ * which of the two classes a fixed-read leaf falls in on this engine, and what
+ * names it. `@objectstack/objectql`'s `FixedReadLeafClass`, the seam's own
+ * answer, stated here because spec does not depend on the engine package;
+ * `ObjectQL implements IObjectQLEngine` holds the two equal on every build.
+ */
+export type EngineFixedReadLeafClass =
+    | {
+          readonly class: 'other-datasource';
+          readonly object: string;
+          readonly table: string;
+          readonly objectDatasource: string | undefined;
+          readonly tableDatasource: string | undefined;
+      }
+    | { readonly class: 'registration-by-name'; readonly table: string; readonly registration: string };
+
+/**
  * The full ObjectQL engine, as the `objectql` slot's consumers use it.
  *
  * Members beyond {@link IDataEngine} are REQUIRED, not optional: `ObjectQL`
@@ -290,12 +308,13 @@ export type EngineFilterJudgement =
  * guarded call into a `possibly undefined` error and push code back toward the
  * `any` this contract exists to remove.
  *
- * Four members are optional by ruling, not by this default: {@link judgeFilter}
+ * Five members are optional by ruling, not by this default: {@link judgeFilter}
  * (#19995 ruling C), {@link getDisabledActions} (#27842 ruling letter B,
  * the `getFlowRegistration?` shape), {@link getCascadeDeleteObjects}
- * (#28001, that shape again) and {@link deferSummaryRecompute} (#33795,
- * ruling 6922040858). Their callers must work with an engine that lacks
- * them, so the optional mark states that requirement in the type.
+ * (#28001, that shape again), {@link deferSummaryRecompute} (#33795,
+ * ruling 6922040858) and {@link fixedReadLeafClassOf} (#35946, ruling
+ * 7051956587). Their callers must work with an engine that lacks them, so the
+ * optional mark states that requirement in the type.
  */
 export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
     // ── Schema access ────────────────────────────────────────────────────
@@ -510,6 +529,33 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * `typeof ql.hasObjectMiddleware === 'function'`.
      */
     hasObjectMiddleware?(objectName: string): boolean;
+    /**
+     * [ADR-0155 D4, plan step 5] Which of D4's two classes the fixed-read leaf
+     * `leaf` (`SharedRecordIds`) falls in on this engine, or `undefined` when
+     * neither applies: the engine seam's own recognition
+     * (`fixedReadLeafClassOfEngine`), the one the executor boundary runs.
+     *
+     * - `'other-datasource'`: the object the leaf names is bound to another
+     *   datasource than the table its fixed inner read reads.
+     * - `'registration-by-name'`: an object-scoped middleware, or a
+     *   `beforeFind` / `afterFind` hook, is registered for that table by name.
+     *
+     * Read-only: it reads the engine's datasource bindings, middlewares and
+     * hooks, and calls no driver and logs nothing.
+     *
+     * The consumer is a read path that compiles the leaf itself instead of
+     * handing it to the engine: the analytics native-SQL strategy (ADR-0155 Q2
+     * as ruled) asks this before it compiles, compiles only on `undefined`, and
+     * declines the query to the engine on a class, where the seam answers it.
+     * It restates neither class (D4: recognised once, in the seam).
+     *
+     * OPTIONAL by ruling 7051956587: an engine without it cannot answer, and
+     * that consumer reads the absence as "cannot say" and declines, so the
+     * probe is `typeof ql.fixedReadLeafClassOf === 'function'`. ⛔ Never
+     * `ql.fixedReadLeafClassOf?.(leaf) ?? null` alone: an absent member then
+     * reads as "neither class" and the consumer compiles what it cannot see.
+     */
+    fixedReadLeafClassOf?(leaf: FixedReadLeaf): EngineFixedReadLeafClass | undefined;
     /** Bind declarative Hook metadata — AppPlugin's app-bundle path. */
     bindHooks(
         hooks: unknown[] | undefined,

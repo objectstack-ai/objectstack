@@ -58,8 +58,9 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * `IObjectQLEngine`, so the `Partial<>` around it is not decoration — it is
  * what keeps this seam usable against an engine that is not ObjectQL.
  * `judgeFilter` (#20157) is optional on the contract itself, by ruling, and
- * the auto-bridge probes it the same way. So is `hasObjectMiddleware`
- * (#21080), whose absence the bridge below reads as "cannot say".
+ * the auto-bridge probes it the same way. So are `hasObjectMiddleware`
+ * (#21080) and `fixedReadLeafClassOf` (ADR-0155 D4, #35946), whose absence
+ * the bridges below read as "cannot say".
  */
 /** One bridged `executeAggregate` call's input (the plugin option's own declaration). */
 type BridgedAggregateInput = Parameters<NonNullable<AnalyticsServicePluginOptions['executeAggregate']>>[1];
@@ -82,7 +83,7 @@ const AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectql.aggr
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
-  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware'>>;
+  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware' | 'fixedReadLeafClassOf'>>;
 
 /**
  * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
@@ -1531,6 +1532,45 @@ export class AnalyticsServicePlugin implements Plugin {
       return undefined;
     };
 
+    /**
+     * [ADR-0155 D4, plan step 5, #35946] The engine seam's recognition of D4's
+     * two classes for a fixed-read leaf a read scope carries
+     * (`IObjectQLEngine.fixedReadLeafClassOf`), resolved per call like
+     * `hasObjectMiddleware` above. The engine's "neither" (`undefined` from the
+     * member) is this hook's `null`, the one answer on which `NativeSQLStrategy`
+     * compiles the leaf; a class is handed on as the engine named it.
+     *
+     * It FAILS CLOSED: no engine, or an engine without the member, answers
+     * `undefined` ("cannot say"), and the strategy declines the query to the
+     * engine path, as it does on a class and on a throw. ⛔ Never
+     * `engine.fixedReadLeafClassOf?.(leaf) ?? null`: the absent member would
+     * read as "neither class". ⛔ No copy of either class here (D4: "restates
+     * none"). Said once, at `warn`: the rows stay correct, only the native path
+     * for a scope carrying the leaf is gone.
+     */
+    let reportedEngineWithoutLeafClassAnswer = false;
+    const fixedReadLeafClassOf: NonNullable<AnalyticsServiceConfig['fixedReadLeafClassOf']> = (leaf) => {
+      let svc: DataEngineLike | undefined;
+      try {
+        svc = ctx.getService<DataEngineLike>('data');
+      } catch {
+        return undefined;
+      }
+      if (!svc) return undefined;
+      if (typeof svc.fixedReadLeafClassOf === 'function') return svc.fixedReadLeafClassOf(leaf) ?? null;
+      if (!reportedEngineWithoutLeafClassAnswer) {
+        reportedEngineWithoutLeafClassAnswer = true;
+        ctx.logger.warn(
+          '[Analytics] The "data" engine has no fixedReadLeafClassOf (IObjectQLEngine.fixedReadLeafClassOf), so ' +
+            'NativeSQLStrategy cannot ask the engine whether it may compile a SharedRecordIds leaf in a read scope. It ' +
+            'declines every query whose read scope carries one, and the ObjectQL strategy serves it through the engine; ' +
+            'a query that strategy cannot serve is refused. Register ObjectQLPlugin\'s engine as "data" to keep the ' +
+            'native path for those scopes. Reported once.',
+        );
+      }
+      return undefined;
+    };
+
     const config: AnalyticsServiceConfig = {
       cubes: this.options.cubes,
       logger: ctx.logger,
@@ -1657,6 +1697,9 @@ export class AnalyticsServicePlugin implements Plugin {
       // `hasObjectMiddleware` above. Wired whoever executes raw SQL: the
       // middlewares live in the engine either way.
       hasObjectMiddleware,
+      // [ADR-0155 D4, #35946] The engine seam's class recognition for a
+      // fixed-read leaf — see `fixedReadLeafClassOf` above.
+      fixedReadLeafClassOf,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.
