@@ -3251,22 +3251,46 @@ export async function isTranslatableMetaType(type: string): Promise<boolean> {
 }
 
 /**
+ * [#34993] The sentence a translation fault is said in, on every door that
+ * says one: the i18n service resolved, but its translations could not be read.
+ */
+export function metaTranslationFaultWarning(error: unknown): string {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `The translations could not be read (${reason}), so labels and descriptions are served untranslated.`;
+}
+
+/**
  * Build a `TranslationBundle` (`Record<locale, TranslationData>`) from an
  * `II18nService` instance. `undefined` when no locales are registered, so
  * callers can avoid translation work. (`RestServer.buildTranslationBundle`
  * delegates here.)
+ *
+ * [#34993] A service whose `getLocales` or `getTranslations` throws is a
+ * translation fault, not a failed read: the answer is `undefined` (the text is
+ * served untranslated, as with no bundle), the server log says so at `warn`
+ * (a functional degradation), and `reportFault` hands the same sentence
+ * ({@link metaTranslationFaultWarning}) to a door that carries a warning on
+ * its answer. One locale failing fails the whole bundle, so an answer never
+ * mixes the locales that read with the fallback for the one that did not.
  */
-export function translationBundleOf(i18n: unknown): any | undefined {
+export function translationBundleOf(i18n: unknown, reportFault?: (warning: string) => void): any | undefined {
     const service: any = i18n;
     if (!service || typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') {
         return undefined;
     }
-    const locales: string[] = service.getLocales();
-    if (!locales.length) return undefined;
     const bundle: Record<string, any> = {};
-    for (const locale of locales) {
-        const data = service.getTranslations(locale);
-        if (data && typeof data === 'object') bundle[locale] = data;
+    try {
+        const locales: string[] = service.getLocales();
+        if (!locales.length) return undefined;
+        for (const locale of locales) {
+            const data = service.getTranslations(locale);
+            if (data && typeof data === 'object') bundle[locale] = data;
+        }
+    } catch (error) {
+        const warning = metaTranslationFaultWarning(error);
+        logWarn(`[meta] ${warning}`);
+        reportFault?.(warning);
+        return undefined;
     }
     return Object.keys(bundle).length ? bundle : undefined;
 }
@@ -3579,6 +3603,11 @@ export interface MetaListTranslationSources {
      * last fallback; without it, only the request's own preference counts.
      */
     requestLocale(i18n?: unknown): string | undefined;
+    /**
+     * [#34993] Told the sentence of a translation fault ({@link translationBundleOf}),
+     * for a door that says it on its answer. Optional: the server log says it either way.
+     */
+    reportTranslationFault?(warning: string): void;
 }
 
 /**
@@ -3611,7 +3640,7 @@ export async function translateMetaList(
         : (raw && typeof raw === 'object' && Array.isArray(raw.items) ? raw.items : null);
     if (!arr) return items;
     const i18n = await sources.resolveI18nService();
-    const bundle = translationBundleOf(i18n);
+    const bundle = translationBundleOf(i18n, (warning) => sources.reportTranslationFault?.(warning));
     const locale = sources.requestLocale(i18n);
     if (!locale) return items;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
@@ -3687,7 +3716,7 @@ export async function translateMetaDocument(
     if (!document || typeof document !== 'object') return document;
     if (!(await isTranslatableMetaType(metaType))) return document;
     const i18n = await sources.resolveI18nService();
-    const bundle = translationBundleOf(i18n);
+    const bundle = translationBundleOf(i18n, (warning) => sources.reportTranslationFault?.(warning));
     const locale = sources.requestLocale(i18n);
     if (!locale) return document;
     if (metaType === 'view') {

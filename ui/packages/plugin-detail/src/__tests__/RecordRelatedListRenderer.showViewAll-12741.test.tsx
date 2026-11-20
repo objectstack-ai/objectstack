@@ -17,7 +17,8 @@
  *     (`handlers.onViewAll`) and the list has records, including when every
  *     row fits on the list (no truncation condition: the spec states none);
  *   - `false` → no link, whatever the host offers;
- *   - an EMPTY list → no link;
+ *   - an EMPTY list → the 「↗」 open-in-list entry still draws
+ *     (objectstack#35601: the list page is where records are found to add);
  *   - no destination from the host (none offered, or no host at all) → no link.
  *
  * The destination itself, the child object's list scoped to this parent, is
@@ -122,6 +123,17 @@ describe('record:related_list.showViewAll — default on (objectui#12741)', () =
     await waitForRows();
     expect(viewAll()).toBeInTheDocument();
   });
+
+  // objectstack#35601 — migrated from 「an EMPTY list: no link」: an empty list
+  // still opens the child list under this record (「↗」).
+  it('an EMPTY list: 「↗」 still draws and opens the host’s destination', async () => {
+    mount(undefined, { rows: [] });
+    expect(await screen.findByText(/no related records|no records/i)).toBeInTheDocument();
+    const link = viewAll();
+    expect(link).toBeInTheDocument();
+    fireEvent.click(link!);
+    expect(onViewAll).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('record:related_list.showViewAll — when no link draws (objectui#12741)', () => {
@@ -132,13 +144,6 @@ describe('record:related_list.showViewAll — when no link draws (objectui#12741
     expect(await screen.findByTestId('related-list-new')).toBeInTheDocument();
     expect(viewAll()).toBeNull();
     expect(onViewAll).not.toHaveBeenCalled();
-  });
-
-  it('an EMPTY list: no link', async () => {
-    mount(undefined, { rows: [] });
-    expect(await screen.findByTestId('related-list-new')).toBeInTheDocument();
-    expect(await screen.findByText(/no related records|no records/i)).toBeInTheDocument();
-    expect(viewAll()).toBeNull();
   });
 
   it('a host that offers no destination: no link', async () => {

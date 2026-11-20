@@ -117,8 +117,15 @@ export const LIST_DATASETS_MAX_CANDIDATES_PER_TERM = 5;
  * A candidate is NOT a match. A match ({@link DatasetTermMatchSchema}) says
  * the term equals one of the member's words after normalization, and D3 rule
  * 2 lets one match win. A candidate says only that the platform offers the
- * member for a clarifying question; what counts as a match is unchanged, and
- * a term has candidates only when it has no match anywhere in the answer.
+ * member as a possible reading; what counts as a match is unchanged, and a
+ * term has candidates only when it has no match anywhere in the answer.
+ *
+ * What a term's candidates are offered for is read from all of them together
+ * (ADR-0149 D3, the amendment note of 2026-11-19). A term with a measure
+ * among its candidates is offered them for a clarifying question. A term
+ * whose candidates are all dimensions is offered them as a possible grouping,
+ * not for a question, and does not stop a matched measure. Both are the same
+ * shape: the kind is the `measures.` or `dimensions.` prefix of `member`.
  *
  * The entry is a pointer, `{ term, dataset, member }`, and carries no
  * `matchedOn`: that key states an equality a candidate does not have. It
@@ -307,8 +314,10 @@ export const ListDatasetsOutputSchema = lazySchema(() => z.object({
   ),
   warning: z.string().optional().describe('Why the answer is partial; present exactly when `partial` is'),
   candidates: z.array(DatasetTermCandidateSchema).min(1).optional().describe(
-    'Members offered as possible readings of a term that matched no member of any listed dataset, for a '
-    + 'clarifying question. A candidate is not a match: its term has no entry in any dataset\'s `matches`. The '
+    'Members offered as possible readings of a term that matched no member of any listed dataset: for a '
+    + 'clarifying question when a measure is among the term\'s candidates. A term whose candidates are all '
+    + 'dimensions is offered them as a possible grouping, not for a question, and does not stop a matched '
+    + 'measure. A candidate is not a match: its term has no entry in any dataset\'s `matches`. The '
     + 'platform selects none: the list carries no score, and its order is the listing order stated here, not a '
     + 'ranking. Every candidate is a member this caller may read, listed in `datasets`. Terms in the order sent; '
     + 'for one term, datasets in the order listed, and each dataset\'s measures before its dimensions, as its '

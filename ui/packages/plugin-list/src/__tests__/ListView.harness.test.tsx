@@ -109,6 +109,111 @@ function restoreAfterBlock() {
   });
 }
 
+// ── ListView.hostDrawnConditions-35727 ──────────────────────────────────────────
+
+/**
+ * objectstack#35727 — a list opened from a record's 「↗」 showed its one
+ * condition twice: the data page's 「Filtered by」 tag, and under the view bar
+ * a locked chip printing the lookup's raw id beside a second 「Reset」.
+ *
+ * The host now names the fields it draws itself (`hostDrawnConditionFields`):
+ * the list still filters on them and draws no locked chip for them. A locked
+ * chip the list does draw for a lookup (a saved view filtered on one) names
+ * the record, read through the list's data source. 「Reset」 is drawn only
+ * while the reader has something of their own to reset.
+ */
+describe('ListView.hostDrawnConditions-35727', () => {
+  restoreAfterBlock();
+
+  const ZH = { defaultLanguage: 'zh', detectBrowserLanguage: false };
+  const EN = { defaultLanguage: 'en', detectBrowserLanguage: false };
+  const OBJECT = 'contact_35727';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Contact',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      account: { type: 'lookup', label: 'Account', reference: 'account_35727' },
+    },
+  };
+  const ACCOUNT_DEFINITION = { name: 'account_35727', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+
+  function mount(config: typeof ZH, props: Partial<React.ComponentProps<typeof ListView>> = {}) {
+    const ds = {
+      find: vi.fn(async (object: string) =>
+        object === 'account_35727'
+          ? { data: [{ id: 'acc_1', name: 'Globex' }], total: 1 }
+          : { data: [{ id: 'c1', name: 'Ada', account: 'acc_1' }], total: 1 },
+      ),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (object: string) =>
+        structuredClone(object === 'account_35727' ? ACCOUNT_DEFINITION : DEFINITION),
+      ),
+    };
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: [{ field: 'name' }, { field: 'account' }],
+      filter: [['account', '=', 'acc_1']],
+    } as unknown as ListViewSchema;
+    render(
+      <I18nProvider config={config}>
+        <SchemaRendererProvider dataSource={ds as any}>
+          <ListView schema={schema} dataSource={ds as any} {...props} />
+        </SchemaRendererProvider>
+      </I18nProvider>,
+    );
+    return ds;
+  }
+
+  const slot = () => screen.getByTestId('list-condition-row');
+  const recordReads = (ds: { find: ReturnType<typeof vi.fn> }) => ds.find.mock.calls.filter(([object]) => object === OBJECT);
+
+  beforeEach(() => window.localStorage.clear());
+
+  it.each([
+    ['zh', ZH],
+    ['en', EN],
+  ])('%s: a condition the host draws is no locked chip and no Reset, and still filters the records', async (_lang, config) => {
+    const ds = mount(config, { hostDrawnConditionFields: ['account'] });
+    await waitFor(() => expect(recordReads(ds).length).toBeGreaterThan(0));
+    await act(async () => {});
+    expect(JSON.stringify(recordReads(ds).at(-1)![1])).toContain('acc_1');
+    expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
+    expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
+    expect(slot()).toBeEmptyDOMElement();
+  });
+
+  it.each([
+    ['zh', ZH, '：', 'Account：= Globex'],
+    ['en', EN, ': ', 'Account: = Globex'],
+  ])('%s: a saved view filtered on a lookup locks a chip that names the record, not its id, and draws no Reset', async (_lang, config, _sep, text) => {
+    mount(config);
+    const chip = await within(slot()).findByTestId('view-condition-chip');
+    await waitFor(() => expect(chip.textContent).toBe(text));
+    expect(chip.textContent).not.toContain('acc_1');
+    expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
+  });
+
+  it.each([
+    ['zh', ZH, '重置'],
+    ['en', EN, 'Reset'],
+  ])('%s: once the reader adds a condition of their own, one Reset is drawn', async (_lang, config, label) => {
+    mount(config, {
+      hostDrawnConditionFields: ['account'],
+      initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'name', operator: 'contains', value: 'A' }] },
+    });
+    const reset = await within(slot()).findByTestId('condition-reset');
+    expect(reset).toHaveTextContent(label);
+    expect(within(slot()).getAllByTestId('condition-reset')).toHaveLength(1);
+    expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
+  });
+});
+
 // ── ListView.concurrencyTokenProjection-12292 ───────────────────────────────────
 
 /**

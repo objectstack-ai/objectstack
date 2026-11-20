@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, isPermissionError, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -45,8 +45,6 @@ import {
   ShieldAlert,
   RotateCw,
   Maximize2,
-  Search,
-  Download,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
@@ -87,7 +85,7 @@ import {
   type ActionResult,
   type FilterNode,
 } from '@object-ui/core';
-import { useSafeFieldLabel, useRecordContext } from '@object-ui/react';
+import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type RelatedListPreference } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
@@ -797,6 +795,11 @@ interface BodyTableTotalPlan {
   groupBy?: string;
   /** The one currency every row is in, for a currency column grouped by nothing. */
   currency?: string;
+  /**
+   * A currency column whose currency does not resolve (objectstack#35710): its
+   * total is drawn the way its cells are, as an amount with no symbol.
+   */
+  amount?: true;
   /** The parent's stored roll-up, when it is this list's total (`RolledUpSum.sameRows`). */
   stored?: number;
 }
@@ -812,7 +815,8 @@ interface BodyTableTotalPlan {
  *
  *  1. a `currency` column, totalled in its one currency: a `fixed` code, the
  *     tenant default for `dynamic`, the parent's code for a `record` amount
- *     that follows its parent. A `record` amount whose rows carry their own
+ *     that follows its parent; with none resolving, as an amount with no
+ *     symbol, as its cells draw (objectstack#35710). A `record` amount whose rows carry their own
  *     code is grouped by that code on the server, and totalled only when one
  *     currency comes back — a sum across currencies is not a total;
  *  2. a `number` / `integer` / `decimal` column only when the record's object
@@ -878,9 +882,12 @@ function useBodyTableTotals(opts: {
         } else {
           // A `record` amount following its parent reads the parent's code
           // off the record this list hangs under (ADR-0144 D2).
+          // With none resolving (no code of its own, no tenant default), the
+          // total is still the server's figure, drawn without a symbol, as
+          // the column's cells are (objectstack#35710).
           const currency = resolveFieldCurrency(def, tenantCurrency, withFollowedParent({}, def, parentRecord) as any);
-          if (!currency) continue;
-          plan.currency = currency;
+          if (currency) plan.currency = currency;
+          else plan.amount = true;
         }
       }
       if (!plan.groupBy && rollUp?.sameRows && listFilterNode === undefined) {
@@ -967,6 +974,8 @@ function useBodyTableTotals(opts: {
       let text: string;
       if (sum.currency) {
         text = formatCurrency(sum.value, sum.currency, displayLocale);
+      } else if (plan.amount) {
+        text = formatCurrency(sum.value, undefined, displayLocale);
       } else {
         try {
           text = new Intl.NumberFormat(displayLocale, { maximumFractionDigits: 2 }).format(sum.value);
@@ -1001,53 +1010,182 @@ const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[] }> = ({ 
   );
 };
 
-/** A chip of the enlarged face's toolbar (objectstack#27524). */
-type EnlargedChip = 'all' | 'mine' | 'overdue';
+/** The add config of {@link RelatedListProps.add}, as `derivedAddOf` derives one. */
+type RelatedListAdd = NonNullable<RelatedListProps['add']>;
 
-interface EnlargedChipDef {
-  id: EnlargedChip;
-  /** The narrowing it adds to the list's own rows; none for 全部. */
-  filter?: Record<string, unknown>;
-}
-
-const NO_ENLARGED_CHIPS: readonly EnlargedChipDef[] = [];
-
-/**
- * The chips of the enlarged face (objectstack#27524, the board's 全部 / 我的 /
- * 逾期), each drawn only where the child object declares what it says:
- *  - 我的: the records the signed-in user owns — the object carries the
- *    platform's `owner_id` column;
- *  - 逾期: the records whose deadline has passed — the object declares a
- *    deadline (`dueLike: true` on a `date` / `datetime` field) with no
- *    `settledWhen`. A settled deadline is a per-record predicate no query can
- *    ask, and a chip that listed settled records as overdue would say what the
- *    cells do not.
- */
-interface EnlargedChipField {
+interface RelationFieldDef {
   name?: unknown;
   type?: unknown;
-  dueLike?: unknown;
-  settledWhen?: unknown;
+  reference?: unknown;
+  required?: unknown;
+  multiple?: unknown;
+  hidden?: unknown;
+  readonly?: unknown;
 }
 
-function enlargedChipsOf(objectSchema: { fields?: unknown } | null | undefined): readonly EnlargedChipDef[] {
-  const chips: EnlargedChipDef[] = [{ id: 'all' }];
-  const raw = objectSchema?.fields;
-  const fields: Array<[unknown, EnlargedChipField | undefined]> = Array.isArray(raw)
-    ? (raw as Array<EnlargedChipField | undefined>).map((f) => [f?.name, f])
-    : raw && typeof raw === 'object'
-      ? Object.entries(raw as Record<string, EnlargedChipField | undefined>)
-      : [];
-  if (fields.some(([name]) => name === 'owner_id')) {
-    chips.push({ id: 'mine', filter: { owner_id: '{current_user_id}' } });
+function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]> {
+  const out: Array<[string, RelationFieldDef]> = [];
+  for (const [name, def] of fieldEntriesOf(fields)) {
+    if (typeof name === 'string' && name !== '' && def && typeof def === 'object') out.push([name, def as RelationFieldDef]);
   }
-  const deadline = fields.find(
-    ([name, f]) => typeof name === 'string' && f?.dueLike === true && f?.settledWhen == null
-      && (f?.type === 'date' || f?.type === 'datetime'),
-  );
-  if (deadline) chips.push({ id: 'overdue', filter: { [deadline[0] as string]: { $lt: '{today}' } } });
-  return chips;
+  return out;
 }
+
+/**
+ * The related tab's 「+ 添加」 when the page authored no `add`
+ * (objectstack#35601), decided by the relationship this list hangs on:
+ *
+ *  - `lookup`: the child is a record of its own, so the picker lists the
+ *    child object and a pick re-parents it (`add` with no `linkField`). It
+ *    lists only UNLINKED children (this relationship empty): a row already
+ *    here would be a no-op pick, and a row under another parent would move
+ *    silently. Moving a child between parents stays on the child's own
+ *    form, where the change is visible (seat ruling on L1-a S1, #35725);
+ *  - `master_detail` with a source catalog: the picker lists the catalog and
+ *    a pick creates a row of this list naming it (`linkField`). The catalog
+ *    is the child's one other REQUIRED single-valued `lookup` (a line's
+ *    product): the field every row must name, so a pick is a whole row;
+ *  - `master_detail` with no catalog (none, or more than one required
+ *    lookup): `undefined`, and 「+ 添加」 creates a new row directly.
+ *
+ * `undefined` too for any other field type and for a multi-valued
+ * relationship, whose membership a pick cannot write.
+ */
+export function derivedAddOf(
+  childFields: unknown,
+  referenceField: string | undefined,
+  childObject: string | undefined,
+): RelatedListAdd | undefined {
+  if (!referenceField || !childObject) return undefined;
+  const entries = relationFieldEntries(childFields);
+  const rel = entries.find(([name]) => name === referenceField)?.[1];
+  if (!rel || rel.multiple === true) return undefined;
+  if (rel.type === 'lookup') return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }] } };
+  if (rel.type !== 'master_detail') return undefined;
+  const catalogs = entries.filter(([name, def]) =>
+    name !== referenceField
+    && def.type === 'lookup'
+    && def.required === true
+    && def.multiple !== true
+    && def.hidden !== true
+    && def.readonly !== true
+    && typeof def.reference === 'string' && def.reference !== '');
+  if (catalogs.length !== 1) return undefined;
+  const [catalogField, catalogDef] = catalogs[0];
+  return { picker: { object: catalogDef.reference as string }, linkField: catalogField };
+}
+
+/** One group of a stateful child list (`statusGroupsOf`). */
+export interface RelatedStatusGroup {
+  key: string;
+  label: string;
+  /** The status a settled (completed) row is in: these groups come last. */
+  settled: boolean;
+  rows: any[];
+}
+
+interface StatusOptionDef { value?: unknown; label?: unknown }
+interface DeadlineDef { name?: string; type?: unknown; dueLike?: unknown; settledWhen?: unknown }
+
+/**
+ * The status groups of a stateful child list (objectstack#35601 item 7), or
+ * `null` when the child object does not declare enough to group by.
+ *
+ * Stateful is DECLARED, never guessed from names: the object has a status
+ * field (`detectStatusField`, the record page's own rule) of type `select`
+ * with options, AND a deadline (`dueLike: true` on a date field) whose
+ * `settledWhen` says when a record is done. A status whose option settles
+ * that predicate is a completed group; the others are open groups. Open
+ * groups come first, completed last, each in its options' order; a row whose
+ * status names no option joins an open group of its own. Empty groups are
+ * not drawn. With no option settling the predicate there is nothing to tell
+ * open from done, so no grouping.
+ */
+export function statusGroupsOf(
+  objectSchema: { fields?: unknown; stageField?: unknown } | null | undefined,
+  rows: readonly any[],
+  scope: Record<string, unknown> | undefined,
+): RelatedStatusGroup[] | null {
+  if (!objectSchema) return null;
+  const statusField = detectStatusField(objectSchema as Parameters<typeof detectStatusField>[0]);
+  if (!statusField) return null;
+  const entries = fieldEntriesOf(objectSchema.fields);
+  const statusDef = entries.find(([name]) => name === statusField)?.[1] as
+    | { type?: unknown; options?: unknown }
+    | undefined;
+  if (statusDef?.type !== 'select' || !Array.isArray(statusDef.options) || statusDef.options.length === 0) return null;
+  const deadlineEntry = entries.find(([, def]) => {
+    const d = def as DeadlineDef | undefined;
+    return d?.dueLike === true && d.settledWhen != null && (d.type === 'date' || d.type === 'datetime');
+  });
+  if (!deadlineEntry) return null;
+  const deadline = { ...(deadlineEntry[1] as DeadlineDef), name: deadlineEntry[0] };
+  const options = (statusDef.options as StatusOptionDef[]).filter((o) => o && o.value != null);
+  const settledOf = (value: unknown) =>
+    isDeadlineSettled(deadline as Parameters<typeof isDeadlineSettled>[0], { [statusField]: value }, {
+      scope,
+      fields: objectSchema.fields as never,
+    });
+  const groups = options.map((o) => ({
+    key: String(o.value),
+    label: typeof o.label === 'string' && o.label !== '' ? o.label : String(o.value),
+    settled: settledOf(o.value),
+    rows: [] as any[],
+  }));
+  if (!groups.some((g) => g.settled)) return null;
+  const byKey = new Map(groups.map((g) => [g.key, g]));
+  const unlisted: RelatedStatusGroup = { key: '', label: '—', settled: false, rows: [] };
+  for (const row of rows) {
+    const raw = row?.[statusField];
+    const group = raw == null ? undefined : byKey.get(String(raw));
+    (group ?? unlisted).rows.push(row);
+  }
+  return [
+    ...groups.filter((g) => !g.settled),
+    unlisted,
+    ...groups.filter((g) => g.settled),
+  ].filter((g) => g.rows.length > 0);
+}
+
+/** The groups of `statusGroupsOf`, each collapsible under its header. */
+const RelatedStatusGroups: React.FC<{
+  groups: readonly RelatedStatusGroup[];
+  renderRows: (rows: any[]) => React.ReactNode;
+  actions: React.ContextType<typeof ActionCtxReact> | null;
+}> = ({ groups, renderRows, actions }) => {
+  const [closed, setClosed] = React.useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (key: string) =>
+    setClosed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  return (
+    <div className="flex min-w-0 flex-col gap-3" data-related-status-groups="">
+      {groups.map((group) => {
+        const open = !closed.has(group.key);
+        const body = renderRows(group.rows);
+        return (
+          <div key={group.key} className="min-w-0" data-related-status-group={group.key} data-settled={group.settled ? 'true' : 'false'}>
+            <button
+              type="button"
+              className="mb-1 inline-flex min-h-11 items-center gap-1.5 rounded px-1 text-xs font-medium text-muted-foreground hover:text-foreground sm:min-h-0"
+              aria-expanded={open}
+              onClick={() => toggle(group.key)}
+              data-related-status-group-toggle=""
+            >
+              {open ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+              <span>{group.label}</span>
+              <span className="tabular-nums">{group.rows.length}</span>
+            </button>
+            {open && (actions ? <ActionCtxReact.Provider value={actions}>{body}</ActionCtxReact.Provider> : body)}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 export const RelatedList: React.FC<RelatedListProps> = ({
   title,
@@ -1069,7 +1207,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   onRowAction,
   toolbarActions,
   onToolbarAction,
-  add,
+  add: authoredAdd,
   redactFields,
   maxColumns = 6,
   pageSize,
@@ -1220,10 +1358,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // objectstack#27524 — drawn as the record page's active tab: the toolbar
   // face below (`RelatedListEnlargedContext`).
   const enlargedFace = React.useContext(RelatedListEnlargedContext) && !compact;
-  const [enlargedChip, setEnlargedChip] = React.useState<EnlargedChip>('all');
-  // The 全部 chip's count, taken while it is on and nothing narrows the rows.
-  const [allCount, setAllCount] = React.useState<number | null>(null);
-  const [exportState, setExportState] = React.useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  // objectstack#35601 — the related tab's add, decided by the relationship
+  // when the page authored none (`derivedAddOf`). The rest of this component
+  // reads `add` alone, so a derived add takes the authored one's path.
+  const derivedAdd = React.useMemo(
+    () => (enlargedFace && !authoredAdd && !schema ? derivedAddOf(objectSchema?.fields, referenceField, api) : undefined),
+    [enlargedFace, authoredAdd, schema, objectSchema, referenceField, api],
+  );
+  const add = authoredAdd ?? derivedAdd;
   // objectstack#27056 — the card's count, asked up front with the column's
   // other cards (`RelatedCardStack`); `null` when nothing counted it.
   const cardCount = React.useContext(RelatedCardCountContext);
@@ -1238,6 +1380,37 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const bodyTableIds = React.useContext(RecordBodyTablesContext);
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
+  // objectstack#35601 — the related tab remembers the reader's header sort and
+  // column widths, per list, in their record-page preferences (the
+  // `sys_user_preference` row of the parent object's record page). No store,
+  // no memory: the list's own default, as before.
+  const pagePreferences = useRecordPagePreferences();
+  const preferenceContext = useRecordContext();
+  const preferenceObject = (typeof (preferenceContext?.objectSchema as { name?: unknown } | undefined)?.name === 'string'
+    ? (preferenceContext!.objectSchema as { name: string }).name
+    : preferenceContext?.objectName) || undefined;
+  const preferenceKey = enlargedFace && pagePreferences && preferenceObject && ownRelationshipId ? ownRelationshipId : null;
+  const storedListPreference = preferenceKey ? pagePreferences!.get(preferenceObject!).relatedLists?.[preferenceKey] : undefined;
+  const writeListPreference = React.useCallback(
+    (patch: RelatedListPreference) => {
+      if (!preferenceKey || !pagePreferences || !preferenceObject) return;
+      const lists = pagePreferences.get(preferenceObject).relatedLists ?? {};
+      pagePreferences.update(preferenceObject, {
+        relatedLists: { ...lists, [preferenceKey]: { ...lists[preferenceKey], ...patch } },
+      });
+    },
+    [preferenceKey, pagePreferences, preferenceObject],
+  );
+  // The remembered sort applies once, when it is first read; a header click
+  // after that is the reader's and is written back.
+  const storedSortApplied = React.useRef(false);
+  const storedSort = storedListPreference?.sort;
+  React.useEffect(() => {
+    if (storedSortApplied.current || !storedSort) return;
+    storedSortApplied.current = true;
+    setSortField(storedSort.field);
+    setSortDirection(storedSort.order);
+  }, [storedSort]);
   // objectstack#35597 — a body table shows its first `pageSize` rows (ten by
   // default, the page may say otherwise) and 「显示全部 N 条」 expands it in
   // place: every row, one read, no pages. N is the server's count when the
@@ -1255,7 +1428,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // as a generic server filter. While the user is typing in it
   // (opt-in `filterable` consumers only) we drop back to the legacy
   // fetch-everything mode so the filter keeps seeing the whole collection.
-  const filterActive = (filterable || enlargedFace) && filterText !== '';
+  const filterActive = filterable && filterText !== '';
   // Windowed (server-paged) mode — issue #2711: on the auto-fetch path with
   // pagination enabled, ask the server for ONE page ($top/$skip) plus the
   // running total instead of dumping every child row into the browser.
@@ -1315,21 +1488,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   );
   const filterRefusal = listFilterResult.ok ? undefined : listFilterResult.refusal;
   const listFilterNode = listFilterResult.ok ? listFilterResult.node : undefined;
-  // The enlarged face's chips (objectstack#27524): 我的 and 逾期 narrow the
-  // list's own rows, each only where the child object declares what it says
-  // (`enlargedChipsOf`). Resolved and lowered the way the list's filter is.
-  const chips = enlargedFace ? enlargedChipsOf(objectSchema) : NO_ENLARGED_CHIPS;
-  const chipFilter = chips.find((chip) => chip.id === enlargedChip)?.filter;
-  const scopeChipFilter = useResolvedFilter(chipFilter, filterScope);
-  const chipKey = JSON.stringify(scopeChipFilter ?? null);
-  const chipFilterNode = React.useMemo(
-    () => {
-      const lowered = toFilterNodeSafely(scopeChipFilter);
-      return lowered.ok ? lowered.node : undefined;
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [chipKey],
-  );
 
   /**
    * The `$expand` roots for the auto-fetch below (objectui#10112).
@@ -1868,9 +2026,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // freshly lowered AST that means the same thing (the difference is
       // invisible on screen and visible to every caller pinning the wire).
       const queryFilter =
-        listFilterNode === undefined && chipFilterNode === undefined
+        listFilterNode === undefined
           ? parentScope
-          : mergeFilterNodes(parentScope, listFilterNode, chipFilterNode);
+          : mergeFilterNodes(parentScope, listFilterNode);
       if (dataSource && typeof dataSource.find === 'function') {
         const params: Record<string, any> = { $filter: queryFilter };
         // Resolve reference columns server-side, the way every other list in
@@ -2034,7 +2192,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // card's in-view / non-zero gate, a boolean. `compact` decides whether the
     // record page's payload may serve the read (objectstack#27627), a boolean.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, chipKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
+  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
 
   // Windowed mode: a page beyond the (shrunken) collection — e.g. the last
   // row of the last page was just deleted — comes back empty. Step back one
@@ -2232,31 +2390,63 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         }).allowed;
 
   // Add existing records via picker → create link rows (junction) or re-parent
-  // (1:m). Server-side insert rules (e.g. the AI-seat cap) surface inline.
+  // (1:m), all of them in ONE transactional batch (objectstack#35601, ADR-0119
+  // D4): the cross-object `POST /batch` commits every row or none, so a pick
+  // of three that fails on one adds nothing. Never a loop of single writes,
+  // which left the rows before the failure in place. A data source without
+  // the batch offers no add (`addBatchable`). Server-side insert rules (e.g.
+  // the AI-seat cap) surface inline.
+  const addBatchable = typeof (dataSource as DataSource | undefined)?.batchTransaction === 'function';
   const handleAddRecords = React.useCallback(async (records: any[]) => {
     if (!add || !dataSource || !api || referenceField == null || parentId === undefined || parentId === null) return;
+    const ds = dataSource as DataSource;
+    if (typeof ds.batchTransaction !== 'function') return;
     const vf = add.picker.valueField || 'id';
+    const operations: Parameters<NonNullable<DataSource['batchTransaction']>>[0] = [];
+    for (const rec of records || []) {
+      const pickedId = rec?.[vf] ?? rec?.id;
+      if (pickedId == null) continue;
+      operations.push(add.linkField
+        ? { object: api, action: 'create', data: { [referenceField]: parentId, [add.linkField]: pickedId } }
+        : { object: add.picker.object, action: 'update', id: String(pickedId), data: { [referenceField]: parentId } });
+    }
+    setPickerOpen(false);
+    if (operations.length === 0) return;
     setAddBusy(true);
     setAddError(null);
     try {
-      for (const rec of records || []) {
-        const pickedId = rec?.[vf] ?? rec?.id;
-        if (pickedId == null) continue;
-        if (add.linkField) {
-          await (dataSource as any).create?.(api, { [referenceField]: parentId, [add.linkField]: pickedId });
-        } else {
-          await (dataSource as any).update?.(add.picker.object, String(pickedId), { [referenceField]: parentId });
-        }
-      }
+      await ds.batchTransaction(operations);
       setRefreshNonce((n) => n + 1);
     } catch (err: any) {
       const raw = err?.body?.error ?? err?.error ?? err?.message ?? String(err);
-      setAddError(typeof raw === 'string' ? raw : 'Failed to add');
+      const reason = typeof raw === 'string' ? raw : typeof raw?.message === 'string' ? raw.message : 'Failed to add';
+      setAddError(reason);
     } finally {
       setAddBusy(false);
-      setPickerOpen(false);
     }
   }, [add, dataSource, api, referenceField, parentId]);
+
+  /**
+   * The related tab's one 「+ 添加」 (objectstack#35601): with a picker it
+   * opens it — the picker's first row is 「新建」 when New is offered too —
+   * and with none it creates a new row directly (New). `null` when neither is
+   * offered.
+   */
+  const pickerOffered = !!add && !!add.picker?.object && !!dataSource && addGranted && addBatchable;
+  const addFallbackLabel = t('detail.add', { defaultValue: 'Add' });
+  const addEntry: { label: string; disabled: boolean; onClick: () => void } | null = pickerOffered
+    ? {
+        label: add!.label || addFallbackLabel,
+        disabled: addBusy,
+        onClick: () => { setAddError(null); setPickerOpen(true); },
+      }
+    : onNew
+      ? {
+          label: addFallbackLabel,
+          disabled: !!newDisabled,
+          onClick: () => onNew(),
+        }
+      : null;
 
   // Generate effective columns from explicit prop or object schema fields.
   // Behavior:
@@ -2997,7 +3187,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // Reset to first page when filter/sort changes
   React.useEffect(() => {
     setCurrentPage(0);
-  }, [filterText, sortField, sortDirection, enlargedChip]);
+  }, [filterText, sortField, sortDirection]);
 
   const handleSort = React.useCallback((field: string) => {
     // A masked column is never sorted by (objectui#10728). The button row
@@ -3047,8 +3237,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       setCurrentPage(0);
       setSortField(first.field);
       setSortDirection(first.order);
+      storedSortApplied.current = true;
+      writeListPreference({ sort: { field: first.field, order: first.order } });
     },
-    [unmaskedColumnKeysKey],
+    [unmaskedColumnKeysKey, writeListPreference],
   );
 
   // A `grid`/`table` list renders a real table, whose column headers carry the
@@ -3137,8 +3329,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     if (enlargedFace && (type === 'grid' || type === 'table')) {
       return {
         type: 'object-grid',
+        // Its own column-layout key, apart from the object's list page grid.
+        ...(ownRelationshipId ? { id: `related-${ownRelationshipId}` } : {}),
         objectName: api,
         data: { provider: 'value', items: paginatedData },
+        ...(storedListPreference?.columnState ? { columnState: storedListPreference.columnState } : {}),
         columns: effectiveColumns
           .map((c: any) => c.accessorKey || columnIdentity(c))
           .filter(Boolean),
@@ -3238,7 +3433,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodySummaryRow]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodySummaryRow, ownRelationshipId, storedListPreference?.columnState]);
 
   const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
 
@@ -3279,8 +3474,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       ...(objectSchema?.fields ? { objectFields: objectSchema.fields } : {}),
       ...(onRowEdit ? { onEdit: onRowEdit } : {}),
       ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
+      ...(preferenceKey ? { onColumnStateChange: (columnState: RelatedListPreference['columnState']) => writeListPreference({ columnState }) } : {}),
     };
-  }, [enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow]);
+  }, [preferenceKey, writeListPreference, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow]);
+
+  // objectstack#35601 — a stateful child (tasks) is grouped by its status on
+  // the related tab: open groups first, completed last (`statusGroupsOf`).
+  const statusGroups = React.useMemo(
+    () => (enlargedGrid ? statusGroupsOf(objectSchema, paginatedData, predicateScope) : null),
+    [enlargedGrid, objectSchema, paginatedData, predicateScope],
+  );
 
   /**
    * objectstack#28865 — where a row action the enlarged grid dispatches goes.
@@ -3350,9 +3553,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   React.useEffect(() => {
     if (settledTotal !== null) reportTotal?.(settledTotal);
   }, [reportTotal, settledTotal]);
-  React.useEffect(() => {
-    if (enlargedFace && enlargedChip === 'all' && !filterActive && !loading && !loadFailure) setAllCount(recordCount);
-  }, [enlargedFace, enlargedChip, filterActive, loading, loadFailure, recordCount]);
   // objectstack#29945 — `bodyTableOverflows`, read where the table scrolls:
   // its scroll box is wider inside than out. Re-read when the box or the
   // table resizes (rows arrive, columns size themselves), and whenever the
@@ -3483,7 +3683,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             render-path bare read of `add.picker` rather than optional-chaining
             it: off-spec `add` still does nothing at all, so no second dialect
             appears (AGENTS.md #0.1). #3838. */}
-        {add && pickerObject && dataSource && addGranted && (
+        {add && pickerObject && dataSource && addGranted && addBatchable && (
           <RecordPickerDialog
             open={pickerOpen}
             onOpenChange={(o) => setPickerOpen(o)}
@@ -3503,6 +3703,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             baseFilter={add.picker.filter}
             onSelect={() => {}}
             onSelectRecords={(records: any[]) => { void handleAddRecords(records); }}
+            // objectstack#35601 — on the related tab the picker's first row is
+            // 「新建」: the add entry and New are one entry there.
+            {...(enlargedFace && onNew && !newDisabled
+              ? { createRow: { label: t('detail.new'), onSelect: () => { setPickerOpen(false); onNew(); } } }
+              : {})}
           />
         )}
     </>
@@ -3624,7 +3829,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 <Plus className="h-3.5 w-3.5" />
               </Button>
             )}
-            {add && pickerObject && dataSource && addGranted && (
+            {add && pickerObject && dataSource && addGranted && addBatchable && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -3701,196 +3906,91 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     );
   }
 
-  // objectstack#27524 — the record page's active tab (the ride-along ruled at
-  // ③'s preview gate): the toolbar — the filter, 全部 / 我的 / 逾期, the child
-  // object's toolbar actions, 新建, 导出 — over the whole table, with the
-  // count and page line between them. No card header and no card foot: the
-  // tab names the list, and its count is the 全部 chip's.
+  // objectstack#35601 — the record page's related tab: no filter, sort,
+  // options or condition row (sorting is the table header's, filtering is the
+  // list page's), and the count only in the tab title. Its right end carries
+  // two entries: 「↗」, the child object's list under this record's condition,
+  // drawn on an empty list too, and 「+ 添加」, the one add entry
+  // (`addEntry`). The child object's own toolbar actions stay beside them.
   if (enlargedFace) {
-    const shownCount = filterActive ? filteredData.length : recordCount;
-    // objectstack#28865 — one count: while the 全部 chip is on and nothing
-    // narrows the rows, the chip already says how many there are, so the
-    // line under the toolbar does not say it again. A chip that narrows (我的,
-    // 逾期) or a filter text keeps the line's count, which is then a
-    // different number from the chip's.
-    const countOnChip = chips.length > 1 && enlargedChip === 'all' && !filterActive && allCount !== null && allCount === shownCount;
-    const chipLabel: Record<EnlargedChip, string> = {
-      all: t('detail.relatedChipAll', { defaultValue: 'All' }),
-      mine: t('detail.relatedChipMine', { defaultValue: 'Mine' }),
-      overdue: t('detail.relatedChipOverdue', { defaultValue: 'Overdue' }),
-    };
-    // The list page's export question, asked of the child object: the
-    // server-resolved effective API operation set (`/me/permissions`
-    // `apiOperations`), read through the same `usePermissions()` source
-    // `ListView`'s `exportPermitted` reads. A missing set (an unrestricted
-    // object, an old backend, no provider) keeps the button, as there. A UI
-    // mirror only: the export route still answers 403 on its own.
-    const childApiOps = api ? perms.getObjectApiOperations(api) : undefined;
-    const exportPermitted = childApiOps ? childApiOps.includes('export') : true;
-    const exportable = typeof (dataSource as DataSource | undefined)?.exportDownload === 'function'
-      && exportPermitted
-      && !!api && !!referenceField && parentId != null && parentId !== '';
-    const handleExport = () => {
-      if (!exportable || exportState.busy) return;
-      setExportState({ busy: true, error: null });
-      void (async () => {
-        try {
-          // The rows the face shows: the parent, the list's own filter, the
-          // chip, the filter text and the order (the list read's sources).
-          const parentScope = composeParentScopeFilter(referenceField!, parentId!, objectSchema?.fields);
-          const fields = (effectiveColumns ?? [])
-            .map((col: any) => col?.accessorKey || columnIdentity(col))
-            .filter((f: unknown): f is string => typeof f === 'string' && f !== '');
-          const blob = await (dataSource as DataSource).exportDownload!(api!, {
-            format: 'csv',
-            filter: mergeFilterNodes(parentScope, listFilterNode, chipFilterNode),
-            ...(fields.length > 0 ? { fields } : {}),
-            ...(filterText ? { search: filterText } : {}),
-            ...(sortField ? { sort: [{ field: sortField, direction: sortDirection }] } : {}),
-          });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${String(title || api).replace(/[\\/:*?"<>|]+/g, '_')}.csv`;
-          a.rel = 'noopener';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          setExportState({ busy: false, error: null });
-        } catch (err) {
-          // A refusal says the Console's sentence, never the server's text.
-          setExportState({
-            busy: false,
-            error: isPermissionError(err)
-              ? t('view.exportNotPermitted')
-              : err instanceof Error ? err.message : String(err),
-          });
-        }
-      })();
-    };
     return (
       <section className={cn('flex min-w-0 flex-col gap-3', className)} data-related-enlarged-list="">
         <div
           role="toolbar"
           aria-label={title}
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-wrap items-center justify-end gap-1"
           data-related-enlarged-toolbar=""
         >
-          <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              type="search"
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
-              placeholder={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
-              aria-label={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
-              className="h-11 sm:h-8 pl-8 text-sm"
-              data-related-enlarged-filter=""
-            />
-          </div>
-          {chips.length > 1 && (
-            <div role="group" aria-label={t('detail.relatedChips', { defaultValue: 'Show' })} className="flex items-center gap-1">
-              {chips.map((chip) => {
-                const on = chip.id === enlargedChip;
-                return (
-                  <Button
-                    key={chip.id}
-                    type="button"
-                    variant={on ? 'secondary' : 'ghost'}
-                    size="sm"
-                    aria-pressed={on}
-                    className="h-11 sm:h-8 gap-1.5 px-2.5 text-xs shadow-none"
-                    onClick={() => setEnlargedChip(chip.id)}
-                    data-related-chip={chip.id}
-                  >
-                    {chipLabel[chip.id]}
-                    {chip.id === 'all' && allCount !== null && (
-                      <span className="tabular-nums text-muted-foreground">{allCount}</span>
-                    )}
-                  </Button>
-                );
-              })}
-            </div>
+          {onToolbarAction && permittedToolbarActions.map((a) => (
+            <RelatedToolbarButton key={a.name} action={a} onToolbarAction={onToolbarAction} />
+          ))}
+          {onViewAll && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-11 w-11 p-0 sm:h-8 sm:w-8 text-muted-foreground"
+              aria-label={t('detail.viewAll')}
+              title={t('detail.viewAll')}
+              data-related-open-list=""
+              onClick={() => onViewAll()}
+            >
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </Button>
           )}
-          <div className="ml-auto flex items-center gap-1">
-            {onToolbarAction && permittedToolbarActions.map((a) => (
-              <RelatedToolbarButton key={a.name} action={a} onToolbarAction={onToolbarAction} />
-            ))}
-            {add && pickerObject && dataSource && addGranted && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={addBusy}
-                onClick={() => { setAddError(null); setPickerOpen(true); }}
-                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {add.label || t('detail.add', { defaultValue: 'Add' })}
-              </Button>
-            )}
-            {onNew && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={newDisabled}
-                data-testid="related-list-new"
-                onClick={() => onNew()}
-                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t('detail.new')}
-              </Button>
-            )}
-            {exportable && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={exportState.busy}
-                onClick={handleExport}
-                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
-                data-related-enlarged-export=""
-              >
-                <Download className="h-3.5 w-3.5" />
-                {t('detail.relatedExport', { defaultValue: 'Export' })}
-              </Button>
-            )}
-          </div>
+          {addEntry && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={addEntry.disabled}
+              onClick={addEntry.onClick}
+              className="h-11 sm:h-8 gap-1 text-xs shadow-none"
+              data-related-add=""
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {addEntry.label}
+            </Button>
+          )}
         </div>
-        {exportState.error && (
-          <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {exportState.error}
-          </div>
-        )}
         {loadFailure ? (
           <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
         ) : loading && relatedData.length === 0 ? (
           <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">{t('detail.loading')}</div>
-        ) : isEmpty || shownCount === 0 ? (
+        ) : isEmpty ? (
           <div className="py-6 text-center text-sm text-muted-foreground" data-related-enlarged-empty="">
             {t('detail.noRelatedRecords')}
           </div>
         ) : (
           <>
-            {(!countOnChip || showPagination) && (
-              <div className="text-xs text-muted-foreground" data-related-enlarged-status="">
-                {[
-                  countOnChip ? null : t('detail.relatedRows', { count: shownCount, defaultValue: '{{count}} rows' }),
-                  showPagination ? t('detail.pageOf', { current: currentPage + 1, total: totalPages }) : null,
-                ].filter(Boolean).join(' · ')}
+            {statusGroups ? (
+              <RelatedStatusGroups
+                groups={statusGroups}
+                renderRows={(rows) => (
+                  <SchemaRenderer
+                    schema={{ ...viewSchema, data: { provider: 'value', items: rows } }}
+                    {...enlargedGridHost}
+                    rowCount={rows.length}
+                    page={1}
+                    pageSize={Math.max(1, rows.length)}
+                  />
+                )}
+                actions={enlargedGridActions}
+              />
+            ) : (
+              <div className={cn('min-w-0', loading && 'pointer-events-none opacity-60 transition-opacity')}>
+                {enlargedGridActions ? (
+                  <ActionCtxReact.Provider value={enlargedGridActions}>
+                    <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
+                  </ActionCtxReact.Provider>
+                ) : (
+                  <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
+                )}
               </div>
             )}
-            <div className={cn('min-w-0', loading && 'pointer-events-none opacity-60 transition-opacity')}>
-              {enlargedGridActions ? (
-                <ActionCtxReact.Provider value={enlargedGridActions}>
-                  <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
-                </ActionCtxReact.Provider>
-              ) : (
-                <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
-              )}
-            </div>
             {showPagination && (
               <div className="flex items-center justify-end gap-2">
+                <span className="mr-auto text-xs text-muted-foreground" data-related-enlarged-status="">
+                  {t('detail.pageOf', { current: currentPage + 1, total: totalPages })}
+                </span>
                 <Button
                   variant="outline"
                   size="sm"
@@ -3993,7 +4093,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 capability behind it exists (objectui#3895) — and, since
                 objectui#12082, only where the caller's grant allows the write
                 it ends in (`addGranted`, above). */}
-            {add && pickerObject && dataSource && addGranted && (
+            {add && pickerObject && dataSource && addGranted && addBatchable && (
               <Button
                 variant={isEmpty ? 'ghost' : 'outline'}
                 size="sm"
@@ -4033,15 +4133,18 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             ))}
             {/* objectstack#35597 — 「↗」 beside a body table's title opens
                 the child's list page under this record's condition (the
-                host's `onViewAll`, which a body table draws no footer for). */}
-            {bodyTable && onViewAll && (
+                host's `onViewAll`, which a body table draws no footer for).
+                objectstack#35601 — an empty list draws it too: it has no
+                footer, and its list page is where its records get found. */}
+            {(bodyTable || isEmpty) && onViewAll && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-11 w-11 p-0 sm:h-7 sm:w-7 text-muted-foreground"
                 aria-label={t('detail.viewAll')}
                 title={t('detail.viewAll')}
-                data-body-table-open-list=""
+                data-related-open-list=""
+                {...(bodyTable ? { 'data-body-table-open-list': '' } : {})}
                 onClick={(e) => { e.stopPropagation(); onViewAll(); }}
               >
                 <ArrowUpRight className="h-3.5 w-3.5" />

@@ -378,14 +378,14 @@ behind it; **drill-to-record** opens one record.
 * **Escape hatch — "Open in list →".** The drawer header offers a link to the
   object's *full* list page (sort / bulk-select / export / shareable URL),
   scoped by the same drill filter. The in-place drawer is the default (peek
-  without losing the dashboard).
+  without losing the dashboard). Today a relationship-path dimension
+  (`account.industry`) gets the drawer only, no link.
 * **`metric` / `chart` widgets are not click-drillable** in the dataset form
   (they render the aggregate only; `compareTo` still applies). Surface the detail
   through a `table` / `pivot` widget instead.
 
 **Reports drill the same way.** A `summary` / `matrix` report (`drilldown`
-defaults `true`) opens the identical in-place drawer on row/cell click — peek the
-records, click a row to open one, or "Open in list →" for the full list page.
+defaults `true`) opens the identical in-place drawer on row/cell click.
 
 ---
 

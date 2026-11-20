@@ -23,6 +23,7 @@ export type {
   ActionInvocationAuditWriter,
   ActionInvocationAuditWriterOptions,
   ActionInvocationBranch,
+  ActionInvocationBulkReading,
   ActionInvocationOutcome,
 } from './action-invocation-audit.js';
 // [#30955] The run-level `export` row writer the REST export door reaches
