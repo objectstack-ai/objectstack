@@ -28,7 +28,8 @@ export const entry: SemanticMigration = {
     + 'relatedLists, a side list no entry names shows no tab; the attachments tab shows only when '
     + "'sys_attachment' is listed (and the object enables files, as before); the approvals tab, when "
     + 'unlisted, follows the listed tabs and still shows whenever the record has requests; the stream '
-    + 'tab, when unlisted, still closes the strip. Body tables a field group places are not affected, '
+    + 'tab, when unlisted, still closes the strip. Body tables a field group places stay at their group; '
+    + 'the tab such a master_detail table also keeps on an undeclared page shows only when an entry names it, '
     + 'and relatedList: false on the FK still hides a list. An undeclared or empty relatedLists draws '
     + 'exactly what it drew before. A STORED object row is not rewritten: its record page changes at '
     + 'the next read. In-repo census before the change: no example, platform object, dogfood fixture '

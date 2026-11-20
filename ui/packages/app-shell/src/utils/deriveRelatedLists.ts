@@ -66,7 +66,8 @@
  *     page's tab list, so a side list no entry names is not derived at all
  *     (the authoring surface, `includeHidden`, keeps it flagged
  *     `isUnlisted`). A body table (`isPrimary`) is the field groups' to place
- *     and is kept, after the listed ones. Undeclared or empty: every list, as
+ *     and is kept, after the listed ones, with no tab of its own (no
+ *     `keepsTab`) unless an entry names it. Undeclared or empty: every list, as
  *     before. The three built-in tab names (`RECORD_PAGE_BUILTIN_TABS` in
  *     `@objectstack/spec/data`) name the page's own tabs, never a child list;
  *     the synthesized page places those (`buildDefaultTabs`).
@@ -159,7 +160,10 @@ export interface DerivedRelatedList {
   /**
    * Present (true) on a body table that a parent field group MAKES one: a
    * `master_detail` FK declaring no `relatedList` that a group names. Such a
-   * table keeps its tab on the record page too (objectstack#35889 item 4). A
+   * table keeps its tab on the record page too (objectstack#35889 item 4),
+   * unless the parent DECLARES `relatedLists` and no entry names it: a declared
+   * list decides the tabs (objectstack#35897), so the table stays at its group
+   * with no tab. A
    * `'primary'` table is a body table without a group and keeps no tab, as
    * before, whether or not a group positions it.
    */
@@ -526,8 +530,14 @@ export function deriveRelatedLists(
     }
     const entry = naming.get(list);
     if (!naming.has(list)) {
-      if (list.isPrimary) all.push(list);
-      else if (options?.includeHidden) all.push({ ...list, isUnlisted: true });
+      // A body table no entry names stays at its group, with no tab: a
+      // declared `relatedLists` decides the tabs, so the tab a group-placed
+      // `master_detail` table keeps on the default page goes (the seat's
+      // reading of objectstack#35897 against #35889 item 4).
+      if (list.isPrimary) {
+        const { keepsTab: _unlistedTab, ...bodyOnly } = list;
+        all.push(bodyOnly);
+      } else if (options?.includeHidden) all.push({ ...list, isUnlisted: true });
       continue;
     }
     if (!isEntryObject(entry)) {
