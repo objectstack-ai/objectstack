@@ -28,6 +28,21 @@ import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { isExitSignal } from '../../utils/format.js';
 import { backfillUnitCodes } from '@objectstack/objectql';
+// Pay the first transform of the dist-resolved workspace deps the command's
+// source reaches through dynamic `import()`s at MODULE LOAD, not inside a case.
+import '@objectstack/service-datasource';
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/service-automation';
+import '@objectstack/service-storage';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/metadata-protocol';
+import '@objectstack/metadata';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/service-settings';
+import '@objectstack/cloud-connection';
 
 vi.mock('../../utils/schema-migrate.js', () => ({ bootSchemaStack: vi.fn() }));
 vi.mock('../../utils/migrate-occupancy-gate.js', () => ({
