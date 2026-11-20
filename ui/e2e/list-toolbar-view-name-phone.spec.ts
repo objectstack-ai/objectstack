@@ -22,8 +22,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *
  * REAL, read out of the sources at run time: the row's classes (the constants
  * in `packages/plugin-list/src/listToolbarRow.ts`, by name), the 「In a queue」
- * toggle's and the Filter button's class strings and the phone touch-target
- * classes from plugin-list, the switcher's own classes from app-shell's
+ * toggle's and the View settings trigger's class strings and the phone
+ * touch-target classes from plugin-list, the switcher's own classes from app-shell's
  * `objectViewTitleSwitcher.tsx` (the trigger now draws the view type's icon
  * and the record count beside the name, objectstack#35548), and the phone
  * title's wrapper from
@@ -112,11 +112,13 @@ const SWITCHER_OUTER = (() => {
 const BUTTON_BASE = 'inline-flex items-center justify-center whitespace-nowrap';
 const QUEUE = `${BUTTON_BASE} ${tagClass(listSrc, LIST_FILE, 'data-testid="queue-sitting-filter"', ['shrink-0', 'h-7'])}`;
 const PHONE_TOUCH_TARGET = constant(read(TOUCH_FILE), TOUCH_FILE, 'PHONE_TOUCH_TARGET');
-// The Filter / Sort / Options triggers draw from one constant (objectstack#35548);
-// below `sm` they are icons, their text labels `hidden sm:inline`.
+// The bar's icon triggers draw from one constant (objectstack#35548). Since
+// objectstack#35878 Filter and Sort live in the condition row, and the bar's
+// trigger that reads the constant is View settings, an icon below `sm`. The
+// four icon buttons below stand for the bar's tools at their touch size.
 const TEXT_TRIGGER = constant(rowSrc, ROW_FILE, 'TOOLBAR_TEXT_TRIGGER');
-if (!/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,\s*PHONE_TOUCH_TARGET,[\s\S]{0,200}data-testid="condition-add-filter"/.test(listSrc)) {
-  throw new Error(`${LIST_FILE}: the Filter trigger no longer draws from TOOLBAR_TEXT_TRIGGER + PHONE_TOUCH_TARGET`);
+if (!/className=\{cn\(\s*TOOLBAR_TEXT_TRIGGER,\s*PHONE_TOUCH_TARGET,[\s\S]{0,200}data-testid="toolbar-display-trigger"/.test(read(TOUCH_FILE))) {
+  throw new Error(`${TOUCH_FILE}: the View settings trigger no longer draws from TOOLBAR_TEXT_TRIGGER + PHONE_TOUCH_TARGET`);
 }
 const ICON_BUTTON = `${BUTTON_BASE} ${TEXT_TRIGGER} ${PHONE_TOUCH_TARGET}`;
 const ICON = 'h-3.5 w-3.5';

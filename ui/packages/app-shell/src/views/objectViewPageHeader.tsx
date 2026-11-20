@@ -14,6 +14,7 @@ import { createContext, createElement, useCallback, useContext, useLayoutEffect,
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import {
   Button,
+  cn,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -230,6 +231,20 @@ export const ListViewBarHostContext = createContext<((hosted: boolean) => void) 
 export const OBJECT_VIEW_PAGE_COLUMN_ATTR = 'data-object-view-page-column';
 
 /**
+ * The view bar's object name. `pl-1.5` matches the switcher's own 6px padding,
+ * so the object's icon starts on the list page's 16px line (objectstack#35663):
+ * the bar's left padding is 10px from `sm` up.
+ */
+export const VIEW_BAR_OBJECT_NAME = 'hidden min-w-0 shrink items-center gap-1.5 sm:flex sm:pl-1.5';
+
+/**
+ * The view bar's right end, added in both faces: the bar ends 8px in, and the
+ * last control there is ⋮, a 28px box around a 16px icon, so 2px more puts
+ * that icon's edge 16px in, where the footer's padding ends (objectstack#35663).
+ */
+export const VIEW_BAR_END_INSET = 'sm:pr-0.5';
+
+/**
  * objectstack#35878 — the start of the view bar: the object's icon and plural
  * name, then 「/」, then the view switcher. Clicking the name does nothing: it
  * names the page. From `sm` up only; a phone names the object in its top bar.
@@ -239,7 +254,7 @@ export function ObjectViewBarObjectName({
     objectPluralLabel,
 }: Pick<ObjectViewPageBarProps, 'objectDef' | 'objectPluralLabel'>) {
     return (
-        <span className="hidden min-w-0 shrink items-center gap-1.5 sm:flex" data-testid="list-view-bar-object">
+        <span className={VIEW_BAR_OBJECT_NAME} data-testid="list-view-bar-object">
             <span className="flex shrink-0 items-center text-muted-foreground" aria-hidden="true">
                 {createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
             </span>
@@ -278,7 +293,7 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
     return (
         <div
             ref={rootRef}
-            className={pageBar.selecting ? 'flex min-w-0 flex-1 items-center' : 'flex shrink-0 items-center gap-0.5'}
+            className={cn(VIEW_BAR_END_INSET, pageBar.selecting ? 'flex min-w-0 flex-1 items-center' : 'flex shrink-0 items-center gap-0.5')}
             data-testid="list-view-bar-end"
         >
             {/* Always mounted, so the slot is there the moment a row is ticked. */}

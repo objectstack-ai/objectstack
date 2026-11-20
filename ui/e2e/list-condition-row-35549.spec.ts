@@ -12,15 +12,15 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * GEOMETRY and INTERACTION pin for the list's condition row (objectstack#35549
  * filter, objectstack#35550 sort), on the REAL list: `ListView` with its
  * toolbar, the `list-condition-row` slot objectstack#35548 laid under the view
- * bar, and the grid. The Filter and Sort triggers open the shared field list;
- * the slot holds the sort chips, then the reader's filter chips, 「Add filter」
- * and 「Reset」; with nothing to show it takes no height at all.
+ * bar, and the grid. Since objectstack#35878 the slot is resident: the one
+ * sort chip (the dashed 「Sort」 with nothing set), then the reader's filter
+ * chips and 「+」 (the dashed 「Filter」 with none), and 「Reset」; it keeps its
+ * 40 px whether or not a condition is set, so the table does not move.
  *
  * ## Why a Playwright spec and not a vitest test
  *
- * "Takes no height", "one row of 24 px chips" and "a real drag reorders" are
- * layout and pointer facts; happy-dom lays nothing out and fires no native
- * drag. The vitest pins (`plugin-list/src/conditions/__tests__/
+ * "Keeps its height", "one row of 24 px chips" and "chips on one line" are
+ * layout facts; happy-dom lays nothing out. The vitest pins (`plugin-list/src/conditions/__tests__/
  * listConditions.test.tsx`, `ListView.conditionRow-35549.test.tsx`) hold the
  * logic; this spec holds it in Chromium. The bundling follows
  * `e2e/list-header-narrow-35446.spec.ts`.
@@ -267,6 +267,8 @@ async function click(page: Page, testId: string): Promise<void> {
 }
 
 const slot = (page: Page) => page.getByTestId('list-condition-row');
+/** The resident row's height (`min-h-10`, objectstack#35878). */
+const ROW_HEIGHT = 40;
 const slotHeight = (page: Page) => slot(page).evaluate((el) => el.getBoundingClientRect().height);
 /** The number the count bar reads, once the list has answered. */
 const count = async (page: Page) => (await page.getByTestId('record-count-bar').textContent())?.match(/\d+/)?.[0];
@@ -279,12 +281,18 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     bundle = await bundlePage();
   });
 
-  test('CONTROL: with no sort and no filter the row takes no height', async ({ page }) => {
+  // objectstack#35878: the row is resident. With nothing set it holds the
+  // dashed 「Sort」 and 「Filter」 and keeps its height, so the table never
+  // moves when the first condition is set or after Reset.
+  test('CONTROL: with no sort and no filter the row is drawn with dashed Sort and Filter, 40 px tall', async ({ page }) => {
     test.setTimeout(120_000);
     await mount(page);
     await expect.poll(() => count(page)).toBe('12');
-    expect(await slotHeight(page)).toBe(0);
-    expect(await slot(page).evaluate((el) => el.childElementCount)).toBe(0);
+    expect(Math.round(await slotHeight(page))).toBe(ROW_HEIGHT);
+    await expect(page.getByTestId('condition-sort')).toHaveAttribute('data-levels', '0');
+    await expect(page.getByTestId('condition-sort')).toHaveText('Sort');
+    await expect(page.getByTestId('condition-add-filter')).toHaveAttribute('data-empty', 'true');
+    await expect(page.getByTestId('condition-add-filter')).toHaveText('Filter');
   });
 
   test('filter: Filter → Stage → Negotiation is three clicks; the chip names field and value, reopens on click, × removes', async ({ page }) => {
@@ -299,10 +307,8 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     await expect.poll(() => count(page)).toBe('3');
     const chip = page.getByTestId('filter-chip-stage');
     await expect(chip).toHaveText(/Stage: Negotiation/);
-    // the row is one line of 24 px chips: 24 + 2 × 6 padding + 1 border
-    const h = await slotHeight(page);
-    expect(h).toBeGreaterThanOrEqual(36);
-    expect(h).toBeLessThanOrEqual(38);
+    // the row is one line of 24 px chips at its resident height (min-h-10)
+    expect(Math.round(await slotHeight(page))).toBe(ROW_HEIGHT);
     const chipBox = await chip.boundingBox();
     expect(Math.round(chipBox!.height)).toBe(24);
     await page.keyboard.press('Escape');
@@ -315,10 +321,15 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     await page.keyboard.press('Escape');
     await click(page, 'filter-chip-remove-stage');
     await expect.poll(() => count(page)).toBe('12');
-    expect(await slotHeight(page)).toBe(0);
+    // the row stays, back to its dashed 「Filter」, at the same height
+    expect(Math.round(await slotHeight(page))).toBe(ROW_HEIGHT);
+    await expect(page.getByTestId('condition-add-filter')).toHaveAttribute('data-empty', 'true');
   });
 
-  test('sort: Sort → Descending → Amount is three clicks; chips come before filter chips; a drag reorders; a header click shows as a chip; Reset restores', async ({ page }) => {
+  // objectstack#35878: a sort of any number of levels is ONE chip, 「Sorted by
+  // X」 with 「+N」, before the filter chips; it opens the sort panel, where the
+  // levels are ordered (the per-level chips and their drag are gone).
+  test('sort: Sort → Descending → Amount is three clicks; one chip with +N comes before the filter chips; a header click shows on it; Reset restores', async ({ page }) => {
     test.setTimeout(120_000);
     await mount(page);
     await expect.poll(() => count(page)).toBe('12');
@@ -326,23 +337,26 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     await click(page, 'sort-panel-order-desc');
     await click(page, 'sort-panel-fields-item-amount');
     expect(await sortNow(page)).toEqual(['amount:desc']);
-    await expect(page.getByTestId('sort-chip-toggle-amount')).toHaveText('Amount');
-    await expect(page.getByTestId('sort-chip-toggle-amount')).toHaveAttribute('title', 'High → Low');
-    // a second level
+    const sortChip = page.getByTestId('condition-sort');
+    await expect(sortChip).toHaveAttribute('data-levels', '1');
+    await expect(sortChip).toHaveText('Sorted by Amount');
+    // a second level: still one chip, now carrying +1
     await click(page, 'condition-sort');
     await click(page, 'sort-panel-fields-item-stage');
     expect(await sortNow(page)).toEqual(['amount:desc', 'stage:asc']);
-    // a filter chip joins after the sort chips
+    await expect(sortChip).toHaveAttribute('data-levels', '2');
+    await expect(page.getByTestId('sort-chip-more')).toHaveText('+1');
+    // a filter chip joins after the sort chip
     await click(page, 'condition-add-filter');
     await click(page, 'filter-panel-fields-item-stage');
     await page.getByTestId('filter-panel-values-option-proposal').getByRole('checkbox').click();
     await page.keyboard.press('Escape');
     await style(page);
     const order = await page.getByTestId('condition-chips').evaluate((row) =>
-      [...row.querySelectorAll('[data-testid^="sort-chip-"][data-priority], [data-testid^="filter-chip-"]:not([data-testid*="-open-"]):not([data-testid*="-remove-"])')]
+      [...row.querySelectorAll('[data-testid="condition-sort"], [data-testid^="filter-chip-"]:not([data-testid*="-open-"]):not([data-testid*="-remove-"])')]
         .map((el) => el.getAttribute('data-testid')),
     );
-    expect(order).toEqual(['sort-chip-amount', 'sort-chip-stage', 'filter-chip-stage']);
+    expect(order).toEqual(['condition-sort', 'filter-chip-stage']);
     // all chips on one line, Reset at the right end of the slot
     const tops = await page.getByTestId('condition-chips').evaluate((row) =>
       [...new Set([...row.children].map((el) => Math.round(el.getBoundingClientRect().top)))],
@@ -351,18 +365,16 @@ test.describe('list condition row under the view bar (objectstack#35549, objects
     const reset = await page.getByTestId('condition-reset').boundingBox();
     const slotBox = await slot(page).boundingBox();
     expect(slotBox!.x + slotBox!.width - (reset!.x + reset!.width)).toBeLessThanOrEqual(17);
-    // a real drag: the second sort chip onto the first
-    await page.getByTestId('sort-chip-stage').dragTo(page.getByTestId('sort-chip-amount'));
-    expect(await sortNow(page)).toEqual(['stage:asc', 'amount:desc']);
-    // Reset puts the list back as saved: no sort, no filter
+    // Reset puts the list back as saved: no sort, no filter, the same row height
     await click(page, 'condition-reset');
     expect(await sortNow(page)).toEqual([]);
     await expect.poll(() => count(page)).toBe('12');
-    expect(await slotHeight(page)).toBe(0);
-    // a click on a column header sorts, and the row shows it as a chip
+    expect(Math.round(await slotHeight(page))).toBe(ROW_HEIGHT);
+    await expect(sortChip).toHaveAttribute('data-levels', '0');
+    // a click on a column header sorts, and the row shows it on the one chip
     await page.getByRole('columnheader', { name: /Amount/ }).click();
     await style(page);
-    await expect(page.getByTestId('sort-chip-amount')).toBeVisible();
+    await expect(sortChip).toHaveText(/^Sorted by Amount/);
     expect((await sortNow(page))[0]).toMatch(/^amount:/);
   });
 });
