@@ -2,8 +2,8 @@
   "number": 35095,
   "kind": "issue",
   "title": "skills eval: analytics-inline-vs-dataset#5 forbids the literal 'defineDataset', so a correct answer that says a chart 'doesn't need a defineDataset' fails — narrow must_not_contain to the wrong pattern",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "domain:skills",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T02:57:08Z",
-  "updated_at": "2026-11-19T15:32:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:17:54Z",
+  "closed_at": "2026-11-20T00:52:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35095",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-C, mailbox #32588, 6967627637), seen on PR #35077 (#34770).\n\n## What happens\nThe eval case `analytics-inline-vs-dataset#5` lists the literal `defineDataset` in `must_not_contain`, and `grade.ts` does a case-sensitive substring match. So a correct answer, one saying an ad-hoc chart \"doesn't need a `defineDataset`\", fails, even though it agrees with `expected_output`.\n\nThis is also #34770's own evidence case, so a false fail here skews that card's before/after measurement.\n\n## Done when\n- `must_not_contain` is narrowed to the wrong pattern, for example a `defineDataset(` call in the answer's code, not a mention.\n- Case #5 is re-run, and the scorecard notes the case change.\n\nGrade: **p2 · domain:skills**. Theme: MCP; the skills eval measures how well external agents are taught. It is an eval false-fail with no customer effect, but it skews a running measurement, so not p3. Routed to seat 4; seat 3 is winding down."

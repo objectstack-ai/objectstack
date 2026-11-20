@@ -2,8 +2,8 @@
   "number": 35549,
   "kind": "issue",
   "title": "列表筛选重做：点「筛选」出可搜索的字段清单，按字段类型选值，条件以标签留在视图栏下",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T15:07:15Z",
-  "updated_at": "2026-11-19T18:26:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:24:06Z",
+  "closed_at": "2026-11-20T01:23:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35549",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-19 原话：「涉及到很多细节了，我们之前做的都不好，包括 过滤 排序，选项的设置过程，视图创建和自定义的过程。」\n\n## 参照（Twenty：三步）\n\n![参照 1：点筛选出字段清单](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-filter-1-fields.jpg?raw=true)\n\n![参照 2：点「阶段」出多选值清单](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-filter-2-values.jpg?raw=true)\n\n![参照 3：条件成为标签，条数从 150 变 66](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-filter-3-chip.jpg?raw=true)\n\n## 我们现在（四步）\n\n![现状 1：添加筛选后多出一行三个控件](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-filter-1-row.jpg?raw=true)\n\n![现状 2：字段下拉是纯文字长列表](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-filter-2-fields.jpg?raw=true)\n\n![现状 3：值是单选下拉](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-filter-3-values.jpg?raw=true)\n\n![现状 4：筛完只有漏斗旁的 1 和「已个性化」](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-filter-4-result.jpg?raw=true)\n\n参照对象是 Twenty（AGPL，本机运行的 `f9056c83`）：只参照结构、步骤和尺寸，⛔ 不抄它的代码。截图 800×500，取自 1280×800 视口；「我们」的截图取自本机最新控制台（`origin/main` `7ece0204a6`，HotCRM，zh-CN），2026-11-19。\n\n## 现状（实测环境：本机控制台 `origin/main` `7ece0204a6` + HotCRM，zh-CN，视口 1280×800，2026-11-19，销售应用「商机 / 进行中商机」。）\n\n- 点漏斗图标：面板标题「筛选记录」，里面只有「其中」和「+ 添加筛选」。「其中」是 Where 的直译。\n- 点「添加筛选」：多出一行三个控件，字段默认是第一个字段（商机名称）、运算符「等于」、值为空。\n- 换字段：下拉是纯文字长列表，不能搜索，没有类型图标，不区分视图里显示的和隐藏的字段。\n- 字段换成「阶段」后，值是单选下拉、选项没有颜色；想多选要先把「等于」换成别的运算符。\n- 筛完之后：漏斗旁多一个「1」，标题旁多一个「已个性化」；筛了什么要再点开面板才知道。\n- 视图自带的筛选条件（「进行中商机」只显示未结束的商机）在面板里不显示，用户看不出为什么只有 10 条。\n\n## 要做的\n\n1. **入口**：点视图栏的「筛选」，直接出字段清单：顶部搜索框；先列当前视图显示的字段，再列隐藏的字段；每个字段带类型图标。底部一项「高级筛选」进入现有的多条件面板（保留给「或」和嵌套条件）。\n2. **选值按字段类型**：\n   - 选项字段：带颜色的多选清单，勾一个生效一个，默认运算符「是其中之一」。\n   - 关联字段：可搜索的记录多选清单。\n   - 文本：输入即筛，默认「包含」。\n   - 数字、金额：一个运算符（≥、≤、等于、介于）加数值。\n   - 日期：常用相对范围（今天、本周、本月、过去 30 天）加自定义。\n   - 布尔：是 / 否。\n   运算符在值清单顶部可改，不需要先选运算符。\n3. **即时生效**：每次勾选或输入后列表和记录数立即更新，不需要「应用」按钮。\n4. **条件标签行**：视图栏下方一行，每个条件一枚标签（「阶段：谈判、提案 ×」），点标签回到该条件的值清单，点 × 删除；行尾「+ 添加筛选」；最右「重置」回到视图保存的状态。没有任何条件时这一行不占高度。\n5. **视图自带的条件**也显示成标签，样式区别于用户临时加的（如带锁或灰色），不可删除。\n6. **个人改动照旧自动记住**、不影响别人（现有行为保留）；「已个性化」徽标去掉，由条件标签和「重置」表达。\n7. 文字：不再出现「其中」。\n\n## 不做的\n\n- 不改筛选条件的存储格式和网址参数（`uf_*`）。\n- 不改保存为共享视图的权限和草稿规则。\n- 不做跨对象筛选（关联对象的字段）。\n\n## 验收\n\n- 从点「筛选」到列表按「阶段 = 谈判或提案」筛出结果，不超过 4 次点击，全程不需要打字。\n- 字段清单可搜索；显示字段在前、隐藏字段在后；每项有类型图标。\n- 筛选后视图栏下有标签写明字段和值；记录数同步变化；点 × 后恢复。\n- 「进行中商机」打开时就能看到它自带的条件标签，且无法删除。\n- 用户 A 加的筛选，用户 B 打开同一视图看不到；A 换浏览器登录后还在。\n- 「重置」后回到视图保存的状态。\n- PR 正文列出迁移和作废的测试、同笔修改的验收条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-list` 的筛选面板、`ui/packages/components/src/renderers/complex/filter-builder.tsx`、`ui/packages/app-shell/src/context/ListPreferencesProvider.tsx`、`ui/packages/app-shell/src/views/userFilterUrlState.ts`。依赖子卡 1 提供的视图栏和条件行位置。\n\nDedupe: `筛选 面板 字段 清单`、`filter panel field picker chips`（objectstack，open）→ 0。"

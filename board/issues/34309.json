@@ -2,8 +2,8 @@
   "number": 34309,
   "kind": "issue",
   "title": "ADR-0149: record that every dataset face answers declared members only — its \"Leaves unchanged\" line still names /analytics/dataset/query",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:data",
     "documentation",
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-16T05:19:09Z",
-  "updated_at": "2026-11-19T05:09:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:16:22Z",
+  "closed_at": "2026-11-20T01:16:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34309",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: area-directed (area S2 of seat domain:server#5). Boundary flag of the L2 contract review 6908009392 on PR #34198 (card #34005): the code cites ADR-0149 for the closed-member rule, and the record carries no line for it.\n\n## Today\n\nADR-0149 states the closed set for the AI tools (D2: the AI chooses from the governed catalogue) and lists `/analytics/dataset/query` and its gate chain under **Leaves unchanged**. The maintainer ruling 6902027136 on #34005 closed the REST dataset door too, and PR #34198 implements it at one point every dataset entry passes (`answerDataset`).\n\n## Ask\n\nAmend ADR-0149 with a dated correction: every dataset face (REST single and batch doors, `query_dataset`, the MCP bridges, the publish build probes) answers only the members the dataset declares, by the maintainer ruling of #34005; strike or qualify the `/analytics/dataset/query` entry under **Leaves unchanged**. Governed text: the ADR lane's usual review applies.\n\nBlocked-by: #34198 (the record follows the code).\n\nReader: domain:spec (ADR). Size XS."

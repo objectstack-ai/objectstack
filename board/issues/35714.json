@@ -1,0 +1,31 @@
+{
+  "number": 35714,
+  "kind": "issue",
+  "title": "skills: data-hooks.md teaches the hook/job js-body compile refusal (follow-up of PR #35713)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T02:04:15Z",
+  "updated_at": "2026-11-20T02:09:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35714",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: ③ an owed `Skills-docs:` follow-up, filed by the seat before ACCEPT of PR #35713 (card #34987), per SKILL.md's `Skills-docs: follow-up owed` rule · Source: fleet\n\n## What is owed\n\nPR #35713 (card #34987) makes the save door refuse a hook or job `js` body that does not compile. The new rule ids are `hook-body-does-not-compile` and `job-body-does-not-compile`, sharing `hookBodyFunctionExpression` with the runtime's wrapper. Its PR body reads `Metadata-protocol: narrowed` and `Clause-②: no (narrowing)`.\n\n`skills/objectstack-data/references/data-hooks.md`, in its \"Sandbox restrictions\" section, teaches what a hook body may contain, and it names no compile check. An author who follows the skill today learns of a syntax error only when the hook first runs. After #35713 lands, the save is refused with a coded sentence. The skill should say so, and say it for job bodies too wherever the skill teaches them.\n\n## Done when\n\n- `data-hooks.md` (and the job passage, if a skill teaches job bodies) says that a `js` body that does not compile is refused at save, naming both rule ids. It gives one minimal example of a refused body and its fix.\n- The skill's evals exercise the refusal, or the PR states why no eval applies.\n- Lands only after PR #35713 has merged, so the skill never teaches a refusal main does not make.\n\nReader: the `domain:skills` lane. Blocked-by: #34987 (PR #35713).\n\nGrading: area:build · Task · docs follow-up of a narrowing change · evidence: PR #35713 body and `data-hooks.md` on `origin/main`.\nSuggested grade: p2 (an owed Skills-docs follow-up of a narrowing change; authors meet the new refusal without the skill naming it).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue hook-body-does-not-compile` → 0 hits; `data-hooks.md compile` → 0 open hits."
+}

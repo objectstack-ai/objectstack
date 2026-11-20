@@ -2,8 +2,8 @@
   "number": 35345,
   "kind": "issue",
   "title": "skills: tell metadata-app projects what the platform already ships — a generated platform catalog and a \"check the catalog first\" question in objectstack-project",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bill",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-19T05:48:42Z",
-  "updated_at": "2026-11-19T19:04:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T22:32:09Z",
+  "closed_at": "2026-11-19T22:28:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35345",
   "body": "③ maintainer-directed task · Source: maintainer: 「我还关心如何优化元数据项目的skills，让他们知道哪些应该用平台的能力，对象，避免重复开发。」 (2026-11-19T05:39Z). He answered the analysis with 「同意」 (05:46Z) and then 「立卡 p1」 (05:47Z). Both are in the project thread on #35328. The analysis ran on Fable, read-only, at `main` 05e0eb8b. Child of #35328.\n\n## 维护者速读\n- **问题：** 套件（hotcrm、hotsrm、生产套件）的 agent 不知道平台已经有什么，所以会自己造。已经造出来的有自由文本的单位、按自然小时算的时效、各自一份的汇率思路。skills 只教怎么写元数据，从不列平台已有的对象和能力。\n- **要做：** 在 objectstack-project skill 下加一份从源码生成的「平台目录」。§0 加第三问：先查目录再新建；目录里没有、但第二个应用也会照抄的，就去平台立卡，应用可以先建并打标。另外补几条 eval。\n- **你要做的：** 无，已裁。\n\n## Business reason\n- **Who benefits:** every metadata-app project that installs `@objectstack/skills`. First are the managed suites.\n- **Scenario:** a suite agent needs attachments, comments, an exchange rate, an approval record, notifications, a time zone or a country. Today nothing in the skills tells it the platform owns these.\n- **What it has already cost:**\n  - hotsrm `uom` is free text (#35339);\n  - hotcrm's case SLA counts wall-clock time (#35340);\n  - each suite owns its own party and item master data, which is now ruled acceptable (#35328 A).\n- **If not done:** every new suite repeats the inventory. Each copy later needs migration once the platform owns the thing.\n\n## Current state (read)\n- `skills/objectstack-project/SKILL.md:28-36` §0 \"App or platform?\" separates business judgement from consistency checks only. Nothing says \"before adding an object, field or flow, check whether the platform ships it\".\n- `skills/objectstack-project/SKILL.md:135-143` §3 covers defects only. A suite that builds its own `uom` or calendar breaks no rule.\n- `:45` says an MCP-only build applies only §0 and §3, so the new question belongs in §0.\n- Across `skills/**/*.md`, only 20 distinct `sys_*` names appear. These appear zero times: `sys_attachment`, `sys_comment`, `sys_exchange_rate`, `sys_business_unit`, `sys_notification`, `sys_email`, `sys_import_job`, `sys_audit_log`, `sys_record_share`, `sys_webhook`.\n- The value domains are a closed set of three (`packages/spec/src/shared/value-domain.zod.ts:96-100`). Skills use one, once (`skills/objectstack-data/rules/field-types.md:168`, currency).\n- No skill links `content/docs/capabilities/*`.\n- MCP `list_objects` filters system objects by default (`skills/objectstack-ai/SKILL.md:206`), so \"look it up at runtime\" finds none of the platform objects.\n- The object-name source is `packages/spec/src/system/constants/platform-object-names.ts:38` (`PLATFORM_OBJECTS_BY_PACKAGE`) and `:193` (`PLATFORM_PROVIDED_OBJECT_NAMES`). It holds 111 names, each pinned by the owning package's conformance test. Most of them are infrastructure (oauth, scim, jwks) and none says what an app would otherwise build.\n- The \"would a second app copy it? ⇒ platform\" test already exists. It is at `.claude/skills/pm-dispatch/references/app-platform-boundary.md:26`, and `:36` keeps it out of customer skills. The maintainer accepted publishing a customer-actionable form of that question.\n\n## Scope (ruled)\n1. **Catalog, generated.** Add `skills/objectstack-project/references/platform-catalog.md`.\n   - Rows: the app-facing subset of platform objects (estimate 25–30), the three value domains and the capability switches (`requires:`).\n   - Each object row carries one hand-written column, \"what you would otherwise build\".\n   - The names are generated from `platform-object-names.ts`, plus an app-facing marker or a small parallel list pinned by a test, so no row can name an object that does not exist.\n   - Wire it into the existing skill gates (`check:skill-refs`, `check:skill-identifier-liveness`).\n   - Before a row ships, confirm an app can actually look the object up or write it.\n2. **\"Not owned by the platform\" rows.** Party and item master data stay with each suite, matched by key contract (#35328 ruling A). This stops \"check the platform first\" from being read as \"wait for the platform\".\n3. **\"Planned\" section,** capped at a few rows. A concept the platform has carded but not shipped is listed as **not available**, with a link to its card. A carded item that already has a field contract (units #35339, working calendars #35340) points to that contract. The PR that ships the capability moves the row into the main table. ⛔ No planned row reads as usable (ADR-0049).\n4. **§0 third question.**\n   - Before adding an object, field or flow, check the catalog. If the platform ships it, use it.\n   - If it is absent but a second app would copy it, file a platform card at `objectstack-ai/objectstack`. The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE: <link>`.\n   - §5 step 4 sweeps these markers on each bump, the same way it sweeps `PLATFORM-GAP`.\n   - Keep the wording textually apart from §3: a defect is never worked around, while a missing capability may be built and marked.\n5. **objectstack-data.** Teach `valueDomain` for time zone and country beside the existing currency line.\n6. **Evals.** Add 2–3 cases to each of `skills/objectstack-project/evals/project-process.json` and the data skill's evals. Examples: \"add an attachments table\", \"add a uom text field\", \"store the customer's country\". The expected answer uses the platform object or value domain, or files a platform card.\n\n## Out of scope\n- The lint warning for hand-rolled value-domain fields is a separate card under #35328.\n- An object-name shadow lint waits for an inventory of what hotcrm and hotsrm duplicated.\n- No change to `.claude/skills/pm-dispatch/**`.\n\n## Reader\n- The `area:ai` seat that owns product skills: one PR covering the generator, the catalog, the §0/§5 text, the data-skill line and the evals.\n- After release: the hotsrm and hotcrm seats re-sync skills.\n\n## Dedupe\n- `\"platform catalog\"` → 151 hits; the top 5 read are unrelated (scenario runner, lint advisories, dogfood anchors).\n- `skills platform-first OR \"platform first\"` → 5854; the top open hits are fleet-skills clean-up (#35229, #35230, #35238), which cover `.claude/` skills, not `skills/`.\n- `PLATFORM-CANDIDATE` → 1179, none on this subject.\n- No open card covers this.\n\n## Grade\n`area:ai · Task · maintainer-sourced, grade set by the maintainer (「立卡 p1」) · reach: three suite inventories named in #35328/#35339/#35340 (read) · evidence: read`"

@@ -2,8 +2,8 @@
   "number": 35088,
   "kind": "issue",
   "title": "ADR-0106 D6: record that a throw from the _withheldFields security member degrades to drop-all (fail-closed hint), not 5xx — the decision PR #34979 makes",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:data",
     "documentation",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-18T02:20:18Z",
-  "updated_at": "2026-11-19T15:44:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:17:26Z",
+  "closed_at": "2026-11-20T01:17:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35088",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6967038502, after 6966984093 item 2).\n\n## The decision to record\nPR #34979 (#34901) decides that when the security member answering the `_withheldFields` question **throws**, every `_withheldFields` entry is **dropped**, a fail-closed hint, rather than the request answering 5xx.\n\nADR-0106 D6's table reads a throw as 5xx. The seat and L1-d agree that D6's 5xx is about the field-access question itself, and that dropping a hint leaks nothing.\n\n## Done when\nD6 gains one row or note: the `_withheldFields` hint question degrades to drop-all on a member throw, citing #34979. Without it, the code reads as a breach of the ADR's letter.\n\nIt is kept out of #34979 because an ADR file would make that PR governed (Tier H) partway through its delta review. ADR files are a governed surface, so this needs L2.\n\nGrade: **p2 · domain:server**. Under addendum 5, an ADR change that records a decision is graded by its theme (HotCRM usable, the #34901 family), not as pure wording. No user effect beyond doc fidelity."

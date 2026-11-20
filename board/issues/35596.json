@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T17:03:03Z",
-  "updated_at": "2026-11-19T17:55:47Z",
+  "updated_at": "2026-11-20T00:41:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35596",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（维护者 2026-11-19：「这一批卡p2」）。\n\n维护者 2026-11-19 原话：「相当于我们概览右侧的子表区域不用改，只是优化界面样式」「还有 8 个空关联 这种不需要吧」「概览右侧还能看到附件、动态、审批状态吗？」「一个客户下面有七八张子表都有记录，感觉都显示页没问题。但是主要子表，附件、审批、动态，肯定是要放在前面的。」「右侧应该不现实空的子表」。\n\n## 目标（图 37 上半张的右栏）\n\n![图 37 记录页：概览、相关表页签、抽屉](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/37-record.png?raw=true)\n\n## 现状\n\n![现状：平台默认记录页（合同 CTR-0003）](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/ours-default-contract.jpg?raw=true)\n\n图是深色稿，只表达结构和尺寸，颜色沿用现有主题变量。参照对象 Twenty 是 AGPL，只参照结构，⛔ 不抄代码。代码读数取自 `origin/main` `7ece0204a6`。外壳（顶栏、左侧栏）不动。\n\n- 默认页的右栏只在概览里画（`RecordPageColumns.tsx:413-441`），内容是相关卡片、附件面板、动态面板。\n- 最上面一行「还有 N 个空关联 · … · 展开」（`ui/packages/components/src/custom/record-reference-rail.tsx:783`）。\n- 附件为空时也是一张带上传按钮和提示语的大卡；动态卡是整个动态流。\n- 相关卡片里每条记录只显示名称。卡片圆角 14、标题 14 号。\n- `record:reference_rail` 画不了审批、附件、动态的摘要卡。手写页面如果把右栏放在页签外，它会在每个页签下都出现（HotCRM 商机页就是这样）。\n\n## 要做的\n\n1. 右栏只在「概览」里出现，位于通栏的阶段条和关键字段之下。\n2. 每样一张小卡：标题、条数或状态，最多三行，整行标题可点（末尾「›」），跳到对应页签。\n   - **审批**：有进行中的审批时出现。每一步一行：步骤名、状态（已通过 / 等你审批 / 等某人）。\n   - **附件**：有文件时出现。最近三个文件名和大小。\n   - **最近动态**：有动态时出现。最近三条：谁做了什么，时间靠右。\n   - **其他相关**：小标题之下，其余**有记录的**普通关联子表各一张卡，有多少显示多少；每条是名称加一个关键值（由相关列表的列定义取第一个金额或状态列）。\n3. 顺序固定：审批、附件、最近动态、其他相关。主从子表不在右栏（它们在概览左侧，见子卡「主从子表」）；在该子卡合入之前，主从子表的卡排在审批之后。\n4. **没有内容的不出现**，也不写「还有 N 个空关联」那一行。审批结束后审批卡不再出现。\n5. 样式：圆角 8、标题 13 号、行高 26；条数是标题后的灰色数字，不用徽标。\n6. 抽屉里不显示右栏。\n\n## 不做的\n\n- 不改右栏的宽度断点和它在哪些宽度下折到下方的规则。\n- 不在右栏里放可编辑的内容或上传入口。\n\n## 承接\n\nobjectstack-ai/objectstack#34590（右栏里动态放最后）：顺序由本卡重新定，同笔改它的测试。\n\n## 验收（1280×800，zh-CN）\n\n- 托管环境那条合同：右栏没有「还有 5 个空关联」，没有空的附件卡；只有「最近动态」一张卡，三行以内。\n- HotCRM 待审批的商机：右栏从上到下是审批、最近动态，然后「其他相关」下面是报价单；每条带金额。\n- 切到任一非概览页签，右栏不出现。\n- 点「审批」卡的标题进入「审批」页签；点「报价单」卡的标题进入报价单页签。\n- 一次合入、一次验收。PR 正文列出迁移和作废的测试，以及同笔修改的 `docs/qa/platform-checklist` 条款。\n\nReader: `domain:ui` 车道。`ui/packages/components/src/custom/record-reference-rail.tsx`、`ui/packages/plugin-detail/src/RecordPageColumns.tsx`、`synth/recordPageColumns.ts`。依赖子卡「页签规则」提供的页签。\n\nDedupe: `右栏 空关联 记录页`、`record reference rail empty related`（objectstack，open）→ 0。"

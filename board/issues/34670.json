@@ -2,8 +2,8 @@
   "number": 34670,
   "kind": "issue",
   "title": "cli i18n-coverage: the hook bucket is labelled \"hook refusals\" but now also counts missing hook texts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,21 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T05:25:48Z",
-  "updated_at": "2026-11-19T05:01:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:08:55Z",
+  "closed_at": "2026-11-20T01:08:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34670",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: contract review N3 on PR #34545 (Part of #34374, review 6939428411), passed on by area `o2-D`. Dedupe: `i18n-coverage hook refusals`; no open card.\n\nSuggested-grade: p3 · domain:server · Blocked-by #34374 (the hook-text bucket exists only after PR #34545 merges)\n\n## 维护者速读\n\n- 现象:`os` 的翻译覆盖报告把钩子这一桶叫「hook refusals」(钩子拒绝语)。#34545 之后，钩子声明的给人读的句子(`texts`)缺译文也计在这一桶里，报告仍按「拒绝语」报，读报告的人会以为缺的是拒绝语。\n- 为什么要修：报告的名字和内容对不上，翻译人员会找错地方。\n- 需要你做的：无(分诊定级)。\n\n## Change\n\nIn `packages/cli/src/utils/i18n-coverage.ts`, name the `hook` bucket for what it now counts (refusals and texts), or split it into two buckets. Pin the report line for a hook with one missing refusal and one missing text.\n\n## Done when\n\nThe coverage report names a missing hook text as a hook text.\n"

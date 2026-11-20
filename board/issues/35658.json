@@ -1,0 +1,32 @@
+{
+  "number": 35658,
+  "kind": "issue",
+  "title": "深色主题下菜单里的「删除」几乎看不见：危险色当文字用，对比度约 1.6:1（列表右键菜单、选中后的「更多」菜单）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T21:59:30Z",
+  "updated_at": "2026-11-19T22:49:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35658",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-20 原话：「更新最新的代码，看列表页改动的效果」。这是那次走查里看到的缺陷。\n\n## 现状（主干 `d96c878e33`，本机环境，深色主题，浏览器实测）\n\n- 列表页选中 2 条以上，页面栏右侧「…」菜单里的「删除」；在行上点右键，菜单里的「删除」。两处的字和图标都是暗红色，落在近黑的菜单底上，几乎看不见，像是被禁用了，实际可点。\n- 实测计算样式：文字 `rgb(127, 29, 29)`，菜单底 `rgb(26, 26, 30)`，对比度约 1.6:1（正文文字的最低要求是 4.5:1）。\n- 原因：这些菜单项用 `text-destructive`（`ui/packages/plugin-grid/src/components/RowContextMenu.tsx:112, 125`）。深色主题里 `--destructive` 是 `0 62.8% 30.6%`（`ui/packages/components/src/index.css:247`），这个值是给红底按钮当底色用的，不适合当文字色；浅色主题的值 `0 84.2% 60.2%`（:159）当文字没有问题。\n- 这不是 objectstack-ai/objectstack#35637 引入的；那次改动把删除从行尾的操作列搬进了这两个菜单，所以现在每个人都会看到。\n\n## 要做的\n\n- 深色主题下，危险操作的文字和图标用一个够亮的红（对比度不低于 4.5:1）。做法由实现方定：给文字单独一个语义色，或调整深色主题的取值并核对红底按钮不受影响。\n- 全仓查一遍把 `text-destructive` 用在深色底上的地方，一并修到，不只修这两个菜单。\n\n## 不做的\n\n- 不改浅色主题的取值。\n- 不改删除的位置和确认流程。\n\n## 验收\n\n- 深色主题：列表右键菜单和选中后的「…」菜单里，「删除」一眼可读，实测对比度不低于 4.5:1。\n- 浅色主题外观不变。\n- 红底的危险按钮（例如删除确认框里的按钮）在两种主题下外观不变，或同样满足对比度。\n\nReader: `domain:ui` 车道。`ui/packages/components/src/index.css`、`ui/packages/plugin-grid/src/components/RowContextMenu.tsx`、`ui/packages/app-shell/src/views/objectViewPageHeader.tsx`。\n\nDedupe: `text-destructive dark`、`深色 删除 看不清`（objectstack，open）→ 0。"
+}

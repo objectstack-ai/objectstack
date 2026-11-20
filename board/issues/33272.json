@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-14T15:16:17Z",
-  "updated_at": "2026-11-19T06:16:29Z",
+  "updated_at": "2026-11-19T21:55:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33272",
   "body": "domain:server#7 · sunhaolin · session_017xRBcSZ51q2s3nMfakhdJ3\n\nFollow-up from #33176 (PR #33255, contract review PASS 6879518229). That PR's body carries `Skills-docs: follow-up owed — FILES`; this card is the owed follow-up. ⛔ Not a claim; triage sets the lane and grade.\n\n**What changes with PR #33255:** MCP `validate_expression` gains an optional `variables` input, accepted only at `site: 'flow_condition'`. It takes the flow's declared variables, in the shape of `FlowVariableSchema`. With it, a bare name a variable shares with a field is bound to the variable, and the tool gives the runtime flow door's shadowed-read warning. Without it, the answer is unchanged.\n\n**Stale text:** two files teach the tool's signature without `variables`. Both read the same on `origin/main` `295ce127`:\n- `packages/mcp/src/skill-md.ts` ~L410, the SKILL.md the MCP server serves: `validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, field? })`.\n- `ui/apps/console/src/pages/developer/objectstack-skill.ts` ~L134, the Console's mirror of that file.\n\n**Expected:** both files name `variables?` in the signature. They also say, in one clause, that the shadowed-read warning and the variable binding of a bare name need it at a `flow_condition`. Nothing under `skills/**` describes the flow_condition inputs; I grepped on main.\n\n**Serial:** after PR #33255 merges. Suggested grade p3 (docs text, MCP focus).\n\nDedupe: `skill-md validate_expression` → #30865 (closed, the Console mirror's `delete_record confirm`), and nothing open."

@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T06:27:06Z",
-  "updated_at": "2026-11-19T05:01:12Z",
+  "updated_at": "2026-11-20T02:06:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34689",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「同意你的所有建议，开始立专题子卡」. The ruling record is #34659 comment 6940528935.\n\n## Why\n\nEvery connection pays for the tool list before any work starts, in the user's own tokens. Text that teaches belongs in the skill a client loads when it needs it; a tool description should carry what the call needs.\n\nWho acts: the server lane (`packages/mcp`). Who reads the result: every MCP client.\n\n## Evidence (objectstack `a0326b06`, `examples/app-crm`, admin API key, read 2026-11-17)\n\n- `tools/list` → 17 tools, 40,341 bytes: descriptions 16,320, input schemas 20,925.\n- Heaviest tools, description plus schema: `validate_expression` 7,791, `query_dataset` 5,508, `aggregate_records` 3,942, `run_action` 3,433, `create_upload_link` 2,883.\n- `aggregate_records` carries a 1,126-byte tombstone for the removed `distinct` key inside its input schema.\n\n## Scope\n\n- Measure first: a per-tool table in the PR, before and after.\n- Move teaching prose out of descriptions into the ask-data skill or `/mcp/skill`, keeping each description sufficient to call the tool correctly without the skill.\n- Decide per tool whether a removed-key tombstone has to ride in `tools/list` or can live in the refusal alone.\n- File surface: `packages/mcp/src/**`, and the spec files that own a description's text.\n\n## Done when\n\n- The table shows the new total, and no tool's call success drops in a scenario ask round run before and after.\n\n## Out of scope\n\n- Removing or renaming a tool. Changing what any tool accepts.\n\n## Relations\n\n- Parent: #34659. Do after the ask-data skill is published, so moved text has a home.\n- Dedup, open and closed: `MCP tools/list description weight validate_expression` 0."

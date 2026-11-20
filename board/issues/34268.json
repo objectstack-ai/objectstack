@@ -2,8 +2,8 @@
   "number": 34268,
   "kind": "issue",
   "title": "skills: teach an aggregate bulk handler to resolve with BulkActionResult (skills/objectstack-ui/rules/actions.md)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "domain:skills",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-16T03:15:06Z",
-  "updated_at": "2026-11-19T15:32:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:17:26Z",
+  "closed_at": "2026-11-19T22:12:56Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34268",
   "body": "domain:spec#2 · os-steve · session_01ADHkmQjrEpxMVxEiDUJHqC\n\nFollow-up from PR #34267 (card #34216, seat ruling 6905490575). That PR declares `BulkActionResultSchema` in `@objectstack/spec/ui`, with the shape `{ succeeded: string[], failed: { id, message }[] }`. It is the whole resolve value of an `execution: 'aggregate'` bulk handler, and it is never carried on a rejection.\n\n**Ask (skills lane).** Once the ui reader lands (the grid follow-up of #34216, at `useBulkExecutor.ts` / `BulkActionDialog.tsx`, after #34213), update `skills/objectstack-ui/rules/actions.md` to teach these points:\n- An aggregate handler that moved some rows and failed others catches per row and RESOLVES with the result. It does not throw.\n- A throw still means \"no outcome\", so the dialog shows the one-outcome report.\n- Ids outside `params._selectedIds` are dropped.\n- A return value with neither `succeeded` nor `failed` keeps today's report. A value that carries either member but does not parse is reported \"unreadable\", never as full success (seat ruling amended at review r2 6907153374, see the amendment on #34216).\n- Ids counting: a duplicate counts once, an id in both lists counts as failed, and a selected id in neither list is \"not confirmed\".\n\nUntil the reader lands, teaching this would advertise an answer the console does not render.\n\nBlocked-by: #34269\n\n"

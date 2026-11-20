@@ -2,8 +2,8 @@
   "number": 34777,
   "kind": "issue",
   "title": "cli: os meta register can save a draft, and os lint can judge one item",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "area:build",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-17T10:14:01Z",
-  "updated_at": "2026-11-19T05:00:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:13:34Z",
+  "closed_at": "2026-11-20T01:12:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34777",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nThe code-first path can only save a live item, and can only lint a whole project. A client that builds one item at a time has no fast local check and no way to stage for review from the command line.\n\nWho acts: the server lane (`packages/cli`). Reader: a developer or an AI client working item by item.\n\n## Evidence\n\n- `os meta register` declares no flag for `mode`: \"adding one is a separate widening\" (`packages/cli/src/commands/meta/register.ts:75-76`). It saves an active item.\n- `os lint` takes a configuration file and lints the whole stack (`packages/cli/src/commands/lint.ts:905-1071`).\n\n## Scope\n\n- `os meta register --mode draft` stages a draft through the same REST route with `?mode=draft` and prints the publish verdict.\n- `os lint --item <file> --type <type>` runs the rules that can judge one item alone, and says which rules it could not run without the rest of the stack.\n\n## Done when\n\n- Both commands work against a self-hosted runtime with an API key; a draft staged this way appears in Studio's Changes.\n\n## Relations\n\n- Parent: #34659. Ruling: E4 = A (the local path uses an API key).\n- Dedup, open and closed: `os lint --item` none."

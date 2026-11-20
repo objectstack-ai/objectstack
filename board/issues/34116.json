@@ -2,8 +2,8 @@
   "number": 34116,
   "kind": "issue",
   "title": "Decision: keep or delete the four remaining target:* label objects now that nothing seeds or reads them?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:skills",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T19:40:39Z",
-  "updated_at": "2026-11-19T06:03:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:12:45Z",
+  "closed_at": "2026-11-20T01:12:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34116",
   "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate ③: seat-directed (domain:skills#1). Card #32956 reserves this question for the maintainer (\"whether the four existing `target:*` label objects are deleted is a maintainer call; ask on this card, do not delete\"); the contract review of PR #34113 escalated it. Asked here so #32956 can close when #34113 lands. Follow-up of #32956.\n\n## 维护者速读\n\n- **现状:** 自 #32906 起,发版阻塞只看「发版窗内的 `priority:p0`」。PR #34113 让 `ensure-pm-labels.sh` 不再创建 `target:*` 标签,已存在的不动。\n- **仓里还剩 4 个 `target:*` 标签对象:** `target:v17`(约 100 张已关卡挂着)、`target:v18`(约 100 张)、`target:18`(4 张)、`target:18.4.0`(0 张)。都没有开着的卡。\n- **ROADMAP.md 第 57–58 行**仍写「发版目标看 milestones 和 `target:*` 标签」。但仓里没有 milestone,今后也不会再有工具创建 `target:*`。\n- **要您选:** 保留这些标签作历史并改 ROADMAP 那一句(推荐 A),还是删掉标签(B)。\n\n## Decision needed (maintainer)\n\n- **A. Keep the four label objects as history; reword the ROADMAP pointer (recommended).** No label is deleted. A skills-lane follow-up rewords `ROADMAP.md:57-58` to say a release blocker is `priority:p0` inside the release window, and that the `target:*` labels are historical marks on closed issues. Nothing reads them as a board today (contract review 6900134615 on PR #34113), so keeping them costs nothing.\n- **B. Delete the four label objects and drop the ROADMAP pointer.** GitHub removes a deleted label from every issue that carries it, about 200 closed issues here, and that cannot be undone except by hand. The release history of v17 and v18 then lives only in changelogs.\n- **C. Delete only the unused one (`target:18.4.0`, 0 issues) and otherwise as A.**\n\nWhy A: the labels carry the only per-issue record of which closed work belonged to the v17 and v18 windows, deletion is irreversible, and the stale part is one sentence in ROADMAP.md, which a small card fixes.\n\nPrior rulings read: #32906 (release blocker = `priority:p0` in the window, nothing else). No ⛔ line asks for the labels to be removed.\n\n## Reader\n\ndomain:skills (seat 1) files the ROADMAP follow-up after the answer; deleting labels (B or C) is a maintainer action, or a seat card if you say so.\n"

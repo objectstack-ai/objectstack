@@ -2,8 +2,8 @@
   "number": 35553,
   "kind": "issue",
   "title": "视图切换和新建重做：下拉带类型图标和记录数，原地新建（名称、类型、分组字段），不再让用户填机器名",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T15:09:47Z",
-  "updated_at": "2026-11-19T18:31:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T00:58:59Z",
+  "closed_at": "2026-11-20T00:55:05Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35553",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。\n\n维护者 2026-11-19 原话：「涉及到很多细节了，我们之前做的都不好，包括 过滤 排序，选项的设置过程，视图创建和自定义的过程。」「你看一下他列表视图有图标代表类型，还有记录数显示在下拉左侧」。\n\n## 参照（Twenty）\n\n![参照 1：视图下拉，末尾「添加视图」](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-view-1-switcher.jpg?raw=true)\n\n![参照 2：原地新建，四个控件](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ref-view-2-create.jpg?raw=true)\n\n## 我们现在\n\n![现状 1：视图下拉](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-view-1-switcher.jpg?raw=true)\n\n![现状 2：整屏的创建视图对话框](https://github.com/objectstack-ai/objectstack/blob/73e27d0b871c08ff9ff7c5d7f3a412ffe3950cae/list-redo/ours-view-2-create.jpg?raw=true)\n\n参照对象是 Twenty（AGPL，本机运行的 `f9056c83`）：只参照结构、步骤和尺寸，⛔ 不抄它的代码。截图 800×500，取自 1280×800 视口；「我们」的截图取自本机最新控制台（`origin/main` `7ece0204a6`，HotCRM，zh-CN），2026-11-19。\n\n## 现状（实测环境：本机控制台 `origin/main` `7ece0204a6` + HotCRM，zh-CN，视口 1280×800，2026-11-19，销售应用「商机 / 进行中商机」。）\n\n- 视图下拉：搜索框、「全部」分组下 9 个视图（已带类型图标），底部「另存为我的视图」「新建视图」「管理视图」。有的视图名被截断（「⚠️ 停滞商机 · 按阶段停留时…」）。\n- 点「新建视图」：弹出整屏对话框「创建视图」，10 张类型卡片（表格、看板、日历、画廊、时间线、甘特图、地图、图表、树形、工时表），下面「标题」和「名称」两个必填项；「名称」是机器标识，自动生成成「biaoge_1」，说明文字写着「机器标识（snake_case）」。\n- 新建的是共享视图，存为草稿（`ui/packages/app-shell/src/views/objectViewViewCrud.tsx:170`），之后跳到草稿预览。\n- 视图栏上当前视图名旁没有记录数。\n\n## 要做的\n\n1. **视图栏上的触发处**：类型图标、视图名、记录数、下拉箭头（位置由子卡 1 提供）。\n2. **下拉**：保留搜索；每个视图一行，带类型图标；「我的视图」和共享视图分两组；名称过长时换行或给出完整提示，不截成看不出区别的样子。底部「添加视图」。\n3. **原地新建**：点「添加视图」，下拉原地换成一张小卡片：图标加名称、视图类型（下拉，带图标）、该类型必需的一个字段（看板选分组字段，日历选日期字段，其余类型没有就不显示）、「创建」。创建后直接进入新视图。\n4. **不让用户填机器名**：机器标识由系统根据名称生成并保证唯一，不出现在界面上。\n5. **从当前状态新建**：当前有未保存的筛选或排序时，新视图默认带上它们，卡片上写明「包含当前的筛选和排序」，可取消勾选。\n6. **默认建成「我的视图」**；有权限的人可在卡片上切到「共享」。「另存为我的视图」并进这张卡片，不再是下拉里的单独一项。\n7. **管理视图**（重命名、删除、置顶、设为默认、排序）保留在下拉底部的「管理视图」里，本卡不重做其内容，只保证入口还在。\n\n## 不做的\n\n- 不改共享视图的草稿/发布规则和权限（另议）。\n- 不减少视图类型；不改各类型视图自身的内容区。\n\n## 验收\n\n- 新建一个按「阶段」分组的看板视图：从点视图名到进入新视图，不超过 5 次点击加一次输入名称；全程看不到 snake_case 或机器标识。\n- 没有改共享视图权限的普通成员也能新建，建出来的是「我的视图」，别人看不到。\n- 带着未保存的筛选新建时，新视图里有同样的筛选标签。\n- 下拉里每个视图有类型图标；当前视图名旁显示记录数。\n- 两个名称前 12 个字相同的视图，在下拉里能分清。\n- PR 正文列出迁移和作废的测试、同笔修改的验收条款（含 `records-forms.saved-view-management`）。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/objectViewTitleSwitcher.tsx`、`objectViewViewCrud.tsx`、`ObjectView.tsx`（`CreateViewDialog`）、`personalViews.ts`。依赖子卡 1。\n\nDedupe: `创建视图 对话框 名称`、`create view dialog machine name`（objectstack，open）→ 0。"

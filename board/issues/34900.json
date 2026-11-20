@@ -2,8 +2,8 @@
   "number": 34900,
   "kind": "issue",
   "title": "Script action bodies write into a disabled package's objects: ctx.api insert succeeds where REST refuses 404 OBJECT_PACKAGE_DISABLED",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:package",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T15:26:26Z",
-  "updated_at": "2026-11-19T18:08:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T22:31:47Z",
+  "closed_at": "2026-11-19T22:28:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34900",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound by the hotcrm lane's probe for hotcrm#2618 (report: hotcrm#2618 comment 6952320824) on @objectstack 18.5.0, local SQLite. Read in code on objectstack `main` fc5913e117.\n\n## What happens\n\nPackage A (Project Delivery) depends on package B (Order to Cash). B is disabled with `PATCH /api/v1/packages/<B>/disable` (200). Then:\n\n- `POST /api/v1/data/crm_billing_milestone` (B's object) → 404 `OBJECT_PACKAGE_DISABLED`, as designed.\n- `POST /api/v1/actions/crm_project/prepare_billing` (A's script action, A enabled) → 200. Its body's `ctx.api.object('crm_billing_milestone').insert(...)` **wrote a row into B's disabled object**, and B's own beforeInsert hook (`billing_milestone_row_stamp`) ran on it. The row was there after B was re-enabled.\n\n## Why, in code\n\nThe disabled-package refusal lives at the doors, not in the engine. `packages/runtime/src/action-execution.ts` ~546–565 (`refuseUnexposedDataAction`) says it outright: \"the engine serves a disabled package's objects\". `isObjectPackageDisabled` is called only from REST meta routes, `protocol-authoring-refusals.ts` and `effective-object-permissions.ts`. A sandboxed script's `ctx.api` (`packages/runtime/src/sandbox/quickjs-runner.ts`) reaches the engine without passing that gate.\n\nRelated: #25296 (closed: the action door ran a disabled package's own action) and #33527 (open: whether withdrawn packages stay armed). This one is a third door: an enabled package's body writing into a disabled package.\n\n## Asked\n\nA disabled package's objects refuse writes (and reads) from every non-system caller, script bodies included, with the same `OBJECT_PACKAGE_DISABLED`. Decide whether `isSystem` writes are exempt, and say so in the ledger.\n\n## Done when\n\nThe probe above answers the action with a refusal naming the disabled object, and nothing lands in it."

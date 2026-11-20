@@ -2,8 +2,8 @@
   "number": 35593,
   "kind": "issue",
   "title": "记录页头部压成一行；只有一组按钮，随记录状态换内容（等我审批时是通过、拒绝）；审批状态只留一个短标签",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T17:01:16Z",
-  "updated_at": "2026-11-19T17:55:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:40:48Z",
+  "closed_at": "2026-11-20T01:39:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35593",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（维护者 2026-11-19：「这一批卡p2」）。\n\n维护者 2026-11-19 原话：「现在的两波按钮很奇怪」；把「并成一组」和 objectstack-ai/objectstack#34361 的旧裁决 A 并排摆出后：「同意」。「顶上一排审批相关的状态是否写太多，有的是否应该放到审批选项卡中」。「抽屉打开的时候，不需要第几条，上一条下一条」「也不需要显示对象名称」。\n\n## 目标（图 37）\n\n![图 37 记录页：概览、相关表页签、抽屉](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/37-record.png?raw=true)\n\n## 现状\n\n![现状：HotCRM 手写的商机页，待审批](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/ours-hotcrm-opportunity-page.jpg?raw=true)\n\n图是深色稿，只表达结构和尺寸，颜色沿用现有主题变量。参照对象 Twenty 是 AGPL，只参照结构，⛔ 不抄代码。代码读数取自 `origin/main` `7ece0204a6`。外壳（顶栏、左侧栏）不动。\n\n- 待审批的记录页上有两组按钮：页面主体上方的审批栏（`DeclaredActionsBar`，`ui/packages/app-shell/src/views/RecordDetailView.tsx:5522-5533`）是「通过、拒绝、更多审批操作」；标题右边是记录自己的操作（HotCRM 商机：生成报价单、克隆商机、记录通话、编辑、⋯）。\n- 审批栏上写「待你审批 · 第 2 步 · 销售总监签批 · 由你提交」；下面另有一块说明和「审批中已锁定」标记（`ui/packages/plugin-detail/src/DetailView.tsx:1774-1781`）。\n- 页签上方共有三到四层：标题和按钮、关键字段、阶段条、（待审批时）审批栏。\n- 抽屉头部显示「对象名 › 记录名」和「2 / 10」、上一条、下一条。\n- 记录操作由动作元数据的 `locations`、`order`、`variant` 决定（`packages/spec/src/ui/action.zod.ts:774-804, 1789-1810`），`page:header` 有 `maxVisible`（默认 3）。没有按审批状态切换头部按钮的规则；「等我审批」目前只在审批请求行上知道（`viewer.can_act`）。\n\n## 要做的\n\n1. **头部一行（高 44）**。整页：对象图标、对象名、「/」、记录名、当前阶段标签、审批状态标签；右边是「第几条」、上一条、下一条、分隔线、一组按钮。\n2. **抽屉头部**：只有对象图标、记录名、阶段标签、审批状态标签；右边是一组按钮、「整页打开」、「关闭」。**不显示对象名，不显示「第几条」和上一条、下一条**（列表就在旁边）。\n3. **只有一组按钮，随记录状态换内容**：\n   - 平时：「编辑」、一个主操作（按动作元数据的顺序取第一个）、「⋮」。\n   - 等我审批：「通过」（主色）、「拒绝」、「⋮」。「⋮」里先是其余审批操作（转交、加签、退回、回复等），分隔线，再是记录自己的操作。\n   - 我提交的、等别人批：「撤回」、「催办」、「⋮」。\n   - 记录锁定时不显示「编辑」。\n   - 任何状态下只有一个主色按钮（承接 objectstack-ai/objectstack#35419：手机上顶部「通过」和底部操作栏第一个动作同为主色）。\n4. **独立的审批栏取消**。头部只留一个短标签：「待你审批」/「审批中」/「已驳回」等，点它跳到「审批」页签。第几步、原因说明、进度、锁定说明都不在头部（去处见子卡「页签规则」）。\n5. **「已锁定」标记**：因审批锁定时不单独显示（「待你审批」已说明）；因其他原因锁定时仍在记录名旁显示。从别处触发编辑时提示「审批中，暂时不能修改」并给出去「审批」页签的链接。\n6. 「拒绝」必须填理由并确认后才提交。\n\n## 不做的\n\n- 不改各个动作本身的行为和权限；不改审批流程。\n- 不动外壳；不动审批请求对象自己的记录页（管理员用）。\n\n## 取代的裁决\n\nobjectstack-ai/objectstack#34361 的裁决 A（保留独立审批条）由本卡取代，已在该卡留注。A 的实现在本卡合入前保持现状。\n\n## 验收（1280×800，zh-CN，HotCRM 待审批的商机）\n\n- 页签行以上只有一行头部；页面上只有一组按钮。\n- 审批人打开：右上是「通过」「拒绝」「⋮」；「⋮」里审批操作和记录操作之间有分隔。提交人打开：「撤回」「催办」「⋮」。无关的人打开：记录自己的操作，没有审批按钮。\n- 审批结束后头部恢复为「编辑」、主操作、「⋮」。\n- 抽屉头部没有对象名、没有「第几条」和上下条按钮；整页有。\n- 手机宽度（390）下任何状态只有一个主色按钮。\n- 点「拒绝」不填理由不能提交。\n- 一次合入、一次验收。PR 正文列出迁移和作废的测试，以及同笔修改的 `docs/qa/platform-checklist` 条款。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/RecordDetailView.tsx`、`DeclaredActionsBar.tsx`、`ui/packages/components/src/custom/record-top-bar.tsx`、`ui/packages/components/src/renderers/layout/containers.tsx`（`page:header`）。若「等我审批」需要进入记录的判断数据，先与 `domain:spec` 对一下。\n\nDedupe: `审批 记录页 按钮 头部`、`record page header actions approval state`（objectstack，open）→ 0；承接 objectstack-ai/objectstack#35419；取代 objectstack-ai/objectstack#34361。"

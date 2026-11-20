@@ -1,0 +1,33 @@
+{
+  "number": 35659,
+  "kind": "issue",
+  "title": "审批「驳回」不填理由也能提交：approval_reject 的 comment 声明为可选，API 与 MCP 也一样（承 #35593 第 6 条）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T22:02:18Z",
+  "updated_at": "2026-11-20T02:15:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35659",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（#35593 卡线程读数 `card-35593/readings-a1-a5.md`，认领修订 7023420709）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（`origin/main` c0716ed4 读源码，未在公开入口实测）\n\n- 维护者在 #35593（记录页头部，专题 #35590）要求：「拒绝」必须填理由并确认后才提交。\n- 动作 `approval_reject` 的参数 `comment` 在 `packages/plugins/plugin-approvals/src/sys-approval-request.object.ts` 里声明为 `required: false`；该动作 `ai.exposed`，所以 REST 和 MCP 调用不带理由也能驳回。\n- #35593 的 PR 只在记录页的驳回对话框里做前端必填；生产方的声明不在该卡车道（`domain:ui`）。\n\n## 要做的\n\n- 由 plugin-approvals 把 `approval_reject` 的 `comment` 改为必填，REST / MCP 同样拒绝空理由；拒绝时的报错文案照现有动作参数校验的口径。\n- 这是对公开接口的收紧（Clause-② narrowing），按契约复核流程走。\n\n## 验收\n\n- 不带 `comment` 调用 `approval_reject`（REST、MCP、控制台）都被拒绝，并说明缺理由；带理由的照旧。\n\nReader: plugin-approvals 车道（`domain:server`）。\n\nDedupe: `approval_reject comment required`（objectstack，open）→ 只有 #35593 本身。"
+}

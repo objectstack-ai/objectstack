@@ -1,0 +1,31 @@
+{
+  "number": 35695,
+  "kind": "issue",
+  "title": "lint: os lint --item judges a rule-table entry per pass or member, not by every stack key the whole entry reads",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T23:43:30Z",
+  "updated_at": "2026-11-19T23:52:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35695",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nFiling gate: ② follow-up of a ruled fork · Source: fleet · fork 2, option C, of os-dev-report 7025323819 on #34777, filed on seat 1's 23:41Z ruling (fork 2 = A now, C as a separate card). ⛔ Not a claim.\n\nGrade: left to triage. Size **M**, area `area:build` (`packages/lint`, `packages/cli`). The seat suggests **p2**: it raises coverage of a command that already ships, and nothing is wrong in what it reports.\nBlocked-by: #34777\n\n## Business reason\n\n`os lint --item FILE --type TYPE` (PR #35675 on #34777) lets a developer or an AI client check one metadata item before saving it, without the rest of the app. To avoid inventing findings, it reports a rule only when that rule read nothing but the item's own collection. Most rules walk several collections, even where the part that judges this item needs only the item, so few rules give a verdict today: object 10 of 38 entries, view 1 of 18, flow 4 of 13, dashboard 1 of 10, app 0 of 11 (measured at 1545a86f96). An author gets \"not judged\" for checks that could have been judged.\n\n## What happens\n\n`judgeItemAlone` (`packages/cli/src/lint/item-lint.ts`) runs each entry of `authoringRulesFor('lint')` through a proxy that records which top-level stack keys the entry reads. One read of any key other than the item's collection drops the whole entry into `notJudged`, even when the read came from a pass or member that does not bear on this item (`validateStackExpressions`, `validateReferenceIntegrity`, `lintLivenessProperties`, ...).\n\n## Expected\n\nThe classification works per pass or member, not per entry. The reference-integrity suite and `validateStackExpressions` already declare which members and passes the runtime per-write gate may run on one written item (`runtimeTypes`, `runtimeWriteType`). `packages/lint` exposes that reach, and `os lint --item` counts a pass that reads only the item's own body as judged, without guessing. A pass that needs the rest of the stack stays in `notJudged` and is named with the keys it read.\n\n## Done when\n\n- The same measurement (one item per type) shows more judged passes than the per-entry figures above, and every newly judged pass is one the runtime per-write gate already runs on a single item.\n- A test pins that a pass needing another collection is still reported as not judged, with the keys it read.\n- No finding is reported that the full-stack `os lint` would not raise on the same item.\n\nWho acts: the owner of `packages/lint`'s rule registry (triage routes).\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open \"lint --item\"` and `lint item judged per pass member` (2026-11-19 23:4xZ): only #34777, the parent."
+}

@@ -2,8 +2,8 @@
   "number": 34783,
   "kind": "issue",
   "title": "ci shard follow-ups after the Test Core 10-shard widening: refresh-lane path filter, width-8 self-test rows, stale 1..8 header",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,21 @@
     "domain:devx",
     "enhancement",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T10:20:59Z",
-  "updated_at": "2026-11-19T05:00:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:10:04Z",
+  "closed_at": "2026-11-20T01:10:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34783",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: follow-ups the contract review of PR #34727 (Fixes #34710, Test Core matrix 8 → 10) left open, comment 6945222844. Dedupe: `shard-timings-refresh paths` / `plan-test-core-shards 1..8`; no open card.\n\nSuggested-grade: p3 · domain:devx · tooling · Blocked-by #34727\n\n## Items\n\n- `.github/workflows/shard-timings-refresh.yml`: its `pull_request.paths` filter should also list `.github/workflows/ci.yml` and `scripts/ci-shard-matrix.mjs`, so a change to the matrix width re-runs the refresh lane's checks.\n- N1 — three negative rows in the self-test hard-code a width of 8; if the matrix ever returns to 8 they fail for the wrong reason. Derive the width from the matrix instead.\n- N2 — the header comment of `scripts/ci/plan-test-core-shards.mjs` still says `1..8` in two places.\n\nNo behaviour change beyond the path filter.\n"

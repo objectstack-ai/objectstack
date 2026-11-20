@@ -2,8 +2,8 @@
   "number": 35621,
   "kind": "issue",
   "title": "Flaky: plugin-hono-server adapter-drain.test.ts \"an idle keep-alive connection is released at drain start\" reads the socket after a fixed 50 ms sleep",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T18:23:28Z",
-  "updated_at": "2026-11-19T20:10:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T21:02:47Z",
+  "closed_at": "2026-11-19T21:02:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35621",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: (c) a residual that a card thread's queue eject names. Reported by seat 1's #34575 card thread (PR #35510 audit comment 7018063679). ⛔ Not a claim.\n\nGrade: area:fleet · Bug · flaky test (a timing premise) · every merge-queue group that runs Test Core shard 10 · measured once: merge-queue run 44581618003.\n\n## What happened\n\nPR #35510 was ejected from the merge queue (run 44581618003, a group holding only that PR). The failure was in Test Core 10/10, `packages/plugins/plugin-hono-server` `adapter-drain.test.ts`, case \"an idle keep-alive connection is released at drain start\": `expected undefined to be 'keep-alive'`.\n\n- #35510's diff is not on that response's runtime path, and main `d2bc1ffd` is green on the same shard.\n- The test writes the request, then `sleep(50)`, then parses the bytes it has received (around lines 241–243). Under a loaded runner the response hasn't arrived yet, so the header reads as `undefined`. This is the same class as a fixed timeout.\n- This is the first occurrence in the 24-hour ledger.\n\n## Fix\n\nWait on the socket for the response (or for its headers) with a bounded deadline, instead of a fixed sleep. Keep the assertion as it is. A shard-local retry, or a longer sleep, is not the fix.\n\n## Done when\n\nThe case waits for the bytes it asserts on, and a loop run (for example 50 runs) under CPU pressure stays green."

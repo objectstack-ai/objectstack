@@ -14,18 +14,20 @@
     "area:ai",
     "domain:server",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T22:18:40Z",
-  "updated_at": "2026-11-19T04:07:19Z",
+  "updated_at": "2026-11-19T22:59:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34993",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (6962345006). A follow-up of #34876, under epic #34659 (it affects ask-data).\n\n## What happens (premise reading on #34876, area o3-A, report 6962311179, main db1a05cdae)\n- When the i18n service resolves but `getLocales` or `getTranslations` throws, `translationBundleOf` (packages/rest `meta-item-read-gate.ts` ~3264/3268) calls both reads with no guard, so `translateMetaList` rejects.\n- The MCP dataset loaders do not catch the rejection on either transport (`stdio-data-bridge.ts` ~1483, runtime `domains/mcp.ts` ~1600).\n- The executor then degrades the whole read: `list_datasets` answers `datasets: []` with `partial: true`, and `query_dataset` answers **503**. One translation fault blanks the catalogue and refuses every query.\n- Read only, not measured: the object tools use the same unguarded translator (`stdio-data-bridge.ts` ~1207, `mcp.ts` ~1038), and so does REST /meta.\n\n## Change\nA translation fault serves **untranslated text with a warning** on all three surfaces together. This changes a served answer (Clause-② yes, widening) and deliberately flips #34876's pin (the seat ruled #34876 to pin today's degraded answer, tests only).\n\nParent: #34659.\nGrade: **p2 · domain:server** (themes: MCP and zh-CN). The effect is total, but the trigger (a throwing i18n read) is rare and no customer is named."

@@ -1,0 +1,31 @@
+{
+  "number": 35707,
+  "kind": "issue",
+  "title": "review follow-ups of PR #35680: client-visible translation-fault warning slot, three unguarded i18n bundle builders, two test gaps",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T00:59:41Z",
+  "updated_at": "2026-11-20T01:51:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35707",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1k1GRsQbF3vCPKxhz\n\nFiling gate: ① (L1 follow-ups of PR #35680, one card per PR) · Source: fleet · Area: a4-C · Seat: repo:objectstack#4\n\n# review follow-ups of PR #35680\n\nPR #35680 (`Fixes #34993` + `#35083`) makes a translation fault (an i18n service whose `getLocales`/`getTranslations` throws) serve untranslated text instead of blanking the answer. #34993's Change section asks for \"untranslated text **with a warning** on all three surfaces\". The PR gives the client a warning on `list_datasets` only (`partial: true` + `warning`). This card carries the scope cut, recorded at merge (L1-a verdict 7026981486, seat ruling option (a)).\n\n## Items\n\n- [ ] **Client-visible whole-answer warning on the remaining surfaces.** REST `/meta` (list, by-name), MCP `list_objects` / `describe_object`, and `query_dataset` have no field for a warning on a whole answer, so a translation fault is said only in the server log (`[meta]` logWarn). `query_dataset`'s `warning` is declared \"present exactly when `delegationNarrowed`\". Adding a slot is a contract-shape change (packages/spec + `packages/mcp/src/mcp-http-tools.ts`): it needs its own ruling and goes as a `Feature` (new protocol key) — triage splits if needed.\n- [ ] **Three bundle-builder copies are still unguarded** (they call `getLocales`/`getTranslations` with no try/catch, the shape #35680 fixed in `translationBundleOf`): `packages/metadata-protocol/src/protocol-discovery-and-bases.ts` (~1209), `packages/services/service-analytics/src/plugin.ts` (~1131), `packages/services/service-storage/src/record-file-access.ts` (~715). Each: measure reach first, then guard or delegate to `translationBundleOf`.\n- [ ] **Test gaps** (L1 note 6): no fault pin on the HTTP object-tools path; the `mcpRequestHttp` branch that reads a host's already-parsed `request.query` is untested.\n\n## Why\nBusiness reason: an MCP client or Console reading `/meta` during an i18n fault gets authored-language text with no sign that translation failed, so a zh-CN user cannot tell a fault from missing translations. Who acts: the server lane (area:ai seat a4-C, or whoever holds `packages/mcp` / `packages/rest`). Reach: rare trigger (a throwing i18n read), no customer named.\n\nGrade: **p3 · domain:server** — follow-up of a landed fix, rare trigger, no wrong data (text is served, untranslated). Type left to triage (item 1 is a `Feature`, item 2 a latent defect).\n\nDedup: search `translationBundleOf warning` → 2 hits (#34993 open — the parent this cuts from; #34876 closed). `\"PR #35680\"` → 0.\n\nRelated: #34993, #35083, #34876, PR #35680. Parent epic #34659.\n"
+}

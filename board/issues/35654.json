@@ -1,0 +1,32 @@
+{
+  "number": 35654,
+  "kind": "issue",
+  "title": "scenario order_to_cash: seeds end-state amount_paid/balance on all 95 invoices, so a build with amount_paid as a roll-up and an open-balance cap refuses 66 of 72 payments",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-19T21:40:32Z",
+  "updated_at": "2026-11-19T21:48:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35654",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4cysZsTQwxLv9M2TzHH\n\nOut-of-scope finding (class a) from area a4-A's #34986 pass (os-dev report 7022810829). The scenario card's seed data writes end-state `amount_paid` and balance on every invoice, so any build that models `amount_paid` as a roll-up of payments with an open-balance cap refuses exactly 66 of 72 payment rows. The fix is the scenario card data / runner, not the skills.\nDone when: the card's seed carries opening state (or the runner seeds in an order the roll-up can follow) and a build of that shape loads every payment row.\nDedupe read: order_to_cash, amount_paid, end-state — only #34986."
+}

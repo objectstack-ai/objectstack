@@ -3,7 +3,7 @@
   "kind": "issue",
   "title": "pm: open eval-run records have no reader after they left the triage sweeps",
   "state": "open",
-  "state_reason": null,
+  "state_reason": "reopened",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T19:40:45Z",
-  "updated_at": "2026-11-19T06:03:05Z",
+  "updated_at": "2026-11-20T01:45:36Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34118",
   "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ① a follow-up owed by work in flight: the at-tier contract review of PR #34110 (card #34012) graded a should-fix off that PR's surface. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** #34110 把 `eval-run` 记录排除在首触巡查、H13、H74 之外,并删掉了「记录在登记的同一轮关闭」这句兜底。`qa-run` 有 `qa-rollup.mjs` 汇总开着的记录,`eval-run` 没有。所以一条忘了关的 `eval-run` 记录现在没有任何巡查会提到。\n- **要做的:** 给开着的 `eval-run` 记录一个读者(汇总或巡查一行),超期未关时报出来。\n- **受管文件:** 否。\n\n## What is wrong\n\nPR #34110 adds `eval-run` to the first-touch sweep's `EXCLUDED_LABELS`, `H13_EXEMPT_LABELS` and `H74_EXEMPT_LABELS`, and rewrites the scenario-eval skill sentence that closed a record in the round it is filed. For `qa-run`, open records are still counted by `qa-rollup.mjs`. For `eval-run`, no reader counts open records after this change, so a record left open is silent.\n\n## What lands\n\n1. A reader of open `eval-run` records: either `qa-rollup.mjs` learns the label, or a half-state row reports an `eval-run` record open past one eval round. Pick the one that matches how the scenario-eval skill closes a record, and say why.\n2. A self-test row and its ablation.\n\n`scripts/pm/**` or `scripts/qa/**` (one reader), `.claude/skills/scenario-eval/SKILL.md` only if the closing rule needs one line; `skip-changeset`; `Clause-②: no`. Serial after PR #34110. Dedupe: `is:issue eval-run open record rollup` → none. **New.**\n"

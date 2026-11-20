@@ -14,18 +14,20 @@
     "area:build",
     "domain:spec",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T12:52:14Z",
-  "updated_at": "2026-11-19T12:54:30Z",
+  "updated_at": "2026-11-20T01:46:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35512",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: **(b) a defect measured during a card's development** — found by the #34575 card thread's dev (PR #35510, os-dev-report 7009580967), outside that card's scope.\n\n## What happens\n- `HookSchema.texts` TSDoc promises: \"A key the hook's source asks for literally that `texts` does not declare is refused at save\".\n- The save-time literal check (`hook-refusal-codes`: `TEXT_CALL` / `hookTextKeysAskedIn`) only recognises the call shape `ctx.text('k')`.\n- So `ctx.text('undeclared_key')` is refused at save, but `await ctx.text?.('undeclared_key')` and `ctx.text!('undeclared_key')` pass `HookSchema.safeParse`. The runtime still refuses the key, so the author learns about it only when the hook runs.\n- PR #35510 declares `HookContext.text` as optional (as #35197 asks). Under strict TypeScript authors will reach for `?.(`, so the hole gets hit more often after it lands.\n- Possibly the same family: the action half shares the key reader (not measured).\n\n## Ask\n- The literal reader also accepts `?.(` and `!(` call shapes (`ctx.text?.('k')`, `ctx.text!('k')`, and their `await` forms), with pins for each shape, on hooks and — if measured to share the reader — actions.\n- ⛔ Not a new rule; this is making an existing declared refusal hold on every call shape it names.\n\n## Dedup\nSearched issues for `hookTextKeysAskedIn`, `TEXT_CALL`, `ctx.text optional`: only #34575 (the source card).\n\n## Reader\nThe seat that takes `area:build` authoring-rule cards. Suggested grade: p2 (declared-but-unenforced save refusal, reach grows with #35510)."

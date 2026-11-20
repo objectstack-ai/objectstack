@@ -2,8 +2,8 @@
   "number": 34544,
   "kind": "issue",
   "title": "aggregate timezone: the zone resolution rule is written three times (engine, driver-sql, analytics echo) and only two are pinned together",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:data",
     "domain:server",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T00:22:44Z",
-  "updated_at": "2026-11-19T05:07:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:06:34Z",
+  "closed_at": "2026-11-20T01:06:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34544",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: an out-of-scope finding the L2 contract-review record 6933599747 on PR #34530 (card #33697) says should get a follow-up card, passed on by area `o2-F`. Dedupe: `echoBucketZone`, `zone resolution three places`.\n\n## 维护者速读\n\n- 现象:#33697 给聚合加了时区分桶。「时区名怎么解析、走哪条路」的规则写了三份：引擎一份、driver-sql 一份、analytics 的 echo 一份。现在只有引擎和 echo 被测试钉在一起，driver-sql 那份可以悄悄漂走。\n- 为什么要修：同一条规则三处实现，迟早会分歧，分歧时同一个时区会走不同的路。\n- 需要你做的：无。\n\n## Change\n\nAfter PR #34530 merges, give the rule one home that all three call, or, if a package boundary forbids one shared call, one shared table and a test that runs every spelling through all three and asserts the same road. L2 N1 (what a non-declaring driver does when a direct caller hands it a zone) goes in the same change if it was not answered in PR #34530.\n\n## Done when\n\nOne implementation of the rule, or one conformance test over all three, fails when any one copy drifts.\n\nBlocked-by: #33697\n"

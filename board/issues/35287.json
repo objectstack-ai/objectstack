@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T02:11:42Z",
-  "updated_at": "2026-11-19T02:49:34Z",
+  "updated_at": "2026-11-19T22:09:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35287",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: split from #35204 by seat 5 (route ruling on #35204; dev report 6997512051 option C). ⛔ Not a claim.\n\n## What\n\nOn the ObjectQL face (date buckets, `$field` filters, external objects, drivers without raw SQL) `query_dataset` fetches every group and cuts top-N in memory (`strategies/objectql-strategy.ts:815` `orderAndWindow` → `applyWindow(applyOrdering(...))`). `totalGroups` is already exact there (whole-grid length, `dataset-group-count.ts:107`), so correctness holds; the gap is AGENTS.md Prime Directive 5 (SQL-first) on compiling drivers: a large grouping is read whole to return N rows.\n\nThe engine already has the order-and-cut (`packages/objectql/src/aggregate-order-cut.ts`, `AGGREGATE_ORDER_CUT`, zero callers), but the face cannot reach it: its read seam `ctx.executeAggregate` carries no read option, and the engine refuses (400) rather than declines where it cannot serve the cut.\n\n## Routes (from the #35204 dev report, costs are estimates)\n\n- A: objectql gains an opt-in `declined` outcome (nothing read) like the relation group join; service-analytics adds an order-cut read seam and the strategy sends `orderBy` + `limit = offset + limit`. Two packages, ~300–450 lines.\n- B: consumer only, catching the engine's pre-read 400 and falling back. One package, ~250–350 lines; discriminates refusals by error fields.\n\n## Needs a maintainer decision before build\n\nA and B both change which rows a text-ordered top-N returns on compiling drivers (database collation and NULL placement instead of `applyOrdering`). That is visible behaviour. The seat brings route and ordering to the maintainer with an analysis before dispatch.\n\n## Done when\n\nOn a compiling driver the face reads only the cut rows from the database, `totalGroups` stays exact, the ordering rule the maintainer picks is pinned, and an engine that cannot serve the cut falls back without a refusal reaching the user."

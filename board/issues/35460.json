@@ -13,18 +13,20 @@
   "labels": [
     "area:build",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T10:15:11Z",
-  "updated_at": "2026-11-19T10:50:35Z",
+  "updated_at": "2026-11-19T22:09:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35460",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiling gate: **(c) a residual a card's review names** — out-of-scope item reported by the #35036 card thread (PR #35458, os-dev-report 7006127433). Lands after PR #35458 merges; until then the current text is still true.\n\n## Gap\n- PR #35458 adds `MCP_DOOR_TOOL_NAMES` to `packages/spec` (the MCP door's full tool set, 19 tools measured) and teaches `ai-skill-tool-unresolved` to resolve every one of them for a skill MCP can offer (`mcpPrompt` not `false`).\n- `skills/objectstack-ai/SKILL.md` (around line 84, the numbered list of tool sources) still names only `MCP_FILE_TOOL_NAMES` as the fourth source. After #35458 an author reading the skill would think `query_records`, `delete_records` and the other door tools still warn, and would rename a correct claim.\n\n## Scope\n- Rewrite source 4 of that list to name `MCP_DOOR_TOOL_NAMES` (file tools included), and keep the `mcpPrompt: false` condition and the dedicated hint for a door-only name on an in-product-only skill.\n- Check the same list's wording in any eval or rule file under `skills/objectstack-ai/**` that quotes it.\n- ⛔ Text only; no change to the rule or the constant.\n\n## Reader\n`domain:skills` (governed text, Tier S/H per the path fork). Suggested grade: p3 (documentation following a landed implementation)."

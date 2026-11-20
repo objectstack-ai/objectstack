@@ -2,7 +2,7 @@
   "number": 35572,
   "kind": "pull_request",
   "title": "docs(skills): a generated platform catalog, and objectstack-project asks \"does the platform ship it?\"",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "security",
     "size/xl",
     "tests",
@@ -24,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T15:51:52Z",
-  "updated_at": "2026-11-19T19:03:41Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-19T22:31:05Z",
+  "closed_at": "2026-11-19T22:28:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-19T22:28:29Z",
   "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35572",

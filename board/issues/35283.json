@@ -2,8 +2,8 @@
   "number": 35283,
   "kind": "issue",
   "title": "pm-dispatch: group work by mechanism — security advisories and area cards get one analysis and one combined fix PR per group",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:fleet",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-19T01:45:44Z",
-  "updated_at": "2026-11-19T16:11:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:15:20Z",
+  "closed_at": "2026-11-20T01:12:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35283",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate ③: maintainer-directed task. Ruling-ref: the maintainer said 「按机制归组，每组做一次分析、出一个合并修复 PR, 同意，立卡修改skills」 (2026-11-19, seat 5 thread), answering seat 5's cost proposal for security fixes. ⛔ Not a claim. Sibling of #35270 (effort policy); the two may land in one PR. Not part of epic #35205; overlap-check its open step PRs first (same files). This card names no advisory, count or mechanism, and the PR ⛔ must not either.\n\n## Why\n\nThe security lane today handles advisories one at a time: one read, one analysis note, one fix dispatch at `xhigh`, one PR, one L2 review each (`.claude/skills/pm-dispatch/references/lanes/security.md:17-28`, `security-findings.md:27`). Many open advisories share a root mechanism, so the same analysis and the same fix shape are paid for again per advisory.\n\n## What to do\n\nEdit `.claude/skills/pm-dispatch/references/lanes/security.md` and the matching lines of `references/security-findings.md` (re-read line numbers on main):\n\n1. **Group before fixing.** On intake and on each patrol, the security seat sorts every `draft` advisory into a group by shared root mechanism (same missing check, same door family, same owning package). A group has one lead advisory. An advisory that shares nothing is a group of one.\n2. **One analysis per group.** The seat writes one analysis for the group and appends it to the lead advisory via relay `advisory_note`; every other advisory in the group gets a one-line note pointing at the lead. Mechanism stays only in advisories and the dispatch order, as today.\n3. **One combined fix PR per group.** One no-card dispatch order per group, one branch, one PR, one L2 review. A group never spans two owning packages' release lines, and a PR stays inside the normal size limits; a group too large splits into ordered PRs. Each advisory in the group gets its own regression test that reproduces its attack (fails before the fix, passes after), so the PR proves every member, not just the lead.\n4. **Ledger.** The seat post's ledger row gains an opaque group tag (`G1`, `G2`, …), never a mechanism word. Every member moves `fixing` → `merged` → `closed` together when the group PR merges.\n5. **Order.** Groups holding a high- or medium-severity advisory go first. Low-severity advisories are fixed only inside such a group (riding it), not on their own, in line with the maintainer's p1/p2-only dispatch rule.\n6. **Effort** follows #35270 (high-severity: `high` build plus an `xhigh` read-only diff review; medium: `high`; grouping and analysis at `high`). Replace the flat `xhigh` at `security-findings.md:27` accordingly.\n7. **Publishing list** (`security.md:35`) lists by group, members under their lead, high and medium first.\n\n## Folding for ordinary cards (maintainer ruling: option C)\n\nRuling-ref: the maintainer chose 「C 收敛版」 on seat 5's decision card (2026-11-19 03:55Z), after asking 「其他 area 可以用类似的方案吗？」 and 「是否建议合并开发，技能是怎么约定的，是否需要优化」. Analysis: project file `objectstack-seat5/fold-policy-review.md` (§ 建议文本改动 has the exact old → new lines, each ≤120 bytes, measured at `bc75bcdbcd`).\n\n8. `references/execution-duties.md:27-34` (fold gates): when all five gates pass, fold by default (≤5 cards). Gate ① gains an arm, \"or same-file text-only cards (`Clause-②: no`)\". Gate ② adds \"members share the landing tier and the L2 tier; a p1 only leads a chain\". Gate ⑤ adds \"a p3 riding a same-file PR is exempt from ①\". New exit line: a member whose premise fails, or whose delta is not cleared in one round, has its commit and `Fixes` line taken out and is released back to the queue, ⛔ never holding the group. The fold-or-serial answer is owed whenever the seat or area has ≥2 claimable cards with the same mechanism or a shared hot file. Triage's suggestion is spelled `Fold-with: #N`.\n9. `references/area-lease.md:47`: claim must answer: same-area cards that pass the five gates go into one PR by default, otherwise serial. `:46` (p3 rides, ≤5 cards) unchanged unless the maintainer makes \"p3 never alone\" a standing rule.\n10. `references/triage-duties.md:77`: the triage audit comment may carry `Fold-with:` beside `Size/model suggestion:`. ⛔ No `Same-mechanism:` marker (it collides with the duplicate-card rule at `triage-duties.md:81-83`). \"One analysis per fold\" needs no new text: a card in the decision box cannot fold (gate ③), and merged questions are already one ask (`SKILL.md:234-236`).\n- `execution-duties.md` grows by 1 line: cite this ruling to raise its line-ratchet ceiling, or pay with an equal same-file cut.\n- The security grouping (items 1–3) points at the same five gates instead of restating them.\n\n## Done when\n\nThe lane and area text say the above, the public lane file still names no finding, count, path or mechanism, the skill gates pass, and the PR carries a contract review (governed `.claude/**`). Seat 5 reviews and lands.\n\n"

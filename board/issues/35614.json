@@ -3,7 +3,7 @@
   "kind": "issue",
   "title": "Eval skill: a defect card filed from a scenario-eval round must not carry eval-run (the QA runner's twin rule)",
   "state": "open",
-  "state_reason": null,
+  "state_reason": "reopened",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,11 +20,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-19T17:34:53Z",
-  "updated_at": "2026-11-19T17:55:13Z",
+  "updated_at": "2026-11-20T01:45:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35614",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CaAqjP52wVTzs99H5G\n\nFiling gate: ① a rule gap with a named location, found in landed work's review (PR #35532 contract review, comment 7012326518, N4). Source: fleet. Grading: `area:fleet · Task · p3 · reach: every finding a scenario-eval round extracts; none mis-labelled on the board today (the six eval-run cards are all records) · evidence: read`. Parent: #35470.\n\nBusiness reason: PR #35532 took `eval-run` out of every patrol (the first-touch sweep, H13, H74 and the grade row), as the maintainer ruled on 2026-11-19 (run records take no area; eval is run like QA). The QA route has a rule that keeps a finding out of that exclusion. The eval route does not have it yet. So a product defect filed with `eval-run` beside it would be read by no patrol.\n\nDuplicate search, open and closed: `is:issue scenario-eval defect card eval-run` and `is:issue eval-run round-end open records` found #34118, #34920, #34869, #33923 and #35470. #34118 (open, area:fleet) is the other half of the review's N4: a reader for `eval-run` records left open. This card is only the filing rule. They touch different files and can land in either order.\n\n## What is wrong\n\n- `docs/qa/platform-checklist/RUNNER.md:1143-1144` says: \"A defect card does not carry `qa-run`; it enters triage first-touch normally.\"\n- `.claude/skills/scenario-eval/SKILL.md` §6 (「发现 —— 各归各主」, line 149 on main f981dce3be) routes product defects through the filing gate. It does not say the defect card leaves `eval-run` off.\n\n## What lands\n\n1. One sentence in `scenario-eval/SKILL.md` §6: a finding card does not carry `eval-run`, and it enters triage first-touch normally. Mirror RUNNER's wording. Keep the file at or under its line ceiling, with no ceiling edit.\n2. If a pin reads that section, extend it.\n3. `.claude/**` only (governed, Tier S). `skip-changeset`, `Clause-②: no`, `Metadata-protocol: none`.\n\n## Done when\n\n§6 carries the rule, and the skill's line ratchet and governed-prose gates pass."

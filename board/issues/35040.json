@@ -2,8 +2,8 @@
   "number": 35040,
   "kind": "issue",
   "title": "action-body compile check: an unterminated regex literal in an inline body takes the warning arm, not the refusal arm, so a body that cannot compile is accepted at write (after #34980)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:build",
     "domain:spec",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-17T23:54:54Z",
-  "updated_at": "2026-11-19T19:43:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T23:59:44Z",
+  "closed_at": "2026-11-19T23:58:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35040",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6964402867, item 1). It comes from the contract review of #34980 (landed at 15faf1da), nit N3.\n\n## What happens\nIn the action-body compile check that #34980 added, an **unterminated regex literal** in an inline body takes the **warning** arm rather than the refusal arm. A body that cannot compile is then accepted at write, and fails only at run time. That is the failure #34884 (p1) was fixed for.\n\n## Done when\nAn unterminated regex literal, and any other tokenizer error class the check routes to warning, is refused like every other compile error. A pin covers the regex case.\n\nSibling of #34987 (hook and job bodies). Area o3-C knows the code.\nGrade: **p2 · domain:spec**. Theme: MCP authoring (agents write action bodies through the build door). It is a gap in a p1 fix, on a narrow input, so p2 rather than a p3 nit."

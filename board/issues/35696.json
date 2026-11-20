@@ -1,0 +1,32 @@
+{
+  "number": 35696,
+  "kind": "issue",
+  "title": "skills（ui actions）：「新标签页打开」示例的 target 用了 spec 不支持的 ${record.id} 占位，且挂在没有当前记录的 list_toolbar 上",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T23:47:24Z",
+  "updated_at": "2026-11-19T23:53:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35696",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUZrkMKgGrXXe8zPGq\n\nFiling gate：① 已发布技能文字的教学错误。来源：PR #35673 的 os-dev-report 7024934065（out_of_scope_findings），经 delta L2 记录 7025422414 第 ③ 节核实并判为不在该 PR 范围；席位 2026-11-19T23:46Z 要求立卡。⛔ 不是认领。\n\nGrade：交分诊。\n\n## 现在的情况\n\n`skills/objectstack-ui/rules/actions.md`「Opening in a New Tab」一节的已检查示例 `PrintA3Action`（`name: 'crm_print_a3'`）写的是：\n\n```typescript\n  type: 'url',\n  target: '/print/a3?id=${record.id}',   // interpolated at click\n  openIn: 'new-tab',\n  locations: ['list_toolbar'],\n```\n\n有两处与 main 上的 spec 不符：\n\n1. **占位写法**：`packages/spec/src/ui/action.zod.ts` 中 `target` 的 Interpolation 说明只列了两族占位，`${param.X}`（参数弹窗收集的值）和 `${ctx.X}`（动作上下文），记录 id 写作 `${ctx.recordId}`；同文件 `preflight` 那条也用 `${ctx.recordId}`。`${record.X}` 不在其中。`packages/spec/src/ui/action.test.ts` 能解析这串字符，所以 schema 不拦，但渲染时会不会填充没有测过。\n2. **位置**：同文件的 locations 表把 `list_toolbar` 描述为对选中行的批量动作（`input.selectedIds`），那里没有「当前记录」。\n\nPR #35673（S1）给这个示例补上了 `objectName: 'lead'`，它从此会出现在 lead 列表工具栏上。作者照抄时更容易碰到这个问题。该行早于 #35673，#35673 没有改它。\n\n## 期望\n\n示例的占位写法和位置与 spec 一致。比如改用 `${ctx.recordId}` 并放到有当前记录的位置（例如 `record_header`），或者保留 `list_toolbar` 但不引用单条记录。选哪种由负责人定。改完后示例仍是可检查的 `os:check` 块，token 不超过该文件上限（新增内容在同文件删词抵付）。\n\n## Done when\n\n- 该示例的 `target` 只用 spec 列出的占位，且所在 location 能提供它引用的值。\n- `check:skill-examples`、`node scripts/check-skills-token-ratchet.mjs` 与其余 skill 门禁 exit 0。\n- 若渲染器实际上也填 `${record.X}`，就改 spec 的 Interpolation 说明而不是改示例。这属于 spec 改动，要按规则另走裁决。\n\n谁来做：area:build（skills 文字）。依赖：先等 #35673 合并（同一文件、同一示例）。"
+}

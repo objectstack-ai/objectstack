@@ -14,18 +14,20 @@
     "area:ai",
     "domain:server",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-18T01:58:18Z",
-  "updated_at": "2026-11-19T04:05:47Z",
+  "updated_at": "2026-11-19T21:53:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35083",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-E, mailbox #32588, 6966680496), from #34919 / PR #35043.\n\n## What happens\nIn `packages/runtime`, `domains/mcp.ts` `metaTranslationSources` calls `metaRequestLocale` with the **headers but no query**, though its docblock says \"Accept-Language / ?locale=\".\n\nWith no `Accept-Language` header, which is common for MCP clients, the **labels** follow the i18n default while the **executor's sentence** follows the workspace setting. One answer can then mix two languages. This happens on stdio too.\n\n## Done when\n- `metaTranslationSources` passes the query through.\n- The dataset executor gets its translation locale through a `DatasetToolsDeps` seam, so labels and sentence resolve one locale.\n- A pin covers `?locale=zh-CN` with no header, and a header-less stdio call, each answering in one language.\n\nParent: #34659.\nGrade: **p2 · domain:server**. Themes: MCP and zh-CN. Raise it to **p1** if a zh-CN tenant shows mixed-language answers in a real MCP client."

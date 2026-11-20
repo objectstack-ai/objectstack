@@ -1,0 +1,31 @@
+{
+  "number": 35650,
+  "kind": "issue",
+  "title": "Studio action designer: the refusals and texts rows reach only the Related drawer editor; the full-page editor and Studio design surface show them as raw JSON",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-19T21:22:30Z",
+  "updated_at": "2026-11-19T21:26:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35650",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgX6mQpVU8yUysiRAFC\n\nFiling gate: **(b) out-of-scope finding** of PR #35636 (Fixes #35096, #34823), nit N1 of its contract review (record 7022528162), adopted by the seat (7022564983) with this card as its disposition. **Pre-existing**: no `ui/` path is in PR #35636, so every host below behaves as it did before it. Dedupe: searched open issues for `ActionDefaultInspector` and `action designer refusals texts raw JSON`; none.\n\nSuggested-grade: p2 (the follow-up that makes the #35096 / #34823 rows reach the editor an author normally uses) · suggested domain `domain:ui` · area:build · for triage first touch.\n\n## What happens\n- PR #35636 adds `refusals` and `texts` key-only-record rows to the served `action` form (`packages/spec/src/ui/action.form.ts`), gated `data.type == 'script'` like `body`.\n- The served form is drawn as a layout only where a host hands it to `SchemaForm`. For `action` that is one host: `ResourceEditPage` in its `embedded` mount (the Related drawer).\n- The full-page editor takes its designer branch, because `action` registers both a preview and a default inspector; the Studio design surface mounts the same `ActionDefaultInspector`. That inspector's \"More fields\" form gets the served schema and no `form`, and its curated keys do not include `refusals` or `texts`, so `resolveFieldFace` gives each the raw JSON editor, without the key-only face or the help text. The create page passes no form either.\n- The hook rows reach the hook's full-page editor because `hook` registers no preview, so hooks are not affected.\n- Read on the tree at PR #35636 head `5cddfca1`, not run.\n\n## Ask\n- The action designer (`ActionDefaultInspector`, full-page editor and Studio design surface, and the create page) draws `refusals` and `texts` with the served rows' key-only-record face and help text, with a pin per host.\n- Carry with it: the console's zh-CN overlay `metadata-form-zh-cn.ts` has no leaves for the action `refusals` / `texts` rows, nor for hook `texts`; add them.\n- ⛔ No schema or served-form change: the rows on `actionForm` are the contract; this card only makes the designer hosts read them.\n\n## Reader\nThe seat that takes `domain:ui` Studio cards."
+}

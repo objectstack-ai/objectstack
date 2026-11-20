@@ -2,8 +2,8 @@
   "number": 33974,
   "kind": "issue",
   "title": "docs(service-storage): three prose fixes to the upload-bound README and changeset wording",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:data",
     "documentation",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T15:10:22Z",
-  "updated_at": "2026-11-19T06:09:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:08:24Z",
+  "closed_at": "2026-11-20T01:08:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33974",
   "body": "security#1 · sunhaolin · session_017xRBcT1w3zpekijraHJE4f\n\nFollow-up to PR #33883, from contract-review record 6896577168 (nits N4–N6, accepted at landing). These are prose only, with no code change.\n\n- **N4:** `packages/services/service-storage/README.md`. The sentence after the new remedy table (\"On the S3 adapter a presigned upload is judged by its declared size ...\") is joined onto the table's last row, so half of it falls in a third cell that does not render. Put a blank line after the table and restore the sentence as its own paragraph.\n- **N5:** the DevPlugin remedy (README table cell). The second form, \"list the instance in the stack's `plugins`\", holds only with the DevPlugin storage toggle off as well: DevPlugin builds its own storage plugin while the toggle is on, and the kernel refuses a second `storage` service. Say \"with the toggle off\" for both forms.\n- **N6:** the README's \"Host option\" sentence names only the lower edge of the refused host numbers. Name both: a number too small to bound one byte, and one too large to be a finite bound. The released changeset is not edited.\n\nSize XS, one file, docs lane. No changeset needed beyond the docs convention."

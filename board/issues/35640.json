@@ -12,17 +12,20 @@
   },
   "labels": [
     "area:build",
-    "bug"
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-19T20:12:28Z",
-  "updated_at": "2026-11-19T20:12:28Z",
+  "updated_at": "2026-11-19T23:59:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35640",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgTyMahdAdhXSzgy2nt\n\nFiling gate: ① product defect. Source: fleet. Out-of-scope finding of PR #35635 (card #35523), named in its Acceptance notes and in the os-dev-report on #35523. L1-a (comment 7020917973 on PR #35635) asked for a card here instead of a note only, for triage to grade. ⛔ Not a claim.\n\nGrade: left to triage. L1-a's reading is that this meets the condition for raising it to p1, because rows the app itself writes stay behind in a real database. It was read from the code and PR #35635's tests, and reach was not measured at a public door.\n\n## Business reason\n\nA developer runs `os verify` expecting nothing to reach the databases their app declares. PR #35635 (route A, ruled on #35523) builds every declared **managed** datasource on an ephemeral in-memory stand-in, so neither verify's own writes nor the app's reach the real store. That holds only for engines with a faithful stand-in (sqlite, sqlite-wasm, postgres, mysql, turso, memory). A managed datasource on **mongodb**, or on a driver id that a plugin supplies, keeps its real driver. Verify withholds its own derived writes for those objects and names them in the report. The app's own seed data and hooks still run during the boot and the write families of other objects, though, and they write through that real driver. The rows they write are left behind in the developer's real database.\n\n## What happens\n\n- `packages/verify/src/managed-datasource-stand-in.ts` (PR #35635) passes a managed mongodb or plugin-driver datasource through to `createDefaultDatasourceDriverFactory` unchanged.\n- `deriveCrudCases` keeps those objects out of every write family: `managed datasource \"NAME\" (driver \"DRIVER\"): not exercised — verify has no ephemeral stand-in for this engine and never writes through to the real one`.\n- Boot-time seed loading and any hook that writes to such an object (for example a hook on another object that creates a row there) are not verify-derived writes, so nothing withholds them. External datasources behave the same today, and that half was ruled out of scope on #35255.\n\n## Expected\n\nDuring `os verify`, nothing the app writes reaches a datasource the app declares, whatever its engine. Candidate shapes for whoever owns the ruling:\n\n- a stand-in for the remaining engines (an in-memory mongodb-compatible store, or a plugin-provided ephemeral hook);\n- or refuse to boot under `os verify` while such a datasource is declared, naming it and the engine, unless the developer opts in;\n- or skip seed and writing hooks that target such a datasource, and name what was skipped in the report.\n\n## Done when\n\n- A verify test with a recording driver behind a declared managed mongodb (or plugin-driver) datasource, whose app seeds that object and has a hook writing into it, records zero writes during `os verify`, with a control showing `os dev` writes them.\n- The verify README and the `harness.ts` header state the rule for engines that have no stand-in.\n\nWho acts: the area that owns `packages/verify` (area:build, CLI/verify area); the shape needs a ruling first.\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open verify seed hook mongodb datasource` (filed 2026-11-19 20:1xZ). Related: #35523 / PR #35635 (the managed half), #35255 / PR #35509 (the external half)."

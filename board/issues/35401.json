@@ -2,8 +2,8 @@
   "number": 35401,
   "kind": "issue",
   "title": "Change Owner (1/3 spec): object switch `userActions.transfer` and structural eligibility for the Change Owner action",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:data",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T08:05:46Z",
-  "updated_at": "2026-11-19T18:11:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-19T20:49:40Z",
+  "closed_at": "2026-11-19T20:48:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35401",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: split of #35315 (p1) on seat 5's word, phase 1 part 1 of 3. Direction and scope ruled by the maintainer on #35315: comments 7000556646 (dedicated Change Owner action) and 7000907189 (points 1–6). Nested under #35315; grade inherited.\nReader: `domain:spec` · area:data (data-2). Clause-② yes (widening: a new authorable key) → contract review.\n\n## 维护者速读\n\n- 用户能看到什么变化：本卡用户无感；它让对象作者能声明「这个对象是否提供改负责人操作」。\n- 为什么做：改负责人操作已定为平台标准能力，但不该出现在所有对象上（你 05:44 的裁定）。\n- 出错会怎样：开关读错会让管理员在明细、系统对象上看到无意义的按钮，或该有的对象没有；回滚即撤销。\n- 要你做什么：无。\n\n## Ask (ruling 7000907189 point 1)\n\n- **Structural eligibility (derived, not overridable):** `resolveInjectedSystemColumns(def).owner === true` and `owner_id` not declared `readonly`. So `ownership: 'business_unit' | 'org' | 'none'`, `managedBy` objects and `sys_*` objects are never eligible. Export one helper both server and console call.\n- **Object switch:** new `userActions.transfer`, same shape as the existing entries (`boolean | { enabled, visibleWhen, disabledWhen }`). Derived default when omitted: on for `sharingModel` `private` / `public_read` / `public_read_write`; off for `controlled_by_parent`.\n- `enabled: true` on a structurally ineligible object is refused at parse or lint (ADR-0049).\n- Generated baselines, forms, docs and liveness ledger per the repo's spec-key rules.\n\n## Done when\n\nPins: eligibility true/false per ownership, `managedBy`, `sys_*`, readonly `owner_id`; derived default per sharingModel; explicit on/off overrides; refusal of `enabled: true` on an ineligible object. Consumers: #35315 server and console cards (Blocked-by this one).\n\n⛔ Not a claim."

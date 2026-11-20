@@ -2,8 +2,8 @@
   "number": 34066,
   "kind": "issue",
   "title": "pm(check-governed-merges): the self-test's own CLI children inherit GIT_* from the parent environment",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:fleet",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-15T17:35:52Z",
-  "updated_at": "2026-11-19T06:09:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T01:07:28Z",
+  "closed_at": "2026-11-20T01:07:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34066",
   "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate: ① a follow-up owed by work in flight: the at-tier contract review 6898489993 on PR #34049 (card #33578) escalated the dev's out-of-scope finding under ③ with no carrier. ⛔ Not a claim.\n\n## 维护者速读\n\n- **现象:** `check-governed-merges.mjs` 的自测会再起一个它自己的命令行子进程,这个子进程的环境直接继承 `process.env`,并在夹具仓里跑真的 git。会话或钩子里若带着 `GIT_DIR` 之类变量,子进程会读到外面的仓,而不是夹具仓。\n- **要做的:** 子进程的环境也走 `gitFreeEnv()`(去掉所有 `GIT_` 开头的变量),和夹具自己的 git 调用一致;加一条自测行钉住。\n- **受管文件:** 否(`scripts/pm/**`)。\n\n## What is wrong\n\nPR #34049 gave every fixture-owned `git` spawn in the `check-governed-merges.mjs` self-test `env: gitFreeEnv()` (the scope added in 6887759291, `GIT_ENV_ISOLATION_RULE`). The self-test also spawns its own CLI (`--root` pointing at a fixture) with a `process.env`-based environment, and that child runs real git in the fixture roots. An inherited `GIT_DIR` wins over `cwd`, so the child can read the outer repository.\n\n## What lands\n\n1. Every CLI child the self-test spawns gets an environment built from `gitFreeEnv()`, keeping whatever non-`GIT_` keys it sets today.\n2. One self-test row: with `GIT_DIR` set to a decoy in the parent environment, the child's reading of the fixture is unchanged. An ablation (drop the strip) turns it red.\n\n`scripts/pm/check-governed-merges.mjs` (self-test region only); `skip-changeset`; `Clause-②: no`. Serial after PR #33975 (same file). Dedupe: `is:issue gitFreeEnv CLI child` → none. **New.**\n"

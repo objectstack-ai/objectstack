@@ -1,0 +1,34 @@
+{
+  "number": 35687,
+  "kind": "issue",
+  "title": "行内编辑键盘与输入法：回车保存下移、Tab 保存右移、打字即编辑、Esc 取消；拼音选词不误提交",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T23:07:03Z",
+  "updated_at": "2026-11-20T00:59:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35687",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单（专题：列表行内编辑重做，维护者直派，见本卡挂靠的父卡）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「以上都同意」。对应协调席列出的键盘做法和「Esc 一律取消」。\n\n## 现状（主干 `d96c878e33`）\n\n- 未编辑时：方向键、Home/End 移动焦点格；回车进入编辑；Ctrl+C 复制一格；直接打字没有反应（`data-table.tsx:3049-3128`）。\n- 编辑时：内置输入框回车提交、Esc 取消、失焦提交；注入的字段控件上，回车只在目标是 `<input>` 时提交；Tab 故意不离开编辑（`4268-4294` 的注释）。\n- **输入法**：`data-table.tsx` 和 `ui/packages/fields/src/FieldEditWidget.tsx` 里没有 `isComposing` 判断，回车一律当提交（约 3130、4283）。选拼音候选词的那次回车可能把单元格提交掉。这一条是读源码得出的，尚未在浏览器里复现。\n- 实测（本机，20 种字段类型）：单击进入编辑后，光标不在编辑框里，焦点停在单元格上，要再点一次才能打字。测试工具的模拟输入不完全可靠，实现时请先复现。\n\n## 要做的\n\n未编辑、有选中格时：\n\n- 方向键移动选中格；Tab、Shift+Tab 右移、左移。\n- 回车、F2 进入编辑，保留原值，光标在末尾。\n- 直接打可见字符：进入编辑，用打的字替换原值。\n- 退格、Delete：进入编辑并清空，不直接保存。\n- 空格：打开记录（布尔格是切换）。\n- Ctrl+C 复制这一格；Ctrl+V 把剪贴板内容按字段类型转换后写入这一格并保存。\n- Esc：取消选中。\n\n编辑时：\n\n- 回车：保存并下移一格。多行文本里回车是换行，Ctrl/Cmd+回车保存。\n- Tab、Shift+Tab：保存并右移、左移。\n- Esc：取消这次编辑，回到原值，保留选中。所有字段类型一致。\n- 点别处：保存。\n- 进入编辑时光标必须在编辑框里。\n\n输入法：\n\n- 组字过程中的回车、Esc、Tab、方向键都交给输入法，不提交、不取消、不移动。\n- 「打字即编辑」由输入法组字触发时，第一个拼音不能丢，也不能把拼音字母当成值。\n\n## 不做的\n\n- 区域多选、多格粘贴、向下填充。\n\n## 验收\n\n- 用系统自带拼音输入法：选中一个文本格直接打「zhong」再按回车选词，单元格里是「中」字并仍在编辑；再按回车才保存。Chrome 和 Safari 各验一次。\n- 选中数字格打「5」：编辑框里是 5，原值被替换；按 Esc 回到原值。\n- 编辑中按 Tab：保存并选中右边一格；按回车：保存并选中下面一格。\n- 多行文本里回车换行，Ctrl+回车保存。\n- 选中必填的金额格按退格：进入编辑且为空，没有发保存请求。\n- 双击任何可编辑的格后直接打字，字进了编辑框。\n- PR 正文列出迁移和作废的测试（Tab 不离开编辑是之前有意的决定，本卡取代它）。\n\nReader: `domain:ui` 车道。`ui/packages/components/src/renderers/complex/data-table.tsx`（`handleCellKeyDown` 约 3070-3128、`handleEditKeyDown` 约 3130-3140、注入编辑器的包装约 4268-4294）、`ui/packages/fields/src/FieldEditWidget.tsx`。\n\nDedupe: `isComposing`、`输入法 回车 提交`、`Tab 行内编辑`（objectstack，open）→ 0。"
+}

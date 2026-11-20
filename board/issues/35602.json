@@ -14,18 +14,20 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T17:05:46Z",
-  "updated_at": "2026-11-19T17:55:59Z",
+  "updated_at": "2026-11-20T00:36:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35602",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2（维护者 2026-11-19：「这一批卡p2」）。\n\n维护者 2026-11-19 原话：「相当于我们概览右侧的子表区域不用改，只是优化界面样式」「附件和动态好丑」；看过图 39 后继续讨论其余部分，没有提出修改。\n\n## 目标（图 37 的字段分组，图 39 的互动和附件）\n\n![图 37 记录页：概览、相关表页签、抽屉](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/37-record.png?raw=true)\n\n![图 39 互动页签与附件页签](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/39-record-activity.png?raw=true)\n\n## 现状\n\n![现状：平台默认记录页（合同 CTR-0003）](https://github.com/objectstack-ai/objectstack/blob/1680b75d346ebc71cde8a85263f041cdc022480b/record-redo/ours-default-contract.jpg?raw=true)\n\n图是深色稿，只表达结构和尺寸，颜色沿用现有主题变量。参照对象 Twenty 是 AGPL，只参照结构，⛔ 不抄代码。代码读数取自 `origin/main` `7ece0204a6`。外壳（顶栏、左侧栏）不动。\n\n- 字段分组是卡片，标签在上、值在下，两列；每个分组一张带圆角的卡。\n- 互动（实测 HotCRM 商机）：标题「活动 (6)」，一个「全部动态」下拉，一个始终展开的评论框（带加粗、斜体、列表、代码、@ 一排按钮，高约 130），每条动态前一个大圆图标，两到三行；一屏约 3 条。\n- 附件：一张大卡，标题、「上传」按钮、空时一句「暂无附件。上传一个文件开始吧。」；空的时候也占一百多像素高。\n- 相关组件：`record:attachments`（`ui/packages/app-shell/src/views/record-attachments-renderer.tsx`、`RecordAttachmentsPanel.tsx`）、`record:activity`、`ui/packages/plugin-detail/src/RecordActivityTimeline.tsx`。\n\n## 要做的\n\n1. **字段分组**：去掉每组的卡片边框，改成一行组标题加字段行；每个字段一行高 32，标签在左（12 号、灰色、定宽）、值在右（13 号）；整页概览左侧两列、没有右栏时三列、抽屉两列，随容器宽度变。组可折叠；全空的分组仍按 objectstack-ai/objectstack#35019 合成一行。\n2. **互动页签**：\n   - 评论框平时只有一行，点进去才展开并出现格式按钮；「全部动态」是右边一个文字按钮。\n   - 动态按天分组（今天、日期），每条一行高 30：小图标、谁、做了什么，时间靠右；评论多一行正文。\n   - 同一个人连续的字段改动合成一条，可展开看每一处。\n   - 审批相关的只留一句，带「看审批」跳到审批页签，不在这里重复审批进度。\n3. **附件页签**：\n   - 有文件时：密排的文件行（33）：类型标记、文件名、大小、上传人、上传时间、「⋮」（下载、重命名、删除）；右上角「+ 上传」；整个区域可拖入文件。\n   - 没有文件时：一行虚线提示加「选择文件」，不占大卡。\n4. 颜色、圆角、字号与列表页一致（objectstack-ai/objectstack#35548）。\n\n## 不做的\n\n- 不改动态的数据来源和合并规则以外的内容；不做附件预览（objectstack-ai/objectstack#34781 待裁决）。\n- 不改新建/编辑表单里的字段排法。\n\n## 验收（1280×800，zh-CN）\n\n- 概览里没有分组卡片的边框；字段行计算高度 32；标签在左、值在右。\n- 互动页签：评论框初始高度不超过 36；一屏能看到至少 7 条动态；连续三次字段改动显示为一条并可展开。\n- 附件页签：3 个文件占 3 行；没有文件时提示区高度不超过 60。\n- 窄抽屉（380 宽）里关键字段、阶段条、页签行不回退（objectstack-ai/objectstack#34614、#34696、#34826 的场景）。\n- 一次合入、一次验收。PR 正文列出迁移和作废的测试，以及同笔修改的 `docs/qa/platform-checklist` 条款。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-detail/src`（`DetailView.tsx`、`RecordActivityTimeline.tsx`）、`ui/packages/app-shell/src/views/RecordAttachmentsPanel.tsx`、`record-attachments-renderer.tsx`。\n\nDedupe: `记录页 字段 密排`、`动态 评论框 记录页`、`附件 卡片 空状态`（objectstack，open）→ 0；相邻：objectstack-ai/objectstack#34781。"

@@ -1,0 +1,28 @@
+{
+  "number": 35717,
+  "kind": "issue",
+  "title": "action params: a missing required param is refused in English only at the REST action door and MCP run_action, while the console says it in the reader's language",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T02:18:21Z",
+  "updated_at": "2026-11-20T02:18:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35717",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: ② out-of-scope finding while building #35659 (PR #35716, dev report 7028248527); filed on the seat's word. ⛔ Not a claim.\n\n**What.** `enforceActionParams` (`packages/runtime/src/action-execution.ts:3774`) refuses a missing or blank required action param with `400 VALIDATION_ERROR` through `validateActionParams` (`packages/spec/src/ui/action-params.zod.ts:197`). That sentence is English-only at the REST action door and at MCP `run_action`. The console's record-page dialog says the same thing through its translated `requiredError` (`isMissingValue`), so a person working in zh-CN gets a localized sentence in the console and an English one from the API or an AI agent.\n\n**Reach.** Since #35659, every reject without a reason hits this refusal (approval_reject's `comment` is now required). It also applies to every other action with a required param.\n\n**Ask.** Serve the param-contract refusal in the requester's language, using the same catalog the console uses or the server-side refusal catalog the platform already uses for other refusals. Keep the code and status unchanged. Pin one non-English locale at the REST door.\n\nSuggested-grade: p3 · a localized-message gap on an existing refusal; the behaviour is correct.\nDedupe: `validateActionParams` (1 hit: #35659 itself), `action param refusal localized` (3 hits, none on this)."
+}

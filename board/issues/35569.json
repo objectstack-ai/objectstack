@@ -13,18 +13,20 @@
   "labels": [
     "area:build",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T15:40:11Z",
-  "updated_at": "2026-11-19T16:02:26Z",
+  "updated_at": "2026-11-19T22:08:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35569",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: ① skills drift owed by a merged PR: PR #35351 (#34030, merged 93fa4f9714) declares `Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md, evals`, and the seat files that card after merge. ⛔ Not a claim.\nReader: `domain:skills` (`skills/objectstack-i18n/`). Suggested-grade: p2 · the published i18n skill tells authors to add a workaround the platform no longer needs, and states the opposite of current behaviour. Parent: #34030.\nDedupe: `objectstack-i18n sourceLocale` in open issues → none covering the skill text.\n\n## 维护者速读\n\n- 用户能看到什么变化：给 AI 用的多语言技能说明改成和现在的行为一致：校验、拒绝和无权限提示里的字段名、对象名，会按作者写的原文语言给出，不再需要额外配 `fallbackLocale` 来绕。\n- 为什么做：#35351 修好了这个问题，但技能说明和评测题 11 还写着旧的绕法。\n- 出错会怎样：只改说明和评测；写错了重改即可，不影响运行。\n- 要你做什么：无（分诊定级）。\n\n## What happens\n\nSince PR #35351, validation, delete-restriction and permission-denial messages read field and object labels with the request's locale resolved against `sourceLocale`: a request in the source language is served the inline `label:` text, as label serving already was. `skills/objectstack-i18n/SKILL.md` lines 50-53 (on main) still say the opposite: that these messages \"still read labels through `t()`, which falls back to `fallbackLocale`, else `defaultLocale`\", and that without `fallbackLocale: 'en'` an `en` refusal names a field by its zh-CN row. Eval case 11 in `skills/objectstack-i18n/evals/bundles-locales-coverage.json` teaches the same `fallbackLocale: 'en'` workaround.\n\n## Expected\n\n1. In SKILL.md, replace the ⚠️ sentence (lines 50-53) with the current behaviour: refusal and validation messages name fields and objects in the request's language, and a request in `sourceLocale` gets the inline label. `fallbackLocale` stays documented for its own purpose (missing translations), not as a refusal workaround.\n2. In eval case 11, drop the \"also declare `fallbackLocale: 'en'`\" reasoning from `expected_output` and from any assertion that requires it. Keep the `sourceLocale: 'en'` beside `defaultLocale: 'zh-CN'` answer.\n3. Read the code on main before writing (the engine's validation-message reader and the security plugin's denial path that #35351 changed), not this card's wording.\n\n## Done when\n\n- SKILL.md and eval 11 match the behaviour on main, and the skills lint passes.\n- Nothing else in `skills/objectstack-i18n/` still tells authors to set `fallbackLocale` to fix refusal labels (search `fallbackLocale`)."

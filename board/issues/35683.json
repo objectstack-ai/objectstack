@@ -1,0 +1,31 @@
+{
+  "number": 35683,
+  "kind": "issue",
+  "title": "专题：列表行内编辑重做（始终可改、先选中再编辑、浮层编辑框、逐格保存；对照 Twenty 与 Attio）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T23:05:26Z",
+  "updated_at": "2026-11-19T23:05:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35683",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点（父单），由维护者直派。维护者 2026-11-20 原话：「行内编辑的效果，也是他这个好，你也具体测试一下，再开一个专题。」「调研完先和我沟通，再立卡」；看完对照和五项待定后：「以上都同意」。\n\n## 维护者速读\n\n- **这是什么**：列表里直接改单元格这件事，从「先开开关、编辑框塞在格里、攒着统一保存」改成「始终可改、先选中再编辑、编辑框是浮层、逐格保存」。\n- **依据**：本机实测了我们（主干 `d96c878e33`，20 种字段类型逐个点过）、Twenty（本机源码运行，源码逐条核对）、Attio（浏览器实测），又请另一个模型独立评审了方案。\n- **范围**：运行时列表的表格视图。记录页上的逐字段就地改不在本专题（见 objectstack-ai/objectstack#35599）。\n- **优先级**：p2（协调席定的，维护者未指定）。\n- 参照方式：Twenty 是 AGPL，Attio 是商业产品。只参照行为和步骤，⛔ 不抄代码。\n\n## 维护者定下的做法（2026-11-20）\n\n1. **没有开关，始终可编辑**（有权限的格）。行点击不再到处打开记录。\n2. **单击选中，双击、回车或直接打字进入编辑。** 维护者补充：「attio 双击可以编辑」。名称列点文字是打开记录；选中某格后按空格也打开记录。\n3. **选中长文本时原地展开显示全文。** 维护者：「对于长文本，这个选中显示全文的效果很好」。\n4. **编辑框是浮层**，盖在单元格上，可以比单元格大，表格行高不变。\n5. **逐格自动保存**，没有保存栏、没有行尾的保存取消按钮。\n6. **保存失败不退回**：这一格保持未保存并标出原因；同一行有失败的格时，这一行后面的修改攒到一起发一次。\n7. **撤销**：保存提示上带「撤销」，支持 Ctrl+Z。\n8. **Esc 一律是取消。**\n9. **状态机字段**（改了会触发流程的）在列表里改之前确认一步。\n10. **关闭行内编辑**：保持按视图关（`userActions.editInline: false`），不加按对象关。\n11. **不做**：区域多选、多格粘贴、向下填充。\n\n## 现状（我们，本机实测）\n\n改一个字之后：表格上方多出保存栏把整张表往下推，行尾多出一列按钮，改过的行变琥珀色，文本框把这一行撑高。\n\n![现状：待保存栏、行尾按钮、行被撑高](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/ours-pending-bar.jpg?raw=true)\n\n地址字段：整张地址表单塞进 80 宽的格子，一行从 32 撑到 269，标签每行一个字。\n\n![现状：地址字段的行内编辑](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/ours-address.jpg?raw=true)\n\n## 参照\n\nAttio：单击选中，长文本原地展开全文；双击或回车才编辑。\n\n![参照：Attio 选中长文本](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/attio-longtext.jpg?raw=true)\n\nTwenty：编辑框是浮层，不动表格（地址、关联）。\n\n![参照：Twenty 地址编辑浮层](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/twenty-address.jpg?raw=true)\n\n![参照：Twenty 关联选择](https://github.com/objectstack-ai/objectstack/blob/4dc4e48bf650ee6be709ad55c6996372d76c22c7/inline-edit/twenty-relation.jpg?raw=true)\n\n## 三家对照\n\n| | 我们现在 | Twenty | Attio | 定下的做法 |\n|---|---|---|---|---|\n| 开启 | 「选项」里的开关，刷新后复位 | 始终可编辑 | 始终可编辑 | 始终可编辑 |\n| 单击 | 开关关：打开记录；开：进入编辑 | 直接编辑 | 选中 | 选中 |\n| 进入编辑 | 单击 | 单击、回车、打字 | 双击、回车 | 双击、回车、打字 |\n| 编辑框 | 在格内，撑高行 | 浮层 | 浮层 | 浮层 |\n| 保存 | 攒着，保存栏统一保存 | 逐格立即保存 | 逐格保存 | 逐格保存，失败保留 |\n| Esc | 取消 | 文本类是保存，下拉类是取消 | 取消 | 取消 |\n| 回车 / Tab | 提交到待保存 / 不离开编辑 | 保存并下移 / 保存并右移 | 未测 | 保存并下移 / 保存并右移 |\n| 只读格 | 点了打开记录，无提示 | 点了无反应 | 未测 | 可选中，说明原因 |\n\n## 子卡\n\n见本卡的子卡列表。建议顺序：交互模型、保存模型、键盘与输入法先做（互相独立，可并行）；浮层编辑框最大，先出原型；触屏与无障碍最后。\n\n## 与其他卡的关系\n\n- objectstack-ai/objectstack#35551（列表「选项」菜单）：其中若还有「行内编辑」开关，随本专题去掉。\n- objectstack-ai/objectstack#35554（取消操作列，已关）：本专题再去掉编辑时才出现的行尾「保存、取消」列。\n- objectstack-ai/objectstack#22605（已关，`editInline` 默认为真）：不变，本专题沿用它作为按视图关闭的入口。\n- objectstack-ai/objectstack#35599（记录页一起编辑保存）：两边是不同的保存模型（记录页是进入编辑后一次保存），互不替代。\n\nReader: `domain:ui` 车道与协调席。\n\nDedupe: `行内编辑 重做`、`inline edit always on`、`单元格 编辑 浮层`、`逐格保存`（objectstack，open）→ 0 张同题卡。"
+}

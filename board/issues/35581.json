@@ -2,7 +2,7 @@
   "number": 35581,
   "kind": "pull_request",
   "title": "feat(spec, platform-objects): the standard unit table and the organization unit object sys_unit (ADR-0158 U1-U3)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "protocol:data",
     "protocol:system",
     "size/xl",
@@ -25,10 +24,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-19T16:11:18Z",
-  "updated_at": "2026-11-19T18:18:02Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-19T22:30:34Z",
+  "closed_at": "2026-11-19T22:28:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-19T22:28:29Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35581",

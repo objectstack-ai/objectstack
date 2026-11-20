@@ -1,0 +1,31 @@
+{
+  "number": 35701,
+  "kind": "issue",
+  "title": "spec migrations: the shipped field-group side-card refusal entry still lists a plain master_detail as refused after #35597 widened body tables",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T00:24:21Z",
+  "updated_at": "2026-11-20T02:20:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35701",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CZrgaiMgTJCnswR6jQ\n\nFiling gate: ③ a finding of the contract L2 on PR #35691 (verdict 7026219725, ① \"Owed, outside the diff\"), card #35597 (epic #35590). It is a child of #35597 and is nested under it.\nReader: `domain:spec` (`packages/spec/src/migrations/`). Suggested grade: p2, the parent's grade.\nDedupe: `field-group-related-list-side-card-refused`, `D3 entry plain master_detail` → only #35597 and PR #35691.\nBlocked-by: #35597 (the entry must match the rule as merged).\n\n## 维护者速读\n\n- 用户能看到什么变化：升级提示不再把「普通主从子表放进字段分组」当成会被拒绝的写法。\n- 为什么做：主从子表默认显示为正文表格以后，这种写法已经被接受，旧提示还说它会被拒绝。\n- 出错会怎样：只改升级提示的文字，不改任何检查或数据；写错时升级提示可能误导作者。\n- 要你做什么：无。\n\n## Facts\n\n- `packages/spec/src/migrations/entries/semantic/18.field-group-related-list-side-card-refused.ts` (shipped D3 entry, #27478) lists \"a plain master_detail with no inlineEdit\" among the refused shapes in `surface`, and quotes the old predicate (\"a master_detail FK that sets inlineEdit and declares no relatedList\") in `reason` and the remedy in `replacement`.\n- After PR #35691, `isBodyTableRelationship` counts a `master_detail` FK with no `relatedList` as a body table, so the field-group check ACCEPTS that shape. `os migrate meta` would print a notice for an accepted shape.\n- The dev's stale-comment list (PR #35691 acceptance notes: ObjectFieldInspector ~2977/3006, ObjectGroupInspector, RecordDetailView ~4285, the field.json / object.json liveness notes, lint data-model-rules) is the same kind of drift; fold those comment fixes into this card if they stay comment-only.\n\n## Ask\n\nAfter #35597 merges, correct the entry to the merged rule in whatever way the migrations registry allows for a shipped entry (an amendment, or a new semantic entry that supersedes the old notice for the widened shape; read `packages/spec/src/migrations/` conventions and its tests first). Fold in the comment-only stale notes listed above. No behaviour change, no new refusal.\n\n⛔ Not a claim."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 35690,
+  "kind": "pull_request",
+  "title": "fix(verify): the no-stand-in skip reason says the app's seed, hooks and flows still reach the real store",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-19T23:11:18Z",
+  "updated_at": "2026-11-19T23:58:31Z",
+  "closed_at": "2026-11-19T23:58:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-19T23:58:28Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35690",
+  "body": "Part of #35640\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 应用作者运行平台校验时,报告对 MongoDB 或插件驱动数据源的跳过说明,从「从不写入真实库」改为如实说明:校验自己的写入被拦下,但应用自己的种子数据、钩子和流程仍会写进真实库。\n- 所属:校验命令会改动真实 MongoDB 数据的问题(修复方案仍待你裁定);这里只先改正错误说法,不管选哪个方案都要改。\n- 只改文字、不改行为;措辞若有误,只影响报告和文档的说明,可直接撤回。\n- 无\n\n## What changes\n\nFor an object on a managed datasource whose engine has no ephemeral stand-in (`mongodb`, or a driver a plugin supplies), the CRUD skip reason said `not exercised — verify has no ephemeral stand-in for this engine and never writes through to the real one`. A real mongod run (readings 7023666050) shows the opposite for the app's own writes: in the same run `seed.totals` reported 3 rows updated in the real store, and the app's hooks and flows inserted 38 rows there. Only verify's own derived writes are withheld.\n\nThe text now says exactly that, and nothing else changes:\n\n- the skip reason (`packages/verify/src/derive.ts`) reads `… verify has no ephemeral stand-in for this engine, so it withholds its own writes; the app's seed, hooks and flows still write to the real database`, and the two comments beside it say the same;\n- the pinned assertion in `packages/verify/src/derive.test.ts` carries the new sentence;\n- the header of `managed-datasource-stand-in.ts` no longer says verify never writes through to it, and the `harness.ts` header, `packages/verify/README.md` and the `os verify` section of `content/docs/deployment/cli.mdx` each gain the one clause that the app's seed, hooks and flows still write to that real database;\n- one patch changeset for `@objectstack/verify`.\n\nWhich objects are skipped, and what reaches which store, are unchanged. The fix shape (what verify should do about those writes) waits on the maintainer's ruling and stays on #35640, which is why this PR is `Part of`.\n\nDiff: 7 files, 29 insertions and 10 deletions (39 lines, text only).\n\n**Read first (by risk):** `packages/verify/src/derive.ts` (the only runtime string; the skip-reason hunk), `packages/verify/src/derive.test.ts` (the pin), `content/docs/deployment/cli.mdx` (customer-facing wording).\n\n**Two-minute check:** `pnpm --filter @objectstack/verify exec vitest run src/derive.test.ts` prints 33 passed; the case `exercises an object on a managed SQL datasource, and withholds one on an engine with no stand-in` asserts the new sentence.\n\n## Tests\n\nHead `946a2f048f`.\n\n<details><summary>Pin: red on the old sentence, green on the new</summary>\n\n- Green: `vitest run src/derive.test.ts` at the head: Test Files 1 passed (1), Tests 33 passed (33).\n- Red: `node scripts/ablation-replace.mjs` put the old sentence back into `derive.ts` (anchor 1 to 0, blob 4f197958b0c7 to e3dbacedf910), the same run went red: `× exercises an object on a managed SQL datasource, and withholds one on an engine with no stand-in`, Tests 1 failed, 32 passed (33). The tool restored the file; the on-disk blob equals the HEAD blob (4f197958b0c7) and `git diff HEAD` is empty. The test imports `./derive.js` from source, so no build stands between the mutation and the run.\n\n</details>\n\n<details><summary>Package suite and typecheck</summary>\n\n- `pnpm --filter @objectstack/verify test`: Test Files 55 passed (55), Tests 478 passed (478).\n- `pnpm --filter @objectstack/verify typecheck`: `tsc --noEmit` clean; `check:test-typecheck: OK`, 0 errors.\n\n</details>\n\n## Acceptance notes\n\n- `test:repo` and the integration layers are left to CI (`Test Core`); the diff touches no test in them.\n- Two derived gates were NOT MEASURED locally, both exit 3 PREREQUISITE NOT MET because they read built output of packages outside this package's closure (`client`, `client-react`, and others): `check:skill-examples`, `check:dual-build-cjs-loads`. CI builds and runs them.\n\n## Verification\n\n<details><summary>Derived gates (dispatch-gates --commands, head 946a2f048f)</summary>\n\n104 derived families: 102 exit 0, 2 exit 3 (above). `dispatch-gates --ran`: 104 accounted for, 102 run, 2 NOT-MEASURED, 0 UNRUN. Among them `check:doc-authoring`, `check:nul-bytes`, `check:verify-stand-in`, `check:published-readme-links`, `check:issue-citations` and `check:docs-audit-scope` all exit 0. Overlap-check: clean against `origin/main` and the one open PR sharing a file.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTyMahdAdhXSzgy2nt)_\n"
+}

@@ -22,11 +22,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-17T10:14:25Z",
-  "updated_at": "2026-11-19T15:32:40Z",
+  "updated_at": "2026-11-19T23:35:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34778",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nThe shape knowledge is shared with code-first authors. What an MCP client lacks is the order of work at a door that only saves drafts: look at what exists, read the contract, save, read the verdict, fix, and hand over to a person.\n\nWho acts: the skills lane (`skills/**`). Governed surface.\n\n## Evidence\n\n- No published skill teaches authoring through MCP; `skills/objectstack-ai` teaches publishing an app over MCP, not being a client.\n- Supabase and Directus ship one skill for both surfaces, name the MCP tools and do not re-document their parameters.\n\n## Scope\n\n- One short skill: inspect (`list_metadata`, `get_metadata`, `describe_object`), read the type's contract, `save_metadata_draft`, read the verdict and repair, never claim a draft is live, hand the Studio route to a person.\n- It names the draft door's tools and points to the metadata skills for shapes. It restates none of them.\n\n## Done when\n\n- A build scenario through the draft door passes more often with the skill than without it, on the eval mode of the sibling devx card.\n\n## Relations\n\n- Parent: #34659. Decision record: #34691 S3 = A.\n- Blocked-by: #34766\n- Dedup, open and closed: none found."

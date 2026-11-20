@@ -1,0 +1,33 @@
+{
+  "number": 35708,
+  "kind": "pull_request",
+  "title": "feat(record-page): dense field rows, one-line activity and file-row attachments",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T01:09:04Z",
+  "updated_at": "2026-11-20T02:16:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35708",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgRuogP8Tp8XyFXLc92Bxvo6)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CZiaBg6rk7dpy1s9Me\nFixes #35602\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户在记录详情页看到更紧凑的字段（标签在左、值在右、按宽度两到三列）、按天分组的一行式动态，以及一行一个文件的附件列表；评论框平时只占一行。\n- 属于记录页改版：同一屏能看到更多字段、动态和附件，少滚动。\n- 出错时最多是版面挤或时间换行，数据不受影响；改动只在界面，可直接撤回。\n- 无。\n\n## What changes\n\nDraft opened on the first push; the body is filled in as the work lands. State at open:\n\n- **Fields** (default record page, frameless face): each field is one row, label left (12px, muted, fixed width) and value right (13px), packed 1, 2 or 3 columns by container width. Authored pages that ask for bordered group cards keep them.\n- **Activity** (panel and stream): the comment box is one line until focused. Entries are grouped by day (今天 / 昨天 / date). Each entry is one line: icon, who, what, and the time on the right. A comment adds one body line. Consecutive field edits by the same person on the same day fold into one expandable row (display only). An approval is one line with 「看审批」 when the host wires it.\n- **Attachments:** 33px file rows (type icon, name, size, uploader, date, and a ⋮ menu with download and delete). 「+ 上传」 sits at the top right. Files can be dropped anywhere on the panel. The empty state is one dashed line with 「选择文件」.\n- **i18n:** new `detail.*` keys in all locale packs.\n\n## Tests\n\nIn progress: migrating the specs and unit tests that pinned the old layout. The list will follow in the report comment.\n\n## Acceptance notes\n\nIn progress.\n\n## Verification\n\nIn progress.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CZiaBg6rk7dpy1s9Me\n"
+}

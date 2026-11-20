@@ -1,0 +1,34 @@
+{
+  "number": 35684,
+  "kind": "issue",
+  "title": "行内编辑：去掉开关，始终可改；单击选中、双击或回车编辑；只读格说明原因",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-19T23:05:55Z",
+  "updated_at": "2026-11-20T00:59:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35684",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单（专题：列表行内编辑重做，维护者直派，见本卡挂靠的父卡）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「以上都同意」（对协调席列出的做法）；「attio 双击可以编辑」；「行内编辑也是看当前用的权限的对吧」。\n\n## 现状（主干 `d96c878e33`）\n\n- 行内编辑是一个模式：视图不声明 `inlineEdit` 时默认关，用户在「选项」里打开，只在本次会话有效，刷新后复位（`ui/packages/plugin-list/src/ListView.tsx:3000-3017`，开关在 `components/ViewSettingsPopover.tsx:753-760` 和工具栏 `ListView.tsx:7028-7046`）。\n- 模式关：点一行任何位置都打开记录。模式开：单击可编辑的格直接进入编辑（`ui/packages/plugin-grid/src/ObjectGrid.tsx:3016` 的 `singleClickEdit ?? true`）；不可编辑的格点了是打开记录。\n- 不可编辑的格没有任何提示（`ui/packages/components/src/renderers/complex/data-table.tsx:4130, 4155`）。\n- 值本身是链接的格（关联、人员）：实测双击负责人，直接跳到了用户的记录页，进不了编辑。\n- 权限分三层，都按当前用户：对象的修改权限（`ui/packages/core/src/utils/affordanceGrants.ts:162`）、字段级（`objectGridPersistedColumns.ts:72-92`）、记录级（批量调 `POST /api/v1/security/explain`，`hooks/useRecordCrudVerdicts.ts:9-60`）。没有找到对审批锁的明确检查。\n\n## 要做的\n\n- 去掉模式和两处开关。用户对对象有修改权限、视图没有 `userActions.editInline: false` 时，列表始终可编辑。`ListView.inlineEdit` 不再决定初始模式（保留它折叠进 `editInline` 的现有含义）。\n- **单击**：选中这一格，出现选中框。不进入编辑，不打开记录。\n- **双击、回车**：进入编辑（打字即编辑见键盘子卡）。\n- **打开记录**：名称列点文字打开；任意格选中后按空格打开；行首的「打开」按钮保留。\n- **值是链接的格**（关联、人员、邮箱、电话、网址）：点链接文字照常跳转或拨打，点格内空白处是选中，双击空白处进入编辑。\n- **布尔**：选中后再点一下或按空格直接切换并保存，不需要先进入编辑。\n- **只读格**：可以选中，不能进入编辑；双击或回车时在格上说明原因（字段只读、没有字段权限、公式或自动编号、记录在审批中、没有这条记录的修改权限）。\n- **审批锁**：核实记录级的判断是否已包含「审批中锁定」和主从子表随主记录锁定（objectstack-ai/objectstack#35599 的裁决）。不包含就补上，避免「能进编辑、保存被拒」。\n- 触屏（指针类型为触摸）：点一下是打开记录，不提供行内编辑。\n\n## 不做的\n\n- 不加按对象关闭行内编辑的开关（维护者同意先不加）。\n- 保存方式、键盘、编辑框的样子在各自的子卡。\n\n## 验收\n\n- 新建一个对象和视图，不做任何设置：有修改权限的用户单击单元格出现选中框，双击进入编辑；「选项」和工具栏里没有「行内编辑」开关；刷新后行为不变。\n- 单击任何数据格都不打开记录；点名称列文字、选中后按空格、点行首按钮都能打开。\n- 关联字段有值时：点名字跳转，双击格内空白处进入编辑。\n- 视图声明 `userActions.editInline: false`：单击仍是选中，双击不进入编辑。\n- 只读字段、无字段权限的字段、审批中的记录：双击后出现对应原因，不出现编辑框。\n- 审批中的记录在列表里不会出现可编辑的格。\n- PR 正文列出迁移和作废的测试。\n\nReader: `domain:ui` 车道。`ui/packages/plugin-list/src/ListView.tsx`、`components/ViewSettingsPopover.tsx`、`ui/packages/plugin-grid/src/ObjectGrid.tsx`、`ui/packages/components/src/renderers/complex/data-table.tsx`（行点击约 3933-3974，格点击约 4173-4189）。\n\nDedupe: `行内编辑 开关`、`单击 选中 单元格`（objectstack，open）→ 无同题卡；相关：objectstack-ai/objectstack#35551（列表「选项」菜单，其中的行内编辑开关随本卡去掉）。"
+}
