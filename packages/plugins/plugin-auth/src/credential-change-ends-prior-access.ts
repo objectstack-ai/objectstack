@@ -37,13 +37,13 @@
  * adapter (`findCredentialAccount`), the same row and the same seam the
  * vendor reads to check a password, so the clock needs no data engine: a
  * manager on the vendor's in-memory adapter reads it as well. Every door that
- * replaces a password writes that row — both reset doors, `/change-password`, an administrator's
- * `/admin/set-user-password`, the one-step invitation door — whether or not it
- * also stamps `sys_user.password_changed_at`. The row's creation is the
- * account's first password, not a change: a row written over within
- * {@link FIRST_CREDENTIAL_WINDOW_MS} of its creation reads as never written
- * over, and an account with no local credential has never changed one. In
- * either case nothing is refused.
+ * replaces a password writes that row — both reset doors, `/change-password`,
+ * an administrator's `/admin/set-user-password`, the one-step invitation door
+ * — whether or not it also stamps `sys_user.password_changed_at`. The row's
+ * creation is the account's first password, not a change: a row written over
+ * within {@link FIRST_CREDENTIAL_WINDOW_MS} of its creation reads as never
+ * written over, and an account with no local credential has never changed
+ * one. In either case nothing is refused.
  *
  * A token's issue time is the `iat` the vendor signs into it, whole seconds:
  * a token minted in the same second as the change, after it, is refused too.
