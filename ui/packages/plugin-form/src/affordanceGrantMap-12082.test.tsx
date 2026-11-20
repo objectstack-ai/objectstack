@@ -829,6 +829,15 @@ const WRITE_SITES: Record<string, WriteSite> = {
         "(absent from the spec's PLATFORM_OBJECTS_BY_PACKAGE and CLOUD_PROVIDED_OBJECT_NAMES, read 2026-10-11), so it fails " +
         'for every caller whatever their grant; no in-app link reaches its route either',
     ),
+  // objectstack#35599 — the record page's edit state: Edit (recordEdit, read
+  // by the page) enters it; Save writes the record alone as the plain update,
+  // or the record and its body tables as one batch, whose line add / remove
+  // read relatedNew / relatedRowDelete in the body-table editor and whose
+  // line cells are the field write gate's edit columns.
+  'packages/app-shell/src/views/recordEditState.tsx :: RecordEditStateController > save :: update':
+    mapped(['recordEdit'], RECORD_PAGE),
+  'packages/app-shell/src/views/recordEditState.tsx :: RecordEditStateController > save :: batch':
+    mapped(['recordEdit', 'relatedNew', 'relatedRowDelete', 'editFormFields'], RECORD_PAGE, 'packages/plugin-form/src/RecordBodyTableEditor.tsx', FIELD_WRITE_GATE),
   // ── plugin-detail ──
   'packages/plugin-detail/src/InlineEditSaveBar.tsx :: updateVia :: update': {
     ...mapped(['recordEdit'], RECORD_PAGE, RECORD_DETAILS, DETAIL_SECTION, HEADER_HIGHLIGHT),
