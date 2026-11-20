@@ -5,11 +5,10 @@
  * One `NavigationOverlay` draws both: the list in the same place and at its
  * full width whether or not a record is open — and whatever the object
  * declares, so a view switch never remounts it — and the opened record's
- * `RecordDetailView` in the drawer over it. The pane beside the list retired
- * (objectstack#28915); a reader who prefers the full page gets it from a row
- * click instead (`utils/recordOpenPreference.ts`, objectstack#26677). An
- * object that declares `page` (or `new_window` / `none`) draws no record
- * here. Every value is passed in as a prop.
+ * `RecordDetailView` in the drawer over it — the floating card the name
+ * cell's 「在侧边打开」 icon opens (objectstack#35854); the record's name opens
+ * the full page instead. A list whose rows open nothing (`none`) draws no
+ * record here. Every value is passed in as a prop.
  *
  * Since objectstack#26679 the pane is the in-place stack of
  * `./recordDrawerStack.tsx`: its root is the list row `?recordId=` names, a
