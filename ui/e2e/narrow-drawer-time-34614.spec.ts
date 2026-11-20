@@ -25,8 +25,9 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * half is pinned beside the components in `narrowDrawerTime-34614.test.tsx`.
  *
  * REAL, read out of the sources at run time: the meta row, entry, time unit
- * and `<time>` classes (`RecordMetaFooter.tsx`), the activity entry's row,
- * content column, header row and time classes (`RecordActivityTimeline.tsx`),
+ * and `<time>` classes (`RecordMetaFooter.tsx`), the activity comment row's
+ * row, icon cell, content column, header row, right-hand tail and time classes
+ * (`RecordActivityTimeline.tsx`, the dense day-grouped rows of objectstack#35602),
  * the badge's base classes (`ui/badge.tsx`), the select badge's own classes
  * (`@object-ui/fields`) and the default page's key-field grid cell
  * (`HeaderHighlight.tsx`), plus real Tailwind compiled from the installed
@@ -68,11 +69,12 @@ const CLS = {
   metaWhen: grab(META, /<span className="([^"]+)" data-record-meta-when="">/, ['inline-flex']),
   metaDot: grab(META, /data-record-meta-when="">\s*\{user \? <span className="([^"]+)">·<\/span>/, ['text-muted-foreground/40']),
   metaTime: grab(META, /<time\s+dateTime=\{[^}]+\}\s+className="([^"]+)"/, ['cursor-default']),
-  feedRow: grab(FEED, /<div key=\{item\.id\}>\s*<div className="([^"]+)">/, ['flex', 'gap-3']),
-  feedIcon: grab(FEED, /\{\/\* Icon \*\/\}\s*<div\s+className=\{cn\(\s*'([^']+)'/, ['shrink-0', 'h-8', 'w-8']),
-  feedContent: grab(FEED, /\{\/\* Content \*\/\}\s*<div className="([^"]+)">/, ['flex-1', 'min-w-0']),
-  feedHeader: grab(FEED, /<div className="([^"]+)">\s*<span className="[^"]+">\{item\.actor\}<\/span>/, ['flex', 'items-center']),
+  feedRow: grab(FEED, /<div key=\{item\.id\} className="group" data-stream-comment-row="">\s*<div className="([^"]+)">/, ['flex', 'gap-2']),
+  feedIcon: grab(FEED, /const STREAM_ICON_CELL =\s*'([^']+)'/, ['shrink-0', 'w-3.5']),
+  feedContent: grab(FEED, /\{\/\* Content[^*]*\*\/\}\s*<div className="([^"]+)">/, ['flex-1', 'min-w-0']),
+  feedHeader: grab(FEED, /const STREAM_COMMENT_HEADER =\s*'([^']+)'/, ['flex', 'flex-wrap', 'items-center']),
   feedActor: grab(FEED, /<span className="([^"]+)">\{item\.actor\}<\/span>\s*\{item\.source/, ['font-medium']),
+  feedTail: grab(FEED, /<span className="(ml-auto [^"]+)">\s*\{\(toggleReaction/, ['ml-auto', 'flex']),
   feedWhen: grab(FEED, /<span className="([^"]+)" data-feed-when="">\s*\{formatTimestamp\(item\.createdAt/, ['text-xs']),
   badgeBase: grab(BADGE, /cva\(\s*(?:\/\/[^\n]*\n\s*)*"([^"]+)"/, ['inline-flex', 'whitespace-nowrap', 'rounded-full']),
   badgeSelect: grab(FIELDS, /<Badge[\s\S]{0,200}?className=\{cn\('([^']+)', colorClasses\)\}/, ['max-w-full']),
@@ -105,7 +107,7 @@ const feedFixture = () =>
   `<div class="${CLS.feedContent}"><div id="header" class="${CLS.feedHeader}">` +
   `<span id="actor" class="${CLS.feedActor}">Jianguo Zhuang Administrator</span>` +
   '<span class="text-xs text-muted-foreground">via Email Gateway Integration</span>' +
-  `<span id="feed-when" class="${CLS.feedWhen}">3 days ago</span>` +
+  `<span class="${CLS.feedTail}"><span id="feed-when" class="${CLS.feedWhen}">3 days ago</span></span>` +
   '</div><p class="text-sm">Sent the revised quote.</p></div></div></div>';
 
 /** Two key-field cells on the default page's grid, each holding a select badge. */

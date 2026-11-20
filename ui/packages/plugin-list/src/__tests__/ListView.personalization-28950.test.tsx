@@ -161,17 +161,17 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
   });
 
   it('a Display-only change is reported as the reader makes it, and the report follows it back', async () => {
-    const { reported } = mount({}, { defaultRowNumbers: true });
+    // The row colour: its last switch-shaped neighbours, Row numbers and Edit
+    // inline, went with objectstack#35663 and objectstack#35684.
+    const { reported } = mount({ userActions: { ...BASE.userActions, rowColor: true }, rowColor: { field: 'stage', colors: {} } } as Partial<ListViewSchema>);
     const content = await openDisplay();
     await waitFor(() => expect(reported()).toEqual([]));
-    // Row numbers sit on the Display menu's More level.
-    fireEvent.click(within(content).getByTestId('options-row-more'));
-    await within(content).findByTestId('options-page-more');
+    fireEvent.click(within(content).getByTestId('options-row-color'));
+    fireEvent.click(await within(content).findByTestId('options-color-clear'));
+    await waitFor(() => expect(reported()).toEqual(['rowColor']));
 
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
-    await waitFor(() => expect(reported()).toEqual(['rowNumbers']));
-
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
+    fireEvent.click(within(content).getByTestId('options-back'));
+    fireEvent.click(within(content).getByTestId('display-reset-button'));
     await waitFor(() => expect(reported()).toEqual([]));
   });
 

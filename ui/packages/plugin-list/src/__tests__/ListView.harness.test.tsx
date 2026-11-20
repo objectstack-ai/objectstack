@@ -2241,8 +2241,8 @@ describe('ListView.switcherChrome-7547', () => {
 /**
  * objectui#12621 — the list toolbar's Display menu closes once a layout is
  * chosen, and on Escape, returning focus to the Display trigger. The panel's
- * toggles keep it open: the control below flips Row numbers and density and
- * finds the panel still drawn. The panel is a menu whose rows open a second
+ * own settings keep it open: the control below clears the row colour and
+ * picks a row height, and finds the panel still drawn. The panel is a menu whose rows open a second
  * level; the Layout level lists every layout as a radio, at any count.
  */
 describe('ListView.displayMenuClose-12621', () => {
@@ -2347,17 +2347,16 @@ describe('ListView.displayMenuClose-12621', () => {
     it('Escape closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      fireEvent.keyDown(within(content).getByTestId('options-row-more'), { key: 'Escape' });
+      fireEvent.keyDown(within(content).getByTestId('options-row-row-height'), { key: 'Escape' });
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('control: toggling Row numbers and choosing a row height keep the menu open', async () => {
-      mount(TWO);
+    it('control: clearing the row colour and choosing a row height keep the menu open', async () => {
+      // objectstack#35684 took the last switch (Edit inline) off the menu.
+      mount({ ...TWO, userActions: { rowColor: true }, rowColor: { field: 'stage', colors: {} } } as ListViewSchema);
       const { trigger, content } = await openDisplay();
-      fireEvent.click(within(content).getByTestId('options-row-more'));
-      const toggle = await within(content).findByTestId('display-row-numbers-toggle');
-      fireEvent.click(toggle);
-      await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
+      fireEvent.click(within(content).getByTestId('options-row-color'));
+      fireEvent.click(await within(content).findByTestId('options-color-clear'));
       fireEvent.click(within(content).getByTestId('options-back'));
       fireEvent.click(await within(content).findByTestId('options-row-row-height'));
       fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
@@ -2959,11 +2958,11 @@ describe('ListView.rowAdornment-13330', () => {
 // ── ListView.setupChrome-12606 ──────────────────────────────────────────────────
 
 /**
- * objectui#12606 — the host prop the console's Setup app sets on its record
- * lists: `defaultRowNumbers` (the grid opens without the `#` numbers). A React
- * prop a host passes, never a view key. The Display control still draws (the
- * maintainer's ruling C on the card withdrew the Display hide rule). The
- * control mounts the same schema without the prop and reads today's shape.
+ * objectui#12606 — the console's Setup app opened its record lists without the
+ * `#` numbers through a host prop, `defaultRowNumbers`. objectstack#35663 took
+ * row numbers off every list, so the prop is gone: no list hands the grid row
+ * numbers, and the Display control still draws (the maintainer's ruling C on
+ * #12606 withdrew the Display hide rule).
  */
 describe('ListView.setupChrome-12606', () => {
   restoreAfterBlock();
@@ -3008,20 +3007,14 @@ describe('ListView.setupChrome-12606', () => {
     if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as any);
   });
 
-  describe('the list’s Setup chrome is one host prop (objectui#12606)', () => {
-    it('`defaultRowNumbers={false}` opens the grid without row numbers; Display still draws, and row numbers off is not a changed setting', async () => {
-      mount({ defaultRowNumbers: false });
-      await screen.findByTestId('grid-stub');
-      expect(gridProps?.showRowNumbers).toBe(false);
-      expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
-      expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
-    });
-
-    it('CONTROL — without the prop the grid numbers its rows and the bar draws Display', async () => {
+  describe('no list numbers its rows (objectui#12606, objectstack#35663)', () => {
+    it('the grid is handed no row numbers; Display still draws, and nothing counts as changed', async () => {
       mount();
       await screen.findByTestId('grid-stub');
-      expect(gridProps?.showRowNumbers).toBe(true);
+      expect(gridProps).toBeDefined();
+      expect(gridProps).not.toHaveProperty('showRowNumbers');
       expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
+      expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
     });
   });
 });

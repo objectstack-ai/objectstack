@@ -332,6 +332,20 @@ async function gridEditable(): Promise<string> {
   return screen.getByTestId('grid-stub').textContent ?? '';
 }
 
+/**
+ * Open the Display menu of a list with no record-open choice to draw.
+ * objectstack#35663 took the Row numbers switch off the More level and
+ * objectstack#35684 the Edit inline switch, so that menu draws no More row at
+ * all, and no level of it carries an inline-edit switch.
+ */
+async function openDisplayWithoutMore(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+  const content = await screen.findByTestId('view-settings-content');
+  expect(within(content).getByTestId('options-menu')).toBeInTheDocument();
+  expect(within(content).queryByTestId('options-row-more')).toBeNull();
+  return content;
+}
+
 describe('ListView – the grid edits in place under the permission gate and the declared switch (#4647, objectstack#35684)', () => {
   let prevGrid: ReturnType<typeof ComponentRegistry.get>;
 
@@ -371,10 +385,7 @@ describe('ListView – the grid edits in place under the permission gate and the
     cleanup();
     renderInlineEdit(makeUpdatePermissions(true), { compactToolbar: true, inlineEdit: true } as Partial<ListViewSchema>);
     await gridEditable();
-    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
-    const content = await screen.findByTestId('view-settings-content');
-    fireEvent.click(within(content).getByTestId('options-row-more'));
-    await within(content).findByTestId('options-page-more');
+    const content = await openDisplayWithoutMore();
     expect(within(content).queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
   });
 });

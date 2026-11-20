@@ -223,11 +223,11 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   objectFields?: Readonly<Record<string, unknown>>;
   /**
-   * [objectui#12423] Row numbers on the leading cell, as a HOST says: `ListView`
-   * passes its Display control's Row numbers switch here (session-only, never
-   * stored). Absent ⇒ on, the grid's default since it drew them. A RUNTIME
-   * prop: the protocol declares no row-number key on a view, and none is read
-   * off the node.
+   * [objectui#12423] Row numbers on the leading cell, as a HOST says. Absent ⇒
+   * off (objectstack#35663: the list's leading cell is the checkbox, always
+   * shown; no list host passes it any more). A RUNTIME prop for a host that
+   * opts in: the protocol declares no row-number key on a view, and none is
+   * read off the node.
    */
   showRowNumbers?: boolean;
   /**
@@ -3092,8 +3092,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           : rowHeightMode === 'extra_tall'
             ? 'px-3 py-3.5 text-sm leading-relaxed'
             : 'px-3 py-1.5 text-[13px] leading-normal',
-    // objectui#12423 — the host's Row numbers switch; on unless a host says off.
-    showRowNumbers: hostShowRowNumbers ?? true,
+    // objectui#12423 — row numbers only where a host opts in (objectstack#35663).
+    showRowNumbers: hostShowRowNumbers ?? false,
     // [#5148] The authored request ∧ the principal's verdict — the conjunction
     // #5143 spelled for `editable` and #4646 / PR #5145 spelled for the
     // related-list "+ New" (`objectCanCreate = affordances.create ∧

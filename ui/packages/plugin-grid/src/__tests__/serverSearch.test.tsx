@@ -102,8 +102,8 @@ const searchBox = (container: HTMLElement) =>
 
 /**
  * The rendered rows, as their full text. Whole-row text rather than the first
- * cell: the grid prepends chrome columns (row number, selection) whose content
- * is not the record's.
+ * cell: the grid may prepend a chrome column (selection) whose content is not
+ * the record's.
  */
 const rowTexts = (container: HTMLElement) =>
   Array.from(container.querySelectorAll('tbody tr')).map((tr) => tr.textContent ?? '');
@@ -152,9 +152,11 @@ describe('ObjectGrid — the search box is server-side under server pagination (
     fireEvent.change(searchBox(container), { target: { value: 'acme' } });
 
     await waitFor(() => expect(screen.getByText('Match 0')).toBeInTheDocument());
-    await waitFor(() =>
-      expect(container.textContent).toContain(`${MATCHES}`),
-    );
+    // The searched total fits one page, and a one-page grid draws no pager, so
+    // the total is read as the rows on screen. (Until objectstack#35663 this
+    // read `container.textContent` for "2", which the second row's NUMBER
+    // satisfied; the grid draws no row numbers now.)
+    expect(rowTexts(container)).toHaveLength(MATCHES);
     // 300 records over 50 per page was `1 / 6`; the searched collection is one
     // page, so the old page count must be gone rather than left standing next
     // to two rows.

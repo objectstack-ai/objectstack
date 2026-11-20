@@ -1013,6 +1013,26 @@ function resolveSelectionMode(selectable: DataTableSchema['selectable'] | 'none'
  */
 const FROZEN_EDGE_SHADOW = 'shadow-[4px_0_6px_-4px_rgba(0,0,0,0.18)] dark:shadow-[4px_0_6px_-4px_rgba(0,0,0,0.6)]';
 
+/**
+ * The leading (selection / row-number) column's width, on every cell of that
+ * column: 40px at any viewport and any column count (objectstack#35663).
+ *
+ * The table lays its columns out automatically, so a width is a request, not a
+ * size. A plain `w-10` let the column shrink to its content once the columns
+ * overflowed (the checkbox, 16px, flush against the list's left edge), and on
+ * a table narrower than its box it took a share of the spare width with every
+ * other fixed-width column (94px measured). `min-w-10` holds the floor; the
+ * `1%` width makes it a percentage column, which auto layout sizes to its
+ * minimum and never hands spare width while a fixed or auto column takes it
+ * (the `fitContent` columns below use the same `1%`).
+ */
+const LEADING_CELL_WIDTH = 'w-[1%] min-w-10';
+/**
+ * The checkbox's place in the leading cell without row numbers: 16px in, the
+ * list page's one left edge, 8px before the first column (16 + 16 + 8 = 40).
+ */
+const LEADING_CELL_INSET = 'pl-4 pr-2';
+
 const EMPTY_COLUMNS = Object.freeze([]) as unknown as DataTableSchema['columns'];
 const EMPTY_ROWS = Object.freeze([]) as unknown as DataTableSchema['data'];
 
@@ -1430,12 +1450,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const selectable = selectionMode !== 'none';
   /**
    * objectui#12423 — the row's LEADING cell is one cell. With selection on it
-   * holds the checkbox, and the row number too when `showRowNumbers` is on:
-   * the number by default, the checkbox on row hover, on focus-within, on a
-   * coarse pointer (no hover to reveal it) and on every row while anything is
-   * selected. The two are swapped by CSS classes on one fixed-width cell,
-   * never mounted and unmounted, so nothing shifts. Without selection it is
-   * the row-number cell alone, as before.
+   * holds the checkbox, always shown (objectstack#35663: no host turns row
+   * numbers on by default any more). A host that opts into `showRowNumbers`
+   * gets the number too: the number by default, the checkbox on row hover, on
+   * focus-within, on a coarse pointer (no hover to reveal it) and on every row
+   * while anything is selected. The two are swapped by CSS classes on one
+   * fixed-width cell, never mounted and unmounted, so nothing shifts. Without
+   * selection it is the row-number cell alone, as before.
    */
   const leadingCellCount = selectable || showRowNumbers ? 1 : 0;
 
@@ -1747,9 +1768,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   // Sticky-left offsets for the leading pinned cells (checkbox, row number,
   // frozen data columns), measured from the REAL rendered header-cell widths.
-  // The table's auto layout does not guarantee the utility columns their
-  // declared `w-10`: the checkbox column can collapse to its ~28px min-content
-  // while the row-number column stretches past 40px. Hardcoded 40px offsets
+  // The table's auto layout does not guarantee a column its declared width
+  // (the leading column holds 40px through `LEADING_CELL_WIDTH` since
+  // objectstack#35663; a frozen data column has no such floor). Hardcoded 40px offsets
   // then leave an uncovered strip between pinned cells where horizontally
   // scrolled content shows through (titanwind-ehr#418), so pin each cell at
   // the cumulative measured width of the cells before it instead.
@@ -3812,7 +3833,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
           <TableHeader className="sticky top-0 bg-background z-10">
             <TableRow ref={headerRowRef}>
               {selectable && (
-                <TableHead className={cn("w-10 bg-background", showRowNumbers ? "px-0" : "px-3", frozenColumns > 0 && "sticky left-0 z-20")}>
+                <TableHead className={cn(LEADING_CELL_WIDTH, "bg-background", showRowNumbers ? "px-0" : LEADING_CELL_INSET, frozenColumns > 0 && "sticky left-0 z-20")}>
                   {/* Select-all is a multi-select affordance; a 'single' view
                       keeps the column (alignment) but offers no way to select
                       more than one row (#2941). */}
@@ -3837,7 +3858,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               {/* With selection on, the row number shares the select-all
                   column's cell (objectui#12423), so `#` heads it only alone. */}
               {showRowNumbers && !selectable && (
-                <TableHead className={cn("w-10 bg-background text-center px-3", frozenColumns > 0 && "sticky left-0 z-20")}>
+                <TableHead className={cn(LEADING_CELL_WIDTH, "bg-background text-center px-3", frozenColumns > 0 && "sticky left-0 z-20")}>
                   <span className="text-xs text-muted-foreground">#</span>
                 </TableHead>
               )}
@@ -4269,15 +4290,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             if (e.shiftKey) window.getSelection?.()?.removeAllRanges();
                             handleSelectRow(rowId, !isSelected, rowIndex);
                           }}
-                          className={cn(cellClassName, "w-10 relative cursor-pointer", showRowNumbers ? "px-0 text-center" : "px-3", frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}
+                          className={cn(cellClassName, LEADING_CELL_WIDTH, "relative cursor-pointer", showRowNumbers ? "px-0 text-center" : LEADING_CELL_INSET, frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}
                         >
                           {/* objectui#12423 — the leading cell (see
-                              `leadingCellCount`): the row number by default,
-                              the checkbox on hover / focus-within / a coarse
-                              pointer, and on every row while any is selected.
-                              The checkbox is hidden by OPACITY only, so it
-                              stays in the tab order and reachable by assistive
-                              tech; focusing it reveals it. */}
+                              `leadingCellCount`). With row numbers on: the row
+                              number by default, the checkbox on hover /
+                              focus-within / a coarse pointer, and on every row
+                              while any is selected; hidden by OPACITY only, so
+                              it stays in the tab order and reachable by
+                              assistive tech. Without them (the default,
+                              objectstack#35663): the checkbox, always shown. */}
                           {showRowNumbers && (
                             <span
                               data-slot="row-number"
@@ -4297,7 +4319,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             className={cn(
                               "flex items-center transition-opacity",
                               showRowNumbers && "absolute inset-0 justify-center",
-                              !selectionActive
+                              // objectstack#35663 — the swap is row numbers'
+                              // alone: without them the checkbox is always shown.
+                              showRowNumbers && !selectionActive
                                 && "opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 pointer-coarse:opacity-100",
                             )}
                           >
@@ -4313,7 +4337,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         </TableCell>
                       )}
                       {showRowNumbers && !selectable && (
-                        <TableCell className={cn("text-center w-10 relative", cellClassName, frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}>
+                        <TableCell className={cn("text-center relative", cellClassName, LEADING_CELL_WIDTH, frozenColumns > 0 && ["sticky left-0 z-10 bg-background", STICKY_ROW_TINT])}>
                           <span className={cn("text-xs text-muted-foreground tabular-nums select-none", !selectable && schema.onRowClick && "group-hover/row:invisible")}>
                             {globalIndex + 1}
                           </span>
@@ -4869,7 +4893,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
             <tfoot className="sticky bottom-0 z-10 bg-background" data-testid="data-table-summary-row">
               <TableRow className="border-t border-b-0 hover:bg-transparent">
                 {leadingCellCount > 0 && (
-                  <TableCell className={cn("w-10 h-8 py-0 bg-background", frozenColumns > 0 && "sticky left-0 z-20")} />
+                  <TableCell className={cn(LEADING_CELL_WIDTH, "h-8 py-0 bg-background", frozenColumns > 0 && "sticky left-0 z-20")} />
                 )}
                 {columns.map((col, colIndex) => {
                   const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;

@@ -302,7 +302,6 @@ export type ListPersonalizationPart =
   | 'density'
   | 'layout'
   | 'rowColor'
-  | 'rowNumbers'
   | 'inlineEdit';
 
 export interface ListViewProps {
@@ -460,14 +459,6 @@ export interface ListViewProps {
    */
   toolbarLeading?: React.ReactNode | ((state: ListToolbarLeadingState) => React.ReactNode);
   /**
-   * Whether the grid opens with row numbers in its leading cell — the opening
-   * state of the Display control's session-only switch, and what its "Reset to
-   * view default" returns to. Default `true`. A HOST prop, never a schema key:
-   * the console's Setup app opens its lists without them (objectui#12606), a
-   * posture of the console, not of the view.
-   */
-  defaultRowNumbers?: boolean;
-  /**
    * A host-drawn node beside each row's title in the grid (objectui#13330),
    * handed to `ObjectGrid`'s `rowAdornment`: the cell of the object's declared
    * name field when a column shows it, else the first shown column, and the
@@ -571,11 +562,11 @@ export interface ListViewProps {
    * search (the Filter panel's finished conditions, the user-filter chips, the
    * "In a queue" toggle; the view's declared `filter` is never one); `search`
    * is a term the list applies. The Display-only settings (`layout`,
-   * `rowColor`, `rowNumbers`) are those the Display control counts. The
-   * gallery card size is not a part: it is kept per object, not per view.
-   * `columns` is never reported here, since the column layout is the host's
-   * own stored state; it is in the type so a host can add it. Nor is
-   * `inlineEdit` since objectstack#35684, which retired the mode it named.
+   * `rowColor`) are those the Display control counts. The gallery card size
+   * is not a part: it is kept per object, not per view. `columns` is never
+   * reported here, since the column layout is the host's own stored state; it
+   * is in the type so a host can add it. Nor is `inlineEdit` since
+   * objectstack#35684, which retired the mode it named.
    *
    * When it is passed the host owns the reset, so the Display control draws
    * no "Reset to view default" of its own. The sort popover's reset and the
@@ -1501,7 +1492,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.display': 'Display',
   'list.options': 'Options',
   'list.layout': 'Layout',
-  'list.rowNumbers': 'Row numbers',
   'list.resetToViewDefault': 'Reset to view default',
   // The Display control's Open records section (objectstack#26681).
   'list.recordOpen': 'Open records',
@@ -2114,7 +2104,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialFilters,
   initialSearchTerm,
   toolbarLeading,
-  defaultRowNumbers = true,
   rowAdornment,
   recordLinkAdornment,
   rowOpensRecord,
@@ -3022,11 +3011,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
   const [showHideFields, setShowHideFields] = React.useState(false);
 
-  // Row numbers on the grid's leading cell — the Display control's switch
-  // (objectui#12423). Session-only and in memory: nothing stores it, and it
-  // opens on the host's `defaultRowNumbers` (on unless a host says otherwise)
-  // with every list.
-  const [rowNumbers, setRowNumbers] = React.useState(defaultRowNumbers);
 
   // Export State
   const [showExport, setShowExport] = React.useState(false);
@@ -6449,7 +6433,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     density: toolbarFlags.showDensity && (currentView === 'gallery'
       ? galleryCardSize !== authoredGalleryCardSize
       : density.mode !== viewDefaultDensity),
-    rowNumbers: currentView === 'grid' && rowNumbers !== defaultRowNumbers,
   };
   const displayChangedCount = Object.values(displayDeviation).filter(Boolean).length;
 
@@ -6484,7 +6467,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   if (displayDeviation.density && currentView !== 'gallery') personalizationParts.push('density');
   if (displayDeviation.layout) personalizationParts.push('layout');
   if (displayDeviation.color) personalizationParts.push('rowColor');
-  if (displayDeviation.rowNumbers) personalizationParts.push('rowNumbers');
   const personalizationKey = personalizationParts.join(',');
   const onPersonalizationChangeRef = React.useRef(onPersonalizationChange);
   React.useEffect(() => {
@@ -6523,7 +6505,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         density.setMode(viewDefaultDensity);
       }
     }
-    if (displayDeviation.rowNumbers) setRowNumbers(defaultRowNumbers);
     if (onRestoreViewDefaults && restoredParts.length > 0) onRestoreViewDefaults(restoredParts);
   };
 
@@ -7453,8 +7434,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               updateHiddenFields={updateListedFields}
               addableFields={addableFields}
               onAddField={addListedField}
-              rowNumbers={rowNumbers}
-              setRowNumbers={currentView === 'grid' ? setRowNumbers : undefined}
               changedCount={displayChangedCount}
               // objectstack#35551 — the view's name and its rename head the
               // menu; the field order is the grid's column order, the state
@@ -8126,11 +8105,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // one, and this React prop is not authored. Only the grid reads
               // it, so only the grid is handed it.
               ? { objectFields: objectDef.fields }
-              : {})}
-            {...(viewComponentSchema.type === 'object-grid'
-              // objectui#12423 — the Display control's Row numbers switch, on
-              // the grid's host channel (a React prop, never a node key).
-              ? { showRowNumbers: rowNumbers }
               : {})}
             {...(onRowsChange && rowGroupsSource === 'grid' && viewComponentSchema.type === 'object-grid'
               // objectstack#28461 — the grouped grid's open groups and their

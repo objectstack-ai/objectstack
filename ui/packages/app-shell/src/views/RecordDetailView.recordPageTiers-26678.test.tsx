@@ -283,7 +283,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(tierOf(container)).toBe('wide');
     expect(shown(container)).toBe('details right');
     expect(columnsGrid(container)).toContain('23.75rem');
-    expect(detailsGrid(container)).toContain('@lg:grid-cols-3');
+    // Container breakpoints of the dense label-left rows (objectstack#35602).
+    expect(detailsGrid(container)).toContain('@4xl:grid-cols-3');
     await expectTabRowOnly();
     // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
     expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
@@ -307,8 +308,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(tierOf(container)).toBe('two-column');
     expect(shown(container)).toBe('details right');
     expect(columnsGrid(container)).toContain('20rem');
-    expect(detailsGrid(container)).toContain('@sm:grid-cols-2');
-    expect(detailsGrid(container)).not.toContain('@lg:grid-cols-3');
+    expect(detailsGrid(container)).toContain('@xl:grid-cols-2');
+    expect(detailsGrid(container)).not.toContain('@4xl:grid-cols-3');
     // The same panels as the wide tier — no rail to open first.
     // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
     expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
