@@ -67,6 +67,7 @@ import type { HistoryVersionOwner } from './sys-metadata-repository.js';
 import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 import { OBJECT_REGISTRY_REFUSED, reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
+import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -1062,6 +1063,32 @@ export class ProtocolHistoryAndPublishFacet {
                 singularType, draftForGate.body, request.name, promoteInto,
             );
             if (extensionRefusal) throw extensionRefusal;
+        }
+        // [ADR-0144 D2 and D6, amended; #33593 ruling R1] …and the follow
+        // door the published save of the same body asks (`saveMetaItem`, the
+        // R1 block beside its own `objectExtensionItemRefusal` call): the
+        // extension judged as its object will be served, with this body in the
+        // slot of the package promoted into. The per-item publish makes this
+        // one body live at once, as that save does; without the question it
+        // answered `published` for an amount whose `currencyField` the served
+        // object cannot satisfy — a pointer naming no field, or a
+        // `master_detail`-led path to a parent field holding no code — and
+        // every later write of the amount was refused, or stored a currency
+        // nobody declared. Asked with the save door's call and envelope
+        // (`422 INVALID_METADATA`, the registry's sentence), before
+        // `repo.promoteDraft` writes, so the draft stays a draft. Asked only on
+        // the against-registry question: a package publish judges its
+        // promoted unit before its commit (`registry-question.ts`). The
+        // registry answers no verdict for an object nothing serves yet, and
+        // none before the cold boot sealed it.
+        if (draftForGate && singularType === OBJECT_EXTENSION_TYPE
+            && request.registryQuestion === 'against-registry' && promoteInto) {
+            const registry = host.engine?.registry as { objectRegistrationRefusal?: (schema: unknown, packageId: string | undefined, ownership: string, options: { againstRegistry?: boolean }) => Error | null } | undefined;
+            if (typeof registry?.objectRegistrationRefusal === 'function') {
+                const { extend, priority: _priority, ...contribution } = registrableObjectExtension(draftForGate.body);
+                const followRefusal = registry.objectRegistrationRefusal({ ...contribution, name: extend }, promoteInto, 'extend', { againstRegistry: true });
+                if (followRefusal) throw followRefusal;
+            }
         }
         // [harden] …and a permission-set draft whose name a DIFFERENT owner
         // already holds by the time it is published: a draft save judged the

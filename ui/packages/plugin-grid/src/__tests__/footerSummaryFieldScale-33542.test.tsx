@@ -112,8 +112,11 @@ function renderGrid(language: 'en' | 'zh-CN') {
 
 /** The footer text of a column once the grid has its field catalogue. */
 async function footerOf(field: string): Promise<string> {
-  const cell = await screen.findByTestId(`summary-${field}`);
-  return cell.textContent ?? '';
+  // objectstack#35548 — the figure is a cell of the table's own last row,
+  // under its column; the first column's cell also holds the row's lead.
+  const cell = await screen.findByTestId(`data-table-summary-${field}`);
+  const lead = cell.querySelector('[data-testid="data-table-summary-lead"]')?.textContent ?? '';
+  return (cell.textContent ?? '').replace(lead, '');
 }
 
 describe('a summary column footer total is formatted as its cell (objectstack#33542)', () => {

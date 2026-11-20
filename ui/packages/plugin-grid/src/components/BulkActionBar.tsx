@@ -121,19 +121,41 @@ export function isDestructiveBulkDef(def: BulkActionDef): boolean {
   return def.variant === 'danger' || def.operation === 'delete';
 }
 
+/** One entry of a selection's actions, in the order a menu or the page bar draws them. */
+export type OrderedBulkItem =
+  | { kind: 'def'; key: string; destructive: boolean; def: BulkActionDef }
+  | { kind: 'legacy'; key: string; destructive: boolean; legacy: LegacyBulkActionItem };
+
+/**
+ * objectstack#35554 — a selection's actions as one list: the rich defs, then
+ * the legacy names, each in declared order, with every destructive entry moved
+ * to the end (the order is otherwise kept). The selection's context menu and
+ * the page bar's selection actions read this one order, so the actions the bar
+ * exposes are the first entries of the menu, and Delete closes both.
+ */
+export function orderSelectionMenuItems(items: BulkActionItems): OrderedBulkItem[] {
+  const all: OrderedBulkItem[] = [
+    ...items.defs.map((def) => ({ kind: 'def' as const, key: `def:${def.name}`, destructive: isDestructiveBulkDef(def), def })),
+    ...items.legacy.map((legacy) => ({ kind: 'legacy' as const, key: `legacy:${legacy.name}`, destructive: legacy.destructive, legacy })),
+  ];
+  return [...all.filter((e) => !e.destructive), ...all.filter((e) => e.destructive)];
+}
+
 /** One rich bulk-action button, offered per {@link useBulkActionItems}. */
-const BulkActionButton: React.FC<{
+export const BulkActionButton: React.FC<{
   def: BulkActionDef;
   selectedRows: any[];
   onActionDef?: (def: BulkActionDef, selectedRows: any[]) => void;
-}> = ({ def, selectedRows, onActionDef }) => {
+  /** `page-bar`: the list page bar's button size (objectstack#35554). */
+  size?: 'bar' | 'page-bar';
+}> = ({ def, selectedRows, onActionDef, size = 'bar' }) => {
   const isDestructive = isDestructiveBulkDef(def);
   const iconName = def.icon ? toKebabIconName(def.icon) : null;
   return (
     <Button
       variant={isDestructive ? 'destructive' : 'outline'}
       size="sm"
-      className="h-7 px-2.5 text-xs gap-1.5"
+      className={size === 'page-bar' ? 'h-8 gap-1.5' : 'h-7 px-2.5 text-xs gap-1.5'}
       onClick={() => onActionDef?.(def, selectedRows)}
       data-testid={`bulk-action-${def.name}`}
     >

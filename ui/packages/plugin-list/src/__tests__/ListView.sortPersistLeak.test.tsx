@@ -54,6 +54,7 @@ import { attachObjectSortability } from '@object-ui/core';
 import { ListView } from '../ListView';
 import type { ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
+import { openAdvancedSort } from './conditionPanels';
 
 const objectDef = {
   name: 'crm_opportunity',
@@ -131,7 +132,7 @@ async function openSortPopover(
   );
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-  await screen.findByText('Sort Records');
+  await openAdvancedSort();
   persistSort.mockClear();
   return { persistSort };
 }

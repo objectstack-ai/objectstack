@@ -48,6 +48,12 @@ export interface RichTextCommentInputProps {
   /** Called when the editor takes focus: the host reads the mention
    *  suggestions then, not when the record opens (objectstack#28470). */
   onMentionSuggestionsWanted?: () => void;
+  /**
+   * One line until used: while the composer holds no text, nothing to send
+   * and no focus, it is the editor alone at one line, with no toolbar and no
+   * extra slot. Focus opens it in full. The record timeline's composer.
+   */
+  compact?: boolean;
 }
 
 /** The look of a picked mention, in the preview and in the composer's chip row. */
@@ -114,9 +120,12 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   canSubmitEmpty = false,
   autoFocus = false,
   onMentionSuggestionsWanted,
+  compact = false,
 }) => {
   const { t } = useDetailTranslation();
   const [isPreview, setIsPreview] = React.useState(false);
+  const [focused, setFocused] = React.useState(false);
+  const collapsed = compact && !focused && !value && !canSubmitEmpty && !isPreview;
   const [showMentions, setShowMentions] = React.useState(false);
   const [mentionQuery, setMentionQuery] = React.useState('');
   const [mentionIndex, setMentionIndex] = React.useState(0);
@@ -262,9 +271,20 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   );
 
   return (
-    <div className={cn('border rounded-md', className)}>
+    <div
+      className={cn('border rounded-md', className)}
+      data-composer-collapsed={compact ? String(collapsed) : undefined}
+      onFocus={compact ? () => setFocused(true) : undefined}
+      onBlur={
+        compact
+          ? (e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+            }
+          : undefined
+      }
+    >
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b bg-muted/30">
+      <div className={cn('flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b bg-muted/30', collapsed && 'hidden')}>
         <Button
           variant="ghost"
           size="icon"
@@ -357,7 +377,11 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           <>
             <textarea
               ref={textareaRef}
-              className="w-full min-h-[80px] px-3 py-2 text-sm bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground"
+              className={cn(
+                'w-full px-3 text-sm bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground',
+                collapsed ? 'block h-8 min-h-0 py-1.5 text-[13px] leading-5' : 'min-h-[80px] py-2',
+              )}
+              rows={collapsed ? 1 : undefined}
               placeholder={placeholder ?? t('detail.writeComment')}
               value={value}
               onChange={handleTextChange}
@@ -420,7 +444,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
       </div>
 
       {/* Extra slot — typically an attachment panel rendered by the host */}
-      {extraSlot && (
+      {extraSlot && !collapsed && (
         <div className="border-t px-2 py-2 bg-muted/20">
           {extraSlot}
         </div>

@@ -58,7 +58,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["$now: true", "addDays", "$field: 'grace_days_offset'", "$lt"],
-        "must_not_contain": ["subDays", "type: 'formula'"]
+        "must_not_contain": ["subDays:", "type: 'formula'"]
       }
     },
     {

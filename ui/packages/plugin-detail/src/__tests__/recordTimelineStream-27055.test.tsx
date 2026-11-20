@@ -92,10 +92,14 @@ describe('RecordActivityTimeline — the stream face', () => {
     expect(screen.getByText('Budget is set')).toBeTruthy();
   });
 
-  it('CONTROL — the panel face keeps its dropdown and no compact lines', () => {
+  // Since the dense activity rows (objectstack#35602) the panel draws its
+  // entries as the same one-line rows; what stays the panel's own is the
+  // dropdown in place of the chips.
+  it('CONTROL — the panel face keeps its dropdown, not the chips, over the same one-line rows', () => {
     const { container } = render(<RecordActivityTimeline items={items} />);
     expect(container.querySelector('[data-stream-filter]')).toBeNull();
-    expect(container.querySelector('[data-stream-system-row]')).toBeNull();
+    expect(screen.getByRole('combobox')).toBeTruthy();
+    expect(container.querySelector('[data-stream-system-row]')).not.toBeNull();
   });
 });
 
@@ -149,8 +153,9 @@ describe('record:activity on the default record page is the stream', () => {
   it('CONTROL — elsewhere the block keeps its panel face, and the field changes join its feed', () => {
     const { container } = mount(false);
     expect(container.querySelector('[data-stream-filters]')).toBeNull();
-    expect(container.querySelector('[data-stream-system-row]')).toBeNull();
-    expect(screen.getByText('Contacted')).toBeTruthy();
+    expect(screen.getByRole('combobox')).toBeTruthy();
+    // The change is one line with its before and after (objectstack#35602).
+    expect(screen.getAllByText(/New → Contacted/).length).toBeGreaterThan(0);
   });
 });
 
@@ -240,7 +245,7 @@ describe("the panel's `changes_only` is offered by the same rule as the 变更 c
 
   it('CONTROL: with history shown, the same `changes_only` holds the field change only', () => {
     render(panel(true, 'changes_only'));
-    expect(screen.getByText('Status')).toBeTruthy();
+    expect(screen.getAllByText(/Status New → Contacted/).length).toBeGreaterThan(0);
     expect(screen.queryByText('Logged a call')).toBeNull();
     expect(screen.queryByText('Budget is set')).toBeNull();
   });
@@ -295,7 +300,7 @@ describe('an activity row sits under 活动 whatever the history flag; 变更 ho
 
   it("the panel's `changes_only` keeps the same rule as the stream", () => {
     render(<RecordActivityTimeline items={[call, created, ...audit]} filterMode="changes_only" />);
-    expect(screen.getByText('Status')).toBeTruthy();
+    expect(screen.getAllByText(/Status New → Contacted/).length).toBeGreaterThan(0);
     expect(screen.queryByText('Created the lead')).toBeNull();
     expect(screen.queryByText('Logged a call')).toBeNull();
   });
@@ -492,16 +497,17 @@ describe("an authored page's feed panels hold the record's field history (object
     it('全部 holds the changes: the paired update shows its before and after, the unpaired change is its own row', () => {
       mount(block, {});
       expect(screen.getByText('Updated the deal')).toBeTruthy();
-      expect(screen.getByText('Negotiation')).toBeTruthy();
-      expect(screen.getByText('250')).toBeTruthy();
+      // Each change is one line with its before and after (objectstack#35602).
+      expect(screen.getAllByText(/Prospecting → Negotiation/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/100 → 250/).length).toBeGreaterThan(0);
       expect(screen.getByText('Kick-off note')).toBeTruthy();
     });
 
     it('an authored `filterMode: changes_only` opens on Field Changes and holds the field history only', () => {
       mount(block, { filterMode: 'changes_only' });
       expect(screen.getByRole('combobox').textContent).toContain('Field Changes');
-      expect(screen.getByText('Negotiation')).toBeTruthy();
-      expect(screen.getByText('250')).toBeTruthy();
+      expect(screen.getAllByText(/Prospecting → Negotiation/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/100 → 250/).length).toBeGreaterThan(0);
       expect(screen.queryByText('Kick-off note')).toBeNull();
       expect(screen.queryByText('Updated the deal')).toBeNull();
     });
@@ -515,8 +521,8 @@ describe("an authored page's feed panels hold the record's field history (object
 
     it('`unifiedTimeline: false` un-mixes them: no field change drawn, and no `changes_only` offered', async () => {
       mount(block, { unifiedTimeline: false, filterMode: 'changes_only' });
-      expect(screen.queryByText('Negotiation')).toBeNull();
-      expect(screen.queryByText('250')).toBeNull();
+      expect(screen.queryAllByText(/Negotiation/)).toHaveLength(0);
+      expect(screen.queryAllByText(/250/)).toHaveLength(0);
       expect(screen.getByRole('combobox').textContent).toContain('All Activity');
       expect(await options()).not.toContain('Field Changes');
     });
@@ -525,8 +531,8 @@ describe("an authored page's feed panels hold the record's field history (object
   it('CONTROL: a discussion panel on the default record page leaves the changes to the stream', async () => {
     mount('record:discussion', {}, { onDefaultPage: true });
     expect(screen.getByText('Kick-off note')).toBeTruthy();
-    expect(screen.queryByText('Negotiation')).toBeNull();
-    expect(screen.queryByText('250')).toBeNull();
+    expect(screen.queryAllByText(/Negotiation/)).toHaveLength(0);
+    expect(screen.queryAllByText(/250/)).toHaveLength(0);
     expect(await options()).not.toContain('Field Changes');
   });
 });

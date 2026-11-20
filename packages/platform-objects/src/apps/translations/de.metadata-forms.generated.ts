@@ -427,7 +427,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       userActions: {
         label: "Benutzeraktionen",
-        helpText: "Welche allgemeinen Einträge (Neu, Importieren, Bearbeiten, Löschen, Exportieren) Oberflächen-Clients für die Datensätze dieses Objekts anbieten; überschreibt den Standard von managedBy Eintrag für Eintrag. Ein nicht gesetzter Eintrag behält diesen Standard: platform bietet alle fünf an; config und system-data alle außer Importieren; engine-owned, append-only und better-auth nur Exportieren. Ein unberührter Schalter schreibt nichts und wird daher als aus angezeigt, auch wo der Standard den Eintrag anbietet. Bei einem Objekt vom Typ engine-owned oder append-only erlaubt das Einschalten eines Eintrags Benutzern auch diesen Schreibvorgang über die Daten-API. Benutzer benötigen weiterhin die passende Berechtigung."
+        helpText: "Welche allgemeinen Einträge (Neu, Importieren, Bearbeiten, Löschen, Exportieren) Oberflächen-Clients für die Datensätze dieses Objekts anbieten; überschreibt den Standard von managedBy Eintrag für Eintrag. Ein nicht gesetzter Eintrag behält diesen Standard: platform bietet alle fünf an; config und system-data alle außer Importieren; engine-owned, append-only und better-auth nur Exportieren. Ein unberührter Schalter schreibt nichts und wird daher als aus angezeigt, auch wo der Standard den Eintrag anbietet. Bei einem Objekt vom Typ engine-owned oder append-only erlaubt das Einschalten eines Eintrags Benutzern auch diesen Schreibvorgang über die Daten-API. Benutzer benötigen weiterhin die passende Berechtigung. „Inhaber ändern“ gehört nicht zu dieser Matrix: sein Standard folgt dem Freigabemodell (siehe seinen Eintrag)."
       },
       "userActions.create": {
         label: "Anlegen",
@@ -448,6 +448,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.exportCsv": {
         label: "CSV exportieren",
         helpText: "Der Eintrag für den CSV-Export. Nicht gesetzt: angezeigt, da jede managedBy-Gruppe den Export anbietet."
+      },
+      "userActions.transfer": {
+        label: "Inhaber ändern",
+        helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
       },
       editMode: {
         label: "Bearbeitungsmodus",
@@ -988,6 +992,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "refusals.params": {
         label: "Parameter",
         helpText: "Namen, die die Sätze füllen dürfen (z. B. state): Der Rumpf wirft { code, params: { state } }, und ein Platzhalter {{ state }} zeigt den Wert. Fehlt er: Die Sätze sind einfacher Text"
+      },
+      texts: {
+        label: "Texte",
+        helpText: "Sätze, die der Hook in Datensätze schreibt, nach dem snake_case-Schlüssel, den sein Code mit ctx.text anfragt (z. B. follow_up_subject). Der Hook erhält die deklarierte Meldung in der Sprache der Organisation, übersetzt, mit der deklarierten Meldung als Rückfall. Für einen JavaScript-Rumpf (L2) oder einen Handler; bei einem Ausdrucksrumpf abgelehnt"
+      },
+      "texts.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Hook schreibt, wenn sein Code diesen Schlüssel anfragt. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
+      },
+      "texts.params": {
+        label: "Parameter",
+        helpText: "Namen, die der Satz füllen darf (z. B. lead): Der Code fragt ctx.text(key, { lead }) an, und ein Platzhalter {{ lead }} zeigt den Wert. Fehlt er: Der Satz ist einfacher Text"
       },
       handler: {
         label: "Handler",
@@ -1880,6 +1896,42 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "body.memoryMb": {
         label: "Speicher (MB)",
         helpText: "Speicherobergrenze pro Aufruf (MB, max. 256)"
+      },
+      refusals: {
+        label: "Ablehnungen",
+        helpText: "Katalog der Ablehnungen, nach dem SCREAMING_SNAKE-Code, den der Rumpf der Aktion wirft (z. B. SIGN_IN_REQUIRED). Der Aufrufer liest die deklarierte Meldung, übersetzt in seine Sprache, mit dem deklarierten Status. Für den JavaScript-Rumpf (L2) einer script-Aktion; bei einem Ausdrucksrumpf abgelehnt"
+      },
+      "refusals.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Benutzer liest, wenn der Rumpf diesen Code wirft. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "HTTP-Status der Ablehnung (400–499). Fehlt er: 400"
+      },
+      "refusals.reasons": {
+        label: "Gründe",
+        helpText: "Weitere Sätze unter demselben Code, nach dem snake_case-Grund, den der Rumpf neben dem Code wirft ({ code, reason }). Gesendeter Code und Status bleiben die dieses Eintrags; ein hier nicht deklarierter Grund wird abgelehnt. Fehlt er: Ein geworfener Grund wird nicht gelesen"
+      },
+      "refusals.reasons.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den der Benutzer liest, wenn der Rumpf diesen Grund unter dem Code wirft. Seine {{ }}-Platzhalter folgen den params des Eintrags"
+      },
+      "refusals.params": {
+        label: "Parameter",
+        helpText: "Namen, die die Sätze füllen dürfen (z. B. state): Der Rumpf wirft { code, params: { state } }, und ein Platzhalter {{ state }} zeigt den Wert. Fehlt er: Die Sätze sind einfacher Text"
+      },
+      texts: {
+        label: "Texte",
+        helpText: "Sätze, die die Aktion in Datensätze schreibt, nach dem snake_case-Schlüssel, den ihr Rumpf mit ctx.text anfragt (z. B. email_subject). Der Rumpf erhält die deklarierte Meldung in der Sprache der Organisation, übersetzt, mit der deklarierten Meldung als Rückfall. Für den JavaScript-Rumpf (L2) einer script-Aktion; bei einem Ausdrucksrumpf abgelehnt"
+      },
+      "texts.message": {
+        label: "Meldung",
+        helpText: "Der Satz, den die Aktion schreibt, wenn ihr Rumpf diesen Schlüssel anfragt. Einfacher Text, außer der Eintrag deklariert params: dann füllt ein Platzhalter {{ name }} einen deklarierten Parameter"
+      },
+      "texts.params": {
+        label: "Parameter",
+        helpText: "Namen, die der Satz füllen darf (z. B. subject): Der Rumpf fragt ctx.text(key, { subject }) an, und ein Platzhalter {{ subject }} zeigt den Wert. Fehlt er: Der Satz ist einfacher Text"
       },
       params: {
         label: "Parameter",

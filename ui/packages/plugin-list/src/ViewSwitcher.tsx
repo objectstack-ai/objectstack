@@ -172,6 +172,23 @@ function useViewLabels(): Record<ListViewVisualization, string> {
 }
 
 /**
+ * The face a {@link ViewSwitcherDropdown} draws, chosen by where it is
+ * mounted rather than by its host: the Options menu lists the layouts as a
+ * second-level page and names the current one on its Layout row, while the
+ * host hands the menu one switcher element. The menu wraps that element in
+ * this context:
+ *
+ *   - `auto` (no provider): the segmented control for two to four
+ *     visualizations, the compact dropdown for more;
+ *   - `list`: every offered visualization as a row of icon and words, the
+ *     current one checked, so a layout is never named by an icon alone;
+ *   - `value`: the current visualization's icon and words, not interactive.
+ */
+export type ViewSwitcherFace = 'auto' | 'list' | 'value';
+
+export const ViewSwitcherFaceContext = React.createContext<ViewSwitcherFace>('auto');
+
+/**
  * Compact dropdown form of the visualization switcher (Airtable-style):
  * a single "List ▾" button in the toolbar's right cluster that opens a
  * menu of the available visualizations. Replaces the full button row so
@@ -186,6 +203,7 @@ export const ViewSwitcherDropdown: React.FC<ListViewSwitcherProps> = ({
 }) => {
   const [open, setOpen] = React.useState(false);
   const VIEW_LABELS = useViewLabels();
+  const face = React.useContext(ViewSwitcherFaceContext);
 
   const handleViewChange = React.useCallback(
     (view: ListViewVisualization) => {
@@ -201,6 +219,45 @@ export const ViewSwitcherDropdown: React.FC<ListViewSwitcherProps> = ({
     },
     [animated, currentView, onViewChange],
   );
+
+  if (face === 'value') {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5" data-testid="view-switcher-value">
+        {VIEW_ICONS[currentView]}
+        <span className="truncate">{VIEW_LABELS[currentView]}</span>
+      </span>
+    );
+  }
+
+  if (face === 'list') {
+    return (
+      <div role="radiogroup" aria-label={VIEW_LABELS[currentView]} className="flex flex-col p-1" data-testid="view-switcher-list">
+        {availableViews.map((view) => {
+          const active = view === currentView;
+          return (
+            <button
+              key={view}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              data-state={active ? 'on' : 'off'}
+              data-testid={`view-switcher-list-${view}`}
+              onClick={() => handleViewChange(view)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-muted max-sm:min-h-11',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                active ? 'font-medium text-foreground' : 'text-foreground/90',
+              )}
+            >
+              <span className="text-muted-foreground">{VIEW_ICONS[view]}</span>
+              <span className="flex-1">{VIEW_LABELS[view]}</span>
+              {active && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   // Few visualizations (2–4): render an iOS/Linear-style segmented control
   // inline — a unified rounded track where the active segment lifts onto a

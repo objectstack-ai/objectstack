@@ -151,7 +151,9 @@ const hostFilters = (dataSource: { find: ReturnType<typeof vi.fn> }) =>
   dataSource.find.mock.calls.map((c: unknown[]) => (c[1] as Record<string, unknown> | undefined)?.$filter);
 const names = (filter: unknown, field: string) => JSON.stringify(filter ?? null).includes(`"${field}"`);
 const countBar = () => screen.getByTestId('record-count-bar');
-const filterButton = () => screen.queryByRole('button', { name: /filter/i });
+// The toolbar trigger by its test id: the condition row's 「Add filter」 is a
+// second button named for filters (objectstack#35549).
+const filterButton = () => screen.queryByTestId('toolbar-filter-trigger');
 const settle = () => new Promise((r) => setTimeout(r, 50));
 
 const pick = (name: string) => {

@@ -1057,6 +1057,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-publish-follow-door-35566.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.external-binding-named-datasource-refusal.test.ts",
       "verb": "delete",
       "pinned": 1

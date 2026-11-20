@@ -39,6 +39,8 @@ export interface CommentBodyProps {
   onDeleteComment?: (itemId: string | number) => void | Promise<void>;
   /** The body paragraph's classes: the timeline row and a reply each keep their own. */
   bodyClassName: string;
+  /** The Edit and Delete row's classes; a row under the body by default. */
+  controlsClassName?: string;
 }
 
 /**
@@ -61,6 +63,7 @@ export const CommentBody: React.FC<CommentBodyProps> = ({
   onEditComment,
   onDeleteComment,
   bodyClassName,
+  controlsClassName = 'mt-1 flex items-center gap-0.5',
 }) => {
   const { t } = useDetailTranslation();
   const own = offersAuthorControls(item);
@@ -137,7 +140,7 @@ export const CommentBody: React.FC<CommentBodyProps> = ({
     <>
       {item.body && <p className={bodyClassName}>{item.body}</p>}
       {(edit || remove) && (
-        <div className="mt-1 flex items-center gap-0.5">
+        <div className={controlsClassName}>
           {edit && (
             <Button
               variant="ghost"

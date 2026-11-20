@@ -204,6 +204,16 @@ describe('composeStacks judges external.connector against the connectors of ever
     );
   });
 
+  /**
+   * [#35228 ruling A] A flat composition is ONE package, so two inputs
+   * declaring one connector name are also the same-package duplicate
+   * `collectDuplicateEntryErrors`' table refuses at the composition door — the
+   * second finding of the same envelope, after this rule's own.
+   */
+  const SAME_PACKAGE_CONNECTOR_DUPLICATE =
+    "Connector 'sap_s4' is declared twice in `connectors`: 'com.acme.orders' (stack #0) connectors[0] and " +
+    "'com.acme.sap' (stack #1) connectors[0]. ";
+
   it('judges a name two inputs declare in the flattened artifact against the later entry, the one the registry keeps', () => {
     const strictPair = defineStack({
       manifest: pluginManifest('com.acme.orders'),
@@ -212,14 +222,25 @@ describe('composeStacks judges external.connector against the connectors of ever
     } as never);
     const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
     const refused = composeRefusal([strictPair, owner(descriptor)]);
-    expectComposedFinding(refused, 'which declares no provider in the entry the composed artifact keeps');
+    expectOneFinding(refused, 'which declares no provider in the entry the composed artifact keeps');
+    expect(refused?.issues).toHaveLength(2);
     expect(String(refused?.issues?.[0])).toContain(
       "Connector 'sap_s4' is declared more than once: 'com.acme.orders' (stack #0) declares an instance " +
         "that can lend, and 'com.acme.sap' (stack #1) declares the later entry, which the runtime keeps. " +
         'Rename or remove the later entry',
     );
     expect(String(refused?.issues?.[0])).not.toContain('Give it the provider');
-    expect(composeRefusal([owner(descriptor), strictPair])).toBeUndefined();
+    expect(String(refused?.issues?.[1])).toContain(SAME_PACKAGE_CONNECTOR_DUPLICATE);
+    // The reverse order lends from the kept entry, so this rule is satisfied;
+    // the pair is still two entries of one name in the one composed package.
+    const reversed = composeRefusal([owner(descriptor), strictPair]);
+    expect({ code: reversed?.code, status: reversed?.status }).toEqual({ code: 'STACK_CROSS_REFERENCE_INVALID', status: 422 });
+    expect(reversed?.issues).toEqual([
+      expect.stringContaining(
+        "Connector 'sap_s4' is declared twice in `connectors`: 'com.acme.sap' (stack #0) connectors[0] and " +
+          "'com.acme.orders' (stack #1) connectors[0]. ",
+      ),
+    ]);
   });
 
   describe('a name two packages of a `preserve` artifact declare: the registry keeps both, the first registered lends', () => {
@@ -255,7 +276,10 @@ describe('composeStacks judges external.connector against the connectors of ever
   it('keeps the per-stack prescription when no declaration of the name could lend', () => {
     const descriptor = { name: 'sap_s4', label: 'SAP S/4HANA', type: 'api' };
     const refused = composeRefusal([owner(descriptor), owner(instance({ auth: { type: 'none' } })), looseBorrower()]);
-    expectComposedFinding(refused, 'which declares no auth credential — there is nothing to borrow. Declare the');
+    expectOneFinding(refused, 'which declares no auth credential — there is nothing to borrow. Declare the');
+    // …beside the same-package duplicate of the flat composition's one package.
+    expect(refused?.issues).toHaveLength(2);
+    expect(String(refused?.issues?.[1])).toContain("Connector 'sap_s4' is declared twice in `connectors`: ");
   });
 
   describe('a nested multi-package input, whose collections live only in its package bodies', () => {
@@ -384,9 +408,16 @@ describe('composeStacks judges external.connector against the connectors of ever
       const withInstance = mixed(instance(), 'com.acme.kit', 'com.acme.toolkit');
       const pair = reversed ? [withInstance, withDescriptor] : [withDescriptor, withInstance];
       const refused = composeRefusal([...pair, looseBorrower()], { manifest: 'preserve' });
-      expectComposedFinding(
+      expectOneFinding(
         refused,
         'which more than one input declares at the top level of a composed artifact that carries package bodies, and they disagree',
+      );
+      // [#35228 review S2] Both top-level entries are the residual the boot
+      // registers under the artifact's one `manifest.id`, so the pair is also
+      // that package's duplicate, the second finding of the same envelope.
+      expect(refused?.issues).toHaveLength(2);
+      expect(String(refused?.issues?.[1])).toMatch(
+        /^Connector 'sap_s4' is declared twice in `connectors`: 'com\.acme\.[a-z]+' \(stack #0\) connectors\[0\] and 'com\.acme\.[a-z]+' \(stack #1\) connectors\[0\]\. /,
       );
       const finding = String(refused?.issues?.[0]);
       expect(finding).toContain("'com.acme.kit' (stack #");
