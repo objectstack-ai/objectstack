@@ -426,14 +426,22 @@ describe('RelatedList — which body-table columns are totalled (objectstack#299
     expect(summaryRow()).toBeNull();
   });
 
-  it('a dynamic amount totals in the tenant default currency, and not at all without one', async () => {
-    const first = renderPlan({ columns: ['name', 'dynamic_fee'], parent: contract({}), tenantCurrency: 'CNY' });
+  it('a dynamic amount totals in the tenant default currency', async () => {
+    renderPlan({ columns: ['name', 'dynamic_fee'], parent: contract({}), tenantCurrency: 'CNY' });
     await waitFor(() => expect(summaryOf('dynamic_fee')).toMatch(/CN¥|¥/));
     expect(summaryOf('dynamic_fee')).toContain('6.00');
-    first.unmount();
+  });
+
+  // objectstack#35710 — with no currency resolving the column's cells still
+  // draw as amounts (two places, no symbol); the total is the same server
+  // figure drawn the same way, never a missing last row.
+  it('with no currency resolving, the total is the server figure drawn as its cells are: an amount, no symbol', async () => {
     const { aggregate } = renderPlan({ columns: ['name', 'dynamic_fee'], parent: contract({}) });
-    await settled(aggregate);
-    expect(summaryRow()).toBeNull();
+    await waitFor(() => expect(summaryOf('dynamic_fee')).not.toBeNull());
+    expect(summaryOf('dynamic_fee')).toMatch(/(^|\D)6\.00$/);
+    expect(summaryOf('dynamic_fee')).not.toMatch(/[$€¥£]|[A-Z]{3}/);
+    expect(aggregate.mock.calls[0][1].aggregations).toEqual([{ function: 'sum', field: 'dynamic_fee', alias: 'dynamic_fee' }]);
+    expect(aggregate.mock.calls[0][1].groupBy ?? []).toEqual([]);
   });
 });
 
