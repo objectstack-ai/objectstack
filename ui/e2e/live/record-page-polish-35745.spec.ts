@@ -113,10 +113,13 @@ test('record page polish (#35745, #35816) — showcase Expense Report', async ({
 
     await save.click();
     await expect(toolbar.getByRole('button', { name: 'Edit', exact: true })).toBeVisible({ timeout: 15_000 });
-    const stored = await request.get(`${API}/api/v1/data/${LINE}?$top=500`);
+    // Asked of the server for this report's lines only: a filter the route
+    // ignored would answer other reports' lines, and fail the count.
+    const ofThisReport = encodeURIComponent(JSON.stringify([['expense_report', 'equals', id]]));
+    const stored = await request.get(`${API}/api/v1/data/${LINE}?$filter=${ofThisReport}`);
     expect(stored.ok(), await stored.text()).toBeTruthy();
     const body = await stored.json();
-    const rows: any[] = (body.records ?? body.data ?? []).filter((r: any) => r.expense_report === id);
+    const rows: any[] = body.records ?? body.data ?? [];
     expect(rows, 'an added line left on its defaults is not stored').toHaveLength(0);
   } finally {
     await request.delete(`${API}/api/v1/data/${OBJECT}/${encodeURIComponent(id)}`);

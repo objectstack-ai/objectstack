@@ -33,7 +33,7 @@
 import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { LineItemsField, lookupAutofillByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -64,6 +64,7 @@ import { isSameStoredValue } from './sanitize';
 import { resolveInitialRecord } from './initialRecord';
 import { sectionEntryName } from './sectionFields';
 import { deriveDetail } from './deriveMasterDetail';
+import { schemaDefaultValues } from './schemaDefaults';
 import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 // objectui#11428 — the per-row form's offer test is the spec's rule.
 import { isInlineRowFormOffered } from '@objectstack/spec/data';
@@ -818,6 +819,16 @@ function withCodeHoles(sentence: string, holes: Record<string, string | undefine
   });
 }
 
+/**
+ * A line without the untouched mark `LineItemsField`'s Add gives a line it
+ * starts on its defaults (`UNTOUCHED_NEW_ROW`): the row editor's Apply is
+ * input, and an object spread would carry the mark over.
+ */
+function withoutUntouchedMark(row: Record<string, any>): Record<string, any> {
+  const { [UNTOUCHED_NEW_ROW]: _untouched, ...rest } = row as Record<string, any> & { [UNTOUCHED_NEW_ROW]?: true };
+  return rest;
+}
+
 interface MasterDetailLinesProps {
   entries: DetailEntry[];
   /** Row state addressed by ENTRY ID, never by array position (objectui#6371). */
@@ -859,6 +870,19 @@ interface MasterDetailLinesProps {
    * Remove asks the child's delete grant: a create form's lines are drafts.
    */
   formMode: 'create' | 'edit';
+  /**
+   * The values a new line starts with, by CHILD object name (objectstack#35940):
+   * the child's static defaults, seeded as a create form seeds them. A child
+   * whose schema has not answered has no entry, and its new lines start blank.
+   */
+  newRowValuesByChild: Readonly<Record<string, Record<string, unknown>>>;
+  /**
+   * A save of this form was tried since the lines were last saved: from then
+   * on a new line's empty required cell reads red (objectstack#35940). Before
+   * it, a line the user just added is not flagged for a cell they have not
+   * reached yet.
+   */
+  newRowRequiredShown: boolean;
 }
 
 /**
@@ -888,6 +912,8 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
   onAddViaForm,
   parentObjectName,
   formMode,
+  newRowValuesByChild,
+  newRowRequiredShown,
 }) => {
   // The subtotal / tax / grand-total stack formats in the display locale; it
   // used to pass `toLocaleString` an explicit `undefined`, i.e. the MACHINE's
@@ -1124,6 +1150,11 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // The columns whose amount follows this header's currency
               // (ADR-0144 D2 as amended), in the header's live code.
               columnCurrencies={followedColumnCurrencies(entry.parentCurrencyFields, parentRecord, tenantCurrency)}
+              // objectstack#35940 — a new line starts on the child's defaults,
+              // and its empty required cell reads red once a save was tried,
+              // as on the record page's edit state.
+              newRowValues={newRowValuesByChild[d.childObject]}
+              newRowRequiredShown={newRowRequiredShown}
               // Per-row "expand to full form" is offered when it adds something:
               // always in form mode (it IS the editor), and in grid mode only
               // when the full form has fields the grid omits. A thin grid whose
@@ -1263,6 +1294,8 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
 
   const [resolvedEntries, setResolvedEntries] = useState<DetailEntry[] | null>(null);
   const entries = resolvedEntries ?? baseEntries; // length always matches rawDetails
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
   /**
    * What the line grids draw: `entries`, each derived entry's columns re-run
    * with the CURRENT session words (objectui#12924). A host that has not
@@ -1473,6 +1506,10 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   // never resets — the header <ObjectForm> (see #1581). Reads happen at submit
   // time, long after the fetch resolves.
   const childSchemasRef = useRef<Record<string, { fields?: Record<string, any> }>>({});
+  // objectstack#35940 — the same answer for the lines' new-line defaults, which
+  // are read at render. It lands once, in the render the lines' own load lands
+  // in, and the header <ObjectForm>'s props do not depend on it.
+  const [childSchemas, setChildSchemas] = useState<Record<string, { fields?: Record<string, any> }>>({});
   useEffect(() => {
     const ds: any = dataSource;
     if (!ds || typeof ds.getObjectSchema !== 'function') return;
@@ -1489,10 +1526,31 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       const next: Record<string, { fields?: Record<string, any> }> = {};
       for (const [obj, sch] of entries) if (sch) next[obj] = sch;
       childSchemasRef.current = next;
+      setChildSchemas(next);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataSource, schema.objectName, schema.details]);
+
+  // objectstack#35940 — every new line is a child record to create, so it
+  // starts on the values a create form of the child seeds: its static
+  // defaults, with the same session facts `ObjectForm` threads (the acting
+  // user, the organization's currency and time zone). A default the server
+  // resolves per insert (`NOW()`, CEL) is left to the server.
+  const perms = usePermissions();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
+  const newRowValuesByChild = useMemo(() => {
+    const out: Record<string, Record<string, unknown>> = {};
+    for (const [childObject, childSchema] of Object.entries(childSchemas)) {
+      out[childObject] = schemaDefaultValues(childSchema, { currentUserId: perms.userId, homeCurrency, homeTimeZone });
+    }
+    return out;
+  }, [childSchemas, perms.userId, homeCurrency, homeTimeZone]);
+  const newRowValuesRef = useRef(newRowValuesByChild);
+  newRowValuesRef.current = newRowValuesByChild;
+  // objectstack#35940 — set when a save is tried, cleared when one lands: a
+  // new line's empty required cell reads red from the try on.
+  const [saveTried, setSaveTried] = useState(false);
 
   // Bumped after a successful CREATE to remount the parent <ObjectForm> (which
   // owns react-hook-form state) so its fields clear for the next entry.
@@ -1821,18 +1879,25 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         const cur = prev[entryId] ?? { rows: [], original: [] };
         return {
           ...prev,
-          [entryId]: { ...cur, rows: cur.rows.map((r, j) => (j === rowIdx ? { ...r, ...values } : r)) },
+          // An applied editor is input, so the line loses the untouched mark
+          // an Add on its defaults gave it (objectstack#35940).
+          [entryId]: { ...cur, rows: cur.rows.map((r, j) => (j === rowIdx ? { ...withoutUntouchedMark(r), ...values } : r)) },
         };
       });
     },
     [],
   );
 
-  /** List/form mode "Add": append a blank row and open it in the full form. */
+  /**
+   * List/form mode "Add": append a row on the child's defaults
+   * (objectstack#35940) and open it in the full form.
+   */
   const addRowViaForm = useCallback((entryId: string) => {
+    const childObject = entriesRef.current.find((e) => e.id === entryId)?.config.childObject;
+    const seed = childObject ? newRowValuesRef.current[childObject] : undefined;
     setRowState((prev) => {
       const cur = prev[entryId] ?? { rows: [], original: [] };
-      const rows = [...cur.rows, {}];
+      const rows = [...cur.rows, { ...seed }];
       setExpanded({ entryId, rowIdx: rows.length - 1, isNew: true });
       return { ...prev, [entryId]: { ...cur, rows } };
     });
@@ -1867,6 +1932,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     async (parent: any) => {
       releaseSave();
       setHeaderDirty(false);
+      setSaveTried(false);
       if (!schema.onSuccess) {
         toast.success(
           isEdit
@@ -2043,6 +2109,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         throw new Error('This save was not sent: another save of this form was still in progress.');
       }
       batchInFlightRef.current = true;
+      setSaveTried(true);
       holdSaveForBatch();
       try {
         return await sendBatch(parentValues);
@@ -2154,6 +2221,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     if (!form) return;
     savingRef.current = true;
     setSaving(true);
+    setSaveTried(true);
     // The previous attempt's outcome belongs to the previous attempt: retire it
     // the moment a new one starts, so no host can confirm a success while this
     // form's last refusal is still on screen (objectui#7345).
@@ -2209,6 +2277,8 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         onAddViaForm={addRowViaForm}
         parentObjectName={schema.objectName}
         formMode={isEdit ? 'edit' : 'create'}
+        newRowValuesByChild={newRowValuesByChild}
+        newRowRequiredShown={saveTried}
       />
 
       {/* Per-row "expand to full form": an inline editor panel for the selected
