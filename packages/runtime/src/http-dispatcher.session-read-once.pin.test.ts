@@ -435,8 +435,11 @@ describe('limiter armed: the limiter\'s read is the request\'s read (real kernel
         // auth base path, where the organization's IP list is judged on the
         // read (ADR-0069 D5). The limiter's read is made in front of that door
         // and judged without it, so it must not be the answer there: the route
-        // reads for itself.
-        const r = await warm(l, AUTH_MOUNT_ROUTE, l.ownerToken);
+        // reads for itself. `host` on the request, as a socket-served request
+        // carries it, so the route's header set is the limiter's exactly.
+        const host = { host: new URL(ORIGIN).host };
+        await request(l, AUTH_MOUNT_ROUTE, l.ownerToken, host);
+        const r = await request(l, AUTH_MOUNT_ROUTE, l.ownerToken, host);
         expect(r.status, JSON.stringify(r.body)).not.toBe(429);
         expect(r.status, JSON.stringify(r.body)).toBeLessThan(500);
         expect(r.getSession).toBe(2);
