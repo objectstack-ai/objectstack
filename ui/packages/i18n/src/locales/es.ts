@@ -993,6 +993,7 @@ const es = {
     draftOnlyQueryDropped: "Sin filtrar ni ordenar por {{fields}}: solo existe en el borrador hasta que publiques.",
     withheldFieldsLeftOut: "Sin mostrar, filtrar, ordenar ni agrupar por {{fields}}: el paquete que lo añade está desactivado. Vuelve cuando se activa el paquete.",
     inlineEditShort: "Edición en línea",
+    inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'Nombre de la vista',

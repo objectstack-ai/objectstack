@@ -961,6 +961,7 @@ const ko = {
     draftOnlyQueryDropped: "{{fields}} 기준 필터와 정렬이 적용되지 않았습니다. 초안에만 있으며 게시 후 적용됩니다.",
     withheldFieldsLeftOut: "{{fields}} 기준 표시, 필터, 정렬, 그룹화가 적용되지 않았습니다. 이 필드를 추가하는 패키지가 비활성화되어 있습니다. 패키지를 활성화하면 다시 나타납니다.",
     inlineEditShort: "인라인 편집",
+    inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
     // The list's Options menu.
     optionsMenu: {
       viewName: '보기 이름',

@@ -988,6 +988,7 @@ const pt = {
     draftOnlyQueryDropped: "Sem filtrar nem ordenar por {{fields}}: existe apenas no rascunho até você publicar.",
     withheldFieldsLeftOut: "Sem exibir, filtrar, ordenar nem agrupar por {{fields}}: o pacote que o adiciona está desativado. Ele volta quando o pacote for ativado.",
     inlineEditShort: "Edição em linha",
+    inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'Nome da visualização',

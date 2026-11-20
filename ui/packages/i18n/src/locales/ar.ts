@@ -1078,6 +1078,7 @@ const ar = {
     draftOnlyQueryDropped: "لم تتم التصفية أو الفرز حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى النشر.",
     withheldFieldsLeftOut: "لا يتم العرض أو التصفية أو الفرز أو التجميع حسب {{fields}}: الحزمة التي تضيف هذا الحقل معطلة. سيعود عند تفعيل الحزمة.",
     inlineEditShort: "تحرير مضمّن",
+    inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'اسم العرض',

@@ -988,6 +988,7 @@ const fr = {
     draftOnlyQueryDropped: "Non filtré ni trié par {{fields}} : ce champ n’existe que dans le brouillon jusqu’à la publication.",
     withheldFieldsLeftOut: "Non affiché, filtré, trié ni groupé par {{fields}} : le paquet qui ajoute ce champ est désactivé. Il revient lorsque le paquet est réactivé.",
     inlineEditShort: "Édition en ligne",
+    inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'Nom de la vue',

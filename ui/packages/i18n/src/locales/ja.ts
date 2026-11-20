@@ -961,6 +961,7 @@ const ja = {
     draftOnlyQueryDropped: "{{fields}} での絞り込みと並べ替えは行われていません。下書きにのみ存在し、公開後に有効になります。",
     withheldFieldsLeftOut: "{{fields}} は表示、絞り込み、並べ替え、グループ化されていません。この項目を追加するパッケージが無効になっています。パッケージを有効にすると戻ります。",
     inlineEditShort: "インライン編集",
+    inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
     // The list's Options menu.
     optionsMenu: {
       viewName: 'ビュー名',

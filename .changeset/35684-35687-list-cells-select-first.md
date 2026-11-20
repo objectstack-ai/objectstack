@@ -25,4 +25,4 @@ Skills-docs: none — `skills/objectstack-ui/rules/list-views.md` already teache
 
 A grid outside the list page, which mounts no provider, keeps its click-to-edit (`singleClickEdit`) and click-to-open behaviour unchanged.
 
-New locale keys, in every pack: `table.cellReadOnly` and `grid.readOnlyReason.*` (nine reasons). Retired: `list.inlineEditLabel`, the toggle's tooltip, which nothing reads now (`list.inlineEditShort` stays; the Options menu still holds it).
+New locale keys, in every pack: `table.cellReadOnly` and `grid.readOnlyReason.*` (nine reasons). No key is removed: `list.inlineEditShort` and `list.inlineEditLabel`, the toggle's words, stay in every pack, though the list no longer draws the toggle.
