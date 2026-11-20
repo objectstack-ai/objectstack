@@ -75,6 +75,29 @@ export const RELATED_CARD_DROP_LINE =
  */
 export const RecordBodyTablesContext = React.createContext<ReadonlySet<string>>(new Set());
 
+/**
+ * What a record page's EDIT STATE draws in place of its body tables
+ * (objectstack#35599): the relationship ids (`CHILD_OBJECT.FK_FIELD`) it edits,
+ * and the element it draws for each — the host's editor, supplied by the host
+ * because this package does not draw editable lines. A `record:related_list`
+ * whose id is in `ids` renders `render(...)` instead of its read-only list;
+ * every other list, and every list while the value is `null` (read mode, and
+ * every page that is not a record page in its edit state), renders as before.
+ *
+ * Set by the record page host only while its edit state is open and one batch
+ * can carry the tables. The page keeps its `record:related_list` nodes: the
+ * editor is a host element, never a node type a page could carry.
+ */
+export interface RecordBodyTableEditorSlot {
+  /** The body tables the edit state edits, by relationship id. */
+  ids: ReadonlySet<string>;
+  /** The editor drawn in a body table's place. */
+  render: (table: { objectName: string; relationshipField: string; title?: string }) => React.ReactNode;
+}
+
+/** The open edit state's body-table editor slot, or `null` (see {@link RecordBodyTableEditorSlot}). */
+export const RecordBodyTableEditorSlotContext = React.createContext<RecordBodyTableEditorSlot | null>(null);
+
 /** Enlarge a related list in place — the host's `?related=` — for a body table. */
 export const RelatedEnlargeContext = React.createContext<((id: string) => void) | null>(null);
 

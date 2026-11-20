@@ -113,8 +113,8 @@ describe('recordPageColumnOfTab — every synthesized tab has a column', () => {
     const tabs = buildDefaultTabs(leadDef, maximal);
     const values = tabs.properties.items.map((item: any) => item.value);
     // The maximal synthesis really emitted the whole strip.
-    // `attachments` rides the Related tab now (objectstack#27055).
-    expect(values).toEqual(expect.arrayContaining(['details', 'related', 'approvals', 'timeline']));
+    // objectstack#35595 — a tab per side list, then 附件 / 审批 / 动态.
+    expect(values).toEqual(['details', 'related:note.parent_id', 'related:call.lead_id', 'attachments', 'approvals', 'timeline']);
     for (const value of values) expect(recordPageColumnOfTab(value)).not.toBeNull();
   });
 
@@ -130,17 +130,23 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
     const page = buildDefaultPageSchema(leadDef, maximal);
     const columns = buildDefaultPageColumns(page);
     expect(columns).not.toBeNull();
-    // The header is every node before the strip — the same nodes the strip draws above it.
+    // The nodes before the strip split in two (objectstack#35595): the header,
+    // and the highlights / stage path the 概览 tab draws at its top.
     const main = page.regions.find((r: any) => r.name === 'main');
     const tabIndex = main.components.findIndex((n: any) => n.type === 'page:tabs');
-    expect(columns!.header).toEqual(main.components.slice(0, tabIndex));
+    const before = main.components.slice(0, tabIndex);
+    expect([...columns!.header, ...columns!.strip]).toEqual(expect.arrayContaining(before));
+    expect(columns!.header.length + columns!.strip.length).toBe(before.length);
     expect(types(columns!.header)[0]).toBe('page:header');
+    for (const type of types(columns!.strip)) expect(['record:highlights', 'record:path']).toContain(type);
+    expect(types(columns!.header)).not.toContain('record:highlights');
+    expect(types(columns!.header)).not.toContain('record:path');
     // The primary list is the record's body: a table in the details column
     // (objectstack#27055, Target 8).
     expect(types(columns!.details)).toEqual(['record:details', 'record:related_list']);
     // The one stream (objectstack#27055): a record:activity.
     expect(types(columns!.timeline)).toEqual(['record:activity']);
-    // The Related tab (side lists, attachments at its foot), then Approvals.
+    // The side lists' tabs, then 附件 and 审批.
     expect(types(columns!.related)).toEqual([
       'record:related_list',
       'record:related_list',
@@ -153,7 +159,7 @@ describe('buildDefaultPageColumns (objectstack#26678)', () => {
   it('places every node the page holds exactly once', () => {
     const page = buildDefaultPageSchema(leadDef, maximal);
     const columns = buildDefaultPageColumns(page)!;
-    const placed = [...columns.header, ...columns.details, ...columns.timeline, ...columns.related];
+    const placed = [...columns.header, ...columns.strip, ...columns.details, ...columns.timeline, ...columns.related];
     const main = page.regions.find((r: any) => r.name === 'main');
     const tabs = main.components.find((n: any) => n.type === 'page:tabs');
     const expected = [

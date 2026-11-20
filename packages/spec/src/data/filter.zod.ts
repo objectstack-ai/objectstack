@@ -2214,20 +2214,28 @@ function checkFilterConditionComparands(
  * 4. Nested relations: { relation: { field: value } } — a condition on the
  *    related record's own fields, beneath a relation field (`lookup`,
  *    `master_detail`, `user`, `tree`; single or multiple). The query engine
- *    SERVES it in `where`, the same on every driver: it reads the related
- *    object with the condition AS THE CALLER — that object's row scope and
- *    field permissions apply, so a condition on a field the caller cannot read
- *    is refused, never answered empty — and matches the relation field against
- *    the ids it returns (`$in` on a single-valued relation; any member, an
- *    `$or` of `$contains` per id, on a multi-valued one). Up to three
+ *    SERVES it in `where`: it reads the related object with the condition AS
+ *    THE CALLER — that object's row scope and field permissions apply, so a
+ *    condition on a field the caller cannot read is refused, never answered
+ *    empty — and matches the relation field against what that read selects.
+ *    On a read verb (`find`, `findOne`, `count`, `aggregate`) a single-valued
+ *    relation is one subquery inside the read's own statement where that is
+ *    provably the same read; everywhere else (a multi-valued relation,
+ *    `update`, `delete`, or a read the subquery cannot prove) the related ids
+ *    are read and matched (`$in` on a single-valued relation; any member, an
+ *    `$or` of `$contains` per id, on a multi-valued one). The subquery needs a
+ *    driver that declares `DriverCapabilities.readableIdsLeaf` (ADR-0139 D3, as
+ *    amended): on one without it (MongoDB, OData) a single-valued condition
+ *    on a read verb is refused up front (`INVALID_FILTER` / 400). Up to three
  *    relationships deep (ADR-0071's 3-hop limit, `RELATION_CONDITION_MAX_HOPS`
  *    in `packages/objectql/src/relation-filter-lowering.ts`): every key must be
  *    a field the related object declares (or `id`, `created_at`, `updated_at`),
  *    a relation key may hold a condition of its own, and a condition past the
  *    third relationship, or a dotted key, is refused (`INVALID_FILTER` / 400).
- *    A condition matching more related records than the engine's cap is
- *    refused rather than truncated; filter the
- *    related object yourself then, and match its ids the same way. An
+ *    Where ids are read, a condition matching more related records than the
+ *    engine's cap (`RELATION_FILTER_ID_CAP`) is refused rather than
+ *    truncated; filter the related object yourself then, and match its ids
+ *    the same way. An
  *    aggregation's own `filter` and `having` do not serve the form. The same
  *    object beneath a JSON-valued field (a whole-value match) and beneath a
  *    scalar field is refused.

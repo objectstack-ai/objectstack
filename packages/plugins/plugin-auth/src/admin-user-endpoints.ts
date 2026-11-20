@@ -557,6 +557,15 @@ export type AdminAuditDecisions =
       hostNotified: boolean;
     }
   | {
+      /**
+       * A ban or its lifting committed (`admin-ban-endpoints.ts`). `hostNotified`:
+       * the environment-user host took the deactivation or reactivation. The
+       * reason and expiry are fields of the user, so they ride the mirror row only.
+       */
+      event: 'user.admin_banned' | 'user.admin_unbanned';
+      hostNotified: boolean;
+    }
+  | {
       event: 'user.admin_password_set';
       passwordGenerated: boolean;
       /** [#23287] Whether the administrator asked for the forced reset's revocation. */

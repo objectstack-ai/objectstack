@@ -9,9 +9,9 @@
 /**
  * objectstack#27052 → objectstack#27524, Target 4 — `RecordPageColumns` with
  * the reader's ONE switch, ⊟ (the right column). The timeline switch, its
- * folded 「动态」 card and the related rail retired: 动态 is a panel of the right
- * column (its last since objectstack#34590), so ⊟ takes the 动态 panel and the
- * related panels out together, and the details take the row. The stack has no right column, so
+ * folded 「动态」 card and the related rail retired. Since objectstack#35596 the
+ * right column is the 概览 tab's summary rail (审批, 附件, 最近动态, 其他相关),
+ * so ⊟ takes the whole rail out, and the details take the row. The stack has no right column, so
  * the switch does not reach it. The blocks are stubbed (each node draws its
  * type), so what is measured is where each node lands.
  */
@@ -52,12 +52,13 @@ const shown = (container: HTMLElement) =>
 afterEach(() => cleanup());
 
 describe('RecordPageColumns — the right-column switch ⊟ (objectstack#27052, objectstack#27524)', () => {
-  it('absent or on: details | right column, 动态 last (objectstack#34590)', () => {
+  it('absent or on: details | the rail (objectstack#35596)', () => {
     for (const rightColumn of [undefined, true]) {
       const { container, unmount } = render(<RecordPageColumns tier="wide" columns={columns} rightColumn={rightColumn} />);
       expect(shown(container)).toBe('details right');
-      // objectstack#34590 — 动态 last (supersedes objectstack#27524 Targets 5 and 8 for the column).
-      expect(nodesIn(column(container, 'right'))).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
+      // The rail: no list drawn whole; the 最近动态 card mounted (hidden until the stream reports entries).
+      expect(nodesIn(column(container, 'right'))).toEqual(['record:activity']);
+      expect(column(container, 'right')!.querySelector('[data-record-summary-card="timeline"]')).not.toBeNull();
       unmount();
     }
   });
@@ -70,6 +71,7 @@ describe('RecordPageColumns — the right-column switch ⊟ (objectstack#27052, 
       expect(shown(container)).toBe('details');
       expect(column(container, 'right')).toBeNull();
       expect(container.querySelector('[data-record-timeline-panel]')).toBeNull();
+      expect(container.querySelector('[data-record-summary-card]')).toBeNull();
       expect(container.querySelectorAll('[data-node="record:related_list"]')).toHaveLength(0);
       expect(container.querySelector('[data-testid="record-related-rail-toggle"]')).toBeNull();
       expect(container.querySelector('[data-record-folded-timeline]')).toBeNull();
@@ -77,10 +79,10 @@ describe('RecordPageColumns — the right-column switch ⊟ (objectstack#27052, 
     });
   }
 
-  it('the stack does not read it: its panels follow the details whatever the switch says', () => {
+  it('the stack does not read it: its rail follows the details whatever the switch says', () => {
     const { container } = render(<RecordPageColumns tier="stack" columns={columns} rightColumn={false} />);
     expect(shown(container)).toBe('details');
-    // objectstack#34590 — the stack ends with 动态 (supersedes objectstack#27524 Targets 5 and 8 for the stack).
-    expect(nodesIn(column(container, 'right'))).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
+    expect(column(container, 'right')!.querySelector('[data-record-summary-card="timeline"]')).not.toBeNull();
+    expect(nodesIn(column(container, 'right'))).toEqual(['record:activity']);
   });
 });
