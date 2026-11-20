@@ -822,7 +822,8 @@ capability the in-app message door already asks of an organization administrator
 channel `sys_connector_credential` uses (ADR-0143): encrypted on write by the host's
 `ICryptoProvider` with the organization in its context, held in `sys_secret`, masked on every read,
 and dereferenced only server side through `resolveSecretField()`; the object is engine-owned with
-its data API closed.
+its data API closed. A Slack link is proposed only for a verified email and names no one before it
+is confirmed.
 
 **Open — not ruled:** what a person's email that matches more than one Slack user proposes (Risks &
 open questions, item 4, is Draft, and it describes the converse — two `sys_user`s sharing one email —
