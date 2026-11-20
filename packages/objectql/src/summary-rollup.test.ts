@@ -2035,7 +2035,7 @@ describe('[#34821] a multi-row insert judges a rule reading a parent field calcu
     for (const budget of [100, 1000]) {
       const p = await engine.insert('bud', { name: 'B', budget });
       // Precondition: the read door serves carol the header and its inputs, without the withheld column.
-      const served = await engine.findOne('bud', { where: { id: p.id }, context: carol } as any);
+      const served = await engine.findOne('bud', { where: { id: p.id }, context: carol });
       expect(served).toMatchObject({ id: p.id, budget, total: 0 });
       expect(served).not.toHaveProperty('remaining');
       verdicts.push(await validOf(guarded(p.id, [40, 40, 1]), carol));
