@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { createRequire } from 'node:module';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -733,6 +734,59 @@ describe('save_metadata_draft saves a draft and answers with its publish verdict
       expect(JSON.parse(result.output.value).error, toolName).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     }
     expect(calls).toEqual([]);
+  });
+});
+
+/** [#34774] `clientSpecVersion` on the save (#34659 ruling D4 = A). */
+describe('[#34774] save_metadata_draft judges the client\'s declared spec version', () => {
+  const SERVER = (createRequire(import.meta.url)('@objectstack/spec/package.json') as { version: string }).version;
+  const [major, minor] = SERVER.split('.').map(Number);
+  const SAVE = { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' };
+  const writes = (calls: unknown[]) => calls.filter((c: any) => ['saveMetaItem', 'draftPublishJudgement'].includes(c[0]));
+  const save = async (clientSpecVersion?: unknown) => {
+    const { authoring, served } = await authorThroughDomain();
+    const input = clientSpecVersion === undefined ? SAVE : { ...SAVE, clientSpecVersion };
+    const result = await authoring.registry.execute({ toolCallId: 't', toolName: 'save_metadata_draft', input }, CONTEXT);
+    return { result, body: JSON.parse(result.output.value), writes: writes(served.protocolCalls), tool: authoring.registry.getAll().find((t) => t.name === 'save_metadata_draft') as any };
+  };
+
+  it('is an optional input; a save without it, or with the same major and minor, answers byte for byte as before', async () => {
+    const without = await save();
+    expect(without.tool.parameters.properties.clientSpecVersion).toMatchObject({ type: 'string' });
+    expect(without.tool.parameters.required).toEqual(['type', 'name', 'item']);
+    expect(Object.keys(without.body)).toEqual(['saved', 'verdict', 'review']);
+    const same = await save(`${major}.${minor}.${Number(SERVER.split('.')[2]) + 1}`);
+    expect(same.result.output.value).toBe(without.result.output.value);
+    expect(same.writes).toEqual(without.writes);
+  });
+
+  it('done when: a client declaring the previous major is refused with the command to run, and nothing is written', async () => {
+    for (const declared of [`${major - 1}.${minor}.0`, `${major + 1}.0.0`]) {
+      const { body, writes: written } = await save(declared);
+      expect(body.error, declared).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      expect(body.error.message, declared).toContain(`npm i -D @objectstack/spec@${SERVER}`);
+      expect(body.error.message, declared).toContain(declared);
+      expect(written, declared).toEqual([]);
+    }
+  });
+
+  it('another minor is saved as usual, with an advisory naming both versions', async () => {
+    const declared = `${major}.${minor + 1}.0`;
+    const { result, body, writes: written } = await save(declared);
+    expect(result.isError).toBeUndefined();
+    expect(body.verdict).toMatchObject({ publishable: false });
+    expect(body.specVersionAdvisory).toContain(declared);
+    expect(body.specVersionAdvisory).toContain(`npm i -D @objectstack/spec@${SERVER}`);
+    expect(written.map((c: any) => c[0])).toEqual(['saveMetaItem', 'draftPublishJudgement']);
+  });
+
+  it('a value that is not a SemVer version is refused as an input error naming the form, before anything is written', async () => {
+    for (const declared of ['18', 'v18.6.0', '18.6', 18, '']) {
+      const { body, writes: written } = await save(declared);
+      expect(body.error, String(declared)).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+      expect(body.error.message, String(declared)).toContain('SemVer');
+      expect(written, String(declared)).toEqual([]);
+    }
   });
 });
 
