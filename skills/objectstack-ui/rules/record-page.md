@@ -4,7 +4,7 @@ Read in order — each step is the remedy for the one before it; author `*.page.
 
 **1 · The object's declarations produce the page.** With no page assigned, the
 Console synthesizes the record page from the object alone: `nameField` is the
-title, `highlightFields` the strip under it, `stageField` the stage path (each
+title, `stageField` the stage on its tag, a menu that moves it (each
 option declares `kind: 'open' | 'won' | 'lost'`; `false` suppresses it),
 `fieldGroups` + `Field.group` the detail sections, `relatedLists` the business
 order of the related lists, `editMode` (`'modal'` | `'page'`) how Edit opens.
