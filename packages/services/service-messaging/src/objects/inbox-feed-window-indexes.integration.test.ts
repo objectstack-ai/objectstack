@@ -128,7 +128,7 @@ describe('the inbox feed window reads have an index each', () => {
                 where: { user_id: 'usr_a' },
                 orderBy: [{ field: 'created_at', order: 'desc' }],
                 limit: 20,
-            } as any, SYS),
+            }, SYS),
         );
         expect(stmt.sql).toMatch(/order by `created_at` desc, `id` desc limit \?/);
         const detail = await plan(driver, stmt);
@@ -149,7 +149,7 @@ describe('the inbox feed window reads have an index each', () => {
                 where: { user_id: 'usr_a', channel: 'inbox' },
                 orderBy: [{ field: 'created_at', order: 'desc' }],
                 limit: 20,
-            } as any, SYS),
+            }, SYS),
         );
         expect(stmt.sql).toMatch(/order by `created_at` desc, `id` desc limit \?/);
         const detail = await plan(driver, stmt);
