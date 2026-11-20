@@ -6,7 +6,7 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * `sys_channel_user_link` — a person's link to their own user in a chat
  * workspace (ADR-0013 §8, narrowed by its accepted addendum of 2026-11-19):
  * the platform user, the organization's install (`sys_channel_account`), and
- * the chat user id.
+ * the chat user id, recorded when the person confirms.
  *
  * A link is `proposed` by matching the person's verified email against the
  * workspace's users and delivers nothing until the person `confirmed` it,
@@ -36,7 +36,7 @@ export const ChannelUserLink = ObjectSchema.create({
         account_id: Field.lookup('sys_channel_account', { label: 'Account', required: true, deleteBehavior: 'cascade' }),
         // [ADR-0118] A person's links go with the person, as their devices do.
         user_id: Field.lookup('sys_user', { label: 'User', required: true, deleteBehavior: 'cascade' }),
-        external_user_id: Field.text({ label: 'Chat User ID', required: true, maxLength: 64 }),
+        external_user_id: Field.text({ label: 'Chat User ID', maxLength: 64 }),
         external_display_name: Field.text({ label: 'Chat User Name', maxLength: 255 }),
         // Proposed by an email match; nothing is delivered until the person confirms.
         state: Field.select([{ label: 'Proposed', value: 'proposed' }, { label: 'Confirmed', value: 'confirmed' }], {

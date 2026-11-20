@@ -175,6 +175,9 @@ function door(deps: SlackLinkRoutesDeps, method: string, path: string, admin: bo
     };
 }
 
+/** A Slack token's alphabet: letters, digits, `.`, `_` and `-`. Any other value is not a token. */
+const TOKEN_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 function parseToken(body: unknown): string {
     const fields = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
     const unknown = Object.keys(fields).filter((k) => !ACCOUNT_BODY_KEYS.includes(k));
@@ -183,7 +186,7 @@ function parseToken(body: unknown): string {
             `Installing Slack reads only { token }, and this body carries ${unknown.map((k) => `'${k}'`).join(', ')}. Nothing was saved.`);
     }
     const token = typeof fields.token === 'string' ? fields.token.trim() : '';
-    if (!token || token.length > TOKEN_MAX) {
+    if (!token || token.length > TOKEN_MAX || !TOKEN_SHAPE.test(token)) {
         throw new SlackLinkError(400, 'VALIDATION_ERROR',
             "Installing Slack needs { token }: your Slack app's bot token (it starts with xoxb-). Nothing was saved.");
     }
@@ -200,7 +203,7 @@ function linkView(l: SlackLink) {
     return {
         id: l.id,
         userId: l.userId,
-        slackUserId: confirmed ? l.externalUserId : null,
+        slackUserId: confirmed ? l.externalUserId ?? null : null,
         slackUserName: confirmed ? l.externalDisplayName ?? null : null,
         state: l.state,
         confirmedAt: l.confirmedAt ?? null,

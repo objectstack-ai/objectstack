@@ -12,10 +12,11 @@
  * it is confirmed: {@link SlackLinkStore.propose} looks a Slack user up only
  * for the person's email while `sys_user.email_verified` reads verified, and
  * answers an unverified email exactly as it answers no match. The proposal
- * records a digest of the email it was made for; {@link SlackLinkStore.confirm}
- * confirms only while the person's email is still verified and still that
- * email, and applies only to the proposal that was checked. A new proposal
- * replaces one made for another email.
+ * records a digest of the email it was made for, and no Slack user;
+ * {@link SlackLinkStore.confirm} confirms only while the person's email is
+ * still verified and still that email, looks it up again, records the Slack
+ * user it names, and applies only to the proposal that was checked. A new
+ * proposal replaces one made for another email.
  *
  * ## What every write carries
  *
@@ -96,7 +97,8 @@ export interface SlackLink {
     readonly id: string;
     readonly accountId: string;
     readonly userId: string;
-    readonly externalUserId: string;
+    /** The linked Slack user: recorded at confirmation, so a proposal has none. */
+    readonly externalUserId?: string;
     readonly externalDisplayName?: string;
     readonly state: 'proposed' | 'confirmed';
     readonly confirmedAt?: string;
@@ -133,7 +135,12 @@ export interface SlackLinkStoreOptions {
     notify(input: EmitInput): Promise<unknown>;
     logger: { warn(...args: unknown[]): void };
     now?(): string;
+    /** How many links one read takes when every link of an install is removed (default {@link LINK_PAGE}). */
+    linkPageSize?: number;
 }
+
+/** The page an install's removal reads its links in, so it reaches every one of them. */
+const LINK_PAGE = 500;
 
 const READ = { context: { isSystem: true } } as const;
 const by = (userId: string | undefined, organizationId?: string) => ({
@@ -156,7 +163,7 @@ function toLink(row: Record<string, any>): SlackLink {
         id: String(row.id),
         accountId: String(row.account_id),
         userId: String(row.user_id),
-        externalUserId: String(row.external_user_id),
+        ...(str(row.external_user_id) ? { externalUserId: String(row.external_user_id) } : {}),
         ...(str(row.external_display_name) ? { externalDisplayName: String(row.external_display_name) } : {}),
         state: row.state === 'confirmed' ? 'confirmed' : 'proposed',
         ...(str(row.confirmed_at) ? { confirmedAt: String(row.confirmed_at) } : {}),
@@ -226,12 +233,28 @@ export class SlackLinkStore {
         return (await this.account(organizationId))!;
     }
 
-    /** Remove the install and, first, every link to it, each as an administrator's removal. */
+    /**
+     * Remove the install and, first, every link to it, each as an administrator's
+     * removal that tells the person. The links are read in pages, in id order,
+     * until a page comes back short, so every linked person is reached.
+     */
     async uninstall(organizationId: string, actor: string): Promise<boolean> {
         const account = await this.account(organizationId);
         if (!account) return false;
-        for (const link of await this.links(organizationId)) await this.removeLink(link, account, actor, true);
-        await this.data().delete(CHANNEL_ACCOUNT_OBJECT, { where: { id: account.id }, ...by(actor, organizationId) } as never);
+        const data = this.data();
+        const size = Math.max(1, this.opts.linkPageSize ?? LINK_PAGE);
+        for (let after: string | undefined; ;) {
+            const rows = await data.find(CHANNEL_USER_LINK_OBJECT, {
+                where: { account_id: account.id, ...(after === undefined ? {} : { id: { $gt: after } }) },
+                orderBy: [{ field: 'id', order: 'asc' }],
+                limit: size,
+            }, READ);
+            const page = (rows ?? []).map(toLink);
+            for (const link of page) await this.removeLink(link, account, actor, true);
+            if (page.length < size) break;
+            after = page[page.length - 1]!.id;
+        }
+        await data.delete(CHANNEL_ACCOUNT_OBJECT, { where: { id: account.id }, ...by(actor, organizationId) } as never);
         return true;
     }
 
@@ -277,18 +300,12 @@ export class SlackLinkStore {
             if (answer.error === 'users_not_found') return undefined;
             throw await this.slackFault(account, answer);
         }
-        const found = answer.body.user ?? {};
-        const externalUserId = str(found.id);
-        if (!externalUserId || found.deleted === true || found.is_bot === true) return undefined;
-        const taken = await data.findOne(CHANNEL_USER_LINK_OBJECT, { where: { account_id: account.id, external_user_id: externalUserId } }, READ);
-        if (taken) return undefined;
+        if (!(await this.linkableUser(account, answer))) return undefined;
         await data.insert(CHANNEL_USER_LINK_OBJECT, {
             id: randomUUID(),
             organization_id: organizationId,
             account_id: account.id,
             user_id: userId,
-            external_user_id: externalUserId,
-            external_display_name: str(found.real_name) ?? str(found.name) ?? null,
             proposal_email_hash: emailDigest(email),
             state: 'proposed',
         }, by(userId, organizationId));
@@ -298,10 +315,12 @@ export class SlackLinkStore {
     /**
      * The person confirms their proposal: from now on it delivers. Only while
      * their email is still verified and still the email the proposal was made
-     * for; otherwise refused, and the person asks for a new proposal. The
-     * write applies only to the proposal that was checked: it is conditioned
-     * on the row's id, its `proposed` state and that email's digest, and a
-     * write that matches no row is refused the same way.
+     * for, and while Slack still names a user for it that no one else in the
+     * install is linked to; otherwise refused, and the person asks for a new
+     * proposal. The Slack user is recorded here. The write applies only to the
+     * proposal that was checked: it is conditioned on the row's id, its
+     * `proposed` state and that email's digest, and a write that matches no
+     * row is refused the same way.
      */
     async confirm(organizationId: string, userId: string): Promise<SlackLink> {
         const link = await this.linkOf(organizationId, userId);
@@ -313,12 +332,20 @@ export class SlackLinkStore {
         const outdated = () => new SlackLinkError(409, 'RESOURCE_CONFLICT', enMessages.slackLinkProposalOutdated, 'slackLinkProposalOutdated');
         const email = await this.verifiedEmail(userId);
         const digest = email ? emailDigest(email) : undefined;
-        if (!digest || link.proposalEmailHash !== digest) throw outdated();
+        if (!email || !digest || link.proposalEmailHash !== digest) throw outdated();
+        const account = await this.requireActive(organizationId);
+        const answer = await (await this.slackFor(account))(`users.lookupByEmail?email=${encodeURIComponent(email)}`);
+        if (!answer.ok && answer.error !== 'users_not_found') throw await this.slackFault(account, answer);
+        const found = answer.ok ? await this.linkableUser(account, answer) : undefined;
+        if (!found) throw outdated();
         // A predicate write (`multi: true`), so every `where` key is evaluated
         // and the answer is the count of rows it changed: at most this one.
-        const written = await this.data().update(CHANNEL_USER_LINK_OBJECT,
-            { state: 'confirmed', confirmed_at: this.opts.now?.() ?? new Date().toISOString() },
-            { where: { id: link.id, state: 'proposed', proposal_email_hash: digest }, multi: true, ...by(userId, organizationId) } as never);
+        const written = await this.data().update(CHANNEL_USER_LINK_OBJECT, {
+            state: 'confirmed',
+            confirmed_at: this.opts.now?.() ?? new Date().toISOString(),
+            external_user_id: found.id,
+            external_display_name: found.name ?? null,
+        }, { where: { id: link.id, state: 'proposed', proposal_email_hash: digest }, multi: true, ...by(userId, organizationId) } as never);
         if (!written) throw outdated();
         return (await this.linkOf(organizationId, userId))!;
     }
@@ -334,25 +361,24 @@ export class SlackLinkStore {
     /** An administrator removes one person's link in their organization; the person is told (rider 2). */
     async removeByAdmin(organizationId: string, linkId: string, actor: string): Promise<boolean> {
         const account = await this.account(organizationId);
-        const link = account ? (await this.links(organizationId)).find((l) => l.id === linkId) : undefined;
-        if (!account || !link) return false;
-        await this.removeLink(link, account, actor, true);
+        if (!account) return false;
+        const row = await this.data().findOne(CHANNEL_USER_LINK_OBJECT, { where: { id: linkId, account_id: account.id } }, READ);
+        if (!row) return false;
+        await this.removeLink(toLink(row), account, actor, true);
         return true;
     }
 
     /**
      * Remove every link of `userId` — in `organizationId`, or everywhere when
-     * it is absent — attributed to `actor` (rider 3's triggers).
+     * it is absent — attributed to `actor` (rider 3's triggers). One predicate
+     * delete (`multi: true`); the engine runs the delete hooks once per row it
+     * removes, so each removal is audited as before. Answers how many went.
      */
     async removeAllOf(userId: string, organizationId: string | undefined, actor: string | undefined): Promise<number> {
-        const data = this.data();
         const where: Record<string, unknown> = { user_id: userId };
         if (organizationId) where.organization_id = organizationId;
-        const rows = await data.find(CHANNEL_USER_LINK_OBJECT, { where, fields: ['id'], limit: 10000 }, READ);
-        for (const row of rows ?? []) {
-            await data.delete(CHANNEL_USER_LINK_OBJECT, { where: { id: row.id }, ...by(actor) } as never);
-        }
-        return (rows ?? []).length;
+        const removed = await this.data().delete(CHANNEL_USER_LINK_OBJECT, { where, multi: true, ...by(actor) } as never);
+        return Number(removed) || 0;
     }
 
     /** The recipients among `userIds` with a confirmed link to the organization's ACTIVE install. */
@@ -372,7 +398,7 @@ export class SlackLinkStore {
         const account = await this.account(organizationId);
         if (!account || account.status !== 'active') return undefined;
         const link = await this.linkOf(organizationId, userId);
-        return link?.state === 'confirmed' ? { account, link } : undefined;
+        return link?.state === 'confirmed' && link.externalUserId ? { account, link } : undefined;
     }
 
     /** A Slack API client for the install, with its token read through the privileged dereference. */
@@ -400,6 +426,20 @@ export class SlackLinkStore {
     private async verifiedEmail(userId: string): Promise<string | undefined> {
         const user = await this.data().findOne(USER_OBJECT, { where: { id: userId }, fields: ['email', 'email_verified'] }, READ);
         return isEmailVerifiedUserRow(user) ? str(user?.email) : undefined;
+    }
+
+    /**
+     * The Slack user a `users.lookupByEmail` answer names, while it can be
+     * linked: a person, not deleted, and linked to no one in this install.
+     */
+    private async linkableUser(account: SlackAccount, answer: SlackAnswer): Promise<{ id: string; name?: string } | undefined> {
+        const found = answer.body.user ?? {};
+        const id = str(found.id);
+        if (!id || found.deleted === true || found.is_bot === true) return undefined;
+        const taken = await this.data().findOne(CHANNEL_USER_LINK_OBJECT, { where: { account_id: account.id, external_user_id: id } }, READ);
+        if (taken) return undefined;
+        const name = str(found.real_name) ?? str(found.name);
+        return name ? { id, name } : { id };
     }
 
     private async requireActive(organizationId: string): Promise<SlackAccount> {

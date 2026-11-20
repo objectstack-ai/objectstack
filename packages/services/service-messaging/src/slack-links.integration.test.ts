@@ -12,7 +12,10 @@
  *  - the proposal rule: a Slack link is proposed only for a verified email
  *    and names no one before it is confirmed, and a confirmation holds only
  *    while that email is still verified and still the person's, and applies
- *    only to the proposal that was checked;
+ *    only to the proposal that was checked; a proposal stores no Slack user,
+ *    the confirmation records the one Slack names for the email then;
+ *  - the token: a value that is not a Slack token is refused before Slack is
+ *    asked;
  *  - the riders of ruling 7024100939: (1) every removal is a write the audit
  *    hook sees, attributed to who removed it; (2) an administrator's removal
  *    tells the person by inbox and email; (3) a link goes with the person's
@@ -61,6 +64,7 @@ const CONTEXTS: Record<string, ExecutionContext> = {
     bob: { userId: 'u_bob', tenantId: 'org_a', systemPermissions: [] } as ExecutionContext,
     bob_fr: { userId: 'u_bob', tenantId: 'org_a', locale: 'fr-FR', systemPermissions: [] } as ExecutionContext,
     ada_no_org: { userId: 'u_ada', systemPermissions: [] } as ExecutionContext,
+    admin_b: { userId: 'u_admin', tenantId: 'org_b', systemPermissions: ['setup.access', 'setup.write'] } as ExecutionContext,
 };
 
 /** Reversible test crypto that binds the organization: a handle opens only under the tenant it was sealed for. */
@@ -113,7 +117,7 @@ afterEach(async () => {
     engine = undefined;
 });
 
-async function boot() {
+async function boot(opts: { linkPageSize?: number } = {}) {
     const ql = new ObjectQL({ logger: silent });
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
     ql.registerDriver(driver, true);
@@ -133,7 +137,7 @@ async function boot() {
     }
     engine = ql;
 
-    const { slack, calls } = scriptedSlack();
+    const { slack, calls, directory } = scriptedSlack();
     const notices: any[] = [];
     // The engine the store writes through; `beforeLinkUpdate` runs once, just before the store's next link write.
     const race: { beforeLinkUpdate?: () => Promise<unknown> } = {};
@@ -151,12 +155,17 @@ async function boot() {
             return typeof member === 'function' ? member.bind(target) : member;
         },
     });
-    const store = new SlackLinkStore({ getData: () => data as any, getSlack: () => slack, notify: async (i) => notices.push(i), logger: silent });
+    const store = new SlackLinkStore({
+        getData: () => data as any, getSlack: () => slack, notify: async (i) => notices.push(i), logger: silent,
+        ...(opts.linkPageSize ? { linkPageSize: opts.linkPageSize } : {}),
+    });
     expect(bindSlackLinkRemovalTriggers(ql as any, store, silent)).toBe(true);
     // The platform's write audit (plugin-audit) is an `after*` hook attributing `session.userId`; this stands in for it.
-    const audit: Array<{ event: string; id: unknown; by: unknown }> = [];
+    const audit: Array<{ event: string; id: unknown; by: unknown; written: string }> = [];
     for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) {
-        ql.registerHook(event, async (ctx: any) => { audit.push({ event, id: ctx.input?.id ?? ctx.result?.id, by: ctx.session?.userId }); }, { object: CHANNEL_USER_LINK_OBJECT });
+        ql.registerHook(event, async (ctx: any) => {
+            audit.push({ event, id: ctx.input?.id ?? ctx.result?.id, by: ctx.session?.userId, written: JSON.stringify([ctx.input?.data ?? null, ctx.result ?? null]) });
+        }, { object: CHANNEL_USER_LINK_OBJECT });
     }
 
     const handlers = new Map<string, (req: unknown, res: unknown) => Promise<void>>();
@@ -180,7 +189,7 @@ async function boot() {
         return call('POST', `${SLACK_LINK_ROUTE}/confirm`, bearer);
     };
     const setUser = (id: string, values: Record<string, unknown>) => ql.update('sys_user', values, { where: { id }, ...SYSTEM } as never);
-    return { ql, driver, store, call, links, install, connect, setUser, race, calls, notices, audit };
+    return { ql, driver, store, call, links, install, connect, setUser, race, calls, directory, notices, audit };
 }
 
 describe('the Slack install — an administrator\'s token, at rest', () => {
@@ -200,6 +209,16 @@ describe('the Slack install — an administrator\'s token, at rest', () => {
         const id = String((raw as any[])[0].id);
         expect(await t.ql.resolveSecretField(CHANNEL_ACCOUNT_OBJECT, id, 'bot_token', { tenantId: 'org_a' })).toBe(GOOD);
         await expect(t.ql.resolveSecretField(CHANNEL_ACCOUNT_OBJECT, id, 'bot_token', { tenantId: 'org_b' })).rejects.toThrow();
+    });
+
+    it('a value that is not a Slack token is refused before Slack is asked, and nothing is saved', async () => {
+        const t = await boot();
+        for (const token of ['secret:abc123', 'SECRET:abc123', '••••••••', 'xoxb acme', 'xoxb-acme\n']) {
+            const put = await t.call('PUT', SLACK_ACCOUNT_ROUTE, 'admin_a', { body: { token: `${token}x` } });
+            expect([put.body.error.code, put.status], token).toEqual(['VALIDATION_ERROR', 400]);
+        }
+        expect(t.calls).toEqual([]);
+        expect(await t.ql.find(CHANNEL_ACCOUNT_OBJECT, {}, SYSTEM)).toHaveLength(0);
     });
 
     it('a token Slack refuses is not saved', async () => {
@@ -315,13 +334,50 @@ describe('the proposal rule — a verified email, and no one named before it is 
         expect(await t.store.confirmedUsers('org_a', ['u_ada'])).toEqual(new Set());
     });
 
+    it('a proposal stores no Slack user; the confirmation records the one Slack names for the verified email', async () => {
+        const t = await boot();
+        await t.install();
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
+        const stored = async () => (await t.driver.find(CHANNEL_USER_LINK_OBJECT, { where: {} } as never)) as any[];
+        const [proposed] = await stored();
+        expect([proposed.state, proposed.external_user_id ?? null, proposed.external_display_name ?? null]).toEqual(['proposed', null, null]);
+        const inserted = t.audit.filter((a) => a.event === 'afterInsert');
+        expect(inserted).toHaveLength(1);
+        expect(inserted[0]!.written).not.toMatch(/UADA|Ada/);
+        expect(lookups(t.calls)).toHaveLength(1);
+
+        const confirmed = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
+        expect(confirmed.body.data.link).toMatchObject({ slackUserId: 'UADA', slackUserName: 'Ada', state: 'confirmed' });
+        expect(lookups(t.calls)).toHaveLength(2);
+        const [row] = await stored();
+        expect([row.state, row.external_user_id, row.external_display_name]).toEqual(['confirmed', 'UADA', 'Ada']);
+    });
+
+    it('a confirmation is refused when Slack no longer names a user for the email, or names one linked to someone else', async () => {
+        const t = await boot();
+        await t.install();
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
+        delete t.directory['u_ada@example.test'];
+        const gone = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
+        expect([gone.body.error.code, gone.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+
+        // Two people whose verified email Slack resolves to one user: the first to confirm holds it.
+        await t.setUser('u_admin', { email: 'u_bob@example.test' });
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'bob');
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'admin_a');
+        expect((await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'bob')).body.data.link).toMatchObject({ slackUserId: 'UBOB', state: 'confirmed' });
+        const taken = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'admin_a');
+        expect([taken.body.error.code, taken.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(await t.store.confirmedUsers('org_a', ['u_ada', 'u_bob', 'u_admin'])).toEqual(new Set(['u_bob']));
+    });
+
     it('a new proposal replaces one made for another email, and confirms for the new one', async () => {
         const t = await boot();
         await t.install();
         await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
         await t.setUser('u_ada', { email: 'ada.new@example.test' });
         expect((await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada')).body.data).toEqual({ link: { state: 'proposed' } });
-        expect((await t.links()).map((l) => l.external_user_id)).toEqual(['UADA2']);
+        expect(await t.links()).toHaveLength(1);
         const confirmed = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
         expect(confirmed.body.data.link).toMatchObject({ slackUserId: 'UADA2', state: 'confirmed' });
         expect(t.audit.filter((a) => a.event === 'afterDelete').map((a) => a.by)).toEqual(['u_ada']);
@@ -353,7 +409,7 @@ describe('the riders of ruling 7024100939', () => {
         const [row] = (await t.ql.find(CHANNEL_USER_LINK_OBJECT, { fields: ['id'] }, SYSTEM)) as any[];
         const removed = await t.call('DELETE', `${SLACK_LINKS_ROUTE}/:id`, 'admin_a', { id: String(row.id) });
         expect(removed.body.data).toEqual({ removed: true });
-        expect(t.audit.filter((a) => a.event === 'afterDelete')).toEqual([{ event: 'afterDelete', id: row.id, by: 'u_admin' }]);
+        expect(t.audit.filter((a) => a.event === 'afterDelete').map(({ event, id, by }) => ({ event, id, by }))).toEqual([{ event: 'afterDelete', id: row.id, by: 'u_admin' }]);
         expect(t.notices).toHaveLength(1);
         expect(t.notices[0]).toMatchObject({
             topic: SLACK_LINK_REMOVED_TOPIC, audience: ['user:u_ada'], organizationId: 'org_a', channels: ['inbox', 'email'], actorId: 'u_admin',
@@ -363,6 +419,28 @@ describe('the riders of ruling 7024100939', () => {
         const again = await t.connect('ada');
         expect(again.body.data.link).toMatchObject({ slackUserId: 'UADA', state: 'confirmed' });
         expect(t.audit.filter((a) => a.event === 'afterInsert').map((a) => a.by)).toEqual(['u_ada', 'u_ada']);
+    });
+
+    it('(2) an administrator removes only a link to their own organization\'s install', async () => {
+        const t = await boot();
+        await t.install();
+        await t.connect('ada');
+        await t.call('PUT', SLACK_ACCOUNT_ROUTE, 'admin_b', { body: { token: GOOD } });
+        const [row] = (await t.ql.find(CHANNEL_USER_LINK_OBJECT, { fields: ['id'] }, SYSTEM)) as any[];
+        const other = await t.call('DELETE', `${SLACK_LINKS_ROUTE}/:id`, 'admin_b', { id: String(row.id) });
+        expect([other.body.error?.code, other.status]).toEqual(['RESOURCE_NOT_FOUND', 404]);
+        expect(await t.links()).toHaveLength(1);
+        expect(t.notices).toEqual([]);
+    });
+
+    it('(2) the uninstall tells every linked person, however many pages their links take', async () => {
+        const t = await boot({ linkPageSize: 2 });
+        await t.install();
+        for (const bearer of ['ada', 'bob', 'admin_a']) await t.connect(bearer);
+        expect((await t.call('DELETE', SLACK_ACCOUNT_ROUTE, 'admin_a')).body.data).toEqual({ removed: true });
+        expect(t.notices.map((n) => n.audience[0]).sort()).toEqual(['user:u_ada', 'user:u_admin', 'user:u_bob']);
+        expect(t.audit.filter((a) => a.event === 'afterDelete').map((a) => a.by)).toEqual(['u_admin', 'u_admin', 'u_admin']);
+        expect(await t.links()).toEqual([]);
     });
 
     it('(1) the person\'s own removal and the uninstall are audited as their actor; only the administrator\'s tells anyone', async () => {
@@ -394,5 +472,19 @@ describe('the riders of ruling 7024100939', () => {
         expect(await t.links()).toEqual([]);
         expect(t.audit.filter((a) => a.event === 'afterDelete')).toHaveLength(3);
         expect(t.audit.filter((a) => a.event === 'afterDelete').slice(0, 2).map((a) => a.by)).toEqual(['u_admin', 'u_admin']);
+    });
+
+    it('(3) a link goes when the person\'s membership moves to another organization, audited as who moved it', async () => {
+        const t = await boot();
+        await t.install();
+        await t.connect('ada');
+        await t.connect('bob');
+        const mover = { context: { isSystem: true, userId: 'u_admin' } as ExecutionContext };
+        await t.ql.update('sys_member', { organization_id: 'org_b' }, { where: { id: 'm_bob' }, ...mover } as never);
+        expect((await t.links()).map((l) => l.user_id)).toEqual(['u_ada']);
+        expect(t.audit.filter((a) => a.event === 'afterDelete').map((a) => a.by)).toEqual(['u_admin']);
+        // A write that leaves the organization as it was removes nothing.
+        await t.ql.update('sys_member', { role: 'admin' }, { where: { id: 'm_ada' }, ...mover } as never);
+        expect((await t.links()).map((l) => l.user_id)).toEqual(['u_ada']);
     });
 });
