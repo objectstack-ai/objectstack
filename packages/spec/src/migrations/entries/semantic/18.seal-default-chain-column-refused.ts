@@ -16,21 +16,24 @@ export const entry: SemanticMigration = {
   reason:
     'A seal that names no chainField chains each row by tenant_id (ADR-0154 D10, note on chainField). That default '
     + 'was never judged at authoring, and such an object parsed. At run time the sealer reported an object with no '
-    + 'tenant_id field at error and sealed none of its rows; sealed the rows of one with a non-text tenant_id into '
-    + 'the deployment chain with no report; and sealed one that lists tenant_id in valueFields per organization, '
+    + 'tenant_id field at error and sealed none of its rows; sealed some or all rows of one with a non-text tenant_id '
+    + '(every row whose value the driver returns as a non-string) into the deployment chain with no report; and '
+    + 'sealed one that lists tenant_id in valueFields per organization, '
     + 'carrying the committed value in clear as the chain. The '
     + 'parse now holds the default to the rules a named chainField meets and refuses the object at lifecycle.seal. '
     + 'The registry injects organization_id, never tenant_id. A definition that skips the parse (a stored row loaded '
     + 'at boot, a raw registration) still registers, and the sealer treats it as before. The judgement reads the '
     + 'object\'s own fields and the injected columns, so a tenant_id contributed only by an objectExtensions entry '
     + 'does not count. There is no mechanical rewrite: '
-    + 'which column holds each row\'s organization is the author\'s choice, and changing the chain column of an '
-    + 'object that already has checkpoints re-seals its last sealed window.',
+    + 'which column holds each row\'s organization is the author\'s choice, and a fix that changes the chain value of '
+    + 'rows on an object that already has checkpoints re-seals its last sealed window.',
   acceptanceCriteria:
     'os validate passes for every sealed object; each one names a chainField it has, or declares a text or lookup '
-    + 'tenant_id outside valueFields. For an object that had no tenant_id field (it had no checkpoints), os audit '
-    + 'verify reports ok once it seals. For an object that already had checkpoints under a non-text tenant_id or one '
-    + 'listed in valueFields, the fix re-seals the last sealed window: os audit verify reports it listed_twice, and '
+    + 'tenant_id outside valueFields. Removing tenant_id from valueFields keeps every chain: nothing is re-sealed and '
+    + 'os audit verify stays ok, since each earlier checkpoint is checked against the columns it was signed with. A '
+    + 'fix that changes a row\'s chain value on an object that already has checkpoints (a non-text tenant_id fixed, or '
+    + 'a different chainField named) re-seals the last sealed window: os audit verify reports it listed_twice, and '
     + 'verifying one organization with --org reads the rows sealed before the change as late and unsealed '
-    + '(ADR-0154 D10 note); expect those findings for that object only.',
+    + '(ADR-0154 D10 note); expect those findings for that object only. An object that had no tenant_id field had no '
+    + 'checkpoints, and verifies ok once it seals.',
 };
