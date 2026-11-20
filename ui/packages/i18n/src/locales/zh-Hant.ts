@@ -5048,7 +5048,7 @@ const zhHant = {
     newestFirst: '最新 → 最早',
     addSort: '新增排序',
     removeSort: '刪除排序',
-    reorder: '拖曳以調整先後',
+    reorder: '拖動以調整先後',
   },
   collaboration: {
     commentCount: '{{count}} 條評論',
