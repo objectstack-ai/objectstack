@@ -1440,6 +1440,17 @@ const zhHant = {
     recordTabsMore: '另外 {{count}} 個頁籤',
     recordTabsMore_one: '另外 {{count}} 個頁籤',
     recordTabsMore_other: '另外 {{count}} 個頁籤',
+    // objectstack#35595 — the tab row's one fold, 「更多 N ▾」: the number of tabs it holds.
+    recordTabsMoreTrigger: '更多 {{count}}',
+    recordTabsMoreTrigger_one: '更多 {{count}}',
+    recordTabsMoreTrigger_other: '更多 {{count}}',
+    // objectstack#35596 — the 概覽 tab's summary rail.
+    summaryApprovalDone: '已通過',
+    summaryApprovalMine: '待你審批',
+    summaryApprovalWaitingOn: '等待 {{name}}',
+    summaryApprovalWaiting: '等待中',
+    summaryRecentActivity: '最近動態',
+    summaryOtherRelated: '其他相關',
     recordTabsHidden: '已隱藏',
     bodyTableTotals: '本頁合計',
     streamAll: '全部',

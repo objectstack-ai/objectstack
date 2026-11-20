@@ -226,6 +226,8 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // objectstack#27055 — the record page v3 face: a host drawing the
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext } from './defaultRecordPage';
+// objectstack#35484 — a page drawn as written draws one approval band.
+export { ApprovalBandOnceScope } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
 // objectstack#35599 — the record page's edit state draws its body tables as
 // the host's editor through this slot.

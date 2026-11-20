@@ -84,6 +84,7 @@ import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
+import { ApprovalBandOnceScope } from '@object-ui/plugin-detail';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
@@ -5220,11 +5221,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
   // group (the page's own bar below; a pane's bar through
   // `RecordPaneBarToggles`), only where the tier has a right column and the
-  // page has a panel for it — never in the stack.
+  // page has a panel for it — never in the stack, and never in a drawer or
+  // pane, which draws no right rail (objectstack#35596).
   const panelToggleItems: PanelToggleItem[] = [];
   if (
     pageColumns
     && pageHasRightColumn
+    && !embedded
     && (pageColumns.timeline.length > 0 || pageColumns.related.length > 0)
   ) {
     panelToggleItems.push({
@@ -5486,7 +5489,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       type="button"
       onClick={() => {
         const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
-        panel?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        if (panel) {
+          panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          return;
+        }
+        // objectstack#35595 — the approvals panel is the page's 审批 tab, not
+        // drawn on 概览: the tag opens that tab.
+        if (pageColumns) openEnlargedRelated('approvals');
+        else if (!hasApprovalsNode) handleTabChange('approvals');
       }}
       className={cn(
         'inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -5543,6 +5553,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     </>
   );
 
+  // objectstack#35595 — where a page drawn as written gets the panels it does
+  // not place: its tab strip's 审批 and 附件 tabs, not the page's foot.
+  const fallbackTabs = pageColumns
+    ? { page: renderedPage, approvals: false, attachments: false }
+    : withFallbackRecordTabs(renderedPage, {
+        approvals: pureRecordId && !hasApprovalsNode && approvals.requests.length > 0
+          ? { approvals: { available: approvals.available, requests: approvals.requests, pendingRequest: approvals.pendingRequest }, currentUserId: user?.id }
+          : null,
+        attachments: !!(filesEnabled && !hasAttachments && pureRecordId),
+      });
   const pageTree = (
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
@@ -5838,6 +5858,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     tier={recordPageTier}
                     columns={pageColumns}
                     rightColumn={relatedSwitch === 'on'}
+                    // objectstack#35596 — a drawer (or pane) draws no right rail:
+                    // its 审批, 附件 and 动态 are its tabs.
+                    rail={!embedded}
                     relatedArrangement={relatedArrangement}
                     onRelatedArrangementChange={setRelatedArrangement}
                     enlargedRelated={enlargedRelatedParam}
@@ -5860,12 +5883,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // (frameless sections, the highlight grid); an authored page
                   // keeps its own face. Every `record:details` body, authored
                   // or not, draws the empty-sections line (objectstack#35019).
+                  //
+                  // objectstack#35595 — the approval and the attachments a page
+                  // does not place go into its tab strip, as the 审批 and 附件
+                  // tabs (`withFallbackRecordTabs`), not the page's foot; and
+                  // however many details nodes it places, it draws ONE approval
+                  // band (`ApprovalBandOnceScope`, objectstack#35483,
+                  // objectstack#35484).
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
                       {/* A page drawn as its strip is drawn as written: the
                           reader's arrangement belongs to the right column and
                           the tab row (objectstack#27524). */}
-                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      <ApprovalBandOnceScope>
+                        <SchemaRenderer schema={withPageTabsUrlSync(fallbackTabs.page, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
+                      </ApprovalBandOnceScope>
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
@@ -5877,7 +5909,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   AUTHORED pages that don't place the node, so the read-gated
                   approval story is never lost to a custom layout. Renders
                   nothing when the record has no requests. */}
-              {pureRecordId && !hasApprovalsNode && (
+              {pureRecordId && !hasApprovalsNode && !fallbackTabs.approvals && (
                 <RecordApprovalsPanel
                   className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   approvals={approvals}
@@ -5891,7 +5923,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   `record:attachments` node beside the discussion feed
                   (objectstack#4358), so this bottom append fires only for
                   authored pages that omit the panel. */}
-              {filesEnabled && !hasAttachments && pureRecordId && (
+              {filesEnabled && !hasAttachments && pureRecordId && !fallbackTabs.attachments && (
                 <div
                   className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   ref={setAttachmentsFallbackEl}
@@ -6073,4 +6105,62 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       {pageTree}
     </RecordPageDrawerHost>
   );
+}
+
+/**
+ * objectstack#35595 — a page drawn as written (an authored page, or a
+ * synthesized one whose strip cannot be laid out) that does not place the
+ * record's approval or attachments panel gets them as tabs of its FIRST
+ * `page:tabs` strip — 「附件」 then 「审批」, after its own tabs — instead of
+ * at the page's foot. A page with no strip keeps the foot (there is nowhere
+ * else to put them). Returns the page unchanged, by reference, when it adds
+ * nothing, and says which tab it added.
+ */
+export function withFallbackRecordTabs(
+  page: any,
+  add: { approvals: Record<string, unknown> | null; attachments: boolean },
+): { page: any; approvals: boolean; attachments: boolean } {
+  const none = { page, approvals: false, attachments: false };
+  if (!add.approvals && !add.attachments) return none;
+  const extra = (): any[] => [
+    ...(add.attachments
+      ? [{ label: 'Attachments', value: 'attachments', children: [{ type: 'record:attachments', properties: {} }] }]
+      : []),
+    ...(add.approvals
+      ? [{ label: 'Approvals', value: 'approvals', children: [{ type: 'record:approvals', properties: add.approvals }] }]
+      : []),
+  ];
+  let placed = false;
+  const visit = (node: any): any => {
+    if (placed || !node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) {
+      let changed = false;
+      const next = node.map((child) => {
+        const out = visit(child);
+        if (out !== child) changed = true;
+        return out;
+      });
+      return changed ? next : node;
+    }
+    if (node.type === 'page:tabs') {
+      const items = node.properties?.items ?? node.items;
+      if (!Array.isArray(items)) return node;
+      placed = true;
+      const nextItems = [...items, ...extra()];
+      return node.properties?.items
+        ? { ...node, properties: { ...node.properties, items: nextItems } }
+        : { ...node, items: nextItems };
+    }
+    let out = node;
+    for (const key of ['regions', 'components', 'children'] as const) {
+      const value = node[key];
+      if (value === undefined) continue;
+      const next = visit(value);
+      if (next !== value) out = { ...out, [key]: next };
+      if (placed) break;
+    }
+    return out;
+  };
+  const next = visit(page);
+  return placed ? { page: next, approvals: !!add.approvals, attachments: add.attachments } : none;
 }

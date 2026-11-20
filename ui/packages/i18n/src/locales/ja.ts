@@ -1344,6 +1344,17 @@ const ja = {
     recordTabsMore: "他 {{count}} 個のタブ",
     recordTabsMore_one: "他 {{count}} 個のタブ",
     recordTabsMore_other: "他 {{count}} 個のタブ",
+    // objectstack#35595 — the tab row's one fold, 「更多 N ▾」: the number of tabs it holds.
+    recordTabsMoreTrigger: "さらに {{count}}",
+    recordTabsMoreTrigger_one: "さらに {{count}}",
+    recordTabsMoreTrigger_other: "さらに {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail.
+    summaryApprovalDone: "承認済み",
+    summaryApprovalMine: "あなたの承認待ち",
+    summaryApprovalWaitingOn: "{{name}} の承認待ち",
+    summaryApprovalWaiting: "承認待ち",
+    summaryRecentActivity: "最近のアクティビティ",
+    summaryOtherRelated: "その他の関連",
     recordTabsHidden: "非表示",
     bodyTableTotals: "合計（このページ）",
     streamAll: "すべて",

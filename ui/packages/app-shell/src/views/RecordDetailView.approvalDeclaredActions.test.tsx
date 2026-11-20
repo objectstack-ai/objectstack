@@ -607,6 +607,18 @@ describe('record header — the approval is the ONE button group (objectstack#35
     expect(tag.tagName).toBe('BUTTON');
   });
 
+  it('the tag opens the 审批 tab, where the approvals panel is drawn (objectstack#35595)', async () => {
+    stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
+    const { container } = renderRecordPage();
+    const tag = await screen.findByTestId('record-approval-tag');
+    // CONTROL: 概览 draws no approvals panel and no tab face.
+    expect(container.querySelector('[data-testid="record-approvals-panel"]')).toBeNull();
+    expect(container.querySelector('[data-related-enlarged]')).toBeNull();
+    fireEvent.click(tag);
+    await waitFor(() => expect(container.querySelector('[data-related-enlarged="approvals"]')).not.toBeNull());
+    expect(container.querySelector('[role="tab"][data-record-tab="approvals"]')?.getAttribute('aria-selected')).toBe('true');
+  });
+
   it('a reject from the record page requires its reason', async () => {
     stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
     renderRecordPage();

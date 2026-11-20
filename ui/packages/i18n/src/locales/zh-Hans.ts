@@ -1440,6 +1440,17 @@ const zh = {
     recordTabsMore: '另外 {{count}} 个页签',
     recordTabsMore_one: '另外 {{count}} 个页签',
     recordTabsMore_other: '另外 {{count}} 个页签',
+    // objectstack#35595 — the tab row's one fold, 「更多 N ▾」: the number of tabs it holds.
+    recordTabsMoreTrigger: '更多 {{count}}',
+    recordTabsMoreTrigger_one: '更多 {{count}}',
+    recordTabsMoreTrigger_other: '更多 {{count}}',
+    // objectstack#35596 — the 概览 tab's summary rail.
+    summaryApprovalDone: '已通过',
+    summaryApprovalMine: '待你审批',
+    summaryApprovalWaitingOn: '等待 {{name}}',
+    summaryApprovalWaiting: '等待中',
+    summaryRecentActivity: '最近动态',
+    summaryOtherRelated: '其他相关',
     recordTabsHidden: '已隐藏',
     bodyTableTotals: '本页合计',
     streamAll: '全部',

@@ -1569,6 +1569,18 @@ const es = {
     recordTabsMore_one: "{{count}} pestaña más",
     recordTabsMore_many: "{{count}} pestañas más",
     recordTabsMore_other: "{{count}} pestañas más",
+    // objectstack#35595 — the tab row's one fold, 「更多 N ▾」: the number of tabs it holds.
+    recordTabsMoreTrigger: "Más {{count}}",
+    recordTabsMoreTrigger_one: "Más {{count}}",
+    recordTabsMoreTrigger_many: "Más {{count}}",
+    recordTabsMoreTrigger_other: "Más {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail.
+    summaryApprovalDone: "Aprobado",
+    summaryApprovalMine: "Pendiente de usted",
+    summaryApprovalWaitingOn: "Esperando a {{name}}",
+    summaryApprovalWaiting: "Pendiente",
+    summaryRecentActivity: "Actividad reciente",
+    summaryOtherRelated: "Otros relacionados",
     recordTabsHidden: "Ocultas",
     bodyTableTotals: "Totales (esta página)",
     streamAll: "Todo",
