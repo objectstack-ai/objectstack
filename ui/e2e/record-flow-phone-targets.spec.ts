@@ -90,7 +90,9 @@ const CLS = {
   stripPencil: g('strip', /className="([^"]+)"\s*aria-label=\{t\('detail\.editInlineHint'\)\}/, ['min-h-[44px]', 'pointer-coarse:opacity-100', 'opacity-0']),
   saveCancel: g('saveBar', /disabled=\{inline\.saving\}\s*className="([^"]+)"/, ['h-11', 'sm:h-9']),
   saveSave: g('saveBar', /disabled=\{inline\.saving \|\| locked\}\s*className="([^"]+)"/, ['h-11', 'sm:h-9']),
-  composerRow: g('composer', /<div className="(flex flex-wrap items-center gap-0\.5[^"]*)">/, ['flex-wrap']),
+  // The toolbar row folds away while the comment box is one collapsed line
+  // (objectstack#35602), so its classes sit in a `cn(...)` with that toggle.
+  composerRow: g('composer', /<div className=\{cn\('(flex flex-wrap items-center gap-0\.5[^']*)'/, ['flex-wrap']),
   composerButton: g('composer', /className="(h-11 w-11 sm:h-7 sm:w-7)"/, ['h-11', 'sm:h-7']),
   barButton: g('header', /barFace && '(h-11 min-w-0 flex-1)'/, ['h-11', 'flex-1']),
   barMore: g('header', /barFace \? '(h-11 w-11 shrink-0 px-0)'/, ['h-11', 'w-11']),

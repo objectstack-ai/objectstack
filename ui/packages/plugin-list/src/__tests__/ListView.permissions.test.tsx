@@ -370,6 +370,21 @@ async function openDisplayMore(): Promise<HTMLElement> {
   return content;
 }
 
+/**
+ * Open the Display menu where Edit inline is withheld. objectstack#35663 took
+ * the Row numbers switch off the More level, so with Edit inline gated and no
+ * drawer to choose, the menu draws no More row at all: the switch is absent
+ * from every level. Each use sits beside a control that opens More and finds
+ * the switch, so the absence is the gate's and not a collapsed panel's.
+ */
+async function openDisplayWithoutMore(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+  const content = await screen.findByTestId('view-settings-content');
+  expect(within(content).getByTestId('options-menu')).toBeInTheDocument();
+  expect(within(content).queryByTestId('options-row-more')).toBeNull();
+  return content;
+}
+
 describe('ListView – inline-edit toggle vs the principal permission gate (#4647)', () => {
   let prevGrid: ReturnType<typeof ComponentRegistry.get>;
 
@@ -441,7 +456,7 @@ describe('ListView – inline-edit toggle vs the principal permission gate (#464
       inlineEdit: true,
     } as Partial<ListViewSchema>);
     await waitFor(() => expect(screen.getByTestId('grid-stub')).toBeInTheDocument());
-    await openDisplayMore();
+    await openDisplayWithoutMore();
     expect(screen.queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
   });
 
@@ -535,7 +550,7 @@ describe('ListView – the declared userActions.editInline switch (#4647 gap 2)'
       ...OPTED_OUT,
     } as Partial<ListViewSchema>);
     await waitFor(() => expect(screen.getByTestId('grid-stub')).toBeInTheDocument());
-    const content = await openDisplayMore();
+    const content = await openDisplayWithoutMore();
     expect(within(content).queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
   });
 });

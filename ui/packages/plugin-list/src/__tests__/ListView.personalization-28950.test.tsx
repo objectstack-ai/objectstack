@@ -161,17 +161,17 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
   });
 
   it('a Display-only change is reported as the reader makes it, and the report follows it back', async () => {
-    const { reported } = mount({}, { defaultRowNumbers: true });
+    const { reported } = mount({});
     const content = await openDisplay();
     await waitFor(() => expect(reported()).toEqual([]));
-    // Row numbers sit on the Display menu's More level.
+    // Edit inline sits on the Display menu's More level.
     fireEvent.click(within(content).getByTestId('options-row-more'));
     await within(content).findByTestId('options-page-more');
 
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
-    await waitFor(() => expect(reported()).toEqual(['rowNumbers']));
+    fireEvent.click(within(content).getByTestId('toolbar-inline-edit-toggle'));
+    await waitFor(() => expect(reported()).toEqual(['inlineEdit']));
 
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
+    fireEvent.click(within(content).getByTestId('toolbar-inline-edit-toggle'));
     await waitFor(() => expect(reported()).toEqual([]));
   });
 

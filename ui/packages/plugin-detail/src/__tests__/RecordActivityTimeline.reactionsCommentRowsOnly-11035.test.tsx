@@ -67,9 +67,14 @@ function mount(items: FeedItem[], onToggleReaction = vi.fn()) {
   return onToggleReaction;
 }
 
-/** The content column of the row whose body reads `body`: where its reaction controls render. */
+/**
+ * The row whose body reads `body`: where its reaction controls render. Since
+ * the dense rows (objectstack#35602) a non-comment entry is one line, so its
+ * chips sit on that line; a comment's sit in its content column.
+ */
 function row(body: string): HTMLElement {
-  const content = screen.getByText(body).parentElement;
+  const text = screen.getByText(body);
+  const content = text.closest<HTMLElement>('[data-stream-row]') ?? text.parentElement;
   if (!content) throw new Error(`no row for "${body}"`);
   return content;
 }

@@ -37,7 +37,6 @@ const LIST_PERSONALIZATION_PART_ORDER: readonly ListPersonalizationPart[] = [
   'density',
   'layout',
   'rowColor',
-  'rowNumbers',
   'inlineEdit',
 ];
 
@@ -68,7 +67,6 @@ export function ListPersonalizedMarker({
     density: t('console.objectView.personalizedParts.density'),
     layout: t('console.objectView.personalizedParts.layout'),
     rowColor: t('console.objectView.personalizedParts.rowColor'),
-    rowNumbers: t('console.objectView.personalizedParts.rowNumbers'),
     inlineEdit: t('console.objectView.personalizedParts.inlineEdit'),
   };
   const label = t('console.objectView.personalized');

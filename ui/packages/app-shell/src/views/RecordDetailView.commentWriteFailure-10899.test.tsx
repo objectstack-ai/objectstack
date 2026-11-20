@@ -233,6 +233,13 @@ describe('a failed comment write is never rendered as sent (objectui#10899)', ()
     await screen.findByText('Signed the renewal');
 
     // The comment has no replies; its reply input is offered all the same.
+    // The reply input opens behind the comment's 「回复」 since the dense
+    // activity rows (objectstack#35602).
+    fireEvent.click(await waitFor(() => {
+      const toggle = document.querySelector<HTMLButtonElement>('[data-feed-reply-toggle]');
+      if (!toggle) throw new Error('no reply toggle yet');
+      return toggle;
+    }));
     const input = (await screen.findByPlaceholderText(REPLY_PLACEHOLDER)) as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'Countersigned copy attached' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send reply' }));

@@ -146,7 +146,7 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(screen.getByTestId('view-switcher-segmented')).toBeInTheDocument();
   });
 
-  it('Display carries Layout, Group, Hide fields, Density, Row numbers, Edit inline, Reset, Refresh and Export', async () => {
+  it('Display carries Layout, Group, Hide fields, Density, Edit inline, Reset, Refresh and Export', async () => {
     mount();
     await screen.findByTestId('grid-stub');
     const trigger = screen.getByTestId('toolbar-display-trigger');
@@ -164,13 +164,13 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(panel.getByTestId('refresh-button')).toHaveTextContent('Refresh');
     expect(panel.getByTestId('display-export-csv')).toHaveTextContent('Export as CSV');
     openLevel(content, 'more');
-    for (const id of ['display-row-numbers-toggle', 'toolbar-inline-edit-toggle']) {
-      const toggle = panel.getByTestId(id);
-      expect(toggle).toHaveAttribute('role', 'switch');
-      expect(toggle).toHaveAttribute('aria-checked');
-    }
-    expect(panel.getByRole('switch', { name: 'Row numbers' })).toBe(panel.getByTestId('display-row-numbers-toggle'));
-    expect(panel.getByRole('switch', { name: 'Edit inline' })).toBe(panel.getByTestId('toolbar-inline-edit-toggle'));
+    const toggle = panel.getByTestId('toolbar-inline-edit-toggle');
+    expect(toggle).toHaveAttribute('role', 'switch');
+    expect(toggle).toHaveAttribute('aria-checked');
+    expect(panel.getByRole('switch', { name: 'Edit inline' })).toBe(toggle);
+    // objectstack#35663 — the More level carries no Row numbers switch.
+    expect(panel.queryByTestId('display-row-numbers-toggle')).toBeNull();
+    expect(panel.getAllByRole('switch')).toEqual([toggle]);
   });
 
   it('the Layout row is drawn only when the list offers a visualization switch', async () => {
@@ -200,24 +200,18 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(within(content).getByTestId('options-row-row-height-value')).toHaveTextContent('Compact');
   });
 
-  it('Row numbers is on by default, reaches the grid, counts when off, and Reset turns it back on', async () => {
+  // objectstack#35663 — the list draws no row numbers and offers no switch for
+  // them: the grid's leading cell is the checkbox, shown at rest.
+  it('the list hands the grid no row numbers, and no level offers a Row numbers switch', async () => {
     mount();
     await screen.findByTestId('grid-stub');
-    expect(gridProps?.showRowNumbers).toBe(true);
+    expect(gridProps).toBeDefined();
+    expect(gridProps).not.toHaveProperty('showRowNumbers');
     const content = await openDisplay();
+    expect(screen.queryByTestId('display-row-numbers-toggle')).toBeNull();
     openLevel(content, 'more');
-    const toggle = within(content).getByTestId('display-row-numbers-toggle');
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(gridProps?.showRowNumbers).toBe(false));
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('1');
-
-    back(content);
-    fireEvent.click(within(content).getByTestId('display-reset-button'));
-    await waitFor(() => expect(gridProps?.showRowNumbers).toBe(true));
-    expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
+    expect(screen.queryByTestId('display-row-numbers-toggle')).toBeNull();
+    expect(within(content).queryByRole('switch', { name: /row numbers/i })).toBeNull();
   });
 
   it('the footer Refresh re-fetches, as the wide toolbar button does', async () => {
