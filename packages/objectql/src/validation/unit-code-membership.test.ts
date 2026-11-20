@@ -318,17 +318,21 @@ describe('the organization read: once per organization per write, never for a st
   });
 });
 
-describe('Requirement 1 (7030061316): a `sys_unit` row is never deleted', () => {
+describe('Requirement 1 (7030061316): a `sys_unit` row is never deleted on its own', () => {
   it('refuses a delete of `sys_unit`, ERR_UNIT_DELETE_REFUSED / 405, and no other object', () => {
     let thrown: unknown;
     try {
-      refuseOrganizationUnitDelete('sys_unit');
+      refuseOrganizationUnitDelete('sys_unit', false);
     } catch (e) {
       thrown = e;
     }
     expect(thrown).toMatchObject({ code: 'ERR_UNIT_DELETE_REFUSED', status: 405, httpStatus: 405 });
-    expect(() => refuseOrganizationUnitDelete('sys_exchange_rate')).not.toThrow();
-    expect(() => refuseOrganizationUnitDelete('material')).not.toThrow();
+    expect(() => refuseOrganizationUnitDelete('sys_exchange_rate', false)).not.toThrow();
+    expect(() => refuseOrganizationUnitDelete('material', false)).not.toThrow();
+  });
+
+  it('[ruling 7035627429, option B] admits only the delete the engine recognised as its organization\'s removal', () => {
+    expect(() => refuseOrganizationUnitDelete('sys_unit', true)).not.toThrow();
   });
 });
 

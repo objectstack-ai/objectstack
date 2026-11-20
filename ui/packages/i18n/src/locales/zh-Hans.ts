@@ -610,6 +610,13 @@ const zh = {
       avg: '平均值',
       min: '最小值',
       max: '最大值',
+      earliest: '最早',
+      latest: '最晚',
+      pageName: '{{label}}（本页）',
+      calculate: '计算',
+      none: '无',
+      menuPercentEmpty: '空值占比',
+      menuPercentFilled: '非空占比',
     },
     toolbar: {
       densityMode: '密度',

@@ -657,6 +657,13 @@ const ru = {
       avg: "Среднее",
       min: "Мин.",
       max: "Макс.",
+      earliest: "Самая ранняя",
+      latest: "Самая поздняя",
+      pageName: "{{label}} (эта страница)",
+      calculate: "Вычислить",
+      none: "Нет",
+      menuPercentEmpty: "Доля пустых",
+      menuPercentFilled: "Доля заполненных",
     },
     toolbar: {
       densityMode: "Плотность",

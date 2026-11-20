@@ -9,6 +9,9 @@
  * - ListView delegation for non-grid view types (kanban, calendar, chart, etc.)
  */
 
+import type { ColumnSummary } from '@objectstack/spec/ui';
+import type { ListColumn } from '@object-ui/types';
+import { columnsWithSummary, declaredColumnFields } from './columnSummaryWrite.js';
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
@@ -56,7 +59,7 @@ import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
 import type { ListViewProps } from '@object-ui/plugin-list';
-import { defaultListViewId, viewRowId } from '../utils/viewIdentity.js';
+import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -828,6 +831,36 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeViewId,
         baseView,
     });
+    // objectstack#35702 — a footer pick saves the column's calculation and
+    // nothing else (L1 7048239634): the stored view's own columns are the
+    // base, so the reader's unsaved hides, order or added columns never ride
+    // along, and a column the view does not declare is not offered. Each
+    // resolves whether the pick was saved; on `false` the grid takes it back.
+    const personalViewRow = activeView ? personalViews.views.find((v) => v.id === activeView.id) : undefined;
+    const handlePickPersonalViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
+        if (!personalViewRow) return false;
+        const columns = columnsWithSummary(personalViewRow.config.columns as ListColumn[] | string[] | undefined, field, summary);
+        if (!columns) return false;
+        try {
+            await personalViews.update(personalViewRow.id, { ...personalViewRow.config, columns });
+            return true;
+        } catch (err) {
+            console.error('[ObjectView] Failed to save a footer calculation:', err);
+            toast.error(t('form.saveError'), { description: err instanceof Error ? err.message : String(err) });
+            return false;
+        }
+    };
+    const handlePickSharedViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
+        if (!activeView) return false;
+        const columns = columnsWithSummary(activeView.columns as ListColumn[] | string[] | undefined, field, summary);
+        if (!columns) return false;
+        const priorDraft = viewDraft;
+        const saved = await handleViewConfigSave({ ...activeView, columns });
+        // The panel's save keeps a refused draft on screen (the panel stays
+        // dirty); a refused pick is taken back instead.
+        if (!saved) setViewDraft(priorDraft);
+        return saved;
+    };
 
     // objectstack#29635 — creating one of the reader's own views, and Rename
     // and Delete on them. Creating is offered to any reader the server lets
@@ -1120,6 +1153,28 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                     : undefined,
             save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
             reset: !isEnvironmentList && listPersonalizedParts.length > 0 ? handleResetView : undefined,
+            // objectstack#35702 — the footer's calculation, saved on the open
+            // view (ruling 7045525672): a personal view at once; a shared one,
+            // by a reader who may edit it, as a draft through the view panel's
+            // save, which others see once published.
+            pickSummary: isEnvironmentList || !activeView
+                ? undefined
+                : activeIsPersonal
+                    ? (canUpdatePersonalView && personalViewRow ? handlePickPersonalViewSummary : undefined)
+                    // Only a view the metadata door stores (one the overlay
+                    // read lists), never the fallback tab an object with no
+                    // views is drawn with. Every stored view has a qualified,
+                    // dotted name, the console's own saved views included
+                    // (`object.key` in the custom package), so the name cannot
+                    // tell a view a read-only package ships; the door refuses
+                    // that save by design (it goes to the custom package) and
+                    // the refused pick is taken back, as the panel's save is.
+                    : isAdmin && isSavedViewId(savedViews, String(activeView.id))
+                        ? handlePickSharedViewSummary
+                        : undefined,
+            summaryPickFields: declaredColumnFields(
+                (activeIsPersonal ? personalViewRow?.config.columns : activeView?.columns) as ListColumn[] | string[] | undefined,
+            ),
         },
     });
 

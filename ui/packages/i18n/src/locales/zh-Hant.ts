@@ -610,6 +610,13 @@ const zhHant = {
       avg: '平均值',
       min: '最小值',
       max: '最大值',
+      earliest: '最早',
+      latest: '最晚',
+      pageName: '{{label}}（本頁）',
+      calculate: '計算',
+      none: '無',
+      menuPercentEmpty: '空值佔比',
+      menuPercentFilled: '非空佔比',
     },
     toolbar: {
       densityMode: '密度',
