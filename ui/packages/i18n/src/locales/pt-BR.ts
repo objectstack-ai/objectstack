@@ -537,6 +537,12 @@ const pt = {
       approvalLocked: "Este registro está bloqueado enquanto está em aprovação.",
       noRecordPermission: "Você não tem permissão para editar este registro.",
     },
+    stateChange: {
+      title: "Alterar {{field}}?",
+      description: "{{field}} muda de {{from}} para {{to}}. Salvar pode acionar automações relacionadas.",
+      confirm: "Alterar",
+      cancel: "Cancelar",
+    },
     bulkSelected: "{{count}} selecionados",
     bulkSelected_one: "{{count}} selecionado",
     bulkSelected_many: "{{count}} selecionados",

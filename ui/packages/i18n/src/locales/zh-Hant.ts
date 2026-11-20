@@ -544,6 +544,12 @@ const zhHant = {
       approvalLocked: '此記錄正在審批中，已鎖定。',
       noRecordPermission: '您沒有編輯此記錄的權限。',
     },
+    stateChange: {
+      title: '變更{{field}}？',
+      description: '{{field}}從 {{from}} 改為 {{to}}，儲存後可能觸發相關自動化。',
+      confirm: '確認變更',
+      cancel: '取消',
+    },
     actions: '操作',
     edit: '編輯',
     delete: '刪除',

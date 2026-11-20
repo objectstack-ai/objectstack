@@ -47,6 +47,7 @@ import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // to reach them as an object and the compiler could not say so.
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { stateMachineNextValues } from './inline-edit-options';
+import { isStateMachineField, stateLabelOf, type StateChangeConfirm } from './objectGridStateConfirm';
 import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
@@ -60,6 +61,14 @@ import {
   cn,
   GridCellSelectionProvider,
   type GridCellSelection,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from '@object-ui/components';
 import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -787,6 +796,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // A grid torn down mid-conflict settles it as Cancel, so the awaiting save
   // never hangs.
   useEffect(() => () => rowConflictDecisionRef.current?.('cancel'), []);
+  // objectstack#35685 — the move of a state-machine field a list cell asks to
+  // confirm first, and the answer the cell's commit is waiting on. A grid torn
+  // down meanwhile answers no, so nothing is written.
+  const [stateChange, setStateChange] = useState<StateChangeConfirm | null>(null);
+  const stateChangeDecisionRef = React.useRef<((confirmed: boolean) => void) | null>(null);
+  useEffect(() => () => stateChangeDecisionRef.current?.(false), []);
   // objectstack#35685 — the rows a select-first save redrew in place, per
   // record id. Each applies while the grid still holds the row object it was
   // saved from (`RowPatch.base`); the next load's rows replace them.
@@ -1197,6 +1212,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         onCellSelect: (row) => {
           recordVerdict.requestVerdicts();
           approvalLocks.probe(rowRecordId(row));
+        },
+        // objectstack#35685 — a move of a state-machine field is confirmed
+        // before anything is written (`./objectGridStateConfirm`).
+        confirmCommit: (row, columnKey, value) => {
+          if (!isStateMachineField(objectSchema, columnKey)) return null;
+          const options = objectFields?.[columnKey]?.options;
+          const labelOf = (v: unknown) => stateLabelOf(
+            options,
+            v,
+            (code, fallback) => (objectName ? resolveFieldOptionLabel(objectName, columnKey, code, fallback) : fallback),
+            t('grid.empty'),
+          );
+          const declared = objectFields?.[columnKey]?.label;
+          const fallback = typeof declared === 'string' && declared.length > 0 ? declared : columnKey;
+          return askStateChange({
+            field: columnHeaderOf(columnKey) ?? (objectName ? resolveFieldLabel(objectName, columnKey, fallback) : fallback),
+            from: labelOf(row?.[columnKey]),
+            to: labelOf(value),
+          });
         },
       }
     : null;
@@ -2476,6 +2510,24 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    * waiting on an earlier dialog is settled as Cancel first, so no save is
    * left waiting on a dialog that is no longer shown.
    */
+  /**
+   * objectstack#35685 — open the state-change confirm and wait for the
+   * answer. A move still waiting on an earlier confirm is answered no first,
+   * so no commit is left waiting on a dialog that is no longer shown.
+   */
+  const askStateChange = (change: StateChangeConfirm): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      stateChangeDecisionRef.current?.(false);
+      stateChangeDecisionRef.current = resolve;
+      setStateChange(change);
+    });
+  const settleStateChange = (confirmed: boolean) => {
+    const resolve = stateChangeDecisionRef.current;
+    stateChangeDecisionRef.current = null;
+    setStateChange(null);
+    resolve?.(confirmed);
+  };
+
   const askRowConflict = (conflict: ConcurrentUpdateConflict): Promise<RowConflictChoice> =>
     new Promise<RowConflictChoice>((resolve) => {
       rowConflictDecisionRef.current?.('cancel');
@@ -4475,6 +4527,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     />
   );
 
+  // objectstack#35685 — the confirm before a list cell moves a state-machine
+  // field. Focus goes back to the cell, which the table hands it.
+  const stateChangeDialog = (
+    <AlertDialog open={stateChange !== null} onOpenChange={(open) => { if (!open) settleStateChange(false); }}>
+      <AlertDialogContent onCloseAutoFocus={(e) => e.preventDefault()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('grid.stateChange.title', { field: stateChange?.field ?? '' })}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t('grid.stateChange.description', {
+              field: stateChange?.field ?? '',
+              from: stateChange?.from ?? '',
+              to: stateChange?.to ?? '',
+            })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('grid.stateChange.cancel')}</AlertDialogCancel>
+          <AlertDialogAction onClick={() => settleStateChange(true)}>{t('grid.stateChange.confirm')}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   return (
     <div ref={setRootRef} className="relative h-full flex flex-col" data-object-grid-root="" onKeyDown={handleUndoKeyDown}>
       {/* Re-fetch indicator while existing rows remain visible (filter/sort
@@ -4542,6 +4617,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       )}
       {bulkDialog}
       {rowConflictDialog}
+      {stateChangeDialog}
     </div>
   );
 };

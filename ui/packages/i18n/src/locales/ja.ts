@@ -531,6 +531,12 @@ const ja = {
       approvalLocked: "このレコードは承認中のためロックされています。",
       noRecordPermission: "このレコードを編集する権限がありません。",
     },
+    stateChange: {
+      title: "{{field}}を変更しますか？",
+      description: "{{field}}を {{from}} から {{to}} に変更します。保存すると関連する自動化が実行される場合があります。",
+      confirm: "変更",
+      cancel: "キャンセル",
+    },
     bulkSelected: "{{count}} 件を選択中",
     bulkSelected_one: "{{count}} 件を選択中",
     bulkSelected_other: "{{count}} 件を選択中",

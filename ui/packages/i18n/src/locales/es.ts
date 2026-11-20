@@ -542,6 +542,12 @@ const es = {
       approvalLocked: "Este registro está bloqueado mientras está en aprobación.",
       noRecordPermission: "No tiene permiso para editar este registro.",
     },
+    stateChange: {
+      title: "¿Cambiar {{field}}?",
+      description: "{{field}} cambia de {{from}} a {{to}}. Al guardar se pueden activar automatizaciones relacionadas.",
+      confirm: "Cambiar",
+      cancel: "Cancelar",
+    },
     bulkSelected: "{{count}} seleccionados",
     bulkSelected_one: "{{count}} seleccionado",
     bulkSelected_many: "{{count}} seleccionados",

@@ -531,6 +531,12 @@ const de = {
       approvalLocked: "Dieser Datensatz ist während der Genehmigung gesperrt.",
       noRecordPermission: "Sie haben keine Berechtigung, diesen Datensatz zu bearbeiten.",
     },
+    stateChange: {
+      title: "{{field}} ändern?",
+      description: "{{field}} wechselt von {{from}} zu {{to}}. Beim Speichern können zugehörige Automatisierungen ausgelöst werden.",
+      confirm: "Ändern",
+      cancel: "Abbrechen",
+    },
     bulkSelected: "{{count}} ausgewählt",
     bulkSelected_one: "{{count}} ausgewählt",
     bulkSelected_other: "{{count}} ausgewählt",

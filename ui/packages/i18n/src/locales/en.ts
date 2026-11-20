@@ -794,6 +794,13 @@ const en = {
       approvalLocked: 'This record is locked while it\'s in approval.',
       noRecordPermission: 'You don\'t have permission to edit this record.',
     },
+    // objectstack#35685 — the confirm before a list cell moves a state-machine field.
+    stateChange: {
+      title: 'Change {{field}}?',
+      description: '{{field}} changes from {{from}} to {{to}}. Saving may trigger related automation.',
+      confirm: 'Change',
+      cancel: 'Cancel',
+    },
     actions: 'Actions',
     edit: 'Edit',
     delete: 'Delete',

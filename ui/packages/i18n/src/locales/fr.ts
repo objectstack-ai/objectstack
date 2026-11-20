@@ -537,6 +537,12 @@ const fr = {
       approvalLocked: "Cet enregistrement est verrouillé pendant son approbation.",
       noRecordPermission: "Vous n'avez pas l'autorisation de modifier cet enregistrement.",
     },
+    stateChange: {
+      title: "Modifier {{field}} ?",
+      description: "{{field}} passe de {{from}} à {{to}}. L'enregistrement peut déclencher des automatisations associées.",
+      confirm: "Modifier",
+      cancel: "Annuler",
+    },
     bulkSelected: "{{count}} sélectionné(s)",
     bulkSelected_one: "{{count}} sélectionné",
     bulkSelected_many: "{{count}} sélectionnés",

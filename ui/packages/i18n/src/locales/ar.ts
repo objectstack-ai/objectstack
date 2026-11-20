@@ -561,6 +561,12 @@ const ar = {
       approvalLocked: "هذا السجل مقفل أثناء الموافقة عليه.",
       noRecordPermission: "ليس لديك إذن بتحرير هذا السجل.",
     },
+    stateChange: {
+      title: "تغيير {{field}}؟",
+      description: "يتغير {{field}} من {{from}} إلى {{to}}. قد يؤدي الحفظ إلى تشغيل عمليات أتمتة ذات صلة.",
+      confirm: "تغيير",
+      cancel: "إلغاء",
+    },
     bulkSelected: "تم تحديد {{count}}",
     bulkSelected_zero: "تم تحديد {{count}}",
     bulkSelected_one: "تم تحديد {{count}}",

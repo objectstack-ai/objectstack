@@ -546,6 +546,12 @@ const ru = {
       approvalLocked: "Эта запись заблокирована, пока находится на согласовании.",
       noRecordPermission: "У вас нет прав на изменение этой записи.",
     },
+    stateChange: {
+      title: "Изменить {{field}}?",
+      description: "{{field}}: {{from}} → {{to}}. При сохранении могут запуститься связанные автоматизации.",
+      confirm: "Изменить",
+      cancel: "Отмена",
+    },
     bulkSelected: "Выбрано: {{count}}",
     bulkSelected_one: "Выбрано: {{count}}",
     bulkSelected_few: "Выбрано: {{count}}",

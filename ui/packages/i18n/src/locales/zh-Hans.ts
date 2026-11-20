@@ -544,6 +544,12 @@ const zh = {
       approvalLocked: '此记录正在审批中，已锁定。',
       noRecordPermission: '您没有编辑此记录的权限。',
     },
+    stateChange: {
+      title: '更改{{field}}？',
+      description: '{{field}}从 {{from}} 改为 {{to}}，保存后可能触发相关自动化。',
+      confirm: '确认更改',
+      cancel: '取消',
+    },
     actions: '操作',
     edit: '编辑',
     delete: '删除',

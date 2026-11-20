@@ -531,6 +531,12 @@ const ko = {
       approvalLocked: "이 레코드는 승인 중이라 잠겨 있습니다.",
       noRecordPermission: "이 레코드를 편집할 권한이 없습니다.",
     },
+    stateChange: {
+      title: "{{field}}을(를) 변경할까요?",
+      description: "{{field}}이(가) {{from}}에서 {{to}}(으)로 변경됩니다. 저장하면 관련 자동화가 실행될 수 있습니다.",
+      confirm: "변경",
+      cancel: "취소",
+    },
     bulkSelected: "{{count}}건 선택됨",
     bulkSelected_one: "{{count}}건 선택됨",
     bulkSelected_other: "{{count}}건 선택됨",
