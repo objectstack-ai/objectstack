@@ -7,7 +7,7 @@ feat(spec)!: a sealed object that names no `lifecycle.seal.chainField` is refuse
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. A lifecycle.seal that names no chainField was already chained by tenant_id; the parse now holds that default to the rules a named chainField already met. No conversion can repair a refused declaration without choosing for the author which column holds each row's organization (declare tenant_id, or name chainField), so there is nothing for a migration to rewrite and no tombstone. -->
+<!-- adr-0087: registered seal-default-chain-column-refused -->
 
 **BREAKING** accept-set narrowing, shipped as `minor`. A `lifecycle.seal` that names no `chainField` chains each row by the default column `tenant_id` (ADR-0154 D10, note on `chainField`). That default was never judged at authoring: an object without a usable `tenant_id` parsed, and at run time the sealer reported it at `error` and sealed none of its rows. The default is now judged by the same rules as a named `chainField`, and the object is refused with one located issue at `lifecycle.seal` when `tenant_id`:
 
