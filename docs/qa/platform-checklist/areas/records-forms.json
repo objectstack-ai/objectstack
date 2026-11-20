@@ -1523,7 +1523,7 @@
       "title": "Master + line items save as one atomic batch, with server-side roll-up",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1546,7 +1546,9 @@
         "re-read master + lines via GET /api/v1/data/showcase_invoice?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] and the lines by the returned invoice id; check invoice.total against the sum of line amounts",
         "add a third line via the edit form and save; re-read invoice.total; delete that line; re-read total again",
         "repeat the create with one child made deliberately invalid (product empty on a line); attempt save; capture the failure",
-        "verify no partial writes: filtered GET for the failed invoice name returns 0 rows and no orphan lines exist"
+        "verify no partial writes: filtered GET for the failed invoice name returns 0 rows and no orphan lines exist",
+        "record-page edit (#35599): open a saved invoice's record page (its Line Items draw as a body table) and press Edit: the fields become inputs, the body table becomes editable lines, and the header shows Cancel and Save in Edit's place. Change the invoice name, one line's quantity, add a line in the trailing blank row and remove another line; Save ONCE; capture the network trace of the save and re-read the invoice and its lines",
+        "on the same page, Edit again, clear one line's product and Save: capture the error and where it is drawn; re-read the invoice and lines; then press Cancel and check the page reads as stored"
       ],
       "acceptance": [
         {
@@ -1584,11 +1586,18 @@
           "oracle": "api",
           "verify": "change qty, watch amount update without save; after save the API row carries qty × unit_price",
           "evidence": "screenshot + line read"
+        },
+        {
+          "clause": "the record page's edit state saves the record's changes and every body table's line creates, updates and deletes in ONE POST /api/v1/batch, one transaction; a refused save writes nothing, keeps every edit on screen, and draws the reason on the line whose write carried the refused field; Cancel discards every edit",
+          "oracle": "network",
+          "verify": "the save sends exactly one batch call whose payload opens with the invoice update (only the changed fields) and carries the line create, update and delete; after the invalid-line save the re-read shows the invoice and lines unchanged and the line's error sits under the table naming that line; after Cancel the lines and fields read as stored",
+          "evidence": "the batch payload, the two re-reads, the error screenshot"
         }
       ],
       "negative": [
         "the invalid-child case must not partially commit: ANY surviving master or sibling row after the failed save is a FAIL — check by API read, not by the grid",
-        "a save that issues one write per row (N requests) is a FAIL of the atomicity clause even when all rows land"
+        "a save that issues one write per row (N requests) is a FAIL of the atomicity clause even when all rows land",
+        "a record-page save that sends the record update and the line writes as separate requests (or one request per line) is a FAIL of the edit-state clause even when every row lands"
       ],
       "traps": [
         "automation-input",
@@ -1596,7 +1605,7 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts (acceptance[4] ONLY: the stock New Invoice dialog renders the relationship-derived Line Items section, found by its heading, and its line grid). The roll-up spec dropped at revision 5 is not a pin of this item (history, revision 5). packages/qa/dogfood/test/master-detail-batch-atomic.dogfood.test.ts, at the cross-object POST /api/v1/batch the form saves through (child ops pointing at the parent by {$ref: 0}), on the showcase invoice and lines as shipped: acceptance[1] (the invoice and two catalog-product lines re-read over REST with the values sent), acceptance[5]'s persisted half (each stored amount is quantity × unit_price; a client-sent amount does not stand), acceptance[2] (total equals the sum of line amounts on the atomic create, after a line is added and after one is deleted) and acceptance[3] with negative[0] (a batch whose second line has no product is 400 VALIDATION_FAILED naming product, and neither the invoice nor its valid sibling line exists afterwards). acceptance[0]'s batch count, negative[1] and acceptance[5]'s live client recompute stay network/dom legs"
+        "ref": "objectui: e2e/live/master-detail.spec.ts (acceptance[0], carrier-neutrally: the showcase 'New Project + Tasks' page, one showcase_task child staged through the per-row form, not this item's invoice grid with two lines), e2e/live/form-view-subforms.spec.ts (acceptance[4] ONLY: the stock New Invoice dialog renders the relationship-derived Line Items section, found by its heading, and its line grid). The roll-up spec dropped at revision 5 is not a pin of this item (history, revision 5). packages/qa/dogfood/test/master-detail-batch-atomic.dogfood.test.ts, at the cross-object POST /api/v1/batch the form saves through (child ops pointing at the parent by {$ref: 0}), on the showcase invoice and lines as shipped: acceptance[1] (the invoice and two catalog-product lines re-read over REST with the values sent), acceptance[5]'s persisted half (each stored amount is quantity × unit_price; a client-sent amount does not stand), acceptance[2] (total equals the sum of line amounts on the atomic create, after a line is added and after one is deleted) and acceptance[3] with negative[0] (a batch whose second line has no product is 400 VALIDATION_FAILED naming product, and neither the invoice nor its valid sibling line exists afterwards). acceptance[0]'s batch count, negative[1] and acceptance[5]'s live client recompute stay network/dom legs. acceptance[6] (the record page's edit state, #35599): ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx block 'RecordDetailView.recordEditState-35599' (the real record page over a mocked adapter: one batchTransaction carrying the record update and two body tables' create, update and delete; a refused batch keeps every edit and draws the reason on its line; Cancel restores) and ui/packages/plugin-form/src/RecordBodyTableEditor.recordEditBatch-35599.test.ts (the batch and the refusal placement). Neither drives a live server: the one-transaction and nothing-lands halves are the batch route's, pinned by the dogfood battery above"
       },
       "source": [
         "#3358 §4",
@@ -1663,6 +1672,12 @@
           "date": "2026-11-15",
           "change": "steps[1] gains a driver note: 'Add line' beside the grid's trailing blank row makes it a middle all-null row that the save submits and the batch refuses (400 'Product is required', nothing written). QA run #33861, ledger row 146. No clause changed. Ledger 6896511848 of the v18.5.0 sweep anchor #33761, carried by batch-A card #33963; read at base 895783a1.",
           "ref": "#33990"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-20",
+          "change": "the record page's edit state (#35599) saves through the same batch door: steps[7] and [8], acceptance[6] and negative[2] added for it, and automated.ref names its two unit pins. The form clauses above are unchanged",
+          "ref": "#35599"
         }
       ]
     },
