@@ -82,6 +82,13 @@
           "evidence": "packages/spec/src/data/field-group-layout.ts#deriveFieldGroupLayout (`label ?? key`); ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections (the form section title); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries (the detail section label)",
           "note": "The group heading on forms and detail pages."
         },
+        "fields": {
+          "status": "live",
+          "verifiedAt": "2026-11-20",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup (reads the list, not on a relatedList group); packages/spec/src/data/field-group-layout.ts#resolveFieldGroupMembership (listed fields join the group in list order, before any field whose own `group` names it); ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections and ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts (both pass `fieldGroups` through to deriveFieldGroupLayout)",
+          "note": "A group's own member list and order. Absent, membership is the older `Field.group` plus declaration order. Read by the one shared derivation every form, drawer and detail surface consumes; the Studio designer writes it on a drag (writeGroupLayout)."
+        },
         "icon": {
           "status": "live",
           "verifiedAt": "2026-10-28",
