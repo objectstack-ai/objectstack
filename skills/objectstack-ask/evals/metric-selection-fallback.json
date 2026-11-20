@@ -180,6 +180,16 @@
         "must_contain": ["query_dataset", "Net Revenue Retention", "Subscriptions"],
         "must_not_contain": ["aggregate_records", "非指标口径", "do you mean", "Do you mean"]
       }
+    },
+    {
+      "id": 19,
+      "prompt": "The user asked: \"What is our retention?\" `list_datasets({ terms: ['retention'] })` answered one dataset, `subscriptions` (label Subscriptions), with `matches: []`; its only measures are `logo_retention`, labelled Logo Retention, and `net_revenue_retention`, labelled Net Revenue Retention. The answer also carried `candidates: [{ term: 'retention', dataset: 'subscriptions', member: 'measures.logo_retention' }, { term: 'retention', dataset: 'subscriptions', member: 'measures.net_revenue_retention' }]`. You asked which one they meant, listing both, and computed nothing. The user now replies: \"No, I mean ARR.\" What is your next tool call, and with what arguments?",
+      "expected_output": "The reply picks neither option and names another word, so neither option is used and the question starts again at step 1 with that word: the next tool call is `list_datasets` with `terms: ['ARR']`, the word as the user wrote it (not spelled out as annual recurring revenue, and not sent together with `retention`). It is a new lookup because the first answer was matched against `retention` only and lists no measure by that name. Nothing else is called before it: no object tool, and no `query_dataset` on either retention measure. Declining the options leads to the object-query fallback only when the reply brings no other word; here that fallback can follow only from this lookup, if `ARR` has no match and no candidates. It does not ask about retention again.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["list_datasets", "ARR"],
+        "must_not_contain": ["describe_object(", "aggregate_records(", "非指标口径"]
+      }
     }
   ]
 }

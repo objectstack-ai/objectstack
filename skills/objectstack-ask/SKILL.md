@@ -36,8 +36,8 @@ wrote its business definition) outranks a number you work out yourself.
 - Call `list_datasets({ terms })` with those words, as the user wrote them.
   Do not translate or reword a term: a match on a word
   you supplied is your reading, not the user's. A term is the noun phrase for
-  the thing, kept whole ("travel budget", not "travel" and "budget": a
-  fragment's matches are not the user's) and without the verbs, time words
+  the thing, kept whole ("travel budget", not "travel" and "budget")
+  and without the verbs, time words
   and question words around it ("trip days", not "trip days requested";
   "报销金额", not "报销金额合计是多少").
 - Each dataset in the answer carries `matches`: one entry per hit, with the
@@ -74,7 +74,7 @@ instead of asking about some other word's matches. `partial: true` on the answer
 be incomplete; `warning` says why, and you repeat it when you fall back.
 
 Use an option only once the user picks it: compute it by its exact name
-(step 3). If they pick none, go to step 4.
+(step 3). Another word starts at step 1; if they only pick none, go to step 4.
 
 ## 3. Compute a governed metric
 
