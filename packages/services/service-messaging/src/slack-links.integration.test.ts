@@ -213,7 +213,7 @@ describe('the Slack install — an administrator\'s token, at rest', () => {
 
     it('a value that is not a Slack token is refused before Slack is asked, and nothing is saved', async () => {
         const t = await boot();
-        for (const token of ['secret:abc123', 'SECRET:abc123', '••••••••', 'xoxb acme', 'xoxb-acme\n']) {
+        for (const token of ['xoxb:acme', 'xoxb/acme', 'xoxb-åcme', 'xoxb acme', 'xoxb-acme\n']) {
             const put = await t.call('PUT', SLACK_ACCOUNT_ROUTE, 'admin_a', { body: { token: `${token}x` } });
             expect([put.body.error.code, put.status], token).toEqual(['VALIDATION_ERROR', 400]);
         }
@@ -472,6 +472,21 @@ describe('the riders of ruling 7024100939', () => {
         expect(await t.links()).toEqual([]);
         expect(t.audit.filter((a) => a.event === 'afterDelete')).toHaveLength(3);
         expect(t.audit.filter((a) => a.event === 'afterDelete').slice(0, 2).map((a) => a.by)).toEqual(['u_admin', 'u_admin']);
+    });
+
+    it('(3) a ban removes the person\'s links in every organization in one write, each removal audited', async () => {
+        const t = await boot();
+        await t.install();
+        await t.call('PUT', SLACK_ACCOUNT_ROUTE, 'admin_b', { body: { token: GOOD } });
+        await t.connect('admin_a');
+        await t.connect('admin_b');
+        await t.connect('ada');
+        expect((await t.links()).map((l) => l.user_id).sort()).toEqual(['u_ada', 'u_admin', 'u_admin']);
+        const deletes = vi.spyOn(t.ql, 'delete');
+        await t.ql.update('sys_user', { banned: true }, { where: { id: 'u_admin' }, context: { isSystem: true, userId: 'u_ada' } } as never);
+        expect(deletes.mock.calls.filter(([object]) => object === CHANNEL_USER_LINK_OBJECT)).toHaveLength(1);
+        expect((await t.links()).map((l) => l.user_id)).toEqual(['u_ada']);
+        expect(t.audit.filter((a) => a.event === 'afterDelete').map((a) => a.by)).toEqual(['u_ada', 'u_ada']);
     });
 
     it('(3) a link goes when the person\'s membership moves to another organization, audited as who moved it', async () => {
