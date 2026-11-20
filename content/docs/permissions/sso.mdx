@@ -178,16 +178,19 @@ identity provider on an internal or private network is refused **400
 `VALIDATION_FAILED`** on `signOutOfIdp` until the provider's origin is listed in
 `OS_TRUSTED_ORIGINS`.
 
-**SSO discovery fetches only hosts that resolve to public addresses.** Before a
-registration reads its discovery document, the server resolves that document's
-host (the `discoveryEndpoint` the registration names, else the issuer's) and
-every address it resolves to must be public. A host that resolves to a private,
-loopback, link-local or otherwise non-public address is refused **400
-`VALIDATION_FAILED`** on `issuer` or `oidcConfig.discoveryEndpoint`, and
-nothing is read from it; the Register SSO Provider bridge answers the same
-refusal as `SSO_REGISTER_FAILED`. Trust an origin gains because a registration
-names it never stands in for this check. An identity provider on an internal
-network registers once its origin is listed in `OS_TRUSTED_ORIGINS`.
+**A registration checks that its discovery host resolves to public addresses
+before reading it.** Before a registration reads its discovery document, the
+server resolves that document's host (the `discoveryEndpoint` the registration
+names, else the issuer's) and every address it resolves to must be public. A
+host that resolves to a private, loopback, link-local or otherwise non-public
+address is refused **400 `VALIDATION_FAILED`** on `issuer` or
+`oidcConfig.discoveryEndpoint`, and nothing is read from it; the Register SSO
+Provider bridge answers the same refusal as `SSO_REGISTER_FAILED`. The check
+comes before the **Sign Out of the Company Sign-In Too** check above, so a
+registration that also turns that switch on is refused on the same member.
+Trust an origin gains because a registration names it never stands in for this
+check. An identity provider on an internal network registers once its origin
+is listed in `OS_TRUSTED_ORIGINS`.
 
 Google is one such provider: its discovery document names the token endpoint,
 the key set and the userinfo endpoint each on a host of its own, so a Google

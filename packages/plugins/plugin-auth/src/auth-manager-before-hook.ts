@@ -609,14 +609,15 @@ export async function globalBeforeHook(
       // [#32085] One email domain, one provider: a domain another
       // provider already serves is refused 409, naming that provider.
       await this.assertSsoProviderDomainFree(ctx);
-      // Ruling record 6866334319: the sign-out switch, as on update-provider.
-      await this.assertSsoSignOutOfIdpSupported(ctx);
       // SSO discovery fetches only hosts that resolve to public addresses:
       // the host this registration's discovery reads is resolved before the
       // vendor's endpoint runs, and every address must be public, unless the
       // deployment's configured trusted origins (read here, before any
       // body-named origin joins them) list it
-      // (`refuseSsoDiscoveryHostNotPublic`).
+      // (`refuseSsoDiscoveryHostNotPublic`). Asked before the sign-out
+      // switch below, whose check reads the same discovery document: a host
+      // that is not public is refused on the member that names it, whatever
+      // the switch says, and nothing is read from it.
       const notPublic = await refuseSsoDiscoveryHostNotPublic({
         body: ctx?.body,
         isConfiguredTrusted: (url) =>
@@ -630,6 +631,8 @@ export async function globalBeforeHook(
           field: notPublic.field,
         });
       }
+      // Ruling record 6866334319: the sign-out switch, as on update-provider.
+      await this.assertSsoSignOutOfIdpSupported(ctx);
       bodyOrigins = await this.ssoDiscoveryTrustedOrigins(ctx?.body);
     }
     // The origins the body names (its issuer and any explicit `oidcConfig`

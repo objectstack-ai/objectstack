@@ -170,8 +170,12 @@ export type SsoDiscoveryReadMember = 'issuer' | 'oidcConfig.discoveryEndpoint';
  * the explicit `oidcConfig.discoveryEndpoint`, else at the issuer's well-known
  * URL (`computeDiscoveryUrl`, the vendor's own). `undefined` when the
  * registration reads none: no `oidcConfig` (a SAML registration), or
- * `oidcConfig.skipDiscovery`. That read is the one server-side read the
- * register endpoint makes (`@better-auth/sso` 1.7.12 `discoverOIDCConfig`).
+ * `oidcConfig.skipDiscovery`. The vendor's register endpoint makes no other
+ * server-side read (`@better-auth/sso` 1.7.12 `discoverOIDCConfig`). With
+ * `signOutOfIdp` on, the register door's sign-out check
+ * (`assertSsoSignOutOfIdpSupported`) reads the same document first, under the
+ * configured trust only, and only after {@link refuseSsoDiscoveryHostNotPublic}
+ * has admitted its host.
  */
 export function ssoRegisterDiscoveryRead(
   body: unknown,

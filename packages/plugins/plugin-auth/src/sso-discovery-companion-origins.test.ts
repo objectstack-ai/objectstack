@@ -566,12 +566,12 @@ describe('an origin a register or update body names is trusted for that provider
     expect(JSON.stringify(storedRows(rp))).toBe(before);
   });
 
-  it('the sign-out capability check trusts a body-named origin for the logout endpoint only: on register, its discovery read keeps the configured trust', async () => {
+  it('on register with the switch on, an issuer whose host resolves to a private address is refused on issuer, before the sign-out check reads it', async () => {
     restore = stubIdp({ [OTHER_ISSUER]: withLogout(OTHER_ISSUER, `${OTHER_ISSUER}/logout`) }, new URL(OTHER_ISSUER).hostname);
     const rp = await makeCheckedRp();
     const res = await postAs(rp, '/sso/register', { ...registration('other-oidc', OTHER_ISSUER), signOutOfIdp: true }, BASE);
     expect(res.status, await res.clone().text()).toBe(400);
-    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'signOutOfIdp' });
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'issuer' });
     expect(storedRows(rp)).toEqual([]);
   });
 
@@ -653,6 +653,20 @@ describe('SSO discovery reads only hosts that resolve to public addresses', () =
     },
   );
 
+  it('with the sign-out switch on, the registration is refused on issuer by this rule, and nothing is read from that host', async () => {
+    const io = idp(
+      { [RESOLVED_ISSUER]: { ...discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`), end_session_endpoint: `${RESOLVED_ISSUER}/logout` } },
+      { [RESOLVED_HOST]: ['10.0.0.5'] },
+    );
+    const rp = await makeRp();
+    const res = await register(rp, { ...registration('resolved-oidc', RESOLVED_ISSUER), signOutOfIdp: true });
+    expect(res.status, await res.clone().text()).toBe(400);
+    expect(await res.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'issuer' });
+    expect(io.asked).toContain(RESOLVED_HOST);
+    expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
+    expect(storedRows(rp)).toEqual([]);
+  });
+
   it('a discovery host with one public and one private address is refused: every address must be public', async () => {
     const io = idp(
       { [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) },
@@ -722,6 +736,18 @@ describe('SSO discovery reads only hosts that resolve to public addresses', () =
       }),
     );
     expect(res.status, await res.clone().text()).toBe(401);
+    expect(io.asked).toEqual([]);
+    expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
+    expect(storedRows(rp)).toEqual([]);
+  });
+
+  it('CONTROL: a registration by a signed-in user who is not a platform admin resolves no name and is answered 403', async () => {
+    const io = idp({ [RESOLVED_ISSUER]: discoveryDocument(RESOLVED_ISSUER, `${RESOLVED_ISSUER}/userinfo`) }, { [RESOLVED_HOST]: ['10.0.0.5'] });
+    const rp = await makeRp();
+    vi.spyOn(rp.manager as any, 'isPlatformAdminUserId').mockResolvedValue(false);
+    const res = await register(rp, registration('resolved-oidc', RESOLVED_ISSUER));
+    expect(res.status, await res.clone().text()).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'SSO_REGISTER_FORBIDDEN' });
     expect(io.asked).toEqual([]);
     expect(readFrom(io.fetched, RESOLVED_HOST)).toEqual([]);
     expect(storedRows(rp)).toEqual([]);
