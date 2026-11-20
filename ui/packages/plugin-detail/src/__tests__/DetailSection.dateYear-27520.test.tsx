@@ -91,3 +91,58 @@ describe('one date format on a record page (objectstack#27520 row 14)', () => {
     expect(screen.getByText('Oct 2')).toBeTruthy();
   });
 });
+
+/**
+ * A business date on a record page reads as the date (objectstack#35745).
+ *
+ * The sighting: a meeting's date, Nov 13, read "6 days ago" on the record page
+ * while the list wrote "Nov 13", so the reader had to work out the day. The
+ * page's date fields now take the absolute face the list's columns take
+ * (objectstack#25884), inside the ±7-day window too, and the relative phrase
+ * is the date's tooltip. A declared `format` still wins.
+ */
+describe('a record page writes a business date as the date (objectstack#35745)', () => {
+  const days = {
+    past: { iso: '2026-10-29', text: 'Oct 29, 2026', phrase: '3 days ago' },
+    today: { iso: '2026-11-01', text: 'Nov 1, 2026', phrase: 'Today' },
+    future: { iso: '2026-11-05', text: 'Nov 5, 2026', phrase: 'In 4 days' },
+  };
+  const meetingSchema = { fields: { meeting_date: { name: 'meeting_date', type: 'date', label: 'Meeting Date' } } };
+  const meetingSection = {
+    title: 'Meeting',
+    fields: [{ name: 'meeting_date', label: 'Meeting Date', type: 'date' }],
+  } as unknown as DetailViewSection;
+
+  for (const [when, day] of Object.entries(days)) {
+    it(`a section row writes a ${when} date in the relative window as the date, the phrase as its tooltip`, () => {
+      render(<DetailSection section={meetingSection} data={{ meeting_date: day.iso }} objectSchema={meetingSchema} />);
+      const cell = screen.getByText(day.text);
+      expect(cell.getAttribute('title')).toBe(day.phrase);
+      expect(screen.queryByText(day.phrase)).toBeNull();
+    });
+  }
+
+  it('the highlights strip writes it the same way', () => {
+    render(
+      <HeaderHighlight
+        fields={[{ name: 'meeting_date', label: 'Meeting Date' }] satisfies HighlightField[]}
+        data={{ meeting_date: days.past.iso }}
+        objectSchema={meetingSchema}
+      />,
+    );
+    expect(screen.getByText(days.past.text).getAttribute('title')).toBe(days.past.phrase);
+  });
+
+  it('a declared `relative` format still wins', () => {
+    const declared = { fields: { meeting_date: { ...meetingSchema.fields.meeting_date, format: 'relative' } } };
+    render(<DetailSection section={meetingSection} data={{ meeting_date: days.past.iso }} objectSchema={declared} />);
+    expect(screen.getByText(days.past.phrase)).toBeTruthy();
+  });
+
+  it('CONTROL: the shared date cell without the record page keeps the relative default', () => {
+    const DateCell = getCellRenderer('date');
+    const field: DateFieldMetadata = { name: 'meeting_date', label: 'Meeting Date', type: 'date' };
+    render(<DateCell value={days.past.iso} field={field} />);
+    expect(screen.getByText(days.past.phrase)).toBeTruthy();
+  });
+});
