@@ -90,8 +90,7 @@
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
 - 首触与每日一遍 `pm:queue`:修复与 open、无认领、未开工的卡同机制或同文件 ⇒ 不分车道成其一行(中继
   `issue_patch`),本卡关 `duplicate`(`duplicate_of` 承载卡)、关卡行点名本卡诉求;同一发现则证据搬先卡。
-- ⛔ 永不折叠或移卡:维护者立或定级的、级高于承载卡的、open `Blocked-by:` 所点名的、专题子卡、
-  `needs-user-decision` 与 `security` 卡。
+- ⛔ 永不折叠或移卡:维护者立或定级的、专题子卡、`needs-user-decision` 与 `security` 卡。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
 - 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
 - 关重复卡须目标具名且新读重叠;追踪父单子卡全关、表完成、无 open 工作 ⇒ `completed`。
