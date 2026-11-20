@@ -1899,6 +1899,8 @@ describe('[#34821] a multi-row insert judges a rule reading a parent field calcu
         bud: { type: 'master_detail', reference: 'bud' },
         // A field-level parent. predicate reading the header's calculated field.
         note: { type: 'text', requiredWhen: 'parent.headroom < 50' },
+        // Reads the header's formula on `parent`, guarded against a column the reader is not served (`null`).
+        memo: { type: 'text', requiredWhen: "record.tag == 'remg' && parent.remaining != null && parent.remaining < 50" },
       },
       validations: [
         { name: 'remaining_cover', type: 'script', severity: 'error', message: 'line over the remaining budget', condition: "record.tag == 'rem' && record.amount > record.bud.remaining" },
@@ -2022,26 +2024,41 @@ describe('[#34821] a multi-row insert judges a rule reading a parent field calcu
 
   const noteless = (budId: string) => [{ bud: budId, amount: 40, tag: 'x' }, { bud: budId, amount: 40, tag: 'x' }, { bud: budId, amount: 1, tag: 'x' }];
 
+  const guarded = (budId: string, amounts: number[]) => amounts.map((amount) => ({ bud: budId, amount, tag: 'remg', note: 'n' }));
+  const validOf = async (batch: Record<string, unknown>[], context?: Record<string, unknown>) =>
+    (await engine.validate('bud_line', batch, { mode: 'insert', ...(context ? { context: context as any } : {}) })).results!.map((r) => r.valid);
+
   it('multi-row insert preview, a caller not served the calculated header field: every row judges it as empty, as the first row does, whatever the header holds', async () => {
-    withholdBudColumns('carol', ['budget', 'headroom', 'remaining']);
+    withholdBudColumns('carol', ['remaining']);
     const carol = { userId: 'carol' };
     const verdicts: boolean[][] = [];
     for (const budget of [100, 1000]) {
       const p = await engine.insert('bud', { name: 'B', budget });
-      // Precondition: the read door serves carol the header, without the withheld columns.
+      // Precondition: the read door serves carol the header and its inputs, without the withheld column.
       const served = await engine.findOne('bud', { where: { id: p.id }, context: carol } as any);
-      expect(served).toMatchObject({ id: p.id });
-      for (const c of ['budget', 'headroom', 'remaining']) expect(served).not.toHaveProperty(c);
-      for (const batch of [noteless(p.id), [1, 2, 3].map(() => ({ bud: p.id, amount: 40, tag: 'rem', note: 'n' }))]) {
-        const preview = await engine.validate('bud_line', batch, { mode: 'insert', context: carol as any });
-        const rows = preview.results!.map((r) => r.valid);
-        // No row reads a value the first row could not: the earlier rows' amounts steer no withheld column.
-        expect(rows).toEqual(rows.map(() => rows[0]));
-        verdicts.push(rows);
-      }
+      expect(served).toMatchObject({ id: p.id, budget, total: 0 });
+      expect(served).not.toHaveProperty('remaining');
+      verdicts.push(await validOf(guarded(p.id, [40, 40, 1]), carol));
     }
-    // Identical whatever the withheld budget holds.
-    expect(verdicts.slice(2)).toEqual(verdicts.slice(0, 2));
+    // CONTROL: a reader served the column needs the memo on the third line (remaining 20), as the write does.
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    expect(await validOf(guarded(p.id, [40, 40, 1]))).toEqual([true, true, false]);
+    expect((await refusalOf(engine.insert('bud_line', guarded(p.id, [40, 40, 1]))) as ValidationError).fields.map((f) => f.field)).toContain('memo');
+    // No row reads a value the first row could not, whatever the withheld column holds:
+    // the earlier rows' amounts steer no withheld column.
+    expect(verdicts).toEqual([[true, true, true], [true, true, true]]);
+  });
+
+  it('multi-row insert preview, a caller not served the roll-up itself: it moves from the stored value, not from the empty column, so the served calculated field reads as one by one serves it', async () => {
+    withholdBudColumns('erin', ['total']);
+    const p = await engine.insert('bud', { name: 'B', budget: 100 });
+    await engine.insert('bud_line', { bud: p.id, amount: 40, tag: 'x', note: 'n' });
+    // One by one: the first line reads remaining 60, the second 40 and needs the memo.
+    // Moved from the empty column instead, the second would read 80.
+    const erin = await engine.validate('bud_line', guarded(p.id, [20, 1]), { mode: 'insert', context: { userId: 'erin' } as any });
+    expect(erin.results!.map((r) => r.valid)).toEqual([true, false]);
+    expect(erin.results![1]!.errors.map((e) => e.field)).toContain('memo');
+    expect(await validOf(guarded(p.id, [20, 1]))).toEqual([true, false]);
   });
 
   it('multi-row insert preview, a caller served the calculated field but not its input: the served field moves as one by one serves it, and the third line needs the note', async () => {
