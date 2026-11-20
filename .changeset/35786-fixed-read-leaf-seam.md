@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/core': patch
 '@objectstack/objectql': patch
 ---
@@ -7,7 +7,7 @@
 feat: the engine's seam for the fixed-read leaf, and the driver declaration for it (ADR-0155, step 2 of 6)
 
 Clause-②: yes
-Metadata-protocol: none
+Metadata-protocol: added
 
 No visible change on its own: nothing on main writes a fixed-read leaf yet (the sharing plugin starts writing `SharedRecordIds` at ADR-0155's last step), and no driver declares one (the SQL drivers and the memory driver declare it on the steps that compile it).
 
