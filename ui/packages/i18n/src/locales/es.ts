@@ -4690,7 +4690,7 @@ const es = {
     actor: 'Actor',
     auto: 'Auto',
     overrideHint: 'p. ej. role:sales_manager. Déjalo vacío para usar la identidad detectada.',
-    comment: 'Comentario (opcional)',
+    comment: 'Comentario',
     approve: 'Aprobar',
     approving: 'Aprobando…',
     reject: 'Rechazar',

@@ -4841,7 +4841,7 @@ const zh = {
     actor: '操作身份',
     auto: '自动',
     overrideHint: '例如 role:sales_manager。留空则使用自动识别的身份。',
-    comment: '审批意见（可选）',
+    comment: '审批意见',
     approve: '通过',
     approving: '正在通过…',
     reject: '驳回',

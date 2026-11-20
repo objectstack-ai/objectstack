@@ -4582,7 +4582,7 @@ const de = {
     actor: 'Akteur',
     auto: 'Auto',
     overrideHint: 'z. B. role:sales_manager. Leer lassen für die automatisch erkannte Identität.',
-    comment: 'Kommentar (optional)',
+    comment: 'Kommentar',
     approve: 'Genehmigen',
     approving: 'Wird genehmigt…',
     reject: 'Ablehnen',

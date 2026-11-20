@@ -295,7 +295,7 @@ describe('a revise-window recall on a batch item resumes the batch (#28183)', ()
     await service.sendBack(first.id, { actorId: 'u1' }, asUser('u1'));
     await service.resubmit(first.id, { actorId: 'submitter' }, asUser('submitter'));
     const round2 = await requestFor('t1', 'pending');
-    await service.decide(round2.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX);
+    await service.decide(round2.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX);
     const second = await requestFor('t2', 'pending');
     await service.decide(second.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
 

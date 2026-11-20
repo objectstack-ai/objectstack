@@ -4841,7 +4841,7 @@ const zhHant = {
     actor: '操作身份',
     auto: '自動',
     overrideHint: '例如 role:sales_manager。留空則使用自動識別的身份。',
-    comment: '審批意見（可選）',
+    comment: '審批意見',
     approve: '通過',
     approving: '正在通過…',
     reject: '駁回',

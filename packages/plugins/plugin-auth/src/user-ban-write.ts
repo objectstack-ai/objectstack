@@ -33,6 +33,8 @@
  * (`deleteUserSessions` on `active: false`, measured on 1.7.2).
  */
 
+import { authSystemWriteContext } from './auth-actor-attribution.js';
+
 export interface UserBanWriter {
   updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
 }
@@ -95,7 +97,8 @@ const BAN_COLUMN: Record<string, string> = {
  * [#33181] The ban write on a kernel WITHOUT the vendor admin plugin. There
  * `banReason` / `banExpires` are not fields of better-auth's user model, so
  * `internalAdapter.updateUser` would not land them; this writer lands the
- * same columns through the data engine, as the system. The break-glass
+ * same columns through the data engine, as the system, attributed to the
+ * administrator in scope (`authSystemWriteContext`). The break-glass
  * last-administrator guard judges engine writes in every context, `isSystem`
  * included, so it holds here too. A field the ban write does not know is
  * refused rather than written under a guessed column.
@@ -109,7 +112,11 @@ export function engineUserBanWriter(engine: UserBanEngine): UserBanWriter {
         if (!column) throw new Error(`engineUserBanWriter: "${field}" is not a ban field`);
         patch[column] = value;
       }
-      return engine.update('sys_user', patch, { context: { isSystem: true, positions: [], permissions: [] } });
+      // Authorized as the system, as before; the attribution seam adds only the
+      // administrator the request scope names, so plugin-audit's mirror row
+      // names them as it does on the admin plugin's `internalAdapter` path.
+      const context = { positions: [], permissions: [], ...(await authSystemWriteContext()) };
+      return engine.update('sys_user', patch, { context });
     },
   };
 }

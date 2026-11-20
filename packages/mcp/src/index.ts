@@ -13,6 +13,13 @@
 export { MCPServerPlugin } from './plugin.js';
 export type { MCPServerPluginOptions } from './plugin.js';
 export { MCPServerRuntime } from './mcp-server-runtime.js';
+// [#35633] The app-docs answer-order rule and the reader pick it names, for a
+// host that writes its own `initialize` text; the open server sends the same.
+export {
+  packageDocAnswerRule,
+  definitionReaderOf,
+  DEFINITION_READER_TOOL_NAMES,
+} from './mcp-server-runtime.js';
 export type { MCPServerRuntimeConfig, McpHttpCaller } from './mcp-server-runtime.js';
 // [#26464] The host-injected authoring bridge behind `metadata:write`: the
 // shapes a host passes to `handleHttpRequest` (`authoring`) and the door
@@ -46,6 +53,8 @@ export {
   registerActionTools,
   registerFederationTools,
   grantsAuthoringTools,
+  // [#35633] Whether both doc tools register: where the rule above is sent.
+  packageDocToolsServed,
 } from './mcp-http-tools.js';
 export type {
   McpDataBridge,

@@ -7059,9 +7059,10 @@ export class ObjectStackClient {
 
     /**
      * Record a reject decision on a request. Resumes the owning flow run down
-     * the `reject` edge.
+     * the `reject` edge. A reject carries its reason: `comment` is required,
+     * and a blank one is refused with `400 VALIDATION_ERROR`.
      */
-    reject: async (requestId: string, decision?: { actorId?: string; comment?: string; attachments?: string[] }): Promise<ApprovalDecisionResult> => {
+    reject: async (requestId: string, decision: { actorId?: string; comment: string; attachments?: string[] }): Promise<ApprovalDecisionResult> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/reject`, {
         method: 'POST',

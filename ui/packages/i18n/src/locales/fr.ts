@@ -4686,7 +4686,7 @@ const fr = {
     actor: 'Acteur',
     auto: 'Auto',
     overrideHint: 'p. ex. role:sales_manager. Laissez vide pour l\'identité détectée automatiquement.',
-    comment: 'Commentaire (facultatif)',
+    comment: 'Commentaire',
     approve: 'Approuver',
     approving: 'Approbation…',
     reject: 'Rejeter',
