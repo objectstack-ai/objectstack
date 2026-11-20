@@ -2144,6 +2144,8 @@ function refuseDishonestRecordCurrencyField(
  *    marker … the pointer is the declaration". Open item 8's marker
  *    (`unitMode: 'code'`) is for a code field no quantity points at, so one
  *    field never carries two declarations of what it holds;
+ *  - the field declares a `valueDomain`: a second vocabulary for the same
+ *    column, the pairing `FieldSchema` refuses beside the `code` marker;
  *  - two quantities sharing one unit field declare different `unitDimension`
  *    values (L3, the check {@link refuseDishonestHomeAmount} makes for amounts
  *    sharing a rate field): one column holds one code per row, so it cannot
@@ -2161,7 +2163,7 @@ function refuseDishonestRecordUnitField(
   if (fields === null || typeof fields !== 'object') return;
   const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
   type UnitConfigView = { unitMode?: unknown; unitField?: unknown; unitDimension?: unknown };
-  const map = fields as Record<string, { type?: unknown; unitConfig?: UnitConfigView } | null>;
+  const map = fields as Record<string, { type?: unknown; unitConfig?: UnitConfigView; valueDomain?: unknown } | null>;
   const isText = (name: string): boolean => map[name]?.type === 'text';
   const dimensionOwner = new Map<string, { quantity: string; dimension: string }>();
   for (const [name, field] of Object.entries(map)) {
@@ -2170,7 +2172,9 @@ function refuseDishonestRecordUnitField(
     const target = config.unitField;
     const path = ['fields', name, 'unitConfig', 'unitField'];
     const at = `\`${name}.unitConfig.unitField\` names \`${target}\``;
-    const candidates = Object.keys(map).filter((k) => k !== name && isText(k) && map[k]?.unitConfig === undefined);
+    const candidates = Object.keys(map).filter(
+      (k) => k !== name && isText(k) && map[k]?.unitConfig === undefined && map[k]?.valueDomain === undefined,
+    );
     const prescription =
       '`unitField` must name a `text` field of this object that holds each record\'s unit code — '
       + (candidates.length > 0
@@ -2210,6 +2214,21 @@ function refuseDishonestRecordUnitField(
         message: `${at}, a field that declares \`unitConfig\` itself. The pointer is the declaration: a field a `
           + `quantity points at holds that quantity's unit and carries no marker of its own. Delete \`unitConfig\` `
           + `from \`${target}\`, and declare any \`unitDimension\` on \`${name}\`.`,
+      });
+      continue;
+    }
+    // The same pairing FieldSchema refuses on a `code` marker, reached through
+    // the pointer: a unit field and a value domain are two vocabularies for
+    // one column (L3: the field a quantity points at carries no marker).
+    if (map[target]?.valueDomain !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`text\` field that declares \`valueDomain: '${String(map[target]?.valueDomain)}'\`, another `
+          + 'vocabulary. One column holds one kind of code: as this quantity\'s unit field it would be judged against two '
+          + 'lists, and a value would pass only where they happen to share a spelling (`MMK` is both a unit and an ISO '
+          + '4217 currency code), meaning two things at once. A field a quantity points at carries no marker of its '
+          + `own: delete \`valueDomain\` from \`${target}\`, or point \`${name}\` at another field. ${prescription}`,
       });
       continue;
     }

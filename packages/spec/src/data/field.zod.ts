@@ -1000,7 +1000,7 @@ const UNIT_CONFIG_HISTORY =
  * The codes a `fixed` unit may name: the own keys of the standard unit table
  * (ADR-0158 U1), in exact uppercase. The same set {@link standardUnitOf}
  * answers, so the build-time check and the write-time check cannot drift into
- * two opinions (`unit-config.test.ts` pins the equality).
+ * two opinions (`field-unit-config.test.ts` pins the equality).
  */
 const STANDARD_UNIT_CODE_LIST = Object.keys(STANDARD_UNITS) as [string, ...string[]];
 
@@ -3166,14 +3166,19 @@ export const FieldSchema = lazySchema(() => {
             + 'with `unitField` (each record\'s code in a sibling `text` field).',
       });
     } else if (mode === 'code' && field.valueDomain !== undefined) {
-      // A unit code is not a member of any value domain (ADR-0158 U1 keeps
-      // the vocabulary at three), so the two declarations would refuse every
-      // value between them.
+      // A unit code field and a value domain are two vocabularies for one
+      // column (ADR-0158 U1 keeps the value domains at three, and a unit is
+      // not one of them). They are not disjoint — `MMK`, `XDR` and `PR` are in
+      // both — so the pair is refused for meaning two things at once, not for
+      // admitting nothing. The object door refuses the same pairing reached
+      // through a quantity's `unitField` (object.zod.ts).
       ctx.addIssue({
         code: 'custom',
         path: ['unitConfig'],
         message: `\`unitConfig: { unitMode: 'code' }\` declares that this field holds a unit code, and it also declares `
-          + `\`valueDomain: '${String(field.valueDomain)}'\`, whose values are not unit codes: no value could satisfy both. `
+          + `\`valueDomain: '${String(field.valueDomain)}'\`, another vocabulary. One column holds one kind of code: `
+          + 'declared as both, every write is judged against two lists, and a value passes only where they happen to '
+          + 'share a spelling (`MMK` is both a unit and an ISO 4217 currency code), meaning two things at once. '
           + 'Delete one of the two.',
       });
     }

@@ -185,11 +185,16 @@ describe('`FieldSchema`: which type carries which mode', () => {
     expect(issues.map((i) => i.path)).toContainEqual(['unitConfig']);
   });
 
-  it('refuses a unit code field that also declares a `valueDomain`: no value satisfies both', () => {
+  it('refuses a unit code field that also declares a `valueDomain`: two vocabularies for one column, not an empty one', () => {
     const issues = issuesOf(FieldSchema.safeParse({
       name: 'uom', label: 'Unit', type: 'text', valueDomain: 'iso_4217_currency', unitConfig: { unitMode: 'code' },
     }));
-    expect(issues.map((i) => i.path)).toEqual([['unitConfig']]);
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['unitConfig']]]);
+    expect(issues[0]!.message).toContain("`valueDomain: 'iso_4217_currency'`, another vocabulary. One column holds one kind of code");
+    // The two lists are not disjoint (`MMK` is a standard unit and an ISO 4217 code), so the refusal never says
+    // that nothing satisfies both.
+    expect(standardUnitOf('MMK')).toBeDefined();
+    expect(issues[0]!.message).not.toContain('no value could satisfy both');
   });
 
   it.each(['unit', 'uom', 'unitCode', 'dimension'])('a bare `%s` key on the field is refused with guidance', (key) => {
@@ -227,6 +232,29 @@ describe('`ObjectSchema`: what a `record` pointer names', () => {
     const issues = issuesOf(ObjectSchema.safeParse(material(fields)));
     expect(issues.map((i) => i.path)).toContainEqual(['fields', 'weight', 'unitConfig', 'unitField']);
   });
+
+  it.each(['iso_4217_currency', 'iso_3166_alpha2', 'iana_time_zone'])(
+    'refuses a pointer into a `text` field that declares `valueDomain: %s`, at `fields.weight.unitConfig.unitField`, and offers no such field as a candidate',
+    (valueDomain) => {
+      const r = ObjectSchema.safeParse(material({
+        uom: UOM,
+        cur: { type: 'text', label: 'Currency', valueDomain },
+        weight: { type: 'number', unitConfig: { unitMode: 'record', unitField: 'cur' } },
+      }));
+      expect(r.success).toBe(false);
+      const issues = issuesOf(r);
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['fields', 'weight', 'unitConfig', 'unitField']]]);
+      expect(issues[0]!.message).toContain(`\`weight.unitConfig.unitField\` names \`cur\`, a \`text\` field that declares \`valueDomain: '${valueDomain}'\`, another vocabulary`);
+      expect(issues[0]!.message).toContain('A field a quantity points at carries no marker of its own');
+      expect(issues[0]!.message).toContain('candidates: `uom`.');
+      // The control: the same quantity pointed at the plain `text` sibling parses.
+      expect(issuesOf(ObjectSchema.safeParse(material({
+        uom: UOM,
+        cur: { type: 'text', label: 'Currency', valueDomain },
+        weight: { type: 'number', unitConfig: RECORD },
+      })))).toEqual([]);
+    },
+  );
 
   it('the path refusal says the parent path is reserved, and a lookup pointer is refused as no text field', () => {
     const [path] = issuesOf(ObjectSchema.safeParse(material({

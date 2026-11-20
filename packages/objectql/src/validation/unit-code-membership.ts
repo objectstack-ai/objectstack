@@ -58,7 +58,11 @@
  * field-level `VALIDATION_FAILED` entry for the reason
  * `ERR_CURRENCY_CODE_REQUIRED` is one: the ADR assigns these refusals to
  * ADR-0112's vocabulary. The message prints a code only when the write itself
- * carried it; a resting code is named by its field, never by its value.
+ * carried it; a resting code is named by its field, never by its value nor by
+ * anything derived from it — no spelling correction (`write 'KGM'` beside a
+ * stored `kgm`, `'H87'` beside a stored `EA`) and no dimension, since either
+ * would tell a caller who may edit the quantity but not read the code field
+ * what the field holds.
  */
 
 import { standardUnitOf, UNIT_DIMENSION_BASE_CODES, type StandardUnit } from '@objectstack/spec/data';
@@ -348,7 +352,8 @@ export function assertUnitCodes(
     if (!membership) continue;
     const code = image[codeField];
     const verdict = membershipOf(code, organizationId, lookup);
-    // A code the write carried is named; a resting one is named by its field only.
+    // A code the write carried is named; a resting one is named by its field only,
+    // and nothing derived from it (its corrected spelling, its dimension) is printed.
     const named = codeWritten && typeof code === 'string' ? `'${code}'` : 'a code stored before this write';
     const quantity = source.quantityFields.find((q) => !isUnitValueBlank(image[q]));
     const remedyTail = codeWritten
@@ -362,7 +367,7 @@ export function assertUnitCodes(
         `${head}'${codeField}' holds ${named}, which is not a unit code: a unit code is a standard UN/ECE `
           + `Recommendation 20 code (for example 'KGM', 'MTR', 'H87') or one of the organization's own units, `
           + 'in exact uppercase. The row was not written. '
-          + (verdict.hint !== undefined
+          + (codeWritten && verdict.hint !== undefined
             ? verdict.hint === 'H87' && typeof code === 'string' && canonicalSpelling(code) !== 'H87'
               ? `The piece is 'H87'; write 'H87'.`
               : `Codes are exact uppercase with no spaces; write '${verdict.hint}'.`
@@ -382,11 +387,14 @@ export function assertUnitCodes(
     }
     if (source.dimension !== undefined && verdict.dimension !== source.dimension) {
       const declarer = source.quantityFields.length > 0 ? `the quantity '${source.quantityFields[0]}'` : `'${codeField}'`;
+      // A resting code's dimension is derived from it, so only a written one is named.
+      const ofDimension = codeWritten ? `a unit of the ${verdict.dimension} dimension` : 'a unit of another dimension';
       throw new RecordUnitCodeError(
         UNIT_DIMENSION_MISMATCH_CODE,
-        `${head}'${codeField}' holds ${named}, a unit of the ${verdict.dimension} dimension, and ${declarer} declares `
+        `${head}'${codeField}' holds ${named}, ${ofDimension}, and ${declarer} declares `
           + `unitDimension '${source.dimension}'. The row was not written. Write a ${source.dimension} unit (for example `
-          + `'${exampleCodeOf(source.dimension)}') into '${codeField}'.`,
+          + `'${exampleCodeOf(source.dimension)}') into '${codeField}'`
+          + (!codeWritten && quantity !== undefined ? ` in the same write as '${quantity}'.` : '.'),
         object, codeField, quantity,
       );
     }

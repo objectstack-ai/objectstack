@@ -170,6 +170,36 @@ describe('Open item 9, case 2: a quantity written beside a resting code that is 
     expect(e!.message).not.toContain('SACK_50');
   });
 
+  it.each([['kgm', "write 'KGM'"], [' KGM', "write 'KGM'"], ['ea', "write 'H87'"], ['c62', "write 'H87'"]])(
+    'OI9 case 2: refuses the quantity edit beside a resting %j, ERR_UNIT_CODE_UNKNOWN / 400, printing neither the stored code nor its corrected spelling',
+    async (uom, correction) => {
+      const e = await judge({ uom, weight: 5 }, 'update', { weight: 5 });
+      expect(envelope(e)).toEqual({ code: 'ERR_UNIT_CODE_UNKNOWN', status: 400, httpStatus: 400, field: 'uom' });
+      expect(e!.message).toContain("'uom' holds a code stored before this write");
+      expect(e!.message).not.toContain(`'${uom}'`);
+      expect(e!.message).not.toContain(correction);
+      expect(e!.message).not.toContain('The piece is');
+      expect(e!.message).not.toContain('Codes are exact uppercase with no spaces');
+      // The control: the same code WRITTEN is still answered with its exact spelling (case 1).
+      expect((await judge({ uom, weight: 5 }, 'update', { uom, weight: 5 }))!.message).toContain(correction);
+    },
+  );
+
+  it.each([['MTR', 'length'], ['BOX_12', 'package']])(
+    'OI9 case 2: refuses the quantity edit beside a resting %s of another dimension, ERR_UNIT_DIMENSION_MISMATCH / 400, printing neither the code nor its dimension',
+    async (uom, dimension) => {
+      const e = await judge({ uom, weight: 5 }, 'update', { weight: 5 });
+      expect(envelope(e)).toEqual({ code: 'ERR_UNIT_DIMENSION_MISMATCH', status: 400, httpStatus: 400, field: 'uom' });
+      expect(e!.message).toContain("'uom' holds a code stored before this write, a unit of another dimension");
+      expect(e!.message).toContain("unitDimension 'mass'");
+      expect(e!.message).toContain("in the same write as 'weight'");
+      expect(e!.message).not.toContain(uom);
+      expect(e!.message).not.toContain(dimension);
+      // The control: the same code WRITTEN is still named with its dimension (point 5).
+      expect((await judge({ uom, weight: 5 }, 'update', { uom, weight: 5 }))!.message).toContain(`the ${dimension} dimension`);
+    },
+  );
+
   it('refuses the quantity edit beside free text stored before the declaration, and the remedy moves the record', async () => {
     const e = await judge({ uom: 'kg', weight: 5 }, 'update', { weight: 5 });
     expect(envelope(e)).toEqual({ code: 'ERR_UNIT_CODE_UNKNOWN', status: 400, httpStatus: 400, field: 'uom' });
