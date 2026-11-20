@@ -22,6 +22,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { compile } from 'tailwindcss';
+// @ts-expect-error -- plain-JS shared helper, intentionally untyped (`allowJs: false`)
+import { stripComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(here, '../../../..');
@@ -54,7 +56,7 @@ function blocks(css: string, selector: RegExp): string[] {
 function vars(css: string, selector: RegExp): Record<string, string> {
   const out: Record<string, string> = {};
   for (const b of blocks(css, selector)) {
-    for (const m of b.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim();
+    for (const m of (stripComments(b) as string).matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) out[m[1]] = m[2].trim();
   }
   return out;
 }
