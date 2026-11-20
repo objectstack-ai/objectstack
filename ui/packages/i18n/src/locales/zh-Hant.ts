@@ -619,8 +619,8 @@ const zhHant = {
       menuPercentFilled: '非空佔比',
       countTrue: '是',
       countFalse: '否',
-      menuCountTrue: '「是」的筆數',
-      menuCountFalse: '「否」的筆數',
+      menuCountTrue: '「是」的條數',
+      menuCountFalse: '「否」的條數',
     },
     toolbar: {
       densityMode: '密度',
