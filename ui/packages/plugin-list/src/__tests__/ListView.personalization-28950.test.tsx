@@ -14,8 +14,9 @@
  * Every part is judged against the VIEW: where the host lays the reader's
  * state over the view's in `schema` (the console), the sort and the grouping
  * compare against `viewDefaults`, as hidden fields and density already do.
- * With the callback wired the Display control draws no reset of its own; the
- * sort popover's per-control reset stays. The host half (the marker, the reset
+ * With the callback wired the Display control draws no live reset of its own
+ * (恢复默认 is dimmed until the host hands its reset over, with its 保存:
+ * objectstack#35551); the sort popover's per-control reset stays. The host half (the marker, the reset
  * that clears the stored entry, the search cache and the `uf_*` params) is
  * pinned in app-shell's `ObjectView.listPersonalized-28950.test.tsx`.
  */
@@ -162,6 +163,9 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
     const { reported } = mount({}, { defaultRowNumbers: true });
     const content = await openDisplay();
     await waitFor(() => expect(reported()).toEqual([]));
+    // Row numbers sit on the Display menu's More level.
+    fireEvent.click(within(content).getByTestId('options-row-more'));
+    await within(content).findByTestId('options-page-more');
 
     fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
     await waitFor(() => expect(reported()).toEqual(['rowNumbers']));
@@ -189,10 +193,42 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
 });
 
 describe('with the callback wired, the host owns the one reset (objectstack#28950)', () => {
-  it('the Display control draws no "Reset to view default" of its own', async () => {
+  it('the Display control draws no live reset of its own: 恢复默认 stays dimmed until the host hands its reset over', async () => {
     mount({ hiddenFields: ['amount'] } as Partial<ListViewSchema>);
     const content = await openDisplay();
-    expect(within(content).queryByTestId('display-reset-button')).toBeNull();
+    expect(within(content).getByTestId('display-reset-button')).toBeDisabled();
+    expect(within(content).queryByTestId('display-save-button')).toBeNull();
+  });
+
+  it('the host\'s reset and save (objectstack#35551) are 恢复默认 and 保存 in Options', async () => {
+    const onResetView = vi.fn();
+    const onSaveView = vi.fn();
+    mount({ hiddenFields: ['amount'] } as Partial<ListViewSchema>, { onResetView, onSaveView });
+    let content = await openDisplay();
+    expect(within(content).getByTestId('display-reset-button')).toBeEnabled();
+    fireEvent.click(within(content).getByTestId('display-reset-button'));
+    expect(onResetView).toHaveBeenCalledTimes(1);
+    content = await screen.findByTestId('view-settings-content');
+    fireEvent.click(within(content).getByTestId('display-save-button'));
+    expect(onSaveView).toHaveBeenCalledTimes(1);
+  });
+
+  it('the view\'s name heads Options; the host\'s rename (objectstack#35551) renames it in place', async () => {
+    const onRenameView = vi.fn().mockResolvedValue(true);
+    mount({ label: 'Hot accounts' } as Partial<ListViewSchema>, { onRenameView });
+    const content = await openDisplay();
+    const name = within(content).getByTestId('options-view-name-input');
+    expect(name).toHaveValue('Hot accounts');
+    fireEvent.change(name, { target: { value: 'Warm accounts' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+    await waitFor(() => expect(onRenameView).toHaveBeenCalledWith('Warm accounts'));
+  });
+
+  it('CONTROL: without a rename the name is shown, not edited', async () => {
+    mount({ label: 'Hot accounts' } as Partial<ListViewSchema>);
+    const content = await openDisplay();
+    expect(within(content).queryByTestId('options-view-name-input')).toBeNull();
+    expect(within(content).getByTestId('options-view-name')).toHaveTextContent('Hot accounts');
   });
 
   it('CONTROL: without the callback the Display control keeps its reset', async () => {

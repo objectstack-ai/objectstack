@@ -108,6 +108,7 @@ export function useObjectViewListRenderer({
     initialUfSelections,
     handleUserFilterSelectionsChange,
     viewPanelFilters,
+    listViewActions,
 }: {
     objectName: string | undefined;
     inSetup: ReturnType<typeof isSetupAppSegment>;
@@ -162,7 +163,24 @@ export function useObjectViewListRenderer({
      * time, and the list judges its 「Personalized」 filters against them.
      */
     viewPanelFilters?: FilterBuilderRowGroup;
+    /**
+     * objectstack#35551 — the open view's rename, 保存 and full reset, for
+     * the list's options menu (`ListView`'s `onRenameView` / `onSaveView` /
+     * `onResetView`). Each is wired only when the reader may use it.
+     */
+    listViewActions?: {
+        rename?: (label: string) => boolean | Promise<boolean>;
+        save?: () => void;
+        reset?: () => void;
+    };
 }) {
+    // objectstack#35551 — the host hands fresh closures every render; the list
+    // reads the latest through a ref, and re-renders only when one appears or goes.
+    const listViewActionsRef = useRef(listViewActions);
+    listViewActionsRef.current = listViewActions;
+    const offersRename = !!listViewActions?.rename;
+    const offersSave = !!listViewActions?.save;
+    const offersReset = !!listViewActions?.reset;
     // objectstack#27058 — below `sm` the title switcher is the phone's one
     // view control, so the list offers no layout switcher of its own there.
     const wideViewport = useViewTabsFit();
@@ -1018,6 +1036,10 @@ export function useObjectViewListRenderer({
                 // for the 「Personalized」 marker, which then owns the one reset
                 // (the Display control draws none of its own).
                 onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
+                // objectstack#35551 — the view's rename, 保存 and full reset in the options menu.
+                onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
+                onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
+                onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1124,7 +1146,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }
