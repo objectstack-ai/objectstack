@@ -520,6 +520,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Page variable declarations — each name once and never blank, a `defaultValue` of its declared type, a `source` naming a component the page holds (#28663, #28725) | ✓ | ✓ | ✓ | ✓ᵖ |
 | JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
 | Script action bodies compile in the runtime's wrapper — an L2 action's `body.source` that does not compile as the body of `(async (input, ctx) => { … })`, most often `const input = …` redeclaring a parameter; an object write runs it over its inline `actions[]`, so an object write cannot republish a refused body (`action-body-does-not-compile`, #34884) | ✓ | ✓ | ✓ | ✓ᵃᶜᵒ |
+| Hook and job bodies compile in the runtime's wrapper — an L2 hook or job `body.source` that does not compile as the body of `(async (ctx) => { … })`, most often `const ctx = …` redeclaring the parameter or one name declared twice; no door publishes a job, so the publish column is the `hook` write alone (`hook-body-does-not-compile`, `job-body-does-not-compile`, #34987) | ✓ | ✓ | ✓ | ✓ʰ |
 | Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
 | Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | ✓ᵒᵖᵉᵇᵖᵒᵃᵒˣ |
@@ -866,7 +867,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (73)...
+  → Running author-time rules (74)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 
