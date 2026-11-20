@@ -500,7 +500,6 @@ const NOT_RELAYED: Record<string, NotRelayed> = {
   showRecordCount: { kind: 'page-owned', from: 'showRecordCount', reason: "The page config's record-count toggle, page presentation policy; the referenced view's toggle does not stand in for it." },
   allowPrinting: { kind: 'page-owned', from: 'allowPrinting', reason: "The page config's \"Allow users to print the page\". It went unwritten until objectui#11572, so the declared toggle drew no print button; the page's value only, like its siblings." },
   userActions: { kind: 'page-owned', from: 'userActions', reason: "The page config's toolbar toggles, read with the published `UserActionsConfigSchema` defaults (a control is withheld by writing `false`; rowColor is opt-in). The view's toolbar vocabulary is the object page's policy, not this page's." },
-  inlineEdit: { kind: 'page-owned', from: 'userActions', reason: "Read from the page's `userActions.editInline` (default on since objectstack#22605; `editInline: false` opts out). Whether this page's cells are editable is the page author's decision, not the referenced view's." },
   navigation: { kind: 'page-prop', from: 'recordAction', prop: 'onRowClick', reason: "The page config's `recordAction` (drawer / page / modal / none) decides how a record opens, wired through `onRowClick` to this page's own overlay. The view's `navigation` would be a second, competing answer." },
 
   // ── The page's own binding and text ──────────────────────────────────────

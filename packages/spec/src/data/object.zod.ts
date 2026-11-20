@@ -1274,24 +1274,32 @@ const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
  * related fields together for presentation in forms, detail pages, and
  * editors (e.g., "Contact Info", "Billing", "System").
  * 
- * Design rules (MVP):
+ * Design rules:
  * - Group **order** is the declaration order of this array — no `order` property.
- * - Field → group mapping is derived automatically from `Field.group`
- *   matching `ObjectFieldGroup.key`; the **in-group display order** equals
- *   the traversal order of `ObjectSchema.fields`.
- * - Fields whose `group` is unset (or references an undeclared key) are
- *   considered ungrouped and must be rendered by consumers in a default
- *   bucket after the declared groups, preserving their field declaration order.
- * - Extension packages and runtime code use `Field.group` to assign fields
- *   to an existing group — no per-field order property is introduced at this
- *   layer.
- * 
- * Migration operations supported by this MVP:
+ * - A group lists its own members, in display order, in `fields`. A group that
+ *   writes no `fields` keeps the older rule: its members are the fields whose
+ *   `Field.group` names its `key`, in the traversal order of
+ *   `ObjectSchema.fields`. So an object written before `fields` existed
+ *   renders exactly as it did.
+ * - A field whose `group` names a group that lists `fields`, but that the list
+ *   does not name (a field another package added later, say), follows the
+ *   listed members in field declaration order: it is never dropped.
+ * - Fields no group lists and whose `group` is unset (or references an
+ *   undeclared key) are ungrouped and render in a default bucket after the
+ *   declared groups, preserving their field declaration order.
+ * - Two spellings of one membership must agree: the object parse refuses a
+ *   field one group lists while its own `group` names another, a field two
+ *   groups list, a name one list repeats, and `fields` on a group that places
+ *   a related list. A listed name the object does not declare is skipped (the
+ *   layout places only declared fields), so removing a field never makes the
+ *   object unparseable.
+ *
+ * Migration operations supported:
  *   - add / rename / delete / reorder groups (via the array)
- *   - assign an existing field to a group (via `Field.group`)
- * 
- * Deferred (not part of MVP):
- *   - explicit per-field in-group ordering
+ *   - assign a field to a group and order it inside the group (via `fields`;
+ *     `Field.group` is the older spelling, still read)
+ *
+ * Deferred:
  *   - nested groups / sub-groups
  *
  * Group-level visibility (`visibleWhen`) closed the ADR-0049 enforce-or-remove
@@ -1309,8 +1317,8 @@ const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
  * @example
  * ```ts
  * fieldGroups: [
- *   { key: 'contact_info', label: 'Contact Information', icon: 'user' },
- *   { key: 'billing',      label: 'Billing',             collapse: 'collapsed' },
+ *   { key: 'contact_info', label: 'Contact Information', icon: 'user', fields: ['email', 'phone'] },
+ *   { key: 'billing',      label: 'Billing',             collapse: 'collapsed', fields: ['billing_address'] },
  *   { key: 'system',       label: 'System' },
  * ]
  * ```
@@ -1329,14 +1337,6 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
     helpText: 'description',
   },
   guidance: {
-    // Membership is declared the OTHER WAY ROUND, and this is the single most
-    // likely thing an author reaches for here — a group that lists its fields
-    // is what every other layout system in this space looks like.
-    fields:
-      '`fields` does not live on a group — membership is declared on the FIELD, pointing ' +
-      "back: `fields: { email: { type: 'email', group: 'contact_info' } }`. The group " +
-      'declares only its `key`, `label` and presentation; `deriveFieldGroupLayout` ' +
-      '(ADR-0085 §5) does the assembly.',
     order:
       '`order` is not a group key — ARRAY ORDER is display order. `fieldGroups: [...]` ' +
       'renders top to bottom, so move the entry rather than numbering it.',
@@ -1364,6 +1364,30 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   /** Human-readable label displayed as the group header. */
   label: z.string().describe('Group display label').meta({ title: 'Label' }),
 
+  /**
+   * The group's members, in display order: field names of this object. Written,
+   * it decides which fields the group shows and in what order, on every surface
+   * that renders the group (record page, create and edit forms, drawer); the
+   * object's `fields` declaration order then no longer decides the order inside
+   * the group, so the group can be reordered without moving any field.
+   *
+   * Absent, the group keeps the older rule: its members are the fields whose
+   * `Field.group` names this group's `key`, in field declaration order. That
+   * spelling is still read; new metadata lists members here.
+   *
+   * A field whose `group` names this group but that this list does not name is
+   * appended after the listed members, in field declaration order, never
+   * dropped. The object parse refuses a field this list names while its own
+   * `group` names another group, a field two groups list, and a name this list
+   * repeats. A name the object declares no field for is skipped. A group that
+   * places a related list (`relatedList`) holds no fields, so it may not write
+   * `fields`. Derivation: `deriveFieldGroupLayout` (field-group-layout.ts,
+   * ADR-0085 §5).
+   */
+  fields: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+    message: 'A field group\'s fields entry is a field name of this object, in snake_case (e.g. "account")',
+  })).optional().describe('The group\'s members in display order (field names of this object). Written, it decides which fields the group shows and their order on the record page and the forms, without changing the order of the object\'s fields. Absent, members are the fields whose `group` names this group, in field declaration order (the older spelling, still read). A field whose `group` names this group but that the list does not name follows the listed ones. Refused: a listed field whose own `group` names another group, a field two groups list, a repeated name, and `fields` on a group with `relatedList`. A name the object does not declare is skipped.').meta({ title: 'Fields' }),
+
   /** Optional Lucide/Material icon name for the group header. */
   icon: z.string().optional().describe('Icon name (Lucide/Material) for the group header').meta({ title: 'Icon' }),
 
@@ -1378,7 +1402,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * items can sit under its basic information with its terms after them.
    *
    * Such a group carries no fields: a field whose `group` names it is refused
-   * at parse. Its name is judged exactly as a `relatedLists` entry's is (see
+   * at parse, and so is a `fields` list on it. Its name is judged exactly as a `relatedLists` entry's is (see
    * there): a child in the stack with no inbound relationship is refused
    * everywhere; a child that exists nowhere is refused at `defineStack` (save a
    * platform-prefixed name, left to the runtime) and by a metadata write that
@@ -1396,7 +1420,7 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused, and so is a fields list on it. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -2116,6 +2140,134 @@ function refuseDishonestRecordCurrencyField(
         message: `\`${name}.currencyConfig.currencyField\` names \`${target}\`, a \`${String(type)}\` field on object \`${objectName}\` `
           + `that does not declare \`valueDomain: 'iso_4217_currency'\`, so a write could store any string as the `
           + `currency. Add \`valueDomain: 'iso_4217_currency'\` to \`${target}\`, or point at another field. ${prescription}`,
+      });
+    }
+  }
+}
+
+/**
+ * [ADR-0158 U4, L3; Open item 8, ruled A] A `record`-mode quantity's
+ * `unitConfig.unitField` names the field THIS object declares that holds each
+ * row's unit code: a `text` field. The quantity stays a bare number (ADR-0104
+ * D1); the code field is the only place its unit lives, so a pointer into
+ * nothing or into a non-text field would parse and give the quantity a unit
+ * no write ever checks.
+ *
+ * `UnitConfigSchema` (field.zod.ts) sees one config at a time and refuses the
+ * half it can see; what the pointer names is judged here, beside
+ * {@link refuseDishonestRecordCurrencyField}, for the same reason: only the
+ * object holds the field map. One located issue per offending field at
+ * `['fields', <field>, 'unitConfig', <key>]`:
+ *
+ *  - a two-segment pointer: following a parent's unit through `master_detail`
+ *    is reserved, not admitted (L3: "a child cannot follow its parent's unit
+ *    yet");
+ *  - the name is not a declared field (or is the quantity itself);
+ *  - the field is not a `text` field;
+ *  - the field declares `unitConfig` itself. L3: "That field carries no
+ *    marker … the pointer is the declaration". Open item 8's marker
+ *    (`unitMode: 'code'`) is for a code field no quantity points at, so one
+ *    field never carries two declarations of what it holds;
+ *  - the field declares a `valueDomain`: a second vocabulary for the same
+ *    column, the pairing `FieldSchema` refuses beside the `code` marker;
+ *  - two quantities sharing one unit field declare different `unitDimension`
+ *    values (L3, the check {@link refuseDishonestHomeAmount} makes for amounts
+ *    sharing a rate field): one column holds one code per row, so it cannot
+ *    satisfy two dimensions.
+ *
+ * Judged against the AUTHORED field map. Not judged on
+ * `ObjectExtensionSchema`, for the reason
+ * {@link refuseDishonestRecordCurrencyField} gives.
+ */
+function refuseDishonestRecordUnitField(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  type UnitConfigView = { unitMode?: unknown; unitField?: unknown; unitDimension?: unknown };
+  const map = fields as Record<string, { type?: unknown; unitConfig?: UnitConfigView; valueDomain?: unknown } | null>;
+  const isText = (name: string): boolean => map[name]?.type === 'text';
+  const dimensionOwner = new Map<string, { quantity: string; dimension: string }>();
+  for (const [name, field] of Object.entries(map)) {
+    const config = field?.unitConfig;
+    if (config?.unitMode !== 'record' || typeof config.unitField !== 'string') continue;
+    const target = config.unitField;
+    const path = ['fields', name, 'unitConfig', 'unitField'];
+    const at = `\`${name}.unitConfig.unitField\` names \`${target}\``;
+    const candidates = Object.keys(map).filter(
+      (k) => k !== name && isText(k) && map[k]?.unitConfig === undefined && map[k]?.valueDomain === undefined,
+    );
+    const prescription =
+      '`unitField` must name a `text` field of this object that holds each record\'s unit code — '
+      + (candidates.length > 0
+        ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
+        : 'the object has none; declare one, conventionally `unit_code: Field.text()`.');
+    if (target.includes('.')) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a path, and a child cannot follow its parent's unit yet: \`unitField\` names one field of `
+          + 'this object. Give this object its own unit code field and point at it. The form '
+          + '`PARENT_FIELD.UNIT_FIELD` is reserved until an amendment of ADR-0158 admits it.',
+      });
+      continue;
+    }
+    if (target === name || !Object.prototype.hasOwnProperty.call(map, target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, but object \`${objectName}\` declares no other field \`${target}\`. ${prescription}`,
+      });
+      continue;
+    }
+    if (!isText(target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`${String(map[target]?.type)}\` field on object \`${objectName}\`; a unit is stored as its `
+          + `code (for example 'KGM'), never as a record id, in a \`text\` field. ${prescription}`,
+      });
+      continue;
+    }
+    if (map[target]?.unitConfig !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a field that declares \`unitConfig\` itself. The pointer is the declaration: a field a `
+          + `quantity points at holds that quantity's unit and carries no marker of its own. Delete \`unitConfig\` `
+          + `from \`${target}\`, and declare any \`unitDimension\` on \`${name}\`.`,
+      });
+      continue;
+    }
+    // The same pairing FieldSchema refuses on a `code` marker, reached through
+    // the pointer: a unit field and a value domain are two vocabularies for
+    // one column (L3: the field a quantity points at carries no marker).
+    if (map[target]?.valueDomain !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`text\` field that declares \`valueDomain: '${String(map[target]?.valueDomain)}'\`, another `
+          + 'vocabulary. One column holds one kind of code: as this quantity\'s unit field it would be judged against two '
+          + 'lists, and a value would pass only where they happen to share a spelling (`MMK` is both a unit and an ISO '
+          + '4217 currency code), meaning two things at once. A field a quantity points at carries no marker of its '
+          + `own: delete \`valueDomain\` from \`${target}\`, or point \`${name}\` at another field. ${prescription}`,
+      });
+      continue;
+    }
+    if (typeof config.unitDimension !== 'string') continue;
+    const holder = dimensionOwner.get(target);
+    if (holder === undefined) {
+      dimensionOwner.set(target, { quantity: name, dimension: config.unitDimension });
+    } else if (holder.dimension !== config.unitDimension) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fields', name, 'unitConfig', 'unitDimension'],
+        message: `\`${name}.unitConfig.unitDimension\` is \`'${config.unitDimension}'\`, but \`${holder.quantity}\` shares `
+          + `its unit field \`${target}\` and declares \`'${holder.dimension}'\`. One column holds one code per record, `
+          + `so it cannot be a unit of both. Declare the same \`unitDimension\` on both, or give \`${name}\` its own `
+          + 'unit field.',
       });
     }
   }
@@ -3200,6 +3352,92 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
         + 'group, or declare a group of fields beside the table and name that one.',
     });
   }
+}
+
+/**
+ * A field group's `fields` list and a field's own `group` are two spellings of
+ * one membership (`ObjectFieldGroupSchema.fields`), so where both speak they
+ * must agree. One located issue per disagreement:
+ *
+ * - `fields` on a group that places a related list (`relatedList`): such a
+ *   group holds no fields — at `['fieldGroups', i, 'fields']`;
+ * - a name one list repeats — at the repeat;
+ * - a field two groups list — at the second listing, naming the first group;
+ * - a listed field whose own `group` names a different DECLARED group — at
+ *   the listing AND at `['fields', <name>, 'group']`, each naming the other,
+ *   so the author sees both places to fix. A `group` naming no declared key
+ *   is not another group (it means ungrouped, and lint reports it as
+ *   `field-group-undeclared`), so the list wins and nothing is refused —
+ *   renaming a group's key never makes its listed members unparseable.
+ *
+ * A listed name the object declares no field for is NOT judged: the layout
+ * skips it, and refusing it would make the object unparseable the moment any
+ * door removes a field without editing every list. A field whose `group` names
+ * a listing group the list leaves out is not a conflict either: it is placed
+ * after the listed members (`deriveFieldGroupLayout`).
+ *
+ * Judged in the object's `superRefine` for the reason
+ * {@link refuseFieldsInRelatedListGroups} gives: only the object holds both the
+ * groups and the field map.
+ */
+function refuseFieldGroupMembershipConflicts(fieldGroups: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(fieldGroups)) return;
+  const fieldMap = fields !== null && typeof fields === 'object' ? (fields as Record<string, unknown>) : {};
+  const listedIn = new Map<string, string>();
+  // Only a `group` naming ANOTHER DECLARED group disagrees with a list: one
+  // naming no declared key means ungrouped (lint reports it as
+  // `field-group-undeclared`), so the list simply wins.
+  const declaredKeys = new Set(
+    fieldGroups
+      .map((g: unknown) => (g !== null && typeof g === 'object' ? (g as { key?: unknown }).key : undefined))
+      .filter((k): k is string => typeof k === 'string'),
+  );
+  fieldGroups.forEach((group: unknown, index: number) => {
+    if (group === null || typeof group !== 'object') return;
+    const { key, relatedList, fields: members } = group as { key?: unknown; relatedList?: unknown; fields?: unknown };
+    if (!Array.isArray(members) || typeof key !== 'string') return;
+    if (typeof relatedList === 'string') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fieldGroups', index, 'fields'],
+        message:
+          `Field group '${key}' places the related list '${relatedList}' (its \`relatedList\`), so it holds no `
+          + 'fields and may not list any. Move these fields into a group of fields beside the table.',
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    members.forEach((name: unknown, at: number) => {
+      if (typeof name !== 'string') return;
+      const path = ['fieldGroups', index, 'fields', at];
+      if (seen.has(name)) {
+        ctx.addIssue({ code: 'custom', path, message: `Field group '${key}' lists the field '${name}' twice. List each field once.` });
+        return;
+      }
+      seen.add(name);
+      const first = listedIn.get(name);
+      if (first !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path,
+          message:
+            `Field '${name}' is listed by two field groups, '${first}' and '${key}'. A field belongs to one group: `
+            + 'remove it from one of the two lists.',
+        });
+        return;
+      }
+      listedIn.set(name, key);
+      const field = fieldMap[name];
+      const own = field !== null && typeof field === 'object' ? (field as { group?: unknown }).group : undefined;
+      if (typeof own !== 'string' || own === key || !declaredKeys.has(own)) return;
+      const message =
+        `Field '${name}' is listed by the field group '${key}' (its \`fields\`), but its own \`group\` names `
+        + `'${own}'. The two say different things: keep the field in '${key}'s list and drop its \`group\` `
+        + `(the list is the current spelling), or remove it from the list.`;
+      ctx.addIssue({ code: 'custom', path, message });
+      ctx.addIssue({ code: 'custom', path: ['fields', name, 'group'], message });
+    });
+  });
 }
 
 /**
@@ -4797,6 +5035,10 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
   // ISO 4217 `text` sibling — the same door: only the object holds the map.
   refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
+  // [ADR-0158 U4, L3] A `record`-mode quantity's `unitField` names a declared
+  // `text` sibling with no marker of its own — the same door: only the object
+  // holds the map.
+  refuseDishonestRecordUnitField(object.name, object.fields, ctx);
   // [ADR-0144 D6, amended] A `summary` carries a currency only where one is
   // admitted; the half its own object can see — same door.
   refuseUnadmittedSummaryCurrency(object.name, object.fields, ctx);
@@ -4824,6 +5066,9 @@ const ObjectSchemaBase = strictObject(
   // [#27069] A field group carrying `relatedList` is a body table: no field
   // joins it. See the helper's docblock.
   refuseFieldsInRelatedListGroups(object.fieldGroups, object.fields, ctx);
+  // A group's `fields` list and a field's own `group` agree where both speak.
+  // See the helper's docblock.
+  refuseFieldGroupMembershipConflicts(object.fieldGroups, object.fields, ctx);
   // [ADR-0055 §1 · #23100 ruling B, as amended by #30905 ruling A] Exactly one
   // master `master_detail` under `controlled_by_parent` (the required one, or
   // the only one declared `required: false`) — the one master relation the

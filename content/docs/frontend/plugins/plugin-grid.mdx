@@ -111,6 +111,27 @@ is no top-level `sortable` switch.
 }
 ```
 
+A click on a sortable column header sorts by that column; another click on it
+changes the direction.
+
+**On an object's list page** the header opens a menu instead
+(objectstack#35876), which its host turns on (the `headerMenu` component
+prop, not a schema key): **Sort ascending**, **Sort descending** and **Hide
+column**. A column that does not sort offers **Hide column** alone. The
+header itself never changes the sort. Enter, Space or ArrowDown
+on the focused header opens the same menu; the arrows move through it, Enter
+chooses and Escape closes it without touching the sort.
+
+- With no sort, or a single level, the column picked in the menu replaces the
+  sort.
+- With two levels or more it becomes the first level and every other level
+  keeps its place after it; a column already in the sort moves up with the
+  picked direction. No level is dropped.
+- The ↑1 / ↓2 marks on the headers show each level's place.
+- A sort chip under the view bar opens every level in one panel (it does not
+  reverse the direction). Each level's handle reorders it: drag it to another
+  row, or press ArrowUp / ArrowDown on the focused handle.
+
 ### Filtering and search
 
 There is no per-column filter key and no top-level `filterable` switch. A grid
@@ -350,6 +371,77 @@ through the host's data source (`dataSource.update`) with no callback to wire.
 To own persistence in a React host, supply `onCellChange` as a **component
 prop** — it is not a schema key.
 
+#### On an object's list page
+
+The console's list page draws its grid with the **select-first** cell model
+(objectstack#35684, objectstack#35687), which its host turns on (the
+`cellSelection` component prop, not a schema key). There is no inline-edit
+mode and no toggle: the grid is editable wherever the reader may edit the
+object and the view does not declare `userActions.editInline: false`, and
+`singleClickEdit` is not read there.
+
+- **A click selects** a cell (a ring around it); it neither edits nor opens the
+  record. A link a cell draws (the name, a lookup, a phone or an email) keeps
+  its own click. On a touch screen a tap opens the record.
+- **Editing** starts on a double-click, Enter or F2 (the value kept, caret at
+  its end), or by typing, which replaces the value; an input method's
+  composition is kept whole. Backspace or Delete opens an empty editor and
+  saves nothing yet.
+- **While editing**, Enter commits and moves down, Tab / Shift+Tab commit and
+  move right / left, and Escape cancels and keeps the cell selected. In a
+  multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. A click
+  elsewhere commits.
+- **Selected cell keys:** the arrows and Tab move the selection; Space is typed
+  like any other key and opens the editor (a checkbox cell flips instead, as
+  does a second click on it); Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text
+  to the field's type and commits it; Escape clears the selection. The record
+  opens from the name link, or a tap on a touch screen.
+- **A cell that opens no editor says why** on the cell: the field is read-only,
+  calculated or not editable in a list, the reader may not edit the field, the
+  object or the record, the view turned editing off, or the record is locked
+  by an approval.
+
+**Each commit is saved at once** (objectstack#35685), as one update for that
+record; there is no Save All bar, no row Save / Cancel and no amber row. The
+cell shows a small spinner while its save runs and a check mark once it
+landed. Only that row is redrawn, from the record the server answered with (a
+value a server hook rewrote shows as stored); the list is not read again, so a
+row whose new value would sort it elsewhere stays in place until the next load
+(a refresh, a sort, a filter or a page change).
+
+- **A refused save** keeps the typed value and shows the server's reason on the
+  cell. Escape puts the stored value back. A later edit on the same row is sent
+  together with the refused one, as one update. When the reason names a field
+  the list cannot edit, the notice offers to open the record.
+- **A newer version** (409) still opens the conflict dialog: "Reload latest"
+  re-reads the list, "Overwrite anyway" writes over it and keeps the row in
+  place.
+- **Undo** takes a save back: the save toast's Undo button, or Ctrl+Z (Cmd+Z on
+  macOS) on a cell of the grid, newest save first. An undo is a new update that
+  writes the value the record held before the save, guarded by the version
+  this grid's own newest write of the record answered: if someone else changed
+  the record since, the 409 dialog opens instead of their change being
+  overwritten. The record's history shows the save and its undo as two
+  changes. Each save is taken back once, and a refused or cancelled undo is
+  used up too, so the next Ctrl+Z undoes the save before it. A toast's Undo
+  takes back that toast's save, while Ctrl+Z always goes newest first. Inside
+  an open editor Ctrl+Z stays the editor's own text undo. A save of a field the
+  row did not read offers no Undo.
+
+### Footer calculations
+
+A column's `summary` draws its calculation in the table's last row, under the
+column. A host that passes `residentSummaryRow` draws that row on a flat table
+even when nothing is declared, led by the record count. With
+`onColumnSummaryPick` as well (wired only for a reader who may change the view),
+clicking a cell opens one menu of the calculations its field type allows, the
+current one ticked and None last; the grid draws the pick at once and the host
+saves it as the column's `summary` (an answer of `false` takes the pick back).
+`summaryPickFields` limits the menu to the columns the host can save. The
+console's list offers it on the columns the view declares and saves only the
+calculation: on a personal view at once, and on a shared view as a draft, which
+the list draws, for the editor and everyone else, once it is published.
+
 ### Keyboard navigation
 
 `keyboardNavigation` turns the grid's data cells into one roving Tab stop, on the
@@ -387,8 +479,11 @@ WAI-ARIA grid pattern (objectui#11068):
 ### Batch Editing & Multi-Row Save
 
 Edit multiple cells across multiple rows and save them individually or all at
-once. The schema half is just `editable` — the save/cancel affordances appear on
-their own once a row has pending changes:
+once. This is the model of a grid without the select-first cell model (a
+related list, a dashboard table, an `object-grid` outside a list page); a list
+page saves each cell as it is committed (above). The schema half is just
+`editable` — the save/cancel affordances appear on their own once a row has
+pending changes:
 
 ```json
 {

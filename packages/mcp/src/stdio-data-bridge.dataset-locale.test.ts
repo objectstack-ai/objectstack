@@ -23,8 +23,9 @@
  * - an i18n service the host cannot resolve (its resolver throws), or none:
  *   the untranslated list, never an error;
  * - an i18n service that resolves but whose `getLocales` / `getTranslations`
- *   throws, over the REAL executor: a degraded read on both dataset tools
- *   (seat ruling A, its own describe below).
+ *   throws, over the REAL executor: the datasets untranslated, with a warning,
+ *   on both dataset tools and the object tools (#34993, its own describe below);
+ * - a header-less call answers labels and sentences in one language (#35083).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -35,7 +36,12 @@ import {
   type AnalyticsService,
   type MatchableMember,
 } from '@objectstack/service-analytics';
-import { createStdioDataBridge, type StdioDataBridgeDeps, type StdioDatasetToolsService } from './stdio-data-bridge.js';
+import {
+  createStdioDataBridge,
+  servedLocaleObjectView,
+  type StdioDataBridgeDeps,
+  type StdioDatasetToolsService,
+} from './stdio-data-bridge.js';
 
 const PRINCIPAL = { userId: 'u_key', tenantId: 'org_1' };
 
@@ -151,21 +157,16 @@ describe('[ADR-0149 D2] stdio list_datasets is localized for the workspace defau
 });
 
 /**
- * [ADR-0149 D2] An i18n service that RESOLVES but whose reads throw is not the
- * unresolvable service above. `translationBundleOf` calls `getLocales` and
- * `getTranslations` unguarded, so `translateMetaList` rejects with the i18n
- * error, and `loadDatasets` leaves that rejection to throw. The executor here
- * is the REAL one (the analytics service `AnalyticsServicePlugin` registers,
- * admission wired), so the answer is the executor's own degraded-read
- * contract: `list_datasets` lists nothing, says `partial` and names the error;
- * `query_dataset` refuses 503 `SERVICE_UNAVAILABLE` for a server-side fault.
- * The control case lists the dataset over the same harness, so the empty
- * catalogue is the failed read's doing, not the harness's.
+ * [ADR-0149 D2 · #34993] An i18n service that RESOLVES but whose reads throw
+ * is a translation fault, which the shared translator (`translationBundleOf`)
+ * answers as no bundle and says. The executor here is the REAL one (the
+ * analytics service `AnalyticsServicePlugin` registers, admission wired):
+ * `list_datasets` keeps the dataset, in its authored text, `partial` with the
+ * fault's warning; `query_dataset` answers; the object tools serve the
+ * authored labels. The control case lists the dataset in the bundle labels.
  *
- * Pinned on purpose under seat ruling A: the catalogue degrades and says so.
- * A follow-up (B: serve the untranslated text on a translation fault, inside
- * the shared translator) would flip these expectations deliberately, on both
- * transports at once.
+ * Flipped on purpose by #34993 (seat ruling B) from #34876's ruling-A pin
+ * (`datasets: []` + `partial`, and a 503), on both transports at once.
  */
 describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but its reads throw', () => {
   /**
@@ -216,12 +217,12 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     };
   }
 
-  async function bridgeOverRealExecutor(i18n: () => unknown) {
+  async function bridgeOverRealExecutor(i18n: () => unknown, principal: object = PRINCIPAL) {
     return createStdioDataBridge({
       engine: {} as any,
       metadataService: { list: async () => [] } as any,
       protocol: () => ({ getMetaItems: async () => ({ items: [METRICS] }) }) as any,
-      resolvePrincipal: async () => PRINCIPAL as any,
+      resolvePrincipal: async () => principal as any,
       datasetTools: await wiredAnalytics(),
       i18n,
     });
@@ -239,32 +240,51 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     expect(answer.datasets.map((d) => [d.name, d.label])).toEqual([['opp_metrics', '商机指标']]);
   });
 
-  it.each(CASES)('$read throwing: list_datasets lists nothing, says partial and names the i18n error', async ({ read, message }) => {
+  it.each(CASES)('$read throwing: list_datasets keeps the dataset untranslated, partial, naming the i18n error', async ({ read, message }) => {
     const bridge = await bridgeOverRealExecutor(() => i18nWhoseReadThrows(read, message));
     const answer = await bridge.listDatasets!({ terms: TERMS });
-    // [#34919] Terms were sent, so the degraded answer also carries `nextStep`:
-    // nothing listed reads `no_measure` for every word, and the note says the
-    // catalogue was incomplete and to repeat the warning.
-    expect(answer).toEqual({
-      datasets: [],
-      partial: true,
-      warning: expect.stringContaining(message),
-      nextStep: { decision: 'no_measure', terms: TERMS, note: expect.stringContaining('warning') },
-    });
-    expect(answer.warning).toMatch(/^The dataset catalogue could not be read: /);
+    expect(answer.datasets.map((d) => [d.name, d.label])).toEqual([['opp_metrics', 'Opportunity Metrics']]);
+    expect(answer).toMatchObject({ partial: true, warning: expect.stringContaining(message) });
   });
 
-  it.each(CASES)('$read throwing: query_dataset refuses 503 SERVICE_UNAVAILABLE, naming the failed read', async ({ read, message }) => {
+  it.each(CASES)('$read throwing: query_dataset answers, in the authored labels', async ({ read, message }) => {
     const bridge = await bridgeOverRealExecutor(() => i18nWhoseReadThrows(read, message));
-    const refused = await bridge
-      .queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 })
-      .then(
-        () => undefined,
-        (e: unknown) => e as { code?: unknown; status?: unknown; message?: unknown },
-      );
-    expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
-    // The failed read's own 503 (naming the i18n error), not the executor's
-    // "not available on this deployment" one.
-    expect(refused?.message).toContain(`the dataset read failed (${message})`);
+    const answer = await bridge.queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 });
+    expect(answer.rowCount).toBe(1);
+    expect(answer.provenance.dataset).toEqual({ name: 'opp_metrics', label: 'Opportunity Metrics' });
+  });
+
+  it.each(CASES)('$read throwing: the object tools serve the authored labels', async ({ read, message }) => {
+    const deal = { name: 'crm_opportunity', label: 'Opportunity', fields: { stage: { type: 'text', label: 'Stage' } } };
+    const view = servedLocaleObjectView(
+      { listObjects: async () => [deal], getObject: async () => deal } as any,
+      { i18n: () => i18nWhoseReadThrows(read, message) },
+    );
+    const [listed] = (await view.listObjects()) as Array<typeof deal>;
+    expect([listed.label, listed.fields.stage.label]).toEqual(['Opportunity', 'Stage']);
+    expect(((await view.getObject('crm_opportunity')) as typeof deal).label).toBe('Opportunity');
+  });
+
+  /**
+   * [#35083] A header-less stdio call, an i18n default of zh-CN and a
+   * workspace of `en`: the labels AND the executor's sentences answer what a
+   * zh-CN principal is answered — one language, the labels'.
+   */
+  it('a header-less call answers labels and sentences in one language', async () => {
+    const ask = async (principal: object, defaultLocale = 'zh-CN') => {
+      const bridge = await bridgeOverRealExecutor(() => i18nService(defaultLocale), principal);
+      return {
+        list: await bridge.listDatasets!({ terms: ['total_amount'] }),
+        query: await bridge.queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 }),
+      };
+    };
+    const headerless = await ask({ ...PRINCIPAL, workspaceLocale: 'en' });
+    const zh = await ask({ ...PRINCIPAL, locale: 'zh-CN' });
+    const en = await ask({ ...PRINCIPAL, locale: 'en' }, 'en');
+    expect(headerless.list.datasets[0].label).toBe('商机指标');
+    expect(headerless.list.nextStep).toEqual(zh.list.nextStep);
+    expect(headerless.query.sourceLine).toBe(zh.query.sourceLine);
+    // Control: the two languages' sentences differ, so the equalities above are the locale's doing.
+    expect(en.query.sourceLine).not.toBe(zh.query.sourceLine);
   });
 });

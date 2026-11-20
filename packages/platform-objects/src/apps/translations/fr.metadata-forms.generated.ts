@@ -86,11 +86,15 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.key": {
         label: "Clé",
-        helpText: "Clé technique en snake_case, unique au sein de cet objet — le schéma refuse tout autre format. Les champs rejoignent le groupe en indiquant cette clé : la renommer les laisse donc sans groupe."
+        helpText: "Clé technique en snake_case, unique au sein de cet objet — le schéma refuse tout autre format. Les champs que le groupe liste dans Champs y restent quand la clé est renommée ; un champ qui rejoint le groupe en indiquant cette clé dans son propre réglage de groupe se retrouve sans groupe."
       },
       "fieldGroups.label": {
         label: "Libellé",
         helpText: "Texte de l’en-tête de la section du groupe."
+      },
+      "fieldGroups.fields": {
+        label: "Champs",
+        helpText: "Les champs que ce groupe affiche, dans l'ordre d'affichage (noms de champ). Renseignée, la liste fixe l'ordre à l'intérieur du groupe sans déplacer aucun champ. Un champ nommé ici ne peut pas indiquer un autre groupe dans son propre réglage de groupe, et un champ ne peut être listé que par un seul groupe. Non autorisé avec Liste associée."
       },
       "fieldGroups.icon": {
         label: "Icône",

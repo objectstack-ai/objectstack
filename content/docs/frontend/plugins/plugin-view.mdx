@@ -654,29 +654,27 @@ panel offers every field the user may read, minus the fields the object marks
 **Inline editing on that node is on by default.** Both keys below are the
 author's permission. `ListView` reads the node's `userActions.editInline` with
 the spec's default, on since the v18 ruling (objectstack#22605), so a view that
-declares neither key offers the inline-edit toggle (objectui#12086), and
-`userActions.editInline: false` is how a view withdraws it. When the node
-carries no `editInline` of its own, its `inlineEdit` stands in for it
-(objectui#5144). The named view's keys win over the host `views` entry's, as
-for every member above:
+declares neither key is editable in place, and `userActions.editInline: false`
+is how a view withdraws it. When the node carries no `editInline` of its own,
+its `inlineEdit` stands in for it (objectui#5144). The named view's keys win
+over the host `views` entry's, as for every member above:
 
-| The view declares | Inline-edit toggle | Grid opens in edit mode |
-| --- | --- | --- |
-| neither key | offered | no |
-| `inlineEdit: true` | offered | yes |
-| `inlineEdit: false` | not offered | no |
-| `userActions.editInline: true` | offered | only with `inlineEdit: true` |
-| `userActions.editInline: false` | not offered | no, whatever `inlineEdit` says |
+| The view declares | Grid editable in place |
+| --- | --- |
+| neither key | yes |
+| `inlineEdit: true` | yes |
+| `inlineEdit: false` | no |
+| `userActions.editInline: true` | yes, whatever `inlineEdit` says |
+| `userActions.editInline: false` | no, whatever `inlineEdit` says |
 
-The toggle switches the edit mode for the session and reports it through
-`ListView`'s `onInlineEditChange`. The console stores nothing for it: each load
-opens in the mode the view's `inlineEdit` declares, so a user's choice is not
-remembered across loads. A view where an earlier console stored
-`inlineEdit: false` still reads off; that data is not migrated, and declaring
-`userActions.editInline: true` brings the toggle back. A list whose records are
-read-only by nature declares `userActions.editInline: false`. Neither key opens
-editing past the object's own editability or the user's permission to update
-the object.
+There is no inline-edit mode and no toggle (objectstack#35684): a click selects
+a cell and a double-click, Enter or typing edits it (the list page's
+select-first model, see the grid's Inline Editing). A view where an earlier
+console stored `inlineEdit: false` still reads off; that data is not migrated,
+and declaring `userActions.editInline: true` turns editing back on. A list
+whose records are read-only by nature declares `userActions.editInline: false`.
+Neither key opens editing past the object's own editability or the user's
+permission to update the object.
 
 ### Update
 

@@ -171,9 +171,10 @@ Three pieces author it:
 ### Recording a decision
 
 A decision is recorded through `ApprovalService.decide()` (or the REST routes
-`POST /api/v1/approvals/requests/:id/approve` | `/reject`). That finalizes the
-`sys_approval_request` and **resumes** the suspended run down the matching
-branch — you never resume the flow by hand, and you *cannot*: the
+`POST /api/v1/approvals/requests/:id/approve` | `/reject`), a reject always
+with a non-blank `comment`, its reason (else `400 VALIDATION_ERROR`). That
+finalizes the `sys_approval_request` and **resumes** the suspended run down the
+matching branch — you never resume the flow by hand, and you *cannot*: the
 `approval` node declares `resumeAuthority: 'service'`, so
 `POST /api/v1/automation/:name/runs/:runId/resume` answers **403** for a run
 parked on one (including via a `subflow` pause) and changes nothing.
@@ -182,10 +183,8 @@ A decision may also carry **structured outputs** (`{ outputs: { … } }` in the
 decide body) when the node declares the keys in `decisionOutputs` — the author
 declares keys, approvers only fill values. Accepted outputs resume the run as
 `<nodeId>.<key>` flow variables, so a LATER node reads them as
-`vars.<nodeId>.<key>` — this is how "the previous approver picks the next
-step's approvers" works without writing to a record field (see Dynamic
-approvers below). A decision carrying an undeclared key is rejected;
-`decision` / `requestId` are reserved. A declaration marked
+`vars.<nodeId>.<key>` (Dynamic approvers ② below). A decision carrying an
+undeclared key is rejected; `decision` / `requestId` are reserved. A declaration marked
 `required: true` must carry a non-blank value to **approve** (never to
 reject) — enforced before any write, with no elevation bypass, so the run
 cannot resume past the node with the key a later `expression` approver reads

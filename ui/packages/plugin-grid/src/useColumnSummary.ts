@@ -11,7 +11,7 @@ import type { ListColumn } from '@object-ui/types';
 import type { ColumnSummary, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 import { deriveColumnSummary } from '@objectstack/spec/ui';
 import type { CurrencyConfig } from '@objectstack/spec/data';
-import { resolveFieldScale } from '@objectstack/spec/data';
+import { resolveFieldScale, isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyField, createSafeTranslation } from '@object-ui/i18n';
 import { formatCurrency, formatPercent, percentCellScale, summaryDeclaresCurrency } from '@object-ui/fields';
 import { temporalCellFaceOf, temporalCellText, temporalExtreme, temporalInstant } from './temporalCellFace';
@@ -56,6 +56,13 @@ export interface ColumnSummaryResult {
    */
   value: number | null;
   label: string;
+  /**
+   * The two halves of `label`, for a footer that draws them apart: `name` is
+   * the calculation's word with its scope (「合计」, 「合计（本页）」), `text`
+   * the formatted figure (「¥1,234,500」).
+   */
+  name: string;
+  text: string;
 }
 
 /** A data row as the aggregations read it — cells are untyped until inspected. */
@@ -131,15 +138,61 @@ const SUMMARY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.summary.avg': 'Avg',
   'grid.summary.min': 'Min',
   'grid.summary.max': 'Max',
+  'grid.summary.earliest': 'Earliest',
+  'grid.summary.latest': 'Latest',
+  'grid.summary.pageName': '{{label}} (this page)',
+  'grid.summary.calculate': 'Calculate',
+  'grid.summary.none': 'None',
+  'grid.summary.menuPercentEmpty': 'Percent empty',
+  'grid.summary.menuPercentFilled': 'Percent filled',
 };
 
-const useSummaryTranslation = createSafeTranslation(
+export const useSummaryTranslation = createSafeTranslation(
   SUMMARY_DEFAULT_TRANSLATIONS,
   'grid.summary.sum',
 );
 
+/**
+ * The calculations the footer's menu offers for a field type, in menu order.
+ * Each one the footer can draw for that type: an aggregate the spec allows on
+ * the type (`isAggregateCompatibleWithFieldType`), and the count family on
+ * any. ⛔ No `count`: the row's first cell already carries the record count.
+ * Booleans get the count family only, and a record-currency amount (whose sum
+ * the footer withholds) likewise.
+ */
+const MENU_AGGREGATES: ReadonlyArray<ColumnSummaryType> = ['sum', 'avg', 'min', 'max'];
+/** The spec's boolean class (`BOOLEAN_AGGREGATE_FIELD_TYPES`): `toggle` is a boolean too. */
+const BOOLEAN_FIELD_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
+const MENU_COUNTS: ReadonlyArray<ColumnSummaryType> = [
+  'count_unique', 'count_filled', 'count_empty', 'percent_filled', 'percent_empty',
+];
+export function offeredColumnSummaries(
+  field: ({ type?: string } & NonNullable<Parameters<typeof recordCurrencyField>[0]>) | undefined,
+): ColumnSummaryType[] {
+  const type = field?.type;
+  const numeric = !!type && !BOOLEAN_FIELD_TYPES.has(type) && !recordCurrencyField(field);
+  return [
+    ...(numeric ? MENU_AGGREGATES.filter((m) => isAggregateCompatibleWithFieldType(m, type!)) : []),
+    ...MENU_COUNTS.filter((m) => m !== 'count_unique' || (!!type && isAggregateCompatibleWithFieldType('count_distinct', type))),
+  ];
+}
+
+/** Is `field` drawn as a date or time, so its `min` / `max` read 「Earliest」 / 「Latest」? */
+export function isTemporalSummaryField(field: { type?: string; format?: string | null; widget?: string | null } | undefined): boolean {
+  return !!temporalCellFaceOf({ type: field?.type, format: field?.format, widget: field?.widget });
+}
+
+/** A calculation's name in the footer's menu. */
+export function summaryMenuLabel(type: ColumnSummaryType, temporal: boolean, t: SummaryTranslate): string {
+  if (temporal && type === 'min') return t('grid.summary.earliest');
+  if (temporal && type === 'max') return t('grid.summary.latest');
+  if (type === 'percent_empty') return t('grid.summary.menuPercentEmpty');
+  if (type === 'percent_filled') return t('grid.summary.menuPercentFilled');
+  return type === 'none' ? t('grid.summary.none') : t(TYPE_LABEL_KEYS[type]);
+}
+
 /** The translator shape `formatSummaryLabel` needs — i18next's `t`, narrowed. */
-type SummaryTranslate = (key: string, options?: Record<string, unknown>) => string;
+export type SummaryTranslate = (key: string, options?: Record<string, unknown>) => string;
 
 /**
  * Every aggregation name the renderer computes. A Set rather than an `in` check
@@ -351,15 +404,28 @@ const WELL_FORMED_CURRENCY_CODE = /^[A-Za-z]{3}$/;
  * ordinary German number — for a value three orders of magnitude away — and
  * the arms below include a currency total.
  */
-function joinSummaryLabel(type: string, formatted: string, t: SummaryTranslate, pageOnly: boolean): string {
-  const labelKey = TYPE_LABEL_KEYS[type as ColumnSummaryType];
+/**
+ * The footer's label and its two halves. A `min` / `max` over a date reads
+ * 「Earliest」 / 「Latest」 (`temporal`); the scope rides on the word, so the
+ * figure stays the figure.
+ */
+function summaryLabelParts(
+  type: string, formatted: string, t: SummaryTranslate, pageOnly: boolean, temporal = false,
+): { label: string; name: string; text: string } {
+  const labelKey = temporal && (type === 'min' || type === 'max')
+    ? (type === 'min' ? 'grid.summary.earliest' : 'grid.summary.latest')
+    : TYPE_LABEL_KEYS[type as ColumnSummaryType];
   // `|| type` is the backstop for an aggregation with no key — it echoes the
   // raw kind, as before, never a half-resolved `grid.summary.<junk>`.
   const label = labelKey ? t(labelKey) : type;
   // The page scope is its own whole pattern, not a suffix glued onto the
   // label: where the scope sits, and its brackets, are the translator's, as
   // the separator is (objectui#4024).
-  return t(pageOnly ? 'grid.summary.pagePattern' : 'grid.summary.pattern', { label, value: formatted });
+  return {
+    label: t(pageOnly ? 'grid.summary.pagePattern' : 'grid.summary.pattern', { label, value: formatted }),
+    name: pageOnly ? t('grid.summary.pageName', { label }) : label,
+    text: formatted,
+  };
 }
 
 /**
@@ -376,11 +442,31 @@ function summaryValueType(column: { currencyConfig?: unknown; scale?: number | n
   return resolveFieldScale(column) === undefined ? 'summary' : 'number';
 }
 
+/**
+ * The return types the spec reads AS a field type: `currency` is "an amount of
+ * money … as a currency field declares it", and `percent` is "read and
+ * displayed as a `percent` field reads its stored value". The list cell draws
+ * them through the currency and percent cells (`FormulaCellRenderer`).
+ */
+const FIELD_TYPED_FORMULA_RETURNS: ReadonlySet<string> = new Set(['currency', 'percent']);
+
+/**
+ * The arm a `formula` column's total is formatted by: its declared
+ * `returnType` when the spec reads that return type as a field type, so a
+ * percent-returning formula's total reads as a percentage under cells that
+ * read as percentages, and a currency-returning one's as money. Any other
+ * formula keeps the plain arm it always took.
+ */
+function formulaValueType(column: { returnType?: unknown }): string {
+  const declared = column.returnType;
+  return typeof declared === 'string' && FIELD_TYPED_FORMULA_RETURNS.has(declared) ? declared : 'formula';
+}
+
 function formatSummaryLabel(
   type: string,
   value: number | null,
   t: SummaryTranslate,
-  column: { type?: string; currency?: string; defaultCurrency?: string; currencyConfig?: { defaultCurrency?: string }; precision?: number | null; scale?: number | null; max?: number } | undefined,
+  column: { type?: string; returnType?: string; currency?: string; defaultCurrency?: string; currencyConfig?: { defaultCurrency?: string }; precision?: number | null; scale?: number | null; max?: number } | undefined,
   tenantDefault: string | undefined,
   // The BCP-47 tag from `useDisplayLocale()` — tenant locale, then UI
   // language, then a concrete `'en'`, never `undefined`.
@@ -408,9 +494,9 @@ function formatSummaryLabel(
   // Required for the reason the two above are: a dropped argument must not
   // type-check into a label that reads as the whole set's total.
   pageOnly: boolean,
-): string {
-  if (value === null) return '';
-  const join = (formatted: string): string => joinSummaryLabel(type, formatted, t, pageOnly);
+): { label: string; name: string; text: string } {
+  if (value === null) return { label: '', name: '', text: '' };
+  const join = (formatted: string) => summaryLabelParts(type, formatted, t, pageOnly);
 
   if (PERCENT_TYPES.has(type)) {
     return join(`${value.toLocaleString(displayLocale, { maximumFractionDigits: 1 })}%`);
@@ -419,7 +505,9 @@ function formatSummaryLabel(
     return join(value.toLocaleString(displayLocale));
   }
 
-  const colType = column?.type === 'summary' ? summaryValueType(column) : column?.type;
+  const colType = column?.type === 'summary'
+    ? summaryValueType(column)
+    : column?.type === 'formula' ? formulaValueType(column) : column?.type;
   let formatted: string;
   if (colType === 'currency') {
     // objectui#10221 — a currency's decimal places are the currency's, not a
@@ -500,7 +588,17 @@ function formatSummaryLabel(
     // over the field's `max`), the answer the cell above reads. The shared
     // scaling used to guess from the magnitude, so a fraction-stored column
     // summing to `1` (100%) read `Sum: 1%` under cells reading the same rows.
-    const decimals = resolveFieldScale(column);
+    //
+    // A percent-returning `formula` reaches this arm too, and is read as the
+    // `percent` field it reads like, as the list cell hands it on
+    // (`FormulaCellRenderer`): `resolveFieldScale` keys its absent-`scale` row
+    // on the type, and a formula's own type has none, so an undeclared width
+    // takes the platform's percent width rather than `formatPercent`'s own
+    // parameter default. Every column that reaches this arm is a percent, so
+    // the type below changes for the formula alone. Its storage is read off
+    // the column as is: `percentCellScale` reads the declared `max`, and the
+    // formula declares it as a percent field does.
+    const decimals = resolveFieldScale({ ...column, type: 'percent' });
     formatted = formatPercent(value, percentCellScale(column), decimals, displayLocale);
   } else if (colType === 'number') {
     // objectstack#19628, ruled A′ and carried to this footer by objectui#9843:
@@ -531,7 +629,7 @@ function formatSummaryLabel(
 }
 
 /** The `objectSchema.fields` slice the footer formats with. */
-type SummaryFieldMetadata = Record<string, { type?: string; format?: string | null; widget?: string | null; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; precision?: number | null; scale?: number | null; max?: number }>;
+type SummaryFieldMetadata = Record<string, { type?: string; returnType?: string; format?: string | null; widget?: string | null; currency?: string; defaultCurrency?: string; currencyConfig?: CurrencyConfig; precision?: number | null; scale?: number | null; max?: number }>;
 
 /**
  * Which rows the footer's figures describe (objectui#12081 item 3).
@@ -679,7 +777,7 @@ export function useScopedColumnSummary(
         summaries.set(col.field, {
           field: col.field,
           value: temporalInstant(raw) ?? null,
-          label: joinSummaryLabel(config.type, text, t, scope === 'page' || (scope === 'whole' && !fromWhole)),
+          ...summaryLabelParts(config.type, text, t, scope === 'page' || (scope === 'whole' && !fromWhole), true),
         });
         continue;
       }
@@ -724,6 +822,9 @@ export function useScopedColumnSummary(
         // objectui#11475 — a percent field's declared `max`, its STORAGE
         // statement (`percentScaleOf`: a fraction unless `max` is above 1).
         max: meta?.max,
+        // A `formula`'s declared value type: a `percent` or `currency` one is
+        // totalled in that type's arm (`formulaValueType`).
+        returnType: meta?.returnType,
       };
 
       // The widest decimal count among the numeric values this aggregation
@@ -742,7 +843,7 @@ export function useScopedColumnSummary(
       summaries.set(col.field, {
         field: col.field,
         value: result,
-        label: formatSummaryLabel(
+        ...formatSummaryLabel(
           config.type,
           result,
           t,

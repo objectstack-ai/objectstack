@@ -46,10 +46,14 @@ ObjectUI follows the Shadcn convention. Design tokens are defined as HSL channel
     --foreground: 210 40% 98%;
     --primary: 210 40% 98%;
     --primary-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-text: 0 91% 71%;
     /* ... remaining dark tokens */
   }
 }
 ```
+
+`--destructive` is the fill of danger buttons (`bg-destructive`, with `--destructive-foreground` on it). Danger **text** (`text-destructive` and its variants) reads `--destructive-text` instead, falling back to `--destructive` where it is unset. Only `.dark` sets it: the dark fill is too deep to read as text on a dark surface, and one value cannot be both a fill under white text and a text colour on near-black. If your theme overrides `--destructive` in dark mode, set `--destructive-text` beside it to a red that reads at 4.5:1 on your dark surfaces.
 
 Components reference these tokens through Tailwind:
 

@@ -173,8 +173,9 @@ export interface BuildPageOptions {
    */
   headerActions?: any[];
   /**
-   * Related child objects. When non-empty, the synthesizer adds a
-   * "Related" tab containing one `record:related_list` per entry.
+   * Related child objects. Each entry is one `record:related_list`: a table
+   * of the 概览 tab when it is the record's body (`isBody`), otherwise a tab
+   * of its own (objectstack#35595).
    *
    * - `objectName` and `relationshipField` are required.
    * - `title` overrides the default child-object label.
@@ -796,6 +797,33 @@ export function buildDefaultDetails(
   });
 }
 
+/**
+ * Whether the record page draws a Details section CLOSED when it opens
+ * (objectstack#35742): an enumerated section that is `collapsible` and
+ * `defaultCollapsed`, or a `{ group }` reference whose group declares the
+ * `collapsed` collapse. A reference inherits its presentation from the group
+ * — the spec refuses `collapsible` / `defaultCollapsed` beside `group` — so
+ * it is read the way `record:details` resolves it, through
+ * {@link deriveFieldGroupDetailEntries}. A reference naming no declared group
+ * draws nothing and counts as open, which leaves the tables where they are.
+ */
+function sectionDrawnClosed(def: ObjectDefLike | undefined): (section: Record<string, any>) => boolean {
+  let groups: Map<string, Record<string, any>> | null = null;
+  return (section) => {
+    if (typeof section?.group !== 'string') {
+      return section?.collapsible === true && section?.defaultCollapsed === true;
+    }
+    if (!groups) {
+      groups = new Map();
+      for (const entry of deriveFieldGroupDetailEntries(def) ?? []) {
+        if (typeof entry.key === 'string') groups.set(entry.key, entry.section);
+      }
+    }
+    const resolved = groups.get(section.group);
+    return resolved?.collapsible === true && resolved?.defaultCollapsed === true;
+  };
+}
+
 /** Rows on the first page of a body table (objectstack#27055, Target 8). */
 export const BODY_TABLE_PAGE_SIZE = 10;
 
@@ -813,12 +841,22 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
  *    the spec refuses a group naming a side card or a hidden list, by the same
  *    `isBodyTableRelationship` the host computes `isBody` with);
- *  - every other body table goes BEFORE the field sections (objectstack#35597,
- *    the maintainer's 「关键字段下面」: under the header strip's stage bar and key
- *    fields, above the field groups), stacked in the order given — the
- *    parent's `relatedLists`, then the derived order. With no section at all
+ *  - every other body table goes AFTER the field sections the record page
+ *    draws open (objectstack#35742: the record's own fields first, then its
+ *    master-detail tables — 「主记录的字段分组 → 主从子表」; the header strip's
+ *    stage bar and key fields sit above both, objectstack#35597's
+ *    「关键字段下面」), stacked in the order given — the parent's
+ *    `relatedLists`, then the derived order. The sections drawn CLOSED that
+ *    trail the last open one (a group whose collapse is `collapsed`, an
+ *    enumerated section that is `collapsible` and `defaultCollapsed`) follow
+ *    the tables: common fields before the tables, the fields an author tucked
+ *    away after them ({@link sectionDrawnClosed}). The declared order of the
+ *    sections is never changed — a closed section between two open ones stays
+ *    between them — and when no section is drawn open the tables follow every
+ *    section, so the record's own fields always lead. With no section at all
  *    the details node leads (it draws the object's highlight fields) and the
- *    tables follow it. (objectstack#27069 drew them after the FIRST section.)
+ *    tables follow it. (objectstack#27069 drew them after the FIRST section,
+ *    objectstack#35597 before every section.)
  *
  * The details node is split around the tables: each run of consecutive
  * sections is one `record:details`. A section names its group by `group` (the
@@ -863,10 +901,18 @@ export function bodyTablePlacement(
     return index ?? Number.POSITIVE_INFINITY;
   };
 
-  if (placed.length === 0 && resolved.length <= 1) {
-    return resolved.length === 0
-      ? [buildDefaultDetails(def, sections, hideFields), ...bodies]
-      : [...bodies, buildDefaultDetails(def, sections, hideFields)];
+  // objectstack#35742 — the unplaced tables follow the last section drawn
+  // open; every section after it is drawn closed and follows the tables. No
+  // open section: the tables follow every section.
+  const closed = sectionDrawnClosed(def);
+  let lastOpen = -1;
+  resolved.forEach((section, index) => {
+    if (!closed(section)) lastOpen = index;
+  });
+  const tablesAt = lastOpen === -1 ? resolved.length : lastOpen + 1;
+
+  if (placed.length === 0 && tablesAt === resolved.length) {
+    return [buildDefaultDetails(def, sections, hideFields), ...bodies];
   }
 
   // Lay the sections and the tables out in one sequence, then fold each run
@@ -877,11 +923,12 @@ export function bodyTablePlacement(
   const flushPlacedBefore = (index: number) => {
     while (next < placed.length && placed[next].at < index) slots.push({ table: placed[next++].node });
   };
-  for (const node of unplaced) slots.push({ table: node });
-  resolved.forEach((section) => {
+  resolved.forEach((section, index) => {
     flushPlacedBefore(sectionGroupIndex(section));
+    if (index === tablesAt) for (const node of unplaced) slots.push({ table: node });
     slots.push({ section });
   });
+  if (tablesAt === resolved.length) for (const node of unplaced) slots.push({ table: node });
   while (next < placed.length) slots.push({ table: placed[next++].node });
 
   const out: any[] = [];
@@ -905,13 +952,13 @@ export function bodyTablePlacement(
 }
 
 /**
- * Sub-builder: the `page:tabs` node. Emits the Details tab, always first,
- * then the Related tab, the Approvals tab and the Timeline tab (the one
- * stream, objectstack#27055: field changes join it under its Changes filter,
- * so there is no History tab), each of those three only when the options give
- * it content. The order is stable: Timeline sits last for every object — the
- * 动态 panel is the last panel of the record page's right column
- * (objectstack#34590, superseding objectstack#27524 Target 5's 动态-first).
+ * Sub-builder: the `page:tabs` node. Emits the 概览 tab (value `details`),
+ * always first, then one tab per ordinary related list, the Attachments tab,
+ * the Approvals tab and the Timeline tab (the one stream, objectstack#27055:
+ * field changes join it under its Changes filter, so there is no History
+ * tab), each after the first only when the options give it content
+ * (objectstack#35595). The order is stable: Timeline sits last for every
+ * object (objectstack#34590).
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into
@@ -973,8 +1020,9 @@ function synthTabs(
       ...(rel.filter ? { filter: rel.filter } : {}),
     });
   // objectstack#27055, Target 8 — a list that is the record's own body
-  // (`isBody`, else `isPrimary`) is a table section of the Details tab; every
-  // other list is a side card in the one `Related` tab. Body tables keep the
+  // (`isBody`, else `isPrimary`) is a table section of the Details tab, after
+  // the record's own open field sections (objectstack#35742); every
+  // other list is a tab of its own (objectstack#35595). Body tables keep the
   // order the host passed (the object's `relatedLists`, then the derived
   // order — objectstack#27069), unless a field group places one
   // (`bodyTablePlacement`).
@@ -982,41 +1030,44 @@ function synthTabs(
   const isBody = (rel: (typeof related)[number]) => rel.isBody ?? rel.isPrimary === true;
   const bodies = related.filter(isBody).map((rel) => relatedNode(rel, BODY_TABLE_PAGE_SIZE));
   const sides = related.filter((rel) => !isBody(rel));
+  // objectstack#35595 — the first tab is 「概览」 (the token the tab strip
+  // localizes as `detail.recordTabOverview`); its value stays `details`, the
+  // URL token a `?tab=` link already names.
   const items: any[] = [
     {
-      label: 'Details',
+      label: 'Overview',
       value: 'details',
       children: bodyTablePlacement(def, options.sections, bodyHiddenFields, bodies),
     },
   ];
-  // objectstack#27055, Target 3 — the timeline stream is ONE tab for every
-  // object (objectstack#27524, Target 5: 动态 is a panel, for every object —
-  // no object-derived default places it). objectstack#34590 — the strip is
-  // 详情 / 关联 / （审批） / 动态: the stream comes LAST, as the laid-out page
-  // draws it last in its right column, its stack and its tab row
-  // (「「动态」在最后」, superseding objectstack#27524 Targets 5 and 8's
-  // 动态-second). Attachments close the Related tab, as they close the related
-  // panels. The stream tab's token is `Activity stream`, which the strip reads
-  // as `detail.timeline` (「动态」); a bare `Timeline` is an author's word.
+  // objectstack#35595 — EVERY ordinary related list is a tab of its own, in
+  // the order the host passed (the object's `relatedLists`, then the derived
+  // order), whether or not it has records: one table, one tab, one count. The
+  // value is `related:<object>.<field>`, the list's relationship id, so two
+  // lists over one child object stay two tabs. A tab merging several tables
+  // is an authored page's (it carries no count, `page:tabs`). Then
+  // Attachments, Approvals and the timeline stream, each its own tab
+  // (objectstack#34590 kept the stream last). The stream tab's token is
+  // `Activity stream`, which the strip reads as `detail.timeline` (「动态」); a
+  // bare `Timeline` is an author's word.
   const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
+  for (const rel of sides) {
+    items.push({
+      label: rel.title ?? rel.objectName,
+      value: `related:${rel.objectName}.${rel.relationshipField}`,
+      children: [relatedNode(rel)],
+    });
+  }
   // Attachments (objectstack#4358) — for `enable.files: true` objects; the
   // tab strip's count badge reads the `record:attachments` node.
-  const relatedChildren = [
-    ...sides.map((rel) => relatedNode(rel)),
-    ...(def?.enable?.files === true && !options.hideAttachments ? [buildDefaultAttachments()] : []),
-  ];
-  if (relatedChildren.length > 0) {
-    items.push({ label: 'Related', value: 'related', children: relatedChildren });
+  if (def?.enable?.files === true && !options.hideAttachments) {
+    items.push({ label: 'Attachments', value: 'attachments', children: [buildDefaultAttachments()] });
   }
   // Approvals tab (objectui#3461) — emitted only when the host reports the
   // record actually HAS approval requests, so approval-free records carry no
-  // dead tab. A peer of Details/Related for the same reason as Attachments
-  // below: footer placement buried the one thing a submitter opens the
-  // record to learn ("who is this waiting on"). The English label localizes
-  // in the tab strip, which reads the pack key for a well-known token
-  // (`detail.approvalsPanelTitle` → 审批 / 承認 / Aprobaciones …). That claim
-  // used to name `KNOWN_LABEL_DICT`, which shipped zh arms only and so was
-  // true for Chinese and silently false everywhere else — objectui#4645.
+  // dead tab. The English label localizes in the tab strip, which reads the
+  // pack key for a well-known token (`detail.approvalsPanelTitle` → 审批 /
+  // 承認 / Aprobaciones …) — objectui#4645.
   if (options.approvals) {
     items.push({
       label: 'Approvals',
@@ -1025,7 +1076,7 @@ function synthTabs(
       children: [componentNode('record:approvals', { ...(options.approvals.node || {}) })],
     });
   }
-  // objectstack#34590 — the 动态 tab closes the strip (see above).
+  // objectstack#34590 — the 动态 tab closes the strip.
   if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
   return componentNode('page:tabs', { items });
 }

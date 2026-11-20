@@ -160,18 +160,19 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
     await waitFor(() => expect(reported()).toEqual(['hiddenFields', 'density']));
   });
 
-  it('a Display-only change is reported as the reader makes it, and the report follows it back', async () => {
-    const { reported } = mount({}, { defaultRowNumbers: true });
+  it('a Display menu change is reported as the reader makes it, and the report follows it back', async () => {
+    // The row height: the menu's switches, Row numbers and Edit inline, went
+    // with objectstack#35663 and objectstack#35684.
+    const { reported } = mount({});
     const content = await openDisplay();
     await waitFor(() => expect(reported()).toEqual([]));
-    // Row numbers sit on the Display menu's More level.
-    fireEvent.click(within(content).getByTestId('options-row-more'));
-    await within(content).findByTestId('options-page-more');
+    fireEvent.click(within(content).getByTestId('options-row-row-height'));
 
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
-    await waitFor(() => expect(reported()).toEqual(['rowNumbers']));
+    fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
+    await waitFor(() => expect(reported()).toEqual(['density']));
 
-    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
+    // The view's `medium` is the menu's Comfortable.
+    fireEvent.click(within(content).getByTestId('options-row-height-comfortable'));
     await waitFor(() => expect(reported()).toEqual([]));
   });
 

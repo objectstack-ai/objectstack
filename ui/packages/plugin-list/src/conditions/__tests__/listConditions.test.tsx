@@ -458,6 +458,7 @@ describe('ConditionChipRow — the row under the view bar', () => {
         filterFields={FIELDS}
         onFiltersChange={() => {}}
         renderAdvanced={() => <div data-testid="advanced-builder" />}
+        renderSortLevels={() => <div data-testid="sort-levels-builder" />}
         {...props}
       />
     );
@@ -503,7 +504,7 @@ describe('ConditionChipRow — the row under the view bar', () => {
     expect(chips[2].textContent).toContain(' or ');
   });
 
-  it('sort chips come before filter chips, name field and direction, and flip on click', () => {
+  it('sort chips come before filter chips, name field and direction, and open the sort levels on click without flipping (objectstack#35876)', () => {
     const onSortChange = vi.fn();
     render(<Row sort={[{ id: 's1', field: 'amount', order: 'asc' }]} filters={twoStages} onSortChange={onSortChange} />);
     const row = screen.getByTestId('condition-chips');
@@ -511,11 +512,13 @@ describe('ConditionChipRow — the row under the view bar', () => {
       .map((el) => el.getAttribute('data-testid'))
       .filter((id) => id === 'sort-chip-amount' || id === 'filter-chip-stage');
     expect(order).toEqual(['sort-chip-amount', 'filter-chip-stage']);
-    const toggle = screen.getByTestId('sort-chip-toggle-amount');
-    expect(toggle.textContent).toBe('Amount');
-    expect(toggle.getAttribute('title')).toBe('Low → High');
-    fireEvent.click(toggle);
-    expect(onSortChange).toHaveBeenCalledWith([{ id: 's1', field: 'amount', order: 'desc' }]);
+    const chip = screen.getByTestId('sort-chip-open-amount');
+    expect(chip.textContent).toBe('Amount');
+    expect(chip.getAttribute('title')).toBe('Low → High');
+    expect(chip.getAttribute('aria-haspopup')).toBe('dialog');
+    fireEvent.click(chip);
+    expect(within(screen.getByTestId('sort-chip-panel')).getByTestId('sort-levels-builder')).toBeTruthy();
+    expect(onSortChange).not.toHaveBeenCalled();
   });
 
   it('two sort levels: dragging the second chip onto the first changes the priority', () => {
@@ -535,13 +538,72 @@ describe('ConditionChipRow — the row under the view bar', () => {
     expect(moveSortItem(sort, 0, 1).map((s) => s.field)).toEqual(['amount', 'stage']);
   });
 
-  it('「Reset」 calls the host, and is disabled while the list is the view’s own', () => {
+  it('「Reset」 calls the host, and is not drawn at all while the host passes none (objectstack#35727)', () => {
     const onReset = vi.fn();
     const { rerender } = render(<Row filters={twoStages} onReset={onReset} />);
     fireEvent.click(screen.getByTestId('condition-reset'));
     expect(onReset).toHaveBeenCalledTimes(1);
-    rerender(<Row viewFilter={[['amount', '>=', 10]]} onReset={onReset} resetDisabled />);
-    expect((screen.getByTestId('condition-reset') as HTMLButtonElement).disabled).toBe(true);
+    // The list is the view's own: the host passes no `onReset`, and the row
+    // draws no 「Reset」, disabled or otherwise, beside the locked chip.
+    rerender(<Row viewFilter={[['amount', '>=', 10]]} />);
+    expect(screen.getByTestId('view-condition-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('condition-reset')).toBeNull();
+  });
+
+  describe('conditions the host draws itself, and lookup names (objectstack#35727)', () => {
+    const ACCOUNT_DEF = { name: 'account', fields: { title: { type: 'text' } }, nameField: 'title' };
+    function lookupSource(answer: () => Promise<{ data: unknown[] }>) {
+      return {
+        find: vi.fn(answer),
+        getObjectSchema: vi.fn(async () => ACCOUNT_DEF),
+      };
+    }
+
+    it('a field the host draws gets no locked chip; the view\'s other conditions keep theirs', () => {
+      render(<Row viewFilter={[['account', '=', 'a1'], ['amount', '>=', 10]]} hostDrawnFields={['account']} />);
+      const chips = screen.getAllByTestId('view-condition-chip');
+      expect(chips.map((c) => c.getAttribute('data-field'))).toEqual(['amount']);
+    });
+
+    it('CONTROL: without `hostDrawnFields` both conditions are locked chips', () => {
+      render(<Row viewFilter={[['account', '=', 'a1'], ['amount', '>=', 10]]} />);
+      expect(screen.getAllByTestId('view-condition-chip').map((c) => c.getAttribute('data-field'))).toEqual(['account', 'amount']);
+    });
+
+    it('when every view condition is the host\'s and the reader has none, the row draws nothing', () => {
+      render(<div data-testid="slot"><Row viewFilter={[['account', '=', 'a1']]} hostDrawnFields={['account']} /></div>);
+      expect(screen.getByTestId('slot').childElementCount).toBe(0);
+    });
+
+    it('a locked lookup chip names the record it points at, read through the data source', async () => {
+      const ds = lookupSource(async () => ({ data: [{ id: 'a1', title: 'Globex' }] }));
+      render(<Row viewFilter={[['account', '=', 'a1']]} dataSource={ds as never} />);
+      const chip = screen.getByTestId('view-condition-chip');
+      await vi.waitFor(() => expect(chip.textContent).toBe('Account: = Globex'));
+      expect(ds.find).toHaveBeenCalledWith('account', { $top: 1, $filter: { id: { $in: ['a1'] } } });
+      expect(chip.textContent).not.toContain('a1');
+    });
+
+    it('the reader\'s own lookup chip names the record too', async () => {
+      const ds = lookupSource(async () => ({ data: [{ id: 'a1', title: 'Globex' }, { id: 'a2', title: 'Initech' }] }));
+      const filters: FilterBuilderRowGroup = {
+        id: 'root',
+        logic: 'and',
+        conditions: [{ id: 'c1', field: 'account', operator: 'in', value: ['a1', 'a2'] }],
+      };
+      render(<Row filters={filters} dataSource={ds as never} />);
+      await vi.waitFor(() => expect(screen.getByTestId('filter-chip-open-account').textContent).toBe('Account: Globex, Initech'));
+    });
+
+    it('falls back to the id when the name cannot be read', async () => {
+      const ds = lookupSource(async () => {
+        throw new Error('offline');
+      });
+      render(<Row viewFilter={[['account', '=', 'a1']]} dataSource={ds as never} />);
+      await vi.waitFor(() => expect(ds.find).toHaveBeenCalled());
+      await act(async () => {});
+      expect(screen.getByTestId('view-condition-chip').textContent).toBe('Account: = a1');
+    });
   });
 
   it('an OR group is one chip that opens the advanced panel', () => {

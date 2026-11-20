@@ -67,7 +67,8 @@ const DIMENSION_LABELS: Record<(typeof UNIT_DIMENSIONS)[number], string> = {
  * table (`STANDARD_UNITS` in `@objectstack/spec`, U1). The platform ships
  * zero rows (U3). A quantity names a unit by its code, never by this row's id
  * (U4), and the membership check that admits a code (U5) reads the standard
- * table and this object; neither reader ships here.
+ * table and this object (`validation/unit-code-membership.ts`,
+ * `@objectstack/objectql`).
  *
  * - **Code** — exact uppercase, in the organization namespace
  *   (`ORGANIZATION_UNIT_CODE_PATTERN`, U3): at least four characters, or
@@ -89,15 +90,20 @@ const DIMENSION_LABELS: Record<(typeof UNIT_DIMENSIONS)[number], string> = {
  *   a retired row keeps its code, so the code can never be created again with
  *   another dimension, ratio or label, and resting quantities never take a
  *   stranger's meaning. A hard delete is not served (`apiMethods` has no
- *   `delete`), a retired unit cannot be brought back, and the membership card
- *   refuses a new save with a retired code.
+ *   `delete`) and the engine refuses a direct one in every context, a system
+ *   writer's and an automation run's included (`ERR_UNIT_DELETE_REFUSED`). The
+ *   one exemption is the organization's own delete, whose cascade removes
+ *   every unit of that organization (#35812). A retired unit cannot be
+ *   brought back, and a new save with a retired code is refused
+ *   (`ERR_UNIT_CODE_RETIRED`).
  * - **Tenancy** — no tenancy opt-out, so `organization_id` is injected and the
  *   Layer 0 tenant wall (ADR-0095 D1) scopes every read and write.
  * - **Who reads, who writes** — every member READS it (`member_default` names
  *   this object, read only), so a quantity's unit label displays to everyone
  *   who reads the quantity (the seat's U3 note). Organization administrators
- *   create, edit and retire units through `organization_admin`'s wildcard
- *   grant (Open item 2); a member holds no write bit on it.
+ *   create, edit and retire units through `organization_admin`'s `sys_unit`
+ *   line (Open item 2), which grants no delete; a member holds no write bit
+ *   on it.
  *
  * @namespace sys
  */

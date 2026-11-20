@@ -5281,18 +5281,16 @@ export class ObjectQL implements IObjectQLEngine {
    * column: the question plugin-auth's organization delete asks before
    * anything is deleted. Only objects holding at least one row are listed.
    *
-   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned}
-   * judges, through the same reader ({@link cascadeRelationBehavior}: a
-   * federated object's unprovisioned injected column is no relation), widened
-   * to every behaviour: a tenant column its author declared `restrict` blocks
-   * the delete too, and one declared `cascade` would delete records, which is
-   * not the organization's own structure either. A count, never a row: the
-   * read is a system-identity `count`, and a table never provisioned holds no
-   * row.
+   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned} judges, through the same
+   * reader ({@link cascadeRelationBehavior}: a federated object's unprovisioned injected column is no
+   * relation), widened to every behaviour: a tenant column its author declared `restrict` blocks the delete
+   * too, and one declared `cascade` would delete records, which is not the organization's own structure
+   * either. A count, never a row: a system-identity `count`, and a table never provisioned holds no row.
    *
-   * `exclude` names the objects the caller removes as part of the delete
-   * itself. An append-only or engine-owned object is never counted ({@link
-   * outlivesOrganization}), the same set the engine's own refusal leaves out.
+   * `exclude` names the objects the caller removes as part of the delete itself. An append-only or
+   * engine-owned object is never counted ({@link outlivesOrganization}), the same set the engine's own
+   * refusal leaves out, and neither is `sys_unit`: the engine's cascade removes the organization's units
+   * with it [ruling 7035627429, option B].
    */
   organizationOwnedRowCounts(
     organizationId: string,
@@ -5322,6 +5320,7 @@ export class ObjectQL implements IObjectQLEngine {
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
       composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
       find: (...a) => this.find(...a),
+      facade: this, logger: this.logger,
     };
     return count.call(host, object, query, options);
   }
@@ -5863,6 +5862,7 @@ export class ObjectQL implements IObjectQLEngine {
       buildSession: (...a) => engine.buildSession(...a),
       buildUser: (...a) => engine.buildUser(...a),
       cascadeDeleteRelations: (...a) => engine.cascadeDeleteRelations(...a),
+      get cascadeIssuedDeletes() { return engine.cascadeIssuedDeletes; },
       claimReferentialCascadeDelete: (...a) => engine.claimReferentialCascadeDelete(...a),
       composeReadableIdsAtBoundary: (...a) => engine.composeReadableIdsAtBoundary(...a),
       delete: (...a) => engine.delete(...a),
@@ -6145,6 +6145,7 @@ export class ObjectQL implements IObjectQLEngine {
       get formulaHopReads() { return engine.formulaHopReads; },
       formulaOptionLabels: (...a) => engine.formulaOptionLabels(...a),
       hasObjectMiddleware: (...a) => engine.hasObjectMiddleware(...a),
+      get hooks() { return engine.hooks; },
       get i18nService() { return engine.i18nService; },
       get insertRecomputeListeners() { return engine.insertRecomputeListeners; },
       get logger() { return engine.logger; },

@@ -11,9 +11,9 @@
  * Search on the bar, everything else inside Display.
  *
  * Every fixture here offers the WHOLE wide toolbar — hide fields, row color,
- * a two-visualization switcher, inline edit, refresh and export — so an
- * absence from the bar is the default shape at work, not a control nobody
- * offered. `compactToolbar: false` is the control: the same fixture draws the
+ * a two-visualization switcher, refresh and export — so an absence from
+ * the bar is the default shape at work, not a control nobody offered. Inline
+ * edit has no control since objectstack#35684, on either toolbar. `compactToolbar: false` is the control: the same fixture draws the
  * wide buttons again.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -65,7 +65,6 @@ function mount(schema: Partial<ListViewSchema> = {}, props: Record<string, unkno
         schema={{ ...FULL, ...schema } as ListViewSchema}
         dataSource={dataSource as never}
         showViewSwitcher
-        onInlineEditChange={vi.fn()}
         {...props}
       />
     </SchemaRendererProvider>,
@@ -141,12 +140,13 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(screen.queryByTestId('toolbar-display-trigger')).toBeNull();
     expect(screen.getByRole('button', { name: /^hide fields/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^group/i })).toBeInTheDocument();
-    expect(screen.getByTestId('toolbar-inline-edit-toggle')).toBeInTheDocument();
+    // objectstack#35684 — no inline-edit toggle on the wide bar either.
+    expect(screen.queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
     expect(screen.getByTestId('refresh-button')).toBeInTheDocument();
     expect(screen.getByTestId('view-switcher-segmented')).toBeInTheDocument();
   });
 
-  it('Display carries Layout, Group, Hide fields, Density, Row numbers, Edit inline, Reset, Refresh and Export', async () => {
+  it('Display carries Layout, Group, Hide fields, Density, Reset, Refresh and Export', async () => {
     mount();
     await screen.findByTestId('grid-stub');
     const trigger = screen.getByTestId('toolbar-display-trigger');
@@ -163,14 +163,12 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(panel.getByTestId('display-reset-button')).toHaveTextContent('Restore defaults');
     expect(panel.getByTestId('refresh-button')).toHaveTextContent('Refresh');
     expect(panel.getByTestId('display-export-csv')).toHaveTextContent('Export as CSV');
-    openLevel(content, 'more');
-    for (const id of ['display-row-numbers-toggle', 'toolbar-inline-edit-toggle']) {
-      const toggle = panel.getByTestId(id);
-      expect(toggle).toHaveAttribute('role', 'switch');
-      expect(toggle).toHaveAttribute('aria-checked');
-    }
-    expect(panel.getByRole('switch', { name: 'Row numbers' })).toBe(panel.getByTestId('display-row-numbers-toggle'));
-    expect(panel.getByRole('switch', { name: 'Edit inline' })).toBe(panel.getByTestId('toolbar-inline-edit-toggle'));
+    // objectstack#35684 retired the Edit inline switch and objectstack#35663
+    // the Row numbers switch, so this list's menu has no More level at all.
+    expect(panel.queryByTestId('options-row-more')).toBeNull();
+    expect(panel.queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
+    expect(panel.queryByRole('switch', { name: 'Edit inline' })).toBeNull();
+    expect(panel.queryByTestId('display-row-numbers-toggle')).toBeNull();
   });
 
   it('the Layout row is drawn only when the list offers a visualization switch', async () => {
@@ -200,24 +198,18 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(within(content).getByTestId('options-row-row-height-value')).toHaveTextContent('Compact');
   });
 
-  it('Row numbers is on by default, reaches the grid, counts when off, and Reset turns it back on', async () => {
+  // objectstack#35663 — the list draws no row numbers and offers no switch for
+  // them: the grid's leading cell is the checkbox, shown at rest.
+  it('the list hands the grid no row numbers, and no level offers a Row numbers switch', async () => {
     mount();
     await screen.findByTestId('grid-stub');
-    expect(gridProps?.showRowNumbers).toBe(true);
+    expect(gridProps).toBeDefined();
+    expect(gridProps).not.toHaveProperty('showRowNumbers');
     const content = await openDisplay();
-    openLevel(content, 'more');
-    const toggle = within(content).getByTestId('display-row-numbers-toggle');
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(gridProps?.showRowNumbers).toBe(false));
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('1');
-
-    back(content);
-    fireEvent.click(within(content).getByTestId('display-reset-button'));
-    await waitFor(() => expect(gridProps?.showRowNumbers).toBe(true));
-    expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
+    expect(screen.queryByTestId('display-row-numbers-toggle')).toBeNull();
+    // No More level either: its last switch went with objectstack#35684.
+    expect(within(content).queryByTestId('options-row-more')).toBeNull();
+    expect(within(content).queryByRole('switch', { name: /row numbers/i })).toBeNull();
   });
 
   it('the footer Refresh re-fetches, as the wide toolbar button does', async () => {

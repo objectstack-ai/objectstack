@@ -259,13 +259,6 @@ export interface ViewSettingsPopoverProps {
   onAddField?: (name: string) => void;
 
   /**
-   * Row numbers on the grid's leading cell — a session-only setting the host
-   * holds in memory (objectui#12423). Offered only when `setRowNumbers` is.
-   */
-  rowNumbers?: boolean;
-  setRowNumbers?: (next: boolean) => void;
-
-  /**
    * Record editing — toggle the grid's inline-edit mode. `setInlineEdit` hands
    * the change to the host, which decides what it does with it; the console
    * keeps it session-only and writes nothing to the view (objectui#5144,
@@ -682,8 +675,6 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     updateHiddenFields,
     addableFields,
     onAddField,
-    rowNumbers,
-    setRowNumbers,
     showInlineEdit,
     inlineEdit,
     setInlineEdit,
@@ -722,7 +713,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     ? groupingConfig.fields.map((f: { field?: string }) => f?.field).filter((f: unknown): f is string => typeof f === 'string' && !!f)
     : [];
   const recordOpenDrawn = !!recordOpen && (recordOpen.resolvedMode === 'drawer' || recordOpen.resolvedMode === 'page');
-  const hasMore = recordOpenDrawn || !!setRowNumbers || (!!showInlineEdit && !!setInlineEdit);
+  const hasMore = recordOpenDrawn || (!!showInlineEdit && !!setInlineEdit);
   const fieldsOffered = !!showHideFields && !!hiddenFields && !!updateHiddenFields;
   const shownCount = fieldsOffered ? allFields.filter((f) => !hiddenFields!.has(f.name)).length : 0;
   const DensityIcon =
@@ -949,14 +940,6 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     body = (
       <SubPage title={titles.more} onBack={back} testId="options-page-more">
         {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
-        {setRowNumbers && (
-          <SwitchRow
-            label={t('list.rowNumbers', { defaultValue: 'Row numbers' })}
-            checked={!!rowNumbers}
-            onCheckedChange={setRowNumbers}
-            testId="display-row-numbers-toggle"
-          />
-        )}
         {showInlineEdit && setInlineEdit && (
           <SwitchRow
             label={t('list.inlineEditShort', { defaultValue: 'Edit inline' })}

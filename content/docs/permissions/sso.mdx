@@ -178,6 +178,37 @@ identity provider on an internal or private network is refused **400
 `VALIDATION_FAILED`** on `signOutOfIdp` until the provider's origin is listed in
 `OS_TRUSTED_ORIGINS`.
 
+**SSO discovery connects only to addresses that are public at connect time.**
+Every read the server makes of an identity provider's OpenID Connect
+configuration (a registration's discovery document, the **Sign Out of the
+Company Sign-In Too** check's read of the same document on a registration or
+an update, a sign-in's discovery, and the token, key-set and userinfo reads of
+a sign-in's callback) goes through the platform's outbound-request guard: the
+connection itself resolves the host, judges every address it resolves to, and
+connects only to an address it judged. An address that is private, loopback,
+link-local, a cloud metadata or host-platform address (`168.63.129.16`
+included) or in any other non-public range is refused and nothing is sent to
+it, whatever an earlier lookup of the same name answered; so is a host whose
+name does not resolve when the read connects. Only reads at the origins the
+provider's configuration names are judged: every other request the server
+makes while answering (a datastore or a rate-limit store reached over HTTP)
+is sent as before.
+
+A registration also judges its discovery host before reading it, by the same
+rule: the host of the `discoveryEndpoint` the registration names, else the
+issuer's. A host that is not public is refused **400 `VALIDATION_FAILED`** on
+`issuer` or `oidcConfig.discoveryEndpoint`, and nothing is read from it; the
+same answer comes back when the host answers a non-public address only once
+its read connects. The Register SSO Provider bridge answers that refusal as
+`SSO_REGISTER_FAILED`. The check comes before the **Sign Out of the Company
+Sign-In Too** check above, so a registration that also turns that switch on is
+refused on the same member. A refused callback read ends the sign-in on the
+error page with `invalid_provider`. Trust an origin gains because a
+registration names it never stands in for this rule, and neither does
+`OS_EGRESS_ALLOWED_TARGETS`. An identity provider on an internal network is
+reached once its origin is listed in `OS_TRUSTED_ORIGINS`: a read of an origin
+the deployment trusts is sent as before.
+
 Google is one such provider: its discovery document names the token endpoint,
 the key set and the userinfo endpoint each on a host of its own, so a Google
 registration names all three, either in the **Token URL**, **JWKS URL** and

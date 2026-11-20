@@ -42,6 +42,12 @@
       "prompt": "In a plain React app with no ObjectStack, write a responsive card grid component with Tailwind that collapses to one column on phones.",
       "should_trigger": false,
       "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "In our ObjectStack app, build a three-step wizard to create a lead: contact details, then the company, then qualification.",
+      "should_trigger": true,
+      "files": []
     }
   ]
 }

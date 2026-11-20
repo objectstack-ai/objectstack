@@ -64,7 +64,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
@@ -80,6 +80,11 @@ const metadata = vi.hoisted(() => ({
     status: 'ready' as string | undefined,
     refresh: vi.fn(async () => {}),
   },
+}));
+
+/** objectstack#35881 — the width and the person's last app, varied by the phone cases. */
+const phone = vi.hoisted(() => ({
+  value: { isPhone: false, lastApp: null as string | null, settled: true },
 }));
 
 /** The auth verdict each case varies. */
@@ -107,6 +112,8 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
       <Navigate to={to} replace={replace} />
     </>
   ),
+  usePhoneViewport: () => phone.value.isPhone,
+  useLastApp: () => ({ lastApp: phone.value.lastApp, settled: phone.value.settled, rememberApp: () => {} }),
   SETUP_APP_PACKAGE_ID: 'com.objectstack.setup',
   SETUP_APP_NAME: 'setup',
   useMetadata: () => ({
@@ -187,6 +194,7 @@ const OTHER_APP = { name: 'showcase_app' };
 beforeEach(() => {
   metadata.value = { apps: [], loading: false, status: 'ready', refresh: vi.fn(async () => {}) };
   auth.value = { isAuthenticated: false, isLoading: false, user: null };
+  phone.value = { isPhone: false, lastApp: null, settled: true };
 });
 
 // ── (b) The control QA used to isolate the defect ────────────────────────
@@ -388,5 +396,47 @@ describe('the landing carries the query and hash `/` arrived with', () => {
 
     expect(location()).toBe('/apps/crm_app');
     expect(screen.getByTestId('location-hash').textContent).toBe('');
+  });
+});
+
+// ── objectstack#35881, ruling 7045309332 (「上次用的优先」) ────────────────────
+describe('a phone lands in the app the person used last (objectstack#35881)', () => {
+  beforeEach(() => {
+    auth.value.isAuthenticated = true;
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+  });
+
+  it('the last-used app wins over the declared default', () => {
+    phone.value = { isPhone: true, lastApp: 'showcase_app', settled: true };
+    renderAt('/');
+    expect(location()).toBe('/apps/showcase_app');
+  });
+
+  it('with no record yet it takes the declared default', () => {
+    phone.value = { isPhone: true, lastApp: null, settled: true };
+    renderAt('/');
+    expect(location()).toBe('/apps/crm_app');
+  });
+
+  it('waits while the record is still being read, then resolves without it after the wait', () => {
+    vi.useFakeTimers();
+    try {
+      phone.value = { isPhone: true, lastApp: null, settled: false };
+      renderAt('/');
+      expect(location()).toBe('/');
+      expect(screen.getByTestId('loading-fallback')).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(location()).toBe('/apps/crm_app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('CONTROL — a desktop ignores the last app and keeps the declared default', () => {
+    phone.value = { isPhone: false, lastApp: 'showcase_app', settled: true };
+    renderAt('/');
+    expect(location()).toBe('/apps/crm_app');
   });
 });

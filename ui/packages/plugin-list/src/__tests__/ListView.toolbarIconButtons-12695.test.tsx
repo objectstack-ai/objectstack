@@ -79,16 +79,16 @@ function mount(schema: Partial<ListViewSchema> = {}, props: Record<string, unkno
   );
 }
 
-/** Raise the Display count to two: density and row numbers off the view's own. */
+/** Raise the Display count to two: density and the row colour off the view's own. */
 async function changeTwoDisplaySettings() {
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
   const content = await screen.findByTestId('view-settings-content');
-  // Two levels of the Display menu: a row height, then Row numbers under More.
+  // Two levels of the Display menu: a row height, then the row colour cleared.
   fireEvent.click(within(content).getByTestId('options-row-row-height'));
   fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
   fireEvent.click(within(content).getByTestId('options-back'));
-  fireEvent.click(within(content).getByTestId('options-row-more'));
-  fireEvent.click(await within(content).findByTestId('display-row-numbers-toggle'));
+  fireEvent.click(within(content).getByTestId('options-row-color'));
+  fireEvent.click(await within(content).findByTestId('options-color-clear'));
   await waitFor(() => expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('2'));
   fireEvent.keyDown(content, { key: 'Escape' });
   await waitFor(() => expect(screen.queryByTestId('view-settings-content')).toBeNull());
@@ -138,7 +138,10 @@ describe('Filter, Sort and Options: text buttons from `sm` up, icons below it (o
   });
 
   it('the count badge follows the name: Filter 2 · Sort 1 · Options 2', async () => {
-    mount({ sort: [{ field: 'name', order: 'asc' }] } as Partial<ListViewSchema>, { initialFilters: TWO_FILTERS });
+    mount(
+      { sort: [{ field: 'name', order: 'asc' }], userActions: { rowColor: true }, rowColor: { field: 'stage', colors: {} } } as Partial<ListViewSchema>,
+      { initialFilters: TWO_FILTERS },
+    );
     await screen.findByTestId('grid-stub');
     await changeTwoDisplaySettings();
 

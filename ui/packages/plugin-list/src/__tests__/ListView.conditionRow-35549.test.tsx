@@ -107,13 +107,13 @@ describe('ListView condition row and panels (objectstack#35549, objectstack#3555
     await waitFor(() => expect(onSortChange.mock.calls.at(-1)![0]).toEqual([]));
   });
 
-  it("the view's own filter is a locked chip, and Reset is disabled while the list matches the view", async () => {
+  it("the view's own filter is a locked chip, and no Reset is drawn while the list matches the view (objectstack#35727)", async () => {
     const ds = mount({ filter: [['stage', '=', 'proposal']] });
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
     const locked = await within(slot()).findByTestId('view-condition-chip');
     expect(locked).toHaveAttribute('data-locked', 'true');
     expect(within(locked).queryByRole('button')).toBeNull();
-    expect(within(slot()).getByTestId('condition-reset')).toBeDisabled();
+    expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
   });
 
   it('Reset clears the reader\'s filter and returns the sort to the view as saved', async () => {
@@ -128,8 +128,8 @@ describe('ListView condition row and panels (objectstack#35549, objectstack#3555
       },
     );
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    fireEvent.click(await within(slot()).findByTestId('sort-chip-toggle-name'));
-    await waitFor(() => expect(onSortChange.mock.calls.at(-1)?.[0]?.[0]?.order).toBe('desc'));
+    fireEvent.click(await within(slot()).findByTestId('sort-chip-remove-name'));
+    await waitFor(() => expect(onSortChange.mock.calls.at(-1)?.[0]).toEqual([]));
     const reset = within(slot()).getByTestId('condition-reset');
     expect(reset).toBeEnabled();
     await act(async () => fireEvent.click(reset));

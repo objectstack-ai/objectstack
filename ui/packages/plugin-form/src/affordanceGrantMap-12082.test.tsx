@@ -829,6 +829,15 @@ const WRITE_SITES: Record<string, WriteSite> = {
         "(absent from the spec's PLATFORM_OBJECTS_BY_PACKAGE and CLOUD_PROVIDED_OBJECT_NAMES, read 2026-10-11), so it fails " +
         'for every caller whatever their grant; no in-app link reaches its route either',
     ),
+  // objectstack#35599 — the record page's edit state: Edit (recordEdit, read
+  // by the page) enters it; Save writes the record alone as the plain update,
+  // or the record and its body tables as one batch, whose line add / remove
+  // read relatedNew / relatedRowDelete in the body-table editor and whose
+  // line cells are the field write gate's edit columns.
+  'packages/app-shell/src/views/recordEditState.tsx :: RecordEditStateController > save :: update':
+    mapped(['recordEdit'], RECORD_PAGE),
+  'packages/app-shell/src/views/recordEditState.tsx :: RecordEditStateController > save :: batch':
+    mapped(['recordEdit', 'relatedNew', 'relatedRowDelete', 'editFormFields'], RECORD_PAGE, 'packages/plugin-form/src/RecordBodyTableEditor.tsx', FIELD_WRITE_GATE),
   // ── plugin-detail ──
   'packages/plugin-detail/src/InlineEditSaveBar.tsx :: updateVia :: update': {
     ...mapped(['recordEdit'], RECORD_PAGE, RECORD_DETAILS, DETAIL_SECTION, HEADER_HIGHLIGHT),
@@ -839,10 +848,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // re-parent of the picked record (without one) an update of the picked
   // object — the rows a related list's "+ New" and row Edit read.
   'packages/plugin-detail/src/queueClaim.ts :: claimQueuedRecord :: update': helper('claimQueuedRecord'),
-  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: create':
-    mapped(['relatedNew'], RELATED_LIST),
-  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: update':
-    mapped(['relatedRowEdit'], RELATED_LIST),
+  // One atomic batch since objectstack#35601: a junction `linkField` adds
+  // by creating junction rows (relatedNew), a plain lookup by reparenting
+  // the picked rows (relatedRowEdit).
+  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: batch':
+    mapped(['relatedNew', 'relatedRowEdit'], RELATED_LIST),
   'packages/plugin-detail/src/renderers/record-related-list.tsx :: RecordRelatedListBody :: delete': {
     ...mapped(['relatedRowDelete'], RELATED_LIST_BLOCK),
     note: "the FALLBACK remove (an `add` config, no host delete) reads the same row the host's delete reads, so it never puts back a delete the host withheld",

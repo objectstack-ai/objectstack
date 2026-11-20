@@ -771,7 +771,8 @@ curl -b cookies.txt -X POST \
   https://your-app.example.com/api/v1/approvals/requests/req_456/approve \
   -H "Content-Type: application/json" \
   -d '{ "comment": "Within budget." }'
-# POST .../reject for the other direction; body: { actorId?, comment? }
+# POST .../reject for the other direction; body: { actorId?, comment }
+# a reject's comment is its reason: required, a non-blank string
 ```
 
 `actorId` defaults to the caller, who takes the first slot in
@@ -868,7 +869,7 @@ continuity levers on the same request. All are `POST
 
 | Verb | Route | Who | Effect |
 |:---|:---|:---|:---|
-| `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment`, `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
+| `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment` (a reject's reason — required at every human door, see below), `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
 | `reassign` | `/reassign` | pending approver | Hands one slot to another user (`to`); the request stays pending. |
 | `revise` (send back) | `/revise` | pending approver | Ends this round as **`returned`**, unlocks the record for rework (ADR-0044). |
 | `request-info` | `/request-info` | pending approver | Asks the submitter for more info; the request **stays pending**. `comment` required. |
@@ -934,7 +935,14 @@ renders and executes them wherever the object is surfaced — the **Approvals
 inbox** included — so a decision (comment, a file-upload for `attachments`, the
 reassign user-picker) is collected by the generic action dialog with **no
 per-action UI code**. New decision capabilities ship as backend metadata, not
-hand-written buttons.
+hand-written buttons. Every human reject carries its reason: `approval_reject`
+declares its `comment` param required, so the action door, MCP `run_action` and the
+dialog refuse a reject whose `comment` is missing or blank (`400`, the declared
+param contract's `required` refusal), and `ApprovalService.decide()`, behind the
+`/reject` route and the SDK's `client.approvals.reject`, refuses one the same
+way (`400 VALIDATION_ERROR`); the inbox keeps Reject disabled until a reason is typed. The one
+exception is the email action link, which still records the fixed text "Via
+action link" instead of the approver's reason (tracked in #35722).
 
 On the record itself, a record with approval requests grows an **Approvals** tab
 beside Details and Related, with a request-count badge: the current step, decision

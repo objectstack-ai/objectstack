@@ -528,9 +528,53 @@ describe('the nested-relation node is refused by name in both dialects', () => {
     },
   );
 
+  /**
+   * A list operator's comparand is judged member by member: a plain-object
+   * member is the same nested condition. `nin` read it by reference, so it
+   * answered every row; `in` answered the rows its other members matched (none
+   * here) and `between` read the object as the text `[object Object]`, so with
+   * `'zzz'` as the other endpoint it answered the text range between them (the
+   * `'zeta'` row here).
+   */
+  it.each(['nin', 'in', 'between'])(
+    '`%s` with a plain-object list member is refused too',
+    async (operator) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['profile', operator, [{ verified: true }, 'zzz']], PROFILE_ROWS))
+        .toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(REFUSAL);
+    },
+  );
+
+  /**
+   * An EMPTY plain object, `{}`, has no key to name, so the same builder refuses
+   * it in a sentence of its own: whole, and as a list member.
+   */
+  const EMPTY_REFUSAL =
+    "filter comparand on field 'profile' is an empty object ({}), which is neither "
+    + 'a comparison value nor a nested relation constraint';
+
+  it.each([
+    ['!=', {}],
+    ['>', {}],
+    ['not_contains', {}],
+    ['nin', [{}]],
+    ['between', [{}, 'zzz']],
+  ] as const)(
+    '`%s` with an empty plain object as its comparand is refused in its own sentence',
+    async (operator, comparand) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await selectedIds(['profile', operator, comparand], PROFILE_ROWS)).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(EMPTY_REFUSAL);
+    },
+  );
+
   it('CONTROL: a scalar `=` still matches, with nothing logged', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(await selectedIds(['role', '=', 'admin'])).toEqual(['a', 'c']);
+    expect(await selectedIds(['role', 'nin', ['user']])).toEqual(['a', 'c']);
     expect(warn).not.toHaveBeenCalled();
   });
 

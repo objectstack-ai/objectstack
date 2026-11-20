@@ -59,6 +59,13 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.saved': '{{count}} row saved',
   'table.saved_one': '{{count}} row saved',
   'table.saved_other': '{{count}} rows saved',
+  // objectstack#35685 — a list cell save's Undo: the toast's button, the
+  // toast once it has run, and the toast when the server refuses it. The
+  // action runner's and the record page's own keys, byte-identical to the
+  // `en` pack.
+  'actions.undo': 'Undo',
+  'actions.undone': 'Change undone',
+  'table.saveFailed': 'Save failed',
   // The field rules an inline edit is checked against before it is sent
   // (objectstack-ai/objectstack#27520), worded as the record form words them.
   // Byte-identical to the `en` pack, which `defaults-maps-mirror-en-pack`
@@ -102,6 +109,16 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.recordDetailWithLabel': '{{label}} Detail',
   // objectstack#35548 — the summary row's lead, under the first column.
   'grid.summary.countLead': 'Count {{value}}',
+  // objectstack#35684 — why a list cell opens no editor (`objectGridCellFacts`).
+  'grid.readOnlyReason.readonly': 'This field is read-only.',
+  'grid.readOnlyReason.computed': 'This value is calculated, so it can\'t be edited.',
+  'grid.readOnlyReason.notInline': 'This field can\'t be edited in a list. Open the record to change it.',
+  'grid.readOnlyReason.noFieldPermission': 'You don\'t have permission to edit this field.',
+  'grid.readOnlyReason.viewOff': 'Editing in the list is turned off for this view.',
+  'grid.readOnlyReason.objectReadOnly': 'These records can\'t be edited here.',
+  'grid.readOnlyReason.noPermission': 'You don\'t have permission to edit these records.',
+  'grid.readOnlyReason.approvalLocked': 'This record is locked while it\'s in approval.',
+  'grid.readOnlyReason.noRecordPermission': 'You don\'t have permission to edit this record.',
 };
 
 /**

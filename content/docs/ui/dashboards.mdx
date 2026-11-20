@@ -306,7 +306,11 @@ the *West* bucket → one order).
 The drawer also offers an **"Open in list →"** escape hatch — escalate the peek
 to the object's full list page (sort / bulk-select / export / shareable URL),
 scoped by the same drill filter. In-place drawer is the default (keep context);
-the escape hatch is there when you need the full surface. **Reports drill
+the escape hatch is there when you need the full surface. Not every drill gets
+the link today: a drill on a dimension whose `field` is a relationship path,
+such as `region` in the `sales` dataset above (`account.region`), stays in the
+drawer, because the list page's URL filter has no spelling for a condition on a
+related record. **Reports drill
 identically**: a `summary` / `matrix` report opens the same in-place drawer on
 row/cell click, so dashboard and report drill behave the same.
 
@@ -336,7 +340,8 @@ click-drillable; expose the detail through a `table`/`pivot` widget instead.
 > whitelist, and chart-segment drill for the `scatter` / `treemap` / `sankey`
 > families. Those knobs live in the renderer; dataset-bound dashboards drill
 > through the semantic layer as described above (and get the "Open in list →"
-> escape hatch from the host app, e.g. the console).
+> escape hatch from the host app, e.g. the console, except today on a
+> relationship-path dimension, as noted above).
 
 ### Aggregation Functions
 
@@ -572,14 +577,18 @@ the base rows whose relationship points at a record it returned:
   unfiltered set.
 - A related field the caller cannot read is refused (`403 PERMISSION_DENIED`), as
   filtering on it directly would be.
-- On a SQL datasource the related condition runs inside the same statement, as
-  a subquery, so the number of matching related records is not limited. Where
-  the engine reads the matching related ids first instead (a related object on
-  another datasource, a federated one, or a driver that compiles no subquery,
-  such as MongoDB; the full list is in
-  [Query Syntax](/docs/protocol/objectql/query-syntax)), more than 1,000 of them
-  are refused (`400 INVALID_FILTER`), never truncated. Narrow the related
-  condition.
+- On a SQL datasource a condition through a single-valued relation usually
+  runs inside the same statement, as a subquery, so the number of matching
+  related records is not limited. Where the engine reads the matching related
+  ids first instead (a multi-valued relation, on every driver; a related object
+  on another datasource, a federated one, one whose reads an object-scoped
+  middleware or an `afterFind` hook shapes, or one read under different driver
+  options than the queried object, its tenant scope most commonly; the full
+  list is in [Query Syntax](/docs/protocol/objectql/query-syntax)), more than
+  1,000 of them are refused (`400 INVALID_FILTER`), never truncated. Narrow the
+  related condition. On a driver that cannot run it in one read (MongoDB,
+  OData), a condition through a single-valued relation is refused before
+  anything is read (`400 INVALID_FILTER`), naming the two-step route.
 - These are refused (`400 INVALID_FIELD`) rather than answered differently: a
   path of four or more relationships (`line.plan.order.customer.tier`), a
   related-field condition under `$not` (write `$ne` / `$nin` inside the

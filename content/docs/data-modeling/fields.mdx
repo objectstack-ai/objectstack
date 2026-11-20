@@ -398,9 +398,14 @@ when multiple relationships target the same parent object.
 
 A summary field is read-only on create and on update whether or not it declares
 `readonly: true`. A value that a `POST`, an import (any `writeMode`), an MCP
-create, a `PATCH` or a bulk update sends for it is dropped, the rest of the write
-is stored, and the response's `droppedFields` names the field with reason
-`readonly`. A record created that way starts as if no value had been sent: `0`
+create or update (over HTTP or stdio), a `PATCH` or a bulk update sends for it
+is dropped, the rest of the write is stored, and the response's `droppedFields`
+names the field with reason `readonly`. Two more doors end in the same create
+and drop the value the same way: the `overrides` of a clone, whose answer names
+the field in `droppedFields` as a create's does, and a public form submission,
+which is anonymous and answers with the created record's id alone, so the
+person who submitted it is not shown the drop. A record created with its value
+dropped starts as if no value had been sent: `0`
 for `count` and `sum`, empty for `min`, `max` and `avg`, and the next child write
 replaces it with the computed value. Under `strictReadonlyWrites` the whole write
 is refused. Server code that runs with `isSystem: true` can still write the

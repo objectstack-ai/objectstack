@@ -480,8 +480,10 @@ describe('controls (objectui#12483, kept by objectstack#34588)', () => {
   it('CONTROL: a request with no payload draws no record card, asks for neither its definition nor its record, and still decides', async () => {
     const { payload: _p, payload_display: _d, ...bare } = BASE_ROW;
     const panel = await openServedPage(bare);
-    // The panel has settled on the request: its rail is drawn.
-    await within(panel).findByTestId('approval-decision-progress', undefined, { timeout: 8000 });
+    // The panel has settled on the request: its decisions are drawn. Not the
+    // "Approval progress" card: this row has no route, no tally and nobody
+    // waiting, so that card has nothing to draw and is not drawn (objectstack#35730).
+    expect(await within(panel).findByTestId('declared-action-approval_reject', undefined, { timeout: 8000 })).toBeTruthy();
     expect(within(panel).queryByTestId('submitted-record')).toBeNull();
     expect(getItem).not.toHaveBeenCalledWith('object', 'invoice');
     expect(host.findOne.mock.calls.filter(([resource]) => resource === 'invoice')).toEqual([]);

@@ -144,7 +144,7 @@ describe('describeUnresolvedColumns — the message names the address (#5349)', 
     expect(message).toContain('[ObjectUI] ObjectGrid columns:');
     expect(message).toContain("object-grid (objectName: 'opportunities', label: 'Open Deals')");
     expect(message).toContain('2 of 2 authored columns resolve to nothing');
-    expect(message).toContain('row-number column and NO data columns');
+    expect(message).toContain('so this grid renders NO data columns');
     expect(message).toContain('columns[0]');
     expect(message).toContain('columns[1]');
     expect(message).toContain('`accessorKey`, `header`');

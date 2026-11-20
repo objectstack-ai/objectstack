@@ -250,16 +250,21 @@ describe('objectui#4243 part 1 — the sort picker no longer reuses `filterableF
 });
 
 describe('objectui#4243 part 2 — reset to the view\'s declared sort', () => {
-  it('restores the two-level default, in declared order, after a header click flattened it', async () => {
+  it('restores the two-level default, in declared order, after a header pick changed it', async () => {
     const ds = await renderList({ sort: DECLARED_SORT, filterableFields: ['status'] });
     await waitFor(() => expect(typeof lastGridProps?.onSortChange).toBe('function'));
 
-    // One header click — the card's trigger.
+    // One pick in the header menu. Since objectstack#35876 it puts its column
+    // first and keeps the declared levels after it.
     await act(async () => {
       lastGridProps.onSortChange([{ field: 'status', order: 'desc' }]);
     });
     await waitFor(() => {
-      expect(lastFindParams(ds).$orderby).toEqual([{ field: 'status', order: 'desc' }]);
+      expect(lastFindParams(ds).$orderby).toEqual([
+        { field: 'status', order: 'desc' },
+        { field: 'plan_start_date', order: 'asc' },
+        { field: 'name', order: 'asc' },
+      ]);
     });
 
     await openSortPanel();
@@ -323,17 +328,20 @@ describe('objectui#4243 part 2 — reset to the view\'s declared sort', () => {
     expect(screen.getByTestId('sort-reset-default')).toBeEnabled();
   });
 
-  it('CONTROL — the header click itself still replaces the whole sort array', async () => {
-    // The ruling adds a way back; it does not change the click's semantics.
+  it('CONTROL — a header pick over a two-level sort puts its column first and drops no level (objectstack#35876)', async () => {
+    // The reset ruling adds a way back; the header's own rule is #35876's.
     const ds = await renderList({ sort: DECLARED_SORT, filterableFields: ['status'] });
     await waitFor(() => expect(typeof lastGridProps?.onSortChange).toBe('function'));
 
     await act(async () => {
-      lastGridProps.onSortChange([{ field: 'status', order: 'desc' }]);
+      lastGridProps.onSortChange([{ field: 'name', order: 'desc' }]);
     });
 
     await waitFor(() => {
-      expect(lastFindParams(ds).$orderby).toEqual([{ field: 'status', order: 'desc' }]);
+      expect(lastFindParams(ds).$orderby).toEqual([
+        { field: 'name', order: 'desc' },
+        { field: 'plan_start_date', order: 'asc' },
+      ]);
     });
   });
 });

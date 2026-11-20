@@ -20,6 +20,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+// Paid at collection, not inside a case's clocked window: the dispatcher's
+// reach loads `@objectstack/metadata` lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import { API_FORWARD_MARK_HEADER } from './action-execution.js';
@@ -30,6 +33,7 @@ import {
     actionInvocationForwardedFrom,
     actionInvocationTarget,
     ACTION_FORWARD_MARK_MAX_LENGTH,
+    actionInvocationBulkReading,
 } from './action-invocation-audit.js';
 
 const OBJECT = 'aud_lead';
@@ -448,5 +452,102 @@ describe('[#27908] the helpers', () => {
     it('actionInvocationFailure reads a declared status and code, and a bare throw as 500', () => {
         expect(actionInvocationFailure(Object.assign(new Error('x'), { status: 409, code: 'CONFLICT' }))).toEqual({ status: 409, errorCode: 'CONFLICT' });
         expect(actionInvocationFailure(new Error('x')).status).toBe(500);
+    });
+});
+
+/**
+ * [#34292 — seat ruling 7000299515, maintainer 「B 仍记成功,加行数」] An
+ * aggregate bulk call (it carries `params._selectedIds`) whose handler
+ * RESOLVES with a `BulkActionResult` keeps `outcome: 'succeeded'` and hands
+ * the writer the per-row counts that value reads as — counted by the rules the
+ * console's aggregate reader counts with, so the dialog and the row agree.
+ */
+describe('[#34292] an aggregate bulk call\'s row records the per-row counts its resolve value reads as', () => {
+    const SELECTED = ['l1', 'l2', 'l3'];
+    const PARTIAL = { succeeded: ['l1'], failed: [{ id: 'l2', message: 'Locked.' }] };
+
+    /** The script handler resolves with `value`; the call carries `params` and no record. */
+    async function run(door: 'rest' | 'mcp', value: unknown, params: Record<string, unknown>) {
+        const rig = makeRig();
+        rig.ql.executeAction.mockImplementation(async () => value);
+        if (door === 'rest') {
+            const res: any = await rig.dispatcher.handleActions(
+                `/${OBJECT}/${SCRIPT.name}`, 'POST', { params }, rig.ctx({ userId: 'u_member' }),
+            );
+            expect(res.response.status).toBe(200);
+        } else {
+            const bridge = (rig.dispatcher as any).buildMcpBridge(rig.ctx({ userId: 'u_member' }));
+            await bridge.runAction(SCRIPT.name, { objectName: OBJECT, params });
+        }
+        expect(rig.events).toHaveLength(1);
+        return rig.events[0];
+    }
+
+    describe.each(['rest', 'mcp'] as const)('%s door', (door) => {
+        it('a partial resolve stays succeeded and records selected / succeeded / failed / unconfirmed', async () => {
+            const event = await run(door, PARTIAL, { _selectedIds: SELECTED });
+            expect(event.outcome).toBe('succeeded');
+            expect(event.bulk).toEqual({ selected: 3, succeeded: 1, failed: 1, unconfirmed: 1 });
+        });
+
+        it('an all-succeeded resolve records every selected row as succeeded', async () => {
+            const event = await run(door, { succeeded: SELECTED, failed: [] }, { _selectedIds: SELECTED });
+            expect(event.outcome).toBe('succeeded');
+            expect(event.bulk).toEqual({ selected: 3, succeeded: 3, failed: 0, unconfirmed: 0 });
+        });
+
+        it('a resolve value that carries a list and does not parse records one unreadable mark and no count', async () => {
+            const event = await run(door, { succeeded: 'l1' }, { _selectedIds: SELECTED });
+            expect(event.outcome).toBe('succeeded');
+            expect(event.bulk).toEqual({ unreadable: true });
+        });
+
+        it('control: a handler that resolves with nothing still records succeeded, with no counts', async () => {
+            const event = await run(door, undefined, { _selectedIds: SELECTED });
+            expect(event.outcome).toBe('succeeded');
+            expect(event.bulk).toBeUndefined();
+        });
+
+        it('a call with no `_selectedIds` records no counts, whatever its handler resolves with', async () => {
+            const event = await run(door, PARTIAL, {});
+            expect(event.outcome).toBe('succeeded');
+            expect(event.bulk).toBeUndefined();
+        });
+    });
+
+    it('a handler that throws records failed and no counts', async () => {
+        const rig = makeRig({ script: true });
+        const res: any = await rig.dispatcher.handleActions(
+            `/${OBJECT}/${SCRIPT.name}`, 'POST', { params: { _selectedIds: SELECTED } }, rig.ctx({ userId: 'u_member' }),
+        );
+        expect(res.response.status).toBe(409);
+        expect(rig.events[0]).toMatchObject({ outcome: 'failed', status: 409 });
+        expect(rig.events[0].bulk).toBeUndefined();
+    });
+
+    it('the four counting rules: outside dropped, duplicate once, both lists failed, neither unconfirmed', () => {
+        const read = (succeeded: string[], failed: string[]) => actionInvocationBulkReading(
+            { _selectedIds: ['a', 'b', 'c'] },
+            { succeeded, failed: failed.map((id) => ({ id, message: 'no' })) },
+        );
+        // An id outside the selection is dropped, counted nowhere.
+        expect(read(['a', 'z'], ['y'])).toEqual({ selected: 3, succeeded: 1, failed: 0, unconfirmed: 2 });
+        // A duplicate counts once, in either list.
+        expect(read(['a', 'a'], ['b', 'b'])).toEqual({ selected: 3, succeeded: 1, failed: 1, unconfirmed: 1 });
+        // An id in both lists counts as failed.
+        expect(read(['a', 'b'], ['b'])).toEqual({ selected: 3, succeeded: 1, failed: 1, unconfirmed: 1 });
+        // A selected id in neither list is not confirmed, never succeeded.
+        expect(read([], [])).toEqual({ selected: 3, succeeded: 0, failed: 0, unconfirmed: 3 });
+    });
+
+    it('a value with neither list keeps the one-outcome answer; a neighbour shape is unreadable', () => {
+        const params = { _selectedIds: ['a'] };
+        expect(actionInvocationBulkReading(params, { url: 'https://example.test/qr.zip' })).toBeUndefined();
+        expect(actionInvocationBulkReading(params, null)).toBeUndefined();
+        expect(actionInvocationBulkReading(params, ['a'])).toBeUndefined();
+        // The data plane's batch answer spells the two as COUNTS: it does not parse.
+        expect(actionInvocationBulkReading(params, { succeeded: 1, failed: 0, results: [] })).toEqual({ unreadable: true });
+        // `_selectedIds` that is not an array is no selection.
+        expect(actionInvocationBulkReading({ _selectedIds: 'a' }, { succeeded: ['a'], failed: [] })).toBeUndefined();
     });
 });

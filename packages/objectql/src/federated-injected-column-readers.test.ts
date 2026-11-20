@@ -182,6 +182,11 @@ const READERS: Record<string, Row> = {
     via: 'cascadeRelationBehavior',
     why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
   },
+  // [ruling 7035627429, option B] The organization delete removes its units.
+  'engine-cascade-planning.ts#removeOrganizationUnits :: resolveTenantFieldName()': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_unit rows, a platform table platform-objects owns (ADR-0158 U3), never a federated object's column",
+  },
   'engine-cascade-planning.ts#keepsOrganizationReference :: organization_id': {
     disposition: 'not-a-read',
     why: "names the attribution column a tenancy-disabled object keeps through an organization delete; the walk reads its relation through cascadeRelationBehavior; it reads no row",
@@ -436,6 +441,15 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the code backfill reads the organization it counts and scopes a row by, and leaves the column out of its read on a federated object',
   },
+  // [ADR-0158 U7 R1] The unit code backfill scopes its walk exactly as its currency twin does.
+  'unit-code-backfill.ts#resolveScope :: isFederatedUnprovisionedInjectedColumn()': {
+    disposition: 'skips',
+    why: 'the unit code backfill never selects an injected column a federated object does not provision',
+  },
+  'unit-code-backfill.ts#resolveScope :: organization_id': {
+    disposition: 'skips',
+    why: 'the unit code backfill reads the organization it counts, scopes a row by and judges its unit codes in, and leaves the column out of its read on a federated object',
+  },
   'stored-expression-backfill.ts#backfillStoredExpressions :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'the backfill never sends an injected column a federated object does not provision',
@@ -460,6 +474,10 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'declines to declare the __search companion column on an object the sync seam issues no DDL for; it reads no row',
   },
+  // The update stamps an all-dropped update leaves unwritten: a set of payload KEYS, judged
+  // against the payload in hand, never a column read.
+  'engine-update.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
+  'engine-update.ts#<module> :: updated_by': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
   'having-filter.ts#declaredReferenceNames :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
@@ -512,6 +530,10 @@ const READERS: Record<string, Row> = {
   'assignment-rules.ts#authoredRules :: organization_id': {
     disposition: 'not-a-read',
     why: "keys an organization's sys_assignment_rule rows, a platform table plugin-sharing owns",
+  },
+  'validation/unit-code-membership.ts#organizationUnitRowsOf :: organization_id': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_unit rows, a platform table platform-objects owns (ADR-0158 U3), never a federated object's column",
   },
   'assignment-rules.ts#organizationMemberStanding :: organization_id': {
     disposition: 'not-a-read',
@@ -574,6 +596,14 @@ const READERS: Record<string, Row> = {
   'tenancy/system-write-organization.ts#buildRefusalMessage :: organization_id': {
     disposition: 'not-a-read',
     why: 'names the column in refusal text',
+  },
+  // ADR-0157 D2: a calendar or exception update may not change the row's organization.
+  'work-calendar-service.ts#refuseOrganizationChange :: organization_id': {
+    disposition: 'row-value',
+    why:
+      'compares the update payload in hand with the stored row the engine passed the hook, and names the column ' +
+      'in the refusal; it reads no storage, and its objects, sys_work_calendar and sys_work_calendar_exception, ' +
+      'are platform objects, never federated',
   },
   'federated-object.ts#isFederatedUnprovisionedInjectedColumn :: isFederatedObject()': {
     disposition: 'definition',
@@ -785,7 +815,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     }
   }, SCAN_BUDGET_MS);
 
-  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute, the record-currency backfill and the stored-expression backfill', () => {
+  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute, the record-currency backfill, the stored-expression backfill and the unit code backfill', () => {
     const skipping = new Set(
       Object.entries(READERS)
         .filter(([, row]) => row.disposition === 'skips')
@@ -799,6 +829,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
       'record-currency-backfill.ts#resolveScope',
       'stored-expression-backfill.ts#backfillStoredExpressions',
+      'unit-code-backfill.ts#resolveScope',
     ]);
   });
 

@@ -94,7 +94,7 @@ describe('data-table — the header caret onto the column menu (objectstack#3479
 
     fireEvent.click(caret);
     const menu = screen.getByTestId('column-context-menu');
-    expect(within(menu).getAllByRole('button').map((b) => b.textContent)).toEqual(['Sort ascending', 'Sort descending', 'Hide column']);
+    expect(within(menu).getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Sort ascending', 'Sort descending', 'Hide column']);
     expect(caret).toHaveAttribute('aria-expanded', 'true');
     // Opening the menu did not sort: the rows keep their order.
     expect(firstColumnValues()).toEqual(['Bob', 'Ada', 'Cyd']);

@@ -16,13 +16,17 @@
  * - `SortPanel`: the same field list with the direction on top; one click on
  *   a field adds a sort level (or sets that level's direction).
  * - `ConditionChipRow`: sort chips, then the view's own conditions as locked
- *   chips, then the reader's filter chips, 「+ Add filter」 and 「Reset」. It
- *   draws nothing at all while there is nothing to show, so the row the host
- *   reserves for it takes no height.
+ *   chips (less the ones the host draws itself, `hostDrawnFields`), then the
+ *   reader's filter chips, 「+ Add filter」 and 「Reset」 (only while the host
+ *   has something to reset). It draws nothing at all while there is nothing
+ *   to show, so the row the host reserves for it takes no height.
  *
  * All three are controlled: they read the host's filter group and sort array
  * and hand back the next one. Nothing here stores anything or changes what a
- * filter row or a sort entry looks like.
+ * filter row or a sort entry looks like. The one read the row makes is the
+ * names of the records a lookup condition points at, through the host's data
+ * source (`useLookupValueNames`), so a chip says 「Account: Globex」, not the
+ * record's id.
  */
 
 import * as React from 'react';
@@ -36,6 +40,8 @@ import {
   type FilterBuilderRowGroup,
   type SortItem,
 } from '@object-ui/components';
+import { referencedRecordTitle } from '@object-ui/core';
+import type { DataSource } from '@object-ui/types';
 import { ArrowDown, ArrowUp, Lock, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
 import { FieldList, type FieldListItem } from './FieldList';
 import { FilterValuePanel, isQuickRowApplied, quickDateWindowOf } from './FilterValuePanel';
@@ -51,7 +57,6 @@ import {
   removeCondition,
   seedValueFor,
   sortWording,
-  toggleSortOrder,
   upsertCondition,
   type ConditionField,
   type ViewConditionChip,
@@ -71,12 +76,20 @@ function optionLabel(field: ConditionField | undefined, raw: unknown): string {
   return hit ? hit.label : String(raw);
 }
 
-/** The value half of a chip: 「Negotiation, Proposal」, 「≥ 100」, 「Today」. */
+/** The name of the record a lookup value points at, or `undefined` while it is not read. */
+export type LookupValueName = (field: string, id: string) => string | undefined;
+
+/**
+ * The value half of a chip: 「Negotiation, Proposal」, 「≥ 100」, 「Today」.
+ * A lookup's value is the referenced record's name when `nameOf` has it, and
+ * its id only when the name cannot be read.
+ */
 export function describeConditionValue(
   field: ConditionField | undefined,
   operator: string,
   value: unknown,
   t: Translate,
+  nameOf?: LookupValueName,
 ): string {
   const opLabel = quickOperatorLabel(operator, t);
   if (isValuelessOperator(operator)) return opLabel;
@@ -93,6 +106,8 @@ export function describeConditionValue(
     text = list.map(String).join(' – ');
   } else if (family === 'option') {
     text = list.map((v) => optionLabel(field, v)).join(joiner);
+  } else if (family === 'lookup' && field && nameOf) {
+    text = list.map((v) => nameOf(field.value, String(v)) ?? String(v)).join(joiner);
   } else {
     text = list.map(String).join(joiner);
   }
@@ -102,18 +117,130 @@ export function describeConditionValue(
     : `${opLabel} ${text}`;
 }
 
-function chipText(field: ConditionField | undefined, fieldName: string | undefined, operator: string, value: unknown, t: Translate) {
+function chipText(
+  field: ConditionField | undefined,
+  fieldName: string | undefined,
+  operator: string,
+  value: unknown,
+  t: Translate,
+  nameOf?: LookupValueName,
+) {
   return t('listConditions.chips.pattern', {
     field: field?.label ?? fieldName ?? '',
-    value: describeConditionValue(field, operator, value, t),
+    value: describeConditionValue(field, operator, value, t, nameOf),
   });
 }
 
-function viewChipText(chip: ViewConditionChip, fields: ReadonlyArray<ConditionField>, t: Translate): string {
-  if (chip.anyOf) return chip.anyOf.map((member) => viewChipText(member, fields, t)).join(t('listConditions.chips.or'));
+function viewChipText(
+  chip: ViewConditionChip,
+  fields: ReadonlyArray<ConditionField>,
+  t: Translate,
+  nameOf?: LookupValueName,
+): string {
+  if (chip.anyOf) return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf)).join(t('listConditions.chips.or'));
   if (!chip.field || !chip.operator) return t('listConditions.chips.viewFilter');
   const field = fields.find((f) => f.value === chip.field);
-  return chipText(field, chip.field, chip.operator, chip.value, t);
+  return chipText(field, chip.field, chip.operator, chip.value, t, nameOf);
+}
+
+// ---------------------------------------------------------------------------
+// Lookup names
+// ---------------------------------------------------------------------------
+
+/** One condition as the name read sees it: a field and the value it compares. */
+interface NamedCondition {
+  field?: string;
+  operator?: string;
+  value?: unknown;
+}
+
+function lookupIds(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : [value];
+  return list
+    .filter((v): v is string | number => (typeof v === 'string' && v !== '') || typeof v === 'number')
+    .map(String);
+}
+
+/**
+ * The names of the records the lookup conditions on screen point at, read
+ * the way the lookup value picker reads them: the target's records by id
+ * through the host's data source, named by the lookup's `displayField`, else
+ * the target's own name field (`referencedRecordTitle`). One record read and
+ * one definition read per target, again only when the ids change.
+ *
+ * Keyed on what it reads (targets and ids), never on the identity of the
+ * arrays the host rebuilds every render (`ui/AGENTS.md` #10). A read that
+ * fails, or a record nothing names, answers `undefined`: the chip keeps the id.
+ */
+function useLookupValueNames(
+  dataSource: Pick<DataSource, 'find' | 'getObjectSchema'> | null | undefined,
+  fields: ReadonlyArray<ConditionField>,
+  conditions: ReadonlyArray<NamedCondition>,
+): LookupValueName {
+  const wanted = new Map<string, Set<string>>();
+  for (const condition of conditions) {
+    if (!condition.field || !condition.operator || isValuelessOperator(condition.operator)) continue;
+    const field = fields.find((f) => f.value === condition.field);
+    if (!field?.referenceTo || quickFilterFamily(field) !== 'lookup') continue;
+    const ids = lookupIds(condition.value);
+    if (ids.length === 0) continue;
+    const held = wanted.get(field.referenceTo) ?? new Set<string>();
+    for (const id of ids) held.add(id);
+    wanted.set(field.referenceTo, held);
+  }
+  const readKey = JSON.stringify(
+    [...wanted.entries()].map(([target, ids]) => [target, [...ids].sort()] as const).sort(([a], [b]) => a.localeCompare(b)),
+  );
+
+  const [read, setRead] = React.useState<{
+    key: string;
+    byTarget: ReadonlyMap<string, { def: unknown; records: ReadonlyMap<string, Record<string, unknown>> }>;
+  } | null>(null);
+
+  React.useEffect(() => {
+    const targets = JSON.parse(readKey) as Array<[string, string[]]>;
+    if (targets.length === 0 || !dataSource || typeof dataSource.find !== 'function') return;
+    let cancelled = false;
+    void Promise.all(
+      targets.map(async ([target, ids]) => {
+        let def: unknown;
+        if (typeof dataSource.getObjectSchema === 'function') {
+          try {
+            def = await dataSource.getObjectSchema(target);
+          } catch {
+            def = undefined;
+          }
+        }
+        const records = new Map<string, Record<string, unknown>>();
+        try {
+          const result = await dataSource.find(target, { $top: ids.length, $filter: { id: { $in: ids } } });
+          for (const record of Array.isArray(result?.data) ? result.data : []) {
+            const id = (record as Record<string, unknown> | null)?.id;
+            if (id !== undefined && id !== null) records.set(String(id), record as Record<string, unknown>);
+          }
+        } catch {
+          // The chip keeps the id: the name is a courtesy, the condition still filters.
+        }
+        return [target, { def, records }] as const;
+      }),
+    ).then((answers) => {
+      if (!cancelled) setRead({ key: readKey, byTarget: new Map(answers) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataSource, readKey]);
+
+  const byTarget = read?.key === readKey ? read.byTarget : undefined;
+  return React.useCallback<LookupValueName>(
+    (fieldName, id) => {
+      const field = fields.find((f) => f.value === fieldName);
+      const answer = field?.referenceTo ? byTarget?.get(field.referenceTo) : undefined;
+      const record = answer?.records.get(id);
+      return answer && record ? referencedRecordTitle(answer.def, record, field?.displayField) : undefined;
+    },
+    [byTarget, fields],
+  );
 }
 
 /** The words for one sort direction on a field of `type`: time, size or the alphabet. */
@@ -335,12 +462,27 @@ export interface ConditionChipRowProps {
   onFiltersChange: (next: FilterBuilderRowGroup) => void;
   /** The view's own filter, drawn as locked chips. */
   viewFilter?: unknown;
+  /**
+   * Fields whose conditions in `viewFilter` the HOST draws itself (the data
+   * page's 「Filtered by」 tags for its address conditions): they still filter,
+   * and the row draws no locked chip for them, so each condition shows once.
+   */
+  hostDrawnFields?: ReadonlyArray<string>;
+  /** Where the names of the records a lookup condition points at are read. */
+  dataSource?: Pick<DataSource, 'find' | 'getObjectSchema'> | null;
   shownFields?: ReadonlyArray<string>;
   renderAdvanced: () => React.ReactNode;
-  /** Back to the view as saved. Drawn only when passed. */
+  /**
+   * Every sort level in one panel, drawn by the host (the Sort panel's
+   * 「all sort levels」 step): a sort chip opens it (objectstack#35876). The
+   * chip itself never changes the sort.
+   */
+  renderSortLevels: () => React.ReactNode;
+  /**
+   * Back to the view as saved. Drawn only when passed: the host passes it
+   * only while the reader has something of their own to reset.
+   */
   onReset?: () => void;
-  /** The list on screen is the view's own: 「Reset」 is drawn but disabled. */
-  resetDisabled?: boolean;
   /** Extra chips the host draws after the filter chips (its own quick filters). */
   trailing?: React.ReactNode;
   className?: string;
@@ -357,10 +499,12 @@ export function ConditionChipRow({
   filterFields,
   onFiltersChange,
   viewFilter,
+  hostDrawnFields,
+  dataSource,
   shownFields,
   renderAdvanced,
+  renderSortLevels,
   onReset,
-  resetDisabled,
   trailing,
   className,
 }: ConditionChipRowProps) {
@@ -368,8 +512,18 @@ export function ConditionChipRow({
   const [openChip, setOpenChip] = React.useState<string | null>(null);
   const dragFrom = React.useRef<number | null>(null);
 
-  const viewChips = React.useMemo(() => readViewConditions(viewFilter), [viewFilter]);
+  // Keyed on the names, not on the array the host may rebuild every render.
+  const hostDrawnKey = (hostDrawnFields ?? []).join('\u0000');
+  const viewChips = React.useMemo(() => {
+    const hostDrawn = new Set(hostDrawnKey ? hostDrawnKey.split('\u0000') : []);
+    return readViewConditions(viewFilter).filter((chip) => !(chip.field && hostDrawn.has(chip.field)));
+  }, [viewFilter, hostDrawnKey]);
   const appliedRows = (filters.conditions ?? []).filter(isQuickRowApplied);
+  const namedConditions = [
+    ...viewChips.flatMap((chip) => (chip.anyOf ? chip.anyOf : [chip])),
+    ...appliedRows,
+  ];
+  const nameOf = useLookupValueNames(dataSource, filterFields, namedConditions);
   const independent = chipsAreIndependent(filters);
   const hasChips = sort.length > 0 || viewChips.length > 0 || appliedRows.length > 0 || !!trailing;
   if (!hasChips) return null;
@@ -432,27 +586,43 @@ export function ConditionChipRow({
             data-order={item.order}
             data-priority={index + 1}
           >
-            <button
-              type="button"
-              className="inline-flex min-w-0 items-center gap-1"
-              onClick={() => onSortChange(toggleSortOrder(sort, item.id))}
-              onKeyDown={(event) => {
-                if (!event.altKey) return;
-                if (event.key === 'ArrowLeft' && index > 0) {
-                  event.preventDefault();
-                  moveSort(index, index - 1);
-                } else if (event.key === 'ArrowRight' && index < sort.length - 1) {
-                  event.preventDefault();
-                  moveSort(index, index + 1);
-                }
-              }}
-              aria-label={t('listConditions.chips.toggleSort', { label: `${label} ${direction}` })}
-              title={direction}
-              data-testid={`sort-chip-toggle-${item.field}`}
-            >
-              <Arrow className="h-3 w-3 shrink-0" aria-hidden="true" />
-              <span className="truncate">{label}</span>
-            </button>
+            {(() => {
+              const chipKey = `sort:${item.id}`;
+              const chipButton = (
+                <button
+                  type="button"
+                  className="inline-flex min-w-0 items-center gap-1"
+                  onKeyDown={(event) => {
+                    if (!event.altKey) return;
+                    if (event.key === 'ArrowLeft' && index > 0) {
+                      event.preventDefault();
+                      moveSort(index, index - 1);
+                    } else if (event.key === 'ArrowRight' && index < sort.length - 1) {
+                      event.preventDefault();
+                      moveSort(index, index + 1);
+                    }
+                  }}
+                  aria-label={`${label} ${direction}`}
+                  title={direction}
+                  data-testid={`sort-chip-open-${item.field}`}
+                >
+                  <Arrow className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+              // objectstack#35876 — the chip opens every sort level in one
+              // panel; it does not flip the direction.
+              return (
+                <Popover open={openChip === chipKey} onOpenChange={(open) => setOpenChip(open ? chipKey : null)}>
+                  <PopoverTrigger asChild>{chipButton}</PopoverTrigger>
+                  <PopoverContent align="start" className={POPOVER_CLASS} data-testid={`condition-popover-${chipKey}`}>
+                    <div className="w-[calc(100vw-2rem)] max-w-[600px] p-3 sm:w-[600px] sm:p-4" data-testid="sort-chip-panel">
+                      {renderSortLevels()}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              );
+            })()}
             <button
               type="button"
               className="ml-0.5 rounded-full text-muted-foreground hover:text-foreground"
@@ -467,7 +637,7 @@ export function ConditionChipRow({
       })}
 
       {viewChips.map((chip) => {
-        const text = viewChipText(chip, filterFields, t);
+        const text = viewChipText(chip, filterFields, t, nameOf);
         return (
           <span
             key={chip.key}
@@ -487,7 +657,7 @@ export function ConditionChipRow({
       {independent
         ? appliedRows.map((row) => {
             const field = fieldOf(filterFields, row.field);
-            const text = chipText(field, row.field, row.operator, row.value, t);
+            const text = chipText(field, row.field, row.operator, row.value, t, nameOf);
             return (
               <span
                 key={row.id}
@@ -557,7 +727,6 @@ export function ConditionChipRow({
           size="sm"
           className="ml-auto h-6 shrink-0 gap-1 px-1.5 text-[13px] text-muted-foreground"
           onClick={onReset}
-          disabled={resetDisabled}
           title={t('listConditions.chips.resetHint')}
           data-testid="condition-reset"
         >

@@ -37,6 +37,8 @@ import {
   parseIndexDdl,
   planDeclaredRenames,
   latestPerDirectiveOf,
+  findMisplacedFixedReadLeaf,
+  misplacedFixedReadLeafMessage,
   type DeclaredRenameCarry,
   type DeclaredRenamePlan,
   type DriftOp,
@@ -56,7 +58,7 @@ import { RemoteTransport, remoteReadableIdsSemiJoin, type RemoteTenantScope } fr
 import { planRelaxedColumnDefinition } from './remote-relax-not-null.js';
 // [ADR-0139 D3] The walk, the rewrite and the refusal for a `ReadableIds` leaf —
 // shared with the local face this class inherits, `driver-memory` and `driver-mongodb`.
-import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
+import { findMisplacedReadableIds, refuseFixedReadLeafOnce, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
 import {
   backfillRemoteCanonicalColumns,
   type RemoteBackfillClient,
@@ -1962,6 +1964,10 @@ export class TursoDriver extends SqlDriver {
       // on the engine's `find()` + in-memory path, which answers it; local and
       // embedded-replica modes run SqlDriver's own compile and inherit `true`.
       ...(this.transportMode === 'remote' ? { aggregationFilter: false } : {}),
+
+      // [ADR-0155 D4] `fixedReadLeaves` is inherited in every mode: local and
+      // embedded-replica modes run SqlDriver's compile, and remote mode's
+      // transport compiles the leaf with its own (`fixedInnerReadSQL`).
     };
   }
 
@@ -3506,6 +3512,14 @@ export class TursoDriver extends SqlDriver {
   private toRemoteWhere(object: string, where: unknown, options: DriverOptions | undefined): unknown {
     const misplaced = findMisplacedReadableIds(where, true);
     if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
+    // [ADR-0155 D1, D4] A fixed-read leaf anywhere but as a field's `$in`
+    // comparand, refused as the local face's `applyFilters` refuses it. One
+    // that is placed passes through by reference (`replaceComposedReadableIds`
+    // and `toRemoteFilter` copy around it), and the transport compiles it.
+    const misplacedLeaf = findMisplacedFixedReadLeaf(where);
+    if (misplacedLeaf) {
+      throw refuseFixedReadLeafOnce(this.readableIdsDriverName, misplacedFixedReadLeafMessage(misplacedLeaf), this.logger, this.fixedReadLeafRefusalLog);
+    }
     const resolved = replaceComposedReadableIds(where, (leaf) => remoteReadableIdsSemiJoin({
       object: leaf.object,
       table: this.remoteTableFor(leaf.object, 'ReadableIds'),
@@ -3858,6 +3872,11 @@ export class TursoDriver extends SqlDriver {
       // The column-map refusal runs once, before any row, as it did when the
       // batch was handed down whole.
       this.remoteTableFor(object, 'bulkCreate');
+      // Every row's storage form is checked before the first row is written,
+      // so a row `formatInput` refuses (a boolean field written as a value that
+      // spells no boolean) refuses the batch with nothing written, as the local
+      // face's single INSERT does. Each `create` below forms its row again.
+      for (const row of data) this.toRemoteWriteForms(object, row);
       // The batch is written one row at a time through this class's own
       // `create`, so each row's record number is issued on the layer that holds
       // the schema and each row's #5495 collision re-seed is its own.
