@@ -145,6 +145,10 @@ describe('judgeRecord — ⛔ a not-measured turn is not a pass, even under a `p
     expect(judgeRecord(asRecord(edited)).reasons).toEqual([
       `${CARD_ID}.scratch.run operation ${String(first!.operation)} as ${String(first!.persona)}: not measured — seed: needs democrm_account ac1, which the app refused`,
     ]);
+    // A confirmed write not measured (no confirmation service) is no reason: the operation was judged on its ask.
+    const confirmTurn = { notMeasured: 'the action door has no pending-confirmation service on this server' };
+    const unconfirmed = { ...record, cardRun: { ...cardRun, modes: cardRun.modes.map((m) => (m === scratch ? { ...m, run: { ...m.run, operations: [{ ...first, confirmTurn }, ...rest] } } : m)) } };
+    expect(judgeRecord(asRecord(unconfirmed))).toMatchObject({ passed: true, reasons: [] });
   });
 });
 
