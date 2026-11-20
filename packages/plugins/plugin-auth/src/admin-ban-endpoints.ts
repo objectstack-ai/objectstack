@@ -96,9 +96,9 @@
  * A ban or an unban that committed writes the sibling doors' admin audit row
  * (`writeAdminAudit`, action `update`, event `user.admin_banned` /
  * `user.admin_unbanned`); a refused one writes none. plugin-audit's mirror row
- * for the column write does not stand in for it: without the admin plugin the
- * engine writer carries no attributed user, so that row names no
- * administrator, and on neither path does it carry the event or `hostNotified`.
+ * for the column write names the administrator on both writers (the engine
+ * one through `authSystemWriteContext`), but carries neither the event nor
+ * `hostNotified`, so it does not stand in for this row.
  */
 
 import {

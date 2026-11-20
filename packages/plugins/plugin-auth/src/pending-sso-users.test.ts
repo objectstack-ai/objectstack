@@ -1597,6 +1597,26 @@ describe('[#35440] admin/ban-user and admin/unban-user write an admin audit row 
     });
   }
 
+  it('the ban columns\' write itself names the admin for plugin-audit\'s mirror row, with the admin plugin off as on', async () => {
+    for (const adminPlugin of [false, true]) {
+      const s = await stage({ adminPlugin });
+      const contexts: any[] = [];
+      const update = s.engine.update.bind(s.engine);
+      s.engine.update = (async (name: string, data: any, options?: any) => {
+        if (name === 'sys_user' && 'banned' in data) contexts.push(options?.context);
+        return update(name, data, options);
+      }) as typeof s.engine.update;
+
+      expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+      expect((await s.fire('/admin/unban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
+
+      expect(contexts, `admin plugin ${adminPlugin ? 'on' : 'off'}`).toEqual([
+        expect.objectContaining({ isSystem: true, attributedUserId: s.ids.admin }),
+        expect.objectContaining({ isSystem: true, attributedUserId: s.ids.admin }),
+      ]);
+    }
+  });
+
   it('with no host wired the rows carry hostNotified false', async () => {
     const s = await stage({ host: 'none' });
     expect((await s.fire('/admin/ban-user', { userId: s.ids.member }, s.bearers.admin)).status).toBe(200);
