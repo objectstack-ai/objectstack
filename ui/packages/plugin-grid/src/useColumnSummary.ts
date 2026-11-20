@@ -527,9 +527,9 @@ function formatSummaryLabel(
     // `percent` field it reads like, as the list cell hands it on
     // (`FormulaCellRenderer`): `resolveFieldScale` keys its absent-`scale` row
     // on the type, and a formula's own type has none, so an undeclared width
-    // would fall to `formatPercent`'s private default while the cell read `0`.
-    // Every column that reaches this arm is a percent, so the face below
-    // changes the type of the formula alone.
+    // takes the platform's percent width rather than `formatPercent`'s own
+    // parameter default. Every column that reaches this arm is a percent, so
+    // the face below changes the type of the formula alone.
     const percentFace = { ...column, type: 'percent' };
     const decimals = resolveFieldScale(percentFace);
     formatted = formatPercent(value, percentCellScale(percentFace), decimals, displayLocale);
