@@ -15,7 +15,9 @@ import type { SemanticMigration } from '../../types.js';
 // What a field group may name is unchanged (`isGroupPlaceableRelationship`
 // accepts exactly what #35597 accepted), so no write that was accepted is
 // refused. Semantic only, with no D2 conversion: whether an author wants the
-// table back in the overview is theirs to say, by a group.
+// table back in the overview is theirs to say, by a group. The printed guidance
+// below names no tracker id (the os migrate meta guidance pin); the previous
+// default it names is #35597's, and the approval lock is #35599's ruling A.
 export const entry: SemanticMigration = {
   id: 'master-detail-related-list-tab-by-default',
   surface:
@@ -39,13 +41,13 @@ export const entry: SemanticMigration = {
   reason:
     'The maintainer ruled that a master-detail child should not be put into the overview by its relationship '
     + 'type alone: 「主从子表我认为不应该自动申明放在概览中，除非我通过 fieldGroup 强制指定」, while keeping '
-    + 'what was built: 「大部分场景不需要，但是我们已经开发好的功能也没必要作废」 (#35889). #35597 had made every '
-    + 'master_detail FK with no relatedList a body table. Now body-ness comes from `relatedList: \'primary\'` '
+    + 'what was built: 「大部分场景不需要，但是我们已经开发好的功能也没必要作废」. Before this change every '
+    + 'master_detail FK with no relatedList was a body table. Now body-ness comes from `relatedList: \'primary\'` '
     + 'on the FK, or from a parent field group that places the list. Nothing is refused that was accepted: a '
     + 'field group may still name a plain master_detail child, and that is now what makes it a body table. '
     + 'There is no D2 conversion, since adding a group to every parent would put back the default the '
     + 'maintainer removed. A STORED object row is not rewritten and loads unchanged; its record page draws '
-    + 'the child as a tab. The child\'s rows, their approval lock (#35599, ruling A) and the parent\'s summary '
+    + 'the child as a tab. The child\'s rows, their approval lock and the parent\'s summary '
     + 'fields are unchanged. In-repo census before the change: no example, platform object or HotCRM object '
     + 'declared a field group relatedList. Moving to a tab: the showcase task (project), field zoo '
     + '(f_master_detail), project membership (team, project), invoice line and expense line children, the CRM '
