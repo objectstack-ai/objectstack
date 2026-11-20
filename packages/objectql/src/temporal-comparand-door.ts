@@ -90,12 +90,18 @@
  *   it in passing"); measured, `$gte ""` binds as `''` and returns every
  *   non-null row — 51 of 51, not the 38 the card's table records, which is a
  *   transcription error its own prose corrects.
- * - **`{placeholder}` strings are stepped around**, not judged. This gate runs
- *   BEFORE `resolveWhereTokens` (which is where it must run — the refusal has
- *   to precede the driver), so judging one would refuse `{30_days_ago}`, the
- *   platform's own correct spelling. Unknown tokens keep their existing loud
- *   refusal one layer down, and [#20844] a known one is judged once resolved,
- *   by its year alone (below).
+ * - **A `{placeholder}` is judged per kind** (`@objectstack/core`'s
+ *   `PLACEHOLDER_AT_THE_TEMPORAL_RULE`, one row per `classifyFilterToken`
+ *   kind). This gate runs BEFORE `resolveWhereTokens` (which is where it must
+ *   run — the refusal has to precede the driver). A date macro is stepped
+ *   around, because judging it as written would refuse `{30_days_ago}`, the
+ *   platform's own correct spelling; [#20844] it is judged once resolved, by
+ *   its year alone (below). [#34938] A period key (`{current_iso_week}`) and
+ *   [#35394] a context token (`{current_user_id}`) are judged AS WRITTEN: each
+ *   resolves to text no temporal rule reads (a week key, an id), so each takes
+ *   the refusal its literal takes. An unknown or a record-context token is
+ *   stepped around and left to the resolver, which refuses it by name
+ *   (`FILTER_TOKEN_UNKNOWN` / `FILTER_TOKEN_UNRESOLVED`, 400).
  * - **Non-string comparands are not judged, save the year classes.** A number
  *   is epoch milliseconds and a `Date` is an instant; the `datetime` and `time`
  *   rules read both, [#20480] a `time` column only when the instant's UTC year
@@ -140,7 +146,8 @@
  *
  * These are not junk: the rule reads each one, as the wrong value, so each
  * answered rows. Their refusal says so in its own words ({@link misreadClassOf})
- * rather than in the junk class's "compare false for EVERY row".
+ * rather than in the junk class's "compared as text: it may select every row,
+ * none or the wrong ones".
  *
  * ## [#20480] An instant on a `time` column outside the four-digit years
  *
@@ -188,8 +195,8 @@
  *
  * ## [#20844] A relative-date placeholder, judged by its year once resolved
  *
- * The door steps around a `{placeholder}`, so the year range never saw what
- * one resolved to. Measured before this on InMemoryDriver and SqlDriver on
+ * The door steps around a date macro, so the year range never saw what one
+ * resolved to. Measured before this on InMemoryDriver and SqlDriver on
  * SQLite, through `engine.find` and `POST /data/:object/query`, a `datetime`
  * field and two rows, one in 2026 and one in 1500:
  *
@@ -623,8 +630,8 @@ function yearClassOutside(kind: 'date' | 'datetime', value: unknown): YearClass 
 /**
  * [#20549] A comparand the storage rule READS, but not as the value it names —
  * the two readings the write door refused first, and `@objectstack/core`'s one
- * rule now refuses at both doors. Such a comparand does not compare false for
- * every row, as junk does: it answers rows, the wrong ones. Each class says
+ * rule now refuses at both doors. Such a comparand is not junk, which no rule
+ * reads at all: it is read, as the wrong value, and answers the wrong rows. Each class says
  * why, and what the value would have done, per position.
  */
 interface MisreadClass {
@@ -712,10 +719,11 @@ export function assertTemporalComparandsInterpretable(
   const hit = findUninterpretableTemporalComparand(schema, where, path);
   if (!hit) return;
   // [#20240] [#20264] A comparand whose year falls outside the kind's years
-  // gets words that say so. It does not compare false for every row as junk
-  // does: its text orders as no day or instant does, so it answers the WRONG
-  // rows (or, on PostgreSQL, a database error) — or [#20280], for a `datetime`
-  // in 0001..0999, it names a year MySQL's `DATETIME` does not document.
+  // gets words that say so. It is not junk, which is compared as text and may
+  // select every row, none or the wrong ones: its text orders as no day or
+  // instant does, so it answers the WRONG rows (or, on PostgreSQL, a database
+  // error) — or [#20280], for a `datetime` in 0001..0999, it names a year
+  // MySQL's `DATETIME` does not document.
   // [#27173] Each arm: the verdict, the prescription, then the consequence.
   const yearClass = yearClassOf(hit);
   if (yearClass) {
@@ -738,8 +746,8 @@ export function assertTemporalComparandsInterpretable(
     `${operation}('${object}'): filter on '${hit.field}' compares a declared ${hit.kind} `
     + `field against ${preview(hit.value)} at ${hit.path}, which is not a ${hit.kind} value `
     + `this platform can interpret. ${REMEDY[hit.kind]} The filter was NOT applied. As written `
-    + 'it would reach the driver, compare false for EVERY row, and return 200 with an empty '
-    + 'result — indistinguishable from "there is no data".',
+    + 'it would reach the driver and be compared as text: it may select every row, none or the '
+    + 'wrong ones (or raise a database error), an answer indistinguishable from a real one.',
   );
 }
 
@@ -817,8 +825,9 @@ export function assertHavingTemporalComparandsInterpretable(
   throw invalidFilterError(
     `aggregate('${object}'): ${column} compares against ${preview(hit.value)} at ${hit.path}, `
     + `which is not a ${hit.kind} value this platform can interpret. ${REMEDY[hit.kind]} The `
-    + '`having` was NOT applied. Compared with each group as written, it would keep no group or '
-    + 'every group, a 200 indistinguishable from a real answer.',
+    + '`having` was NOT applied. As written it would be compared with each group as text: it may '
+    + 'keep every group, none or the wrong ones (or raise a database error), an answer '
+    + 'indistinguishable from a real one.',
   );
 }
 
