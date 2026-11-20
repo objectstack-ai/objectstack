@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { Connector } from '@objectstack/spec/integration';
-import { createSlackConnector, type SlackConnectorOptions } from './slack-connector.js';
+import { createSlackClientService, createSlackConnector, type SlackConnectorOptions } from './slack-connector.js';
 
 /**
  * Minimal surface of the automation engine this plugin depends on — the
@@ -35,6 +35,8 @@ export class ConnectorSlackPlugin implements Plugin {
     name = 'com.objectstack.connector.slack';
     version = '1.0.0';
     type = 'standard' as const;
+    /** The client factory init() registers (`SlackClientService`), for the Slack DM channel. */
+    providesServices = ['slack'];
     // Ensure the automation engine (and its connector registry) is started first.
     dependencies = ['com.objectstack.service-automation'];
 
@@ -46,9 +48,12 @@ export class ConnectorSlackPlugin implements Plugin {
         this.options = options;
     }
 
-    async init(_ctx: PluginContext): Promise<void> {
-        // No services to register; the connector is registered in start() once
-        // the automation engine is available.
+    async init(ctx: PluginContext): Promise<void> {
+        // The client, for a token its caller holds: the messaging service's
+        // Slack DM channel sends with each organization's own bot token. The
+        // flow connector is registered in start(), once the automation engine
+        // is available.
+        ctx.registerService('slack', createSlackClientService(this.options));
     }
 
     async start(ctx: PluginContext): Promise<void> {

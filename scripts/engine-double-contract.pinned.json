@@ -5337,6 +5337,21 @@
       "pinned": 2
     },
     {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/automation-notify-slack-composition.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/domains/catalog-activation-door.test.ts",
       "verb": "update",
       "pinned": 1
@@ -5999,6 +6014,21 @@
     {
       "file": "packages/services/service-messaging/src/recipient-resolver.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/slack-channel-composition.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

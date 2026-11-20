@@ -517,6 +517,13 @@ export interface ApprovalMessagingSurface {
    * notification's title and body alone.
    */
   registerBuiltinTemplates?(templates: readonly ApprovalBuiltinTemplate[]): void;
+  /**
+   * [#34730] The channel mounted under `id` right now
+   * (`MessagingService.getChannel`), or `undefined`. Read to ask for `slack`
+   * only while the composition mounts it. Optional — a messaging service
+   * without it is never asked for `slack`.
+   */
+  getChannel?(id: string): unknown;
 }
 
 /** [#30509] One code-declared notification template, as the messaging service takes it. */
@@ -2491,8 +2498,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           severity: 'info', ...event, payload, keyedText: part.keyedText, audience: part.audience,
           // [#30509] The approval lifecycle's own notices also go by e-mail;
           // every other approval topic stays inbox-only. Preferences filter as
-          // for any channel.
-          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { channels: [...APPROVAL_EMAIL_CHANNELS] } : {}),
+          // for any channel. [#34730] A request also goes by Slack DM to an
+          // approver who connected Slack (anyone else is skipped, not failed),
+          // asked only while the composition mounts the channel: without
+          // connector-slack, asking would log a refusal on every request.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic)
+            ? {
+              channels: [
+                ...APPROVAL_EMAIL_CHANNELS,
+                ...(event.topic === 'approval.requested'
+                  && this.messaging.getChannel?.('slack') ? ['slack'] : []),
+              ],
+            }
+            : {}),
           ...(dedupKey ? { dedupKey } : {}),
           ...(person ? { actorId: person } : {}),
           ...(organization ? { organizationId: organization } : {}),
