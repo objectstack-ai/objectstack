@@ -13,6 +13,9 @@
 // ADR-0112 is `code` AND `status`; every refusal assertion carries both.
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not in the first case's clocked window: the manager's
+// request routing loads it dynamically (`check:test-source-alias`).
+import '@objectstack/core/egress';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import type { AuthSessionAuditEventInput } from './auth-session-audit';
