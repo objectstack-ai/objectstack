@@ -722,10 +722,13 @@ describe("an account's first password is told by the request that created the ac
   /** A host database hook that holds its write past a second. */
   const hold = () => new Promise<void>((resolve) => setTimeout(resolve, 1_200));
 
-  it('a host hook holds the credential row: the sign-up still creates the first password, and the verification link it mails signs in', async () => {
+  // The vendor stamps each row when its create is called, before that row's
+  // own `create.before` hooks run: a hook held on the account's creation
+  // falls between the account's stamp and its credential row's.
+  it("a host hook holds the account's creation: the sign-up still creates the first password, and the verification link it mails signs in", async () => {
     const s = await stage({
       emailVerification: { autoSignInAfterVerification: true, sendOnSignUp: true },
-      databaseHooks: { account: { create: { before: hold } } },
+      databaseHooks: { user: { create: { before: hold } } },
     });
     expect(await s.changedAt(), 'the password the sign-up created is the first one').toBeUndefined();
     await s.engine.update('sys_user', { id: s.userId, email_verified: false }, SYS);
@@ -744,7 +747,7 @@ describe("an account's first password is told by the request that created the ac
     expect(await s.changedAt()).toBeDefined();
   }, 60_000);
 
-  it("a host hook holds the account's creation: an administrator's create-user still creates the first password", async () => {
+  it("a host hook runs long after the account's creation: an administrator's create-user still creates the first password", async () => {
     const s = await stage({ databaseHooks: { user: { create: { after: hold } } } });
     const res = await s.fire('/admin/create-user', { email: 'held@example.com', name: 'Held', password: SECOND }, s.bearer(s.adminBearer));
     expect(res.status, await res.clone().text()).toBe(200);
