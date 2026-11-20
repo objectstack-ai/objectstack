@@ -27,7 +27,7 @@ import { suggestRename } from '../shared/rename-guess';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
-import { isRecordPageBuiltinTab } from './related-list-entry';
+import { RECORD_PAGE_BUILTIN_TABS } from './related-list-entry';
 // [#23809] The stage-field option-kind rule, in its own module so the AI
 // blueprint object (`ai/solution-blueprint.zod.ts`) runs this same refinement.
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
@@ -1268,6 +1268,13 @@ export const LifecycleSchema = lazySchema(() => strictObject({
  */
 const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
 
+/**
+ * The object form's `list`: any entry name but a built-in tab's
+ * (`RECORD_PAGE_BUILTIN_TABS`), which is written only bare. A pattern rather
+ * than a refinement, so the published JSON Schema refuses it too.
+ */
+const RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN = new RegExp(`^(?!(?:${RECORD_PAGE_BUILTIN_TABS.join('|')})$)`);
+
 const RELATED_LIST_ENTRY_NAME_MESSAGE =
   'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case';
 
@@ -1317,6 +1324,11 @@ export const RelatedListEntryObjectSchema = lazySchema(() => strictObject({
   },
 }, {
   list: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE })
+    .regex(RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN, {
+      message:
+        `${RECORD_PAGE_BUILTIN_TABS.map((n) => `'${n}'`).join(', ')} are built-in record-page tabs, drawn by their own ` +
+        'renderers: write one as its bare name (e.g. \'sys_attachment\'), never as { list }. A built-in tab takes no label or columns.',
+    })
     .describe('The relationship this entry names: a child object name (e.g. "quote_line"), or object.field when that child has more than one relationship to this object.'),
   label: z.string().min(1).optional()
     .describe("This list's title on the record page (its tab and its table heading). Wins over the child FK's relatedListTitle; absent = that key, else the child object's plural label."),
@@ -1326,16 +1338,6 @@ export const RelatedListEntryObjectSchema = lazySchema(() => strictObject({
       : undefined,
   }).min(1)).min(1).optional()
     .describe("This list's columns, as field names of the child object (e.g. ['product', 'quantity', 'amount']). Wins over the child FK's relatedListColumns; absent = that key, else the child object's derived columns. Used wherever this list is drawn: its tab, and the body table a field group places. A name that is no field of the child is refused where the child is known."),
-}).superRefine((entry, ctx) => {
-  if (isRecordPageBuiltinTab(entry.list)) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['list'],
-      message:
-        `'${entry.list}' is a built-in record-page tab, drawn by its own renderer: write it as the bare name '${entry.list}'. ` +
-        'A built-in tab takes no label or columns.',
-    });
-  }
 }));
 
 /**
@@ -4577,7 +4579,7 @@ const ObjectSchemaBase = strictObject(
    * (`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`) and the
    * synthesized page's tab list (`buildDefaultTabs`).
    */
-  relatedLists: z.array(RelatedListEntrySchema).optional().describe('The record page\'s tabs beside the overview, in order. Absent: every related list shows (owned master_detail children, then lookup children), then attachments, approvals and the activity stream, as before. Declared: only the lists named here show, in this order; leaving one out hides its tab. Each entry is a child object name (e.g. "task"), object.field when that child has more than one relationship to this object (e.g. "event.related_to"), or a built-in tab: "sys_attachment" (attachments, still only when enable.files is on; not shown when unlisted), "sys_approval_request" (approvals, still only when the record has requests; when unlisted it follows the listed tabs), "sys_activity" (the activity stream of activities, discussion and changes; when unlisted it comes last). An entry may instead be { list, label?, columns? } to give that list its own title and child-field columns (wins over the child FK\'s relatedListTitle / relatedListColumns, used wherever the list is drawn); a built-in tab is written only as its bare name. relatedList: false on the FK still hides a list; body tables placed by fieldGroups are not hidden by this list. A name whose child is in the stack with no inbound lookup / master_detail field is refused everywhere; one whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it and the record page places nothing for it. A columns name that is no field of the child is refused.'),
+  relatedLists: z.array(RelatedListEntrySchema).optional().describe('The record page\'s tabs beside the overview, in order. Absent: every related list shows (owned master_detail children, then lookup children), then attachments, approvals and the activity stream, as before. Declared: only the lists named here show, in this order; leaving one out hides its tab. Each entry is a child object name (e.g. "task"), object.field when that child has more than one relationship to this object (e.g. "event.related_to"), or a built-in tab: "sys_attachment" (attachments, still only when enable.files is on; not shown when unlisted), "sys_approval_request" (approvals, still only when the record has requests; when unlisted it follows the listed tabs), "sys_activity" (the activity stream of activities, discussion and changes; when unlisted it comes last). An entry may instead be { list, label?, columns? } to give that list its own title and child-field columns (wins over the child FK\'s relatedListTitle / relatedListColumns, used wherever the list is drawn); a built-in tab is written only as its bare name. relatedList: false on the FK still hides a list; body tables placed by fieldGroups are not hidden by this list. A name whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere; one whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it and the record page places nothing for it. A columns name that is no field of the child is refused.'),
   /**
    * [ADR-0085] Semantic role: the field that represents the record's LINEAR
    * lifecycle (an ordered pipeline / stage progression). A string names the

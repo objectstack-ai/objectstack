@@ -4739,6 +4739,45 @@ const RELATED_LIST_GROUP_NOT_BODY_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-column-unknown',
+  covers: "the columns a relatedLists entry may name",
+  paragraphs: [
+    'A `relatedLists` entry may be written `{ list, label, columns }` to give that related list its own ' +
+      'title and columns on the parent object. The columns are field names of the CHILD object, the one ' +
+      'whose rows the list shows, exactly as the child FK\'s `relatedListColumns` names them; they win over ' +
+      'that key wherever the list is drawn.',
+    'A column that is no field of the child draws an empty column, silently, so it is an error on ' +
+      '`os validate`, `os build` and at the runtime publish gate. Judged against every child the entry ' +
+      'names whose fields this rule can see (the authored fields and the registry-injected columns); a ' +
+      'child outside the stack is not judged here.',
+  ],
+};
+
+const RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-attachments-off',
+  covers: "a relatedLists 'sys_attachment' entry on an object without files",
+  paragraphs: [
+    "`'sys_attachment'` in `relatedLists` places the record page's attachments tab. The tab is drawn only " +
+      'for an object that enables files (`enable.files: true`), the same gate the server enforces on ' +
+      'attachment rows, so on an object without files the entry places nothing.',
+    'A warning, not an error: the entry is not wrong in itself and becomes live the moment the object ' +
+      "turns files on. Enable files to show the tab, or remove `'sys_attachment'`.",
+  ],
+};
+
+const RELATED_LIST_STREAM_PART_EXPLANATION: RuleExplanation = {
+  rule: 'related-list-stream-part',
+  covers: 'a relatedLists entry naming a part of the activity stream',
+  paragraphs: [
+    "The record page draws activities, the discussion and field changes as ONE stream, whose tab " +
+      "`relatedLists` names `'sys_activity'`. `'sys_comment'` and `'sys_audit_log'` are parts of that " +
+      'stream, not tabs of their own, so an entry naming one places nothing.',
+    "A warning, prescribing `'sys_activity'`. Which parts the stream shows is still the object's own " +
+      'switches (`enable.feeds`, `enable.activities`, `trackHistory`).',
+  ],
+};
+
 // ── Object-name references (`validate-object-references.ts`) ────────────────
 
 /** The sites judged — both object-reference ids. */
@@ -6596,6 +6635,9 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [OBJECT_FIELD_REF_UNKNOWN_EXPLANATION.rule]: OBJECT_FIELD_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_REF_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_REF_UNKNOWN_EXPLANATION,
   [RELATED_LIST_GROUP_NOT_BODY_EXPLANATION.rule]: RELATED_LIST_GROUP_NOT_BODY_EXPLANATION,
+  [RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION.rule]: RELATED_LIST_COLUMN_UNKNOWN_EXPLANATION,
+  [RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION.rule]: RELATED_LIST_ATTACHMENTS_OFF_EXPLANATION,
+  [RELATED_LIST_STREAM_PART_EXPLANATION.rule]: RELATED_LIST_STREAM_PART_EXPLANATION,
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
