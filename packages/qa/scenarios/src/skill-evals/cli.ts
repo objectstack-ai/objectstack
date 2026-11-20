@@ -351,6 +351,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       console.log(`skills: ${source.label} (${source.root})`);
       for (const b of bundles) console.log(`  ${b}: ${cases.filter((c) => c.bundle === b).length} case(s)`);
       const triggers = cases.filter((c) => c.shouldTrigger !== undefined);
+      for (const b of triggers.length ? (triggerField ?? []).filter((n) => !bundles.includes(n)) : []) console.log(`  ${b}: no case selected; a competitor in every trigger turn`);
       console.log(`${turnsLine(cases.length - triggers.length, triggers.length, args.repeats)} = ${jobs.length} turn(s), ${args.concurrency} at once`);
       if (args.triggersOnly) console.log(`--triggers-only: ${selectBundles(catalog, args.skills, false, triggerField !== undefined).length - cases.length} behaviour case(s) of these bundles left out`);
       if (triggers.length) console.log(`trigger cases: ${triggers.filter((c) => c.shouldTrigger).length} should load the bundle, ${triggers.filter((c) => !c.shouldTrigger).length} should not`);
