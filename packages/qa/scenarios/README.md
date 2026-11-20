@@ -900,6 +900,7 @@ pnpm --filter @objectstack/scenarios skill-evals --dry-run      # the plan and t
 pnpm --filter @objectstack/scenarios skill-evals                # every case × 2 arms
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --repeats 3   # a touched skill
 pnpm --filter @objectstack/scenarios skill-evals --skills-from 18.5.0   # a published @objectstack/skills version's bundles and cases
+pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --triggers-only   # its trigger cases alone
 pnpm --filter @objectstack/scenarios skill-evals --regrade DIR  # re-draw a recorded round's verdicts from its records; no model call
 pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's own fixtures; no model call
 ```
@@ -931,6 +932,11 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   cases are all positive, or all negative, is refused. The summary reports trigger cases in their own section beside
   the behaviour cases, never inside their pass rates: per bundle, loaded when it should, left alone when it should
   not, the missed loads and the false loads.
+- **`--triggers-only`**: the selected bundles' trigger cases alone, on the with-skill arm, for a change that only
+  touches when a skill loads (its `description`). The summary is the trigger section alone, and `round.json` records
+  `scope.triggersOnly`, so `--regrade DIR` keeps that scope. A bundle `--skills` names with no trigger case is refused
+  (a published version before trigger cases has none), and so is the flag beside `--regrade` or `--self-test`.
+  `--dry-run` prints the reduced plan, and `--skills-from VERSION` runs it on the published bundles.
 - **Case files**: a case's `files` entries are paths under the bundle's `evals/files/` (anything else is refused, and
   so is a path the bundle lacks or one with a `.claude` segment, since `.claude/` is where the runner places the skill). Each is copied, a directory whole, into both arms' directories at its path below
   `evals/files/`, so the arms still differ only in the bundle. A case whose prompt states its context needs none.
