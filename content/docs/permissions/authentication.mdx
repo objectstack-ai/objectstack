@@ -394,7 +394,30 @@ beside the account's sessions, what the account added before it:
   account's password last changed.
 - **Device sign-ins.** Where device authorization is enabled, a device sign-in
   approved for the account and not yet collected by its device is ended.
+- **OAuth applications it registered.** Every OAuth application the account
+  registered (it is the application's owner) that is not disabled is
+  disabled, as a platform administrator's **Disable** action disables one: the
+  provider issues it no token, client-credentials tokens included, answers its
+  tokens inactive at introspection, and the MCP endpoint refuses every token
+  it holds, whoever authorized it. A platform administrator can enable it
+  again; its owner cannot. An application another account registered is not
+  touched.
+- **SCIM credentials it minted.** Every SCIM provisioning credential the
+  account minted that is still active is revoked, as **Revoke Credential**
+  revokes one: its bearer is refused from the next SCIM request on. A revoke
+  is one-way, so provisioning through that connection waits until a platform
+  administrator mints a new credential. A credential another administrator
+  minted, for the same connection or another, is not touched.
 - **Passkeys.** This build offers no passkey sign-in, so there are none to end.
+
+A reset keeps the single sign-on providers the account registered and its
+two-factor enrolment. Once it has ended the rest, it sends the account's
+address `auth.password_reset_notice`: how many API keys, linked sign-in
+accounts and authorized apps it ended, each OAuth application it disabled and
+each SCIM credential it revoked by name, and the single sign-on providers and
+the second factor it kept, so the owner can check them. The notice is
+best-effort: one that cannot be sent never fails the reset. It is a built-in
+auth template, overridable like the others.
 
 A reset that does not complete ends nothing; a key minted after the reset
 works as usual. A completed reset that cannot end one of these — a record that
@@ -406,9 +429,11 @@ resetting again ends what remains.
 A password change through `POST /api/v1/auth/change-password`, which proves
 the current password, ends none of these: an authorized app keeps its
 authorization and gets a new MCP access token with its refresh token, issued
-after the change. When the account still holds an API
-key that is neither revoked nor past its own expiry, a linked sign-in account
-or an authorized app after the change, the account's address is sent
+after the change. It disables no application and revokes no SCIM credential.
+When the account still holds an API key that is neither revoked nor past its
+own expiry, a linked sign-in account, an authorized app, an OAuth application
+it registered that is not disabled or a SCIM credential it minted that is
+still active after the change, the account's address is sent
 `auth.password_changed_notice`, naming each one, through the email service
 every auth mail goes through. The notice is best-effort: one that cannot be
 sent never fails the change. It is a built-in auth template, overridable like
@@ -416,8 +441,10 @@ the others.
 
 An administrator's forced reset with `revokeSessionsAndKeys` on and the
 operator's `os user set-password` end the API keys, the linked sign-in
-accounts, the authorized apps and the device sign-ins, as
-[Set / Reset a Password](#set--reset-a-password) describes.
+accounts, the authorized apps and the device sign-ins, disable the OAuth
+applications the account registered and revoke the SCIM credentials it
+minted, as [Set / Reset a Password](#set--reset-a-password) describes. They
+send no notice: each tells the one who ran it what it ended.
 
 #### Setting a first local password
 
@@ -1355,14 +1382,21 @@ the OAuth provider is enabled, ends every app authorized to the user (its
 consents, refresh tokens and stored access tokens are deleted, so the app asks
 to be authorized again and an MCP access token is refused on its next request)
 and, where device authorization is enabled, every device sign-in approved for
-the user and not yet collected. A suspected compromise leaves no live
-credential behind. Pass `revokeSessionsAndKeys: false` for a routine reset,
+the user and not yet collected. It also disables every OAuth application the
+user registered and revokes every SCIM credential the user minted, as a
+self-service reset does; an application another account registered and a
+credential another administrator minted are not touched, and the user's
+single sign-on providers and two-factor enrolment are kept. A suspected
+compromise leaves no live credential behind. Pass `revokeSessionsAndKeys: false` for a routine reset,
 which ends none of these; as after any password change, an MCP access token
 issued before it is refused and the app gets a new one with its refresh token. The response reports what was ended
-(`revoked: { sessions, apiKeys, signInAccounts, authorizedApps, failed, complete }`),
-and revoked keys stay revoked after the password change. The operator's
-`os user set-password` ends the same, reading the authorized apps and device
-sign-ins the project database holds.
+(`revoked: { sessions, apiKeys, signInAccounts, authorizedApps, ownedApps, scimCredentials, failed, complete }`,
+`ownedApps` counting the applications disabled and `scimCredentials` the
+credentials revoked; the ledger row carries the same counts), and revoked keys
+stay revoked after the password change. The operator's `os user set-password`
+ends the same, reading the authorized apps, device sign-ins, registered
+applications and minted credentials the project database holds, and reports
+each count.
 
 #### Bulk Import Users
 
@@ -1634,6 +1668,16 @@ SCIM request (at most once a minute; a refused request records nothing), and
 its `token_hint` tells the two rows apart: the old one is safe to revoke once
 its `last_used_at` stops advancing while the new one's does. Each mint and each revoke writes one `sys_audit_log` row naming the
 administrator and the connection, never the credential.
+
+A credential records the administrator who minted it (`user_id`). A completed
+password reset of that administrator's account, whether self-service, an
+administrator's forced reset with `revokeSessionsAndKeys` on, or
+`os user set-password`, revokes every credential the account minted that is
+still active, as this revoke does ([What a password reset ends, and what a
+change keeps](#what-a-password-reset-ends-and-what-a-change-keeps)). Provisioning
+through the connection waits until a platform administrator mints a new
+credential; another administrator's credential for the same connection keeps
+working, so a connection with two credentials is not paused.
 
 #### When the identity provider deactivates a user
 
