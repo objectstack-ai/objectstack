@@ -128,11 +128,10 @@ import { ExecutionContext, type InstalledPackageSource } from '@objectstack/spec
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 // [#20157] The judge-only filter-admission member's verdict and options.
-import type { EngineFilterJudgement, EngineFilterJudgementOptions, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
+import type { EngineFilterJudgement, EngineFilterJudgementOptions, IObjectQLEngine, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
-  type IObjectQLEngine,
   type EngineTransactionInfo,
   type EngineTransactionOptions,
   Logger,
