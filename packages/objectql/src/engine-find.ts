@@ -45,6 +45,7 @@ import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
 import { FindOneHookResultNotRecordError, isFindOneResultShape } from './verb-hook-result-shape.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
+import { atFixedReadLeafDoor } from './fixed-read-leaf-seam.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { PLATFORM_PROVISIONED_COLUMNS, declaredColumnSet, rowsWithDeclaredColumnsOnly, rowsWithSelectedColumnsAnswered, selectedStoredColumns, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import {
@@ -56,7 +57,6 @@ import {
   withoutFormulaWidening, writeFailureLogMeta,
 } from './engine-top-level.js';
 import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
-import { atFixedReadLeafDoor } from './fixed-read-leaf-seam.js';
 import type { ObjectQL } from './engine.js';
 
 /**
