@@ -28,7 +28,6 @@
  * are different questions, and only one of them moved.
  */
 
-import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { recordsOf } from './object-graph.js';
 
@@ -215,17 +214,19 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
       if (unprovisioned.has(entry)) findings.push(unprovisionedPointer('highlightFields', entry));
     }
 
-    // ── (d) declared group fully shadowed by the detail highlight strip ──
-    // Detail pages render the first RECORD_HIGHLIGHTS_MAX highlightFields
-    // (after the title leaves the list) as the top strip and HIDE those
-    // fields from the details body. The count is the spec constant the record
-    // page synthesizer cuts with, so the verdict and the screen cannot drift
-    // apart; a literal here once judged 4 while the page drew 6, so a group
-    // emptied by the 5th or 6th highlight passed. The record's title field is
-    // the page H1 and never renders in the body either. A group whose every
-    // visible member is covered by strip ∪ title therefore renders on FORMS
-    // but silently never on detail pages — legal, but almost never what the
-    // author pictured when they declared the group.
+    // ── (d) declared group fully shadowed on the detail page ──
+    // The record's title field is the page H1 and never renders in the
+    // details body. A group whose every visible member is the title therefore
+    // renders on FORMS but silently never on detail pages — legal, but almost
+    // never what the author pictured when they declared the group.
+    //
+    // The highlight strip no longer counts (objectstack#35849): the default
+    // record page draws no strip and leaves every grouped field in its group
+    // (objectstack#35891), so a highlighted field is drawn in the body like
+    // any other. The rule used to hide the first six (RECORD_HIGHLIGHTS_MAX)
+    // highlights from the body too, and judging that now would warn about
+    // groups the page draws. Its reach is unchanged: objects that declare
+    // `highlightFields`.
     const declaredStrings = highlights.filter(
       (h): h is string => typeof h === 'string' && h.length > 0,
     );
@@ -243,10 +244,7 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
         .find((v): v is string => typeof v === 'string' && v.length > 0 && fieldNames.has(v));
       const titleField = declaredTitle
         ?? ['name', 'full_name', 'title', 'subject', 'display_name'].find((c) => fieldNames.has(c));
-      const stripSet = new Set(
-        declaredStrings.filter((h) => h !== titleField).slice(0, RECORD_HIGHLIGHTS_MAX),
-      );
-      const hiddenFromBody = new Set(stripSet);
+      const hiddenFromBody = new Set<string>();
       if (titleField) hiddenFromBody.add(titleField);
 
       for (const key of declaredGroups) {
@@ -263,12 +261,10 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
           path: `${path}.fieldGroups`,
           message:
             `${objName}: every field in group "${key}" (${members.join(', ')}) is ` +
-            `hoisted into the detail highlight strip (or is the record title) — ` +
-            `the group renders on forms but never on detail pages`,
+            `the record title — the group renders on forms but never on detail pages`,
           hint:
-            `Keep at least one non-highlighted field in "${key}", or remove the ` +
-            `group if the strip already covers it. (Detail pages show the first ` +
-            `${RECORD_HIGHLIGHTS_MAX} highlightFields as the top strip and hide them from the body.)`,
+            `Add another field to "${key}", or remove the group. (Detail pages show ` +
+            `the record title as the page heading and leave it out of the body.)`,
         });
       }
     }

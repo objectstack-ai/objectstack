@@ -103,9 +103,11 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     expect(control.map((f) => [f.rule, f.message.includes('"lines"')])).toEqual([[FIELD_GROUP_EMPTY, true]]);
   });
 
-  it('flags a group fully shadowed by the highlight strip (rule d)', () => {
-    // `money`'s only member is also a highlight → detail bodies hide it, so
-    // the group never renders on detail pages.
+  // objectstack#35849 — the default record page draws no highlight strip and
+  // leaves every grouped field in its group (objectstack#35891), so a group
+  // whose members are all highlights IS drawn on the detail page. Rule (d)
+  // used to hide the first six highlights from the body and warn here.
+  it('rule d no longer counts highlights as hidden from the body (objectstack#35849)', () => {
     const findings = validateSemanticRoles(stack([{
       name: 'zoo',
       highlightFields: ['name', 'status', 'amount'],
@@ -116,67 +118,18 @@ describe('validateSemanticRoles (ADR-0085)', () => {
       fields: {
         name: { type: 'text' },
         status: { type: 'select', group: 'basics' },
-        code: { type: 'text', group: 'basics' }, // keeps basics visible
+        code: { type: 'text', group: 'basics' },
         amount: { type: 'number', group: 'money' },
       },
     }]));
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({
-      severity: 'warning',
-      rule: FIELD_GROUP_SHADOWED,
-      path: 'objects[0].fieldGroups',
-    });
-    expect(findings[0].message).toContain('money');
-    expect(findings[0].message).toContain('amount');
-  });
+    expect(findings).toEqual([]);
 
-  it('rule d counts the title field as hidden-from-body and respects the 6-entry strip cap', () => {
-    // A group holding only the record title never renders in the body even
-    // though the title is filtered OUT of the strip.
-    const titleOnly = validateSemanticRoles(stack([{
-      name: 'doc',
-      highlightFields: ['title', 'status'],
-      fieldGroups: [{ key: 'head', label: 'Head' }],
-      fields: { title: { type: 'text', group: 'head' }, status: { type: 'select' } },
-    }]));
-    expect(titleOnly.map((f) => f.rule)).toEqual([FIELD_GROUP_SHADOWED]);
-
-    // Entry #7 is beyond the strip (first 6 after the title filter), so a
-    // group containing it still renders → clean.
-    const beyondCap = validateSemanticRoles(stack([{
-      name: 'wide',
-      highlightFields: ['name', 'a', 'b', 'c', 'd', 'e', 'f', 'g'],
-      fieldGroups: [{ key: 'tail', label: 'Tail' }],
-      fields: {
-        name: {}, a: {}, b: {}, c: {}, d: {}, e: {}, f: {},
-        g: { type: 'text', group: 'tail' },
-      },
-    }]));
-    expect(beyondCap).toEqual([]);
-
-    // Hidden members don't keep a group "visible": a group whose only
-    // NON-hidden member is highlighted is still shadowed.
-    const hiddenMember = validateSemanticRoles(stack([{
-      name: 'mix',
-      highlightFields: ['name', 'amount'],
-      fieldGroups: [{ key: 'money', label: 'Money' }],
-      fields: {
-        name: {},
-        amount: { type: 'number', group: 'money' },
-        legacy: { type: 'text', group: 'money', hidden: true },
-      },
-    }]));
-    expect(hiddenMember.map((f) => f.rule)).toEqual([FIELD_GROUP_SHADOWED]);
-  });
-
-  // The record page hoists RECORD_HIGHLIGHTS_MAX (6) highlights and its body
-  // leaves them out. The rule used to cut at 4, so a group whose only member
-  // sat 5th or 6th was emptied on the page and passed the lint.
-  it('rule d judges the six highlights the record page hoists, not four', () => {
-    for (const position of [5, 6]) {
+    // Every one of the six strip positions: a group holding only that
+    // highlight is drawn, so nothing is flagged.
+    for (const position of [1, 2, 3, 4, 5, 6]) {
       const strip = ['a', 'b', 'c', 'd', 'e', 'f'];
       const owner = strip[position - 1];
-      const findings = validateSemanticRoles(stack([{
+      const clean = validateSemanticRoles(stack([{
         name: 'lead',
         highlightFields: strip,
         fieldGroups: [{ key: 'basics', label: 'Basics' }, { key: 'assignment', label: 'Assignment' }],
@@ -185,25 +138,50 @@ describe('validateSemanticRoles (ADR-0085)', () => {
           ...Object.fromEntries(strip.map((n) => [n, { type: 'text', ...(n === owner ? { group: 'assignment' } : {}) }])),
         },
       }]));
-      expect(findings, `position ${position}`).toHaveLength(1);
-      expect(findings[0]).toMatchObject({ severity: 'warning', rule: FIELD_GROUP_SHADOWED, path: 'objects[0].fieldGroups' });
-      expect(findings[0]?.message).toContain('"assignment"');
-      expect(findings[0]?.hint).toContain('first 6 highlightFields');
+      expect(clean, `position ${position}`).toEqual([]);
     }
+  });
 
-    // Control: four highlights out of a six-slot strip, every group keeping
-    // a member the body draws → clean.
-    const fourOfSix = validateSemanticRoles(stack([{
-      name: 'lead',
-      highlightFields: ['a', 'b', 'c', 'd'],
-      fieldGroups: [{ key: 'basics', label: 'Basics' }, { key: 'assignment', label: 'Assignment' }],
+  it('rule d still flags a group that holds only the record title', () => {
+    // A group holding only the record title never renders in the body: the
+    // title is the page heading.
+    const titleOnly = validateSemanticRoles(stack([{
+      name: 'doc',
+      highlightFields: ['title', 'status'],
+      fieldGroups: [{ key: 'head', label: 'Head' }],
+      fields: { title: { type: 'text', group: 'head' }, status: { type: 'select' } },
+    }]));
+    expect(titleOnly).toHaveLength(1);
+    expect(titleOnly[0]).toMatchObject({ severity: 'warning', rule: FIELD_GROUP_SHADOWED, path: 'objects[0].fieldGroups' });
+    expect(titleOnly[0]?.message).toContain('"head"');
+
+    // Hidden members don't keep a group "visible": a group whose only
+    // NON-hidden member is the title is still shadowed.
+    const hiddenMember = validateSemanticRoles(stack([{
+      name: 'mix',
+      highlightFields: ['amount'],
+      fieldGroups: [{ key: 'head', label: 'Head' }],
       fields: {
-        name: { type: 'text', group: 'basics' }, notes: { type: 'textarea', group: 'basics' },
-        a: { type: 'text', group: 'basics' }, b: { type: 'text' }, c: { type: 'text' },
-        d: { type: 'text', group: 'assignment' }, owner_id: { type: 'text', group: 'assignment' },
+        name: { type: 'text', group: 'head' },
+        amount: { type: 'number' },
+        legacy: { type: 'text', group: 'head', hidden: true },
       },
     }]));
-    expect(fourOfSix).toEqual([]);
+    expect(hiddenMember).toHaveLength(1);
+    expect(hiddenMember[0]?.rule).toBe(FIELD_GROUP_SHADOWED);
+
+    // Control: the same group with a second visible member is drawn.
+    const withSecond = validateSemanticRoles(stack([{
+      name: 'mix',
+      highlightFields: ['amount'],
+      fieldGroups: [{ key: 'head', label: 'Head' }],
+      fields: {
+        name: { type: 'text', group: 'head' },
+        code: { type: 'text', group: 'head' },
+        amount: { type: 'number' },
+      },
+    }]));
+    expect(withSecond).toEqual([]);
   });
 
   // #6326 — rule (d)'s title resolution used to read
@@ -219,28 +197,24 @@ describe('validateSemanticRoles (ADR-0085)', () => {
   // key can physically reach it; the assertion is that it is IGNORED. Do not
   // make the fixture schema-valid: that deletes the coverage.
   //
-  // The pair below is the discriminating one. Title resolution matters here
-  // because the title is filtered OUT of the 6-entry strip, so whether
-  // `ref_no` counts as the title decides whether entry #7 (`f`) lands inside
-  // the strip. Read as the title → strip is [a,b,c,d,e,f], group "tail"
-  // (only member `f`) is fully hidden → SHADOWED. Not read → strip is
-  // [ref_no,a,b,c,d,e], `f` still renders → clean. No field here is one of the
+  // The pair below is the discriminating one: group "head" holds only
+  // `ref_no`. Read as the title → the group is shadowed. Not read → `ref_no`
+  // is an ordinary field the body draws → clean. No field here is one of the
   // conventional fallbacks (name/full_name/title/subject/display_name), and
   // none is an injected system column, so nothing else can supply a title.
+  // (Before objectstack#35849 the pair discriminated through the six-entry
+  // strip instead; the strip no longer hides anything.)
   it('ignores primaryField in title resolution; nameField still resolves (#6326)', () => {
     const withPhantomKey = validateSemanticRoles(stack([{
       name: 'ledger_entry',
       primaryField: 'ref_no',
-      highlightFields: ['ref_no', 'a', 'b', 'c', 'd', 'e', 'f'],
-      fieldGroups: [{ key: 'tail', label: 'Tail' }],
-      fields: {
-        ref_no: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
-        c: { type: 'text' }, d: { type: 'text' }, e: { type: 'text' }, f: { type: 'text', group: 'tail' },
-      },
+      highlightFields: ['ref_no', 'a'],
+      fieldGroups: [{ key: 'head', label: 'Head' }],
+      fields: { ref_no: { type: 'text', group: 'head' }, a: { type: 'text' } },
     }]));
     // Goes red the moment the `primaryField` entry returns to the chain:
-    // `ref_no` would become the title, `f` would fall inside the strip, and
-    // one FIELD_GROUP_SHADOWED finding would appear.
+    // `ref_no` would become the title and one FIELD_GROUP_SHADOWED finding
+    // would appear.
     expect(withPhantomKey).toEqual([]);
 
     // Paired positive — the SAME shape with the one declarable pointer. This
@@ -249,12 +223,9 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     const withNameField = validateSemanticRoles(stack([{
       name: 'ledger_entry',
       nameField: 'ref_no',
-      highlightFields: ['ref_no', 'a', 'b', 'c', 'd', 'e', 'f'],
-      fieldGroups: [{ key: 'tail', label: 'Tail' }],
-      fields: {
-        ref_no: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
-        c: { type: 'text' }, d: { type: 'text' }, e: { type: 'text' }, f: { type: 'text', group: 'tail' },
-      },
+      highlightFields: ['ref_no', 'a'],
+      fieldGroups: [{ key: 'head', label: 'Head' }],
+      fields: { ref_no: { type: 'text', group: 'head' }, a: { type: 'text' } },
     }]));
     // Indexed rather than `.map((f) => f.rule)` on purpose: this file's
     // relative import of the module under test omits the `.js` extension, so
@@ -263,7 +234,7 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     // Same assertion strength, no new ledger entry.
     expect(withNameField).toHaveLength(1);
     expect(withNameField[0]?.rule).toBe(FIELD_GROUP_SHADOWED);
-    expect(withNameField[0]?.message).toContain('tail');
+    expect(withNameField[0]?.message).toContain('head');
   });
 
   it('flags stageField pointing at a missing field; false is fine', () => {
@@ -378,7 +349,7 @@ describe('validateSemanticRoles — injected system columns (#5378)', () => {
       fieldGroups: [{ key: 'basic', label: 'Basic' }],
       fields: { name: { group: 'basic' }, notes: { group: 'basic' } },
     }]));
-    // `basic` has two declared members, neither hoisted into the strip, so no
+    // `basic` has two declared members, neither the title, so no
     // FIELD_GROUP_SHADOWED — and no injected column is counted as its member.
     expect(findings).toEqual([]);
   });

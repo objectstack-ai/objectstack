@@ -61,7 +61,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 import { RecordPageColumns } from '../RecordPageColumns';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
-import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
+import { buildDefaultHighlights, buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
 import { DetailView } from '../DetailView';
 import { InlineEditProvider } from '@object-ui/react';
 
@@ -313,16 +313,20 @@ describe('RecordPageColumns — the rail: 审批, 附件, 最近动态, 其他�
   });
 
   it('the rail is the 概览 tab\'s: another tab open draws none, and the strip leaves with it', async () => {
+    // A slotted page placing the strip: the default page draws none since
+    // objectstack#35891, and the columns still draw a placed one on 概览.
+    const lead = { name: 'lead', fields: { name: { type: 'text' }, email: { type: 'email' }, rating: { type: 'select' } } } as any;
     const cols = buildDefaultPageColumns(
-      buildDefaultPageSchema(
-        { name: 'lead', fields: { name: { type: 'text' }, email: { type: 'email' }, rating: { type: 'select' } } } as any,
-        {
-          related: relatedLists,
-          highlightFields: ['email'],
-          statusField: 'rating',
-          stages: [{ value: 'hot', label: 'Hot' }],
+      buildDefaultPageSchema(lead, {
+        related: relatedLists,
+        slots: {
+          highlights: buildDefaultHighlights(lead, {
+            highlightFields: ['email'],
+            statusField: 'rating',
+            stages: [{ value: 'hot', label: 'Hot' }],
+          }),
         },
-      ),
+      }),
     )!;
     expect(cols.strip.length).toBeGreaterThan(0);
     const overview = drawPage('wide', cols, { onEnlargeRelated: vi.fn() });

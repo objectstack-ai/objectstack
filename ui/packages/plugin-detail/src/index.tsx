@@ -102,6 +102,10 @@ export type { SysActivityRow } from './renderers/recordActivityFeed';
 
 export { RecordDetailDrawer, deriveRecordPageHref } from './RecordDetailDrawer';
 export type { RecordDetailDrawerProps } from './RecordDetailDrawer';
+// objectstack#35891 — the record header's stage tag as a menu that moves the
+// stage; a host hands it to the header as `RecordHeaderState.stage`.
+export { RecordStageMenu } from './RecordStageMenu';
+export type { RecordStageMenuProps } from './RecordStageMenu';
 /**
  * The record overlay PAYLOAD, with no shell of its own (objectui#9299).
  *
