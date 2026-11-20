@@ -6,11 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/**
- * `resolveAffordanceGrant`: the grant half of an affordance's verdict, which a
- * list cell needs to tell "you may not edit these records" apart from "these
- * records cannot be edited here" (objectstack#35684).
- */
+/** `resolveAffordanceGrant`, the grant half of a verdict (objectstack#35684). */
 import { describe, it, expect } from 'vitest';
 import { resolveAffordance, resolveAffordanceGrant } from '../affordanceGrants';
 

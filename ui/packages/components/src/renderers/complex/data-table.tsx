@@ -3599,12 +3599,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     (Array.isArray(schema.rowActionDefs) && schema.rowActionDefs.length > 0 && schema.onRowActionDef)
   );
   const rowActionsColumnIsEditOnly = editable && !!(schema.onRowSave || schema.onBatchSave) && !rowMenuDeclared;
-  // objectstack#35684 — interim, until objectstack#35685 retires this column:
-  // in the select-first model (the list page) the edit-only column is drawn
-  // only while a row holds pending changes, so a list at rest ends on its last
-  // data column (objectstack#35554). A commit draws it with that row's
-  // cancel/save pair, and the last save or cancel takes it away. A host that
-  // mounts no cell selection draws it as before.
+  // objectstack#35684, until objectstack#35685 retires it: in the select-first
+  // model the edit-only column shows only while a row has pending changes, so a
+  // list at rest ends on its last data column (objectstack#35554).
   const drawRowActionsColumn = rowActions && !(selectFirst && rowActionsColumnIsEditOnly && !hasPendingChanges);
 
   /**

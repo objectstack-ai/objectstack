@@ -317,10 +317,8 @@ export function resolveAffordance(
 }
 
 /**
- * The grant half of {@link resolveAffordance} alone: does the caller hold the
- * object grant the row exercises? For a surface that tells a missing grant
- * apart from an object that allows no such write (objectstack#35684: a list
- * cell's read-only reason).
+ * The grant half of {@link resolveAffordance} alone, for a surface that tells a
+ * missing grant from an object that allows no such write (objectstack#35684).
  */
 export function resolveAffordanceGrant(
   affordance: ConsoleAffordance,
