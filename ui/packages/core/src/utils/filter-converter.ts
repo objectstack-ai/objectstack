@@ -22,6 +22,7 @@ import {
 } from '@objectstack/spec/ui';
 import { isAcceptedFilterComparand, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE } from '@objectstack/spec/data';
 import { isRefusedTextComparand, textComparandRefusalReason } from './text-comparand.js';
+import { isForeignRealmPlainObject } from './foreign-realm-object.js';
 
 /**
  * FilterNode AST type definition
@@ -334,10 +335,16 @@ function falseIdentityLeaf(field: string, value: unknown[]): FilterNode {
  * pinned in filter-date-comparand-8555.test.ts section 4; that row now pins
  * the refusal.)
  *
- * The second hop admits a CROSS-REALM plain object (an iframe, a `vm` context),
- * whose prototype is that realm's `Object.prototype` rather than this one's: a
- * plain object's prototype has a null prototype, while a `RegExp`'s chain is one
- * link longer. So the test is about SHAPE, not about object identity.
+ * Plain means prototype `Object.prototype` or `null`, of THIS realm: the test
+ * the spec's filter walk (`isFilterNode` in `normalizeFilterComparandTypes`)
+ * and the engine's `isNoOperatorObject` make, so the client and the server name
+ * one population. A plain object from ANOTHER realm (an iframe, a `vm`
+ * context), whose prototype is that realm's `Object.prototype`, is therefore
+ * not an operator map here either: the spec reads it as a literal comparand and
+ * answers `INVALID_FILTER` / 400, so the converter refuses it with a sentence
+ * of its own (see {@link refuseForeignRealmCondition}), and the value data
+ * source, which routes a non-plain condition to this converter, refuses it in
+ * the same words.
  *
  * A plain object with no entries stays an operator map with no operators,
  * whatever else it happens to be. That boundary is deliberate:
@@ -349,7 +356,7 @@ function falseIdentityLeaf(field: string, value: unknown[]): FilterNode {
  */
 function isOperatorMap(value: object): boolean {
   const proto = Object.getPrototypeOf(value) as object | null;
-  return proto === null || proto === Object.prototype || Object.getPrototypeOf(proto) === null;
+  return proto === null || proto === Object.prototype;
 }
 
 /**
@@ -465,6 +472,67 @@ function refuseTextComparand(field: string, operator: string, target: unknown): 
 }
 
 /**
+ * A field whose whole condition is a plain object of ANOTHER realm (an iframe,
+ * a `vm` context): `{ age: foreignObject }` with `foreignObject` built as
+ * `{ $gte: 18 }` there ({@link isForeignRealmPlainObject}).
+ *
+ * The author wrote a valid operator map in the wrong realm, so the exotic
+ * comparand sentence is the wrong one for them: it tells them a comparison
+ * value must be a string or a number, and that the condition used to be
+ * dropped, when until objectstack#35533 it lowered. This sentence says what is
+ * read as filter structure here and names the copy that rebuilds the filter in
+ * this realm. Same envelope as the exotic refusal: `INVALID_FILTER` / 400,
+ * naming the field.
+ */
+function refuseForeignRealmCondition(field: string): never {
+  throw new FilterOperatorError(
+    `[ObjectUI] The filter on field '${field}' is a plain object from another realm (an iframe, a vm ` +
+    `context). Only a plain object of this realm (prototype Object.prototype or null) is read as an ` +
+    `operator map or a nested condition here, as the spec's filter walk reads it; '@objectstack/spec' ` +
+    `reads this one as a comparand and answers 400 INVALID_FILTER. Rebuild the filter in this realm ` +
+    `before filtering it: { ...condition } for each operator map, or structuredClone(filter).`,
+    { field },
+  );
+}
+
+/** What `true` and `false` select, for each of the three flag operators. */
+const FLAG_OPERATOR_DIRECTIONS: Record<'$null' | '$exists' | '$empty', readonly [string, string]> = {
+  $null: ['a missing value', 'a present one'],
+  $exists: ['a present value', 'a missing one'],
+  $empty: ['an empty value', 'a non-empty one'],
+};
+
+/**
+ * A flag operator — `$null`, `$exists`, `$empty` — whose flag is not a
+ * boolean: `{ a: { $null: 'no' } }`, `{ a: { $exists: { owner: 'u1' } } }`.
+ *
+ * `SpecialOperatorSchema` declares all three flags `z.boolean()`, the spec's
+ * save door refuses anything else, and the query faces refuse it rather than
+ * coerce it because the backends read a non-boolean in opposite directions
+ * (`"false"` the string is truthy). One sentence for the three, so the
+ * prescription names the two spellings that work.
+ *
+ * The received value is rendered defensively: a refusal message must never
+ * itself throw (a cyclic object has no JSON form).
+ */
+function refuseNonBooleanFlag(field: string, operator: '$null' | '$exists' | '$empty', flag: unknown): never {
+  let received: string;
+  try {
+    received = JSON.stringify(flag) ?? String(flag);
+  } catch {
+    received = typeof flag;
+  }
+  const [whenTrue, whenFalse] = FLAG_OPERATOR_DIRECTIONS[operator];
+  throw new FilterOperatorError(
+    `[ObjectUI] The '${operator}' filter operator on field '${field}' takes a boolean flag ` +
+    `(true or false); received ${received}. ` +
+    `Write { ${field}: { ${operator}: true } } for ${whenTrue}, or ` +
+    `{ ${field}: { ${operator}: false } } for ${whenFalse}.`,
+    { operator, field },
+  );
+}
+
+/**
  * A field that names NO operator — `{ a: {} }` — wherever it appears in a
  * filter: alone (objectui#9164) or beside a key that lowers (objectui#10788).
  *
@@ -548,8 +616,11 @@ function refuseEmptyOperatorMap(field: string): never {
  * the condition travels verbatim in the object dialect, nested relations
  * included. Nothing here judges it. Whether `field` is a relationship and the
  * condition's keys are fields of the related object is decided where the
- * declarations are: the engine refuses anything else with `INVALID_FILTER` /
- * 400, and on a read it matches the relationship with one in-database
+ * declarations are: the engine answers `INVALID_FILTER` / 400 for such a
+ * condition under a field that stores a scalar or a structured-JSON value,
+ * and, under a relationship, for a condition key the related object does not
+ * declare, a dotted key, or a relation nested past the hop limit. On a read it
+ * matches the relationship with one in-database
  * subquery under the related object's own read scope, never an id list this
  * app reads first.
  *
@@ -608,7 +679,9 @@ function isNestedRelationCondition(entries: ReadonlyArray<[string, unknown]>): b
  * operator map (`{ a: {} }`) — alone (objectui#9164) or
  * beside a key that lowers (objectui#10788): see {@link refuseEmptyOperatorMap},
  * or if a `$empty` flag is not a boolean (`{ a: { $empty: 'yes' } }`,
- * objectui#11094).
+ * objectui#11094), or if a `$null` / `$exists` flag is not one
+ * (`{ a: { $null: 'no' } }`, `{ a: { $exists: { owner: 'u1' } } }`): see
+ * {@link refuseNonBooleanFlag}.
  *
  * @example
  * // A field with NO operator (objectui#9164)
@@ -822,6 +895,11 @@ export function convertFiltersToAST(
       // The accepted-type list is the spec's own sentence, not a second list
       // spelled out here, for the same reason the gate above is the spec's
       // predicate rather than a local `instanceof Date`.
+      //
+      // A plain object of ANOTHER realm is refused first, in its own sentence:
+      // it is a valid operator map written in the wrong realm, and the caller's
+      // fix is a copy, not a different comparand (refuseForeignRealmCondition).
+      if (isForeignRealmPlainObject(value)) refuseForeignRealmCondition(field);
       if (!isOperatorMap(value)) {
         throw new FilterOperatorError(
           `[ObjectUI] The filter on field '${field}' carries ${describeExoticComparand(value)} ` +
@@ -829,7 +907,7 @@ export function convertFiltersToAST(
           `be ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (ACCEPTED_FILTER_COMPARAND_TYPES), so ` +
           `isAcceptedFilterComparand is false for it and normalizeFilterComparandTypes answers 400 ` +
           `INVALID_FILTER — "which no driver can compare". It is not an operator map either: only ` +
-          `a plain object can be one, so until objectui#8567 this value was read as ZERO operators ` +
+          `a plain object of this realm (prototype Object.prototype or null) can be one, so until objectui#8567 this value was read as ZERO operators ` +
           `and the '${field}' condition was dropped from the filter entirely, silently WIDENING the ` +
           `result set. Spell a text match as { ${field}: { $contains: '...' } } ($startsWith / ` +
           `$endsWith; a pattern itself has no operator here, see the $regex refusal), a membership ` +
@@ -877,15 +955,22 @@ export function convertFiltersToAST(
           );
         }
 
-        // $null / $exists translate based on their boolean value (per spec semantics).
+        // $null / $exists take their direction from a boolean flag (per spec semantics).
         // $null: true  → IS NULL    | $null: false  → IS NOT NULL
         // $exists: true → IS NOT NULL | $exists: false → IS NULL
-        if (operator === '$null') {
-          conditions.push([field, operatorValue ? 'is_null' : 'is_not_null', true]);
-          continue;
-        }
-        if (operator === '$exists') {
-          conditions.push([field, operatorValue ? 'is_not_null' : 'is_null', true]);
+        //
+        // The flag is a BOOLEAN by declaration (`SpecialOperatorSchema`), so a
+        // non-boolean (`'no'`, `1`, `null`, an object) is refused rather than
+        // read for its truthiness, as `$empty` below is: the spec's save door
+        // and every query face refuse it with `INVALID_FILTER` / 400, and
+        // `ValueDataSource`'s `$null` / `$exists` arms refuse the same values,
+        // so the object form and its lowered node cannot answer apart.
+        if (operator === '$null' || operator === '$exists') {
+          if (operatorValue !== true && operatorValue !== false) {
+            refuseNonBooleanFlag(field, operator, operatorValue);
+          }
+          const isNull = operator === '$null' ? operatorValue : !operatorValue;
+          conditions.push([field, isNull ? 'is_null' : 'is_not_null', true]);
           continue;
         }
         // objectui#11094 — `$empty`, admitted to the spec's `FILTER_OPERATORS`
@@ -903,13 +988,7 @@ export function convertFiltersToAST(
         // Until this arm the operator reached the unknown-operator throw below.
         if (operator === '$empty') {
           if (operatorValue !== true && operatorValue !== false) {
-            throw new FilterOperatorError(
-              `[ObjectUI] The '$empty' filter operator on field '${field}' takes a boolean flag ` +
-              `(true or false); received ${JSON.stringify(operatorValue) ?? String(operatorValue)}. ` +
-              `Write { ${field}: { $empty: true } } for an empty value, or ` +
-              `{ ${field}: { $empty: false } } for a non-empty one.`,
-              { operator: '$empty', field },
-            );
+            refuseNonBooleanFlag(field, operator, operatorValue);
           }
           conditions.push([field, operatorValue ? 'is_empty' : 'is_not_empty', true]);
           continue;
