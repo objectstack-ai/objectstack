@@ -107,7 +107,7 @@ async function deployment(options: { autoActiveOrganization?: boolean; databaseH
     emailAndPassword: { enabled: true, requireEmailVerification: false },
     getAuditSink: () => sink,
     ...(options.autoActiveOrganization === false ? { autoActiveOrganization: false } : {}),
-    databaseHooks: options.databaseHooks ?? testHooks,
+    databaseHooks: testHooks,
   } as any);
   vi.spyOn(manager as any, 'selfRegistrationSetResolvable').mockResolvedValue(true);
   const policies: Record<string, Record<string, unknown>> = {
@@ -133,6 +133,10 @@ async function deployment(options: { autoActiveOrganization?: boolean; databaseH
   await engine.insert('sys_member', { user_id: user.id, organization_id: ORG_D, role: 'member', created_at: new Date() });
   engine.tables.set('sys_session', []);
   events.length = 0;
+  // A whole `databaseHooks` under test takes over from here, after the sign-up
+  // (whose own session, from 127.0.0.1, no organization's list would admit).
+  const given = options.databaseHooks?.session?.create?.before;
+  if (given) hostHook = (session) => given(session as any, null) as Promise<SessionCreateBeforeResult | undefined>;
 
   const signIn = (remoteAddress: string) => post(manager, '/sign-in/email', { email, password: PASSWORD }, remoteAddress);
   const host = (hook: HostHook | undefined) => { hostHook = hook; };
