@@ -11,9 +11,9 @@
  * Search on the bar, everything else inside Display.
  *
  * Every fixture here offers the WHOLE wide toolbar — hide fields, row color,
- * a two-visualization switcher, inline edit, refresh and export — so an
- * absence from the bar is the default shape at work, not a control nobody
- * offered. `compactToolbar: false` is the control: the same fixture draws the
+ * a two-visualization switcher, refresh and export — so an absence from
+ * the bar is the default shape at work, not a control nobody offered. Inline
+ * edit has no control since objectstack#35684, on either toolbar. `compactToolbar: false` is the control: the same fixture draws the
  * wide buttons again.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -65,7 +65,6 @@ function mount(schema: Partial<ListViewSchema> = {}, props: Record<string, unkno
         schema={{ ...FULL, ...schema } as ListViewSchema}
         dataSource={dataSource as never}
         showViewSwitcher
-        onInlineEditChange={vi.fn()}
         {...props}
       />
     </SchemaRendererProvider>,
@@ -141,12 +140,13 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(screen.queryByTestId('toolbar-display-trigger')).toBeNull();
     expect(screen.getByRole('button', { name: /^hide fields/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^group/i })).toBeInTheDocument();
-    expect(screen.getByTestId('toolbar-inline-edit-toggle')).toBeInTheDocument();
+    // objectstack#35684 — no inline-edit toggle on the wide bar either.
+    expect(screen.queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
     expect(screen.getByTestId('refresh-button')).toBeInTheDocument();
     expect(screen.getByTestId('view-switcher-segmented')).toBeInTheDocument();
   });
 
-  it('Display carries Layout, Group, Hide fields, Density, Row numbers, Edit inline, Reset, Refresh and Export', async () => {
+  it('Display carries Layout, Group, Hide fields, Density, Row numbers, Reset, Refresh and Export', async () => {
     mount();
     await screen.findByTestId('grid-stub');
     const trigger = screen.getByTestId('toolbar-display-trigger');
@@ -164,13 +164,13 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
     expect(panel.getByTestId('refresh-button')).toHaveTextContent('Refresh');
     expect(panel.getByTestId('display-export-csv')).toHaveTextContent('Export as CSV');
     openLevel(content, 'more');
-    for (const id of ['display-row-numbers-toggle', 'toolbar-inline-edit-toggle']) {
-      const toggle = panel.getByTestId(id);
-      expect(toggle).toHaveAttribute('role', 'switch');
-      expect(toggle).toHaveAttribute('aria-checked');
-    }
-    expect(panel.getByRole('switch', { name: 'Row numbers' })).toBe(panel.getByTestId('display-row-numbers-toggle'));
-    expect(panel.getByRole('switch', { name: 'Edit inline' })).toBe(panel.getByTestId('toolbar-inline-edit-toggle'));
+    const toggle = panel.getByTestId('display-row-numbers-toggle');
+    expect(toggle).toHaveAttribute('role', 'switch');
+    expect(toggle).toHaveAttribute('aria-checked');
+    expect(panel.getByRole('switch', { name: 'Row numbers' })).toBe(toggle);
+    // objectstack#35684 — the Edit inline switch is retired with the mode.
+    expect(panel.queryByTestId('toolbar-inline-edit-toggle')).toBeNull();
+    expect(panel.queryByRole('switch', { name: 'Edit inline' })).toBeNull();
   });
 
   it('the Layout row is drawn only when the list offers a visualization switch', async () => {

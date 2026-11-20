@@ -174,14 +174,15 @@ describe('ListView.concurrencyTokenProjection-12292', () => {
   afterEach(() => cleanup());
 
   describe('ListView — an inline-editable grid\'s rows carry their concurrency token (objectui#12292)', () => {
-    it('asks for `updated_at` when the grid opens in inline-edit mode, though no column shows it', async () => {
-      const { lastSelect } = await mount({ inlineEdit: true });
+    it('asks for `updated_at` when the grid is editable in place, though no column shows it', async () => {
+      // objectstack#35684 — a view that declares nothing is editable.
+      const { lastSelect } = await mount({});
       await waitFor(() => expect(lastSelect()).toContain('updated_at'));
       expect(lastSelect()).toEqual(expect.arrayContaining(['id', 'title', 'estimate_hours']));
     });
 
-    it('does not ask for it while the grid is not in inline-edit mode', async () => {
-      const { dataSource, lastSelect } = await mount({});
+    it('does not ask for it when the view turns in-place editing off', async () => {
+      const { dataSource, lastSelect } = await mount({ userActions: { editInline: false } });
       await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
       expect(dataSource.find.mock.calls.length).toBeGreaterThan(0);
       for (const call of dataSource.find.mock.calls) {

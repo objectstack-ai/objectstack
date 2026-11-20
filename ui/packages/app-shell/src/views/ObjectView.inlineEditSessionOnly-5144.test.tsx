@@ -8,7 +8,10 @@
 
 /**
  * objectui#5144, triage's ruling E — the console's inline-edit toggle is
- * session state and writes nothing.
+ * session state and writes nothing. Since objectstack#35684 there is no
+ * toggle and no mode at all: the page hands `ListView` no inline-edit
+ * callback, and these cases pin that nothing the page does stores an
+ * `inlineEdit`, and what the fold reads.
  *
  * The view's `inlineEdit` and `userActions.editInline` are the author's
  * permission keys, and `normalizeListViewSchema` folds the first into the
@@ -308,17 +311,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('objectui#5144 (ruling E) — the console inline-edit toggle writes nothing', () => {
-  it('switching the toggle on a served view sends no write; the store records a view write when one is made', async () => {
+describe('objectui#5144 (ruling E), objectstack#35684 — the console stores no inline-edit mode', () => {
+  it('a served view hands `ListView` no inline-edit callback and sends no write; the store records a view write when one is made', async () => {
     const { meta, rows, bodies } = makeStore([SERVED_OVERLAY]);
     const ds = await openPage(meta, OPTED_IN_OBJECT, 'all');
     expect(listSchema.label).toBe('All notes');
-    expect(typeof listProps.onInlineEditChange).toBe('function');
-
-    act(() => {
-      listProps.onInlineEditChange(true);
-      listProps.onInlineEditChange(false);
-    });
+    // objectstack#35684 — no toggle, so no callback to report it.
+    expect(listProps.onInlineEditChange).toBeUndefined();
     // Past the old toolbar write's 300 ms debounce, with room to spare.
     await wait(700);
     expect(meta.saveItem).not.toHaveBeenCalled();
@@ -338,32 +337,25 @@ describe('objectui#5144 (ruling E) — the console inline-edit toggle writes not
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it('two-way: on a view that declares `userActions.editInline: true`, the toggle is still offered after it is switched off and the view remounts', async () => {
+  it('a view that declares `userActions.editInline: true` reads on, and still does after the view remounts', async () => {
     const { meta, rows } = makeStore([SERVED_OVERLAY]);
     await openPage(meta, OPTED_IN_OBJECT, 'all');
     expect(folded().editInline).toBe(true);
-
-    act(() => listProps.onInlineEditChange(false));
     await wait(700);
     expect(rows.get('all')).toEqual(SERVED_OVERLAY);
 
     cleanup();
     await openPage(meta, OPTED_IN_OBJECT, 'all');
     expect(folded().editInline).toBe(true);
-    // Nothing was stored, so the mode is seeded from the view again.
+    // Nothing was stored.
     expect(folded().inlineEdit).toBeUndefined();
   });
 
-  it('a saved view: the toggle switched off writes nothing, and the stored `inlineEdit: true` is what the next load reads', async () => {
-    // Recorded cost of ruling E: the edit mode is not remembered across loads.
+  it('a saved view writes nothing, and the stored `inlineEdit: true` is what the next load reads', async () => {
     const { meta, rows, bodies } = makeStore([SAVED_ROW]);
     await openPage(meta, PLAIN_OBJECT, SAVED_ID);
     expect(listSchema.label).toBe('Mine');
     expect(folded()).toEqual({ editInline: true, inlineEdit: true });
-
-    act(() => listProps.onInlineEditChange(false));
-    await wait(700);
-    expect(meta.saveItem).not.toHaveBeenCalled();
 
     // Since objectui#12474 a density change on the same saved view writes no
     // row either (it is the user's own list state), so the row's own

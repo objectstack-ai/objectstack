@@ -30,6 +30,11 @@ import { SchemaRendererContext, resolveApprovalLock, useDataInvalidation } from 
 /** Set once a lock read answered 501: the deployment runs no approvals service. */
 let approvalsServiceAbsent = false;
 
+/** Tests only: forget a 501 latched by an earlier test. */
+export function __resetApprovalsServiceLatch(): void {
+  approvalsServiceAbsent = false;
+}
+
 type LockAnswer = { locked: boolean } | 'asking' | 'unanswered';
 
 export interface RowApprovalLocks {
