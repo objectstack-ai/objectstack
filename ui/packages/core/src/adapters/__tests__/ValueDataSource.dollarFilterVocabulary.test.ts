@@ -73,6 +73,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { runInNewContext } from 'node:vm';
 import { FILTER_OPERATORS } from '@objectstack/spec/data';
 import { ValueDataSource } from '../ValueDataSource';
 import { toFilterNodeSafely } from '../../utils/filter-converter';
@@ -775,4 +776,234 @@ describe('a plain-object comparand under a `$` operator is refused as the AST ar
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("carries the non-operator key 'profile'");
   });
+});
+
+/**
+ * `$null` / `$exists` take a BOOLEAN flag on this face too, as `$empty` does,
+ * and the converter refuses the same flags before lowering, so the object form
+ * and its lowered form cannot answer apart: neither one serves rows.
+ * `nickname` is present on `a`, null on `b`, absent on `c`.
+ */
+describe('a `$null` / `$exists` flag that is not a boolean is refused on the `$` arm', () => {
+  const NON_BOOLEAN_FLAGS: unknown[] = ['no', 'false', 1, 0, null, { owner: 'u1' }, {}];
+
+  async function refusalOf(filter: unknown): Promise<{ ids: string[]; lines: string[] }> {
+    const warn = spyWarn();
+    const ids = await selectedIds(filter);
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    warn.mockRestore();
+    return { ids, lines };
+  }
+
+  describe.each(['$null', '$exists'] as const)('%s', (operator) => {
+    it.each(NON_BOOLEAN_FLAGS.map((flag) => [JSON.stringify(flag), flag]))(
+      'the flag %s excludes every row and logs the boolean-flag sentence once',
+      async (_label, flag) => {
+        const { ids, lines } = await refusalOf({ nickname: { [operator]: flag } });
+        expect(ids).toEqual([]);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(
+          `filter operator '${operator}' on field 'nickname' takes a boolean flag (true or false)`,
+        );
+      },
+    );
+
+    it('the converter refuses the same filter, so there is no lowered form to split from', () => {
+      const lowered = toFilterNodeSafely({ nickname: { [operator]: 'no' } });
+      expect(lowered.ok).toBe(false);
+      if (!lowered.ok) {
+        expect(lowered.refusal).toMatchObject({ code: 'INVALID_FILTER', operator, field: 'nickname' });
+      }
+    });
+  });
+
+  it.each([
+    [{ nickname: { $null: true } }, ['b', 'c']],
+    [{ nickname: { $null: false } }, ['a']],
+    [{ nickname: { $exists: true } }, ['a']],
+    [{ nickname: { $exists: false } }, ['b', 'c']],
+  ] as const)(
+    'CONTROL: %j answers as before, in the object form and in its lowered form, with nothing logged',
+    async (filter, expected) => {
+      const lowered = toFilterNodeSafely(filter);
+      if (!lowered.ok) throw new Error(`the lowering refused ${JSON.stringify(filter)}`);
+      const warn = spyWarn();
+      expect(await selectedIds(filter)).toEqual(expected);
+      expect(await selectedIds(lowered.node)).toEqual(expected);
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+});
+
+/**
+ * Three more object comparands this matcher cannot compare, refused on both
+ * arms by the shared builder: a `$`-keyed plain object that is no `{ $field }`
+ * reference (the `{ $now, addDays }` date anchor among them), a plain object
+ * of another realm, and a class instance under an equality, membership or text
+ * operator. The spec's comparand door refuses the last two at every operator;
+ * it steps around a well-formed anchor, which the platform resolves in the
+ * compared column's temporal form, and this face, which has no field types,
+ * refuses it in words instead of comparing it as `[object Object]`.
+ */
+describe('a `$`-keyed object, a foreign-realm object and a class instance in comparand position', () => {
+  const ROWS_2 = [
+    { id: 'a', owner: 'zeta', age: 30, due: '2099-01-01', floor: 25 },
+    { id: 'b', owner: 'Alpha', age: 25, due: '2000-01-01', floor: 25 },
+    { id: 'c', owner: null, age: 20, due: null, floor: 10 },
+  ];
+  const FLAG_OPERATORS = new Set(['$null', '$exists', '$empty']);
+  const LIST_OPERATORS = new Set(['$in', '$nin', '$between']);
+  const COMPARAND_OPERATORS = FILTER_OPERATORS.filter((op) => !FLAG_OPERATORS.has(op));
+
+  /**
+   * How each comparand operator compares: by ORDER (a class instance is
+   * compared through its `valueOf`), by VALUE (equality, membership, text: a
+   * class instance is refused), or by its own text door (`$icontains`, which
+   * refuses every non-string comparand already).
+   */
+  const COMPARISON_KIND: Record<string, 'order' | 'value' | 'text-door'> = {
+    $eq: 'value', $ne: 'value', $in: 'value', $nin: 'value',
+    $contains: 'value', $notContains: 'value', $startsWith: 'value', $endsWith: 'value',
+    $gt: 'order', $gte: 'order', $lt: 'order', $lte: 'order', $between: 'order',
+    $icontains: 'text-door',
+  };
+
+  async function refusalOf(filter: unknown): Promise<{ ids: string[]; lines: string[] }> {
+    const warn = spyWarn();
+    const ids = await selectedIds(filter, ROWS_2);
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    warn.mockRestore();
+    return { ids, lines };
+  }
+
+  /** The whole comparand, or a list member for a list operator. */
+  const placed = (operator: string, comparand: unknown): unknown =>
+    LIST_OPERATORS.has(operator) ? [comparand, 'zzz'] : comparand;
+
+  it('the comparison-kind table covers the comparand operators exactly', () => {
+    expect(Object.keys(COMPARISON_KIND).sort()).toEqual([...COMPARAND_OPERATORS].sort());
+  });
+
+  const ANCHOR = { $now: true, addDays: 7 };
+  const ANCHOR_REFUSAL =
+    "filter comparand on field 'due' is a { $now, addDays } date anchor, which the in-memory "
+    + 'matcher does not resolve';
+
+  it.each(COMPARAND_OPERATORS)(
+    '`%s` refuses a `{ $now, addDays }` anchor by name, whole or as a list member',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({ due: { [operator]: placed(operator, ANCHOR) } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(ANCHOR_REFUSAL);
+    },
+  );
+
+  it('the resolved anchor form (`$now` holding an instant) is refused in the same words', async () => {
+    const { ids, lines } = await refusalOf({ due: { $lt: { $now: '2026-01-01T00:00:00Z', addDays: 7 } } });
+    expect(ids).toEqual([]);
+    expect(lines[0]).toContain(ANCHOR_REFUSAL);
+  });
+
+  it.each(COMPARAND_OPERATORS)(
+    '`%s` refuses another `$`-keyed object that is no `{ $field }` reference',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({ owner: { [operator]: placed(operator, { $foo: 1 }) } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(
+        "filter comparand on field 'owner' is an object carrying the key '$foo', which is neither "
+        + 'a comparison value nor a { $field } reference',
+      );
+    },
+  );
+
+  it.each(COMPARAND_OPERATORS)(
+    '`%s` refuses a plain object of another realm, whole or as a list member',
+    async (operator) => {
+      const foreign = runInNewContext('({ id: "u1" })');
+      const { ids, lines } = await refusalOf({ owner: { [operator]: placed(operator, foreign) } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("filter comparand on field 'owner' is a plain object from another realm");
+    },
+  );
+
+  it('a plain object of another realm as the WHOLE condition is refused in the converter’s words', async () => {
+    const { ids, lines } = await refusalOf({ owner: runInNewContext('({ id: "u1" })') });
+    expect(ids).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("The filter on field 'owner' carries a plain object from another realm");
+  });
+
+  /** A class instance: data, compared through its `valueOf` under an ordering. */
+  class Amount {
+    readonly units: number;
+    constructor(units: number) {
+      this.units = units;
+    }
+    valueOf(): number {
+      return this.units;
+    }
+    toString(): string {
+      return `Amount(${this.units})`;
+    }
+  }
+  const CLASS_REFUSAL = "filter comparand on field 'age' is a Amount instance, which the in-memory matcher compares only by order";
+
+  it.each(COMPARAND_OPERATORS.filter((op) => COMPARISON_KIND[op] === 'value'))(
+    '`%s` refuses a class instance, whole or as a list member, by name',
+    async (operator) => {
+      const { ids, lines } = await refusalOf({ age: { [operator]: placed(operator, new Amount(25)) } });
+      expect(ids).toEqual([]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain(CLASS_REFUSAL);
+    },
+  );
+
+  it('`$icontains` keeps its own text door for a class instance', async () => {
+    const { ids, lines } = await refusalOf({ age: { $icontains: new Amount(25) } });
+    expect(ids).toEqual([]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain(CLASS_REFUSAL);
+    expect(lines[0]).toContain('$icontains');
+  });
+
+  it('CONTROL: under `$between` a class instance endpoint compares through valueOf, with nothing logged', async () => {
+    const warn = spyWarn();
+    expect(await selectedIds({ age: { $between: [new Amount(22), new Amount(28)] } }, ROWS_2)).toEqual(['b']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a scalar, a `Date` and a `{ $field }` reference are compared, with nothing logged', async () => {
+    const warn = spyWarn();
+    expect(await selectedIds({ owner: { $ne: 'zeta' } }, ROWS_2)).toEqual(['b', 'c']);
+    expect(await selectedIds({ due: { $lt: '2050-01-01' } }, ROWS_2)).toEqual(['b']);
+    expect(await selectedIds({ age: { $eq: { $field: 'floor' } } }, ROWS_2)).toEqual(['b']);
+    const dated = [{ id: 'x', at: new Date('2026-03-01T00:00:00Z') }, { id: 'y', at: new Date('2026-01-01T00:00:00Z') }];
+    expect(await selectedIds({ at: { $eq: new Date('2026-03-01T00:00:00Z') } }, dated)).toEqual(['x']);
+    expect(await selectedIds({ at: { $nin: [new Date('2026-03-01T00:00:00Z')] } }, dated)).toEqual(['y']);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['$lt anchor', { due: { $lt: ANCHOR } }],
+    ['$in anchor member', { due: { $in: [ANCHOR] } }],
+    ['$ne $-keyed', { owner: { $ne: { $foo: 1 } } }],
+    ['$eq class instance', { age: { $eq: new Amount(25) } }],
+    ['$nin class member', { age: { $nin: [new Amount(25)] } }],
+    ['$notContains class instance', { age: { $notContains: new Amount(25) } }],
+  ] as const)(
+    '%s: the object form and its lowered AST form log one and the same sentence',
+    async (_label, filter) => {
+      const lowered = toFilterNodeSafely(filter);
+      if (!lowered.ok) throw new Error(`the lowering refused ${JSON.stringify(filter)}`);
+      const objectForm = await refusalOf(filter);
+      const astForm = await refusalOf(lowered.node);
+      expect(objectForm.ids).toEqual([]);
+      expect(astForm.ids).toEqual([]);
+      expect(objectForm.lines).toHaveLength(1);
+      expect(astForm.lines).toEqual(objectForm.lines);
+    },
+  );
 });

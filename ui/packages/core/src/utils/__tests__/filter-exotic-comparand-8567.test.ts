@@ -317,13 +317,27 @@ describe('objectui#8567 — the identity and the operator path are untouched', (
     expect(convertFiltersToAST({ age: bag })).toEqual(['age', '>=', 18]);
   });
 
-  it('a CROSS-REALM plain object is still an operator map', () => {
-    // Its prototype is another realm's `Object.prototype`, so an identity test
-    // against this realm's would refuse a perfectly plain object. The gate takes
-    // the second hop instead: a plain object's prototype has a null prototype.
-    const foreign = runInNewContext('({ $gte: 18 })') as Record<string, unknown>;
-    expect(Object.getPrototypeOf(foreign)).not.toBe(Object.prototype);
-    expect(convertFiltersToAST({ age: foreign })).toEqual(['age', '>=', 18]);
+  it('a CROSS-REALM plain object is a comparand, refused as the spec refuses it', () => {
+    // Its prototype is another realm's `Object.prototype`. The spec's filter
+    // walk (`isFilterNode`) and the engine's `isNoOperatorObject` read only
+    // this realm's `Object.prototype` or `null` as filter structure, so the
+    // spec judges it as a literal comparand and refuses it; the converter's
+    // operator-map test is the same prototype test, and refuses it too.
+    for (const source of ['({ $gte: 18 })', '({ owner: "u1" })']) {
+      const foreign = runInNewContext(source) as Record<string, unknown>;
+      expect(Object.getPrototypeOf(foreign)).not.toBe(Object.prototype);
+      expect(() => normalizeFilterComparandTypes({ age: foreign })).toThrow(/which no driver can compare/);
+      const { thrown } = refusalOf(() => convertFiltersToAST({ age: foreign }));
+      expect(thrown).toBeInstanceOf(FilterOperatorError);
+      expect(thrown).toMatchObject({ ...INVALID_FILTER, field: 'age' });
+      expect((thrown as Error).message)
+        .toContain("The filter on field 'age' carries a plain object from another realm in comparand position");
+    }
+  });
+
+  it('CONTROL: a `null`-prototype object of THIS realm is still an operator map', () => {
+    const bare = Object.assign(Object.create(null) as Record<string, unknown>, { $gte: 18 });
+    expect(convertFiltersToAST({ age: bare })).toEqual(['age', '>=', 18]);
   });
 
   it('a Date comparand still LOWERS — the other half of this arm (objectui#8555)', () => {
