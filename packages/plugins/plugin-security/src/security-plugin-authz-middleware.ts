@@ -2845,10 +2845,11 @@ export function registerAuthzMiddleware(
         // floor would refuse is given the by-id decision for that row
         // ({@link predicateWriteFloorRelief}): the floor stays where it is
         // decided to stay (`abstain`, `deny`, an unresolvable verdict), and is
-        // replaced only where the by-id write of that row would replace it.
-        // Layer 0 is recomposed as it stood, and every authored policy stays
-        // in both arms. Not for a delegated write, which keeps both floors on
-        // the by-id path too.
+        // replaced only where the by-id write of that row would replace it,
+        // and only where no authored write-class policy remains once it is
+        // (where one does, replacing the floor admits no row and no verdict is
+        // asked). Layer 0 is recomposed as it stood. Not for a delegated
+        // write, which keeps both floors on the by-id path too.
         if (rlsFilter && layered.layer1 && !delegatorSets) {
           const relief = await predicateWriteFloorRelief.call(
             this,
@@ -2980,10 +2981,13 @@ export function registerAuthzMiddleware(
  * (`{ id: { $in: ids } }`). A scope of any other shape answers none, so the
  * floor stays where it is.
  */
-function idsOfReadableScope(scope: Record<string, unknown>): (string | number)[] {
+export function idsOfReadableScope(scope: Record<string, unknown>): (string | number | bigint)[] {
   const leaf = scope.id as { $in?: unknown } | undefined;
   const ids = leaf && typeof leaf === 'object' && Array.isArray(leaf.$in) ? leaf.$in : [];
-  return ids.filter((id): id is string | number => typeof id === 'string' || typeof id === 'number');
+  // The scalar kinds `extractSingleId` takes for a row address, `bigint` included.
+  return ids.filter(
+    (id): id is string | number | bigint => typeof id === 'string' || typeof id === 'number' || typeof id === 'bigint',
+  );
 }
 
 /**
@@ -2996,33 +3000,40 @@ function idsOfReadableScope(scope: Record<string, unknown>): (string | number)[]
  * caller can read (step 3's read question, at most
  * `PREDICATE_WRITE_READABLE_ID_CAP`: above it the write was refused before
  * this ran, so the work below is bounded by the same cap and nothing is ever
- * cut off). Three steps:
+ * cut off). Four steps:
  *
  * 1. The floor must be in play for this write class at all (the provenance
  *    test {@link resolvePreImageFloorDrop} applies). If not, `null`.
- * 2. The rows `floored` already admits are read once, under the caller's
+ * 2. The Layer 1 the by-id write of a row composes once its floor is
+ *    replaced: `computeLayeredRlsFilter` with `dropPlatformOwnershipFloor`.
+ *    If that is not `null`, an authored write-class policy remains, and
+ *    `null` is answered with no verdict asked. Policies compose by `$or` only
+ *    (`rls-compiler.ts`), so `floored` is that policy set OR the floor: a
+ *    row `floored` refuses fails every authored policy too, and the by-id
+ *    write of it, held to those policies alone, is refused as well. Replacing
+ *    the floor can add no row there, so nothing is asked.
+ * 3. The rows `floored` already admits are read once, under the caller's
  *    context, and set aside: they are matched today whatever any verdict says,
  *    so nothing is asked about them and the check they are held to does not
  *    move. A read the read door refuses keeps the floor (`null`): never wider
  *    than the floor when the question could not be asked.
- * 3. Every other matched row gets the by-id decision for that row,
+ * 4. Every other matched row gets the by-id decision for that row,
  *    {@link predicateWriteFloorDropIds} — `resolvePreImageFloorDrop` itself.
- *    The rows it replaces the floor for are OR-ed in under the Layer 1 the
- *    by-id write of each composes: `computeLayeredRlsFilter` with
- *    `dropPlatformOwnershipFloor`, so an authored policy still binds them.
  *
- * The answer is `floored OR (id IN dropIds AND replaced)`. It only ever adds
- * rows to `floored`, and each row it adds is one the by-id pre-image gate
- * admits for the same caller. The sharing middleware's own bulk scope (the
- * owner/depth set, the `edit` shares on update only) is ANDed in by that
- * middleware as before, and the readable scope beside this one still binds.
+ * The answer is `floored OR id IN dropIds`. It only ever adds rows to
+ * `floored`, and each row it adds is one the by-id pre-image gate admits for
+ * the same caller: the floor is the only Layer 1 term the by-id write of it
+ * would have been held to, and its verdict replaced it. The sharing
+ * middleware's own bulk scope (the owner/depth set, the `edit` shares and the
+ * queue on update only) is ANDed in by that middleware as before, and the
+ * readable scope beside this one still binds.
  */
 async function predicateWriteFloorRelief(
   this: Pick<AuthzMiddlewareHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'ql' | 'resolvePreImageFloorDrop'>,
   opCtx: any,
   permissionSets: PermissionSet[],
   floored: Record<string, unknown>,
-  readableIds: readonly (string | number)[],
+  readableIds: readonly (string | number | bigint)[],
 ): Promise<{ layer1: Record<string, unknown>; dropIds: ReadonlySet<unknown> } | null> {
   if (readableIds.length === 0) return null;
   const rlsOperation = rlsOperationForVerb(opCtx.operation);
@@ -3034,6 +3045,12 @@ async function predicateWriteFloorRelief(
     opCtx.context,
   ).some(isPlatformOwnershipFloorPolicy);
   if (!floorInPlay) return null;
+  const replaced = (
+    await this.computeLayeredRlsFilter(permissionSets, opCtx.object, opCtx.operation, opCtx.context, {
+      dropPlatformOwnershipFloor: true,
+    })
+  ).layer1;
+  if (replaced) return null;
   // A fresh compile for the read, so nothing the read pipeline does to its
   // own query reaches the tree the write runs with. Marked `'policy'` like the
   // by-id re-read's: the read's caller-predicate guard judges `{ id }`, not a
@@ -3068,14 +3085,8 @@ async function predicateWriteFloorRelief(
     false,
   );
   if (dropIds.length === 0) return null;
-  const replaced = (
-    await this.computeLayeredRlsFilter(permissionSets, opCtx.object, opCtx.operation, opCtx.context, {
-      dropPlatformOwnershipFloor: true,
-    })
-  ).layer1;
-  const dropLeaf = { id: { $in: dropIds } };
   return {
-    layer1: { $or: [floored, replaced ? { $and: [dropLeaf, replaced] } : dropLeaf] },
+    layer1: { $or: [floored, { id: { $in: dropIds } }] },
     dropIds: new Set<unknown>(dropIds),
   };
 }

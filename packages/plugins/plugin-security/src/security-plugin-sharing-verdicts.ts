@@ -336,13 +336,13 @@ export async function predicateWriteFloorDropIds(
   this: Pick<SharingVerdictsHost, 'resolvePreImageFloorDrop'>,
   rlsOperation: string,
   object: string,
-  candidateIds: readonly (string | number)[],
+  candidateIds: readonly (string | number | bigint)[],
   context: any,
   permissionSets: PermissionSet[],
   delegated: boolean,
-): Promise<(string | number)[]> {
+): Promise<(string | number | bigint)[]> {
   if (delegated) return [];
-  const dropped: (string | number)[] = [];
+  const dropped: (string | number | bigint)[] = [];
   for (let start = 0; start < candidateIds.length; start += PREDICATE_WRITE_FLOOR_DECISION_BATCH) {
     const batch = candidateIds.slice(start, start + PREDICATE_WRITE_FLOOR_DECISION_BATCH);
     const decisions = await Promise.all(
