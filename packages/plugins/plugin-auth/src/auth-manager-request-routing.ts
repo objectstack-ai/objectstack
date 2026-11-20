@@ -68,6 +68,7 @@ import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
 import { ssoCallbackOf } from './sso-oidc-refusal-cause.js';
+import { isSsoDiscoveryEgressPath } from './sso-discovery-egress.js';
 import { samlSingleLogoutProviderId, SIGN_OUT_ENDPOINT_PATH } from './sso-sign-out-of-idp.js';
 import type { ScimRequestScope } from './scim-connection-service.js';
 
@@ -91,11 +92,12 @@ export interface RequestRoutingHost {
   answerOAuthTokenRevocation: AuthManager['answerOAuthTokenRevocation'];
   runSsoCallback: AuthManager['runSsoCallback'];
   runSsoLogout: AuthManager['runSsoLogout'];
+  runSsoDiscoveryEgress: AuthManager['runSsoDiscoveryEgress'];
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
 }
 
 /** The body of `AuthManager#handleRequest`; the method's docblock there is its contract. */
-export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'resolveAuthSecret'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'runSsoLogout' | 'runSsoDiscoveryEgress' | 'resolveAuthSecret'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
   // ADR-0069 D7 — the client address this request's sign-in audit stamps,
   // established ONCE, here, by the same trust rule the D5 allow-list judges
   // with (`resolveClientAddress`). Read before any rewrite below, and carried
@@ -214,13 +216,27 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // `await`, not a bare return: both scope helpers are generic over their
   // callback, so the composed call is typed `Promise< Promise< Response > >`.
   // The previous single call site flattened it with the `await` below.
-  const runHandler = async (): Promise<Response> =>
+  const runVendorHandler = async (): Promise<Response> =>
     await runWithAuthActorScope(() =>
       runWithRequestState(
         new WeakMap<object, unknown>(clientAddressStateEntries(clientAddress)),
         () => auth.handler(request),
       ),
     );
+
+  // SSO discovery connects only to addresses that are public at connect time
+  // (`sso-discovery-egress.ts`): a vendor endpoint that reads an identity
+  // provider (`/sso/register`, `/sign-in/sso`, `/sso/callback/*`) runs inside
+  // the scope whose reads the outbound-request guard sends. Opened HERE, with
+  // `run(...)` around the whole request, for the reason the SCIM scope below
+  // is: the vendor's endpoint handler is resumed from a continuation that a
+  // scope entered inside a hook never reaches. Only reads at origins the
+  // request's provider configuration names are judged (the global before-hook
+  // names a registration's, the observed adapter a stored provider's as the
+  // vendor reads it); every other read is sent as it was.
+  const runHandler = isSsoDiscoveryEgressPath(this.betterAuthEndpointPath(request))
+    ? (): Promise<Response> => this.runSsoDiscoveryEgress(runVendorHandler)
+    : runVendorHandler;
 
   // [#7724] A subject-erasure request is ONE unit of work, and better-auth
   // does not treat it as one: `internalAdapter.deleteUser` deletes the

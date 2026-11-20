@@ -1450,6 +1450,8 @@ const zh = {
     relatedShowHidden: '显示',
     recordTabs: '记录页签',
     recordTabOverview: '概览',
+    recordTabMoveBefore: '左移',
+    recordTabMoveAfter: '右移',
     recordTabsMore: '另外 {{count}} 个页签',
     recordTabsMore_one: '另外 {{count}} 个页签',
     recordTabsMore_other: '另外 {{count}} 个页签',

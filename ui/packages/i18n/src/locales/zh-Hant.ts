@@ -1450,6 +1450,8 @@ const zhHant = {
     relatedShowHidden: '顯示',
     recordTabs: '記錄頁籤',
     recordTabOverview: '概覽',
+    recordTabMoveBefore: '左移',
+    recordTabMoveAfter: '右移',
     recordTabsMore: '另外 {{count}} 個頁籤',
     recordTabsMore_one: '另外 {{count}} 個頁籤',
     recordTabsMore_other: '另外 {{count}} 個頁籤',

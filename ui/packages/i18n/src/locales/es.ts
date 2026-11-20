@@ -1578,6 +1578,8 @@ const es = {
     relatedShowHidden: "Mostrar",
     recordTabs: "Pestañas del registro",
     recordTabOverview: "Resumen",
+    recordTabMoveBefore: "Mover a la izquierda",
+    recordTabMoveAfter: "Mover a la derecha",
     recordTabsMore: "{{count}} pestañas más",
     recordTabsMore_one: "{{count}} pestaña más",
     recordTabsMore_many: "{{count}} pestañas más",

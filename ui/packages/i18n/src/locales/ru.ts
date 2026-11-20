@@ -1439,6 +1439,8 @@ const ru = {
     relatedShowHidden: "Показать",
     recordTabs: "Вкладки записи",
     recordTabOverview: "Обзор",
+    recordTabMoveBefore: "Переместить влево",
+    recordTabMoveAfter: "Переместить вправо",
     recordTabsMore: "Ещё вкладок: {{count}}",
     recordTabsMore_one: "Ещё вкладок: {{count}}",
     recordTabsMore_few: "Ещё вкладок: {{count}}",

@@ -1745,6 +1745,9 @@ const en = {
     relatedShowHidden: 'Show',
     recordTabs: 'Record tabs',
     recordTabOverview: 'Overview',
+    // objectstack#35783 — a related tab's menu: one place before / after it in the row.
+    recordTabMoveBefore: 'Move left',
+    recordTabMoveAfter: 'Move right',
     recordTabsMore: '{{count}} more tabs',
     recordTabsMore_one: '{{count}} more tab',
     recordTabsMore_other: '{{count}} more tabs',

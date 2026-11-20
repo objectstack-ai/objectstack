@@ -92,6 +92,7 @@ import {
 } from './relation-group-join.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
+import { refuseOrganizationUnitDelete } from './validation/unit-code-membership.js';
 
 /**
  * The `ObjectQL` members the bodies of {@link DeleteAndAggregateFacet} read — every one of
@@ -165,6 +166,10 @@ export class DeleteAndAggregateFacet {
       ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');
+    // [ADR-0158 Open item 11] A unit of measure is retired, never deleted:
+    // refused here, before any middleware or hook, so the refusal holds for a
+    // system writer and an automation run as for a user, single and batched.
+    refuseOrganizationUnitDelete(object);
     // [#8844] See the insert face — deleting the install's only organization
     // must not leave the memo answering with it.
     if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();

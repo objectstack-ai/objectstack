@@ -96,6 +96,7 @@ import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
 import { refuseSsoDiscoveryHostNotPublic, ssoDiscoveryCompanionContext } from './sso-discovery-companion-origins.js';
+import { declareSsoDiscoveryReadsOf, judgeSsoDiscoveryUrl } from './sso-discovery-egress.js';
 import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
 import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
@@ -242,6 +243,20 @@ export async function globalBeforeHook(
   // of every endpoint on both lanes and in-process — see
   // `principal-session-mint.ts` (3b).
   if (carriesPrincipalSession(ctx)) await setShouldSkipSessionRefresh(true);
+
+  // ── SSO discovery connects only to addresses public at connect time ──
+  // Ahead of every branch below that may answer early: a vendor endpoint
+  // that reads an identity provider (`/sso/register`, `/sign-in/sso`,
+  // `/sso/callback/*`) runs in the SSO discovery scope the request routing
+  // opened, which judges only reads at origins the request's provider
+  // configuration names (`sso-discovery-egress.ts`). Here the scope takes the
+  // deployment's configured trust from this request's context and, on a
+  // registration, the origins its body has the server read; a stored
+  // provider's are named as the vendor reads its row. This reads nothing.
+  // Naming an origin trusts nothing: a read of it is sent through the
+  // outbound-request guard, unless the deployment's configured trusted
+  // origins list it. Outside that scope this does nothing.
+  await declareSsoDiscoveryReadsOf(ctx);
 
   // ── An auth request is judged and executed as one account ────────
   // AHEAD OF EVERY GATE BELOW, and of the endpoint: a request whose
@@ -639,19 +654,21 @@ export async function globalBeforeHook(
       // [#32085] One email domain, one provider: a domain another
       // provider already serves is refused 409, naming that provider.
       await this.assertSsoProviderDomainFree(ctx);
-      // SSO discovery fetches only hosts that resolve to public addresses:
-      // the host this registration's discovery reads is resolved before the
-      // vendor's endpoint runs, and every address must be public, unless the
-      // deployment's configured trusted origins (read here, before any
-      // body-named origin joins them) list it
+      // SSO discovery connects only to addresses that are public at connect
+      // time: the host this registration's discovery reads is judged before
+      // the vendor's endpoint runs, by the rule its read is judged by when it
+      // connects, unless the deployment's configured trusted origins (read
+      // here, before any body-named origin joins them) list it
       // (`refuseSsoDiscoveryHostNotPublic`). Asked before the sign-out
       // switch below, whose check reads the same discovery document: a host
       // that is not public is refused on the member that names it, whatever
-      // the switch says, and nothing is read from it.
+      // the switch says, and nothing is read from it. A host that answers
+      // otherwise when its read connects is refused there, nothing sent.
       const notPublic = await refuseSsoDiscoveryHostNotPublic({
         body: ctx?.body,
         isConfiguredTrusted: (url) =>
           typeof ctx?.context?.isTrustedOrigin === 'function' && ctx.context.isTrustedOrigin(url) === true,
+        judge: judgeSsoDiscoveryUrl,
       });
       if (notPublic) {
         const { APIError } = await import('better-auth/api');

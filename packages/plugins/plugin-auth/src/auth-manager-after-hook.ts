@@ -65,6 +65,7 @@ import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js
 import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { explainUntrustedDiscoveryRefusal } from './sso-discovery-companion-origins.js';
+import { explainSsoDiscoveryConnectRefusal } from './sso-discovery-egress.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
@@ -613,6 +614,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `/sso/register` only; the same status and code, the remedy appended to
   // the vendor's message (`sso-discovery-companion-origins.ts`).
   await explainUntrustedDiscoveryRefusal(ctx);
+
+  // ── A registration's discovery read refused when it connected ──
+  // `/sso/register` only: answered as the before-hook answers a discovery
+  // host that is not public, on the member that names it
+  // (`sso-discovery-egress.ts`). Throws on a match.
+  await explainSsoDiscoveryConnectRefusal(ctx);
 
   // ── #29163: update-user's uncoded refusal carries its code ──
   // Same seam as the change-email section above; throws on a match.

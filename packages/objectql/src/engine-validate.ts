@@ -53,6 +53,7 @@ import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
 import { formulaValuesFor } from './engine-top-level.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, RecordCurrencyCodeRequiredError, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertUnitCodes, isUnitCodeRefusal, organizationUnitRowsOf, readOrganizationUnits, touchesUnitCodes } from './validation/unit-code-membership.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { isHomeAmountRefusal } from './home-amount-projection.js';
 import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
@@ -589,6 +590,20 @@ export async function validate(
           followCodes && currencyImage ? followCodes(currencyImage) : currencyImage, mode, mode === 'insert' ? undefined : row, storedIds[i],
           messages, parentCodeFieldServingOf(this._registry),
         );
+        // [ADR-0158 U5, Open item 9] The write's unit check, on the same image
+        // and under the same condition: a code the write would refuse as no
+        // member, retired or of another dimension, or a quantity beside a
+        // blank code, is refused here with the same code. It reads the
+        // organization's units; it writes nothing.
+        if (currencyImage && (mode === 'insert' || touchesUnitCodes(currencyFields, row))) {
+          const unitOrganization = ObjectQLStatics.homeAmountOrganizationOf(currencyImage, options?.context);
+          const touched = mode === 'insert' ? undefined : row;
+          const organizationUnits = await readOrganizationUnits(
+            currencyFields, [{ image: currencyImage, touched, organizationId: unitOrganization }], mode,
+            organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.find(o, q as never) }, options?.context as Record<string, unknown> | undefined),
+          );
+          assertUnitCodes(object, currencyFields, currencyImage, mode, touched, storedIds[i], unitOrganization, organizationUnits);
+        }
         // [ADR-0144 D2, amended] …and the write's parent-code lock, on the
         // stored row the by-id update writes: a record a child row follows
         // keeps its code field.
@@ -649,7 +664,7 @@ export async function validate(
         return { valid: false, errors: e.fields.map((f) => ({ ...f })), warnings };
       }
       // The write throws this refusal whole; the preview answers it as the row's finding.
-      if (e instanceof RecordCurrencyCodeRequiredError || isHomeAmountRefusal(e)) {
+      if (e instanceof RecordCurrencyCodeRequiredError || isHomeAmountRefusal(e) || isUnitCodeRefusal(e)) {
         return { valid: false, errors: [{ field: e.field, code: e.code, message: e.message }], warnings };
       }
       throw e;

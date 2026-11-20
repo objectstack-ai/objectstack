@@ -1354,6 +1354,8 @@ const ja = {
     relatedShowHidden: "表示",
     recordTabs: "レコードのタブ",
     recordTabOverview: "概要",
+    recordTabMoveBefore: "左へ移動",
+    recordTabMoveAfter: "右へ移動",
     recordTabsMore: "他 {{count}} 個のタブ",
     recordTabsMore_one: "他 {{count}} 個のタブ",
     recordTabsMore_other: "他 {{count}} 個のタブ",

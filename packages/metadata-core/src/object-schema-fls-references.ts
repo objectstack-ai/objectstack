@@ -623,6 +623,10 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     deleteBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
     relatedListTitle: keep, lookupPageSize: keep, allowCreate: keep, returnType: keep,
     language: keep, step: keep, currencyConfig: keep, dimensions: keep, trackHistory: keep,
+    // The unit of this quantity, or this field's unit-code marker (ADR-0158
+    // U4): kept as `currencyConfig` is, whose `currencyField` names a sibling
+    // the way `unitConfig.unitField` does.
+    unitConfig: keep,
     group: keep, widget: keep, hidden: keep, internal: keep, readonly: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,

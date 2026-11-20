@@ -839,22 +839,23 @@ export const PageHeaderProps = strictObject({
    * evidence: the renderer has always read them and the schema had not caught
    * up. The header renderer (read points recorded in `liveness/page.json`, row `regions`) resolves
    * `schema?.maxVisible ?? schema?.properties?.maxVisible` (and the `mobile*`
-   * twin), the `?? 3` / `?? 1` are its own fallbacks, and its comment says out
-   * loud that both are "overridable on the page:header". Closing this shape
+   * twin), the fallbacks for an unset key are its own (they differ by host, as
+   * the two `.describe()` strings below state), and its comment says out loud
+   * that both are "overridable on the page:header". Closing this shape
    * without declaring them would turn an invited affordance into a hard
    * rejection — the lesson of commit 78f0be872, which is to enumerate by the RENDERER'S read
    * pattern rather than by the key list a previous ruling happened to quote.
    *
-   * Optional with NO schema default, deliberately: 3 and 1 are the renderer's
-   * fallbacks, and declaring them here would materialize a `maxVisible` on
+   * Optional with NO schema default, deliberately: the per-host numbers are the
+   * renderer's fallbacks, and declaring one here would materialize a `maxVisible` on
    * every parsed header — turning an unset key into an authored one, exactly
    * as the record picker's `limit` docblock records for its own 50.
    */
   maxVisible: z.number().int().positive().optional().describe(
-    'How many header actions render as inline buttons before the rest fold into the overflow menu (renderer default 3).',
+    'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 1 in a record page\'s one-row header bar, 3 on any other header.',
   ),
   mobileMaxVisible: z.number().int().positive().optional().describe(
-    'The `maxVisible` budget on mobile viewports (renderer default 1).',
+    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, 1 on any other header.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),

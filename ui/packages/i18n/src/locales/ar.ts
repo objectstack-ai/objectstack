@@ -1719,6 +1719,9 @@ const ar = {
     relatedShowHidden: "إظهار",
     recordTabs: "علامات تبويب السجل",
     recordTabOverview: "نظرة عامة",
+    // objectstack#35783 — before / after in the row; an RTL row runs right to left, so before is to the right.
+    recordTabMoveBefore: "نقل إلى اليمين",
+    recordTabMoveAfter: "نقل إلى اليسار",
     recordTabsMore: "علامات تبويب أخرى: {{count}}",
     recordTabsMore_zero: "علامات تبويب أخرى: {{count}}",
     recordTabsMore_one: "علامات تبويب أخرى: {{count}}",
