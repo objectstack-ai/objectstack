@@ -860,7 +860,8 @@ export function bindDetailRowLockHook(
             where: { id: rowId[0] },
             fields: ['id', ...edges.map((e) => e.fk)],
             limit: 1,
-            context: { ...SYSTEM_CTX },
+            // SYSTEM_CTX's arrays are `as const` (readonly); the declared type wants mutable ones.
+            context: { ...SYSTEM_CTX, positions: [], permissions: [] },
           } satisfies EngineQueryOptions);
           previous = Array.isArray(rows) && rows[0] ? rows[0] : undefined;
         } catch {
