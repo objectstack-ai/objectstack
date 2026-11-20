@@ -33,7 +33,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, within } from '@testing-library/react';
+import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
 import type { FeedItem } from '@object-ui/types';
 import { RecordActivityTimeline } from '../RecordActivityTimeline';
 import { activityRowToFeedItem } from '../renderers/recordActivityFeed';
@@ -66,14 +66,21 @@ const ACTIVITY = activityRowToFeedItem(
   'System',
 ) as FeedItem;
 
+/**
+ * Mount the timeline and press every comment's 「回复」: since the dense rows
+ * (objectstack#35602) the offered input opens behind that toggle instead of
+ * standing open under each comment. The toggle is the offer this file pins.
+ */
 function mount(items: FeedItem[], { threading = true, onAddReply }: { threading?: boolean; onAddReply?: () => void } = {}) {
-  render(<RecordActivityTimeline items={items} config={{ enableThreading: threading }} onAddReply={onAddReply} />);
+  const { container } = render(
+    <RecordActivityTimeline items={items} config={{ enableThreading: threading }} onAddReply={onAddReply} />,
+  );
+  container.querySelectorAll<HTMLButtonElement>('[data-feed-reply-toggle]').forEach((toggle) => fireEvent.click(toggle));
 }
 
 /** The feed row a body sits in: the keyed root element holding the row and its replies. */
 function rootRowOf(body: string): HTMLElement {
-  const rows = screen.getByText(body).closest('.space-y-4')!.children;
-  const row = Array.from(rows).find((r) => r.textContent?.includes(body));
+  const row = screen.getByText(body).closest('[data-stream-comment-row],[data-stream-row]');
   if (!row) throw new Error(`no feed row holds ${JSON.stringify(body)}`);
   return row as HTMLElement;
 }

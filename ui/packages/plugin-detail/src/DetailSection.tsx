@@ -835,7 +835,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         <div
           className={
             frameless
-              ? 'w-28 shrink-0 truncate py-1.5 text-xs leading-5 text-muted-foreground'
+              ? 'w-28 shrink-0 truncate py-1 text-xs leading-6 text-muted-foreground'
               : 'text-xs font-medium text-muted-foreground'
           }
           title={frameless ? fieldLabelText : undefined}
@@ -902,7 +902,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           <div
             className={cn(
               'flex-1 min-w-0 break-words',
-              frameless ? 'py-1.5 text-[13px] leading-5' : 'text-sm py-1',
+              frameless ? 'py-1 text-[13px] leading-6' : 'text-sm py-1',
             )}
           >
             {displayValue}

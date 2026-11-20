@@ -105,10 +105,10 @@ describe('activity entries keep their time on one line (objectstack#34614)', () 
     expect(count).not.toBeNull();
     // Since objectstack#35602 a fold is one 30 px line: the time is a fixed,
     // unbreakable piece at its end and the text before it truncates instead.
-    const row = count!.closest('[data-stream-row]');
-    const when = row!.querySelector('[data-stream-when]');
+    const foldRow = count!.closest('[data-stream-row]');
+    const when = foldRow!.querySelector('[data-stream-when]');
     expect(tokens(when)).toEqual(expect.arrayContaining(['whitespace-nowrap', 'shrink-0']));
-    expect(tokens(row!.querySelector('.flex-1'))).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
+    expect(tokens(foldRow!.querySelector('.flex-1'))).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
     expect(tokens(count)).toEqual(expect.arrayContaining(['whitespace-nowrap', 'shrink-0']));
   });
 

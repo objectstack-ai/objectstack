@@ -760,6 +760,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           {item.actor}
         </span>
         <span className="min-w-0 flex-1 truncate text-muted-foreground">{what}</span>
+        {/* Reactions a non-comment row carries stay readable, as chips that
+            cannot be toggled: only a comment can store one (objectui#11035). */}
+        {enableReactions && item.reactions && item.reactions.length > 0 && (
+          <ReactionPicker reactions={item.reactions} className="shrink-0" />
+        )}
         {extra}
         <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums" data-stream-when="">
           {when}

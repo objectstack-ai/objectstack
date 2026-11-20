@@ -151,7 +151,7 @@ describe('RecordAttachmentsPanel — denied vs empty list (#4269)', () => {
     );
     expect(screen.getByText("You don't have access to these attachments.")).toBeInTheDocument();
     // The empty state is reserved for a genuine 200-with-zero-rows.
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('withdraws the Upload affordance under a denied list', async () => {
@@ -200,11 +200,11 @@ describe('RecordAttachmentsPanel — denied vs empty list (#4269)', () => {
   it('a genuine 200-with-zero-rows still renders the empty state AND the Upload button', async () => {
     setup(makeDataSource({ find: vi.fn(async () => []) }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText('No attachments yet. Upload a file to get started.'),
-      ).toBeInTheDocument(),
-    );
+    // The empty state an upload-capable reader gets since the dense
+    // attachments rows (objectstack#35602): one dashed line to drop on or
+    // pick from.
+    await waitFor(() => expect(document.querySelector('[data-attachments-empty]')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'choose a file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
     expect(screen.queryByTestId('record-attachments-denied')).not.toBeInTheDocument();
   });
@@ -273,7 +273,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
       screen.getByText("We couldn't load the attachments for this record."),
     ).toBeInTheDocument();
     // The empty state is reserved for a genuine 200-with-zero-rows.
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('a 5xx renders the unavailable state', async () => {
@@ -288,7 +288,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   // A 401 is AUTHENTICATION, not authorization: the session expired, the user
@@ -313,7 +313,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
       expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument(),
     );
     expect(screen.queryByTestId('record-attachments-denied')).not.toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('withdraws the Upload affordance under an unloaded list', async () => {
@@ -396,7 +396,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
 
     await waitFor(() => expect(find).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   // The other three states must keep their own meaning — this card only
@@ -425,11 +425,11 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
   it('a genuine 200-with-zero-rows still renders the empty state AND the Upload button', async () => {
     setup(makeDataSource({ find: vi.fn(async () => []) }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText('No attachments yet. Upload a file to get started.'),
-      ).toBeInTheDocument(),
-    );
+    // The empty state an upload-capable reader gets since the dense
+    // attachments rows (objectstack#35602): one dashed line to drop on or
+    // pick from.
+    await waitFor(() => expect(document.querySelector('[data-attachments-empty]')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'choose a file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
     expect(screen.queryByTestId('record-attachments-unavailable')).not.toBeInTheDocument();
   });
@@ -439,7 +439,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
 
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
     expect(screen.queryByTestId('record-attachments-unavailable')).not.toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 });
 
