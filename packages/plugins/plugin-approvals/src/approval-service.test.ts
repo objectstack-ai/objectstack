@@ -1436,11 +1436,13 @@ describe('ApprovalService (node era)', () => {
       expect(err.message).toBe('Invalid action params: Action param "comment" is required');
     }
     // Not a string is no reason either: the door's `textarea` value shape refuses it.
-    for (const comment of [0, false, [], {}]) {
+    for (const [comment, received] of [[0, 'number'], [false, 'boolean'], [[], 'array'], [{}, 'object']] as const) {
       const err: any = await svc.decide(req.id, { decision: 'reject', actorId: 'u9', comment } as any, SYS)
         .then(() => undefined, (e) => e);
       expect([err?.status, err?.code], JSON.stringify(comment)).toEqual([400, 'VALIDATION_ERROR']);
-      expect(err.message).toMatch(/^Invalid action params: Action param "comment" \(textarea\): /);
+      expect(err.message).toBe(
+        `Invalid action params: Action param "comment" (textarea): Invalid input: expected string, received ${received}`,
+      );
     }
     const [row] = await engine.find('sys_approval_request', { where: { id: req.id } });
     expect(row.status).toBe('pending');
