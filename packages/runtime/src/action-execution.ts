@@ -96,7 +96,7 @@ import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objec
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { PLATFORM_SYSTEM_API, deriveThroughSeam, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
-import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
+import { actionInvocationBranch, actionInvocationBulkReading, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 // The ONE admitted sequence every action door shares; `invokeBusinessAction`
 // below is its MCP door (posture `ai`).
@@ -5167,7 +5167,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     });
     const { outcome } = run;
     if (outcome.kind === 'answered') {
-        await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
+        // [#34292] A call that carried `_selectedIds` adds the per-row counts
+        // its resolve value reads as; the outcome stays `succeeded`.
+        await recordActionInvocation(deps, requestContext, envId, {
+            ...invocation, outcome: 'succeeded', bulk: actionInvocationBulkReading(run.admitted.params, outcome.result),
+        });
         if (action?.type === 'api' && !declarative) {
             // A credential rotation the target emitted (impersonation): the
             // bearer pair ONLY — see {@link mcpRelayableForwardHeaders} for why

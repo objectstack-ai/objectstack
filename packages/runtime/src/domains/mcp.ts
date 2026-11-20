@@ -45,6 +45,8 @@ import type { ActionDispatchAnswer, ActionResumeRequest, PlaceRequestInEnvironme
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#34766] The open MCP draft door: its registry, behind `metadata:write` and the user's own `manage_metadata`.
 import { resolveOpenAuthoringInjection } from './mcp-authoring.js';
+// [#35442] The app-docs members (`search_package_docs` / `read_package_doc`), over the `/meta/doc` docs-audience gate.
+import { createPackageDocMembers, packageDocsReadGate, type PackageDocsProtocol } from './mcp-package-docs.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
@@ -248,7 +250,10 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // carries `list_datasets` / `query_dataset` exactly where the analytics
     // service serves its dataset executor.
     const datasetTools = await resolveMcpDatasetToolsService(deps, context);
-    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools });
+    // [#35442] The docs seam: the bridge carries `search_package_docs` /
+    // `read_package_doc` exactly where the protocol serves the `/meta` list read.
+    const packageDocs = await resolveMcpPackageDocsProtocol(deps, context);
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs });
     // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
     // Design A): resolved per request, so the user's own `manage_metadata` is
     // read for every call. `undefined` for a grant without `metadata:write`
@@ -948,7 +953,7 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 export function buildMcpBridge(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService } = {},
+    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService; packageDocs?: PackageDocsProtocol } = {},
 ): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
@@ -1597,6 +1602,21 @@ export function buildMcpBridge(
         // [ADR-0149 D2] The dataset seam (`list_datasets` / `query_dataset`),
         // carried only where the analytics service serves its executor.
         ...(seams.datasetTools ? datasetToolMembers(seams.datasetTools, getProtocol, ec, deps, context) : {}),
+        // [#35442] The docs seam (`search_package_docs` / `read_package_doc`),
+        // carried only where the protocol serves the `/meta` list read. Every
+        // page is read through the `/meta/doc` docs-audience gate AS this
+        // request's caller (`mcp-package-docs.ts`), in this request's locale.
+        ...(seams.packageDocs
+            ? createPackageDocMembers(async () => ({
+                protocol: seams.packageDocs!,
+                readGate: packageDocsReadGate(
+                    seams.packageDocs!,
+                    ec as Record<string, unknown> | undefined,
+                    (name) => deps.resolveService(context, name),
+                ),
+                locale: metaRequestLocale(mcpRequestHttp(context)),
+            }))
+            : {}),
     };
 }
 
@@ -1610,7 +1630,8 @@ export function buildMcpBridge(
  */
 export interface McpDatasetToolsService {
     datasetTools(deps: {
-        loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+        loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
+        translationLocale?: (context: unknown) => Promise<string | undefined>;
         diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
         maxQueryLimit?: number;
     }): {
@@ -1641,6 +1662,48 @@ export async function resolveMcpDatasetToolsService(
 }
 
 /**
+ * [#35442] The protocol whose `/meta` list read the app-docs members read
+ * `doc` and `book` items through, or `undefined` when this request has none
+ * (no protocol, one without `getMetaItems`, or a lookup that throws): the doc
+ * tools are then not listed, as for {@link resolveMcpDatasetToolsService}.
+ */
+export async function resolveMcpPackageDocsProtocol(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<PackageDocsProtocol | undefined> {
+    let protocol: Partial<PackageDocsProtocol> | undefined;
+    try {
+        protocol = (await deps.resolveService(context, 'protocol', context.environmentId)) as Partial<PackageDocsProtocol> | undefined;
+    } catch {
+        return undefined;
+    }
+    return protocol && typeof protocol.getMetaItems === 'function' ? (protocol as PackageDocsProtocol) : undefined;
+}
+
+/**
+ * [#35083] This request's two locale members, as the REST door reads them: its
+ * headers, and its query — the host's parsed `query` where the request carries
+ * one, else its URL's (a repeated `?locale=` stays an array, which the locale
+ * read sends to the i18n default).
+ */
+function mcpRequestHttp(context: HttpProtocolContext): { headers?: unknown; query?: Record<string, unknown> } {
+    const request: any = context.request;
+    if (request?.query && typeof request.query === 'object') return { headers: request.headers, query: request.query };
+    let params: URLSearchParams | undefined;
+    try {
+        params = typeof request?.url === 'string' ? new URL(request.url, 'http://localhost').searchParams : undefined;
+    } catch {
+        params = undefined;
+    }
+    const query: Record<string, unknown> = {};
+    for (const key of new Set(params?.keys() ?? [])) {
+        const values = params!.getAll(key);
+        query[key] = values.length > 1 ? values : values[0];
+    }
+    return { headers: request?.headers, query };
+}
+
+/**
  * [ADR-0149 D2 · #34872] What the `/meta` translation reads for THIS request:
  * the request's i18n service (a lookup that throws is none, and the text is
  * then served untranslated), its protocol (an object's packaged base and a
@@ -1664,7 +1727,7 @@ function metaTranslationSources(
             }
         },
         resolveProtocol: getProtocol,
-        requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
+        requestLocale: (i18n?: unknown) => metaRequestLocale(mcpRequestHttp(context), i18n),
     };
 }
 
@@ -1677,7 +1740,10 @@ function metaTranslationSources(
  *   localized with the `/meta` list translation for this request's locale, as
  *   the REST door localizes a saved dataset. A throwing read is left to throw:
  *   the executor answers it as a degraded read (`partial` / 503), never as an
- *   empty catalogue.
+ *   empty catalogue. [#34993] A translation fault is no failed read: the rows
+ *   are handed over untranslated, with the fault's sentence as their `warning`.
+ * - [#35083] `translationLocale` is the locale that translation read, so the
+ *   executor's labels and its sentences speak one language.
  * - The narrowing probe is the bridge's own `diagnoseDelegation` read, asked
  *   of this request's security service, so `query_dataset` states a narrowing
  *   exactly where `query_records` does.
@@ -1692,15 +1758,21 @@ function datasetToolMembers(
     context: HttpProtocolContext,
 ) {
     const envId = context.environmentId;
-    const loadDatasets = async (): Promise<readonly unknown[]> => {
+    const loadDatasets = async () => {
         const protocol = await getProtocol();
         const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
+        let warning: string | undefined;
         const translated = await translateMetaList(
-            metaTranslationSources(deps, context, async () => protocol),
+            { ...metaTranslationSources(deps, context, async () => protocol), reportTranslationFault: (w) => { warning = w; } },
             'dataset',
             items,
         );
-        return Array.isArray(translated) ? translated : items;
+        const rows = Array.isArray(translated) ? translated : items;
+        return warning === undefined ? rows : { items: rows, warning };
+    };
+    const translationLocale = async () => {
+        const sources = metaTranslationSources(deps, context, getProtocol);
+        return sources.requestLocale(await sources.resolveI18nService());
     };
     const diagnoseDelegation = async (object: string) => {
         try {
@@ -1713,7 +1785,7 @@ function datasetToolMembers(
         }
     };
     const executor = (maxQueryLimit?: number) =>
-        service.datasetTools({ loadDatasets, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+        service.datasetTools({ loadDatasets, translationLocale, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
     return {
         listDatasets: (input: unknown) => executor().listDatasets(input, ec),
         queryDataset: (input: unknown, opts: { maxRows: number }) => executor(opts.maxRows).queryDataset(input, ec),

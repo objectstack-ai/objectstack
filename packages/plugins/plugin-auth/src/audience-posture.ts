@@ -59,7 +59,9 @@
  * self-serve sign-up route. So a self-serve creation holding a PENDING,
  * unexpired `sys_invitation` row is admitted under every posture (under
  * `email_domain` an explicit invitation also trumps the domain list — an
- * operator inviting an external contractor must not dead-end them). Without
+ * operator inviting an external contractor must not dead-end them), except a
+ * social-provider creation whose address the provider did not verify under a
+ * posture whose admission rests on the address (below). Without
  * this carve-out the posture would be "admin-create only" and the invitation
  * surface would be dead for new users — the invite dead-end class.
  *
@@ -77,6 +79,21 @@
  * `email_domain` for an address off the list, the sign-up is not bound into
  * the deployment's organization while its address is unverified, and joins by
  * accepting the invitation.
+ *
+ * ## A social provider's word on the address
+ *
+ * Under a posture whose admission rests on the address — `email_domain`
+ * always, `open` while email verification is in force
+ * ({@link resolveEmailVerificationRequirement}) — a self-serve creation through
+ * a social provider is admitted only when the provider verified the address
+ * (`emailVerified` `true`). Otherwise {@link decideAudienceAdmission} refuses it
+ * `SELF_REGISTRATION_CLOSED`, as `invite_only` refuses it through the
+ * invitation proof: no account row, no session, no membership, and a pending
+ * invitation addressed to it does not admit it either. The rule is keyed on the
+ * creation class, so a social provider configured later is covered without
+ * being named; the `provider` class (an operator-registered identity
+ * authority) and the bootstrap carve-out are unaffected. Under `open` with the
+ * deployment's verification declared off, the creation is admitted as before.
  *
  * ## Pinned domain-matching rules (`email_domain`)
  *
@@ -494,6 +511,47 @@ export interface AudienceAdmissionInput {
    * creation, an `oidcProviders` entry included.
    */
   ssoProvider?: { allowJit: boolean };
+  /** The vendor's `source.method` for the creation (`oauth` for a social provider). */
+  method?: unknown;
+  /**
+   * What the creation's identity provider said of the address, as the vendor
+   * hands it (`user.emailVerified`). Verified only when it is `true`.
+   */
+  emailVerified?: unknown;
+  /**
+   * The deployment's declared `emailAndPassword.requireEmailVerification`,
+   * resolved here by {@link resolveEmailVerificationRequirement}, the resolver
+   * the better-auth wiring and the public config read. Absent resolves to the
+   * posture's default, so under `open` email verification is in force unless
+   * the deployment declared an explicit `false`.
+   */
+  declaredEmailVerification?: boolean;
+}
+
+/**
+ * A self-serve creation through a social provider: `oauth` whose providerId is
+ * not an operator-registered `oidcProviders` entry ({@link classifyCreationMethod}
+ * classes those `provider`). It is told by the creation class and method, not
+ * by a list of providers, so a social provider configured later is covered
+ * without being named.
+ */
+function isSocialProviderCreation(creationClass: AudienceCreationClass, method: unknown): boolean {
+  return creationClass === 'self-serve' && method === 'oauth';
+}
+
+/**
+ * Whether a valid posture's admission of a self-serve creation rests on its
+ * address: `email_domain` always, and `open` while email verification is in
+ * force. Under either, a self-serve creation through a social provider is
+ * admitted only when the provider verified the address
+ * ({@link decideAudienceAdmission}). Under `invite_only` the invitation proof
+ * already asks it of an OAuth creation ({@link invitationProofFor}).
+ */
+function admissionRestsOnAddress(audience: ResolvedAudience, declaredEmailVerification: boolean | undefined): boolean {
+  if (audience.invalid) return false;
+  if (audience.posture === 'email_domain') return true;
+  if (audience.posture === 'open') return resolveEmailVerificationRequirement('open', declaredEmailVerification);
+  return false;
 }
 
 /**
@@ -569,10 +627,26 @@ const SSO_JIT_CLOSED_MESSAGE =
   '(audience posture invite_only). Ask an administrator for an invitation, or ask them to turn on ' +
   'just-in-time provisioning (allowJit) for this provider.';
 
+/** The refusal message for a social-provider creation whose address the provider did not verify. */
+const socialAddressUnverifiedMessage = (posture: AudiencePosture): string =>
+  'This sign-in provider has not verified the email address, and this environment creates an account through ' +
+  `a social sign-in only for a verified address (audience posture ${posture}). ` +
+  'Verify the address with the provider and sign in again.';
+
 /**
  * THE admission decision — pure, so the posture × method matrix is a table of
  * direct calls. Order: creation-class exemptions → bootstrap → vocabulary
- * guard (fail closed) → posture semantics.
+ * guard (fail closed) → the social-provider address rule → posture semantics.
+ *
+ * The social-provider address rule: under a posture whose admission rests on
+ * the address ({@link admissionRestsOnAddress}: `email_domain` always, `open`
+ * while email verification is in force), a self-serve creation through a
+ * social provider is admitted only when the provider verified the address.
+ * Otherwise it is refused `SELF_REGISTRATION_CLOSED`, as `invite_only` refuses
+ * it, and nothing is written: no account row, no session, no membership. A
+ * pending invitation does not admit it either — the invitation is matched by
+ * that same address. The `operator` and `provider` classes, and the bootstrap
+ * carve-out, stay ahead of the rule.
  */
 export function decideAudienceAdmission(input: AudienceAdmissionInput): AudienceAdmission {
   const { audience, creationClass, email, hasPendingInvitation, isBootstrap, ssoProvider } = input;
@@ -600,6 +674,13 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
         `${AUDIENCE_POSTURES.join(', ')}) — self-registration is refused until the configuration is fixed. ` +
         'This is a configuration error, not a policy refusal.',
     };
+  }
+  if (
+    isSocialProviderCreation(creationClass, input.method) &&
+    input.emailVerified !== true &&
+    admissionRestsOnAddress(audience, input.declaredEmailVerification)
+  ) {
+    return { admit: false, code: SELF_REGISTRATION_CLOSED, message: socialAddressUnverifiedMessage(audience.posture) };
   }
   if (hasPendingInvitation) {
     // An explicit invitation is a stronger operator act than any posture —

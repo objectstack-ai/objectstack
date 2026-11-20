@@ -4554,6 +4554,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.defaultView': 'Default view',
   'engine.studio.inspector.listView.notCreated': 'Changes save as a draft first.',
   'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
+  // objectstack#35600 — a list view of the object a read-only base does not ship is not customized here.
+  'engine.studio.inspector.listView.environmentView':
+    'This view was created in this deployment, and {package} does not ship it, so it is not customized here. Edit it in the app, on the object’s list: Manage views, then the view’s ⋯ menu › Edit view config.',
+  'engine.studio.inspector.listView.notShipped': '{package} does not ship this view, so it is not customized here.',
   'engine.studio.inspector.listView.notList': '“{view}” is not a list view, so it is not edited here.',
   'engine.studio.inspector.listView.filter': 'Filter',
   'engine.studio.inspector.listView.sort': 'Sort',

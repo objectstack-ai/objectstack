@@ -1,14 +1,12 @@
 ---
 name: objectstack-formula
 description: >
-  Author CEL expressions used across ObjectStack — formula fields,
-  field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`),
-  validation / sharing / visibility predicates, flow conditions, and dynamic
-  seed values. This is the companion skill that objectstack-data, -ui, -api
-  and -automation each tell you to load alongside them. Use when the user is
-  writing an `F`, `P`, or `cel` tagged-template literal, or asks "how do I
-  express X as a formula / predicate". Do not use for SQL fragments
-  (driver-native) or L2 hook bodies (those belong in objectstack-data).
+  Write a CEL expression wherever ObjectStack takes one, in a project or through
+  MCP: formula fields, `visibleWhen` / `requiredWhen` rules, validation, sharing
+  and visibility predicates, flow conditions, seed values, Salesforce formulas
+  ported to CEL. Use when asked how to express a condition or calculation, or
+  writing an `F`, `P` or `cel` literal. Not for ObjectQL query filters
+  (objectstack-query), SQL fragments, or hook bodies (objectstack-data).
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/formula 18.x (CEL)
 metadata:

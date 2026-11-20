@@ -7,8 +7,11 @@ import { test, expect } from '@playwright/test';
  */
 test('a row Edit action opens a modal form and closes', async ({ page }) => {
   await page.goto('/apps/showcase_app/showcase_task');
-  await page.locator('[data-testid="row-action-trigger"]').first().waitFor();
-  await page.locator('[data-testid="row-action-trigger"]').first().click();
+  // objectstack#35554 — the list page draws no row "⋮": a row's actions are
+  // its context menu (right-click), the same items.
+  const row = page.locator('tbody tr').filter({ hasText: /\S/ }).first();
+  await row.waitFor();
+  await row.locator('td').last().click({ button: 'right' });
   await page.getByRole('menuitem', { name: /^Edit$/i }).click();
 
   const dialog = page.getByRole('dialog');

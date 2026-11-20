@@ -23,6 +23,7 @@
 import type { ComponentType } from 'react';
 import type { SupportedLocale } from './i18n.js';
 import { createObservableTypeRegistry, type MetadataSelection } from './preview-registry.js';
+import type { SchemaFormIssue } from './SchemaForm.js';
 
 export interface MetadataDefaultInspectorProps {
   /** Metadata type, e.g. 'view'. */
@@ -72,6 +73,23 @@ export interface MetadataDefaultInspectorProps {
    * server schema is available (offline / older server).
    */
   serverSchema?: Record<string, unknown>;
+  /**
+   * The host's issues on the draft (a refused save, the live pass), paths
+   * relative to the draft — what the host's fallback form is handed. An
+   * inspector draws each on the row that edits its path (objectstack#35628).
+   * Optional: a host that passes none gets the inspector it got before.
+   */
+  issues?: SchemaFormIssue[];
+  /** The host's Save was attempted: no deferred issue line stays hidden, as `SchemaForm`'s `revealIssues`. */
+  revealIssues?: boolean;
+  /**
+   * Told the PATH PREFIXES whose issues the inspector draws on a row, mounted
+   * and shown: a whole-draft form's row keys, a slice form's keys under the
+   * slice's path, a curated row's own path. The host's banner and refusal
+   * line leave an issue out only when one of them is the issue's path or a
+   * segment-wise prefix of it (objectstack#27865).
+   */
+  onInlineIssueFieldsChange?: (prefixes: ReadonlySet<string>) => void;
 }
 
 export type MetadataDefaultInspector = ComponentType<MetadataDefaultInspectorProps>;

@@ -4422,5 +4422,78 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_unit: {
+    label: "计量单位",
+    pluralLabel: "计量单位",
+    description: "组织自定义的计量单位，与所有组织共有的标准单位并列——每个单位一行，以组织命名空间中的代码标识。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "代码",
+        help: "数量所存储的代码，须为大写：字母、数字和下划线，至少 4 个字符或包含下划线（如 BOX_12、JIN1）。KGM、H87 等标准代码所有组织均可使用，无需在此添加。单位创建后代码不可更改。"
+      },
+      label: {
+        label: "名称",
+        help: "数量旁显示的单位名称，使用组织自己的语言填写。"
+      },
+      dimension: {
+        label: "量纲",
+        help: "该单位度量的是什么。包装单位（箱、袋）没有固定换算比例。单位创建后量纲不可更改。",
+        options: {
+          mass: "质量",
+          length: "长度",
+          area: "面积",
+          volume: "体积",
+          time: "时间",
+          count: "计数",
+          package: "包装"
+        }
+      },
+      ratio: {
+        label: "换算比例",
+        help: "1 个本单位 = 换算比例 × 其量纲的基本单位（质量 KGM、长度 MTR、面积 MTK、体积 MTQ、时间 SEC、计数 H87）。例：质量量纲中半千克的单位，换算比例为 0.5。包装单位没有换算比例。修改换算比例只影响之后保存的记录；已保存的记录保留保存时的数量和换算。规格变了应新建单位，而不是修改比例。"
+      },
+      decimal_places: {
+        label: "小数位数",
+        help: "该单位的数量默认显示几位小数。它从不对已存储的值取整，存储的位数仍受字段自身的小数位数限制。"
+      },
+      retired: {
+        label: "已停用",
+        help: "停用的单位仍保留在档，其代码永不再用，已使用它的记录照常显示。新记录不能使用已停用的单位。停用不可撤销。"
+      }
+    },
+    _views: {
+      all_units: {
+        label: "全部",
+        description: "1 个本单位 = 换算比例 × 其量纲的基本单位（质量 KGM、长度 MTR、面积 MTK、体积 MTQ、时间 SEC、计数 H87）。例：质量量纲中半千克的单位，换算比例为 0.5。包装单位没有换算比例。",
+        emptyState: {
+          title: "尚无计量单位",
+          message: "千克（KGM）、件（H87）等标准单位已可直接使用。仅当组织需要标准单位未涵盖的单位时，才在此添加。"
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "单位代码由大写字母、数字和下划线组成，至少 4 个字符或包含下划线（例如 BOX_12 或 JIN1）。更短的代码保留给标准单位。"
+      },
+      unit_code_immutable: {
+        message: "单位创建后代码不可更改。请用新代码新建一个单位。"
+      },
+      unit_dimension_immutable: {
+        message: "单位创建后量纲不可更改。请用新量纲新建一个单位。"
+      },
+      unit_ratio_required: {
+        message: "请填写相对于该量纲基本单位的换算比例。"
+      },
+      unit_package_has_no_ratio: {
+        message: "包装单位没有换算比例：一个包装装多少属于物品，而不属于单位。请清空换算比例。"
+      },
+      unit_retired_one_way: {
+        message: "已停用的单位不能恢复。请用新代码新建一个单位。"
+      }
+    }
   }
 };

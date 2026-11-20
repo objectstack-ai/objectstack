@@ -144,6 +144,8 @@ const childObject = (relatedListFilter?: unknown) => ({
       // on the fake adapter — the rendered-row half of the parity assertion
       // needs the row VALUES on screen, not just a fetch that happened.
       relatedListColumns: ['name', 'status'],
+      // A side list (objectstack#35597: a plain master_detail FK is an overview body table).
+      relatedList: true,
       ...(relatedListFilter === undefined ? {} : { relatedListFilter }),
     },
   },

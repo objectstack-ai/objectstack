@@ -86,9 +86,11 @@ describe('relatedLists — the declared business order (objectstack#27069)', () 
       fields: { lead_id: { type: 'lookup', reference: 'lead', relatedList: 'primary' } },
     };
     const out = deriveRelatedLists({ ...lead, relatedLists: ['task'] }, [lead, note, task, primaryCampaign]);
+    // `note` is an owned child with no relatedList: a body table by default
+    // since objectstack#35597, and still in its derived position.
     expect(out.map((r) => [r.childObject, r.isPrimary])).toEqual([
       ['task', false],
-      ['note', false],
+      ['note', true],
       ['campaign_member', true],
     ]);
   });
@@ -124,9 +126,18 @@ describe("relatedList: 'primary' as body placement (objectstack#27069)", () => {
     expect(primaryOf({ inlineEdit: true, relatedList: true })).toBe(false);
   });
 
-  it('no inlineEdit, or inlineEdit: false, is not primary by default', () => {
-    expect(primaryOf({})).toBe(false);
-    expect(primaryOf({ inlineEdit: false })).toBe(false);
+  it('no inlineEdit, or inlineEdit: false, is primary by default too (objectstack#35597: the relation type decides)', () => {
+    expect(primaryOf({})).toBe(true);
+    expect(primaryOf({ inlineEdit: false })).toBe(true);
+  });
+
+  it("relatedList: true keeps a plain master_detail a side card; 'primary' is unchanged (objectstack#35597)", () => {
+    expect(primaryOf({ relatedList: true })).toBe(false);
+    expect(primaryOf({ relatedList: 'primary' })).toBe(true);
+  });
+
+  it('relatedList: false hides a plain master_detail: no list at all (objectstack#35597)', () => {
+    expect(deriveRelatedLists(quote, [quote, lineOf({ relatedList: false })])).toEqual([]);
   });
 
   it('a lookup FK with inlineEdit is not primary by default (owned children only)', () => {

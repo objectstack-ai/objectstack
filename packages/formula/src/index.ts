@@ -195,6 +195,26 @@ export type { FormulaReturnDeclaration, FormulaSourceField } from './formula-ret
 // number the engine stores.
 export { toScaledDecimal, divideToPlaces, formatScaledDecimal, documentDateOf } from './home-amount-arithmetic';
 export type { ScaledDecimal } from './home-amount-arithmetic';
+// ADR-0157 — the working-calendar arithmetic: the calendar service
+// (`@objectstack/objectql`) and the working-day formula functions count with
+// this one copy, through the one daylight-saving rule. The codes, the column
+// names and the `WorkCalendar` shape are `@objectstack/spec/data`'s.
+export {
+  WorkCalendarUnresolvedError,
+  WorkCalendarNotMaintainedError,
+  WorkCalendarInvalidError,
+  isWorkCalendarRefusal,
+  parseWorkPeriods,
+  buildWorkCalendar,
+  exceptionDayOf,
+  calendarDayOf,
+  workingPeriodsOn,
+  isWorkingDay,
+  isWorkingTime,
+  addWorkingDays,
+  workingDaysBetween,
+  addWorkingHours,
+} from './work-calendar';
 // The closed set of refusal codes `validateExpression` and
 // `collectCelRootIdentifiers` carry beside their English message, with the
 // typed params each message interpolates — so a localized author surface keys

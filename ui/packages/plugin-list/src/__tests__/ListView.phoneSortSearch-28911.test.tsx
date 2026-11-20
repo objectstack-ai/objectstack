@@ -10,7 +10,8 @@
  * objectstack#28911 — a phone list offers Sort and its own search.
  *
  * Below `sm` the bar keeps Filter and Display. Sort rides in the Display
- * panel there (the same Sort panel the toolbar popover draws), and the list
+ * menu there, as its Sort row's level (the same Sort panel the toolbar
+ * popover draws), and the list
  * search is an icon that expands into a field in place. Both follow the same
  * `userActions` flags as the desktop toolbar.
  *
@@ -116,7 +117,10 @@ describe('phone list: Sort in the Display panel (objectstack#28911)', () => {
     expect(screen.getByTestId('toolbar-sort-trigger')).not.toBeVisible();
 
     const content = await openDisplay();
-    const block = within(content).getByTestId('display-sort');
+    const row = within(content).getByTestId('options-row-sort');
+    expect(row).toBeVisible();
+    fireEvent.click(row);
+    const block = await within(content).findByTestId('display-sort');
     expect(block).toBeVisible();
     expect(within(block).getByText('Sort Records')).toBeVisible();
 
@@ -129,14 +133,14 @@ describe('phone list: Sort in the Display panel (objectstack#28911)', () => {
     expect(JSON.stringify(ds.find.mock.lastCall)).toContain('name');
   });
 
-  it('wide: the Sort button is on the bar and the Display panel draws no Sort block', async () => {
+  it('wide: the Sort button is on the bar and the Display menu shows no Sort row', async () => {
     fromSm();
     mount();
     await screen.findByTestId('grid-stub');
 
     expect(screen.getByTestId('toolbar-sort-trigger')).toBeVisible();
     const content = await openDisplay();
-    expect(within(content).getByTestId('display-sort')).not.toBeVisible();
+    expect(within(content).getByTestId('options-row-sort')).not.toBeVisible();
   });
 
   it('`userActions.sort: false` withholds Sort on the phone too', async () => {
@@ -146,6 +150,7 @@ describe('phone list: Sort in the Display panel (objectstack#28911)', () => {
 
     expect(screen.queryByTestId('toolbar-sort-trigger')).toBeNull();
     const content = await openDisplay();
+    expect(within(content).queryByTestId('options-row-sort')).toBeNull();
     expect(within(content).queryByTestId('display-sort')).toBeNull();
   });
 

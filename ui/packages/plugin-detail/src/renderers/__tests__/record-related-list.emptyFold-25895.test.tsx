@@ -235,17 +235,20 @@ describe('record:related_list — a body table of the record page never folds (o
     const title = cardTitled('Deviations');
     expect(title).toBeVisible();
 
-    // The header row is the non-empty tables' header: title, count, New.
+    // The header row is the non-empty tables' header: title and count.
     const head = title.closest('[data-related-list-head]') as HTMLElement;
     expect(head).not.toBeNull();
-    fireEvent.click(within(head).getByRole('button', { name: /New/ }));
-    expect(created).toHaveBeenCalledWith('crm_child_account');
 
-    // The sentence is not in the header row: it is drawn under it.
+    // The sentence is not in the header row: it is drawn under it, in the
+    // table's one empty row, with the add entry beside it (objectstack#35597).
     expect(within(head).queryByText('No related records found')).toBeNull();
     const sentence = screen.getByText('No related records found');
     expect(sentence).toBeVisible();
     expect(head.compareDocumentPosition(sentence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const emptyRow = sentence.closest('[data-body-table-empty-row]') as HTMLElement;
+    expect(emptyRow).not.toBeNull();
+    fireEvent.click(within(emptyRow).getByRole('button', { name: /New/ }));
+    expect(created).toHaveBeenCalledWith('crm_child_account');
   });
 
   it('CONTROL: a Related tab stack under the same context folds as before — only the listed ids are body tables', async () => {

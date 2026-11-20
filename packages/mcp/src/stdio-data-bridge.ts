@@ -286,7 +286,8 @@ export interface StdioDataBridgeDeps {
  */
 export interface StdioDatasetToolsService {
   datasetTools(deps: {
-    loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+    loadDatasets: (context: unknown) => Promise<readonly unknown[] | { items: readonly unknown[]; warning?: string }>;
+    translationLocale?: (context: unknown) => Promise<string | undefined>;
     diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
     maxQueryLimit?: number;
   }): {
@@ -1703,12 +1704,14 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // carries no request, so the locale is the i18n service's default (what
   // `metaRequestLocale` answers with no header), the workspace default the
   // stdio principal speaks. An i18n service this host cannot resolve leaves the
-  // list untranslated, as there. The stdio bridge has no delegation probe (an
-  // API key is not delegated), so none is passed, as `query_records` here
-  // carries none.
+  // list untranslated, as there. [#34993] So does a translation fault, whose
+  // sentence the rows carry as their `warning`. [#35083] `translationLocale`
+  // is that one locale, so the executor's sentences speak the labels' language.
+  // The stdio bridge has no delegation probe (an API key is not delegated), so
+  // none is passed, as `query_records` here carries none.
   if (deps.datasetTools) {
     const service = deps.datasetTools;
-    const loadDatasets = async (): Promise<readonly unknown[]> => {
+    const loadDatasets = async () => {
       const protocolService = protocol?.();
       let merged: StdioProtocolObjectReads | undefined;
       let items: readonly unknown[];
@@ -1718,11 +1721,21 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       } else {
         items = (await metadataService.list('dataset')) ?? [];
       }
-      const translated = await translateMetaList(defaultLocaleSources(deps.i18n, async () => merged), 'dataset', items);
-      return Array.isArray(translated) ? translated : items;
+      let warning: string | undefined;
+      const translated = await translateMetaList(
+        { ...defaultLocaleSources(deps.i18n, async () => merged), reportTranslationFault: (w: string) => { warning = w; } },
+        'dataset',
+        items,
+      );
+      const rows = Array.isArray(translated) ? translated : items;
+      return warning === undefined ? rows : { items: rows, warning };
+    };
+    const translationLocale = async () => {
+      const sources = defaultLocaleSources(deps.i18n, async () => undefined);
+      return sources.requestLocale(await sources.resolveI18nService());
     };
     const executor = (maxQueryLimit?: number) =>
-      service.datasetTools({ loadDatasets, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+      service.datasetTools({ loadDatasets, translationLocale, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
     bridge.listDatasets = async (input) => executor().listDatasets(input, await resolvePrincipal());
     bridge.queryDataset = async (input, opts) => executor(opts.maxRows).queryDataset(input, await resolvePrincipal());
     bridge.datasetToolDefinitions = () => executor().definitions;

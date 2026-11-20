@@ -53,6 +53,7 @@ import type { HookRunAs, HookRunAsRef } from './hook-run-as.js';
 import { scopedContextHost } from './engine-scoped-hosts.js';
 import { ObjectRepository, ScopedContext } from './engine.js';
 import type { ObjectQL } from './engine.js';
+import { isDispatchedActionApi, markDispatchedActionApi } from './engine-object-repository.js';
 
 /**
  * The `ScopedContext` members the bodies of {@link ScopedContextFacet} read —
@@ -76,16 +77,18 @@ export interface ScopedContextHost {
 /** The bodies of `ScopedContext`'s methods: a stateless facet, called by the class's stubs. */
 export class ScopedContextFacet {
   /**
-   * A child over `executionContext` that keeps this api's provenance.
+   * A child over `executionContext` that keeps this api's provenance: the
+   * app-authored flag, and the dispatched action's origin flag
+   * (`engine-object-repository.ts`, `markDispatchedActionApi`).
    *
    * The child's private `appAuthored` is written through the child's own host
    * (`scopedContextHost.of(child)`), the port its class's static block fills:
    * a module function cannot write another instance's private field directly.
    */
-  static derive(this: Pick<ScopedContextHost, 'appAuthored' | 'engine'>, executionContext: ExecutionContext): ScopedContext {
+  static derive(this: Pick<ScopedContextHost, 'appAuthored' | 'engine' | 'facade'>, executionContext: ExecutionContext): ScopedContext {
     const child = new ScopedContext(executionContext, this.engine);
     scopedContextHost.of(child).appAuthored = this.appAuthored;
-    return child;
+    return isDispatchedActionApi(this.facade) ? markDispatchedActionApi(child) : child;
   }
 
   /**
@@ -124,11 +127,13 @@ export class ScopedContextFacet {
   /**
    * The body of `ScopedContext#[PLATFORM_SYSTEM_API]`; its contract, and
    * where its guard stops, is `platform-system-api.ts`'s module header.
-   * An app-authored hook's api is never the platform's: there it is that
-   * api's own {@link ScopedContextFacet.sudo}, provenance kept.
+   * An app-authored hook's api, and the api `ObjectRepository.execute` hands
+   * the action it dispatches (`isDispatchedActionApi`), are never the
+   * platform's: there it is that api's own {@link ScopedContextFacet.sudo},
+   * provenance kept.
    */
-  static platformSystemApi(this: Pick<ScopedContextHost, 'appAuthored' | 'derive' | 'executionContext'>): ScopedContext {
-    if (this.appAuthored) return ScopedContextFacet.sudo.call(this);
+  static platformSystemApi(this: Pick<ScopedContextHost, 'appAuthored' | 'derive' | 'executionContext' | 'facade'>): ScopedContext {
+    if (this.appAuthored || isDispatchedActionApi(this.facade)) return ScopedContextFacet.sudo.call(this);
     const { flowRunId: _run, ...context } = withoutAppAutomationElevation({ ...this.executionContext, isSystem: true });
     return this.derive(context as ExecutionContext);
   }

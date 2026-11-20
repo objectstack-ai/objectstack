@@ -39,6 +39,7 @@ import { InspectorComboField } from './InspectorComboField.js';
 import { useObjectOptions } from './useDatasetFields.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
+import { IssuePrefixLines, issuesUnderPrefix, useIssuePrefixRegister, useSliceFormIssueRows } from '../issuePath.js';
 import { useObjectFields, type ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { failed, loaded, type LoadState } from '../loadState.js';
 import type { ObjectFieldOption, WidgetContext } from '../widgets.js';
@@ -233,8 +234,18 @@ export function ViewVariantInspector({
   objectFieldsOverride,
   locale,
   serverSchema,
+  issues,
+  revealIssues,
+  onInlineIssueFieldsChange,
 }: ViewVariantInspectorProps) {
   const variant = (draft[variantKey] as Record<string, unknown> | undefined) ?? {};
+  // objectstack#35628 — the host's issues are drawn on the rows that edit their
+  // paths: the Label and Columns rows here, the spec form below over the
+  // variant body (its keys reported under `variantKey`). Any other path stays
+  // in the host's banner.
+  const registerIssuePrefix = useIssuePrefixRegister(onInlineIssueFieldsChange);
+  const setFormIssueRows = useSliceFormIssueRows(registerIssuePrefix, variantKey);
+  const variantIssues = React.useMemo(() => issuesUnderPrefix(issues ?? [], variantKey), [issues, variantKey]);
 
   const isFormFamily = isFormFamilyKey(familyKey ?? variantKey);
   // objectstack#30046 — a form view without a `type` is the spec's default
@@ -441,6 +452,13 @@ export function ViewVariantInspector({
         placeholder={t('engine.inspector.view.labelPlaceholder', locale)}
         disabled={readOnly}
       />
+      <IssuePrefixLines
+        issues={issues}
+        prefix="label"
+        label={t('engine.inspector.view.label', locale)}
+        value={draft.label}
+        register={registerIssuePrefix}
+      />
       <InspectorSelectField
         label={t('engine.inspector.view.type', locale)}
         value={viewType}
@@ -503,6 +521,13 @@ export function ViewVariantInspector({
             onPatch={onPatch}
             onSelectionChange={onSelectionChange}
           />
+          <IssuePrefixLines
+            issues={issues}
+            prefix={`${variantKey}.columns`}
+            label={t('engine.fieldsListEditor.columns', locale)}
+            value={variant.columns}
+            register={registerIssuePrefix}
+          />
         </div>
       )}
 
@@ -531,6 +556,9 @@ export function ViewVariantInspector({
             hiddenFields={['type', 'object', 'label']}
             readOnly={readOnly}
             widgetContext={widgetContext}
+            issues={variantIssues}
+            revealIssues={revealIssues}
+            onInlineIssueFieldsChange={setFormIssueRows}
             onChange={writeForm}
           />
         ) : (

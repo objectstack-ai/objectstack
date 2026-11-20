@@ -213,3 +213,35 @@ describe('a typed list declared on an embedded-JSON field is refused with the ch
     }
   });
 });
+
+/**
+ * The authoring-key lint (read by `defineStack` and the CLI) answers an unknown
+ * key with the package's ONE rename rule (`shared/rename-guess.ts`). It used to
+ * pass a flat distance of 3 to `findClosestMatches`, so a four-letter key was
+ * offered any declared key three edits away, and the budget did not grow or
+ * shrink with the key.
+ */
+describe('lintAuthoredRecordKeys — an unknown key gets the shared rename rule', () => {
+  const declared = ['description', 'label', 'required', 'areas', 'defaultValue'];
+
+  it('a short key two unrelated edits from a declared key gets no rename', () => {
+    // `aria` → `areas` is one substitution and one insertion: inside the old
+    // flat 3, outside the one-edit screen a short key gets.
+    const [f] = runComparator({ aria: 'x' }, declared);
+    expect(f).toMatchObject({ path: 'p.aria', key: 'aria' });
+    expect(f.suggestion).toBeUndefined();
+    expect(formatUnknownAuthoringKey(f)).not.toContain('did you mean');
+  });
+
+  it('a one-edit or adjacent-swap slip on a short key is still answered', () => {
+    expect(runComparator({ lable: 'x' }, declared)[0]?.suggestion).toBe('label');
+    expect(runComparator({ lbael: 'x' }, declared)[0]?.suggestion).toBe('label');
+  });
+
+  it('the budget is length-relative: three edits are too many at eight characters, enough at nine', () => {
+    // Both are three edits from their declared key. `descrptn` (8 characters)
+    // gets a budget of 2; `dfltValue` (9 characters) gets 3.
+    expect(runComparator({ descrptn: 'x' }, declared)[0]?.suggestion).toBeUndefined();
+    expect(runComparator({ dfltValue: 'x' }, declared)[0]?.suggestion).toBe('defaultValue');
+  });
+});

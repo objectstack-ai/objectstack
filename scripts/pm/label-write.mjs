@@ -200,6 +200,12 @@
  *             candidates are the patrol's readers, called, ⛔ never a second parser. When that report's `pr` names
  *             ANOTHER pull (siblings on one card), the newest trusted report whose `pr` names THIS pull, or none — a
  *             null or URL-less `pr` names no pull, so in that fallback it is not this pull's and is passed over too.
+ *             A FOLD — one closing keyword per card, at equal strength — delivers no single card, and
+ *             `deliveredCardNumber` reports that tie rather than break it (the queue guard's record pairing stays
+ *             refusing on it). The gate then reads EVERY tied card (`deliveredCardsAtStrongest`, the same
+ *             enumeration), each thread whole, under the same author filter and sibling rule, and lands when SOME
+ *             tied card's report carries a battery the head reaches; the verdict never depends on which card is read
+ *             first, and a refusal names every tied card and why each failed. A body naming no card still refuses.
  *   sha       its `dogfood_battery` must open with a sha that is the pull's head, or that a first-parent walk from the
  *             head reaches over merges of the base alone: each step's commit has exactly two parents, the second one
  *             on the base branch (`GET /compare/{parent2}...{base}` answers `ahead` or `identical`).
@@ -393,7 +399,7 @@ import {
 // The `--land` dogfood gate's readers (header: `--land` on a breaking or narrowing pull), each CALLED from its owner:
 // the one `Clause-②:` reader, the card a pull delivers, the relay's identity and the record leg's author trust.
 import { quoteLine, readClause2Line } from './clause2-line.mjs';
-import { deliveredCardNumber } from './record-recognisers.mjs';
+import { deliveredCardNumber, deliveredCardsAtStrongest } from './record-recognisers.mjs';
 import { RELAY_COMMENT_AUTHOR } from './fleet-write/ops.mjs';
 import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
 // The comment half of a release, borrowed exactly as close-cards borrows it:
@@ -1722,7 +1728,13 @@ export function readBatterySha(text) {
  * readable `dogfood_battery`, an `n/a` one or one naming no sha all refuse — NOT MEASURED is a refusal here, never a
  * pass. A read the platform did not answer comes back `unread: true`, which the fold exits 3 on, not 2.
  *
- * @returns {Promise<{ judged: false } | { judged: true, ok: boolean, title: string|null, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number, unread?: true }>}
+ * A TIE (a fold's equal closing keywords, `deliveredCardsAtStrongest`): every tied card's thread is read whole before
+ * anything is judged — one that does not read is exit 3 and one that cannot be read whole refuses, whatever the other
+ * cards carry — then each card's report is chosen exactly as above, and the pull lands when the head, or one first-parent
+ * walk from it, reaches ANY tied card's battery sha. The result then carries `card`, `cleared` and `tied` (each card
+ * read, its report and battery); a tie refusal carries `tied` with each card's reason. ⛔ Never a choice by number order.
+ *
+ * @returns {Promise<{ judged: false } | { judged: true, ok: boolean, title: string|null, marker: string, why?: string, clear?: string, report?: number|null, battery?: string|null, hops?: number, unread?: true, card?: number, cleared?: object[], tied?: object[] }>}
  */
 export async function landDogfoodGate({ repo, issue, card, doCall }) {
   const title = typeof card?.title === 'string' ? quoteLine(card.title, LAND_TITLE_QUOTE_CAP) : null;
@@ -1746,74 +1758,131 @@ export async function landDogfoodGate({ repo, issue, card, doCall }) {
   const baseRef = pull.json?.base?.ref;
   if (!FULL_SHA.test(head) || typeof baseRef !== 'string' || baseRef === '') return refuse('the pull read carries no full head sha or no base branch', 'land again once the pull reads whole');
   const delivered = deliveredCardNumber(pull.json);
-  if (delivered.card === null) return refuse(`no card: ${delivered.reason}`, `declare the card on the body (\`Fixes #N\` or \`Part of #N\`), then ${rerun(head)}`);
+  // A fold delivers one card per closing keyword at equal strength, and `deliveredCardNumber` reports that tie
+  // (`card: null`) rather than break it. The gate then reads EVERY tied card (`deliveredCardsAtStrongest`, the
+  // same enumeration) and judges over all of them; a body naming no card still refuses here.
+  const tie = delivered.card === null ? deliveredCardsAtStrongest(pull.json) : null;
+  if (delivered.card === null && tie.cards.length < 2) return refuse(`no card: ${delivered.reason}`, `declare the card on the body (\`Fixes #N\` or \`Part of #N\`), then ${rerun(head)}`);
+  const cards = tie === null ? [delivered.card] : tie.cards;
 
-  const rows = [];
-  for (let page = 1; ; page += 1) {
-    if (page > LAND_COMMENT_PAGE_CAP) {
-      return refuse(
-        `card #${delivered.card}'s thread is still full after ${LAND_COMMENT_PAGE_CAP} pages of 100 — a TRUNCATED listing, so its newest report is unknown`,
-        'report it to the maintainer: this gate cannot read the newest report on a thread that long, and it lands nothing it has not read',
-      );
-    }
-    const listed = await doCall('comments-list', `/repos/${repo}/issues/${delivered.card}/comments?per_page=100&page=${page}`, {});
-    if (listed.verdict !== 'ok') {
-      // A 404 is as likely the pull delivering the wrong card (its body or its branch) as the platform failing to answer.
-      return unread(`card #${delivered.card}'s thread`, listed, `land again once the card reads${listed.status === 404 ? `, or correct the card this pull delivers (#${delivered.card})` : ''}`);
-    }
-    if (!Array.isArray(listed.json)) return refuse(`card #${delivered.card}'s thread answered no list on page ${page}`, 'land again once the card reads');
-    rows.push(...listed.json);
-    if (listed.json.length < 100) break;
-  }
   const trusted = recordTrustedAuthors(RELAY_COMMENT_AUTHOR);
-  const kept = rows.filter((row) => recordAuthorTrusted(row, trusted));
-  const newest = latestMarkedComment(kept, OS_DEV_REPORT_MARKER);
-  if (newest === null) return refuse(`card #${delivered.card} carries no \`os-dev-report\` by ${trusted.join(' / ')} (${rows.length} comment(s) read)`, rerun(head));
-  let row = kept[newest.index];
-  // Sibling pulls on one card: the newest report may be another pull's. Then the newest naming THIS pull, or none.
-  if (reportNamesPull(row?.body, { repo, number: issue }) === 'other') {
-    const own = kept.filter((r) => reportNamesPull(r?.body, { repo, number: issue }) === 'this');
-    const mine = latestMarkedComment(own, OS_DEV_REPORT_MARKER);
-    if (mine === null) {
-      report = row?.id ?? null;
-      battery = reportedDogfoodBattery(row?.body);
-      return refuse(`card #${delivered.card}'s newest trusted report names another pull in \`pr\`, and no trusted report names this one`, rerun(head));
+  // One card's thread, read whole, and the report the gate judges on it: `{ blocked }` when the thread cannot be read
+  // whole (the gate's verdict, as on one card), else `{ card, report, battery, sha }` or `{ card, report, battery, why }`.
+  const readCard = async (number) => {
+    const rows = [];
+    for (let page = 1; ; page += 1) {
+      if (page > LAND_COMMENT_PAGE_CAP) {
+        return {
+          blocked: refuse(
+            `card #${number}'s thread is still full after ${LAND_COMMENT_PAGE_CAP} pages of 100 — a TRUNCATED listing, so its newest report is unknown`,
+            'report it to the maintainer: this gate cannot read the newest report on a thread that long, and it lands nothing it has not read',
+          ),
+        };
+      }
+      const listed = await doCall('comments-list', `/repos/${repo}/issues/${number}/comments?per_page=100&page=${page}`, {});
+      if (listed.verdict !== 'ok') {
+        // A 404 is as likely the pull delivering the wrong card (its body or its branch) as the platform failing to answer.
+        return { blocked: unread(`card #${number}'s thread`, listed, `land again once the card reads${listed.status === 404 ? `, or correct the card this pull delivers (#${number})` : ''}`) };
+      }
+      if (!Array.isArray(listed.json)) return { blocked: refuse(`card #${number}'s thread answered no list on page ${page}`, 'land again once the card reads') };
+      rows.push(...listed.json);
+      if (listed.json.length < 100) break;
     }
-    row = own[mine.index];
+    const kept = rows.filter((row) => recordAuthorTrusted(row, trusted));
+    const newest = latestMarkedComment(kept, OS_DEV_REPORT_MARKER);
+    if (newest === null) return { card: number, report: null, battery: null, why: `card #${number} carries no \`os-dev-report\` by ${trusted.join(' / ')} (${rows.length} comment(s) read)` };
+    let row = kept[newest.index];
+    // Sibling pulls on one card: the newest report may be another pull's. Then the newest naming THIS pull, or none.
+    if (reportNamesPull(row?.body, { repo, number: issue }) === 'other') {
+      const own = kept.filter((r) => reportNamesPull(r?.body, { repo, number: issue }) === 'this');
+      const mine = latestMarkedComment(own, OS_DEV_REPORT_MARKER);
+      if (mine === null) {
+        return { card: number, report: row?.id ?? null, battery: reportedDogfoodBattery(row?.body), why: `card #${number}'s newest trusted report names another pull in \`pr\`, and no trusted report names this one` };
+      }
+      row = own[mine.index];
+    }
+    const found = { card: number, report: row?.id ?? null, battery: reportedDogfoodBattery(row?.body) };
+    if (found.battery === null) return { ...found, why: `the newest report carries no readable \`${LAND_DOGFOOD_REPORT_KEY}\` string` };
+    const ran = readBatterySha(found.battery);
+    if (ran.ran === false) return { ...found, why: 'the battery was not run (`n/a`)' };
+    if (ran.ran === null) return { ...found, why: `\`${LAND_DOGFOOD_REPORT_KEY}\` names no sha it ran on` };
+    return { ...found, sha: ran.sha };
+  };
+  const outcomes = [];
+  for (const number of cards) {
+    const one = await readCard(number);
+    if (one.blocked) return tie === null ? one.blocked : { ...one.blocked, tied: outcomes.map(tiedRow) };
+    outcomes.push(one);
   }
-  report = row?.id ?? null;
-  battery = reportedDogfoodBattery(row?.body);
-  if (battery === null) return refuse(`the newest report carries no readable \`${LAND_DOGFOOD_REPORT_KEY}\` string`, rerun(head));
-  const ran = readBatterySha(battery);
-  if (ran.ran === false) return refuse('the battery was not run (`n/a`)', rerun(head));
-  if (ran.ran === null) return refuse(`\`${LAND_DOGFOOD_REPORT_KEY}\` names no sha it ran on`, rerun(head));
-  if (head.startsWith(ran.sha)) return { judged: true, ok: true, title, marker, report, battery, hops: 0 };
+  const judgeable = outcomes.filter((one) => one.sha !== undefined);
+  // On a tie the refusal names every card read and why each failed; on one card it is that card's reason, as before.
+  const tieRefuse = (walkWhy) => {
+    const rows = outcomes.map((one) => ({ ...tiedRow(one), why: one.why ?? walkWhy }));
+    return {
+      ...refuse(
+        `it delivers ${cards.length} cards at the same strength (${cards.map((n) => `#${n}`).join(', ')}, ${tie.evidence}), each card's thread was read, and none carries a report that clears this pull — ${rows.map((r) => `card #${r.card}: ${r.why}`).join('; ')}`,
+        rerun(head),
+      ),
+      tied: rows,
+    };
+  };
+  if (tie === null) {
+    report = outcomes[0].report;
+    battery = outcomes[0].battery;
+    if (outcomes[0].why !== undefined) return refuse(outcomes[0].why, rerun(head));
+  } else if (judgeable.length === 0) {
+    return tieRefuse(null);
+  }
+  const shaWords = judgeable.length === 1 ? `the battery's \`${judgeable[0].sha}\`` : `the tied cards' batteries (${[...new Set(judgeable.map((one) => one.sha))].map((sha) => `\`${sha}\``).join(', ')})`;
+  // A pass names the report(s) whose sha the head reaches first; on a tie every card read rides along in `tied`.
+  const pass = (at, hops) => {
+    const clearing = judgeable.filter((one) => at.startsWith(one.sha));
+    if (clearing.length === 0) return null;
+    report = clearing[0].report;
+    battery = clearing[0].battery;
+    return { judged: true, ok: true, title, marker, report, battery, hops, ...(tie === null ? {} : { card: clearing[0].card, cleared: clearing.map(tiedRow), tied: outcomes.map(tiedRow) }) };
+  };
+  const walkRefuse = (why) => (tie === null ? refuse(why, rerun(head)) : tieRefuse(why));
+  const walkUnread = (what, r) => (tie === null ? unread(what, r, rerun(head)) : { ...unread(what, r, rerun(head)), tied: outcomes.map(tiedRow) });
+  const passedOnHead = pass(head, 0);
+  if (passedOnHead) return passedOnHead;
 
   let at = head;
   for (let hop = 1; hop <= LAND_MERGE_HOP_CAP; hop += 1) {
     const commit = await doCall('commit-read', `/repos/${repo}/commits/${at}`, {});
-    if (commit.verdict !== 'ok') return unread(`commit \`${at}\`, on the walk to the battery's \`${ran.sha}\`,`, commit, rerun(head));
+    if (commit.verdict !== 'ok') return walkUnread(`commit \`${at}\`, on the walk to ${shaWords},`, commit);
     const parents = (Array.isArray(commit.json?.parents) ? commit.json.parents : []).map((p) => String(p?.sha ?? '').toLowerCase());
     if (parents.length !== 2 || !parents.every((p) => FULL_SHA.test(p))) {
-      return refuse(`commit \`${at}\` lies after the battery's \`${ran.sha}\` and is not a merge (${parents.length} parent(s)) — the battery did not run on this code`, rerun(head));
+      return walkRefuse(`commit \`${at}\` lies after ${shaWords} and is not a merge (${parents.length} parent(s)) — the battery did not run on this code`);
     }
     const compared = await doCall('compare-read', `/repos/${repo}/compare/${parents[1]}...${enc(baseRef)}`, {});
-    if (compared.verdict !== 'ok') return unread(`whether merge \`${at}\`'s second parent \`${parents[1]}\` is on \`${baseRef}\``, compared, rerun(head));
+    if (compared.verdict !== 'ok') return walkUnread(`whether merge \`${at}\`'s second parent \`${parents[1]}\` is on \`${baseRef}\``, compared);
     if (!ON_BASE_STATUSES.includes(compared.json?.status)) {
-      return refuse(`merge \`${at}\` brings in \`${parents[1]}\`, which \`${baseRef}\` does not hold (compare status ${JSON.stringify(compared.json?.status ?? null)}) — not a merge of the base`, rerun(head));
+      return walkRefuse(`merge \`${at}\` brings in \`${parents[1]}\`, which \`${baseRef}\` does not hold (compare status ${JSON.stringify(compared.json?.status ?? null)}) — not a merge of the base`);
     }
     at = parents[0];
-    if (at.startsWith(ran.sha)) return { judged: true, ok: true, title, marker, report, battery, hops: hop };
+    const passed = pass(at, hop);
+    if (passed) return passed;
   }
-  return refuse(`the battery's \`${ran.sha}\` is not reached within ${LAND_MERGE_HOP_CAP} merges of \`${baseRef}\` on the head's first-parent line`, rerun(head));
+  return walkRefuse(`${shaWords} ${judgeable.length === 1 ? 'is' : 'are'} not reached within ${LAND_MERGE_HOP_CAP} merges of \`${baseRef}\` on the head's first-parent line`);
+}
+
+/** One tied card's row on a tie verdict: the card, its judged report comment (or null) and that report's battery text. Pure. */
+function tiedRow(one) {
+  return { card: one.card, report: one.report ?? null, battery: one.battery ?? null };
 }
 
 /** The refusal line a failed gate prints: the title, the marker, the report comment and its `dogfood_battery` text, why, and what clears it. */
 export function landDogfoodRefusal(gate) {
+  const reportWords = (r) => `${r.report === null || r.report === undefined ? 'none' : `comment ${r.report}`}`;
+  const batteryWords = (r) => `${r.battery === null || r.battery === undefined ? 'none' : JSON.stringify(r.battery)}`;
+  // A tie names every tied card read, each with its report and battery; one card prints as it always has.
+  const reportPart = Array.isArray(gate.tied)
+    ? `reports: ${gate.tied.length === 0 ? 'none read' : gate.tied.map((r) => `card #${r.card} ${reportWords(r)}, ${LAND_DOGFOOD_REPORT_KEY} ${batteryWords(r)}`).join('; ')}`
+    : `report: ${reportWords(gate)} · ${LAND_DOGFOOD_REPORT_KEY}: ${batteryWords(gate)}`;
   return (
     `--land REFUSED by the dogfood battery gate (${LAND_DOGFOOD_RULE_PATH}) — title: ${gate.title === null || gate.title === undefined ? 'none read' : JSON.stringify(gate.title)} · marker: ${gate.marker} · ` +
-    `report: ${gate.report === null || gate.report === undefined ? 'none' : `comment ${gate.report}`} · ` +
-    `${LAND_DOGFOOD_REPORT_KEY}: ${gate.battery === null || gate.battery === undefined ? 'none' : JSON.stringify(gate.battery)} · why: ${gate.why} · to clear: ${gate.clear}.`
+    `${reportPart} · why: ${gate.why} · to clear: ${gate.clear}.`
   );
 }
 
@@ -1845,7 +1914,7 @@ async function foldStroke(c) {
     if (gate.judged && !gate.ok) return refuse(landDogfoodRefusal(gate), { gate });
     record(
       gate.judged
-        ? `[${stamp()}] ② dogfood gate ✓ — marker: ${gate.marker} · report comment ${gate.report} · ${LAND_DOGFOOD_REPORT_KEY} ${JSON.stringify(gate.battery)} · sha judged only · ${gate.hops === 0 ? 'ran on the head' : `ran ${gate.hops} merge(s) of the base below the head`}`
+        ? `[${stamp()}] ② dogfood gate ✓ — marker: ${gate.marker} · report comment ${gate.report} · ${LAND_DOGFOOD_REPORT_KEY} ${JSON.stringify(gate.battery)} · sha judged only · ${gate.hops === 0 ? 'ran on the head' : `ran ${gate.hops} merge(s) of the base below the head`}${Array.isArray(gate.tied) ? ` · a tie of ${gate.tied.length} cards (${gate.tied.map((r) => `#${r.card}`).join(', ')}), every thread read, cleared by ${gate.cleared.map((r) => `card #${r.card} comment ${r.report}`).join(', ')}` : ''}`
         : `[${stamp()}] ② dogfood gate — not judged: no \`!\` in the title and no \`(narrowing)\` arm`,
     );
   }
@@ -2657,7 +2726,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [FOLD_BATTERY]: 28,
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
-  [LAND_DOGFOOD_BATTERY]: 50,
+  // Raised 50 → 65 with the fold's tie: two `Fixes` lines read on every tied card, passing and refusing, and the structural pin.
+  [LAND_DOGFOOD_BATTERY]: 65,
   [HAND_SET_BATTERY]: 42,
 });
 const SELF_TEST_BATTERY_FLOOR = 18;
@@ -3444,6 +3514,39 @@ export async function selfTest() {
       [gateLine.includes('`!`'), gateLine.includes('dogfood'), gateLine.includes('`os-dev.md`'), LAND_DOGFOOD_RULE_PATH, ruleLine !== ''],
       [true, true, true, '.claude/agents/os-dev.md', true], `rule line: ${JSON.stringify(ruleLine)}`);
 
+    // A FOLD: one closing keyword per card, at equal strength. `deliveredCardNumber` reports the tie (no card), and
+    // the gate reads EVERY tied card's thread, judging over all of them -- never one picked by number order.
+    const FOLD = 'Fixes #8\nFixes #9\n\nClause-②: no\nMetadata-protocol: none\n';
+    const threadsRead = (run) => run.fake.calls.filter((c) => c.op === 'comments-list').map((c) => Number(/\/issues\/(\d+)\/comments/u.exec(c.path)?.[1]));
+    const foldHead = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD)], 9: [] } }));
+    t('⭐ PASSES: a `!` fold whose body carries TWO `Fixes` lines and a dogfood report on the chain-head card — exit 0, ready and armed, both threads read', [foldHead.exit, foldHead.sent[0]?.actions.map((a) => a.op), threadsRead(foldHead).filter((n) => n !== 7), foldHead.text.includes('a tie of 2 cards (#8, #9), every thread read, cleared by card #8 comment 501')], [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], [8, 9], true], foldHead.text.slice(-700));
+    const foldReversed = await land(pull({ body: 'Fixes #9\nFixes #8\n\nClause-②: no\n', cards: { 8: [report(RAN_HEAD)], 9: [] } }));
+    t('…the verdict does not follow number or body order: the same fold with its lines swapped passes on the same card', [foldReversed.exit, foldReversed.text.includes('cleared by card #8 comment 501'), threadsRead(foldReversed).filter((n) => n !== 7)], [EXIT_OK, true, [9, 8]], foldReversed.text.slice(-500));
+    const foldSecond = await land(pull({ body: FOLD, cards: { 8: [], 9: [report(RAN_HEAD, { id: 901 })] } }));
+    t('…and a report on the SECOND-named card clears it the same way', [foldSecond.exit, foldSecond.text.includes('cleared by card #9 comment 901')], [EXIT_OK, true], foldSecond.text.slice(-500));
+    const foldPartOf = await land(pull({ body: 'Part of #8\nPart of #9\n\nClause-②: no\n', cards: { 8: [report(RAN_HEAD)], 9: [] } }));
+    t('…a tie of two `Part of` declarations is read the same way', foldPartOf.exit, EXIT_OK, foldPartOf.text.slice(-500));
+    const foldNone = await land(pull({ body: FOLD, cards: { 8: [], 9: [] } }));
+    t('⭐ REFUSED: a fold on which NO delivered card carries a report — exit 2, zero sends, and the refusal names every tied card read and why each failed', [...refused(foldNone), ['it delivers 2 cards at the same strength (#8, #9, closing-keyword)', 'card #8: card #8 carries no `os-dev-report` by', 'card #9: card #9 carries no `os-dev-report` by', 'reports: card #8 none, dogfood_battery none; card #9 none'].map((w) => foldNone.text.includes(w))], [...REFUSED, [true, true, true, true]], foldNone.text.slice(-700));
+    const foldNa = await land(pull({ body: FOLD, cards: { 8: [report(NA)], 9: [report(RAN_BELOW, { id: 902 })] }, commits: { [HEAD]: [BELOW] } }));
+    t('⛔ REFUSED: an `n/a` on one tied card and a battery the head does not reach on the other — each card\'s own reason, the walk\'s on the one it judged', [...refused(foldNa), ['card #8: the battery was not run (`n/a`)', 'card #9: commit `', 'lies after the battery\'s `bbbb', 'card #8 comment 501, dogfood_battery "n/a', 'card #9 comment 902'].map((w) => foldNa.text.includes(w))], [...REFUSED, [true, true, true, true, true]], foldNa.text.slice(-700));
+    const foldMerged = await land(pull({ body: FOLD, cards: { 8: [report(NA)], 9: [report(RAN_BELOW, { id: 903 })] }, commits: { [HEAD]: [BELOW, MAIN_SIDE] }, onBase: [MAIN_SIDE] }));
+    t('…while a tied card whose battery ran one merge of main below the head passes, over an `n/a` on the other', [foldMerged.exit, foldMerged.text.includes('ran 1 merge(s) of the base below the head'), foldMerged.text.includes('cleared by card #9 comment 903')], [EXIT_OK, true, true], foldMerged.text.slice(-500));
+    const foldBoth = await land(pull({ body: FOLD, cards: { 8: [report(RAN_BELOW)], 9: [report(RAN_BELOW, { id: 904 })] }, commits: { [HEAD]: [BELOW, STRAY] }, onBase: [MAIN_SIDE] }));
+    t('⛔ …and when the shared walk refuses, every judged card carries the walk\'s reason', [...refused(foldBoth), foldBoth.text.includes('card #8: merge `'), foldBoth.text.includes('card #9: merge `'), (foldBoth.text.match(/which `main` does not hold/gu) ?? []).length], [...REFUSED, true, true, 2], foldBoth.text.slice(-700));
+    const foldLinear = await land(pull({ body: FOLD, cards: { 8: [report(RAN_BELOW)], 9: [report(`${STRAY} · VERDICT command-exit 0`, { id: 906 })] }, commits: { [HEAD]: [BELOW] } }));
+    t('…the walk names every battery it looked for, once each, when it stops on new code', [...refused(foldLinear), foldLinear.text.includes(`lies after the tied cards' batteries (\`${BELOW}\`, \`${STRAY}\`) and is not a merge`)], [...REFUSED, true], foldLinear.text.slice(-700));
+    const foldUnread = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD)] } }));
+    t('⛔ FAIL CLOSED: a tied card whose thread does not read is NOT MEASURED — exit 3 and zero sends, even with the other card clearing', [foldUnread.exit, foldUnread.sent.length, writesOf(foldUnread), foldUnread.text.includes("card #9's thread did not read"), foldUnread.text.includes('reports: card #8 comment 501')], [EXIT_PREREQUISITE, 0, [], true, true], foldUnread.text.slice(-600));
+    const foldNoList = await land({ ...pull({ body: FOLD, cards: { 8: [report(RAN_HEAD)], 9: [] } }), hooks: { 'comments-list': [{ status: 200, json: { message: 'not a list' } }] } });
+    t('⛔ …and a tied card\'s thread answering no list refuses before the next card is read, saying none was read whole', [...refused(foldNoList), foldNoList.text.includes("card #8's thread answered no list on page 1"), foldNoList.text.includes('reports: none read')], [...REFUSED, true, true], foldNoList.text.slice(-500));
+    const foldWalkUnread = await land(pull({ body: FOLD, cards: { 8: [report(RAN_BELOW)], 9: [report(NA, { id: 907 })] } }));
+    t('⛔ …and a walk commit that does not read on a tie is NOT MEASURED too, naming every tied card\'s report', [foldWalkUnread.exit, foldWalkUnread.sent.length, foldWalkUnread.text.includes('on the walk to the battery\'s `bbbb'), foldWalkUnread.text.includes('reports: card #8 comment 501'), foldWalkUnread.text.includes('card #9 comment 907')], [EXIT_PREREQUISITE, 0, true, true, true], foldWalkUnread.text.slice(-600));
+    const foldSibling = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD, { pr: 'https://github.com/objectstack-ai/objectstack/pull/9' })], 9: [report(RAN_HEAD, { id: 905 })] } }));
+    t('the sibling-pull rule holds per tied card: a card whose newest report names another pull is passed over, the other card clears', [foldSibling.exit, foldSibling.text.includes('cleared by card #9 comment 905')], [EXIT_OK, true], foldSibling.text.slice(-500));
+    const foldForeign = await land(pull({ body: FOLD, cards: { 8: [report(RAN_HEAD, { login: 'someone-else' })], 9: [] } }));
+    t('⛔ …and the trusted-author filter too: an untrusted report on a tied card is data, never a reason to land', [...refused(foldForeign), foldForeign.text.includes('card #8: card #8 carries no `os-dev-report` by')], [...REFUSED, true], foldForeign.text.slice(-500));
+
     // Ordering and shape.
     const early = await land(pull({ cards: { 8: [report(NA)] } }));
     t('the gate refuses BEFORE the comment is judged and before any send — the comment file is never even read', [early.exit, early.sent.length, early.text.includes('② comment —')], [EXIT_USAGE, 0, false]);
@@ -3453,6 +3556,9 @@ export async function selfTest() {
     t('structural: in the fold the gate runs before judgeBody; ⛔ no second report parser — the marker, the payload candidates, the newest-of and the card are the owners\' readers',
       [foldSource.indexOf('landDogfoodGate(') > 0 && foldSource.indexOf('landDogfoodGate(') < foldSource.indexOf('judgeBody('), /latestMarkedComment\(kept, OS_DEV_REPORT_MARKER\)/u.test(gateSource), /deliveredCardNumber\(pull\.json\)/u.test(gateSource), /recordAuthorTrusted\(row, trusted\)/u.test(gateSource), /\bOS_DEV_REPORT_MARKER\s*=/u.test(own)],
       [true, true, true, true, false]);
+    t('structural: a tie is read through the owner\'s tie relation, ⛔ never a second enumeration of the body, and nothing in the gate ranks cards by number',
+      [/deliveredCardsAtStrongest\(pull\.json\)/u.test(gateSource), /closingKeywordTargets|partOfTargets|deliveryEvidence\(/u.test(gateSource), /\.sort\(|Math\.(?:min|max)\(/u.test(gateSource)],
+      [true, false, false]);
   }
 
   // ── the real transport ───────────────────────────────────────────────────

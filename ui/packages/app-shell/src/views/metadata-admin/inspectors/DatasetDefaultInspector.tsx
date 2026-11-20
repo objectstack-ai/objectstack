@@ -46,6 +46,7 @@ import {
   fieldTypeToDimensionType,
 } from './useDatasetFields.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
+import { IssuePrefixLines, useIssuePrefixRegister } from '../issuePath.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 
 /**
@@ -376,11 +377,32 @@ export function objectChangePatch(
   return patch;
 }
 
-export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale, onBlockingIssuesChange }: MetadataDefaultInspectorProps) {
+export function DatasetDefaultInspector({
+  draft,
+  onPatch,
+  readOnly,
+  name,
+  locale,
+  onBlockingIssuesChange,
+  issues,
+  onInlineIssueFieldsChange,
+}: MetadataDefaultInspectorProps) {
   // The designer's chrome language, handed in by the host like every other
   // default inspector's (objectui#10586). A plain function, not a memoised
   // one: nothing below may key on its identity (AGENTS.md #10).
   const tr = (key: string) => t(key, locale);
+  // objectstack#35628 — each row and section below edits one top-level key and
+  // draws the host's issues under it; any other path stays in the host's banner.
+  const registerIssuePrefix = useIssuePrefixRegister(onInlineIssueFieldsChange);
+  const issueLines = (key: string, rowLabel: string) => (
+    <IssuePrefixLines
+      issues={issues}
+      prefix={key}
+      label={rowLabel}
+      value={draft[key]}
+      register={registerIssuePrefix}
+    />
+  );
   const label = typeof draft.label === 'string' ? draft.label : '';
   const description = typeof draft.description === 'string' ? draft.description : '';
   const object = typeof draft.object === 'string' ? draft.object : '';
@@ -536,6 +558,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
           mono
         />
       )}
+      {createMode && issueLines('name', tr('engine.inspector.dataset.name'))}
       <InspectorTextField
         label={tr('engine.inspector.dataset.label')}
         value={label}
@@ -552,7 +575,9 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
         }}
         disabled={readOnly}
       />
+      {issueLines('label', tr('engine.inspector.dataset.label'))}
       <InspectorTextField label={tr('engine.inspector.dataset.description')} value={description} onCommit={(v) => onPatch({ description: v })} disabled={readOnly} />
+      {issueLines('description', tr('engine.inspector.dataset.description'))}
       <InspectorComboField
         label={tr('engine.inspector.dataset.baseObject')}
         value={object}
@@ -564,6 +589,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
         disabled={readOnly}
         mono
       />
+      {issueLines('object', tr('engine.inspector.dataset.baseObject'))}
       {object && (dimensions.length > 0 || measures.length > 0 || include.length > 0 || !!datasetFilter) && (
         <p className="text-[10px] text-muted-foreground">{tr('engine.inspector.dataset.baseObjectChangeHint')}</p>
       )}
@@ -576,6 +602,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
           addLabel={tr('engine.form.add')}
           onAdd={readOnly ? undefined : () => onPatch({ include: appendArray(include, '') })}
         />
+        {issueLines('include', tr('engine.inspector.dataset.includedRelationships'))}
         {include.length === 0 ? (
           <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-center text-[11px] text-muted-foreground">
             {withSlots(tr('engine.inspector.dataset.noJoins'), {
@@ -635,6 +662,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
           disabled={readOnly}
           locale={locale}
         />
+        {issueLines('filter', tr('engine.inspector.dataset.scopeFilter'))}
       </div>
 
       {/* Dimensions */}
@@ -646,6 +674,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
           // No `field` key until one is picked (objectui#11402) — never `''`.
           onAdd={readOnly ? undefined : () => onPatch({ dimensions: appendArray<Dimension>(dimensions, { name: '', type: 'string' }) })}
         />
+        {issueLines('dimensions', tr('engine.inspector.dataset.dimensions'))}
         {dimensions.map((d, i) => (
           <div key={i} className="rounded-md border p-2 space-y-1.5">
             <div className="flex items-center justify-between">
@@ -707,6 +736,7 @@ export function DatasetDefaultInspector({ draft, onPatch, readOnly, name, locale
           // No `field` key until one is picked (objectui#11402) — never `''`.
           onAdd={readOnly ? undefined : () => onPatch({ measures: appendArray<Measure>(measures, { name: '', aggregate: 'sum' }) })}
         />
+        {issueLines('measures', tr('engine.inspector.dataset.measures'))}
         {measures.map((m, i) => {
           const otherMeasures = measures.filter((_, idx) => idx !== i).map((x) => x.name).filter((n): n is string => !!n);
           const derived = m.derived;

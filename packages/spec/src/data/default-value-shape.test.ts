@@ -219,3 +219,25 @@ describe('suggestDefaultValueToken — Object.prototype fall-through', () => {
     expect(suggestDefaultValueToken('current_time')).toBe('NOW()');
   });
 });
+
+/**
+ * A literal default is judged by the value shape's own refusal, so its detail
+ * carries the package's ONE rename rule (`shared/rename-guess.ts`) — pinned at
+ * this door because `actionableValueIssueMessage`'s docblock restates it.
+ */
+describe('checkLiteralDefaultValue — a short unknown key gets the shared rename rule', () => {
+  it('a short key two unrelated edits from a member is offered nothing', () => {
+    const v = checkLiteralDefaultValue({ type: 'location' }, { lat: 1, lng: 2, lon: 3 });
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.detail).toContain('Unrecognized key(s) on this location value: `lon`.');
+    expect(v.detail).not.toContain('Did you mean');
+  });
+
+  it('a genuine one-edit slip on a short key is still answered', () => {
+    const v = checkLiteralDefaultValue({ type: 'location' }, { lat: 1, lng: 2, lgn: 3 });
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.detail).toContain('Did you mean `lgn` → `lng`?');
+  });
+});

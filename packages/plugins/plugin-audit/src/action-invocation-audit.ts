@@ -59,6 +59,12 @@
  *    arrived carrying (`<object>/<action>` of the outer action). The mark is
  *    a HINT, not a surface: a caller can forge it, so it mislabels this key
  *    and nothing else, and the inner row's `surface` stays its own door's.
+ *  - [#34292] an answered aggregate bulk call (it carried `_selectedIds`)
+ *    keeps `outcome: 'succeeded'` and adds what its resolve value read as
+ *    under `BulkActionResultSchema` (`event.bulk`, read by the door):
+ *    `bulk_selected`, `bulk_succeeded`, `bulk_failed` and `bulk_unconfirmed`
+ *    (`selected = succeeded + failed + unconfirmed`), or, for a value that
+ *    could not be read, `bulk_unreadable: true` alone and no succeeded count.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -117,6 +123,29 @@ export interface ActionInvocationAuditEvent {
   target?: string;
   /** The forward mark the call arrived carrying (the inner row of a forward) — a hint only. */
   forwardedFrom?: string;
+  /**
+   * [#34292] An answered aggregate bulk call's per-row counts, or the mark of
+   * a resolve value that could not be read. Recorded on a `succeeded` row only.
+   */
+  bulk?: ActionInvocationBulkReading;
+}
+
+/** What an aggregate bulk call's resolve value read as — the door reads it, this writer records it. */
+export type ActionInvocationBulkReading =
+  | { selected: number; succeeded: number; failed: number; unconfirmed: number }
+  | { unreadable: true };
+
+function isCount(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+
+/** The row's bulk keys for one reading — none for a reading this writer cannot record whole. */
+function bulkMetadata(bulk: ActionInvocationBulkReading | undefined): Record<string, unknown> {
+  if (!bulk || typeof bulk !== 'object') return {};
+  if ('unreadable' in bulk) return bulk.unreadable === true ? { bulk_unreadable: true } : {};
+  const { selected, succeeded, failed, unconfirmed } = bulk;
+  if (![selected, succeeded, failed, unconfirmed].every(isCount)) return {};
+  return { bulk_selected: selected, bulk_succeeded: succeeded, bulk_failed: failed, bulk_unconfirmed: unconfirmed };
 }
 
 /** What {@link createActionInvocationAuditWriter} adds to the `audit` slot. */
@@ -171,6 +200,8 @@ export function buildActionInvocationAuditRow(
     if (typeof event.status === 'number') metadata.status = event.status;
     const errorCode = nonEmpty(event.errorCode);
     if (errorCode) metadata.error_code = errorCode;
+  } else {
+    Object.assign(metadata, bulkMetadata(event.bulk));
   }
   const runId = nonEmpty(event.runId);
   if (runId) metadata.run_id = runId;

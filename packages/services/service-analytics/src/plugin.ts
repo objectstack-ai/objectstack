@@ -70,6 +70,13 @@ type BridgedAggregateInput = Parameters<NonNullable<AnalyticsServicePluginOption
  */
 const RELATION_GROUP_BY: unique symbol = Symbol.for('objectstack.objectql.relationGroupBy');
 
+/**
+ * [order and cut] The data engine's read-option key for an order-and-cut
+ * request: objectql's `AGGREGATE_ORDER_CUT` (`aggregate-order-cut.ts`), the
+ * same `Symbol.for` key, for the reason `RELATION_GROUP_BY` is spelled here.
+ */
+const AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectql.aggregateOrderCut');
+
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
@@ -381,6 +388,7 @@ export class AnalyticsServicePlugin implements Plugin {
     // without re-implementing the bridge in every app.
     let executeAggregate = this.options.executeAggregate;
     let executeRelationGroupAggregate: AnalyticsServiceConfig['executeRelationGroupAggregate'];
+    let executeOrderCutAggregate: AnalyticsServiceConfig['executeOrderCutAggregate'];
     let autoBridged = false;
     // [#19995, ruling C] The engine's judge-only `where` admission, filled below
     // ONLY when this plugin bridges `executeAggregate` itself, and then to the
@@ -517,6 +525,30 @@ export class AnalyticsServicePlugin implements Plugin {
           joined: false,
           reason: request.outcome?.reason ?? 'the "data" engine does not serve a relation group join',
         };
+      };
+      // [order and cut] …and the same aggregate ordered, cut and counted by
+      // the driver's own statement. Declinable: where the engine cannot serve
+      // the cut it reads nothing and says so, and `ObjectQLStrategy` reads
+      // every group and cuts in memory. Same engine as the executor above.
+      executeOrderCutAggregate = async (objectName, input, cut) => {
+        const request: {
+          orderBy: typeof cut.orderBy; limit: number; declinable: true;
+          outcome?: { kind?: unknown; totalGroups?: unknown };
+          declined?: { reason?: unknown };
+        } = { orderBy: cut.orderBy, limit: cut.limit, declinable: true };
+        const engine = requireDataEngine();
+        const aggregate = engine.aggregate as unknown as (
+          object: string, query: unknown, options: Record<symbol, unknown>,
+        ) => Promise<unknown>;
+        const rows = await aggregate.call(engine, objectName, engineAggregateQuery(input), {
+          [AGGREGATE_ORDER_CUT]: request,
+        });
+        const totalGroups = request.outcome?.totalGroups;
+        if (request.outcome?.kind === 'served' && typeof totalGroups === 'number') {
+          return { served: true, rows: rows as Record<string, unknown>[], totalGroups };
+        }
+        const reason = request.declined?.reason;
+        return { served: false, reason: typeof reason === 'string' ? reason : 'the "data" engine did not order and cut the groups' };
       };
       autoBridged = true;
 
@@ -1608,6 +1640,9 @@ export class AnalyticsServicePlugin implements Plugin {
       // [relation group join] The executing engine's relation group join —
       // see beside the `executeAggregate` auto-bridge above.
       executeRelationGroupAggregate,
+      // [order and cut] The executing engine's order and cut — see beside
+      // the `executeAggregate` auto-bridge above.
+      executeOrderCutAggregate,
       // [#21080] The data engine's per-object middleware answer — see
       // `hasObjectMiddleware` above. Wired whoever executes raw SQL: the
       // middlewares live in the engine either way.
