@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 // Paid during collection, not in the first case's clocked window: the manager's
 // request routing loads it dynamically (`check:test-source-alias`).
 import '@objectstack/core/egress';
-import { AuthManager } from './auth-manager';
+import { AuthManager, type AuthManagerOptions } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import type { AuthSessionAuditEventInput } from './auth-session-audit';
 import type { SessionCreateBeforeResult } from './session-organization-candidates';
@@ -30,6 +30,8 @@ const BASE = '/api/v1/auth';
 const ORG_A = 'org_alpha';
 const ORG_B = 'org_beta';
 const ORG_C = 'org_gamma';
+/** No allowed IP ranges of its own: admits every address. */
+const ORG_D = 'org_delta';
 const IN_A = '10.1.0.7';
 const IN_B = '10.2.0.7';
 const IN_NONE = '10.9.0.7';
@@ -37,6 +39,36 @@ const IN_NONE = '10.9.0.7';
 const REFUSED = { status: 403, code: 'IP_NOT_ALLOWED' };
 
 type HostHook = (session: Record<string, any>) => Promise<SessionCreateBeforeResult | undefined | void>;
+
+// ── The documented example, typed WITHOUT a cast ─────────────────────────────
+// The changeset, the module docblock and the package index show a host's hook
+// returning `SessionCreateBeforeResult`; these assignments compile only while
+// that type stays assignable to better-auth's own hook result (whose `data` is
+// required). `check:test-typecheck` compiles this file, so a drift reds there.
+const documentedHooks: AuthManagerOptions['databaseHooks'] = {
+  session: {
+    create: {
+      before: async (session): Promise<SessionCreateBeforeResult> => ({
+        data: { ...session, activeOrganizationId: ORG_A },
+        activeOrganizationCandidates: [ORG_B, ORG_C],
+      }),
+    },
+  },
+};
+/** A list-only return still carries `data: session`. */
+const listOnlyHooks: AuthManagerOptions['databaseHooks'] = {
+  session: {
+    create: {
+      before: async (session): Promise<SessionCreateBeforeResult> => ({
+        data: session,
+        activeOrganizationCandidates: [ORG_A, ORG_B],
+      }),
+    },
+  },
+};
+// @ts-expect-error better-auth's hook result requires `data`; a bare list is not one.
+const missingData: SessionCreateBeforeResult = { activeOrganizationCandidates: [ORG_A] };
+void missingData;
 
 const post = (manager: AuthManager, path: string, body: unknown, remoteAddress: string) =>
   manager.handleRequest(
@@ -55,14 +87,18 @@ async function verdict(res: Response): Promise<{ status: number; code?: string }
 
 /**
  * Alpha admits only 10.1.0.0/16, Beta only 10.2.0.0/16, Gamma only
- * 10.3.0.0/16; Alice is a member of all three. The host's hook is whatever
- * the test hands in, read when a session is created.
+ * 10.3.0.0/16, and Delta sets no list (admits every address); Alice is a
+ * member of all four, oldest first. The host's hook is whatever the test hands
+ * in (or `databaseHooks` whole), read when a session is created.
  */
-async function deployment(options: { autoActiveOrganization?: boolean } = {}) {
+async function deployment(options: { autoActiveOrganization?: boolean; databaseHooks?: AuthManagerOptions['databaseHooks'] } = {}) {
   const events: AuthSessionAuditEventInput[] = [];
   const sink = { recordAuthEvent: vi.fn(async (e: AuthSessionAuditEventInput) => { events.push(e); }) };
   const engine = createMemoryEngine();
   let hostHook: HostHook | undefined;
+  const testHooks: AuthManagerOptions['databaseHooks'] = {
+    session: { create: { before: async (session) => (hostHook ? hostHook(session) : undefined) } },
+  };
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: ORIGIN,
@@ -71,9 +107,7 @@ async function deployment(options: { autoActiveOrganization?: boolean } = {}) {
     emailAndPassword: { enabled: true, requireEmailVerification: false },
     getAuditSink: () => sink,
     ...(options.autoActiveOrganization === false ? { autoActiveOrganization: false } : {}),
-    databaseHooks: {
-      session: { create: { before: async (session: any) => (hostHook ? hostHook(session) : undefined) } },
-    },
+    databaseHooks: options.databaseHooks ?? testHooks,
   } as any);
   vi.spyOn(manager as any, 'selfRegistrationSetResolvable').mockResolvedValue(true);
   const policies: Record<string, Record<string, unknown>> = {
@@ -89,13 +123,14 @@ async function deployment(options: { autoActiveOrganization?: boolean } = {}) {
   const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email }, '127.0.0.1');
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === email);
-  for (const [id, name] of [[ORG_A, 'Alpha'], [ORG_B, 'Beta'], [ORG_C, 'Gamma']]) {
+  for (const [id, name] of [[ORG_A, 'Alpha'], [ORG_B, 'Beta'], [ORG_C, 'Gamma'], [ORG_D, 'Delta']]) {
     await engine.insert('sys_organization', { id, name, slug: name.toLowerCase() });
   }
   engine.tables.set('sys_member', (engine.tables.get('sys_member') ?? []).filter((m: any) => m.user_id !== user.id));
   await engine.insert('sys_member', { user_id: user.id, organization_id: ORG_A, role: 'member', created_at: new Date(Date.now() - 120_000) });
   await engine.insert('sys_member', { user_id: user.id, organization_id: ORG_B, role: 'member', created_at: new Date(Date.now() - 60_000) });
-  await engine.insert('sys_member', { user_id: user.id, organization_id: ORG_C, role: 'member', created_at: new Date() });
+  await engine.insert('sys_member', { user_id: user.id, organization_id: ORG_C, role: 'member', created_at: new Date(Date.now() - 30_000) });
+  await engine.insert('sys_member', { user_id: user.id, organization_id: ORG_D, role: 'member', created_at: new Date() });
   engine.tables.set('sys_session', []);
   events.length = 0;
 
@@ -135,11 +170,27 @@ describe('[#35829] a host\'s ordered organization candidates at session creation
     expect(d.scopedTo(d.sessions()[0])).toBe(ORG_A);
   });
 
-  it('a list with no data.activeOrganizationId: judged in its own order', async () => {
-    const d = await deployment();
-    d.host(async () => ({ activeOrganizationCandidates: [ORG_A, ORG_B] }));
+  it('a list with no data.activeOrganizationId (data: session): judged in its own order', async () => {
+    const d = await deployment({ databaseHooks: listOnlyHooks });
     expect((await d.signIn(IN_B)).status).toBe(200);
     expect(d.scopedTo(d.sessions()[0])).toBe(ORG_B);
+  });
+
+  it('the documented example, typed without a cast, runs as documented', async () => {
+    const d = await deployment({ databaseHooks: documentedHooks });
+    expect((await d.signIn(IN_B)).status).toBe(200);
+    expect(d.scopedTo(d.sessions()[0])).toBe(ORG_B);
+    expect(await verdict(await d.signIn(IN_NONE))).toEqual(REFUSED);
+  });
+
+  it('two candidates both admitted: the earlier one wins, in either order', async () => {
+    const d = await deployment();
+    d.host(async (session) => ({ data: { ...session, activeOrganizationId: ORG_A }, activeOrganizationCandidates: [ORG_B, ORG_D] }));
+    expect((await d.signIn(IN_B)).status).toBe(200);
+    expect(d.scopedTo(d.sessions().at(-1))).toBe(ORG_B);
+    d.host(async (session) => ({ data: { ...session, activeOrganizationId: ORG_A }, activeOrganizationCandidates: [ORG_D, ORG_B] }));
+    expect((await d.signIn(IN_B)).status).toBe(200);
+    expect(d.scopedTo(d.sessions().at(-1))).toBe(ORG_D);
   });
 
   it('every candidate refused: the sign-in is refused as today, the row naming the host\'s first choice', async () => {

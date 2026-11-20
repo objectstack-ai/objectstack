@@ -35,8 +35,10 @@
  * same established client address, the same organization policy, the same
  * tenant-level-administrator break-glass. The order is: the host's
  * `data.activeOrganizationId` when it set one, then the list in order; an
- * organization named twice is judged once. The judgement stays inside the
- * framework; the host only states its order of preference.
+ * organization named twice is judged once. A hook that returns only a list
+ * still returns `data: session` beside it: better-auth's hook result requires
+ * `data`. The judgement stays inside the framework; the host only states its
+ * order of preference.
  *
  * What does NOT change:
  *
@@ -49,7 +51,8 @@
  *    programmatic `auth.api.*` call) is not judged, as before, and takes the
  *    first candidate;
  *  - the candidates are the host's word, trusted as its single choice is:
- *    nothing here checks that the user is a member of them.
+ *    nothing here checks that the user is a member of them (the interface's
+ *    own docblock says what a non-member candidate leads to).
  *
  * The list key is read by the framework and never reaches better-auth: the
  * framework returns only `{ data }`, with `activeOrganizationId` set to the
@@ -60,19 +63,32 @@
  * What a host's `session.create.before` hook may return to plugin-auth's
  * composed hooks (`AuthManagerOptions.databaseHooks`): better-auth's own
  * `{ data }` result, plus an optional ordered list of fallback organizations.
+ * It is assignable to better-auth's hook result, so a hook typed to return it
+ * fits `AuthManagerOptions['databaseHooks']` without a cast.
  *
- * - `data` — the session draft, as better-auth's hook contract has it. Its
- *   `activeOrganizationId`, when set, is the host's first choice.
+ * - `data` — the session draft, REQUIRED as better-auth's hook contract has
+ *   it. Its `activeOrganizationId`, when set, is the host's first choice. A
+ *   hook that returns only a list still returns `data: session` (the draft it
+ *   was handed) beside it.
  * - `activeOrganizationCandidates` — organization ids, most preferred first,
  *   tried after `data.activeOrganizationId`. The session is scoped to the first
  *   one whose own access policy (allowed IP ranges) admits the request; none
  *   admitted ⇒ the sign-in is refused (`SESSION_SCOPING_REFUSAL`), exactly as
- *   a refused single choice is. Each entry must be a non-empty string; any
- *   other value is a host programming error and fails the session creation
- *   loudly with a `TypeError`.
+ *   a refused single choice is. An organization named twice is judged once.
+ *   No list, or an empty one, is the single choice, unchanged. Each entry must
+ *   be a non-empty string; any other value is a host programming error and
+ *   fails the session creation loudly with a `TypeError`.
+ *
+ * ⚠ The candidates are the HOST's word, trusted as its single choice is:
+ * plugin-auth judges only the organization's access policy, never membership.
+ * The host MUST list only organizations the user is a member of. A candidate
+ * the user is not a member of can still be admitted at creation, and the
+ * session's organization claim is then dropped on its next request by the
+ * per-request membership check (`vetOrganizationClaim`), leaving the person
+ * signed in with no active organization.
  */
-export interface SessionCreateBeforeResult<TSession extends Record<string, unknown> = Record<string, unknown>> {
-  data?: TSession;
+export interface SessionCreateBeforeResult<TSession extends Record<string, any> = Record<string, any>> {
+  data: TSession;
   activeOrganizationCandidates?: readonly string[];
 }
 
