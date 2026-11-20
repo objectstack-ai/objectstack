@@ -842,6 +842,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
             // objectstack#33317 — a list-only object's rows open nothing, so
             // the grid draws them no record link and no Open.
             rowOpensRecord={recordServed}
+            // objectstack#35727 — the address conditions are this page's own
+            // 「Filtered by」 tags; the list filters on them and draws no
+            // second, locked chip for them.
+            hostDrawnConditionFields={urlFilters.map(([field]) => field)}
           />
         )}
       </div>
