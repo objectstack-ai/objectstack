@@ -1351,7 +1351,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.mode": {
         label: "モード",
-        helpText: "[非推奨] オブジェクトのリストがレコードをどう開くかを、もう決めません：コンソールでは、すべての閲覧者に対し、レコード名で全画面ページが、名前の横にホバー時に出るアイコンでサイドパネルが開きます。`drawer`、`page`、`new_window` は引き続き解析されますが、何も変えません。`none` は引き続き行を開かないことを意味します——`preventNavigation: true` を推奨します。このキーは省略してください。"
+        helpText: "[非推奨] オブジェクトのリスト（リストビュー、オブジェクトの `listViews`）では、レコードの開き方をもう決めません：コンソールでは、すべての閲覧者に対し、レコード名で全画面ページが、名前の横にホバー時に出るアイコンでサイドパネルが開きます。ここでは `drawer`、`page`、`new_window` は引き続き解析されますが何も変えないため、このキーは省略してください。`none` は引き続き行を開かないことを意味します——`preventNavigation: true` を推奨します。`navigation` を持つページブロック（リストブロック、タイムライン、埋め込みビュー）では、すべての値が引き続き有効です。"
       },
       "navigation.preventNavigation": {
         label: "ナビゲーションを無効化",
@@ -1359,7 +1359,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "新しいタブで開く",
-        helpText: "常に新しいタブで開きます（page モードに適用）"
+        helpText: "クリックしたレコードの全画面ページを新しいブラウザータブで開きます。何も開かない行はそのままで、スマートフォンでは同じページ内で開きます"
       },
       "navigation.size": {
         label: "サイズ",

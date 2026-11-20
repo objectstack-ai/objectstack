@@ -2908,36 +2908,36 @@ const NAVIGATION_MODE_RETIRED_FIX =
 const NAVIGATION_MODE_RETIRED = {
   modal:
     "`navigation.mode: 'modal'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
-    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
-    + 'object that declares `page`, so a centred dialog was a third surface for the same record. '
+    + 'in the drawer or as its full page, the same record page at two widths, so a centred dialog was '
+    + 'a third surface for the same record. '
     + NAVIGATION_MODE_RETIRED_FIX,
   split:
     "`navigation.mode: 'split'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — whether the "
-    + 'record opens beside the list is each reader\'s own choice, not a mode an author fixes for every '
-    + 'reader of the list. '
+    + 'record opens beside the list is not a mode an author fixes for every reader of the list. '
     + NAVIGATION_MODE_RETIRED_FIX,
   popover:
     "`navigation.mode: 'popover'` was removed in @objectstack/spec 18.3.0 (ADR-0087 D2) — a record opens "
-    + 'one way per object: in the drawer, which expands to the full page, or as the full page for an '
-    + 'object that declares `page`, so a popover was a cramped fourth surface for the same record. '
+    + 'in the drawer or as its full page, the same record page at two widths, so a popover was a '
+    + 'cramped fourth surface for the same record. '
     + NAVIGATION_MODE_RETIRED_FIX,
 } as const;
 
 /**
  * Navigation Mode Enum
- * How a list opens the record a reader clicks. `drawer` is the default: the
- * record opens in the side drawer, which expands to the full page — the same
- * record page at two widths. `page` is for an object whose record should open
- * as a full page, and is declared for that object only. `modal`, `split` and
- * `popover` were retired (#26677): a side-by-side pane is a reader's own
- * preference, not metadata, and each retired member is refused at parse with
- * its prescription.
+ * How a page block that carries `navigation` (a list block, the timeline, an
+ * embedded view) opens the record a reader clicks. `drawer` is the default:
+ * the record opens in the side drawer, which expands to the full page — the
+ * same record page at two widths. `page` opens the full page. On an object's
+ * list (a list view, an object's `listViews`) the key is deprecated (#35854):
+ * there the record's name opens the full page and the hover icon the side
+ * panel, and only `none` still counts. `modal`, `split` and `popover` were
+ * retired (#26677) and each is refused at parse with its prescription.
  */
 export const NavigationModeSchema = lazySchema(() => enumWithRetiredValues([
-  'drawer',     // Open the record in the side drawer, which expands to the full page (default)
-  'page',       // Navigate to the record route — declared only for an object that opens as a full page
-  'new_window', // Open in new browser tab/window
-  'none',       // No navigation (read-only list)
+  'drawer',     // Open the record in the side drawer, which expands to the full page (default); ignored on an object's list
+  'page',       // Navigate to the record route; ignored on an object's list
+  'new_window', // Open in a new browser tab; ignored on an object's list (write `openNewTab: true`)
+  'none',       // No navigation (read-only list), on every surface
 ], NAVIGATION_MODE_RETIRED));
 
 // [#16885] `navigation.view` retirement prescription — director decision batch
@@ -2968,7 +2968,8 @@ const NAVIGATION_VIEW_RETIRED =
   + 'selected nothing and could silently deaden the row click. Delete the key; to choose what '
   + 'opens for a record, assign a `record` page to the object and let `isDefault` pick the one '
   + 'that opens — page assignment is the machinery that resolves a detail layout, and a list '
-  + 'view\'s navigation block only decides HOW the detail is surfaced (`mode`, `size`).';
+  + 'view\'s navigation block only decides HOW the detail is surfaced (its `size`, and on a page block '
+  + 'its `mode`).';
 
 /**
  * Navigation Configuration Schema
@@ -2978,23 +2979,27 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   history: VIEW_HISTORY,
 }, {
   /**
-   * @deprecated [#35854] No longer picks how an object's list opens a record
-   * (maintainer ruling 2026-11-20: 「废弃」). The console's object list has one
-   * rule for every reader: the record's name opens the full page, and the icon
-   * beside the name while the row is hovered opens the side panel. There
-   * `drawer`, `page` and `new_window` still parse and change nothing — a list
-   * view that declares one behaves as one that declares nothing; `none` still
-   * means the rows open nothing (prefer `preventNavigation: true`). Renderers
-   * outside that list (a page's list block, the timeline, an embedded view)
-   * still read the value until they follow. ADR-0087 D3 semantic entry
+   * @deprecated [#35854] On an object's list (a list view, an object's
+   * `listViews`) no longer picks how a record opens (maintainer ruling
+   * 2026-11-20: 「废弃」). The console's object list has one rule for every
+   * reader: the record's name opens the full page, and the icon beside the
+   * name while the row is hovered opens the side panel. There `drawer`, `page`
+   * and `new_window` still parse and change nothing — a list view that
+   * declares one behaves as one that declares nothing; `none` still means the
+   * rows open nothing (prefer `preventNavigation: true`), and
+   * `openNewTab: true` opens the page in a new tab. A page block that carries
+   * `navigation` (a list block, the timeline, an embedded view) still honours
+   * every value: keep the key there. ADR-0087 D3 semantic entry
    * `navigation-mode-record-open-deprecated`. Kept in the shape so existing
    * metadata loads.
    */
   mode: NavigationModeSchema.default('drawer').describe(
-    '[DEPRECATED] No longer picks how an object\'s list opens a record: in the console the record '
-    + 'name opens the full page and the hover icon beside it opens the side panel, for every reader. '
-    + 'There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows '
-    + 'open nothing — prefer `preventNavigation: true`. Omit the key.',
+    '[DEPRECATED] On an object\'s list (a list view, an object\'s `listViews`) no longer picks how a '
+    + 'record opens: in the console the record name opens the full page and the hover icon beside it '
+    + 'opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and '
+    + 'change nothing, so omit the key; `none` still means rows open nothing — prefer '
+    + '`preventNavigation: true`. A page block that carries `navigation` (a list block, the timeline, '
+    + 'an embedded view) still honours every value.',
   ),
 
   /**
@@ -3007,7 +3012,7 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
 
   /** Interaction Triggers */
   preventNavigation: z.boolean().default(false).describe('Disable standard navigation entirely'),
-  openNewTab: z.boolean().default(false).describe('Force open in new tab (applies to page mode)'),
+  openNewTab: z.boolean().default(false).describe('Open the record\'s full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place'),
   
   /**
    * [#2578] Overlay size for a drawer detail — coarse T-shirt buckets,
@@ -5080,16 +5085,16 @@ const FORM_VIEW_TYPE_RETIRED_FIX =
 const FORM_VIEW_TYPE_RETIRED = {
   split:
     "'split' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
-    + 'the form\'s layout, and a side-by-side split is not one: whether a record opens beside its list is '
-    + 'each reader\'s own preference in the list\'s Display menu, not metadata. Write `type: \'tabbed\'` (one '
+    + 'the form\'s layout, and a side-by-side split is not one: a record opens from its list in the drawer '
+    + 'or as the full page, never beside the list. Write `type: \'tabbed\'` (one '
     + 'tab per section) or delete the value for the `simple` default, and delete each section\'s `pane` and '
     + 'the form\'s `splitDirection` / `splitSize` / `splitResizable`; to edit child records beside the parent, declare '
     + '`subforms`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
   drawer:
     "'drawer' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
-    + 'the form\'s layout, and where a form opens is decided by whoever opens it: a list opens a clicked '
-    + 'record in the drawer (`navigation.mode`, the default), and the console\'s New and Edit entries open '
+    + 'the form\'s layout, and where a form opens is decided by whoever opens it: an object\'s list opens a '
+    + 'clicked record\'s full page, or its drawer from the hover icon, and the console\'s New and Edit entries open '
     + 'the record form themselves. Delete the value for the `simple` default, or write the layout you want: '
     + '`simple`, `tabbed` or `wizard`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
@@ -5154,8 +5159,8 @@ const FORM_VIEW_BUTTONS_RESET_RETIRED =
 // stored rows and sources.
 const FORM_VIEW_DRAWER_SIDE_RETIRED =
   '`view.form.drawerSide` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form view opens in a '
-  + 'drawer, so no form view ever read it. Delete the key: a list opens a clicked record in its drawer '
-  + '(`navigation.mode`), and the React `ObjectForm` block keeps its own `drawerSide` prop for the drawer it '
+  + 'drawer, so no form view ever read it. Delete the key: an object\'s list opens a record in its drawer '
+  + 'from the hover icon, and the React `ObjectForm` block keeps its own `drawerSide` prop for the drawer it '
   + 'opens with `formType=\'drawer\'`. '
   + FORM_VIEW_TYPE_RETIRED_FIX;
 

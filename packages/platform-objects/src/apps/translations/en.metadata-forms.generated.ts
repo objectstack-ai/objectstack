@@ -1351,7 +1351,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.mode": {
         label: "Mode",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[DEPRECATED] On an object's list (a list view, an object's `listViews`) no longer picks how a record opens: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing, so omit the key; `none` still means rows open nothing — prefer `preventNavigation: true`. A page block that carries `navigation` (a list block, the timeline, an embedded view) still honours every value."
       },
       "navigation.preventNavigation": {
         label: "Prevent Navigation",
@@ -1359,7 +1359,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.openNewTab": {
         label: "Open New Tab",
-        helpText: "Force open in new tab (applies to page mode)"
+        helpText: "Open the record's full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place"
       },
       "navigation.size": {
         label: "Size",
