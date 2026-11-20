@@ -2390,6 +2390,9 @@ describe('[ADR-0057] a missing hierarchy-scope resolver is said once per boot', 
     expect(HIERARCHY_RESOLVER_ABSENT_NOTICE).toContain('"hierarchy-security"');
     expect(HIERARCHY_RESOLVER_ABSENT_NOTICE).toContain('@objectstack/security-enterprise');
     expect(HIERARCHY_RESOLVER_ABSENT_NOTICE).toContain('owner-only');
+    // `os validate` / `os verify` / `os serve` quote these opening words
+    // (`ENTERPRISE_ABSENCE_RUNTIME_NOTICE` in the CLI's capability-preflight).
+    expect(HIERARCHY_RESOLVER_ABSENT_NOTICE.startsWith('[sharing] hierarchy scope NOT widened')).toBe(true);
   });
 
   it('a hierarchy scope with no resolver warns ONCE across two calls, and still answers owner-only', async () => {

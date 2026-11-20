@@ -1,5 +1,6 @@
 ---
 '@objectstack/plugin-sharing': patch
+'@objectstack/cli': patch
 ---
 
 fix(plugin-sharing): a hierarchy scope that falls back to owner-only for want of a resolver now says so once per boot
@@ -12,3 +13,4 @@ When a permission set grants a hierarchy scope (`own_and_reports`, `unit`, `unit
 - The first time the fallback is taken, the sharing service logs one `warn` naming the capability, its provider and the owner-only consequence. It is logged once per service instance, which is once per boot, never once per request.
 - Nothing is logged for an app that never asks for a hierarchy scope, or when a resolver is registered.
 - The answer does not change: the scope still resolves to the caller alone.
+- `os validate`, `os verify` and `os serve` no longer end the `hierarchy-security` advisory with "and no log line says so": for that token they now say the runtime logs one warning, opening `[sharing] hierarchy scope NOT widened`, the first time it falls back. Other enterprise tokens keep their wording.
