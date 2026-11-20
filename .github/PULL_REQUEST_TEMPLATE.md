@@ -13,6 +13,11 @@ _Keep one value on each of the two lines above, each line starting with its key.
 [Human Minimum](https://github.com/objectstack-ai/objectstack/blob/main/CONTRIBUTING.md#human-minimum)
 item 5 says what they mean._
 
+_Only when this pull request changes a file under `.claude/`: add one more line there. It starts with the key
+word `Rule-change` and a colon, then `none` (no fleet rule changes), `yes` (one does) or `ruled` (it copies a
+maintainer ruling, quoted on a second line that starts with `Ruling-ref` and a colon). Every other pull request
+leaves it out._
+
 ## Human Minimum
 
 Each item is one rule from

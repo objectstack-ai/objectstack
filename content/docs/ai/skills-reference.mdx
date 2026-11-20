@@ -45,7 +45,7 @@ npm create objectstack@latest my-app
 
 {/* BEGIN GENERATED: skills (packages/spec/scripts/build-skill-docs.ts) — DO NOT EDIT */}
 
-ObjectStack ships **13 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
+ObjectStack ships **14 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
 
 ## Quick Reference
 
@@ -62,8 +62,9 @@ ObjectStack ships **13 skills** — one per authoring domain, plus process skill
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Write a CEL expression wherever ObjectStack takes one, in a project or through MCP: formula fields, `visibleWhen` / `requiredWhen` rules, validation, sharing and visibility predicates, flow conditions, seed values, Salesforce formulas ported to CEL. |
 | 10 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
 | 11 | [Ask](#ask) | `process` | `skills/objectstack-ask/` | Answer a business question over a live ObjectStack environment through its MCP tools (list_datasets, query_dataset, list_objects, describe_object, query_records, aggregate_records): find the governed metric the question names, compute it and cite its source, or fall back to an object query and say so. |
-| 12 | [Project](#project) | `process` | `skills/objectstack-project/` | Run an ObjectStack metadata-app project: decide whether a change belongs in the app or the platform, what to write before building, what the app tests and what the platform already checks, how a change is described for customers, released and upgraded. |
-| 13 | [ObjectUI](#objectui) | `ui` | `skills/objectui/` | Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. |
+| 12 | [MCP Build](#mcp-build) | `process` | `skills/objectstack-mcp-build/` | Build or change an ObjectStack app's metadata through its MCP draft door (list_metadata_items, get_metadata_item, save_metadata_draft, list_drafts, delete_metadata_draft), with no project files: read what exists, load the type's domain skill, save a draft, read the publish verdict the save answers, repair it, and hand the Studio review route to a person. |
+| 13 | [Project](#project) | `process` | `skills/objectstack-project/` | Run an ObjectStack metadata-app project: decide whether a change belongs in the app or the platform, what to write before building, what the app tests and what the platform already checks, how a change is described for customers, released and upgraded. |
+| 14 | [ObjectUI](#objectui) | `ui` | `skills/objectui/` | Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. |
 
 ---
 
@@ -206,6 +207,20 @@ Use for EVERY question answered from the app's records, before the first data to
 Do not use for building or changing metadata (the domain skills cover that), or for writing a query in application code (see objectstack-query).
 
 **Tags:** `ask`, `question`, `metric`, `dataset`, `mcp`, `list_datasets`, `query_dataset`, `问数`, `指标`
+
+---
+
+### MCP Build
+
+**Domain** `process` · **Path** `skills/objectstack-mcp-build/`
+
+Build or change an ObjectStack app's metadata through its MCP draft door (list_metadata_items, get_metadata_item, save_metadata_draft, list_drafts, delete_metadata_draft), with no project files: read what exists, load the type's domain skill, save a draft, read the publish verdict the save answers, repair it, and hand the Studio review route to a person.
+
+Use when connected to an environment over MCP and asked to add or change an object, field, view, page, dashboard, flow, action or permission there, before the first save ("build an app", "add a field", "建一个应用", "加个字段", "做个审批流").
+
+Do not use for metadata written in a project's files (the domain skills cover that) or to answer a question from the app's records (objectstack-ask).
+
+**Tags:** `mcp`, `build`, `draft`, `save_metadata_draft`, `verdict`, `studio`, `no-project`, `草稿`
 
 ---
 

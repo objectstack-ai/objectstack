@@ -63,11 +63,24 @@
  * ledger row on such a host. ⛔ The `console.info [action-audit]` line the
  * script branch prints is NOT this row and is not replaced by it.
  *
+ * ## An aggregate bulk run's per-row counts (#34292)
+ *
+ * A call that carried `params._selectedIds` (the console's
+ * `execution: 'aggregate'` dispatch) and resolved with a value that carries a
+ * `succeeded` or `failed` member keeps `outcome: 'succeeded'` (seat ruling
+ * 7000299515, maintainer option 「B 仍记成功,加行数」) and adds the counts
+ * that value reads as under `BulkActionResultSchema` — read by
+ * {@link actionInvocationBulkReading}, by the rules the console's aggregate
+ * reader counts with, so the dialog and the row agree. A value that carries a
+ * member and does not parse records one `unreadable` mark and no counts. A
+ * value with neither member (nothing, a summary, a link) records nothing new.
+ *
  * Attribution only: nothing here gates, narrows or widens what a door runs.
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
+import { BulkActionResultSchema } from '@objectstack/spec/ui';
 import { resolveThrownHttpError } from '@objectstack/types';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
@@ -93,7 +106,19 @@ export interface ActionInvocationAuditEvent {
     target?: string;
     /** The forward mark this request arrived carrying (`<object>/<action>`), a hint only. */
     forwardedFrom?: string;
+    /** [#34292] An answered aggregate bulk call's per-row counts — {@link actionInvocationBulkReading}. */
+    bulk?: ActionInvocationBulkReading;
 }
+
+/**
+ * [#34292] What an answered call's resolve value reads as against the
+ * `params._selectedIds` it was dispatched with: the four counts, or the one
+ * mark of a value that cannot be read.
+ * `selected === succeeded + failed + unconfirmed`.
+ */
+export type ActionInvocationBulkReading =
+    | { selected: number; succeeded: number; failed: number; unconfirmed: number }
+    | { unreadable: true };
 
 /** The `audit` slot member this file calls — declared locally, structurally. */
 interface ActionInvocationAuditSurface {
@@ -172,6 +197,44 @@ export function actionInvocationForwardedFrom(requestContext: HttpProtocolContex
 export function actionInvocationFailure(err: unknown): { status: number; errorCode?: string } {
     const { status, code } = resolveThrownHttpError(err, 500);
     return typeof code === 'string' && code.length > 0 ? { status, errorCode: code } : { status };
+}
+
+/**
+ * [#34292] The bulk counts an answered call's row records, or `undefined` when
+ * it records none: the call carried no `params._selectedIds` array, or its
+ * resolve value has neither a `succeeded` nor a `failed` own member (nothing,
+ * a summary, an artifact link — the one-outcome answer the shape leaves
+ * optional).
+ *
+ * A value that carries either member is read under `BulkActionResultSchema`
+ * (`@objectstack/spec/ui`), by the rules that schema states and the console's
+ * aggregate reader counts with: an id outside the selection is dropped; a
+ * duplicate counts once; an id in both lists counts as failed; a selected id
+ * in neither list is not confirmed, never succeeded. A value that does not
+ * parse is `{ unreadable: true }` — no count, so never a full success.
+ */
+export function actionInvocationBulkReading(params: unknown, result: unknown): ActionInvocationBulkReading | undefined {
+    const selectedIds = params && typeof params === 'object' ? (params as Record<string, unknown>)._selectedIds : undefined;
+    if (!Array.isArray(selectedIds)) return undefined;
+    const carriesMember = result !== null
+        && typeof result === 'object'
+        && !Array.isArray(result)
+        && (Object.prototype.hasOwnProperty.call(result, 'succeeded')
+            || Object.prototype.hasOwnProperty.call(result, 'failed'));
+    if (!carriesMember) return undefined;
+
+    const parsed = BulkActionResultSchema.safeParse(result);
+    if (!parsed.success) return { unreadable: true };
+
+    const selected = new Set(selectedIds.filter((id): id is string => typeof id === 'string'));
+    const failed = new Set(parsed.data.failed.map((entry) => entry.id).filter((id) => selected.has(id)));
+    const succeeded = new Set(parsed.data.succeeded.filter((id) => selected.has(id) && !failed.has(id)));
+    return {
+        selected: selected.size,
+        succeeded: succeeded.size,
+        failed: failed.size,
+        unconfirmed: selected.size - succeeded.size - failed.size,
+    };
 }
 
 /**

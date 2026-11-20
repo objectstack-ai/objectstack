@@ -138,7 +138,11 @@ import {
 // The governed-rules face is the governed register itself — the same function the queue guard
 // classifies a merge group's paths with. `dispatch-gates.mjs` already imports this module at module
 // scope, so the edge adds no new module to this file's graph and no cycle.
-import { SELF_REPO_ID, governedPathsIn, lowRiskRowHit } from './check-governed-merges.mjs';
+import { RULE_CHANGE_VALUES, RULE_CHANGE_VERIFIED_KEY, SELF_REPO_ID, governedPathsIn, lowRiskRowHit, readRuleChangeVerified, ruleChangeRowHit } from './check-governed-merges.mjs';
+// The record's `Rule-change-verified:` line — the declaration split's machine line (`.claude/**`, maintainer ruling
+// 2026-11-19 on #35321). Its key and its reader are the register's own, re-exported so the template below prints
+// exactly what the queue guard takes, ⛔ never a second spelling.
+export { RULE_CHANGE_VERIFIED_KEY, readRuleChangeVerified };
 // How an unreadable `Served-tier:` line is quoted back — the declaration
 // line's own quoting helper, one spelling for both. The narrowing face is read
 // with the fleet's ONE reader of that line, imported, ⛔ never a second parser.
@@ -2037,6 +2041,48 @@ export function recordCarriesSecurityTouching(face, tierName, scopeHits) {
 export const RECORD_SECURITY_TOUCHING_DEFAULT = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES[1];
 
 /**
+ * What counts as fleet rule text, in the maintainer's own three heads (ruling 2026-11-19 on #35321): the one
+ * wording the brief and the template legend both print, so the reviewer who writes the line and the seat who
+ * reads the legend judge by the same sentence. Process steps, scripts, wording, slimming and file moves are
+ * the reviewer's, and are named so.
+ */
+export const RULE_CHANGE_VERIFIED_DUTY = Object.freeze([
+  `  Write \`${RULE_CHANGE_VERIFIED_KEY}: none\` ONLY when no changed hunk alters what an agent may do without the maintainer`,
+  '  (merge, bypass a check, change repository settings), what gets done and in what order (grading, dispatch, scope), or',
+  '  what must go to him (decisions, maintainer actions); process steps, scripts, wording, slimming and file moves are not rule',
+  '  changes. Write `ruled` ONLY when every such hunk copies the ruling the PR body quotes on its `Ruling-ref:` line — check the',
+  '  copy against the quoted words, do not re-rule it. Otherwise `yes`: the pull request then waits for the maintainer.',
+]);
+
+const RULE_CHANGE_VERIFIED_LEGEND = Object.freeze([
+  `  · ${RULE_CHANGE_VERIFIED_KEY}  read by the queue guard on a pull request touching \`.claude/**\`: it lands on this record`,
+  '                    with no human approval only when this line equals the `Rule-change:` value the PR body declares.',
+  ...RULE_CHANGE_VERIFIED_DUTY.map((line) => `                  ${line}`),
+  '                    A missing line, a second line, a quoted, fenced or code-indented line, or anything after the value',
+  `                    does not verify. The template ships \`${RULE_CHANGE_VALUES[2]}\`, so an unedited paste never lands the pull request.`,
+]);
+
+/**
+ * Does the record printed for this face carry the `Rule-change-verified:` line — the ONE machine line the
+ * `.claude/**` declaration split stands on (`ruleChangeVerdict`, `check-governed-merges.mjs`)? The same
+ * shape as `recordCarriesSecurityTouching`: with the `hits` known, exactly when one sits under a row that
+ * splits by declaration (`ruleChangeRowHit`); with none known, on every at-tier face a governed path can sit
+ * on. ⛔ Not on the narrowing or the declaration face. Pure.
+ */
+export function recordCarriesRuleChangeVerified(face, tierName, scopeHits) {
+  if (tierName !== CONTRACT_REVIEW_TIER_NAME) return false;
+  if (scopeHits !== undefined) return ruleChangeRowHit(scopeHits);
+  return face?.id !== 'narrowing';
+}
+
+/**
+ * The value the printed record ships on that line: `yes`. It PARSES through the reader that judges the real
+ * thing and it fails closed — a record pasted with it left in verifies neither `none` nor `ruled`, so the pull
+ * request does not land on the record, and `none` or `ruled` is only ever a reviewer's own statement.
+ */
+export const RECORD_RULE_CHANGE_VERIFIED_DEFAULT = RULE_CHANGE_VALUES[2];
+
+/**
  * The record itself — the lines a seat copies, and nothing else.
  *
  * ⭐ Rendered from the same constants the readers compare against
@@ -2081,6 +2127,10 @@ export const RECORD_SECURITY_TOUCHING_DEFAULT = CONTRACT_REVIEW_SECURITY_TOUCHIN
  * and keeps the pull request at Tier H unless it reads `no`. It ships `yes`
  * (`RECORD_SECURITY_TOUCHING_DEFAULT`), so an unedited paste fails closed.
  *
+ * ⭐ `Rule-change-verified:` rides the same block, after it, where `recordCarriesRuleChangeVerified` says so:
+ * the queue guard lands a `.claude/**` pull request on this record only when the line equals the
+ * `Rule-change:` value the PR body declares (`none` or `ruled`). It ships `yes`, so an unedited paste fails closed.
+ *
  * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string, scopeHits?: string[], faceId?: string}} values
  * @returns {string[]}
  */
@@ -2104,6 +2154,7 @@ export function contractReviewRecordLines(values = {}) {
     'Local-runs: none',
     ...(tierName === CONTRACT_REVIEW_TIER_NAME ? [`Scope: ${scopeHits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}`] : []),
     ...(recordCarriesSecurityTouching(face, tierName, values.scopeHits) ? [`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}: ${RECORD_SECURITY_TOUCHING_DEFAULT}`] : []),
+    ...(recordCarriesRuleChangeVerified(face, tierName, values.scopeHits) ? [`${RULE_CHANGE_VERIFIED_KEY}: ${RECORD_RULE_CHANGE_VERIFIED_DEFAULT}`] : []),
     '',
     '### ① Derived judgments',
     '',
@@ -2367,6 +2418,7 @@ export function contractReviewTemplateLines(values = {}) {
       `                    or anything after the value keeps the PR at Tier H. The template ships \`${RECORD_SECURITY_TOUCHING_DEFAULT}\`, so an unedited paste`,
       '                    never lands on the arm: the seat adds the `security` label only once the reviewer confirms a `yes` was meant.',
     ] : []),
+    ...(recordCarriesRuleChangeVerified(face, tierName, scopeHits) ? RULE_CHANGE_VERIFIED_LEGEND : []),
     '  · ③ Boundary flags  every dev flag and every `open_questions` entry answered, or escalated; and on',
     '                    every face the SQL push-down check:',
     ...TEMPLATE_PUSH_DOWN_LINES,
@@ -2563,6 +2615,12 @@ export function contractReviewBriefLines(values = {}) {
     `  The record says so on its \`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}:\` line, and the arm lands on \`no\` alone: write \`no\` ONLY when no changed`,
     '  hunk teaches permission, sharing, credential, token, authentication or other security behaviour, else `yes`.',
   ];
+  // A `hits` path under `.claude/**` lands on this record only when it verifies the PR body's `Rule-change:` line.
+  const ruleChangeLines = !recordCarriesRuleChangeVerified(face, tierName, scopeHits) ? [] : [
+    `Rule change — ${scopeHits !== undefined ? 'a `hits` path sits under `.claude/**`' : 'if a `hits` path is under `.claude/**`'}: the PR body declares \`Rule-change:\` and you verify it against the diff.`,
+    ...RULE_CHANGE_VERIFIED_DUTY,
+    '',
+  ];
   const lowRiskLines = !recordCarriesSecurityTouching(face, tierName, scopeHits) ? [] : scopeHits !== undefined ? [
     'Security — a `hits` path sits on the low-risk skills arm: when the change teaches security, auth or permission',
     securityDuty,
@@ -2595,6 +2653,7 @@ export function contractReviewBriefLines(values = {}) {
     '',
     ...scopeLines,
     ...lowRiskLines,
+    ...ruleChangeLines,
     '⛔ READ-ONLY. No worktree, no checkout, no build, no test run, no gate re-run, no ablation: the check-runs',
     '   on the head already answered every derived gate family, and a local run costs more than it returns.',
     "   If ONE probe is unavoidable, the record's `Local-runs:` line says `probe — REASON`; otherwise `none`.",
@@ -2777,11 +2836,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 32 → 38 with the `Security-touching:` line the low-risk skills arm reads: the record line and its
   // shipped `yes`, the whole template read through the record reader, the `no` reading, the faces and hits it
   // prints on, the one predicate, and the legend — six pins.
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 38,
+  // Raised 38 → 42 with the `Rule-change-verified:` line the `.claude/**` declaration split reads (maintainer ruling
+  // 2026-11-19 on #35321): the record line and its shipped `yes`, the whole template through the register's reader,
+  // where it prints, and the one duty wording in the legend and the brief — four pins.
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 42,
   // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
   // posted by an untrusted author not read — two pins, two cases.
   // Raised 19 → 22 with `namedCardNumbers`, every card a pull names: the low-risk arm reads the label on each.
-  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 22,
+  // Raised 22 → 23 with the unedited-paste pin: the shipped `Rule-change-verified: yes` lands nothing.
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 23,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   // Raised 23 → 24 with ③'s SQL push-down check on every face's brief: one pin.
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 24,
@@ -3745,15 +3808,23 @@ export async function selfTest() {
   t('the printed location is the ONE thread set\'s own words', says(TPL_TEXT, `ONE comment on ${REVIEW_OF_RECORD_LOCATION};`));
   // -- the `Security-touching:` line: the low-risk skills arm's machine line, printed where an arm PR can sit --
   const ST_LINE = (value) => `Security-touching: ${value}`;
+  const RV_LINE = (value) => `Rule-change-verified: ${value}`;
+  const rvOf = (text) => JSON.stringify(readRuleChangeVerified(text));
+  const RULE_PATH = ['.claude', 'skills', 'pm-dispatch', 'SKILL.md'].join('/');
   const stOf = (text) => contractReviewRecordReading(text)?.securityTouching;
   const ARM_PATHS = [['skills', 'objectstack-data', 'SKILL.md'].join('/'), ['ui', 'skills', 'objectui-forms', 'SKILL.md'].join('/'), ['docs', 'adr', '0001-x.md'].join('/')];
   const OFF_ARM_PATH = ['.claude', 'agents', 'os-dev.md'].join('/');
-  t('⭐ the bare record carries ONE `Security-touching:` line, right after `Scope:`, and it ships `yes` — read by the fleet\'s record reader as `yes`, never as `no`', (() => { const rec = contractReviewRecordLines(); const i = rec.indexOf(ST_LINE('yes')); return i > 0 && rec[i - 1].startsWith('Scope: ') && rec[i + 1] === '' && rec.filter((l) => l.startsWith('Security-touching')).length === 1 && JSON.stringify(stOf(TPL_RECORD)) === '{"state":"read","value":"yes"}' && RECORD_SECURITY_TOUCHING_DEFAULT === 'yes'; })());
+  t('⭐ the bare record carries ONE `Security-touching:` line, right after `Scope:`, and it ships `yes` — read by the fleet\'s record reader as `yes`, never as `no`', (() => { const rec = contractReviewRecordLines(); const i = rec.indexOf(ST_LINE('yes')); return i > 0 && rec[i - 1].startsWith('Scope: ') && rec[i + 1] === RV_LINE('yes') && rec[i + 2] === '' && rec.filter((l) => l.startsWith('Security-touching')).length === 1 && JSON.stringify(stOf(TPL_RECORD)) === '{"state":"read","value":"yes"}' && RECORD_SECURITY_TOUCHING_DEFAULT === 'yes'; })());
   t('⭐ the WHOLE printed template reads that one line too — the legend around the fence carries no second declaration, on any face that prints it', [{}, { face: 'rules' }, { face: 'schema' }, ...ARM_PATHS.map((path) => ({ paths: [path] }))].every((v) => JSON.stringify(stOf(contractReviewTemplateLines(v).join('\n'))) === '{"state":"read","value":"yes"}'));
   t('…and a reviewer who writes `no` over it is read as `no` — the one value the arm stands on', JSON.stringify(stOf(TPL_RECORD.replace(ST_LINE('yes'), ST_LINE('no')))) === '{"state":"read","value":"no"}' && TPL_RECORD.includes(`\n${ST_LINE('yes')}\n`));
   t('⛔ the line prints exactly where an arm PR can sit: with the `hits` known, under a low-risk row (skills, ui/skills, an ADR) and nowhere else; with none known, on the bare, rules and schema faces — never the narrowing or declaration face', ARM_PATHS.every((path) => fenced(contractReviewTemplateLines({ paths: [path] })).includes(`\n${ST_LINE('yes')}\n`)) && !contractReviewTemplateLines({ paths: [OFF_ARM_PATH] }).join('\n').includes('Security-touching') && !contractReviewTemplateLines({ paths: MIXED }).join('\n').includes('Security-touching') && ['rules', 'schema'].every((id) => contractReviewRecordLines({ faceId: id }).includes(ST_LINE('yes'))) && ['narrowing', 'declaration'].every((id) => !contractReviewTemplateLines({ face: id }).join('\n').includes('Security-touching')) && !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n').includes('Security-touching'));
   t('the predicate is ONE function over face, tier and hits — below tier never, a narrowing never, known hits by the register\'s own low-risk row test', recordCarriesSecurityTouching(null, CONTRACT_REVIEW_TIER_NAME, undefined) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, undefined) && !recordCarriesSecurityTouching(reviewFaceById('narrowing'), CONTRACT_REVIEW_TIER_NAME, undefined) && recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [ARM_PATHS[0]]) && !recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [OFF_ARM_PATH]) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, [ARM_PATHS[0]]));
   t('the notes explain the line where the record carries it — who reads it, when `no` may be written, what keeps Tier H — and the key and values are the reader\'s own constants', ['· Security-touching  read by the low-risk skills arm alone', 'only when this line reads `no`', 'Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,', 'the key inside a code span', 'keeps the PR at Tier H', 'The template ships `yes`', 'adds the `security` label only once the reviewer confirms a `yes` was meant'].every((frag) => says(TPL_TEXT, frag)) && CONTRACT_REVIEW_SECURITY_TOUCHING_KEY === 'Security-touching' && CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join() === 'no,yes');
+  // -- the `Rule-change-verified:` line: the `.claude/**` declaration split's machine line (maintainer ruling 2026-11-19 on #35321) --
+  t('⭐ the bare record carries ONE `Rule-change-verified:` line, in the header block, and it ships `yes` — read by the register\'s own reader as `yes`, never as a value that verifies', (() => { const rec = contractReviewRecordLines(); return rec.filter((l) => l.startsWith('Rule-change-verified')).length === 1 && rec.indexOf(RV_LINE('yes')) < rec.indexOf('### ① Derived judgments') && rvOf(TPL_RECORD) === '{"state":"read","value":"yes"}' && RECORD_RULE_CHANGE_VERIFIED_DEFAULT === 'yes' && RULE_CHANGE_VERIFIED_KEY === 'Rule-change-verified'; })());
+  t('⭐ the WHOLE printed template reads that one line too, on every face that prints it, and a reviewer who writes `none` or `ruled` over it is read as that', [{}, { face: 'rules' }, { face: 'schema' }, { paths: [RULE_PATH] }].every((v) => rvOf(contractReviewTemplateLines(v).join('\n')) === '{"state":"read","value":"yes"}') && ['none', 'ruled'].every((value) => rvOf(TPL_RECORD.replace(RV_LINE('yes'), RV_LINE(value))) === `{"state":"read","value":"${value}"}`));
+  t('⛔ the line prints exactly where a split PR can sit: with the `hits` known, under `.claude/**` and nowhere else; with none known, on the bare, rules and schema faces — never the narrowing or declaration face, never below tier', fenced(contractReviewTemplateLines({ paths: [RULE_PATH] })).includes(`\n${RV_LINE('yes')}\n`) && fenced(contractReviewTemplateLines({ paths: [OFF_ARM_PATH] })).includes(`\n${RV_LINE('yes')}\n`) && ARM_PATHS.every((path) => !contractReviewTemplateLines({ paths: [path] }).join('\n').includes('Rule-change-verified')) && !contractReviewTemplateLines({ paths: ['AGENTS.md'] }).join('\n').includes('Rule-change-verified') && ['rules', 'schema'].every((id) => contractReviewRecordLines({ faceId: id }).includes(RV_LINE('yes'))) && ['narrowing', 'declaration'].every((id) => !contractReviewTemplateLines({ face: id }).join('\n').includes('Rule-change-verified')) && !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n').includes('Rule-change-verified') && recordCarriesRuleChangeVerified(null, CONTRACT_REVIEW_TIER_NAME, undefined) && !recordCarriesRuleChangeVerified(null, TIER_DEFAULT_NAME, [RULE_PATH]) && !recordCarriesRuleChangeVerified(reviewFaceById('narrowing'), CONTRACT_REVIEW_TIER_NAME, undefined));
+  t('the legend and the brief hand the SAME duty where the record carries the line — the maintainer\'s three heads, the ruled copy checked not re-ruled, `yes` the fail-closed value — and neither names it where it does not', ['· Rule-change-verified  read by the queue guard', 'what an agent may do without the maintainer', 'what gets done and in what order (grading, dispatch, scope)', 'what must go to him (decisions, maintainer actions)', 'check the', 'copy against the quoted words, do not re-rule it', 'The template ships `yes`'].every((frag) => says(TPL_TEXT, frag)) && RULE_CHANGE_VERIFIED_DUTY.every((line) => says(TPL_TEXT, line) && says(contractReviewBriefLines().join('\n'), line) && says(contractReviewBriefLines({ paths: [RULE_PATH] }).join('\n'), line)) && says(contractReviewBriefLines({ paths: [RULE_PATH] }).join('\n'), 'a `hits` path sits under `.claude/**`') && says(contractReviewBriefLines().join('\n'), 'if a `hits` path is under `.claude/**`') && [{ paths: ARM_PATHS }, { face: 'declaration' }, { face: 'narrowing' }].every((v) => !says(contractReviewBriefLines(v).join('\n'), 'Rule-change-verified') && !says(contractReviewTemplateLines(v).join('\n'), 'Rule-change-verified')));
   // -- item ④: the owner's full-review order rides THIS record as a fourth section ------------
   const DJ = '### ④ Design judgment';
   const headings = (lines) => lines.filter((line) => line.startsWith('### '));
@@ -3858,13 +3929,16 @@ export async function selfTest() {
     id: 7701,
     created_at: '2026-09-16T10:00:00Z',
     user: { login: PIN_RELAY },
-    body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'),
+    // …with the ONE line a reviewer must write over filled in: the template ships `Rule-change-verified: yes`, which
+    // verifies nothing (the pin below drives the unedited paste), so the reviewer's own `none` is what lands the record.
+    body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n').replace(`${RULE_CHANGE_VERIFIED_KEY}: ${RECORD_RULE_CHANGE_VERIFIED_DEFAULT}`, `${RULE_CHANGE_VERIFIED_KEY}: none`),
   };
-  // A Tier S path (the register's `.claude/**` row since #19133). The control
-  // below asks the register, so a row moving tiers reddens here instead of
-  // silently driving the approval leg.
+  const PIN_BODY = `Fixes #${PIN_CARD}\n\nRule-change: none`;
+  // A Tier S path (the register's `.claude/**` row since #19133) — Tier S on the declared body alone since the
+  // row splits by declaration (maintainer ruling 2026-11-19 on #35321), which is the reading the queue leg hands in.
+  // The control below asks the register, so a row moving tiers reddens here instead of silently driving the approval leg.
   const TIER_S_PATH = '.claude/skills/pm-dispatch/references/contract-review.md';
-  t('⛔ CONTROL: the fixture path is Tier S under the register, so the record leg is the one being driven', GUARD.governedTierFor([TIER_S_PATH], GUARD_REPO) === GUARD.TIER_S);
+  t('⛔ CONTROL: the fixture path is Tier S under the register, so the record leg is the one being driven', GUARD.governedTierFor([TIER_S_PATH], GUARD_REPO, undefined, null, { measured: true, body: PIN_BODY, recordLeg: 'deferred' }) === GUARD.TIER_S && GUARD.governedTierFor([TIER_S_PATH], GUARD_REPO) === GUARD.TIER_H);
   const pinRun = async (where) => {
     const threadsRead = [];
     const verdict = await GUARD.runGuard({
@@ -3872,7 +3946,7 @@ export async function selfTest() {
       repo: GUARD_REPO,
       rows: [{ sha: 'e'.repeat(40), subject: `x (#${PIN_PR})`, pr: PIN_PR, paths: [TIER_S_PATH] }],
       fetchReviews: async () => [],
-      fetchPull: async () => ({ sha: PIN_HEAD, body: `Fixes #${PIN_CARD}`, headRef: `claude/issue-${PIN_CARD}-x` }),
+      fetchPull: async () => ({ sha: PIN_HEAD, body: PIN_BODY, headRef: `claude/issue-${PIN_CARD}-x` }),
       fetchComments: async (n) => {
         threadsRead.push(n);
         return (n === PIN_PR ? 'PR' : 'card') === where ? [PIN_RECORD] : [];
@@ -3905,6 +3979,7 @@ export async function selfTest() {
     }
   })());
   t('⛔ #33541: the same template record posted by an author outside the relay and GOVERNED_APPROVERS is not read -- refused as no record', await (async () => { const saved = PIN_RECORD.user; PIN_RECORD.user = { login: 'drive-by-commenter' }; try { const r = await pinRun('PR'); return r.verdict.exitCode !== GUARD.EXIT_CLEAR && r.record?.state === 'absent'; } finally { PIN_RECORD.user = saved; } })());
+  t('⛔ #35321: the template pasted UNEDITED — `Rule-change-verified: yes` left in — does not land the pull request; the reviewer\'s own `none` is what the guard reads', await (async () => { const saved = PIN_RECORD.body; PIN_RECORD.body = contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'); try { const r = await pinRun('PR'); return saved.includes('\nRule-change-verified: none\n') && PIN_RECORD.body.includes('\nRule-change-verified: yes\n') && r.verdict.exitCode !== GUARD.EXIT_CLEAR && r.record?.state === 'not-pass' && /declaration split is not verified/.test(r.record?.verdictReason ?? ''); } finally { PIN_RECORD.body = saved; } })());
   t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
   t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
   t('⭐ the record the guard cleared carries the at-tier `Scope:` line — the guard reads past it, unchanged (ruling record 6184805932)', PIN_RECORD.body.includes(`\nScope: ${RECORD_SCOPE_PLACEHOLDERS.hits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}\n`) && readSet === THREAD_SET);

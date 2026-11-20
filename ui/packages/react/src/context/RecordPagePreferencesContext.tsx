@@ -11,7 +11,7 @@
  * per object, offered to the record page's renderers by their host
  * (objectstack#25883).
  *
- * The one choice it carries today is "show empty fields": a reader who opens a
+ * Its first choice is "show empty fields": a reader who opens a
  * section's "Show N empty fields" row wants to see the whole record, and wants
  * it on every section of the page, on the next record of the same object and
  * after a reload. The host keeps that choice where it keeps the user's list
@@ -48,6 +48,18 @@ export interface RecordPagePreference {
    * means no choice was made: the page folds them, as it always has.
    */
   showEmptyFields?: boolean;
+  /**
+   * The reader's sort and column layout of each related list on the record
+   * page's related tab (objectstack#35601), keyed by the list's `child.field`
+   * id. Absent: the list's own default sort and column widths.
+   */
+  relatedLists?: Record<string, RelatedListPreference>;
+}
+
+/** One related list's remembered sort and column layout. */
+export interface RelatedListPreference {
+  sort?: { field: string; order: 'asc' | 'desc' };
+  columnState?: { order?: string[]; widths?: Record<string, number> };
 }
 
 /** The host's store of record-page choices, one entry per object. */
