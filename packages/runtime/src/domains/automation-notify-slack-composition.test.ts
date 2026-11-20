@@ -20,6 +20,12 @@ import { describe, it, expect, vi } from 'vitest';
 // at collection, not inside the first case's clocked window.
 import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { MessagingServicePlugin } from '@objectstack/service-messaging';
 
@@ -45,10 +51,10 @@ async function messagingOf(opts: { slack: boolean }): Promise<unknown> {
     const engine = {
         async syncObjectSchema() {},
         async find() { return [] as unknown[]; },
-        async findOne() { return null; },
+        async findOne(object: string, query?: EngineFindOneQueryInput) { assertEngineFindOnePredicate(object, query); return null; },
         async insert() { return {}; },
-        async update() { return {}; },
-        async delete() { return {}; },
+        async update(_object: string, data: any, options?: any) { assertEngineUpdateDispatch(data, options); return {}; },
+        async delete(_object: string, options?: any) { assertEngineDeleteDispatch(options); return {}; },
     };
     const services = new Map<string, unknown>([['data', engine], ['manifest', { register() {} }]]);
     // connector-slack's client service, registered at init as ConnectorSlackPlugin does.

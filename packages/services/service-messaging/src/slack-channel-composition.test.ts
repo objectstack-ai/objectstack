@@ -16,7 +16,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 import { MessagingServicePlugin } from './messaging-service-plugin.js';
 import type { MessagingService } from './messaging-service.js';
 import { MY_PREFERENCES_ROUTE } from './my-preferences-routes.js';
@@ -43,8 +48,8 @@ async function compose(opts: { slack: boolean }) {
         async count() { return 0; },
         async insert() { return {}; },
         async findOne(object: string, query?: EngineFindOneQueryInput) { assertEngineFindOnePredicate(object, query); return null; },
-        async update() { return {}; },
-        async delete() { return {}; },
+        async update(_object: string, data: any, options?: any) { assertEngineUpdateDispatch(data, options); return {}; },
+        async delete(_object: string, options?: any) { assertEngineDeleteDispatch(options); return {}; },
     };
     const handlers = new Map<string, (req: unknown, res: unknown) => Promise<void>>();
     const mount = (verb: string) => (path: string, handler: (req: unknown, res: unknown) => Promise<void>) => { handlers.set(`${verb} ${path}`, handler); };
