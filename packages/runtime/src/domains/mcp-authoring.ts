@@ -10,6 +10,12 @@
  * `delete_metadata_draft`). No tool publishes and none takes a `force` (D2 A):
  * a person reviews and publishes the drafts in Studio.
  *
+ * [#35761] `list_metadata_items` with `contract: true` also answers the type's
+ * contract: the entry `getMetaTypes` serves `GET /meta/types` for it, its JSON
+ * Schema (`getMetadataTypeSchema` through the protocol's one converter) and
+ * its `createSeed`, never a second derivation. A flag, not a sixth tool: it
+ * costs `tools/list` fewer bytes (the PR states both).
+ *
  * ## Who is admitted (seat ruling D1 A)
  *
  * The effective right is an intersection, and both halves are read here, once
@@ -249,6 +255,10 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                 state: {
                     ...STATE_PARAMETER,
                     description: 'Omit to list drafts in place of their published versions; `active` lists the published items only; `draft` lists the pending drafts only.',
+                },
+                contract: {
+                    type: 'boolean',
+                    description: '`true` adds `contract`: the type\'s JSON Schema and create seed, to read before writing a new item. `schema: null` says why none is served.',
                 },
             },
             required: ['type'],
@@ -658,6 +668,8 @@ export function createOpenAuthoringRegistry(opts: {
                         // nothing under is refused, as the `/meta` list refuses it, rather
                         // than answered an empty list.
                         await refuseUnknownMetaListType(protocol, type);
+                        const contract = input.contract === true ? await typeContractOf(protocol, type) : undefined;
+                        if (contract === null) return unavailable();
                         // `state: "draft"` reads the draft-overlaid list and keeps its
                         // drafts, rather than `listDrafts({ type })`: the list gate
                         // below judges each item's BODY (its `requiredPermissions`,
@@ -673,7 +685,7 @@ export function createOpenAuthoringRegistry(opts: {
                         const items = kept
                             .map(summaryOf)
                             .filter((item) => state !== 'draft' || item.draft);
-                        return answer({ type: listed?.type ?? type, count: items.length, items });
+                        return answer({ type: listed?.type ?? type, count: items.length, items, ...(contract ? { contract } : {}) });
                     }
                     case 'get_metadata_item': {
                         if (typeof protocol?.getMetaItem !== 'function') return unavailable();
@@ -951,6 +963,33 @@ export function createOpenAuthoringRegistry(opts: {
                 );
             }
         },
+    };
+}
+
+/**
+ * [#35761] One type's contract, read off the entry `getMetaTypes` answers
+ * `GET /meta/types` with: no second converter. `null` when the protocol has no
+ * type listing. A type with no JSON Schema is answered `schema: null` with the
+ * reason, never `{}`.
+ */
+async function typeContractOf(
+    protocol: OpenAuthoringProtocol,
+    type: string,
+): Promise<{ schema: Record<string, unknown> | null; reason?: string; createSeed?: unknown } | null> {
+    if (typeof protocol.getMetaTypes !== 'function') return null;
+    const listing = await protocol.getMetaTypes();
+    const entry = listing?.entries?.find((e) => e?.type === type) as { schema?: unknown; createSeed?: unknown } | undefined;
+    const schema = entry?.schema;
+    const seed = entry?.createSeed !== undefined ? { createSeed: entry.createSeed } : {};
+    if (schema && typeof schema === 'object' && !Array.isArray(schema) && Object.keys(schema).length > 0) {
+        return { schema: schema as Record<string, unknown>, ...seed };
+    }
+    return {
+        schema: null,
+        reason: entry
+            ? `The platform derives no JSON Schema for '${type}'. Read a published item of the type, and let the save validate yours.`
+            : `This environment's type listing has no entry for '${type}', so no contract is served for it.`,
+        ...seed,
     };
 }
 

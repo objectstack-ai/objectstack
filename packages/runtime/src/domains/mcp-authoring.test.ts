@@ -36,8 +36,10 @@ import {
 } from '@objectstack/metadata-core';
 // The `/mcp` domain reaches the dispatcher, which loads this package lazily;
 // paid here, during collection, never inside a clocked case.
-import '@objectstack/metadata';
+import { MetadataManager } from '@objectstack/metadata';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataCreateSeed, getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { z } from 'zod';
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { handleMcpRequest } from './mcp.js';
 import {
@@ -598,6 +600,67 @@ describe('the tools\' names', () => {
 });
 
 // ---------------------------------------------------------------------------
+// [#35761] The type's contract, on list_metadata_items behind `contract: true`
+// ---------------------------------------------------------------------------
+
+describe('[#35761] list_metadata_items with contract: true answers the type\'s contract from the /meta/types entry', () => {
+  const FLOW_SCHEMA = { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] };
+  /** The recording double, whose type listing carries entries: flow with a schema and a seed, `job` with neither. */
+  async function withEntries(systemPermissions = ADMIN) {
+    const { protocol, calls } = fakeProtocol();
+    protocol.getMetaTypes = async () => {
+      calls.push(['getMetaTypes']);
+      return {
+        types: ['object', 'flow', 'job', 'datasource'],
+        entries: [{ type: 'flow', schema: FLOW_SCHEMA, createSeed: { name: 'new_flow' } }, { type: 'job', schema: undefined }],
+      } as any;
+    };
+    const served = await serve(await oauthEnvelope(['metadata:write'], systemPermissions), { protocol, systemPermissions });
+    return { authoring: served.authoring!, calls };
+  }
+
+  it('answers the entry\'s schema and seed beside the list; without the flag the reply is unchanged', async () => {
+    const { authoring } = await withEntries();
+    const plain = await call(authoring, 'list_metadata_items', { type: 'flow' });
+    expect(Object.keys(plain.body)).toEqual(['type', 'count', 'items']);
+    const read = await call(authoring, 'list_metadata_items', { type: 'flows', contract: true });
+    expect(read.isError).toBe(false);
+    expect(read.body.items).toEqual(plain.body.items);
+    expect(read.body.contract).toEqual({ schema: FLOW_SCHEMA, createSeed: { name: 'new_flow' } });
+  });
+
+  it('a type with no schema is answered schema: null with the reason, never {}', async () => {
+    const { authoring } = await withEntries();
+    const noSchema = (await call(authoring, 'list_metadata_items', { type: 'job', contract: true })).body.contract;
+    expect(noSchema).toEqual({ schema: null, reason: expect.stringContaining('no JSON Schema') });
+    const unlisted = (await call(authoring, 'list_metadata_items', { type: 'object', contract: true })).body.contract;
+    expect(unlisted).toEqual({ schema: null, reason: expect.stringContaining('no entry') });
+  });
+
+  it('an unknown type is refused as the list refuses it; a type the caller may not read is refused before any read', async () => {
+    const { authoring, calls } = await withEntries();
+    const unknown = await call(authoring, 'list_metadata_items', { type: 'no_such_type', contract: true });
+    expect(unknown.body.error).toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+    expect(unknown.body.contract).toBeUndefined();
+    calls.length = 0;
+    const refused = await call(authoring, 'list_metadata_items', { type: 'datasource', contract: true });
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(calls).toEqual([]);
+  });
+
+  it('is behind the same gate: a user without manage_metadata lists nothing and is refused before the listing is read', async () => {
+    const { authoring, calls } = await withEntries(NOT_AN_AUTHOR);
+    expect(authoring.registry.getAll()).toEqual([]);
+    const refused = await call(authoring, 'list_metadata_items', { type: 'flow', contract: true });
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(calls).toEqual([]);
+    // A data-only token and an API key are handed no registry at all (the door's four cells, above).
+    expect((await serve(await oauthEnvelope(['data:read'], ADMIN))).carried).toBe(false);
+    expect((await serve({ userId: 'u1', principalKind: 'human', systemPermissions: ADMIN })).carried).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The draft writes, and the publish verdict each answers with
 // ---------------------------------------------------------------------------
 
@@ -856,7 +919,7 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     cleanup = [];
   });
 
-  async function realProtocol() {
+  async function realProtocol(services?: Map<string, unknown>) {
     const dir = mkdtempSync(join(tmpdir(), 'os-34766-'));
     cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
@@ -875,7 +938,7 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     engine.registry.installPackage({ id: 'com.example.crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any, 'code' as never);
     engine.registry.installPackage({ id: STUDIO_BASE, name: 'CRM Studio', version: '1.0.0', type: 'app' } as any, 'authored');
     cleanup.push(() => { void engine.destroy(); });
-    return new ObjectStackProtocolImplementation(engine as any) as unknown as OpenAuthoringProtocol;
+    return new ObjectStackProtocolImplementation(engine as any, services && (() => services as Map<string, any>)) as unknown as OpenAuthoringProtocol;
   }
 
   const STUDIO_BASE = 'com.example.crm_studio';
@@ -968,6 +1031,22 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(refused.body.error.message).not.toContain('bogus_key');
     expect(JSON.stringify(refused.body.error.issues)).toContain('bogus_key');
     expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
+  });
+
+  it('[#35761] the flow contract is the /meta/types entry: its required keys are getMetadataTypeSchema(\'flow\')\'s, with the create seed', async () => {
+    // The type registry the metadata plugin sets at boot: `flow` is live with no flow item stored.
+    const metadata = new MetadataManager({} as never);
+    metadata.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
+    const protocol = await realProtocol(new Map([['metadata', metadata]]));
+    const { authoring } = await authorThroughDomain({ protocol });
+    const read = await call(authoring, 'list_metadata_items', { type: 'flow', contract: true });
+    expect(read.body.count, JSON.stringify(read.body)).toBe(0);
+    const { contract } = read.body;
+    const entry = (await protocol.getMetaTypes!()).entries!.find((e) => e.type === 'flow') as any;
+    expect(contract.schema).toEqual(entry.schema);
+    const reference = z.toJSONSchema(getMetadataTypeSchema('flow')!, { unrepresentable: 'any' }) as { required?: string[] };
+    expect([...contract.schema.required].sort()).toEqual([...reference.required!].sort());
+    expect(contract.createSeed).toEqual(getMetadataCreateSeed('flow'));
   });
 
   it('an inherited member\'s name as `type`, which the fold keeps as sent, is refused and writes nothing', async () => {

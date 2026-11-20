@@ -51,8 +51,9 @@ the authority on its arguments and its reply.
 
 Load the type's domain skill before you write it: its text is your contract.
 Follow its pointers into `node_modules` only where you can read files. Where
-you cannot, read a published item of the same type, and let the save check
-you (step 4). Never write a key none of these shows.
+you cannot, `list_metadata_items` with `contract: true` answers the type's
+JSON Schema and a `createSeed` to start from. The save still checks you
+(step 4). Never write a key none of these shows.
 
 | You write | Skill |
 |:--|:--|
