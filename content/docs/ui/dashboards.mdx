@@ -306,13 +306,13 @@ the *West* bucket → one order).
 The drawer also offers an **"Open in list →"** escape hatch — escalate the peek
 to the object's full list page (sort / bulk-select / export / shareable URL),
 scoped by the same drill filter. In-place drawer is the default (keep context);
-the escape hatch is there when you need the full surface. **Reports drill
+the escape hatch is there when you need the full surface. Not every drill gets
+the link today: a drill on a dimension whose `field` is a relationship path,
+such as `region` in the `sales` dataset above (`account.region`), stays in the
+drawer, because the list page's URL filter has no spelling for a condition on a
+related record. **Reports drill
 identically**: a `summary` / `matrix` report opens the same in-place drawer on
-row/cell click, so dashboard and report drill behave the same. The exception
-today is a dimension whose `field` is a relationship path, such as `region` in
-the `sales` dataset above (`account.region`): the list page's URL filter has no
-spelling for a condition on a related record, so that drill stays in the drawer
-and offers no link.
+row/cell click, so dashboard and report drill behave the same.
 
 ```typescript
 // A drill-through table widget. No drill configuration is required — it is
