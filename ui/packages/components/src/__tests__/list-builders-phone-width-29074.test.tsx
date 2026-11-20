@@ -42,14 +42,15 @@ describe('SortBuilder below sm (objectstack#29057)', () => {
     );
   }
 
-  it('lays a level out on three lines: the words, the field beside Remove, the direction', () => {
+  it('lays a level out on three lines: the words, the field beside Remove, the direction; the drag handle beside all three (objectstack#35876)', () => {
     mount();
     const row = screen.getByTestId('sort-builder-row');
-    expect(tokens(row)).toEqual(expect.arrayContaining(['flex', 'max-sm:grid', 'max-sm:grid-cols-[minmax(0,1fr)_auto]']));
+    expect(tokens(row)).toEqual(expect.arrayContaining(['flex', 'max-sm:grid', 'max-sm:grid-cols-[auto_minmax(0,1fr)_auto]']));
+    expect(tokens(screen.getByTestId('sort-builder-handle'))).toEqual(expect.arrayContaining(['max-sm:col-start-1', 'max-sm:row-span-3']));
     const field = screen.getByTestId('sort-builder-field').parentElement!;
     expect(tokens(field)).toEqual(expect.arrayContaining(['flex-1', 'max-sm:row-start-2']));
     const direction = screen.getByTestId('sort-builder-direction').parentElement!;
-    expect(tokens(direction)).toEqual(expect.arrayContaining(['w-36', 'max-sm:col-span-2', 'max-sm:row-start-3', 'max-sm:w-auto']));
+    expect(tokens(direction)).toEqual(expect.arrayContaining(['w-36', 'max-sm:col-start-2', 'max-sm:col-span-2', 'max-sm:row-start-3', 'max-sm:w-auto']));
   });
 
   it('every control is 44 px below sm and keeps its desktop size', () => {
