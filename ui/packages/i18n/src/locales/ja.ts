@@ -1194,6 +1194,8 @@ const ja = {
     manageViewsDescription: "このオブジェクトのすべてのビューを並べ替え、名前変更、固定、削除できます。",
     searchViews: "ビューを検索",
     addNewView: "新しいビューを追加",
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: "このビューは、このアプリのカスタマイズパッケージをここでは使用できないため、アプリの外に下書きとして保存されました。このアプリの下書きバーでは集計も公開もされません。ホームから公開してください。",
     done: "完了",
     noViewsFound: "検索に一致するビューはありません。",
     // objectstack#27594 — the list title's view switcher.

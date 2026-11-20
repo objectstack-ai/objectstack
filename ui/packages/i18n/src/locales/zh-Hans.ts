@@ -1221,6 +1221,8 @@ const zh = {
     manageViewsDescription: '对该对象的所有视图进行重新排序、重命名、固定或删除。',
     searchViews: '搜索视图',
     addNewView: '新建视图',
+    // objectstack#35624 — a new view the app's customization package could not take.
+    savedOutsideApp: '此视图已作为草稿保存在本应用之外，因为此处无法使用本应用的定制包。本应用的草稿条不会计入或发布它：请在首页发布。',
     done: '完成',
     noViewsFound: '没有匹配的视图。',
     // objectstack#27594 — the list title's view switcher.

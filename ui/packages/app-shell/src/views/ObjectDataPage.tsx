@@ -71,6 +71,7 @@ import { PageHeader } from '../layout/PageHeader.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import { useRuntimeCreateApp } from './objectViewViewCrud.js';
 import { buildNewViewSpec } from './newViewSpec.js';
 import { CreateViewDialog } from './CreateViewDialog.js';
 import {
@@ -242,6 +243,8 @@ export function buildSaveAsViewSpec(
 export function ObjectDataPage({ dataSource, objects }: any) {
   const { appName, objectName } = useParams();
   const { t, language } = useObjectTranslation();
+  // objectstack#35624 — the app Save as view saves the new view into.
+  const createApp = useRuntimeCreateApp(t);
   const { objectLabel, objectPluralLabel, fieldLabel } = useObjectLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -442,6 +445,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           metadataClient,
           dataSource,
           objectName,
+          // objectstack#35624 — saved into the app it was made in.
+          app: createApp,
         });
         if (createdId) {
           const previewSuffix = previewDrafts
@@ -462,7 +467,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         return false;
       }
     },
-    [columns, urlFilters, metadataClient, dataSource, navigate, objectName, previewDrafts, t],
+    [columns, urlFilters, metadataClient, dataSource, navigate, objectName, previewDrafts, t, createApp],
   );
 
   // ─── The CRUD affordance matrix for this surface (#5164) ──────────────
