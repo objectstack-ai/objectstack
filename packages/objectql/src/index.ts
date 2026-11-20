@@ -693,6 +693,22 @@ export type {
     RecordCurrencyBackfillOrganization,
     RecordCurrencyBackfillOrganizationsRefusal,
 } from './record-currency-backfill.js';
+// [ADR-0158 U7 R1, Open item 12] The unit code backfill behind `os migrate
+// unit-codes`: stored free text rewritten into unit codes from the operator's mapping.
+export {
+    backfillUnitCodes,
+    formatUnitCodeBackfillReport,
+    unitCodeBackfillComplete,
+    unitCodeMappingOf,
+} from './unit-code-backfill.js';
+export type {
+    UnitCodeBackfillReport,
+    UnitCodeBackfillEngine,
+    UnitCodeBackfillOptions,
+    UnitCodeBackfillValue,
+    UnitCodeBackfillOrganization,
+    UnitCodeMapping,
+} from './unit-code-backfill.js';
 // [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
 // home amounts behind `os migrate recompute-home-amounts`: the write's own
 // projection over stored rows. Same split as the two backfills above.
