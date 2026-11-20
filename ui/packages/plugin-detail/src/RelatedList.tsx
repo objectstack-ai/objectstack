@@ -1010,6 +1010,53 @@ const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[] }> = ({ 
   );
 };
 
+/**
+ * A body table's density (objectstack#35742): the list's dense rows — a 32px
+ * cell over the row's 1px line, 33px a row — under a 32px header at 13px, the
+ * measures `object-grid` draws a list's `compact` rows with
+ * (objectstack#35548). On the table's root, so it reaches every header and
+ * body cell, the row-actions cell included, over the table primitive's
+ * roomier defaults.
+ */
+export const BODY_TABLE_DENSITY = [
+  '[&_thead_th]:h-8 [&_thead_th]:px-3 [&_thead_th]:py-0 [&_thead_th]:text-[13px]',
+  '[&_tbody_td]:h-8 [&_tbody_td]:px-3 [&_tbody_td]:py-0 [&_tbody_td]:text-[13px] [&_tbody_td]:leading-tight',
+].join(' ');
+
+/**
+ * The width a body table's drawn column asks for: the inline width the table
+ * gives its header cell (a user's resize, the declared width or the estimate
+ * from what its cells draw), which does not grow when the table stretches
+ * its columns to fill the row; else the drawn width.
+ */
+function bodyTableColumnWidth(th: HTMLElement): number {
+  const declared = th.style.minWidth;
+  if (/^\d+(\.\d+)?(px)?$/.test(declared)) return parseFloat(declared);
+  return th.getBoundingClientRect().width;
+}
+
+/**
+ * How many of a body table's columns, in their priority order, fit whole in
+ * `available` px (objectstack#35742): the leading run whose widths sum to no
+ * more than it, never fewer than one. `null` when every column fits, or when
+ * a column's width is not known yet (it has not been drawn), so the table
+ * draws them all and is measured again.
+ */
+export function bodyTableColumnsThatFit(
+  keys: readonly string[],
+  widths: ReadonlyMap<string, number>,
+  available: number,
+): number | null {
+  let used = 0;
+  for (let index = 0; index < keys.length; index += 1) {
+    const width = widths.get(keys[index]);
+    if (width === undefined) return null;
+    used += width;
+    if (used > available) return Math.max(1, index);
+  }
+  return null;
+}
+
 /** The add config of {@link RelatedListProps.add}, as `derivedAddOf` derives one. */
 type RelatedListAdd = NonNullable<RelatedListProps['add']>;
 
@@ -3266,6 +3313,25 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // table's scroll box by the effect below the empty answer.
   const bodyTableHostRef = React.useRef<HTMLDivElement | null>(null);
   const [bodyTableOverflows, setBodyTableOverflows] = React.useState(false);
+  // objectstack#35742 — never a half-cut column: a body table draws the
+  // leading run of its columns, in their priority order, that fits whole in
+  // its column (`bodyTableColumnsThatFit`); the rest wait behind ⤢ 「全部列」.
+  // `null` draws every column. The width each column asks for is kept by its
+  // key, so a column left out is still counted when the box grows.
+  const [bodyTableColumnCap, setBodyTableColumnCap] = React.useState<number | null>(null);
+  const bodyTableColumnWidths = React.useRef(new Map<string, number>());
+  const bodyTableColumnKeysKey = React.useMemo(
+    () => JSON.stringify((tableColumns ?? []).map((col: any) => String(col?.accessorKey ?? ''))),
+    [tableColumns],
+  );
+  // A different column set is measured afresh, every column drawn.
+  React.useLayoutEffect(() => {
+    bodyTableColumnWidths.current.clear();
+    setBodyTableColumnCap(null);
+  }, [bodyTableColumnKeysKey]);
+  const bodyTableColumnsOmitted = bodyTable && bodyTableColumnCap !== null;
+  // ⤢ in words, and the overflow cue: the table scrolls, or leaves columns out.
+  const bodyTableNarrow = bodyTableOverflows || bodyTableColumnsOmitted;
 
   // The row click hands the host the rows on show beside the clicked one
   // (objectstack#26679), so its drawer can step through them.
@@ -3391,7 +3457,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         return {
           type: 'data-table',
           data: paginatedData,
-          columns: compact ? tableColumns.slice(0, 1) : tableColumns,
+          columns: compact
+            ? tableColumns.slice(0, 1)
+            : bodyTableColumnsOmitted ? tableColumns.slice(0, bodyTableColumnCap!) : tableColumns,
+          // The list's dense rows and header (objectstack#35742).
+          ...(bodyTable ? { className: BODY_TABLE_DENSITY } : {}),
           // A body table wider than its column keeps its first column, the
           // row's identity, in view while it scrolls (objectstack#29945).
           ...(bodyTable && bodyTableOverflows ? { frozenColumns: 1 } : {}),
@@ -3433,7 +3503,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodySummaryRow, ownRelationshipId, storedListPreference?.columnState]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodyTableColumnsOmitted, bodyTableColumnCap, bodySummaryRow, ownRelationshipId, storedListPreference?.columnState]);
 
   const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
 
@@ -3569,8 +3639,24 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     let resizes: ResizeObserver | null = null;
     let mounts: MutationObserver | null = null;
     const findBox = () => host.querySelector<HTMLElement>('[data-table-scroll-box]');
+    const keys = readColumnKeys(bodyTableColumnKeysKey);
     const watch = (box: HTMLElement) => {
-      const read = () => setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
+      const read = () => {
+        // objectstack#35742 — the columns that fit whole: the box's width
+        // less the cells that are no column (the row actions), against the
+        // width each column asks for.
+        let besideColumns = 0;
+        for (const th of Array.from(box.querySelectorAll<HTMLElement>('thead th'))) {
+          const key = th.getAttribute('data-column-key');
+          if (key === null) besideColumns += th.getBoundingClientRect().width;
+          else bodyTableColumnWidths.current.set(key, bodyTableColumnWidth(th));
+        }
+        // A box with no width has not been laid out: it leaves nothing out.
+        setBodyTableColumnCap(box.clientWidth > 0
+          ? bodyTableColumnsThatFit(keys, bodyTableColumnWidths.current, box.clientWidth - besideColumns)
+          : null);
+        setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
+      };
       read();
       if (typeof ResizeObserver === 'undefined') return;
       resizes = new ResizeObserver(read);
@@ -3597,7 +3683,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       mounts?.disconnect();
       resizes?.disconnect();
     };
-  }, [bodyTableDrawn, isMobile]);
+  }, [bodyTableDrawn, isMobile, bodyTableColumnKeysKey]);
   // When the consumer explicitly enables `filterable`, always render the
   // filter input — they're opting in. (data-table's own auto-search is
   // suppressed via the viewSchema below to avoid a duplicate input.)
@@ -4105,9 +4191,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
               </Button>
             )}
-            {bodyTable && enlargeRelated && ownRelationshipId && (bodyTableOverflows ? (
+            {bodyTable && enlargeRelated && ownRelationshipId && (bodyTableNarrow ? (
               // A table wider than its column offers ⤢ in words: the enlarged
-              // tab is where every column fits (objectstack#29945).
+              // tab is where every column fits (objectstack#29945), the ones
+              // the table left out included (objectstack#35742).
               <Button
                 variant="outline"
                 size="sm"
@@ -4296,7 +4383,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           <div
             ref={bodyTableHostRef}
             className={cn(loading && 'opacity-60 pointer-events-none transition-opacity')}
-            data-body-table-overflow={bodyTable ? (bodyTableOverflows ? 'true' : 'false') : undefined}
+            data-body-table-overflow={bodyTable ? (bodyTableNarrow ? 'true' : 'false') : undefined}
+            data-body-table-columns-omitted={bodyTableColumnsOmitted ? String(tableColumns.length - bodyTableColumnCap!) : undefined}
           >
             <SchemaRenderer schema={viewSchema} />
           </div>
