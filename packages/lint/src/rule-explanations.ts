@@ -1612,6 +1612,27 @@ const FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_UPDATE_SUMMARY_FIELD_EXPLANATION: RuleExplanation = {
+  rule: 'flow-update-summary-field',
+  covers: 'why a roll-up summary field write is dropped',
+  paragraphs: [
+    FLOW_FIELDS_CALLER_PAYLOAD,
+    'A roll-up `summary` field is computed by the engine from its child records, so the engine treats it ' +
+      'as `readonly: true` on create and on update whether or not the field declares it. A value a ' +
+      'non-system write sends for it is dropped, the rest of the write lands, the step still reports ' +
+      'success and the drop is reported as `readonly`; under `strictReadonlyWrites` the whole write is ' +
+      'refused. A created record starts the column as if no child record existed: `0` for `count` and ' +
+      '`sum`, empty for `min`, `max` and `avg`.',
+    'Reported as a warning, so it never blocks a build. A roll-up that declares `readonly: true` is ' +
+      'reported as `flow-update-readonly-field` instead, which does. A `runAs: \'system\'` flow writes the ' +
+      'column and is not reported, and neither is a create on a platform object, which the create-side ' +
+      'strip does not judge.',
+    'To fix it, remove the field from the node: the engine recomputes the value whenever a child record ' +
+      'is created, changed or deleted. To change what it adds up, change the child records or the ' +
+      'roll-up\'s `summaryOperations`.',
+  ],
+};
+
 const HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION: RuleExplanation = {
   rule: 'hook-api-update-readonly-field',
   covers: 'why a readonly field write is silently dropped',
@@ -6470,6 +6491,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_UPDATE_READONLY_FIELD_EXPLANATION.rule]: FLOW_UPDATE_READONLY_FIELD_EXPLANATION,
   [FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: FLOW_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
+  [FLOW_UPDATE_SUMMARY_FIELD_EXPLANATION.rule]: FLOW_UPDATE_SUMMARY_FIELD_EXPLANATION,
   [HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_FIELD_EXPLANATION,
   [HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: HOOK_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
   [ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION.rule]: ACTION_API_UPDATE_READONLY_WHEN_FIELD_EXPLANATION,
