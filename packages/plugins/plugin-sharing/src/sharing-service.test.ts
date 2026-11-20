@@ -2,7 +2,11 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
-import { SharingService, type SharingServiceOptions } from './sharing-service.js';
+import {
+  SharingService,
+  HIERARCHY_RESOLVER_ABSENT_NOTICE,
+  type SharingServiceOptions,
+} from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
 import { bootRequestContext } from './exec-context-seam.testkit.js';
 import { SysRecordShare } from './objects/sys-record-share.object.js';
@@ -2365,5 +2369,89 @@ describe('[#14484] grant stamps organization_id on both halves of the upsert', (
       { userId: 'admin', tenantId: ORG_CALLER } as any,
     );
     expect(engine._tables.sys_record_share[0].organization_id).toBe(ORG_CALLER);
+  });
+});
+
+describe('[ADR-0057] a missing hierarchy-scope resolver is said once per boot', () => {
+  const MANAGER_PROBE = {
+    hasWriteBypass: async () => false,
+    resolveWriteScope: async () => 'unit_and_below' as const,
+  };
+  const notices = (warn: ReturnType<typeof vi.fn>) =>
+    warn.mock.calls.filter((c) => c[0] === HIERARCHY_RESOLVER_ABSENT_NOTICE);
+
+  let engine: ReturnType<typeof makeFakeEngine>;
+  beforeEach(() => {
+    engine = makeFakeEngine({ account: ACCOUNT_SCHEMA, sys_record_share: {} });
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'alice' }];
+  });
+
+  it('the notice names the capability, its registry provider and the owner-only consequence', () => {
+    expect(HIERARCHY_RESOLVER_ABSENT_NOTICE).toContain('"hierarchy-security"');
+    expect(HIERARCHY_RESOLVER_ABSENT_NOTICE).toContain('@objectstack/security-enterprise');
+    expect(HIERARCHY_RESOLVER_ABSENT_NOTICE).toContain('owner-only');
+  });
+
+  it('a hierarchy scope with no resolver warns ONCE across two calls, and still answers owner-only', async () => {
+    const warn = vi.fn();
+    const svc = new SharingService({ engine, securityService: () => MANAGER_PROBE, logger: { warn } });
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    const resolve = (s: any) => (svc as any).resolveOwnerScopeIds(bob, s);
+
+    expect(await resolve('unit_and_below')).toEqual(['bob']);
+    expect(await resolve('own_and_reports')).toEqual(['bob']);
+    // Through a public gate too: the verdict is the owner-only one.
+    expect(await svc.canManageShares('account', 'a1', bob)).toBe(false);
+
+    expect(notices(warn)).toHaveLength(1);
+    expect(notices(warn)[0][1]).toMatchObject({
+      capability: 'hierarchy-security',
+      provider: '@objectstack/security-enterprise',
+      scope: 'unit_and_below',
+    });
+  });
+
+  it('a fresh service instance (a new boot) says it again', async () => {
+    const warn = vi.fn();
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    for (let boot = 0; boot < 2; boot++) {
+      const svc = new SharingService({ engine, logger: { warn } });
+      expect(await (svc as any).resolveOwnerScopeIds(bob, 'unit')).toEqual(['bob']);
+    }
+    expect(notices(warn)).toHaveLength(2);
+  });
+
+  it('CONTROL: non-hierarchy scopes take no fallback and log nothing', async () => {
+    const warn = vi.fn();
+    const svc = new SharingService({ engine, logger: { warn } });
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    for (const scope of [undefined, 'own', 'org'] as const) {
+      expect(await (svc as any).resolveOwnerScopeIds(bob, scope)).toEqual(['bob']);
+    }
+    expect(await svc.canManageShares('account', 'a1', { userId: 'alice' })).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a registered resolver takes no fallback and logs nothing', async () => {
+    const warn = vi.fn();
+    const svc = new SharingService({
+      engine,
+      securityService: () => MANAGER_PROBE,
+      hierarchyResolver: () => ({ resolveOwnerIds: async () => ['bob', 'alice'] }),
+      tenancy: () => ({ posture: 'single' }),
+      logger: { warn },
+    });
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    expect(await (svc as any).resolveOwnerScopeIds(bob, 'unit_and_below')).toEqual(['bob', 'alice']);
+    expect(notices(warn)).toHaveLength(0);
+  });
+
+  it('a throwing logger neither fails the gate nor throws again', async () => {
+    const warn = vi.fn(() => { throw new Error('sink down'); });
+    const svc = new SharingService({ engine, logger: { warn } });
+    const bob = await bootRequestContext({ userId: 'bob', activeOrganizationId: 'org_a' });
+    expect(await (svc as any).resolveOwnerScopeIds(bob, 'unit')).toEqual(['bob']);
+    expect(await (svc as any).resolveOwnerScopeIds(bob, 'unit')).toEqual(['bob']);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
