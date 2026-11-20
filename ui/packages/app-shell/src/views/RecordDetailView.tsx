@@ -4845,6 +4845,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         icon: 'check',
         type: 'script',
         locations: ['record_header'],
+        // objectstack#35816 — Save is the edit state's one filled button, and
+        // keeps its place after Cancel, as a form's footer orders them.
+        variant: 'primary',
         order: 100,
         disabled: recordEditSaving,
         onClick: () => { void recordEditControlRef.current?.save(); },

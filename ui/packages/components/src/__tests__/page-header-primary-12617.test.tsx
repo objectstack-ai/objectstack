@@ -158,3 +158,58 @@ describe('page:header draws one primary action, the rest secondary (objectui#126
     expect(isFilled(buttons[0])).toBe(true);
   });
 });
+
+/**
+ * objectstack#35816: the record page's edit state draws Cancel and Save, and
+ * Save is the one filled button. The edit state's Cancel came first in `order`
+ * and so drew as the primary: the hand fell on the button that throws the edit
+ * away. A host button declaring `variant: 'primary'` is now the primary over
+ * every page action, and keeps the place the host gave it (Cancel, then Save,
+ * as a form's footer orders them).
+ */
+describe("page:header — a host button declaring `variant: 'primary'` is the primary in place (objectstack#35816)", () => {
+  const EDIT_STATE = [
+    { name: 'sys_record_edit_cancel', label: 'Cancel', icon: 'x', variant: 'outline', order: 99, onClick: vi.fn() },
+    { name: 'sys_record_edit_save', label: 'Save', icon: 'check', variant: 'primary', order: 100, onClick: vi.fn() },
+    { name: 'sys_share', label: 'Share', order: 110, component: 'action:menu', onClick: vi.fn() },
+  ];
+  const renderEditState = (actions: any[], hosts: any[] = EDIT_STATE) =>
+    render(
+      <ActionProvider>
+        <RecordContextProvider
+          objectName="crm_lead"
+          recordId={LEAD.id}
+          data={LEAD}
+          objectSchema={{ name: 'crm_lead', label: 'Lead' }}
+          headerSystemActions={hosts}
+        >
+          <PageHeader schema={{ type: 'page:header', actions }} />
+        </RecordContextProvider>
+      </ActionProvider>,
+    );
+  const rowButtons = () => toolbarButtons().filter((b) => nameOf(b) !== 'More actions');
+
+  it('Cancel then Save, Save the only filled button', () => {
+    renderEditState([]);
+    const buttons = rowButtons();
+    expect(buttons.map(nameOf)).toEqual(['Cancel', 'Save']);
+    expect(buttons.map(isFilled)).toEqual([false, true]);
+    expect(isOutline(buttons[0])).toBe(true);
+  });
+
+  it("Save stays the primary beside the page's own actions, one declaring `variant: 'primary'` included", () => {
+    renderEditState([act('log_call', 'Log a Call'), act('convert_lead', 'Convert Lead', { variant: 'primary' })]);
+    const buttons = rowButtons();
+    // The page's actions keep the memo's sort (`variant: 'primary'` breaks the
+    // `order` tie); only the filled style moves to Save.
+    expect(buttons.map(nameOf)).toEqual(['Convert Lead', 'Log a Call', 'Cancel', 'Save']);
+    expect(buttons.map(isFilled)).toEqual([false, false, false, true]);
+  });
+
+  it('CONTROL: with no host primary, the first page action still leads as the primary', () => {
+    renderEditState([act('log_call', 'Log a Call')], EDIT_STATE.map((a) => (a.name === 'sys_record_edit_save' ? { ...a, variant: undefined } : a)));
+    const buttons = rowButtons();
+    expect(buttons.map(nameOf)).toEqual(['Log a Call', 'Cancel', 'Save']);
+    expect(buttons.map(isFilled)).toEqual([true, false, false]);
+  });
+});

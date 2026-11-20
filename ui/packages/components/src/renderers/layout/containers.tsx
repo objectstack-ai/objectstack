@@ -2647,9 +2647,17 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     const isHostButton = (a: unknown): boolean => isHostAction(a) && !isDestructiveAction(a);
     const rowEligible = buttonable.filter((a) => !isHostAction(a) || isHostButton(a));
     const primaryCandidates = rowEligible.filter((a) => !isDestructiveAction(a));
+    // A HOST button declaring `variant: 'primary'` is the primary whatever the
+    // page declares, and keeps the place the host gave it (objectstack#35816):
+    // the record page's edit state draws Cancel then Save, as a form's footer
+    // does, and Save is the one filled button. Before this the edit state's
+    // Cancel came first in `order` and drew as the primary, so the hand fell
+    // on the button that throws the edit away. No other host button declares
+    // a variant of `primary`, so every other row is unchanged.
+    const hostPrimary = primaryCandidates.find((a) => isHostButton(a) && a?.variant === 'primary');
     const primaryIdx = primaryCandidates.findIndex((a) => a?.variant === 'primary');
-    const primaryAction: unknown = primaryCandidates[primaryIdx >= 0 ? primaryIdx : 0];
-    const ranked = primaryAction
+    const primaryAction: unknown = hostPrimary ?? primaryCandidates[primaryIdx >= 0 ? primaryIdx : 0];
+    const ranked = primaryAction && !hostPrimary
       ? [primaryAction, ...buttonable.filter((a) => a !== primaryAction)]
       : buttonable;
     // The page's own actions share the `maxVisible` budget; what does not fit
