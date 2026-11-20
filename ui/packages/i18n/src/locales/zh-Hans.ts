@@ -525,8 +525,21 @@ const zh = {
     openRecord: '打开记录',
     cancelChanges: '取消更改',
     saveRow: '保存行',
+    cellReadOnly: '此单元格不能在这里编辑。',
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: '此字段为只读。',
+      computed: '此值由计算得出，不能编辑。',
+      notInline: '此字段不能在列表中编辑，请打开记录修改。',
+      noFieldPermission: '您没有编辑此字段的权限。',
+      viewOff: '此视图已关闭列表内编辑。',
+      objectReadOnly: '这些记录不能在这里编辑。',
+      noPermission: '您没有编辑这些记录的权限。',
+      approvalLocked: '此记录正在审批中，已锁定。',
+      noRecordPermission: '您没有编辑此记录的权限。',
+    },
     actions: '操作',
     edit: '编辑',
     delete: '删除',

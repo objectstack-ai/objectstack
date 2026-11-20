@@ -78,6 +78,8 @@ async function paramsFor(schemaExtra: Record<string, unknown>) {
     type: 'list-view',
     objectName: OBJECT,
     viewType: 'grid',
+    // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+    userActions: { editInline: false },
     ...schemaExtra,
   };
   render(

@@ -527,8 +527,21 @@ const ru = {
     openRecord: "Открыть запись",
     cancelChanges: "Отменить изменения",
     saveRow: "Сохранить строку",
+    cellReadOnly: "Эту ячейку нельзя изменить здесь.",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "Это поле только для чтения.",
+      computed: "Это значение вычисляется, его нельзя изменить.",
+      notInline: "Это поле нельзя изменить в списке. Откройте запись, чтобы изменить его.",
+      noFieldPermission: "У вас нет прав на изменение этого поля.",
+      viewOff: "Редактирование в списке отключено для этого представления.",
+      objectReadOnly: "Эти записи нельзя изменить здесь.",
+      noPermission: "У вас нет прав на изменение этих записей.",
+      approvalLocked: "Эта запись заблокирована, пока находится на согласовании.",
+      noRecordPermission: "У вас нет прав на изменение этой записи.",
+    },
     bulkSelected: "Выбрано: {{count}}",
     bulkSelected_one: "Выбрано: {{count}}",
     bulkSelected_few: "Выбрано: {{count}}",

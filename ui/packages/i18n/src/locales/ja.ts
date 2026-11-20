@@ -512,8 +512,21 @@ const ja = {
     openRecord: "レコードを開く",
     cancelChanges: "変更を取り消す",
     saveRow: "行を保存",
+    cellReadOnly: "このセルはここでは編集できません。",
   },
   grid: {
+    // objectstack#35684 — why a list cell opens no editor, said on the cell.
+    readOnlyReason: {
+      readonly: "このフィールドは読み取り専用です。",
+      computed: "この値は計算で求められるため、編集できません。",
+      notInline: "このフィールドは一覧では編集できません。レコードを開いて変更してください。",
+      noFieldPermission: "このフィールドを編集する権限がありません。",
+      viewOff: "このビューでは一覧での編集がオフになっています。",
+      objectReadOnly: "これらのレコードはここでは編集できません。",
+      noPermission: "これらのレコードを編集する権限がありません。",
+      approvalLocked: "このレコードは承認中のためロックされています。",
+      noRecordPermission: "このレコードを編集する権限がありません。",
+    },
     bulkSelected: "{{count}} 件を選択中",
     bulkSelected_one: "{{count}} 件を選択中",
     bulkSelected_other: "{{count}} 件を選択中",

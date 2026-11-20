@@ -2403,9 +2403,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     if (typeof ds.batchTransaction !== 'function') return;
     const vf = add.picker.valueField || 'id';
     const operations: Parameters<NonNullable<DataSource['batchTransaction']>>[0] = [];
+    // The picked record behind each op, index-aligned with `operations`.
+    const opPicks: Array<{ rec: any; pickedId: unknown }> = [];
     for (const rec of records || []) {
       const pickedId = rec?.[vf] ?? rec?.id;
       if (pickedId == null) continue;
+      opPicks.push({ rec, pickedId });
       operations.push(add.linkField
         ? { object: api, action: 'create', data: { [referenceField]: parentId, [add.linkField]: pickedId } }
         : { object: add.picker.object, action: 'update', id: String(pickedId), data: { [referenceField]: parentId } });
@@ -2420,11 +2423,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     } catch (err: any) {
       const raw = err?.body?.error ?? err?.error ?? err?.message ?? String(err);
       const reason = typeof raw === 'string' ? raw : typeof raw?.message === 'string' ? raw.message : 'Failed to add';
-      setAddError(reason);
+      // objectstack#35726 — the batch refusal names the op it is for
+      // (`failedOperation.index`, which the client SDK carries on
+      // `err.details`, the flat refusal body). Name the picked record at that
+      // index by the label the picker shows; with no index inside the ops
+      // sent, the server's reason alone, as before.
+      const failedIndex = err?.details?.failedOperation?.index;
+      const failedPick = Number.isInteger(failedIndex) ? opPicks[failedIndex] : undefined;
+      const shownLabel = failedPick?.rec?.[pickerDisplayField];
+      const failedLabel = failedPick
+        ? String(shownLabel != null && String(shownLabel) !== '' ? shownLabel : failedPick.pickedId)
+        : undefined;
+      setAddError(failedLabel ? `${failedLabel}: ${reason}` : reason);
     } finally {
       setAddBusy(false);
     }
-  }, [add, dataSource, api, referenceField, parentId]);
+  }, [add, dataSource, api, referenceField, parentId, pickerDisplayField]);
 
   /**
    * The related tab's one 「+ 添加」 (objectstack#35601): with a picker it

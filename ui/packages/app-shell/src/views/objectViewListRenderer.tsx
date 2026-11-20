@@ -40,7 +40,7 @@ import {
     kanbanViewOptions,
     isSameOptionsValue,
 } from './objectViewOptions.js';
-import { keepInlineEditModeForTheSession, useViewTabsFit } from './objectViewChrome.js';
+import { useViewTabsFit } from './objectViewChrome.js';
 import { ListRecordCountContext } from './objectViewTitleSwitcher.js';
 import { OpenAsPageLink } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
@@ -1101,8 +1101,6 @@ export function useObjectViewListRenderer({
                 // the door that stores a change to them (see `persistAddedFields`).
                 addedFields={listColumns.addedFields}
                 onAddedFieldsChange={addedFieldsStored ? persistAddedFields : undefined}
-                // objectui#5144 (ruling E): session-only, writes nothing.
-                onInlineEditChange={keepInlineEditModeForTheSession}
                 onColumnStateChange={persistListColumnState}
                 userFilterSelections={initialUfSelections}
                 onUserFilterSelectionsChange={handleUserFilterSelectionsChange}

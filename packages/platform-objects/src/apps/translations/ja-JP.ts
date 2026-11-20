@@ -86,6 +86,8 @@ export const jaJP: TranslationData = {
         nav_settings_localization: { label: 'ローカリゼーション' },
         nav_exchange_rates: { label: '為替レート' },
         nav_units_of_measure: { label: '計量単位' },
+        nav_work_calendars: { label: '稼働カレンダー' },
+        nav_work_calendar_exceptions: { label: 'カレンダー例外' },
         nav_settings_company: { label: '会社' },
         nav_settings_mail: { label: 'メール配信' },
         nav_settings_sms: { label: 'SMS 配信' },

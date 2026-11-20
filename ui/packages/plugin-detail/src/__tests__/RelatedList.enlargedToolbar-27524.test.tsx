@@ -255,6 +255,45 @@ describe('「+ 添加」 is decided by the relationship, and a pick is one trans
     expect(listReads(dataSource)).toBe(readsBefore);
   });
 
+  /**
+   * objectstack#35726 — the refusal as the client SDK throws it: the server's
+   * sentence as the message and the flat refusal body as `details`, which
+   * carries `failedOperation` when one op caused the refusal.
+   */
+  const refusal = (message: string, failedOperation?: unknown) => Object.assign(new Error(message), {
+    httpStatus: 400,
+    code: 'VALIDATION_FAILED',
+    details: { error: message, code: 'VALIDATION_FAILED', ...(failedOperation ? { failedOperation } : {}) },
+  });
+
+  it('a refusal naming the 2nd of three ops names that picked record by its picker label (objectstack#35726)', async () => {
+    const { dataSource } = renderList({
+      batch: async () => { throw refusal("Field 'title' is required", { index: 1, object: 'task' }); },
+    });
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    const readsBefore = listReads(dataSource);
+    await pickThree();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("Bravo: Field 'title' is required");
+    expect(alert).not.toHaveTextContent('Alpha');
+    expect(alert).not.toHaveTextContent('Charlie');
+    expect(dataSource.batchTransaction).toHaveBeenCalledTimes(1);
+    expect(listReads(dataSource)).toBe(readsBefore);
+  });
+
+  it.each([
+    ['no failedOperation', undefined],
+    ['an index outside the ops sent', { index: 7, object: 'task' }],
+  ] as const)('control: a refusal with %s shows the server message alone (objectstack#35726)', async (_label, failedOperation) => {
+    renderList({
+      batch: async () => { throw refusal("Field 'title' is required", failedOperation); },
+    });
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    await pickThree();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent?.trim()).toBe("Field 'title' is required");
+  });
+
   it('master_detail with a catalog: the picker lists the catalog and a pick creates a row naming it', async () => {
     const { dataSource } = renderList({
       fields: {

@@ -97,6 +97,8 @@ export const fr: TranslationData = {
         nav_settings_localization: { label: 'Localisation' },
         nav_exchange_rates: { label: 'Taux de change' },
         nav_units_of_measure: { label: 'Unités de mesure' },
+        nav_work_calendars: { label: 'Calendriers de travail' },
+        nav_work_calendar_exceptions: { label: 'Exceptions de calendrier' },
         nav_settings_company: { label: 'Entreprise' },
         nav_settings_mail: { label: 'Envoi des e-mails' },
         nav_settings_sms: { label: 'Envoi des SMS' },
