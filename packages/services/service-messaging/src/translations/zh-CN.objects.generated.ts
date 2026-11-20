@@ -542,6 +542,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "确认时间"
+      },
+      proposal_email_hash: {
+        label: "提议邮箱哈希"
       }
     }
   }

@@ -542,6 +542,9 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "확인 일시"
+      },
+      proposal_email_hash: {
+        label: "제안 이메일 해시"
       }
     }
   }

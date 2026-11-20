@@ -7,6 +7,7 @@ import {
     evaluateAuthGate,
     isApiKeyLifecycleRefusalError,
     isAuthzStoreUnavailableError,
+    resolveOfferedLocale,
     shouldDenyAnonymous,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
@@ -14,6 +15,7 @@ import type { IHttpRequest, IHttpResponse, IHttpServer } from '@objectstack/spec
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { sendError, sendOk, sendServerFault } from '@objectstack/types';
 import { SlackLinkError, type SlackAccount, type SlackLink, type SlackLinkStore } from './slack-links.js';
+import { enMessages, messagingMessages, type MessagingLocale, type MessagingMessageId } from './translations/messages.js';
 
 /**
  * The Slack link doors (ADR-0013 addendum of 2026-11-19, step 2), the server
@@ -24,8 +26,11 @@ import { SlackLinkError, type SlackAccount, type SlackLink, type SlackLinkStore 
  *  - `GET    /api/v1/messaging/me/slack-link` — the install (its workspace) and
  *    their link, each `null` when there is none.
  *  - `POST   /api/v1/messaging/me/slack-link/proposal` — propose a link by
- *    their email; `link: null` when nothing matched.
- *  - `POST   /api/v1/messaging/me/slack-link/confirm` — confirm the proposal.
+ *    their verified email; `link: null` when nothing matched or the email is
+ *    not verified, and `link: { state: 'proposed' }` — no Slack user's name
+ *    or id — when a match was found.
+ *  - `POST   /api/v1/messaging/me/slack-link/confirm` — confirm the proposal,
+ *    while the email is still verified and still the one it was proposed for.
  *  - `DELETE /api/v1/messaging/me/slack-link` — remove their link.
  *
  * ## An organization administrator — in their current organization
@@ -50,7 +55,8 @@ import { SlackLinkError, type SlackAccount, type SlackLink, type SlackLinkStore 
  * Every door: the caller through the platform's one composition, a held
  * sign-in `403`, anonymous `401`, then the CLOSED query set, which is empty
  * (AGENTS.md route rule 5), then no current organization `403`. ⛔ No answer
- * carries the token.
+ * carries the token, and no answer names the Slack user of a link before it is
+ * confirmed.
  */
 
 export const SLACK_LINK_ROUTE = '/api/v1/messaging/me/slack-link';
@@ -82,14 +88,14 @@ export function registerSlackLinkRoutes(http: IHttpServer, deps: SlackLinkRoutes
     http.get(SLACK_LINK_ROUTE, person('GET', SLACK_LINK_ROUTE, async (_req, c, store) => {
         const account = await store.account(c.organizationId);
         const link = account ? await store.linkOf(c.organizationId, c.userId) : undefined;
-        return { account: account ? accountView(account) : null, link: link ? linkView(link) : null };
+        return { account: account ? accountView(account) : null, link: link ? ownLinkView(link) : null };
     }));
     http.post(`${SLACK_LINK_ROUTE}/proposal`, person('POST', `${SLACK_LINK_ROUTE}/proposal`, async (_req, c, store) => {
         const link = await store.propose(c.organizationId, c.userId);
-        return { link: link ? linkView(link) : null };
+        return { link: link ? ownLinkView(link) : null };
     }));
     http.post(`${SLACK_LINK_ROUTE}/confirm`, person('POST', `${SLACK_LINK_ROUTE}/confirm`, async (_req, c, store) => (
-        { link: linkView(await store.confirm(c.organizationId, c.userId)) }
+        { link: ownLinkView(await store.confirm(c.organizationId, c.userId)) }
     )));
     http.delete(SLACK_LINK_ROUTE, person('DELETE', SLACK_LINK_ROUTE, async (_req, c, store) => (
         { removed: await store.removeOwn(c.organizationId, c.userId) }
@@ -160,7 +166,8 @@ function door(deps: SlackLinkRoutesDeps, method: string, path: string, admin: bo
             sendOk(res, await run(req, { userId: context.userId, organizationId }, deps.getStore()));
         } catch (err) {
             if (err instanceof SlackLinkError) {
-                sendError(res, err.status, err.code as ErrorCode, err.message);
+                sendError(res, err.status, err.code as ErrorCode, err.message,
+                    err.messageId ? { userMessage: inCallerLanguage(err.messageId, context.locale) } : undefined);
                 return;
             }
             sendServerFault(res, 500, 'INTERNAL_ERROR', 'The Slack link request could not be completed.', err, { method, path });
@@ -187,13 +194,26 @@ function accountView(a: SlackAccount) {
     return { id: a.id, workspace: a.displayName, workspaceId: a.externalId, status: a.status };
 }
 
+/** A link as an administrator reads it: the Slack user is named only once the person confirmed. */
 function linkView(l: SlackLink) {
+    const confirmed = l.state === 'confirmed';
     return {
         id: l.id,
         userId: l.userId,
-        slackUserId: l.externalUserId,
-        slackUserName: l.externalDisplayName ?? null,
+        slackUserId: confirmed ? l.externalUserId : null,
+        slackUserName: confirmed ? l.externalDisplayName ?? null : null,
         state: l.state,
         confirmedAt: l.confirmedAt ?? null,
     };
+}
+
+/** The person's own link: before they confirm, only that a match was found. */
+function ownLinkView(l: SlackLink) {
+    return l.state === 'confirmed' ? linkView(l) : { state: l.state };
+}
+
+/** A refusal's sentence in the caller's language (`ExecutionContext.locale`), else in English. */
+function inCallerLanguage(id: MessagingMessageId, locale: string | undefined): string {
+    const offered = locale ? resolveOfferedLocale(locale, Object.keys(messagingMessages)) : undefined;
+    return (offered ? messagingMessages[offered as MessagingLocale][id] : undefined) ?? enMessages[id];
 }

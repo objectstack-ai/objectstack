@@ -542,6 +542,9 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "Дата подтверждения"
+      },
+      proposal_email_hash: {
+        label: "Хеш адреса электронной почты предложения"
       }
     }
   }

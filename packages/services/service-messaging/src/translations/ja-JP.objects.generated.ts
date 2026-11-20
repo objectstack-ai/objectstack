@@ -542,6 +542,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "確認日時"
+      },
+      proposal_email_hash: {
+        label: "提案時のメールアドレスのハッシュ"
       }
     }
   }

@@ -8,8 +8,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * the platform user, the organization's install (`sys_channel_account`), and
  * the chat user id.
  *
- * A link is `proposed` by matching the person's email against the workspace's
- * users and delivers nothing until the person `confirmed` it, once. A person,
+ * A link is `proposed` by matching the person's verified email against the
+ * workspace's users and delivers nothing until the person `confirmed` it,
+ * once, while that email is still verified and still theirs
+ * (`proposal_email_hash`). A person,
  * or an administrator of the organization, may remove it; it goes with the
  * person (`user_id` cascades, as `sys_user_device`), with the install
  * (`account_id` cascades), and the link store removes it when the person is
@@ -41,6 +43,8 @@ export const ChannelUserLink = ObjectSchema.create({
             label: 'State', required: true, defaultValue: 'proposed',
         }),
         confirmed_at: Field.datetime({ label: 'Confirmed At' }),
+        // SHA-256 of the email the proposal was made for; a confirmation requires the person's verified email to still match it.
+        proposal_email_hash: Field.text({ label: 'Proposal Email Hash', maxLength: 64 }),
     },
 
     indexes: [

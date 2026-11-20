@@ -6,6 +6,16 @@
  * their Slack user (`sys_channel_user_link`), proposed by email match and
  * confirmed once by the person.
  *
+ * ## The proposal
+ *
+ * A Slack link is proposed only for a verified email, and names no one before
+ * it is confirmed: {@link SlackLinkStore.propose} looks a Slack user up only
+ * for the person's email while `sys_user.email_verified` reads verified, and
+ * answers an unverified email exactly as it answers no match. The proposal
+ * records a digest of the email it was made for; {@link SlackLinkStore.confirm}
+ * confirms only while the person's email is still verified and still that
+ * email, and a new proposal replaces one made for another email.
+ *
  * ## What every write carries
  *
  * Each write is an ENGINE write under a system context that names the person
@@ -35,10 +45,11 @@
  * confirmed link on an active install.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { isEmailVerifiedUserRow } from '@objectstack/types';
 import type { EmitInput } from './messaging-service.js';
-import { enMessages } from './translations/messages.js';
+import { enMessages, type MessagingMessageId } from './translations/messages.js';
 
 export const CHANNEL_ACCOUNT_OBJECT = 'sys_channel_account';
 export const CHANNEL_USER_LINK_OBJECT = 'sys_channel_user_link';
@@ -88,14 +99,25 @@ export interface SlackLink {
     readonly externalDisplayName?: string;
     readonly state: 'proposed' | 'confirmed';
     readonly confirmedAt?: string;
+    /** The digest of the email the proposal was made for ({@link emailDigest}). Never answered. */
+    readonly proposalEmailHash?: string;
 }
 
-/** A refusal a door answers with its own status and code. */
+/**
+ * A refusal a door answers with its own status and code. `messageId` names the
+ * refusal's sentence in the messaging catalog (`translations/messages.ts`),
+ * whose `en` entry is `message`; the door answers it in the caller's language.
+ */
 export class SlackLinkError extends Error {
-    constructor(readonly status: number, readonly code: string, message: string) {
+    constructor(readonly status: number, readonly code: string, message: string, readonly messageId?: MessagingMessageId) {
         super(message);
         this.name = 'SlackLinkError';
     }
+}
+
+/** The digest a proposal records of the email it was made for: SHA-256 of the trimmed, lower-cased address. */
+export function emailDigest(email: string): string {
+    return createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
 }
 
 type SecretEngine = IDataEngine & {
@@ -137,6 +159,7 @@ function toLink(row: Record<string, any>): SlackLink {
         ...(str(row.external_display_name) ? { externalDisplayName: String(row.external_display_name) } : {}),
         state: row.state === 'confirmed' ? 'confirmed' : 'proposed',
         ...(str(row.confirmed_at) ? { confirmedAt: String(row.confirmed_at) } : {}),
+        ...(str(row.proposal_email_hash) ? { proposalEmailHash: String(row.proposal_email_hash) } : {}),
     };
 }
 
@@ -228,19 +251,24 @@ export class SlackLinkStore {
     }
 
     /**
-     * Propose a link by the person's email (Slack `users.lookupByEmail`). An
-     * existing link is answered as it is. `undefined` — nothing proposed —
-     * when the person has no email, no Slack user holds it, or that Slack user
-     * is already linked to another person in this install.
+     * Propose a link by the person's verified email (Slack
+     * `users.lookupByEmail`). A confirmed link, or a proposal made for the
+     * person's current verified email, is answered as it is; a proposal made
+     * for another email, or for one no longer verified, is replaced.
+     * `undefined` — nothing proposed, and Slack is not asked — when the person
+     * has no verified email; `undefined` too when no Slack user holds it, or
+     * that Slack user is already linked to another person in this install.
      */
     async propose(organizationId: string, userId: string): Promise<SlackLink | undefined> {
         const account = await this.requireActive(organizationId);
+        const email = await this.verifiedEmail(userId);
         const existing = await this.linkOf(organizationId, userId);
-        if (existing) return existing;
-        const data = this.data();
-        const user = await data.findOne(USER_OBJECT, { where: { id: userId }, fields: ['email'] }, READ);
-        const email = str(user?.email);
+        if (existing) {
+            if (existing.state === 'confirmed' || (email && existing.proposalEmailHash === emailDigest(email))) return existing;
+            await this.removeLink(existing, undefined, userId, false);
+        }
         if (!email) return undefined;
+        const data = this.data();
         // `users.lookupByEmail` reads its argument from the query string or a
         // form body, not JSON (Slack's accepted content types for the method).
         const answer = await (await this.slackFor(account))(`users.lookupByEmail?email=${encodeURIComponent(email)}`);
@@ -260,12 +288,17 @@ export class SlackLinkStore {
             user_id: userId,
             external_user_id: externalUserId,
             external_display_name: str(found.real_name) ?? str(found.name) ?? null,
+            proposal_email_hash: emailDigest(email),
             state: 'proposed',
         }, by(userId, organizationId));
         return this.linkOf(organizationId, userId);
     }
 
-    /** The person confirms their proposal: from now on it delivers. */
+    /**
+     * The person confirms their proposal: from now on it delivers. Only while
+     * their email is still verified and still the email the proposal was made
+     * for; otherwise refused, and the person asks for a new proposal.
+     */
     async confirm(organizationId: string, userId: string): Promise<SlackLink> {
         const link = await this.linkOf(organizationId, userId);
         if (!link) {
@@ -273,6 +306,10 @@ export class SlackLinkStore {
                 'You have no proposed Slack link in this organization to confirm: ask for a proposal first. Nothing was changed.');
         }
         if (link.state === 'confirmed') return link;
+        const email = await this.verifiedEmail(userId);
+        if (!email || link.proposalEmailHash !== emailDigest(email)) {
+            throw new SlackLinkError(409, 'RESOURCE_CONFLICT', enMessages.slackLinkProposalOutdated, 'slackLinkProposalOutdated');
+        }
         await this.data().update(CHANNEL_USER_LINK_OBJECT,
             { state: 'confirmed', confirmed_at: this.opts.now?.() ?? new Date().toISOString() },
             { where: { id: link.id }, ...by(userId, organizationId) } as never);
@@ -350,6 +387,12 @@ export class SlackLinkStore {
         } catch (err) {
             this.opts.logger.warn(`[slack] Slack refused the token of the install '${account.id}', which could not be marked revoked: ${(err as Error)?.message}`);
         }
+    }
+
+    /** The person's email while `sys_user.email_verified` reads verified, else `undefined`. */
+    private async verifiedEmail(userId: string): Promise<string | undefined> {
+        const user = await this.data().findOne(USER_OBJECT, { where: { id: userId }, fields: ['email', 'email_verified'] }, READ);
+        return isEmailVerifiedUserRow(user) ? str(user?.email) : undefined;
     }
 
     private async requireActive(organizationId: string): Promise<SlackAccount> {

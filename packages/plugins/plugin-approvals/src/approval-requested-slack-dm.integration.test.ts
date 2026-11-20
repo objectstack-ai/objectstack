@@ -100,6 +100,7 @@ async function boot(setup: Setup) {
       id: { name: 'id', label: 'Id', type: 'text' as const, primaryKey: true },
       name: { name: 'name', label: 'Name', type: 'text' as const },
       email: { name: 'email', label: 'Email', type: 'text' as const },
+      email_verified: { name: 'email_verified', label: 'Email Verified', type: 'boolean' as const },
       locale: { name: 'locale', label: 'Locale', type: 'text' as const },
     },
   };
@@ -137,7 +138,7 @@ async function boot(setup: Setup) {
   stop = async () => { await messagingPlugin.destroy?.(); await engine.destroy(); };
 
   for (const [id, name] of [[SUBMITTER, 'Sam Submitter'], [APPROVER, 'Ada Approver']]) {
-    await engine.insert('sys_user', { id, name, email: `${id}@example.com`, locale: 'en' }, { context: SYSTEM } as any);
+    await engine.insert('sys_user', { id, name, email: `${id}@example.com`, email_verified: true, locale: 'en' }, { context: SYSTEM } as any);
   }
   await engine.insert(OBJECT, { id: 'inv_1', title: 'March invoice' }, { context: SYSTEM } as any);
 

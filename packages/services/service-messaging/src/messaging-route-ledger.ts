@@ -67,7 +67,7 @@ export const MESSAGING_ROUTE_LEDGER: readonly MessagingRouteLedgerEntry[] = [
     { route: 'GET /api/v1/messaging/me/slack-link', family: 'messaging', disposition: 'server-only',
         note: 'the signed-in person\'s Slack link in their current organization, and the install\'s workspace, for the Account app\'s Notification Settings page; about themselves only' },
     { route: 'POST /api/v1/messaging/me/slack-link/proposal', family: 'messaging', disposition: 'server-only',
-        note: 'propose a Slack link by the person\'s own email (Slack users.lookupByEmail); the proposal delivers nothing until confirmed' },
+        note: 'propose a Slack link by the person\'s own verified email (Slack users.lookupByEmail); the proposal names no Slack user and delivers nothing until confirmed' },
     { route: 'POST /api/v1/messaging/me/slack-link/confirm', family: 'messaging', disposition: 'server-only',
         note: 'the person confirms their own proposed Slack link; from then on notifications may reach them by Slack DM' },
     { route: 'DELETE /api/v1/messaging/me/slack-link', family: 'messaging', disposition: 'server-only',

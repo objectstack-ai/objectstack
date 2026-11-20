@@ -542,6 +542,9 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "Bestätigt am"
+      },
+      proposal_email_hash: {
+        label: "Hash der Vorschlags-E-Mail"
       }
     }
   }

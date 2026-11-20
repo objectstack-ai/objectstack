@@ -542,6 +542,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "Confirmed At"
+      },
+      proposal_email_hash: {
+        label: "Proposal Email Hash"
       }
     }
   }

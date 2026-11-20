@@ -542,6 +542,9 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "تاريخ التأكيد"
+      },
+      proposal_email_hash: {
+        label: "تجزئة البريد الإلكتروني للاقتراح"
       }
     }
   }

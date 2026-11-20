@@ -542,6 +542,9 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "Confirmé le"
+      },
+      proposal_email_hash: {
+        label: "Hachage de l’e-mail de la proposition"
       }
     }
   }

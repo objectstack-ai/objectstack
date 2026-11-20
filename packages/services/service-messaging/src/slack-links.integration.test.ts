@@ -9,6 +9,9 @@
  *    encrypted (never in the row, never in an answer), and read back only by
  *    the privileged dereference under its own organization;
  *  - the person: a proposal by email delivers nothing until confirmed;
+ *  - the proposal rule: a Slack link is proposed only for a verified email
+ *    and names no one before it is confirmed, and a confirmation holds only
+ *    while that email is still verified and still the person's;
  *  - the riders of ruling 7024100939: (1) every removal is a write the audit
  *    hook sees, attributed to who removed it; (2) an administrator's removal
  *    tells the person by inbox and email; (3) a link goes with the person's
@@ -34,12 +37,18 @@ import {
     type SlackClientSurface,
 } from './slack-links.js';
 import { SLACK_ACCOUNT_ROUTE, SLACK_ADMIN_CAPABILITY, SLACK_LINK_ROUTE, SLACK_LINKS_ROUTE, registerSlackLinkRoutes } from './slack-link-routes.js';
+import { enMessages, frMessages } from './translations/messages.js';
 
 const SYSTEM = { context: { isSystem: true } as ExecutionContext };
 const SYS_ORGANIZATION = { name: 'sys_organization', label: 'Organization', managedBy: 'better-auth', fields: { name: { type: 'text', label: 'Name' } } };
 const SYS_USER = {
     name: 'sys_user', label: 'User', managedBy: 'better-auth',
-    fields: { name: { type: 'text', label: 'Name' }, email: { type: 'text', label: 'Email' }, banned: { type: 'boolean', label: 'Banned' } },
+    fields: {
+        name: { type: 'text', label: 'Name' },
+        email: { type: 'text', label: 'Email' },
+        email_verified: { type: 'boolean', label: 'Email Verified' },
+        banned: { type: 'boolean', label: 'Banned' },
+    },
 };
 const silent: any = { debug() {}, info() {}, warn() {}, error() {}, fatal() {}, child() { return silent; } };
 const GOOD = 'xoxb-acme';
@@ -49,6 +58,7 @@ const CONTEXTS: Record<string, ExecutionContext> = {
     admin_a: { userId: 'u_admin', tenantId: 'org_a', systemPermissions: ['setup.access', 'setup.write'] } as ExecutionContext,
     ada: { userId: 'u_ada', tenantId: 'org_a', systemPermissions: ['setup.access'] } as ExecutionContext,
     bob: { userId: 'u_bob', tenantId: 'org_a', systemPermissions: [] } as ExecutionContext,
+    bob_fr: { userId: 'u_bob', tenantId: 'org_a', locale: 'fr-FR', systemPermissions: [] } as ExecutionContext,
     ada_no_org: { userId: 'u_ada', systemPermissions: [] } as ExecutionContext,
 };
 
@@ -76,6 +86,7 @@ function scriptedSlack() {
         'u_ada@example.test': { id: 'UADA', real_name: 'Ada' },
         'u_bob@example.test': { id: 'UBOB', real_name: 'Bob' },
         'u_admin@example.test': { id: 'UADM', real_name: 'Admin' },
+        'ada.new@example.test': { id: 'UADA2', real_name: 'Ada New' },
     };
     const calls: Array<{ token: string; method: string }> = [];
     const answer = (ok: boolean, body: Record<string, unknown>) => ({ ok, status: 200, body: { ok, ...body }, error: ok ? undefined : body.error });
@@ -113,7 +124,9 @@ async function boot() {
     ql.setTenancyPostureProvider(() => 'single');
     ql.setCryptoProvider(tenantBoundCrypto());
     for (const id of ['org_a', 'org_b']) await ql.insert('sys_organization', { id, name: id }, SYSTEM);
-    for (const id of ['u_admin', 'u_ada', 'u_bob']) await ql.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYSTEM);
+    for (const id of ['u_admin', 'u_ada', 'u_bob']) {
+        await ql.insert('sys_user', { id, name: id, email: `${id}@example.test`, email_verified: true }, SYSTEM);
+    }
     for (const [id, user] of [['m_admin', 'u_admin'], ['m_ada', 'u_ada'], ['m_bob', 'u_bob']]) {
         await ql.insert('sys_member', { id, user_id: user, organization_id: 'org_a', role: 'member' }, SYSTEM);
     }
@@ -149,7 +162,8 @@ async function boot() {
         await call('POST', `${SLACK_LINK_ROUTE}/proposal`, bearer);
         return call('POST', `${SLACK_LINK_ROUTE}/confirm`, bearer);
     };
-    return { ql, driver, store, call, links, install, connect, calls, notices, audit };
+    const setUser = (id: string, values: Record<string, unknown>) => ql.update('sys_user', values, { where: { id }, ...SYSTEM } as never);
+    return { ql, driver, store, call, links, install, connect, setUser, calls, notices, audit };
 }
 
 describe('the Slack install — an administrator\'s token, at rest', () => {
@@ -184,11 +198,11 @@ describe('a person\'s link — proposed by email, delivering once confirmed', ()
         const t = await boot();
         await t.install();
         const proposed = await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
-        expect(proposed.body.data.link).toMatchObject({ slackUserId: 'UADA', slackUserName: 'Ada', state: 'proposed' });
+        expect(proposed.body.data.link).toEqual({ state: 'proposed' });
         expect(await t.store.confirmedUsers('org_a', ['u_ada'])).toEqual(new Set());
 
         const confirmed = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
-        expect(confirmed.body.data.link).toMatchObject({ state: 'confirmed' });
+        expect(confirmed.body.data.link).toMatchObject({ slackUserId: 'UADA', slackUserName: 'Ada', state: 'confirmed' });
         expect(await t.store.confirmedUsers('org_a', ['u_ada', 'u_bob'])).toEqual(new Set(['u_ada']));
         expect((await t.call('GET', SLACK_LINK_ROUTE, 'ada')).body.data).toMatchObject({ account: { workspace: 'Acme' }, link: { state: 'confirmed' } });
 
@@ -209,6 +223,77 @@ describe('a person\'s link — proposed by email, delivering once confirmed', ()
         const query = await t.call('GET', SLACK_LINK_ROUTE, 'ada', { query: { user: 'u_bob' } });
         expect([query.body.error.code, query.status]).toEqual(['VALIDATION_ERROR', 400]);
         expect(await t.links()).toHaveLength(0);
+    });
+});
+
+describe('the proposal rule — a verified email, and no one named before it is confirmed', () => {
+    const lookups = (calls: Array<{ method: string }>) => calls.filter((c) => c.method.startsWith('users.lookupByEmail'));
+
+    it('an unverified email is answered exactly as no match, and Slack is not asked', async () => {
+        const t = await boot();
+        await t.install();
+        await t.setUser('u_bob', { email: 'nobody@example.test' });
+        const noMatch = await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'bob');
+        expect(lookups(t.calls)).toHaveLength(1);
+
+        await t.setUser('u_ada', { email_verified: false });
+        const unverified = await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
+        expect([unverified.status, unverified.body]).toEqual([noMatch.status, noMatch.body]);
+        expect(unverified.body.data).toEqual({ link: null });
+        expect(lookups(t.calls)).toHaveLength(1);
+        expect(JSON.stringify(unverified.body)).not.toMatch(/UADA|Ada/);
+        expect(await t.links()).toEqual([]);
+    });
+
+    it('a match names no Slack user, to the person or an administrator, until the person confirms it', async () => {
+        const t = await boot();
+        await t.install();
+        const proposed = await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
+        const own = await t.call('GET', SLACK_LINK_ROUTE, 'ada');
+        const listed = await t.call('GET', SLACK_LINKS_ROUTE, 'admin_a');
+        expect(proposed.body.data).toEqual({ link: { state: 'proposed' } });
+        expect(own.body.data.link).toEqual({ state: 'proposed' });
+        expect(listed.body.data.links).toMatchObject([{ userId: 'u_ada', slackUserId: null, slackUserName: null, state: 'proposed' }]);
+        for (const answer of [proposed, own, listed]) expect(JSON.stringify(answer.body)).not.toMatch(/UADA|Ada/);
+
+        const confirmed = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
+        expect(confirmed.body.data.link).toMatchObject({ slackUserId: 'UADA', slackUserName: 'Ada', state: 'confirmed' });
+        expect((await t.call('GET', SLACK_LINKS_ROUTE, 'admin_a')).body.data.links).toMatchObject([{ slackUserId: 'UADA', slackUserName: 'Ada' }]);
+    });
+
+    it('a confirmation is refused once the email changed or is no longer verified, and holds while it is unchanged', async () => {
+        const t = await boot();
+        await t.install();
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'bob');
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'admin_a');
+
+        await t.setUser('u_ada', { email: 'ada.new@example.test' });
+        const changed = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
+        expect([changed.body.error.code, changed.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(changed.body.error.userMessage).toBe(enMessages.slackLinkProposalOutdated);
+
+        await t.setUser('u_bob', { email_verified: false });
+        const unverified = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'bob_fr');
+        expect([unverified.body.error.code, unverified.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(unverified.body.error.userMessage).toBe(frMessages.slackLinkProposalOutdated);
+
+        const unchanged = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'admin_a');
+        expect(unchanged.body.data.link).toMatchObject({ slackUserId: 'UADM', state: 'confirmed' });
+        expect(await t.store.confirmedUsers('org_a', ['u_ada', 'u_bob', 'u_admin'])).toEqual(new Set(['u_admin']));
+        expect((await t.links()).filter((l) => l.state === 'proposed').map((l) => l.user_id).sort()).toEqual(['u_ada', 'u_bob']);
+    });
+
+    it('a new proposal replaces one made for another email, and confirms for the new one', async () => {
+        const t = await boot();
+        await t.install();
+        await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada');
+        await t.setUser('u_ada', { email: 'ada.new@example.test' });
+        expect((await t.call('POST', `${SLACK_LINK_ROUTE}/proposal`, 'ada')).body.data).toEqual({ link: { state: 'proposed' } });
+        expect((await t.links()).map((l) => l.external_user_id)).toEqual(['UADA2']);
+        const confirmed = await t.call('POST', `${SLACK_LINK_ROUTE}/confirm`, 'ada');
+        expect(confirmed.body.data.link).toMatchObject({ slackUserId: 'UADA2', state: 'confirmed' });
+        expect(t.audit.filter((a) => a.event === 'afterDelete').map((a) => a.by)).toEqual(['u_ada']);
     });
 });
 

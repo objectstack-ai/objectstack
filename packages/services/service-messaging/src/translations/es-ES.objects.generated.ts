@@ -542,6 +542,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "Confirmado el"
+      },
+      proposal_email_hash: {
+        label: "Hash del correo de la propuesta"
       }
     }
   }

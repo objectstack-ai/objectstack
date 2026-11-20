@@ -542,6 +542,9 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       confirmed_at: {
         label: "Confirmado em"
+      },
+      proposal_email_hash: {
+        label: "Hash do e-mail da proposta"
       }
     }
   }
