@@ -2,6 +2,7 @@
 '@objectstack/spec': minor
 '@objectstack/lint': minor
 '@object-ui/app-shell': minor
+'@objectstack/platform-objects': minor
 ---
 
 feat(spec): a field group lists its own members and their order (`fieldGroups[].fields`)
