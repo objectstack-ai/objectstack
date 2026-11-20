@@ -29,12 +29,14 @@
  */
 
 import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
+import { readFieldGroupMembership } from '@objectstack/spec/data';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { recordsOf } from './object-graph.js';
 
 export const FIELD_GROUP_UNDECLARED = 'field-group-undeclared';
 export const FIELD_GROUP_EMPTY = 'field-group-empty';
 export const FIELD_GROUP_SHADOWED = 'field-group-shadowed';
+export const FIELD_GROUP_MEMBER_UNKNOWN = 'field-group-member-unknown';
 export const SEMANTIC_ROLE_FIELD_UNKNOWN = 'semantic-role-field-unknown';
 export const SEMANTIC_ROLE_FIELD_UNPROVISIONED = 'semantic-role-field-unprovisioned';
 
@@ -138,11 +140,39 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
         .map((g) => g.key)
         .filter((k): k is string => typeof k === 'string' && k.length > 0),
     );
-    const referencedGroups = new Set<string>();
+    // Membership as the layout resolves it: a group's own `fields` list first,
+    // else the older `Field.group` (`readFieldGroupMembership`, the same
+    // resolution `deriveFieldGroupLayout` places sections from).
+    const membership = readFieldGroupMembership(obj);
+    const referencedGroups = new Set<string>(
+      [...membership.members].filter(([, names]) => names.length > 0).map(([key]) => key),
+    );
+    // ── (e) a group's `fields` list names a field the object does not declare ──
+    // The parse skips such a name (removing a field must not make the object
+    // unparseable), so the layout places nothing for it: almost always a typo
+    // or a field removed without editing the list.
+    (Array.isArray(obj.fieldGroups) ? obj.fieldGroups : []).forEach((g: unknown, gi: number) => {
+      if (!g || typeof g !== 'object') return;
+      const grp = g as AnyRec;
+      if (!Array.isArray(grp.fields) || typeof grp.relatedList === 'string') return;
+      grp.fields.forEach((name: unknown, fi: number) => {
+        if (typeof name !== 'string' || Object.prototype.hasOwnProperty.call(fields, name)) return;
+        findings.push({
+          severity: 'warning',
+          rule: FIELD_GROUP_MEMBER_UNKNOWN,
+          where,
+          path: `${path}.fieldGroups[${gi}].fields[${fi}]`,
+          message:
+            `${objName}: field group "${String(grp.key)}" lists "${name}", which is not a field on this ` +
+            `object — the group places nothing for it`,
+          hint:
+            `Fix the name to one of ${objName}'s fields, or remove it from the group's fields list.`,
+        });
+      });
+    });
     for (const [fname, f] of Object.entries(fields)) {
       const g = f?.group;
       if (typeof g !== 'string' || g.length === 0) continue;
-      referencedGroups.add(g);
       if (!declaredGroups.has(g)) {
         findings.push({
           severity: 'warning',
@@ -172,7 +202,7 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
             `${objName}: fieldGroups declares "${key}" but no field references it — ` +
             `the group never renders`,
           hint:
-            `Assign at least one field via group: '${key}', or remove the unused ` +
+            `List at least one field in its fields (fields: ['…']), or remove the unused ` +
             `group declaration.`,
         });
       }
@@ -251,9 +281,8 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
 
       for (const key of declaredGroups) {
         if (relatedListGroups.has(key)) continue;
-        const members = Object.entries(fields)
-          .filter(([, f]) => f?.group === key && f?.hidden !== true)
-          .map(([fname]) => fname);
+        const members = (membership.members.get(key) ?? [])
+          .filter((fname) => fields[fname]?.hidden !== true);
         if (members.length === 0) continue; // rule (b) already covers empty groups
         if (!members.every((m) => hiddenFromBody.has(m))) continue;
         findings.push({
