@@ -5348,7 +5348,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectstack#35853 — the bar's record row: the object's icon, then the
   // record's name and tags as the record header draws them into the slot;
   // until it holds the route's record, the bar's own name for it.
-  const pageRecordRow = embedded ? undefined : (
+  // Who else is on the record, and the managing package: on the page they
+  // stand in the record row after the title (objectstack#35745: the page
+  // starts right under the bar, so a badge floated over its top-right corner
+  // would sit on the tab row). Elsewhere they float, in `sharedChrome` below.
+  const recordBadges = (
+    <>
+      {recordPresence.length > 0 && (
+        <PresenceAvatars users={recordPresence} size="sm" maxVisible={3} showStatus />
+      )}
+      {!inSetupApp && <ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
+    </>
+  );
+  const pageRecordRow = embedded || phonePage ? undefined : (
     <>
       {objectIcon}
       {!barNamesRecord && (
@@ -5357,6 +5369,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </span>
       )}
       {barTitleSlotEl}
+      <span className="flex shrink-0 items-center gap-2 empty:hidden" data-record-page-badges="">{recordBadges}</span>
     </>
   );
   // objectstack#35853 — ✕ at the far right of the navigation row, on every
@@ -5552,10 +5565,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const sharedChrome = (
     <>
       {!headerBarForRecord && stateLockChip}
-      {recordPresence.length > 0 && (
-        <PresenceAvatars users={recordPresence} size="sm" maxVisible={3} showStatus />
-      )}
-      {!inSetupApp && <ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
+      {!pageRecordRow && recordBadges}
     </>
   );
 
@@ -5583,9 +5593,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         <div
           className={cn(
             'absolute right-2 sm:right-4 z-50 flex items-center gap-2',
-            // Under the bar: one 44 px row on a phone, two rows (40 + 48,
-            // objectstack#35853) on a desktop.
-            pageBar ? (phonePage ? 'top-12' : 'top-24') : 'top-2 sm:top-4',
+            // Under a phone's one 44 px bar row; in a pane, over the page's
+            // top-right corner, level with its first row (objectstack#35745).
+            pageBar ? 'top-12' : headerBarForRecord ? 'top-3' : 'top-2 sm:top-4',
           )}
         >
           {sharedChrome}
