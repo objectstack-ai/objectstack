@@ -288,4 +288,47 @@ describe('#35891 the keyboard', () => {
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     expect(dataSource.update).not.toHaveBeenCalled();
   });
+
+  it('the confirm dialog opens on Move, so Enter confirms the stage it names', async () => {
+    mount();
+    fireEvent.click(item(openMenu(), 'Negotiation'));
+    const dialog = await screen.findByRole('alertdialog');
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Move' })).toHaveFocus());
+  });
+
+  it('a stage that needs a field opens with that field focused', async () => {
+    mount();
+    fireEvent.click(item(openMenu(), 'Closed Lost'));
+    const dialog = await screen.findByRole('alertdialog');
+    await waitFor(() => expect(within(dialog).getByRole('textbox')).toHaveFocus());
+  });
+
+  it('control: the record:path dialog keeps the alert dialog default, Cancel first', async () => {
+    const { useStageChange } = await import('../renderers/recordPathStageChange');
+    function PathHost() {
+      const change = useStageChange(true, 'stage');
+      return (
+        <>
+          <button type="button" onClick={() => change.request({ value: 'negotiation', label: 'Negotiation' })}>go</button>
+          {change.dialog}
+        </>
+      );
+    }
+    render(
+      <RecordContextProvider
+        objectName="crm_opportunity"
+        recordId="o1"
+        data={{ id: 'o1', name: 'Wayne deal', stage: 'prospecting', updated_at: VERSION }}
+        objectSchema={OPPORTUNITY}
+        dataSource={makeDataSource() as any}
+      >
+        <InlineEditProvider canEdit>
+          <PathHost />
+        </InlineEditProvider>
+      </RecordContextProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'go' }));
+    const dialog = await screen.findByRole('alertdialog');
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus());
+  });
 });

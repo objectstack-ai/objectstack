@@ -383,7 +383,22 @@ export function useStageChange(
       open={target !== null}
       onOpenChange={(open) => { if (!open && !(collectFields && busy)) setTarget(null); }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent
+        onOpenAutoFocus={collectFields ? (event) => {
+          // An alert dialog focuses Cancel on open. The stage menu's dialog is
+          // one the reader opened by picking a stage, so Enter confirms the
+          // move (objectstack#35891): focus the first field it asks for, or
+          // the confirm button when it asks for none.
+          const content = event.currentTarget as HTMLElement | null;
+          const first = content?.querySelector<HTMLElement>(
+            '[data-stage-change-fields] input, [data-stage-change-fields] textarea, [data-stage-change-fields] button, [data-stage-change-fields] [role="combobox"]',
+          ) ?? content?.querySelector<HTMLElement>('[data-stage-change-confirm]');
+          if (first) {
+            event.preventDefault();
+            first.focus();
+          }
+        } : undefined}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{t('detail.pathStageChangeTitle')}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -404,7 +419,6 @@ export function useStageChange(
             <Button
               type="button"
               disabled={busy}
-              autoFocus={!fieldsBody}
               onClick={() => { void confirm(); }}
               data-stage-change-confirm=""
             >
