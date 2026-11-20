@@ -1,12 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `ApprovalEscalation.timeoutHours` is CALENDAR (wall-clock) hours — pinned
- * through the real code path, not restated.
+ * `ApprovalEscalation.timeoutHours` counts on the escalation's `clock` —
+ * wall-clock hours by default, working hours on a working calendar under
+ * `'working_time'` (ADR-0157 D5) — pinned through the real code path, not
+ * restated.
  *
  * The declaration's `describe` text on `ApprovalEscalationSchema` says the
  * clock out loud; `slaDueAt` in `approval-service.ts` is the one runtime site
- * that turns the declared number into a deadline; the escalation sweep compares
+ * that turns the declared number into a wall-clock deadline, reached with the
+ * working-time count through `ApprovalService.slaDeadline`, the one function
+ * the read projection and the sweep share; the escalation sweep compares
  * that deadline against the injected clock. This file drives all three through
  * `openNodeRequest` → `getRequest` → `runEscalations`, so the sentence in the
  * schema and the arithmetic in the service cannot drift apart without a red
@@ -126,7 +130,7 @@ const utcDay = (iso: string) => new Date(iso).getUTCDay(); // 0 = Sunday … 5 =
 const FRIDAY_1700 = '2026-01-16T17:00:00.000Z';
 const MONDAY_0900 = '2026-01-19T09:00:00.000Z';
 
-describe('ApprovalEscalation.timeoutHours is calendar (wall-clock) hours', () => {
+describe('ApprovalEscalation.timeoutHours on the default clock is wall-clock hours', () => {
   it('the fixture dates are the weekdays the assertions name', () => {
     expect(utcDay(FRIDAY_1700)).toBe(5);
     expect(utcDay(MONDAY_0900)).toBe(1);
