@@ -16,6 +16,8 @@
  * mounted route through `dispatcher-plugin`'s thrown-error exit.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect } from 'vitest';
 import { ApiErrorSchema } from '@objectstack/spec/api';
 
