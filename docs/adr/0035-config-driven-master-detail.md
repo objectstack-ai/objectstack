@@ -139,6 +139,20 @@ a self-referential FK surfaces a "children" list.
 > `inlineEdit` is a body table on the record page and stays out of the
 > parent's form.
 
+> **Amended (2026-11-20, #35742; epic #35590).** One clause of the note above
+> no longer holds: a body table no longer sits "under the header strip and
+> above the field sections". The overview's details column now reads top to
+> bottom as the header strip (key fields and the stage bar), the field
+> sections drawn open, the body tables in the parent's `relatedLists` order,
+> then the field sections drawn closed that follow the last open one. A
+> closed section between two open ones keeps its place; when every section is
+> drawn closed, the tables come last; a field group whose `relatedList` names
+> a table still places it among the field sections; and an object with no
+> stage bar and no key fields opens on its own fields. "Drawn closed" is what
+> the reader sees: a section that opens expanded (the host's "More details"
+> today) stays before the tables. Everything else in the note above is
+> unchanged.
+
 The derivation is a pure function — `deriveRelatedLists(objectDef, objects)` in
 `@object-ui/app-shell` (`utils/deriveRelatedLists.ts`) — the read-side analogue
 of `attachInlineSubforms`. `RecordDetailView` feeds its output into the
