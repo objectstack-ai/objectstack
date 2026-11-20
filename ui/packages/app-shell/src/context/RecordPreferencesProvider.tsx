@@ -18,7 +18,8 @@
  * written on its own.
  *
  * ```json
- * { "showEmptyFields": true }
+ * { "showEmptyFields": true,
+ *   "relatedLists": { "<child>.<field>": { "sort": {…}, "columnState": {…} } } }
  * ```
  *
  * The renderers read it through `@object-ui/react`'s
@@ -40,6 +41,7 @@ import {
   RecordPagePreferencesProvider,
   type RecordPagePreference,
   type RecordPagePreferencesStore,
+  type RelatedListPreference,
 } from '@object-ui/react';
 import { useRecordStateFamily } from './UserStateAdapters.js';
 
@@ -59,7 +61,38 @@ export function sanitizeRecordPreference(v: unknown): RecordPagePreference {
   const out: RecordPagePreference = {};
   const show = (v as Record<string, unknown>).showEmptyFields;
   if (typeof show === 'boolean') out.showEmptyFields = show;
+  const lists = sanitizeRelatedLists((v as Record<string, unknown>).relatedLists);
+  if (lists) out.relatedLists = lists;
   return out;
+}
+
+/** The related tab's remembered sort and column widths, per list (objectstack#35601), well formed. */
+function sanitizeRelatedLists(v: unknown): Record<string, RelatedListPreference> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: Record<string, RelatedListPreference> = {};
+  for (const [id, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const entry: RelatedListPreference = {};
+    const sort = (raw as Record<string, unknown>).sort as { field?: unknown; order?: unknown } | undefined;
+    if (sort && typeof sort.field === 'string' && sort.field !== '' && (sort.order === 'asc' || sort.order === 'desc')) {
+      entry.sort = { field: sort.field, order: sort.order };
+    }
+    const columns = (raw as Record<string, unknown>).columnState as { order?: unknown; widths?: unknown } | undefined;
+    if (columns && typeof columns === 'object') {
+      const state: NonNullable<RelatedListPreference['columnState']> = {};
+      if (Array.isArray(columns.order)) state.order = columns.order.filter((k): k is string => typeof k === 'string');
+      if (columns.widths && typeof columns.widths === 'object' && !Array.isArray(columns.widths)) {
+        const widths: Record<string, number> = {};
+        for (const [k, w] of Object.entries(columns.widths as Record<string, unknown>)) {
+          if (typeof w === 'number' && Number.isFinite(w) && w > 0) widths[k] = w;
+        }
+        state.widths = widths;
+      }
+      entry.columnState = state;
+    }
+    if (entry.sort || entry.columnState) out[id] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export function RecordPreferencesProvider({ children }: { children: ReactNode }) {
