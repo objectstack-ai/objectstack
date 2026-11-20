@@ -19,4 +19,9 @@ A page the list opens remembers the list in its history entry (`location.state.f
 
 `navigation.mode` (`NavigationConfigSchema.mode`) is deprecated (`@deprecated`, `[DEPRECATED]` describe; ADR-0087 D3 semantic entry `navigation-mode-record-open-deprecated`). The key stays in the shape and every value still parses, so existing metadata loads. On an object's list `drawer`, `page` and `new_window` change nothing: a view that declares one behaves as a view that declares nothing. `none` keeps "rows open nothing", because a read-only list that started opening records would be a regression nobody chose; prefer `navigation: { preventNavigation: true }`. Renderers outside the object list (a page's list block, the timeline, an embedded view) still read the value until they follow.
 
-The i18n keys `list.recordOpen`, `list.recordOpenDrawer`, `list.recordOpenPage`, `list.optionsMenu.recordOpenAlwaysPage`, `detail.collapseToDrawer` and `console.objectView.openAsPage` are removed from every pack, and `console.objectView.openInSidePanel` is added. `NavigationOverlay` drops `maximizable`, and `SIDEBAR_WIDTH_FALLBACK` / `SIDEBAR_WIDTH_ICON_FALLBACK` are no longer exported from `@object-ui/components`.
+The i18n keys `list.recordOpen`, `list.recordOpenDrawer`, `list.recordOpenPage`, `list.optionsMenu.recordOpenAlwaysPage`, `detail.collapseToDrawer` and `console.objectView.openAsPage` are removed from every pack, and `console.objectView.openInSidePanel` is added.
+
+What moves in `@object-ui/components` (each line FROM → TO):
+
+- `NavigationOverlay`'s `maximizable` prop: FROM a toggle that widened the drawer to the full window in place TO removed. Fix: delete `maximizable`; the drawer's ⤢ opens the full page.
+- `SIDEBAR_WIDTH_FALLBACK` / `SIDEBAR_WIDTH_ICON_FALLBACK`: FROM exported constants TO no longer exported (only the removed full-width state read them). Fix: inline `'16rem'` / `'3rem'`.
