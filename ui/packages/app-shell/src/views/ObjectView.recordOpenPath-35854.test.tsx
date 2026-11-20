@@ -238,6 +238,19 @@ describe('a list opens a record one way: the name opens the page, the icon besid
     },
   );
 
+  it('a view declaring `openNewTab: true` opens the page in a new tab from the name; the list stays', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    try {
+      await openList(objectsWith({ openNewTab: true }));
+      fireEvent.click(nameLink('Beta'));
+      expect(open).toHaveBeenCalledWith(`/apps/demo/${OBJECT_NAME}/record/r2`, '_blank');
+      expect(location()).toBe(LIST_PATH);
+      expect(screen.queryByTestId('record-page-route')).toBeNull();
+    } finally {
+      open.mockRestore();
+    }
+  });
+
   it.each([[{ mode: 'none' }], [{ preventNavigation: true }]])(
     'a view declaring %j opens nothing: no icon, and the name stays put',
     async (navigation) => {

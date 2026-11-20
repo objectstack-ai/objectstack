@@ -210,8 +210,10 @@ export function useObjectViewRecordNavigation({
             // The drawer's width still reads the authored `size` bucket (or the
             // deprecated pixel `width`, objectstack-ai/objectstack#2578): `auto`
             // is the pane's 720 (objectstack#27545), clamped to the viewport.
+            // `openNewTab: true` stays live: the name opens the page in a new tab.
             return {
                 mode: 'drawer',
+                openNewTab: authored?.openNewTab,
                 width: authored?.width ?? overlayWidthFor(
                     recordPaneSize((authored as { size?: 'auto' | OverlaySizeBucket } | undefined)?.size),
                     objectDef,
@@ -360,23 +362,23 @@ export function useObjectViewRecordNavigation({
     // What the row click reads at click time. The handler itself never changes
     // (objectstack#27545): the list it is handed to must not re-render when
     // `?recordId=` changes, and the overlay state changes with it.
-    const rowClickInputs = useRef({ navOverlay, handleNavOverlayNavigate, recordServed });
-    rowClickInputs.current = { navOverlay, handleNavOverlayNavigate, recordServed };
+    const rowClickInputs = useRef({ navOverlay, handleNavOverlayNavigate, recordServed, newTab: detailNavigation.openNewTab });
+    rowClickInputs.current = { navOverlay, handleNavOverlayNavigate, recordServed, newTab: detailNavigation.openNewTab };
     const handleRowClick = useCallback(
         (record: any, event?: React.MouseEvent | { metaKey?: boolean; ctrlKey?: boolean; button?: number }) => {
-            const { navOverlay: overlay, handleNavOverlayNavigate: navigateTo, recordServed: served } = rowClickInputs.current;
+            const { navOverlay: overlay, handleNavOverlayNavigate: navigateTo, recordServed: served, newTab } = rowClickInputs.current;
             // No record surface: not even a modifier click opens one in a new tab.
             if (!served) return;
             // An authored `none` is no navigation (the spec's "No navigation
             // (read-only list)"): no click opens the record, a ⌘/Ctrl or
             // middle click included (objectstack#33548).
             if (overlay.mode === 'none') return;
-            // Cmd/Ctrl/middle-click — let the hook open in a new tab (full page).
-            // Matches browser link convention.
+            // Cmd/Ctrl/middle-click, or an authored `openNewTab: true` — let the
+            // hook open the full page in a new tab. Matches browser link convention.
             const isModifier = !!(
                 event && ((event as any).metaKey || (event as any).ctrlKey || (event as any).button === 1)
             );
-            if (isModifier) {
+            if (isModifier || newTab) {
                 overlay.handleClick(record, event as any);
                 return;
             }
