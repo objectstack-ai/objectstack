@@ -1901,7 +1901,7 @@ export class ObjectStackProtocolImplementation implements
         return draftPublishVerdict.call(this.draftVerdictHost(), draft);
     }
 
-    /** [#34818, #34766] PUBLIC: this judgement with the gate's advisories; no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
+    /** [#34818, #34766] PUBLIC: this judgement with its advisories (the gate's, plus a flow's #35256 connector-probe finding); no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
     draftPublishJudgement(draft: {
         type: string; name: string; body?: unknown; packageId: string | null; member?: string;
         userTextLocales?: readonly (string | undefined)[];

@@ -742,6 +742,12 @@ type DraftVerdictHost = RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatch
  * ADVISORIES — the findings a publish that passes returns on its 2xx, which the
  * console otherwise sees only after the publish, in a toast. One judgement, so
  * the two halves come from the same run of the same rules.
+ *
+ * [#35256] A flow draft's `advisories` also carry one member that is not the
+ * gate's: the build probe's `flow_connector_action_unresolved` finding
+ * ({@link draftConnectorAdvisories}), which a publish reports as a build-probe
+ * finding (`PublishPackageDraftsResponse.probes.issues[]`) rather than under
+ * `advisories`, and which stays a warning.
  */
 export interface DraftPublishJudgement {
     refusals: RuntimeAuthoringIssue[];
@@ -765,6 +771,12 @@ export async function draftPublishVerdict(
  * publish checks before Publish is pressed. One run of the same rules;
  * `userTextLocales` picks the language of the advisories' user sentences and
  * nothing else.
+ *
+ * [#35256] For a flow draft, `advisories` also carry the build probe's
+ * `flow_connector_action_unresolved` finding ({@link draftConnectorAdvisories}):
+ * a publish reports it as a build-probe finding
+ * (`PublishPackageDraftsResponse.probes.issues[]`), never under `advisories`,
+ * and it stays a warning.
  *
  * [#34766] The class method is PUBLIC: it is the publish verdict a door that
  * cannot publish answers with (the open MCP draft door's save and its draft

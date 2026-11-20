@@ -1576,6 +1576,32 @@ describe('[#35256] a flow draft whose connector step cannot dispatch reads the p
         expect(warning!.message).toContain('自动化“订单同步”中的步骤“推送订单”调用了连接器“erp”');
     });
 
+    it('a step inside a loop body: the advisory\'s path is the step\'s place in its region', async () => {
+        const { automation } = automationKnowing([]);
+        const protocol = protocolWith(automation);
+        const loopFlow = regionFlow('order_sweep', {
+            id: 'each', type: 'loop', label: 'Each',
+            config: {
+                collection: [1, 2], iteratorVariable: 'row',
+                body: {
+                    nodes: [
+                        { id: 'prep', type: 'assignment', label: 'prep' },
+                        { id: 'push', type: 'connector_action', label: 'push', connectorConfig: { connectorId: 'erp', actionId: 'push_order', input: {} } },
+                    ],
+                    edges: [{ id: 'b1', source: 'prep', target: 'push' }],
+                },
+            },
+        });
+        await stageDraft(protocol, 'flow', loopFlow);
+
+        const judgement = await protocol.draftPublishJudgement({ type: 'flow', name: 'order_sweep', packageId: PKG });
+        expect(judgement.refusals).toEqual([]);
+        const found = judgement.advisories.filter((a) => a.rule === RULE);
+        expect(found.map((a) => [a.path, a.where])).toEqual([
+            ['flows[0].nodes[1].config.body.nodes[1].connectorConfig', 'flow "order_sweep" · node "push"'],
+        ]);
+    });
+
     it('a known connector and action: no advisory, and the lookups were asked', async () => {
         const { automation, asked } = automationKnowing(['erp.push_order']);
         const protocol = protocolWith(automation);
