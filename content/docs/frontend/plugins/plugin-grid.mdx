@@ -395,6 +395,13 @@ row whose new value would sort it elsewhere stays in place until the next load
 - **A newer version** (409) still opens the conflict dialog: "Reload latest"
   re-reads the list, "Overwrite anyway" writes over it and keeps the row in
   place.
+- **Undo** takes a save back: the save toast's Undo button, or Ctrl+Z (Cmd+Z on
+  macOS) on a cell of the grid, newest save first. An undo is a new update that
+  writes the value the record held before the save, guarded by the record's
+  newest version like any save (a 409 opens the same dialog), so the record's
+  history shows the save and its undo as two changes. Each save is taken back
+  once. Inside an open editor Ctrl+Z stays the editor's own text undo. A save
+  of a field the row did not read offers no Undo.
 
 ### Keyboard navigation
 
