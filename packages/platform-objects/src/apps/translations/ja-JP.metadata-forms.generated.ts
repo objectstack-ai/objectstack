@@ -93,8 +93,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "グループのセクションの見出しテキスト。"
       },
       "fieldGroups.fields": {
-        label: "Fields",
-        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+        label: "フィールド",
+        helpText: "このグループが表示するフィールドと表示順（フィールド名）。入力すると、どのフィールドも移動せずにグループ内の順序が決まります。ここに挙げたフィールドは、自身のグループ設定で別のグループを指定できません。また、1 つのフィールドを挙げられるのは 1 つのグループだけです。関連リストとは併用できません。"
       },
       "fieldGroups.icon": {
         label: "アイコン",

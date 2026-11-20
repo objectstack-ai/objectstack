@@ -18,8 +18,6 @@
  */
 
 export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
-  "metadataForms.object.fields.fieldGroups.fields.helpText": "c63503d01551c816",
-  "metadataForms.object.fields.fieldGroups.fields.label": "f316ec6025047133",
   "objects.sys_email.fields.cc_addresses.label": "02946d952cf15623",
   "objects.sys_email.fields.error.label": "786fed84bd8d5a32",
   "objects.sys_email.fields.message_id.label": "14cd089a4062f4b1",

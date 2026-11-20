@@ -93,8 +93,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         helpText: "該分組所在分割區的標題文字。"
       },
       "fieldGroups.fields": {
-        label: "Fields",
-        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+        label: "欄位",
+        helpText: "此分組顯示的欄位及其順序（欄位名稱）。填寫後，它決定分組內的順序，不移動任何欄位。此處列出的欄位，其自身的分組設定不能指向其他分組；一個欄位只能被一個分組列出。不能與相關清單同時使用。"
       },
       "fieldGroups.icon": {
         label: "圖示",

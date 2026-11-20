@@ -93,8 +93,8 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Текст заголовка раздела группы."
       },
       "fieldGroups.fields": {
-        label: "Fields",
-        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+        label: "Поля",
+        helpText: "Поля, которые показывает эта группа, в порядке отображения (имена полей). Если список заполнен, он задаёт порядок внутри группы, не перемещая ни одно поле. Поле из этого списка не может указывать другую группу в собственной настройке группы, и поле может быть указано только одной группой. Нельзя использовать вместе со связанным списком."
       },
       "fieldGroups.icon": {
         label: "Значок",

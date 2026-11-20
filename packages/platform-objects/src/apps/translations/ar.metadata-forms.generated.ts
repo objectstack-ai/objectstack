@@ -93,8 +93,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "نص ترويسة قسم المجموعة."
       },
       "fieldGroups.fields": {
-        label: "Fields",
-        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+        label: "الحقول",
+        helpText: "الحقول التي تعرضها هذه المجموعة، بترتيب العرض (أسماء الحقول). عند تعبئتها تحدد الترتيب داخل المجموعة دون نقل أي حقل. لا يجوز للحقل المذكور هنا أن يشير إلى مجموعة أخرى في إعداد المجموعة الخاص به، ولا يُذكر الحقل إلا في مجموعة واحدة. غير مسموح مع القائمة المرتبطة."
       },
       "fieldGroups.icon": {
         label: "الأيقونة",

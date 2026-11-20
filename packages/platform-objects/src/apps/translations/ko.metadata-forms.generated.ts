@@ -93,8 +93,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "그룹 섹션의 헤더 텍스트입니다."
       },
       "fieldGroups.fields": {
-        label: "Fields",
-        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+        label: "필드",
+        helpText: "이 그룹이 표시하는 필드와 표시 순서(필드 이름)입니다. 입력하면 어떤 필드도 옮기지 않고 그룹 안의 순서를 정합니다. 여기에 나열한 필드는 자체 그룹 설정에서 다른 그룹을 지정할 수 없으며, 한 필드는 한 그룹에만 나열할 수 있습니다. 관련 목록과 함께 사용할 수 없습니다."
       },
       "fieldGroups.icon": {
         label: "아이콘",

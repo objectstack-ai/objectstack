@@ -93,8 +93,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Texte de l’en-tête de la section du groupe."
       },
       "fieldGroups.fields": {
-        label: "Fields",
-        helpText: "The fields this group shows, in display order (field names). Written, it sets the order inside the group without moving any field. A field this list names may not name another group in its own group setting, and a field may be listed by one group only. Not allowed with Related List."
+        label: "Champs",
+        helpText: "Les champs que ce groupe affiche, dans l'ordre d'affichage (noms de champ). Renseignée, la liste fixe l'ordre à l'intérieur du groupe sans déplacer aucun champ. Un champ nommé ici ne peut pas indiquer un autre groupe dans son propre réglage de groupe, et un champ ne peut être listé que par un seul groupe. Non autorisé avec Liste associée."
       },
       "fieldGroups.icon": {
         label: "Icône",
