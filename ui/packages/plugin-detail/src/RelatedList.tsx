@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, isPermissionError, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -2429,15 +2429,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * offered.
    */
   const pickerOffered = !!add && !!add.picker?.object && !!dataSource && addGranted && addBatchable;
+  const addFallbackLabel = t('detail.add', { defaultValue: 'Add' });
   const addEntry: { label: string; disabled: boolean; onClick: () => void } | null = pickerOffered
     ? {
-        label: add!.label || t('detail.add', { defaultValue: 'Add' }),
+        label: add!.label || addFallbackLabel,
         disabled: addBusy,
         onClick: () => { setAddError(null); setPickerOpen(true); },
       }
     : onNew
       ? {
-          label: t('detail.add', { defaultValue: 'Add' }),
+          label: addFallbackLabel,
           disabled: !!newDisabled,
           onClick: () => onNew(),
         }
