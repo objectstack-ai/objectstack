@@ -187,6 +187,14 @@ function refusalText(error: Error, errorMessages: Record<string, string> | undef
   );
 }
 
+/**
+ * The "Sign in with SSO" request's watchdog: the same window and sentence as
+ * the provider buttons' sign-in watchdog (`signInWithProvider` in
+ * `createAuthClient.ts`), so both doors recover a hung request alike.
+ */
+const SSO_SIGN_IN_TIMEOUT_MS = 20_000;
+const SSO_SIGN_IN_TIMEOUT_TEXT = 'Sign-in timed out — the server did not respond. Please try again.';
+
 const DefaultLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <a href={href} className={className}>{children}</a>
 );
@@ -536,6 +544,15 @@ export function LoginForm({
       return;
     }
     setSsoSubmitting(true);
+    // A request that never answers is aborted after the same window the
+    // provider buttons' sign-in watchdog uses, so the button and the email
+    // field always come back with an error and a retry path.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, SSO_SIGN_IN_TIMEOUT_MS);
     try {
       const base = window.location.pathname.replace(/\/login(?:\/.*)?$/, '');
       const res = await fetch('/api/v1/auth/sign-in/sso', {
@@ -543,8 +560,12 @@ export function LoginForm({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: identifier, callbackURL: base + '/home' }),
         credentials: 'include',
+        signal: controller.signal,
       });
-      const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string };
+      const data = (await res.json().catch((e: unknown) => {
+        if (timedOut) throw e;
+        return {};
+      })) as { url?: string; message?: string };
       if (res.ok && typeof data.url === 'string') {
         // Navigating to the IdP — keep the pending state through teardown.
         window.location.href = data.url;
@@ -553,8 +574,10 @@ export function LoginForm({
       setError(data.message || 'No SSO provider is configured for this email domain.');
       setSsoSubmitting(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(timedOut ? SSO_SIGN_IN_TIMEOUT_TEXT : err instanceof Error ? err.message : String(err));
       setSsoSubmitting(false);
+    } finally {
+      clearTimeout(timer);
     }
   };
 
