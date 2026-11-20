@@ -1942,8 +1942,14 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
       expect(cardOrder(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'showcase_call.project']);
     });
 
-    it('with relatedLists: the declared lists first in that order, the rest after them in the derived order', async () => {
+    it('with relatedLists: only the declared lists, in that order; an unlisted side list draws nothing (objectstack#35897)', async () => {
       const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project']));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project']);
+    });
+
+    it('with relatedLists listing every list: the declared order, nothing dropped (control)', async () => {
+      const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project', 'showcase_task']));
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
       expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project', 'showcase_task.project']);
     });
