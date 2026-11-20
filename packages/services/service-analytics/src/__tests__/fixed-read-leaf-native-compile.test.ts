@@ -160,7 +160,7 @@ describe('[ADR-0155 Q2] the share-grant leaf on the analytics faces, live on SQL
     for (const [where, scope] of MISPLACED) {
       it(`${where}: compiler and engine-bound merge alike`, () => {
         const lines: string[] = [];
-        const sink = { log: { warn() {}, error: (m: string) => void lines.push(m) }, state: { logged: false } };
+        const sink = { logger: { warn() {}, error: (m: string) => void lines.push(m) }, state: { logged: false } };
         for (let i = 0; i < 2; i++) {
           const compiled = thrownBy(() => compileScopedFilterToSql(scope() as FilterCondition, 'srid_doc', { object: 'srid_doc', fixedReadLeafRefusal: sink }));
           expect(envelopeOf(compiled)).toEqual(REFUSED);

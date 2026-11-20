@@ -4452,6 +4452,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/explain-fixed-read-leaf.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-read-verdict-inputs.test.ts",
       "verb": "findOne",
       "pinned": 1

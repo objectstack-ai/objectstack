@@ -865,25 +865,25 @@ export interface ReadScopeCompileOptions {
 
 /**
  * [ADR-0155 D4] One evaluator's half of ADR-0139 D3's "logged at `error` once
- * per evaluator": the log a refusal of a fixed-read leaf is written to, and the
+ * per evaluator": the logger a refusal of a fixed-read leaf is written to, and the
  * flag that keeps it to one line (`@objectstack/core`'s `refuseFixedReadLeafOnce`).
  * `AnalyticsService` holds one per instance and hands it to both strategies.
  */
 export interface FixedReadLeafRefusalSink {
-  readonly log: ReadableIdsRefusalLog | undefined;
+  readonly logger: ReadableIdsRefusalLog | undefined;
   readonly state: { logged: boolean };
 }
 
 const REFUSAL_SINKS = new WeakMap<object, FixedReadLeafRefusalSink>();
 
 /**
- * [ADR-0155 D4] The refusal sink for `log`, one per log object: the service's
+ * [ADR-0155 D4] The refusal sink for `logger`, one per logger object: the service's
  * strategies and the plugin's record-label read hand the same logger and so
  * share one flag, one line for this evaluator between them.
  */
-export function fixedReadLeafRefusalSinkOf(log: ReadableIdsRefusalLog): FixedReadLeafRefusalSink {
-  let sink = REFUSAL_SINKS.get(log);
-  if (sink === undefined) REFUSAL_SINKS.set(log, (sink = { log, state: { logged: false } }));
+export function fixedReadLeafRefusalSinkOf(logger: ReadableIdsRefusalLog): FixedReadLeafRefusalSink {
+  let sink = REFUSAL_SINKS.get(logger);
+  if (sink === undefined) REFUSAL_SINKS.set(logger, (sink = { logger, state: { logged: false } }));
   return sink;
 }
 
@@ -1051,7 +1051,7 @@ function refuseUnservedFixedReadLeaf(
       'compiles only as the $in comparand of id on the object it names (ADR-0155 D1). The statement was NOT run, ' +
       'rather than read the leaf as an ordinary comparand. Place it as { id: { $in: leaf } } in the scope of that object.';
   const state = sink?.state ?? { logged: true };
-  throw refuseFixedReadLeafOnce(READ_SCOPE_FIXED_READ_LEAF_EVALUATOR, message, sink?.log, state, objectName);
+  throw refuseFixedReadLeafOnce(READ_SCOPE_FIXED_READ_LEAF_EVALUATOR, message, sink?.logger, state, objectName);
 }
 
 /** A node the compiler can walk: a plain object, not `null` and not an array. */

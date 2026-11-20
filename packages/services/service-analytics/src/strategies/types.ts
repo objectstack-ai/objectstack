@@ -305,7 +305,7 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * compiler or merges refuse, once per evaluator (`read-scope-sql.ts`'s
    * `FixedReadLeafRefusalSink`). Absent, the refusal is thrown unlogged.
    */
-  fixedReadLeafRefusal?: { readonly log: { error?(message: string): void; warn(message: string): void } | undefined; readonly state: { logged: boolean } };
+  fixedReadLeafRefusal?: { readonly logger: { error?(message: string): void; warn(message: string): void } | undefined; readonly state: { logged: boolean } };
   /**
    * The data engine's aggregate of `objectName`, grouped ALSO by attributes of
    * related records (one {@link RelationGroupAggregateRelation} per relation),
