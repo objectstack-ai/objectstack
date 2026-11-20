@@ -4565,7 +4565,7 @@ const ja = {
     actor: '操作ID',
     auto: '自動',
     overrideHint: '例：role:sales_manager。空欄の場合は自動検出されたIDを使用します。',
-    comment: 'コメント（任意）',
+    comment: 'コメント',
     approve: '承認',
     approving: '承認中…',
     reject: '却下',

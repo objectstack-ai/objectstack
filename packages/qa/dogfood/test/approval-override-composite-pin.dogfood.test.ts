@@ -356,7 +356,7 @@ describe('the override never approves its actor\'s own request, through the appr
 
   it('leaves the submitter-administrator their reject and their recall', async () => {
     const rejected = await openRequest(adminToken, 'own reject');
-    const reject = await call(adminToken, 'POST', `/approvals/requests/${rejected}/reject`, {});
+    const reject = await call(adminToken, 'POST', `/approvals/requests/${rejected}/reject`, { comment: 'Filed in error.' });
     expect(reject.status).toBe(200);
     expect((await requestRow(rejected)).status).toBe('rejected');
     expect(await decisionsOn(rejected)).toMatchObject([{ action: 'reject', via_override: true }]);
@@ -365,6 +365,28 @@ describe('the override never approves its actor\'s own request, through the appr
     const recall = await call(adminToken, 'POST', `/approvals/requests/${recalled}/recall`, {});
     expect(recall.status).toBe(200);
     expect((await requestRow(recalled)).status).toBe('recalled');
+  }, 60_000);
+
+  // [#35719] A reject carries its reason on the approvals route too, with the
+  // answer the `approval_reject` action door gives: 400 VALIDATION_ERROR naming
+  // `comment`, before anything is read or written.
+  it('refuses a reject with no reason, or a blank one, and leaves the request pending', async () => {
+    const id = await openRequest(memberToken, 'reasonless reject');
+    for (const body of [{}, { comment: '' }, { comment: '   ' }, { comment: null }]) {
+      const reject = await call(adminToken, 'POST', `/approvals/requests/${id}/reject`, body);
+      expect([reject.status, reject.code], JSON.stringify(body)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(JSON.stringify(reject.body)).toContain('Action param \\"comment\\" is required');
+    }
+    expect((await requestRow(id)).status).toBe('pending');
+    expect(await decisionsOn(id)).toEqual([]);
+  }, 60_000);
+
+  it('CONTROL: a reject with its reason is recorded with that reason', async () => {
+    const id = await openRequest(memberToken, 'reasoned reject');
+    const reject = await call(adminToken, 'POST', `/approvals/requests/${id}/reject`, { comment: 'Over budget.' });
+    expect(reject.status).toBe(200);
+    expect((await requestRow(id)).status).toBe('rejected');
+    expect(await decisionsOn(id)).toMatchObject([{ action: 'reject', comment: 'Over budget.' }]);
   }, 60_000);
 
   it('CONTROL: an administrator who did not submit the request override-approves it, audited, and the slate\'s approver then reads 404', async () => {

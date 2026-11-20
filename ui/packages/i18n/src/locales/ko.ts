@@ -4562,7 +4562,7 @@ const ko = {
     actor: '작업 ID',
     auto: '자동',
     overrideHint: '예: role:sales_manager. 비워 두면 자동 감지된 ID를 사용합니다.',
-    comment: '의견(선택)',
+    comment: '의견',
     approve: '승인',
     approving: '승인 중…',
     reject: '거부',

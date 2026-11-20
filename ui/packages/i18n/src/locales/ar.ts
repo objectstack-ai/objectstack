@@ -4988,7 +4988,7 @@ const ar = {
     actor: 'الهوية',
     auto: 'تلقائي',
     overrideHint: 'مثال: role:sales_manager. اتركه فارغًا لاستخدام الهوية المكتشفة تلقائيًا.',
-    comment: 'تعليق (اختياري)',
+    comment: 'تعليق',
     approve: 'موافقة',
     approving: 'جارٍ الموافقة…',
     reject: 'رفض',
