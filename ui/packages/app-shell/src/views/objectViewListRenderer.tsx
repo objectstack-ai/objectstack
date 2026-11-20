@@ -28,7 +28,6 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import type { DataSource } from '@object-ui/types';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
-import type { isSetupAppSegment } from '../console/setupApp.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
 import { substituteFilterTokens } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
@@ -74,7 +73,6 @@ export function withAddedListColumns(
 
 export function useObjectViewListRenderer({
     objectName,
-    inSetup,
     t,
     viewEmptyState,
     localizeActionTexts,
@@ -111,7 +109,6 @@ export function useObjectViewListRenderer({
     listViewActions,
 }: {
     objectName: string | undefined;
-    inSetup: ReturnType<typeof isSetupAppSegment>;
     t: ReturnType<typeof useObjectTranslation>['t'];
     viewEmptyState: ReturnType<typeof useObjectLabel>['viewEmptyState'];
     localizeActionTexts: ReturnType<typeof useActionTextLocalizer>;
@@ -366,11 +363,17 @@ export function useObjectViewListRenderer({
             const chartConfig = viewDef.chart || {};
             // The way back to the other views is the view switcher
             // (objectstack#27594), which heads the chart in a bar of the
-            // list's view bar's height (objectstack#27058, objectstack#35548).
+            // list's view bar's height (objectstack#27058, objectstack#35548)
+            // and the list's view bar's padding (`TOOLBAR_ROW` in
+            // plugin-list's `listToolbarRow.ts`, objectstack#35729): from `sm`
+            // up 10px on the left puts the switcher's 6px-padded icon on the
+            // list page's 16px line (objectstack#35663), so switching between
+            // the list and the chart does not move it; below `sm` both bars
+            // keep `px-2`.
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
                     {hasPhoneTitle && (
-                        <div className="border-b px-2 py-1.5 sm:h-10 sm:px-4 sm:py-0 flex items-center min-w-0 bg-background">
+                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center min-w-0 bg-background">
                             <ViewBarLead store={leadStore} />
                         </div>
                     )}
@@ -1142,7 +1145,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }
