@@ -22,6 +22,7 @@ import { observeOperation, relationObjects, type Row } from '../src/runner/obser
 import { namespacedScenario } from '../src/runner/namespace.js';
 import type { ParsedTurn } from '../src/runner/transcript.js';
 import { gradeCardOperation } from '../src/score/index.js';
+import { datasetMembers, hitsOf, isNearMiss, memberKey } from '../src/datasets.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARD = resolve(HERE, '../../../../docs/qa/scenarios/travel_expense.json');
@@ -334,5 +335,39 @@ describe('travel_expense file_and_submit_from_text: the per-type amounts, in eit
     });
     expect(observation.state!.slice(1).map((rows) => rows.length)).toEqual([0, 0, 0]);
     expect(gradeCardOperation(scenario, op.id, observation).pass).toBe(false);
+  });
+});
+
+/**
+ * The figure questions whose measured word once named no member. The word
+ * "claims" is a near miss on both `reimbursement` measures (each has a synonym
+ * holding it) and a hit on neither, so the dataset tools offer both as
+ * candidates and the agent rightly asks back (ADR-0149 D3): a true tie the
+ * card keeps. Each of these asks now writes a word that is a hit on exactly the
+ * measure its truth computes, in each language.
+ */
+describe('travel_expense figure questions: each ask writes one measure\'s own word', () => {
+  const { card } = load(CARD);
+  const members = datasetMembers(card.expect.datasets);
+  const measures = members.filter((m) => m.kind === 'measure');
+
+  it('"claims" alone is a true tie: no hit, a near miss on two measures', () => {
+    expect(hitsOf(members, 'claims')).toEqual([]);
+    expect(measures.filter((m) => isNearMiss(m, 'claims')).map(memberKey)).toEqual([
+      'reimbursement.claimed_amount',
+      'reimbursement.claim_count',
+    ]);
+  });
+
+  it.each([
+    ['paid_reimbursement', 'reimbursement.claimed_amount', { en: 'claimed amount', zh: '报销金额' }],
+    ['claims_by_status', 'reimbursement.claim_count', { en: 'number of claims', zh: '报销单数' }],
+    ['claimed_last_month', 'reimbursement.claimed_amount', { en: 'expense claims', zh: '报销金额' }],
+  ] as const)('%s: the ask writes a word that is a hit on %s alone', (id, measure, words) => {
+    const ask = card.run.questions.find((q) => q.id === id)!.ask;
+    for (const lang of ['en', 'zh'] as const) {
+      expect(ask[lang]).toContain(words[lang]);
+      expect(hitsOf(members, words[lang]).map(memberKey)).toEqual([measure]);
+    }
   });
 });

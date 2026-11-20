@@ -350,6 +350,38 @@ through the host's data source (`dataSource.update`) with no callback to wire.
 To own persistence in a React host, supply `onCellChange` as a **component
 prop** — it is not a schema key.
 
+#### On an object's list page
+
+The console's list page draws its grid with the **select-first** cell model
+(objectstack#35684, objectstack#35687), which its host turns on (the
+`cellSelection` component prop, not a schema key). There is no inline-edit
+mode and no toggle: the grid is editable wherever the reader may edit the
+object and the view does not declare `userActions.editInline: false`, and
+`singleClickEdit` is not read there.
+
+- **A click selects** a cell (a ring around it); it neither edits nor opens the
+  record. A link a cell draws (the name, a lookup, a phone or an email) keeps
+  its own click. On a touch screen a tap opens the record.
+- **Editing** starts on a double-click, Enter or F2 (the value kept, caret at
+  its end), or by typing, which replaces the value; an input method's
+  composition is kept whole. Backspace or Delete opens an empty editor and
+  saves nothing yet.
+- **While editing**, Enter commits and moves down, Tab / Shift+Tab commit and
+  move right / left, and Escape cancels and keeps the cell selected. In a
+  multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. A click
+  elsewhere commits.
+- **Selected cell keys:** the arrows and Tab move the selection; Space opens the
+  record (a checkbox cell flips instead, as does a second click on it);
+  Ctrl/Cmd+C copies; Ctrl/Cmd+V converts the text to the field's type and
+  commits it; Escape clears the selection.
+- **A cell that opens no editor says why** on the cell: the field is read-only,
+  calculated or not editable in a list, the reader may not edit the field, the
+  object or the record, the view turned editing off, or the record is locked
+  by an approval.
+
+Commits are the grid's own staged edits: the row's Save / Cancel and the Save
+All bar save them, as before.
+
 ### Keyboard navigation
 
 `keyboardNavigation` turns the grid's data cells into one roving Tab stop, on the

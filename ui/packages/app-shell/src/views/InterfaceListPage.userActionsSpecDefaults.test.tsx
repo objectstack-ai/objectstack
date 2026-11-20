@@ -123,6 +123,9 @@ const SPEC_DEFAULT_TOOLBAR = {
   group: true,
   hideFields: true,
   rowColor: false,
+  // On by default as well: the page writes it as the canonical key, since the
+  // list has no edit mode for a legacy `inlineEdit` to start (objectstack#35684).
+  editInline: true,
 };
 
 const ON_BY_DEFAULT = ['filter', 'rowHeight', 'group', 'hideFields'] as const;

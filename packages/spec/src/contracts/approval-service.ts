@@ -644,6 +644,12 @@ export interface ApprovalActionRow {
 export interface ApprovalDecisionInput {
   decision: 'approve' | 'reject';
   actorId: string;
+  /**
+   * The decision's comment, recorded on the `sys_approval_action` audit row.
+   * A REJECT must carry it as a non-blank string — its reason; `decide()`
+   * refuses a reject whose comment is missing, blank or not a string with
+   * `400 VALIDATION_ERROR` before any write. An approve keeps it optional.
+   */
   comment?: string;
   /**
    * File references (already stored via the storage service) to attach to this
@@ -1090,6 +1096,11 @@ export interface IApprovalService {
    * Record a decision on a node-driven request. Honours the node's
    * `unanimous` behaviour, finalises the request when satisfied, and resumes
    * the owning flow run down the matching `approve` / `reject` edge.
+   *
+   * A reject carries its reason: one whose `comment` is missing, blank or not
+   * a string is refused with `400 VALIDATION_ERROR` before anything is read
+   * or written ({@link ApprovalDecisionInput.comment}). An approve keeps its
+   * comment optional.
    */
   decide(requestId: string, input: ApprovalDecisionInput, context: ExecutionContext): Promise<ApprovalDecisionResult>;
 

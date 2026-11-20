@@ -13,6 +13,8 @@ import { resolveIcon } from '../action/resolve-icon';
 import { hasDeclaredVisibilityGate } from '../action/visibility-gate';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from '../action/disabled-reason';
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
+import { useGridCellSelection } from '../../context/gridCellSelection';
+import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey } from './dataTableCellSelection';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
@@ -31,6 +33,8 @@ import {
   TableCaption 
 } from '../../ui/table';
 import { Button } from '../../ui/button';
+import { Popover, PopoverContent } from '../../ui/popover';
+import { Anchor as PopoverAnchor } from '@radix-ui/react-popover';
 import { Input } from '../../ui/input';
 import { Checkbox } from '../../ui/checkbox';
 import { TriStateCheckbox } from '../../custom/tri-state-checkbox';
@@ -335,6 +339,9 @@ const TABLE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.openRecord': 'Open record',
   'table.cancelChanges': 'Cancel changes',
   'table.saveRow': 'Save row',
+  // objectstack#35684 — a selected cell that opens no editor, when its host
+  // gives no reason of its own.
+  'table.cellReadOnly': 'This cell can\'t be edited here.',
   'common.actions': 'Actions',
   // objectui#10625 — the inline date editors' notice for a stored value
   // written on a day that does not exist. The SAME keys `DateField` /
@@ -1352,6 +1359,33 @@ function sameDrawnSizes(a: DrawnColumnSizes, b: DrawnColumnSizes): boolean {
  * @param {DataTableSchema} props.schema - Table schema configuration
  * @returns {JSX.Element} Rendered data table component
  */
+/**
+ * objectstack#35684 — why a selected cell opens no editor, drawn on the cell
+ * when an edit is asked of it. It takes no focus (typing carries on in the
+ * cell) and closes on the next key, press or selection.
+ */
+function CellNotice({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  return (
+    <Popover open onOpenChange={(open) => { if (!open) onDismiss(); }}>
+      <PopoverAnchor asChild>
+        <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-0" />
+      </PopoverAnchor>
+      <PopoverContent
+        role="status"
+        data-testid="cell-readonly-reason"
+        side="bottom"
+        align="start"
+        sideOffset={2}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        className="w-auto max-w-xs px-2.5 py-1.5 text-xs"
+      >
+        {text}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const {
     caption,
@@ -1383,7 +1417,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     reorderableColumns = true,
     editable = false,
     singleClickEdit = false,
-    keyboardNavigation = false,
+    keyboardNavigation: keyboardNavigationProp = false,
     rowClassName,
     rowStyle,
     className,
@@ -1401,6 +1435,14 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // `dataTableBindDiagnostic.ts`.
     bind: authoredBind,
   } = schema;
+
+  // objectstack#35684 — the select-first cell model, when a host mounted one
+  // (`GridCellSelection`): a click selects a cell, an editor opens on
+  // double-click, Enter, F2 or typing, Space opens the record. It needs the
+  // arrow keys, so it turns the roving-cell navigation on.
+  const cellSelection = useGridCellSelection();
+  const selectFirst = cellSelection !== null;
+  const keyboardNavigation = keyboardNavigationProp || selectFirst;
 
   // 'single' caps the selection at one row (replace-on-select) and drops the
   // select-all header; every truthy legacy value keeps meaning 'multiple'.
@@ -1914,6 +1956,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // The last pointer that pressed a row: a touch long-press raises
   // `contextmenu` too, and touch keeps the row's "⋮" instead.
   const rowPointerTypeRef = useRef<string>('');
+  /** objectstack#35684 — a touch press opens the record and never selects or edits a cell. */
+  const isTouchPress = (e: React.MouseEvent) =>
+    ((e.nativeEvent as PointerEvent).pointerType || rowPointerTypeRef.current) === 'touch';
   // When the keyboard last opened the menu: the browser may raise its own
   // `contextmenu` for the same key press right after.
   const rowContextMenuKeyboardAtRef = useRef(Number.NEGATIVE_INFINITY);
@@ -2543,8 +2588,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // `editable`; a refused row reads exactly like a row of a read-only table.
   const rowMayEdit = (row: any): boolean => isRowEditable?.(row) !== false;
 
-  // Cell editing handlers
-  const startEdit = (row: any, columnKey: string) => {
+  // Cell editing handlers. `seed` (the select-first model's typing and
+  // Backspace, objectstack#35687) opens the editor on that value instead of
+  // the cell's; the cell's own value still decides what Escape restores.
+  const startEdit = (row: any, columnKey: string, seed?: { value: unknown }) => {
     if (!editable || !rowMayEdit(row)) return;
     const rowKey = pendingRowKeyOf(row);
 
@@ -2575,7 +2622,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // Check if there's a pending change for this cell, otherwise use current data value
     const rowChanges = pendingChanges.get(rowKey)?.changes;
     const currentValue = row[columnKey];
-    const valueToEdit = rowChanges?.[columnKey] ?? currentValue ?? '';
+    const valueToEdit = seed ? seed.value : rowChanges?.[columnKey] ?? currentValue ?? '';
     setEditValue(valueToEdit);
     // Snapshot the cell's pending state so Escape/cancel can revert an injected
     // widget edit (which stages on every change) back to exactly what it was.
@@ -3088,8 +3135,206 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     }
   };
 
+  // ── The select-first cell model (objectstack#35684, objectstack#35687) ──
+  //
+  // Behind `GridCellSelection` (a host's choice, never metadata). One cell is
+  // SELECTED: it carries an outline ring that moves no layout, and focus sits
+  // in an invisible text box inside it, the type catcher. An input method only
+  // composes into an editable element, so the box is what lets a composition
+  // that starts on a selected cell keep its first syllable: the composed text
+  // opens the editor when the input method hands it over, and the keys pressed
+  // while composing are never read as Enter, Esc, Tab or arrows. What is
+  // typed or pasted there opens the editor (or, pasted, writes the cell); the
+  // box itself never holds a value.
+  //
+  // Kept by record and column, like an edit (objectui#12310): a re-read that
+  // moves or drops the row moves or drops the selection with it. Focus moves
+  // to the catcher only after the reader acted on the grid
+  // (`focusSelectionRef`), never because the rows changed under it.
+  const [selectedCell, setSelectedCellKey] = useState<{ rowKey: PendingRowKey; columnKey: string } | null>(null);
+  const selectedRowIndex = selectedCell ? paginatedData.findIndex((r) => pendingRowKeyOf(r) === selectedCell.rowKey) : -1;
+  const selectedColIndex = selectedCell ? columns.findIndex((c) => c.accessorKey === selectedCell.columnKey) : -1;
+  const selectedPos = selectedRowIndex >= 0 && selectedColIndex >= 0
+    ? { rowIndex: selectedRowIndex, colIndex: selectedColIndex }
+    : null;
+  const setSelectedCell = (pos: { rowIndex: number; colIndex: number } | null) =>
+    setSelectedCellKey(pos ? { rowKey: pendingRowKeyOf(paginatedData[pos.rowIndex]), columnKey: columns[pos.colIndex].accessorKey } : null);
+  const focusSelectionRef = useRef(false);
+  useEffect(() => {
+    if (!focusSelectionRef.current || editingCell) return;
+    focusSelectionRef.current = false;
+    tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]')?.focus();
+  });
+  const [composing, setComposing] = useState(false);
+  const composingRef = useRef(false);
+  // Why the cell an edit was asked of opens no editor, drawn on that cell.
+  const [cellNotice, setCellNotice] = useState<{ rowIndex: number; colIndex: number; text: string } | null>(null);
+
+  const selectCell = (rowIndex: number, colIndex: number) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    setCellNotice(null);
+    rove(rowIndex, colIndex);
+    if (selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex) {
+      // Selected already, so no render follows to move the focus: a click on
+      // the cell took it to the cell itself, where a typed key is lost.
+      focusSelectionRef.current = false;
+      tableRef.current?.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]')?.focus();
+      return;
+    }
+    focusSelectionRef.current = true;
+    setSelectedCell({ rowIndex, colIndex });
+    cellSelection?.onCellSelect?.(row, col.accessorKey);
+  };
+
+  const factsOf = (row: any, col: TableColumn) => cellSelection?.describeCell?.(row, col.accessorKey) ?? null;
+
+  /** Why this cell opens no editor, or `null` when it opens one. */
+  const readOnlyReasonOf = (row: any, col: TableColumn): string | null => {
+    const reason = factsOf(row, col)?.readOnlyReason;
+    if (reason) return reason;
+    return editable && col.editable !== false && !col.masked && rowMayEdit(row) ? null : t('table.cellReadOnly');
+  };
+
+  /** Open the editor on a cell, or say on the cell why it opens none. */
+  const attemptEdit = (rowIndex: number, colIndex: number, seed?: { value: unknown }) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    const reason = readOnlyReasonOf(row, col);
+    if (reason) {
+      setCellNotice({ rowIndex, colIndex, text: reason });
+      return;
+    }
+    setCellNotice(null);
+    setSelectedCell({ rowIndex, colIndex });
+    startEdit(row, col.accessorKey, seed);
+  };
+
+  /** Write a value into a cell without an editor: the commit `saveEdit` makes. */
+  const commitCellValue = (row: any, columnKey: string, value: unknown) => {
+    const rowKey = pendingRowKeyOf(row);
+    const held = heldRowOf(rowKey) ?? row;
+    const inFlight = inFlightRef.current.get(rowKey);
+    setPendingChanges((prev) => stageCellChange(prev, rowKey, held, columnKey, value, inFlight));
+    clearCellError(rowKey, columnKey);
+    schema.onCellChange?.(rowIndexOf(rowKey), columnKey, value, held);
+  };
+
+  /** What a cell does with a value it is handed rather than edited: a toggle or a paste. */
+  const writeCell = (rowIndex: number, colIndex: number, valueOf: (row: any, col: TableColumn) => unknown) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    const reason = readOnlyReasonOf(row, col);
+    if (reason) {
+      setCellNotice({ rowIndex, colIndex, text: reason });
+      return;
+    }
+    const value = valueOf(row, col);
+    if (value !== undefined) commitCellValue(row, col.accessorKey, value);
+  };
+
+  const togglesCell = (row: any, col: TableColumn) => factsOf(row, col)?.toggles ?? col.type === 'boolean';
+  const toggleCell = (rowIndex: number, colIndex: number) => writeCell(rowIndex, colIndex, (row, col) => {
+    const staged = pendingChanges.get(pendingRowKeyOf(row))?.changes;
+    const current = staged && col.accessorKey in staged ? staged[col.accessorKey] : row[col.accessorKey];
+    return current !== true;
+  });
+  const pasteIntoCell = (rowIndex: number, colIndex: number, text: string) => writeCell(rowIndex, colIndex, (row, col) => {
+    const fromText = factsOf(row, col)?.fromText;
+    return fromText ? fromText(text) : defaultValueFromText(col, text);
+  });
+
+  /** Text typed or composed on the selected cell. */
+  const typeIntoCell = (rowIndex: number, colIndex: number, text: string) => {
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (text === '' || row === undefined || col === undefined) return;
+    const facts = factsOf(row, col);
+    if ((facts?.typing ?? defaultTyping(col)) === 'open') {
+      attemptEdit(rowIndex, colIndex);
+      return;
+    }
+    const converted = facts?.fromText ? facts.fromText(text) : defaultValueFromText(col, text);
+    attemptEdit(rowIndex, colIndex, { value: converted !== undefined ? converted : text });
+  };
+
+  /** After Enter or Tab committed the selected cell's edit: the cell it moves to. */
+  const moveSelection = (direction: 'down' | 'right' | 'left') => {
+    if (!selectedPos) return;
+    const { rowIndex, colIndex } = selectedPos;
+    if (direction === 'down') selectCell(Math.min(paginatedData.length - 1, rowIndex + 1), colIndex);
+    else selectCell(rowIndex, Math.max(0, Math.min(columns.length - 1, colIndex + (direction === 'right' ? 1 : -1))));
+  };
+
+  /** The selected cell's keys, while no editor is open (an open editor owns every key). */
+  const handleSelectFirstKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => {
+    if (isImeKey(e) || editingCell) return;
+    // The cell or its catcher, not a widget inside it: a record link keeps Enter.
+    const target = e.target as HTMLElement;
+    const onCatcher = target.matches('[data-slot="cell-type-catcher"]');
+    if (target !== e.currentTarget && !onCatcher) return;
+    const row = paginatedData[rowIndex];
+    const col = columns[colIndex];
+    if (row === undefined || col === undefined) return;
+    const bare = !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (e.key === 'Escape') {
+      if (cellNotice) setCellNotice(null);
+      else if (selectedPos) {
+        e.preventDefault();
+        focusGridCell(rowIndex, colIndex);
+        setSelectedCell(null);
+      }
+      return;
+    }
+    setCellNotice(null);
+    const next = navigationTarget(e, rowIndex, colIndex);
+    if (next) {
+      e.preventDefault();
+      selectCell(next.rowIndex, next.colIndex);
+      return;
+    }
+    if (e.key === 'Tab' && bare) {
+      // Along the row, then on to the next one; at either end of the page
+      // Tab leaves the grid, as it does any widget.
+      const at = rowIndex * columns.length + colIndex + (e.shiftKey ? -1 : 1);
+      if (at < 0 || at >= paginatedData.length * columns.length) return;
+      e.preventDefault();
+      selectCell(Math.floor(at / columns.length), at % columns.length);
+      return;
+    }
+    if (!onCatcher) {
+      // Focus on the bare cell (after Esc): the first key selects it again.
+      if (bare && (isPrintableKey(e) || e.key === 'Enter' || e.key === 'F2')) {
+        e.preventDefault();
+        selectCell(rowIndex, colIndex);
+      }
+      return;
+    }
+    if ((e.key === 'Enter' || e.key === 'F2') && bare && !e.shiftKey) {
+      e.preventDefault();
+      attemptEdit(rowIndex, colIndex);
+    } else if (e.key === ' ' && bare) {
+      e.preventDefault();
+      if (togglesCell(row, col)) toggleCell(rowIndex, colIndex);
+      else schema.onRowClick?.(row, e);
+    } else if ((e.key === 'Backspace' || e.key === 'Delete') && bare) {
+      // An empty editor; nothing is written until it commits.
+      e.preventDefault();
+      attemptEdit(rowIndex, colIndex, { value: '' });
+    }
+    // A printable key lands in the catcher, which reads it (`typeIntoCell`).
+  };
+
   const handleCellKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number, columnKey: string) => {
-    if (keyboardNavigation) {
+    if (selectFirst) {
+      if (!isCommandLetter(e, 'c')) {
+        handleSelectFirstKeyDown(e, rowIndex, colIndex);
+        return;
+      }
+    } else if (keyboardNavigation) {
       // An edit in this cell that the key now bubbling through it just ended
       // (Enter committed it, Escape cancelled it): `editingCellRef` is cleared
       // synchronously by the editor's own handler, while `editingCell` is still
@@ -3110,8 +3355,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       }
     }
 
-    // Copy cell value with Ctrl+C / Cmd+C
-    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !editingCell) {
+    // Copy cell value with Ctrl+C / Cmd+C, CapsLock on or off.
+    if (isCommandLetter(e, 'c') && !editingCell) {
       // objectui#13188 — text the viewer selected in this cell is what they
       // copy: the browser's own copy runs. A masked cell never gets here
       // with its default intact — the mask rule below goes first.
@@ -3137,7 +3382,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       return;
     }
 
-    if (!editable || !rowMayEdit(paginatedData[rowIndex])) return;
+    if (selectFirst || !editable || !rowMayEdit(paginatedData[rowIndex])) return;
     
     const column = columns.find(col => col.accessorKey === columnKey);
     if (column?.editable === false) return;
@@ -3149,24 +3394,51 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   };
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+    // A key the input method owns picks or moves a candidate (objectstack#35687).
+    if (isImeKey(e)) return;
+    if (e.key === 'Enter' || (selectFirst && e.key === 'Tab')) {
       e.preventDefault();
       // Already saving here; suppress the redundant save the ensuing blur triggers.
       skipBlurSaveRef.current = true;
       saveEdit(true);
+      // The select-first model: Enter saves and moves down, Tab right, Shift+Tab left.
+      if (selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
     } else if (e.key === 'Escape') {
       e.preventDefault();
+      focusSelectionRef.current = selectFirst;
       cancelEdit();
     }
   };
 
-  // Auto-focus on edit input when entering edit mode
+  // Auto-focus on edit input when entering edit mode. The select-first model
+  // keeps what was typed or what the cell held, caret after it.
   useEffect(() => {
     if (editingCell && editInputRef.current) {
       editInputRef.current.focus();
-      editInputRef.current.select();
+      if (selectFirst) caretToEnd(editInputRef.current);
+      else editInputRef.current.select();
     }
   }, [editingCell]);
+
+  // …and an injected editor takes the caret the same way (objectstack#35687):
+  // its first control, once it has drawn one (a lazily loaded picker draws it
+  // a few frames late). Before this the caret stayed on the cell.
+  useEffect(() => {
+    if (!selectFirst || !editingCell) return undefined;
+    let frame = 0;
+    let frames = 0;
+    const place = () => {
+      const host = injectedEditorElRef.current;
+      if (!host || host.contains(document.activeElement)) return;
+      const control = firstEditorControl(host);
+      if (control) {
+        control.focus({ preventScroll: true });
+        caretToEnd(control);
+      } else if (++frames < 30) frame = requestAnimationFrame(place);
+    };
+    place();
+    return () => cancelAnimationFrame(frame);
+  }, [editingCell, selectFirst]);
 
   // Commit a host-injected widget editor on click-outside (objectui#2321).
   //
@@ -3327,6 +3599,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     (Array.isArray(schema.rowActionDefs) && schema.rowActionDefs.length > 0 && schema.onRowActionDef)
   );
   const rowActionsColumnIsEditOnly = editable && !!(schema.onRowSave || schema.onBatchSave) && !rowMenuDeclared;
+  // objectstack#35684, until objectstack#35685 retires it: in the select-first
+  // model the edit-only column shows only while a row has pending changes, so a
+  // list at rest ends on its last data column (objectstack#35554).
+  const drawRowActionsColumn = rowActions && !(selectFirst && rowActionsColumnIsEditOnly && !hasPendingChanges);
 
   /**
    * objectstack#28434 — the items ONE row's context menu opens with, or `null`
@@ -3413,7 +3689,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   // The span of a row drawn as one cell across the table: the leading utility
   // cell, every column, the row-actions cell and the add-column cell.
-  const fullRowColSpan = columns.length + leadingCellCount + (rowActions ? 1 : 0) + (addColumnEnabled ? 1 : 0);
+  const fullRowColSpan = columns.length + leadingCellCount + (drawRowActionsColumn ? 1 : 0) + (addColumnEnabled ? 1 : 0);
 
   // What the body draws, in order. Flat: the data rows. Grouped (objectui#12620):
   // per group, its band, its data rows and its optional footer. A data row
@@ -3736,7 +4012,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               {/* The label sits in the same 13px muted span every data
                   column's header label uses (objectui#11816): a bare string
                   here took the cell's larger default type. */}
-              {rowActions && (rowActionsColumnIsEditOnly ? (
+              {drawRowActionsColumn && (rowActionsColumnIsEditOnly ? (
                 <TableHead
                   className="w-24 text-right bg-background"
                   title={t('table.edit')}
@@ -3940,7 +4216,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // The open record's row, frozen cells included.
                         "data-[active-record]:bg-primary/10 data-[active-record]:[--os-row-tint:color-mix(in_oklab,var(--color-primary)_10%,transparent)]",
                         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset",
-                        schema.onRowClick && "cursor-pointer",
+                        !selectFirst && schema.onRowClick && "cursor-pointer",
                         rowHasChanges && !rowErrored && "bg-amber-50 dark:bg-amber-950/20",
                         rowErrored && "bg-destructive/10 dark:bg-destructive/15 ring-1 ring-inset ring-destructive/40",
                         rowClassName && rowClassName(row, rowIndex)
@@ -4152,6 +4428,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         // the host's per-row verdict refuses (objectstack#27365).
                         const isEditable = editable && col.editable !== false && !col.masked && rowMayEdit(row);
                         const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;
+                        // objectstack#35684 — the selected cell of the select-first model.
+                        const isSelectedCell = selectFirst && selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex;
                         const frozenOffset = isFrozen
                           ? measuredStickyLefts?.[leadingCellCount + colIndex]
                             ?? columns.slice(0, colIndex).reduce((sum, c, i) => {
@@ -4175,7 +4453,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // content (row-action buttons); every other column
                               // keeps overflow-hidden for truncation.
                               isFit ? 'whitespace-nowrap' : 'overflow-hidden',
-                              isEditable && !isEditing && "cursor-text hover:bg-muted/50",
+                              !selectFirst && isEditable && !isEditing && "cursor-text hover:bg-muted/50",
+                              // A ring that moves no layout (outline, not border).
+                              isSelectedCell && "outline-2 -outline-offset-2 outline-primary",
+                              selectFirst && !isFrozen && "relative",
                               hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
@@ -4194,7 +4475,23 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // where its column does.
                               ...(pinnedRightOffset ? { right: pinnedRightOffset } : {}),
                             }}
+                            onMouseDown={selectFirst ? (e) => {
+                              // The double-click is the edit gesture here, so its second
+                              // press does not select the word under the pointer.
+                              if (e.detail > 1 && !isEditing && !isCellWidgetTarget(e.target, e.currentTarget)) e.preventDefault();
+                            } : undefined}
                             onDoubleClick={(e) => {
+                              if (selectFirst) {
+                                // objectstack#35684 — a double-click on the cell (not on a
+                                // link it draws) edits; a two-state cell already flipped on
+                                // the second click. A touch never edits in place. A word the
+                                // browser selected on the way is not a text selection.
+                                if (isEditing || isTouchPress(e) || isCellWidgetTarget(e.target, e.currentTarget)) return;
+                                window.getSelection?.()?.removeAllRanges();
+                                e.stopPropagation();
+                                if (!togglesCell(row, col)) attemptEdit(rowIndex, colIndex);
+                                return;
+                              }
                               // Entering edit mode must NOT also fire the row's
                               // onRowClick (record-detail drawer). The row heuristic
                               // can't see the editor yet (the <input> only renders
@@ -4206,6 +4503,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               }
                             }}
                             onClick={(e) => {
+                              if (selectFirst) {
+                                // objectstack#35684 — a click SELECTS the cell; it neither
+                                // edits nor opens the record. A link or button the cell
+                                // draws keeps its own click, and a touch tap still opens
+                                // the record through the row.
+                                if (isTouchPress(e) || isCellWidgetTarget(e.target, e.currentTarget)) return;
+                                e.stopPropagation();
+                                if (isEditing) return;
+                                const wasSelected = isSelectedCell;
+                                selectCell(rowIndex, colIndex);
+                                if (wasSelected && togglesCell(row, col)) toggleCell(rowIndex, colIndex);
+                                return;
+                              }
                               if (isEditable && singleClickEdit && !hasTextSelectionIn(e.currentTarget)) {
                                 e.stopPropagation();
                                 startEdit(row, col.accessorKey);
@@ -4217,16 +4527,61 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             // `handleCellKeyDown`); every cell its own stop when
                             // it is off, exactly as before. The address and the
                             // focus tracking exist only in the first case.
-                            tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex ? 0 : -1) : 0}
+                            tabIndex={keyboardNavigation ? (rowIndex === rovingRowIndex && colIndex === rovingColIndex && !isSelectedCell ? 0 : -1) : 0}
                             data-grid-cell={keyboardNavigation ? `${rowIndex}:${colIndex}` : undefined}
                             onFocus={keyboardNavigation ? () => rove(rowIndex, colIndex) : undefined}
                             aria-invalid={cellError !== undefined || undefined}
                             // objectstack#28434 — a cell in edit mode keeps the
                             // browser's context menu (`keepsBrowserContextMenu`).
                             data-editing-cell={isEditing ? '' : undefined}
+                            data-selected-cell={isSelectedCell ? '' : undefined}
+                            aria-selected={selectFirst ? isSelectedCell : undefined}
                             data-cell-error={cellError}
                             title={cellError}
                           >
+                            {isSelectedCell && !isEditing && (
+                              <input
+                                data-slot="cell-type-catcher"
+                                // The selected cell's focus (see `selectedCell`).
+                                type="text"
+                                defaultValue=""
+                                autoComplete="off"
+                                spellCheck={false}
+                                aria-label={typeof col.header === 'string' ? col.header : col.accessorKey}
+                                className={cn(
+                                  "absolute inset-0 h-full w-full min-w-0 border-0 bg-transparent px-3 py-0 text-transparent caret-transparent outline-none pointer-events-none",
+                                  // An open composition is drawn over the cell, so its
+                                  // text shows where it is typed.
+                                  composing && "z-20 bg-background text-foreground caret-current",
+                                )}
+                                onCompositionStart={() => {
+                                  composingRef.current = true;
+                                  setComposing(true);
+                                  setCellNotice(null);
+                                }}
+                                onCompositionEnd={(e) => {
+                                  composingRef.current = false;
+                                  setComposing(false);
+                                  const text = e.currentTarget.value;
+                                  e.currentTarget.value = '';
+                                  typeIntoCell(rowIndex, colIndex, text);
+                                }}
+                                onChange={(e) => {
+                                  if (composingRef.current || (e.nativeEvent as InputEvent).isComposing) return;
+                                  const text = e.currentTarget.value;
+                                  e.currentTarget.value = '';
+                                  typeIntoCell(rowIndex, colIndex, text);
+                                }}
+                                onPaste={(e) => {
+                                  const text = e.clipboardData?.getData('text/plain') ?? '';
+                                  e.preventDefault();
+                                  if (text !== '') pasteIntoCell(rowIndex, colIndex, text);
+                                }}
+                              />
+                            )}
+                            {cellNotice?.rowIndex === rowIndex && cellNotice.colIndex === colIndex && (
+                              <CellNotice text={cellNotice.text} onDismiss={() => setCellNotice(null)} />
+                            )}
                             {isEditing ? (
                               (() => {
                                 // Type-aware inline editor. `col.type` is forwarded
@@ -4290,7 +4645,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     // textarea it's left alone so Enter opens the
                                     // dropdown / inserts a newline as usual.
                                     //
-                                    // Tab is deliberately NOT in that list, and
+                                    // Outside the select-first model, Tab is
+                                    // deliberately NOT in that list, and
                                     // tabbing out therefore does not leave edit
                                     // mode — measured, `64d937c53`. It costs
                                     // nothing: the widget has already staged
@@ -4306,14 +4662,25 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                         className="w-full"
                                         onKeyDown={(e) => {
                                           if (!e.currentTarget.contains(e.target as Node)) return;
-                                          if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+                                          // The input method's keys (objectstack#35687).
+                                          if (isImeKey(e)) return;
+                                          const tag = (e.target as HTMLElement).tagName;
+                                          // The select-first model (objectstack#35687): in a
+                                          // multi-line editor Ctrl/Cmd+Enter commits, and Tab
+                                          // commits and moves, superseding the Tab-stays rule.
+                                          const commits = (e.key === 'Enter' && (tag === 'INPUT'
+                                            || (selectFirst && tag === 'TEXTAREA' && (e.ctrlKey || e.metaKey))))
+                                            || (selectFirst && e.key === 'Tab');
+                                          if (commits) {
                                             e.preventDefault();
                                             // A commit-on-blur widget stages
                                             // on this blur (objectui#12664).
                                             flushInjectedEditor();
                                             saveEdit(true);
+                                            if (selectFirst) moveSelection(e.key === 'Enter' ? 'down' : e.shiftKey ? 'left' : 'right');
                                           } else if (e.key === 'Escape') {
                                             e.preventDefault();
+                                            focusSelectionRef.current = selectFirst;
                                             exitEdit(true);
                                           }
                                         }}
@@ -4459,7 +4826,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                           </TableCell>
                         );
                       })}
-                      {rowActions && (
+                      {drawRowActionsColumn && (
                         <TableCell className={cn("text-right", cellClassName)}>
                           <div className="flex items-center justify-end gap-1">
                             {rowHasChanges && (schema.onRowSave || schema.onBatchSave) ? (
@@ -4567,7 +4934,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                     </TableCell>
                   );
                 })}
-                {rowActions && <TableCell className="w-24 h-8 py-0 bg-background" />}
+                {drawRowActionsColumn && <TableCell className="w-24 h-8 py-0 bg-background" />}
                 {addColumnEnabled && <TableCell aria-hidden className="w-10 h-8 py-0" />}
               </TableRow>
             </tfoot>

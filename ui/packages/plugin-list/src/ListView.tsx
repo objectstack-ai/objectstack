@@ -9,7 +9,7 @@
 import * as React from 'react';
 import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuilder, SortBuilder, NavigationOverlay, GroupingEditor, RefreshIndicator, DataErrorState, resolveIcon, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import type { SortItem } from '@object-ui/components';
-import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
+import { Search, Funnel, ArrowUpDown, X, EyeOff, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
@@ -380,11 +380,9 @@ export interface ListViewProps {
    */
   onAddedFieldsChange?: (added: string[]) => void;
   /**
-   * Called when the user toggles inline record editing. Wiring it is also what
-   * offers the wide toolbar's toggle. The toggle switches the grid's edit MODE,
-   * which `ListView` keeps in its own state. A host should not persist it into
-   * the view's `inlineEdit`: that key is the author's permission, and it folds
-   * into `userActions.editInline` (objectui#5144).
+   * @deprecated Never called since objectstack#35684: a list has no inline-edit
+   * mode and no toggle. Its grid is editable wherever the reader may edit and
+   * the view does not declare `userActions.editInline: false`.
    */
   onInlineEditChange?: (next: boolean) => void;
   /** Called when the user resizes/reorders columns in the underlying grid. */
@@ -564,10 +562,11 @@ export interface ListViewProps {
    * search (the Filter panel's finished conditions, the user-filter chips, the
    * "In a queue" toggle; the view's declared `filter` is never one); `search`
    * is a term the list applies. The Display-only settings (`layout`,
-   * `rowColor`, `inlineEdit`) are those the Display control
-   * counts. The gallery card size is not a part: it is kept per object, not
-   * per view. `columns` is never reported here, since the column layout is
-   * the host's own stored state; it is in the type so a host can add it.
+   * `rowColor`) are those the Display control counts. The gallery card size
+   * is not a part: it is kept per object, not per view. `columns` is never
+   * reported here, since the column layout is the host's own stored state; it
+   * is in the type so a host can add it. Nor is `inlineEdit` since
+   * objectstack#35684, which retired the mode it named.
    *
    * When it is passed the host owns the reset, so the Display control draws
    * no "Reset to view default" of its own. The sort popover's reset and the
@@ -2110,7 +2109,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onHiddenFieldsChange,
   addedFields,
   onAddedFieldsChange,
-  onInlineEditChange,
   onColumnStateChange,
   onRowClick,
   showViewSwitcher: showViewSwitcherProp,
@@ -3027,25 +3025,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
   const [showHideFields, setShowHideFields] = React.useState(false);
 
-  // Inline-edit MODE: session state, seeded from the view's `inlineEdit` on each
-  // load (objectui#5144, ruling E). The toolbar toggle flips it here and reports
-  // it through `onInlineEditChange`. The console writes nothing back, because
-  // `inlineEdit` is the author's permission key, so the mode is not remembered
-  // across loads. Whether the toggle is offered at all is `inlineEditOffered`
-  // below.
-  const [inlineEdit, setInlineEdit] = React.useState<boolean>(() => !!schema.inlineEdit);
-  React.useEffect(() => {
-    setInlineEdit(!!schema.inlineEdit);
-  }, [schema.inlineEdit]);
-  // Setter that also notifies the host.
-  const updateInlineEdit = React.useCallback(
-    (next: boolean) => {
-      setInlineEdit(next);
-      onInlineEditChange?.(next);
-    },
-    [onInlineEditChange]
-  );
-
 
   // Export State
   const [showExport, setShowExport] = React.useState(false);
@@ -3220,70 +3199,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
 
   /**
-   * [#4647] Is the grid toolbar's inline-edit toggle offered at all?
+   * Is the grid editable in place? (objectstack#35684: there is no mode and no
+   * toggle; the grid IS editable wherever this says so, and a click selects a
+   * cell rather than editing it.)
    *
-   * Two gaps closed together, because both end at this one render condition.
+   * [#4647] The permission gate: the object's resolved affordance — ADR-0103
+   * bucket ∧ `userActions.edit` ∧ the server's effective API operations
+   * (objectstack#3391) — AND the current principal's grant (#4096), the
+   * `listInlineEdit` row of the affordance-to-grant map, the same question the
+   * record body's in-place editing asks. `can()` answers `true` with no
+   * `PermissionProvider`, so standalone embeds and the Studio designer keep
+   * their behavior.
    *
-   * ## Gap 1 — the permission gate
-   *
-   * The toggle used to render on the sole conditions "grid view", "the host
-   * wired `onInlineEditChange`" and "not the compact toolbar" — and every host
-   * passes that callback unconditionally. It was the ONE affordance on this
-   * toolbar with no permission check: New and Import are hidden for an account
-   * without the grant, the bulk-delete entry directly above ANDs
-   * `can(obj, 'delete')`, and inline edit alone stayed available to a read-only
-   * principal, who could flip it, edit cells and press "Save all" to earn a
-   * server 403. No data ever landed (the server gate is solid), but the UI
-   * walked the user through a round-trip guaranteed to fail.
-   *
-   * The gate is `permittedBulkActions`' verbatim, with the operation moved from
-   * `delete` to `update`: the object's resolved affordance — ADR-0103 bucket ∧
-   * `userActions.edit` ∧ the server's effective API operations (objectstack#3391) — AND
-   * the CURRENT PRINCIPAL's grant (#4096). The first half is spelled
-   * `isObjectInlineEditable`, which IS
-   * `resolveEffectiveCrudAffordances(...).edit` under the name that says what
-   * this surface is asking; it is the same helper the record body's
-   * double-click/pencil affordances read, so a list and a record page cannot
-   * disagree about whether an object's rows are editable in place.
-   *
-   * `can()` answers `true` with no `PermissionProvider`, so standalone embeds
-   * and the Studio designer keep today's behavior — the same fail-open the
-   * bulk gate above relies on.
-   *
-   * ## Gap 2 — the declared `userActions.editInline`, with the spec's default
-   *
-   * `ListViewSchema.userActions.editInline` defaults to `true`: a list view is
-   * editable in place by default, under the gate above, and
-   * `editInline: false` is the opt-out (the maintainer's v18 ruling,
-   * objectstack#22605, which flipped the earlier `.default(false)`). It is read
-   * here with that default (`!== false`), so a view that declares nothing is
-   * offered inline editing wherever the gate admits the principal. The ADR-0047
-   * interface page reads the same default.
-   *
-   * A view's `inlineEdit` reaches this read through the fold, not around it
-   * (objectui#5144). `normalizeListViewSchema` folds a boolean `inlineEdit`
-   * into `userActions.editInline` when the view declares no `editInline` of its
-   * own. So:
-   *  - a view with `inlineEdit: true` offers the toggle;
-   *  - a view with `inlineEdit: false` reads off;
-   *  - an explicit `editInline` wins over `inlineEdit`, either way;
-   *  - a view with neither key offers the toggle and opens out of edit mode.
-   *
-   * Both keys are the author's permission. This gate decides whether the toggle
-   * is offered. Whether the grid is in edit mode is the `inlineEdit` state above:
-   * session state, seeded from the view's `inlineEdit` on each load, and flipped
-   * by the toggle. The console no longer persists the toggle into the view
-   * (objectui#5144, ruling E). That write made the toggle one-way, because
-   * switching it off stored `inlineEdit: false`, which this gate then read as
-   * "not offered". A view with `editInline: true` and no `inlineEdit` offers the
-   * toggle and opens out of edit mode, the same as a view with neither key.
-   *
-   * ⚠️ A list that is read-only by nature declares
-   * `userActions.editInline: false`. Two costs are recorded with the
-   * objectui#5144 ruling. The edit mode is not remembered across loads. A view
-   * or overlay that already stores `inlineEdit: false`, written by the old
-   * toggle, still reads off; that is existing data, it is not migrated, and
-   * declaring `userActions.editInline: true` brings the toggle back.
+   * The view's opt-out: `ListViewSchema.userActions.editInline` defaults to
+   * `true` (objectstack#22605), read here with that default (`!== false`), and
+   * `editInline: false` turns editing off for the view. A view's boolean
+   * `inlineEdit` reaches this read through the fold (objectui#5144):
+   * `normalizeListViewSchema` folds it into `userActions.editInline` when the
+   * view declares no `editInline` of its own, so a view or overlay that stores
+   * `inlineEdit: false` (written by the console's old toggle) reads off, and
+   * `userActions.editInline: true` turns it back on.
    */
   const inlineEditOffered = React.useMemo(() => {
     if ((schema.userActions as Record<string, boolean | undefined> | undefined)?.editInline === false) {
@@ -3298,10 +3233,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * Whether the rows this list fetches must carry their concurrency token
    * (objectui#12292): exactly when the grid it hands them to is editable in
    * place — the same expression as that grid's `editable` below. The grid's
-   * save sends each row's `updated_at` as `If-Match`, so the fetch projects it;
-   * turning the mode on re-reads the rows with it.
+   * save sends each row's `updated_at` as `If-Match`, so the fetch projects it.
+   * Every view of the list asks for it, not the grid alone, so a switch
+   * between the grid and another view re-reads nothing (objectui#7394).
    */
-  const rowsCarryConcurrencyToken = inlineEdit && inlineEditOffered;
+  const rowsCarryConcurrencyToken = inlineEditOffered;
 
   // Normalize exportOptions: support both ObjectUI object format and spec string[] format
   const resolvedExportOptions = React.useMemo(() => {
@@ -5181,14 +5117,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             ? { columns: effectiveFields }
             : { fields: undefined, columns: undefined }),
           ...(schema.conditionalFormatting ? { conditionalFormatting: schema.conditionalFormatting } : {}),
-          // [#4647] The MODE, not just its toggle. Gating only the toggle would
-          // leave the issue's own consequence reachable by a different door: a
-          // stored view carrying `inlineEdit: true` (authored, or left by the
-          // console's old toggle) drops a read-only principal straight into editable cells
-          // with no toggle to press, and "Save all" still earns the 403. The
-          // toggle can only ever be the cheapest entrance to this state; the
-          // state is what needs the grant.
-          editable: inlineEdit && inlineEditOffered,
+          // [#4647] Editable exactly where the reader may edit and the view
+          // does not opt out (`inlineEditOffered`); objectstack#35684 retired
+          // the mode that used to gate this as well.
+          editable: inlineEditOffered,
           ...(schema.wrapHeaders != null ? { wrapHeaders: schema.wrapHeaders } : {}),
           ...(schema.resizable != null ? { resizable: schema.resizable } : {}),
           ...(schema.selection ? { selection: schema.selection } : {}),
@@ -5757,7 +5689,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -6515,7 +6447,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     density: toolbarFlags.showDensity && (currentView === 'gallery'
       ? galleryCardSize !== authoredGalleryCardSize
       : density.mode !== viewDefaultDensity),
-    inlineEdit: currentView === 'grid' && inlineEditOffered && inlineEdit !== !!schema.inlineEdit,
   };
   const displayChangedCount = Object.values(displayDeviation).filter(Boolean).length;
 
@@ -6550,7 +6481,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   if (displayDeviation.density && currentView !== 'gallery') personalizationParts.push('density');
   if (displayDeviation.layout) personalizationParts.push('layout');
   if (displayDeviation.color) personalizationParts.push('rowColor');
-  if (displayDeviation.inlineEdit) personalizationParts.push('inlineEdit');
   const personalizationKey = personalizationParts.join(',');
   const onPersonalizationChangeRef = React.useRef(onPersonalizationChange);
   React.useEffect(() => {
@@ -6589,7 +6519,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         density.setMode(viewDefaultDensity);
       }
     }
-    if (displayDeviation.inlineEdit) updateInlineEdit(!!schema.inlineEdit);
     if (onRestoreViewDefaults && restoredParts.length > 0) onRestoreViewDefaults(restoredParts);
   };
 
@@ -7124,30 +7053,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               <div className="h-4 w-px bg-border/60 mx-0.5" />
             </>
           )}
-          {/* Inline edit — toggle record editing for this (grid) view, for the
-              session (objectui#5144, ruling E). Reported via onInlineEditChange.
-              [#4647] `inlineEditOffered` carries BOTH the `can(obj,'update')`
-              permission gate this affordance was missing and the declared
-              `userActions.editInline` switch — see its definition above. */}
-          {currentView === 'grid' && onInlineEditChange && !toolbarFlags.compactToolbar && inlineEditOffered && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => updateInlineEdit(!inlineEdit)}
-              // A toggle button announces its state (objectui#11816): the
-              // `text-primary` tint below was the mode's only signal.
-              aria-pressed={inlineEdit}
-              className={cn(
-                "hidden sm:inline-flex h-7 px-2 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                inlineEdit && "text-primary"
-              )}
-              title={t('list.inlineEditLabel', { defaultValue: 'Edit records inline (click a cell to edit)' })}
-              data-testid="toolbar-inline-edit-toggle"
-            >
-              <Pencil className="h-3.5 w-3.5 mr-1.5" />
-              <span className="hidden sm:inline">{t('list.inlineEditShort', { defaultValue: 'Edit inline' })}</span>
-            </Button>
-          )}
           {/* Hide Fields — hidden on mobile (collapsed into ViewSettingsPopover) */}
           {toolbarFlags.showHideFields && !toolbarFlags.compactToolbar && (
           <Popover open={showHideFields} onOpenChange={setShowHideFields}>
@@ -7543,15 +7448,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               updateHiddenFields={updateListedFields}
               addableFields={addableFields}
               onAddField={addListedField}
-              /* [#4647] The Display panel's inline-edit entry — the SECOND
-                 render site for this affordance, and the one with no gate at
-                 all: it never even required `onInlineEditChange`. Same
-                 `inlineEditOffered` verdict as the wide toolbar's toggle, or a
-                 read-only principal would keep the entry here after losing it
-                 there. */
-              showInlineEdit={currentView === 'grid' && inlineEditOffered}
-              inlineEdit={inlineEdit}
-              setInlineEdit={updateInlineEdit}
               changedCount={displayChangedCount}
               // objectstack#35551 — the view's name and its rename head the
               // menu; the field order is the grid's column order, the state
@@ -8247,6 +8143,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectstack#26681 — the host's node beside each row's record
               // link, on the grid's host channel (a React prop, never a node key).
               ? { recordLinkAdornment }
+              : {})}
+            {...(viewComponentSchema.type === 'object-grid'
+              // objectstack#35684 — the list page's grid selects a cell on a
+              // click and edits on double-click, Enter or typing, on the
+              // grid's host channel (a React prop, never a node key).
+              ? { cellSelection: true }
               : {})}
             {...(ROW_OPENS_RECORD_VIEW_TYPES.has(viewComponentSchema.type) && rowOpensRecord !== undefined
               // objectstack#33317, objectstack#33548 — whether the host's row

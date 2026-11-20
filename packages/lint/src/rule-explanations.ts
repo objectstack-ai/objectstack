@@ -2734,8 +2734,9 @@ const DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'Before those refusals the group key reached the driver as a column that does not exist, or an ' +
       'engine that aggregates in memory put every row into one null group while the answer looked served.',
     'Denormalise the value: make it a stored field of its own on the object, of the formula\'s ' +
-      '`returnType` (`number`, `text`, `boolean`, `date` or `currency`) and carrying the same `expression`, ' +
-      'which the engine computes and stores on every write, and point the dimension at that stored field. ' +
+      '`returnType` (`number`, `text`, `boolean`, `date`, `currency` or `percent`) and carrying the same ' +
+      '`expression`, which the engine computes and stores on every write, and point the dimension at that ' +
+      'stored field. ' +
       'This rule makes the same ' +
       'refusal where the author is standing. A dotted path is judged on the leaf\'s own declaration.',
     ANALYTICS_MEMBER_WALK,
