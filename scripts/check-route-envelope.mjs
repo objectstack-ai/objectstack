@@ -299,6 +299,14 @@ const MODULES = {
   // itself. Declared in the same PR that created the module.
   'packages/services/service-messaging/src/my-preferences-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // [#34730] The Slack link doors (`/api/v1/messaging/me/slack-link` and its
+  // proposal / confirm, `/api/v1/messaging/slack/account`,
+  // `/api/v1/messaging/slack/links`), mounted by `MessagingServicePlugin`
+  // beside the preference options door. Every body they answer is written by
+  // the shared pair (`sendOk` / `sendError` / `sendServerFault`), so the module
+  // builds none itself. Declared in the same PR that created the module.
+  'packages/services/service-messaging/src/slack-link-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // [#30209] The shareable-objects door (`GET /api/v1/sharing/shareable-objects`),
   // mounted by `SharingServicePlugin` straight on `IHttpServer`. Every body it
   // answers is written by the shared pair (`sendOk` / `sendError` /
