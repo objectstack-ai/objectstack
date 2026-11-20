@@ -624,11 +624,14 @@ function foreignRealmComparandRefusalReason(field: string): string {
 }
 
 /**
- * Is `value` an object whose prototype chain ends one step up without this
- * realm's `Object.prototype`, and that is not a foreign plain object:
- * `Object.create(Object.create(null))`? It has no `toString` or `valueOf`, so
- * an ordering would throw on it, and it is refused under every operator, in a
- * sentence that names it as the converter does.
+ * Is `value` an object whose prototype is a `null`-prototype object, such as
+ * `Object.create(Object.create(null))`? Its chain never reaches
+ * `Object.prototype`, so it inherits no `toString` or `valueOf` from it (an
+ * ordering threw on it, unless its prototype defines one), and it is refused
+ * under every operator, in a sentence that names it as the converter does.
+ *
+ * The test alone also matches a plain object of ANOTHER realm: it relies on
+ * {@link objectValueRefusal} running {@link isForeignRealmPlainObject} first.
  */
 function isNullRootedObject(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value) || isPlainObject(value)) return false;
@@ -734,8 +737,8 @@ function objectValueRefusal(field: string, value: unknown, byValue: boolean): st
  *
  * And, only under an operator that compares by equality, membership or text
  * (`byValue`), a class instance ({@link classInstanceComparandRefusalReason}).
- * Under an ordering it is data compared through its `valueOf` when that returns
- * a primitive, and otherwise as its text, so it is not refused there. A `Date` and a `{ $field }` reference are still compared.
+ * Under an ordering this builder does not refuse it. It refuses neither a
+ * `Date` nor a `{ $field }` reference.
  */
 function objectComparandRefusal(
   field: string,

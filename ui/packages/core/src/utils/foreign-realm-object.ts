@@ -31,8 +31,9 @@
  * must never itself throw (a revoked `Proxy` throws on `getPrototypeOf`).
  */
 export function isForeignRealmPlainObject(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (!value || typeof value !== 'object') return false;
   try {
+    if (Array.isArray(value)) return false;
     const proto = Object.getPrototypeOf(value) as { constructor?: { name?: unknown } } | null;
     if (proto === null || proto === Object.prototype) return false;
     if (Object.getPrototypeOf(proto) !== null) return false;
