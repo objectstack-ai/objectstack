@@ -391,11 +391,17 @@ export interface ListViewProps {
    * objectstack#35702 — the grid's footer calculation picked by the reader
    * (`null` = None). Wired only for a reader who may change the open view;
    * absent ⇒ the footer draws its figures and offers no menu. The host saves
-   * the pick as the column's `summary` on the view; `drawnFields` are the
-   * field columns drawn, for a view that declares no `columns`. A HOST prop,
-   * never a schema key.
+   * the pick as the column's `summary` on the view and resolves whether it
+   * did; on `false` the grid takes the pick back. A HOST prop, never a schema
+   * key.
    */
-  onColumnSummaryPick?: (field: string, summary: ColumnSummary | null, drawnFields: readonly string[]) => void;
+  onColumnSummaryPick?: (field: string, summary: ColumnSummary | null) => void | boolean | Promise<void | boolean>;
+  /**
+   * objectstack#35702 — the fields whose calculation the host can save (the
+   * columns the open view itself declares); the menu is offered on those
+   * only. Absent ⇒ every field column. A HOST prop, never a schema key.
+   */
+  columnSummaryPickFields?: readonly string[];
   /**
    * Callback when a row/item is clicked (overrides NavigationConfig).
    *
@@ -2120,6 +2126,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onAddedFieldsChange,
   onColumnStateChange,
   onColumnSummaryPick,
+  columnSummaryPickFields,
   onRowClick,
   showViewSwitcher: showViewSwitcherProp,
   userFilterSelections,
@@ -2154,6 +2161,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const { t } = useListViewTranslation();
   // objectstack#35702 — the grid's footer row leads with the list's own count wording.
   const recordCountLead = React.useCallback((count: number) => t('list.recordCount', { count }), [t]);
+  // objectstack#35702 — keyed on content, never the host array's identity.
+  const columnSummaryPickKey = columnSummaryPickFields ? columnSummaryPickFields.join('\n') : undefined;
   const { fieldLabel: resolveFieldLabel, actionLabel: resolveActionLabel, objectLabel: resolveObjectLabel } = useListFieldLabel();
   const { translateOptions } = useSafeFieldLabel();
   // The audience's BCP-47 tag (tenant locale → UI language → `en`), used below
@@ -5154,7 +5163,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 residentSummaryRow: true,
                 summaryRowLead: recordCountLead,
                 onResidentSummaryRowChange: setGridDrawsCount,
-                ...(onColumnSummaryPick ? { onColumnSummaryPick } : {}),
+                ...(onColumnSummaryPick ? {
+                  onColumnSummaryPick,
+                  ...(columnSummaryPickKey !== undefined
+                    ? { summaryPickFields: columnSummaryPickKey.split('\n').filter(Boolean) }
+                    : {}),
+                } : {}),
               }
             : {}),
           ...(schema.wrapHeaders != null ? { wrapHeaders: schema.wrapHeaders } : {}),
@@ -5725,7 +5739,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged, compact, cappedWindow, onColumnSummaryPick, recordCountLead]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged, compact, cappedWindow, onColumnSummaryPick, columnSummaryPickKey, recordCountLead]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a

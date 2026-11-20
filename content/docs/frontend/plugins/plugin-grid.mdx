@@ -404,9 +404,11 @@ even when nothing is declared, led by the record count. With
 `onColumnSummaryPick` as well (wired only for a reader who may change the view),
 clicking a cell opens one menu of the calculations its field type allows, the
 current one ticked and None last; the grid draws the pick at once and the host
-saves it as the column's `summary`. The console's list saves it on a personal
-view at once, and on a shared view as a draft that others see once it is
-published.
+saves it as the column's `summary` (an answer of `false` takes the pick back).
+`summaryPickFields` limits the menu to the columns the host can save. The
+console's list offers it on the columns the view declares and saves only the
+calculation: on a personal view at once, and on a shared view as a draft that
+others see once it is published.
 
 ### Keyboard navigation
 

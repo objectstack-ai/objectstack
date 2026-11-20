@@ -365,13 +365,16 @@ the secondary text colour and the figure in the normal one (`Sum 1,234.00`).
 A grouped grid and the phone's card list draw no such row; the grid reports
 whether it drew one through `onResidentSummaryRowChange`.
 
-A host that also passes `onColumnSummaryPick(field, summary, drawnFields)`
+A host that also passes `onColumnSummaryPick(field, summary)`
 (wire it only for a reader who may change the view) turns each cell into a
 menu of the calculations the column's field type allows — `sum`/`avg` on
 numbers and amounts, `min`/`max` on numbers and dates (named Earliest and
 Latest on a date), the count family on any field, the current one ticked and
-None last. The grid draws a pick at once; the host saves it as the column's
-`summary` and hands the view back.
+None last. `summaryPickFields` limits the menu to the columns the host can
+save (the console passes the columns the view itself declares); the other cells
+draw their figure only. The grid draws a pick at once; the host saves it as the
+column's `summary` and hands the view back, or answers `false` (or a promise of
+it) when it did not, and the grid takes the pick back.
 
 A cell counts as empty when it is `null`, `undefined`, `""` or an empty array,
 so an unset multi-select or lookup reads as empty rather than as a filled `[]`.

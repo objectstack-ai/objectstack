@@ -136,14 +136,14 @@ describe('the resident footer row (objectstack#35702)', () => {
     expect(within(menu).getByTestId('summary-option-none')).toHaveTextContent('None');
     await user.click(within(menu).getByTestId('summary-option-sum'));
 
-    expect(onPick).toHaveBeenLastCalledWith('amount', 'sum', ['name', 'amount', 'due']);
+    expect(onPick).toHaveBeenLastCalledWith('amount', 'sum');
     await waitFor(() => expect(screen.getByTestId('summary-picker-amount')).toHaveTextContent('Sum 350'));
 
     await user.click(screen.getByTestId('summary-picker-amount'));
     const again = await screen.findByTestId('summary-menu-amount');
     expect(within(again).getByTestId('summary-option-sum').querySelector('svg')).toHaveClass('opacity-100');
     await user.click(within(again).getByTestId('summary-option-none'));
-    expect(onPick).toHaveBeenLastCalledWith('amount', null, ['name', 'amount', 'due']);
+    expect(onPick).toHaveBeenLastCalledWith('amount', null);
     await waitFor(() => expect(screen.getByTestId('summary-picker-amount')).not.toHaveTextContent('Sum'));
   });
 
@@ -158,5 +158,47 @@ describe('the resident footer row (objectstack#35702)', () => {
     expect(within(menu).queryByTestId('summary-option-sum')).toBeNull();
     await user.click(within(menu).getByTestId('summary-option-max'));
     await waitFor(() => expect(screen.getByTestId('summary-picker-due')).toHaveTextContent(/^Latest /));
+  });
+
+  // L1 7048239634: the menu only where the host can save the pick, and a pick
+  // the host did not save is taken back.
+  it('offers the menu only on the columns the host can save; the others draw their figure only', async () => {
+    renderGrid({ residentSummaryRow: true, onColumnSummaryPick: vi.fn(), summaryPickFields: ['amount'] }, [
+      { field: 'name', label: 'Name', summary: 'count_filled' },
+      { field: 'amount', label: 'Amount' },
+      { field: 'due', label: 'Due' },
+    ]);
+    await screen.findByTestId('data-table-summary-row');
+    expect(screen.getByTestId('summary-picker-amount')).toBeInTheDocument();
+    expect(screen.queryByTestId('summary-picker-due')).toBeNull();
+    expect(screen.queryByTestId('summary-picker-name')).toBeNull();
+    expect(screen.getByTestId('data-table-summary-name')).toHaveTextContent('Filled 2');
+  });
+
+  it.each([
+    ['answers false', () => false],
+    ['resolves false', async () => false],
+    ['rejects', async () => { throw new Error('refused'); }],
+  ])('takes a pick back when the host %s', async (_label, answer) => {
+    const user = userEvent.setup();
+    const onPick = vi.fn(answer);
+    renderGrid({ residentSummaryRow: true, onColumnSummaryPick: onPick });
+    await screen.findByTestId('data-table-summary-row');
+    await user.click(screen.getByTestId('summary-picker-amount'));
+    await user.click(within(await screen.findByTestId('summary-menu-amount')).getByTestId('summary-option-sum'));
+    expect(onPick).toHaveBeenLastCalledWith('amount', 'sum');
+    await waitFor(() => expect(screen.getByTestId('summary-picker-amount')).not.toHaveTextContent('Sum'));
+    expect(screen.getByTestId('summary-picker-hint-amount')).toHaveTextContent('Calculate');
+  });
+
+  it('keeps a pick the host saved', async () => {
+    const user = userEvent.setup();
+    renderGrid({ residentSummaryRow: true, onColumnSummaryPick: vi.fn(async () => true) });
+    await screen.findByTestId('data-table-summary-row');
+    await user.click(screen.getByTestId('summary-picker-amount'));
+    await user.click(within(await screen.findByTestId('summary-menu-amount')).getByTestId('summary-option-sum'));
+    await waitFor(() => expect(screen.getByTestId('summary-picker-amount')).toHaveTextContent('Sum 350'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId('summary-picker-amount')).toHaveTextContent('Sum 350');
   });
 });
