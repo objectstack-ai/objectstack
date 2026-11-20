@@ -283,6 +283,10 @@ export {
   useAttachUserStateAdapters,
 } from './context/index.js';
 export type { UserDataAdapter, UserStateKind } from './context/index.js';
+// objectstack#35881 — the person's last app and the phone breakpoint: the
+// console's `/` landing reads both on a phone.
+export { useLastApp } from './context/LastAppProvider.js';
+export { usePhoneViewport } from './hooks/usePhoneViewport.js';
 
 // Default page implementations (consumers can partial-override slots)
 export { AppContent as DefaultAppContent } from './console/AppContent.js';

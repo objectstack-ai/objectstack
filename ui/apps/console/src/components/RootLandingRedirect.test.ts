@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { resolveLandingPath, isAppListConclusive } from './RootLandingRedirect';
+import { resolveLandingPath, resolvePhoneLandingPath, isAppListConclusive } from './RootLandingRedirect';
 
 describe('resolveLandingPath', () => {
   it('routes to the App marked isDefault (isDefault now ROUTES, not just badges)', () => {
@@ -183,5 +183,48 @@ describe('isAppListConclusive — is this list an answer, or an unknown?', () =>
     // states "absent means always ready". Reading `undefined` as inconclusive
     // would hang every such consumer on the loading fallback forever.
     expect(isAppListConclusive(undefined)).toBe(true);
+  });
+});
+
+// objectstack#35881, ruling 7045309332 (「上次用的优先」): on a phone the app the
+// person used last wins; the declared default applies only when there is no
+// record yet. One function, one test per order.
+describe('resolvePhoneLandingPath — the last app first, then the desktop order', () => {
+  const APPS = [
+    { name: 'crm', _packageId: 'com.acme.crm' },
+    { name: 'cloud_control', isDefault: true },
+    { name: 'service' },
+  ];
+
+  it('the last-used app beats the declared default', () => {
+    expect(resolvePhoneLandingPath(APPS, 'service')).toBe('/apps/service');
+  });
+
+  it('the last-used app lands at its address segment (its package id when it has one)', () => {
+    expect(resolvePhoneLandingPath(APPS, 'crm')).toBe('/apps/com.acme.crm');
+  });
+
+  it('no record yet: the declared default', () => {
+    expect(resolvePhoneLandingPath(APPS, null)).toBe('/apps/cloud_control');
+    expect(resolvePhoneLandingPath(APPS, undefined)).toBe('/apps/cloud_control');
+  });
+
+  it('no record and no default: the single visible app, else /home', () => {
+    expect(resolvePhoneLandingPath([{ name: 'only' }], null)).toBe('/apps/only');
+    expect(resolvePhoneLandingPath([{ name: 'a' }, { name: 'b' }], null)).toBe('/home');
+  });
+
+  it('a last app that is gone, hidden or switched off is ignored', () => {
+    expect(resolvePhoneLandingPath(APPS, 'removed')).toBe('/apps/cloud_control');
+    expect(
+      resolvePhoneLandingPath([...APPS, { name: 'secret', hidden: true }], 'secret'),
+    ).toBe('/apps/cloud_control');
+    expect(
+      resolvePhoneLandingPath([...APPS, { name: 'off', active: false }], 'off'),
+    ).toBe('/apps/cloud_control');
+  });
+
+  it('CONTROL — the desktop resolver does not read the last app', () => {
+    expect(resolveLandingPath(APPS)).toBe('/apps/cloud_control');
   });
 });
