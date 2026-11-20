@@ -15,13 +15,14 @@
  *
  *   - `drawer`: two segments, Drawer | Full page — the split pane retired
  *     (objectstack#28915, 「默认改抽屉，分屏彻底退役，只留抽屉和整页」) — each
- *     writing the reader's preference through the host's setter, with the
- *     note that the choice is the reader's own;
+ *     writing the reader's preference through the host's setter; the note
+ *     that the choice is the reader's own retired with the Options menu
+ *     (objectstack#35551: no developer wording in the menu);
  *   - `page`: one read-only line — the declaration wins, nothing to choose;
  *   - `new_window` / `none`, or no `recordOpen` at all: no section.
  *
- * The note and the read-only line are read against the packs, not spelled
- * here: what is pinned is which line is drawn, not its wording. Rendered in
+ * The read-only line is read against the packs, not spelled here: what is
+ * pinned is which line is drawn, not its wording. Rendered in
  * zh-CN as well, the language the ruling was given in.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -51,6 +52,9 @@ function openDisplay(recordOpen: ViewSettingsRecordOpen | undefined, language = 
     </I18nProvider>,
   );
   fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+  // Open records lives on the Options menu's More level (objectstack#35551).
+  const more = screen.queryByTestId('options-row-more');
+  if (more) fireEvent.click(more);
 }
 
 const drawer = (preference: 'drawer' | 'page', setPreference = vi.fn()): ViewSettingsRecordOpen => ({
@@ -74,7 +78,7 @@ describe('ViewSettingsPopover — Open records (objectstack#26681)', () => {
     expect(screen.queryByTestId('display-record-open-split')).toBeNull();
     expect(screen.getByRole('radio', { name: 'Drawer' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('radio', { name: 'Full page' }).getAttribute('aria-checked')).toBe('false');
-    expect(screen.getByTestId('display-record-open-note').textContent).toBe(en.list.recordOpenNote);
+    expect(screen.queryByTestId('display-record-open-note')).toBeNull();
     expect(screen.queryByTestId('display-record-open-declared')).toBeNull();
   });
 
@@ -106,7 +110,7 @@ describe('ViewSettingsPopover — Open records (objectstack#26681)', () => {
   it('a `page` object: the read-only line, no segments, no note', async () => {
     openDisplay({ resolvedMode: 'page', preference: 'drawer', setPreference: vi.fn() });
     expect((await screen.findByTestId('display-record-open-declared')).textContent).toBe(
-      en.list.recordOpenDeclaredPage,
+      en.list.optionsMenu.recordOpenAlwaysPage,
     );
     expect(screen.queryByRole('radio')).toBeNull();
     expect(screen.queryByTestId('display-record-open-note')).toBeNull();
@@ -131,9 +135,9 @@ describe('ViewSettingsPopover — Open records (objectstack#26681)', () => {
     expect(await screen.findByRole('radio', { name: zh.recordOpenDrawer })).toBeTruthy();
     expect(screen.getByRole('radio', { name: zh.recordOpenPage })).toBeTruthy();
     expect(screen.getByTestId('display-record-open').textContent).toContain(zh.recordOpen);
-    expect(screen.getByTestId('display-record-open-note').textContent).toBe(zh.recordOpenNote);
+    expect(screen.queryByTestId('display-record-open-note')).toBeNull();
     cleanup();
     openDisplay({ resolvedMode: 'page', preference: 'drawer', setPreference: vi.fn() }, 'zh');
-    expect((await screen.findByText(zh.recordOpenDeclaredPage)).getAttribute('data-testid')).toBe('display-record-open-declared');
+    expect((await screen.findByText(zh.optionsMenu.recordOpenAlwaysPage)).getAttribute('data-testid')).toBe('display-record-open-declared');
   });
 });

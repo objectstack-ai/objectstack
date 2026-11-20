@@ -30,6 +30,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, act, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
@@ -189,9 +192,11 @@ async function createViewThroughTheSwitcher() {
     </ExpressionProvider>,
   );
   await settle();
-  // New view, from the page title's view switcher (objectstack#27594).
+  // The Create View dialog, from the view switcher's Manage views (its
+  // 「Add view」 creates in place since objectstack#35553).
   fireEvent.click(screen.getByTestId('list-view-switcher'));
-  fireEvent.click(screen.getByTestId('list-view-switcher-new'));
+  fireEvent.click(screen.getByTestId('list-view-switcher-manage'));
+  fireEvent.click(await screen.findByTestId('manage-views-add'));
   await screen.findByTestId('create-view-dialog');
   fireEvent.change(labelInput(), { target: { value: 'Pipeline board' } });
   await waitFor(() => expect(nameInput().value).toBe('pipeline_board'));
