@@ -282,7 +282,9 @@ roll-up as `readonly: true` on create and on update. A value a non-system write 
 is dropped and reported under the same `readonly` reason, and `strictReadonlyWrites` refuses
 the write, exactly as for a declared read-only column; a create that had the value dropped
 starts the column as for an empty child list. That covers a flow's `create_record` and
-`update_record` steps that do not run as `runAs: 'system'`. Rule 1 below holds for it: seed
+`update_record` steps that do not run as `runAs: 'system'`; `os validate`, `os lint` and
+`os build` report such a step as the `flow-update-summary-field` warning, which never blocks a
+build (a roll-up declared `readonly: true` is the `flow-update-readonly-field` error). Rule 1 below holds for it: seed
 data, package installs and the roll-up's own recompute write it from a system context. See [Calculation types](/docs/data-modeling/fields#calculation-types).
 
 Five rules decide whether a given value survives:
