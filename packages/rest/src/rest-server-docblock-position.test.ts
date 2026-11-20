@@ -325,6 +325,7 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
         // [#30237] 108 + 11 = 119: `recycle-bin-routes.ts`, a new registrar.
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(119);
+        // [ADR-0158 U7 R1] 119 + 6 = 125: `meta-unit-code-backfill-route.ts`, a new registrar.
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(125);
     });
 });
