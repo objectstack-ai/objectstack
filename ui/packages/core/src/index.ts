@@ -40,6 +40,7 @@ export * from './utils/managedBy.js';
 // consumers).
 export {
   resolveAffordance,
+  resolveAffordanceGrant,
   resolveFieldAffordance,
   formFieldsAffordance,
   type AffordanceGrant,

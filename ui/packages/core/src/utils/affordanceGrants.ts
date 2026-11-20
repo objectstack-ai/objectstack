@@ -312,8 +312,21 @@ export function resolveAffordance(
     if (!crud[row.crud]) return { allowed: false };
     predicates = crud[PREDICATES[row.crud]] as RowCrudPredicates | undefined;
   }
-  if (objectName && perms && !perms.can(objectName, row.grant)) return { allowed: false };
+  if (!resolveAffordanceGrant(affordance, { objectName, perms })) return { allowed: false };
   return predicates ? { allowed: true, predicates } : { allowed: true };
+}
+
+/**
+ * The grant half of {@link resolveAffordance} alone: does the caller hold the
+ * object grant the row exercises? For a surface that tells a missing grant
+ * apart from an object that allows no such write (objectstack#35684: a list
+ * cell's read-only reason).
+ */
+export function resolveAffordanceGrant(
+  affordance: ConsoleAffordance,
+  { objectName, perms }: AffordanceSource = {},
+): boolean {
+  return !(objectName && perms && !perms.can(objectName, AFFORDANCE_GRANTS[affordance].grant));
 }
 
 /**

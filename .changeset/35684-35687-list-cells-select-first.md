@@ -1,5 +1,6 @@
 ---
 '@object-ui/components': minor
+'@object-ui/core': minor
 '@object-ui/plugin-grid': minor
 '@object-ui/plugin-list': minor
 '@object-ui/i18n': patch
@@ -24,5 +25,7 @@ Skills-docs: none — `skills/objectstack-ui/rules/list-views.md` already teache
 - A cell that opens no editor says why on the cell: the field is read-only, calculated or not editable in a list, the reader may not edit the field, these records or this record, the view turned editing off, or the record is locked by an approval. The approval lock is read from the approvals service's per-record lock when a cell of the row is selected, through the record page's rule (`resolveApprovalLock`), with the row's `approval_status` standing in until it answers.
 
 A grid outside the list page, which mounts no provider, keeps its click-to-edit (`singleClickEdit`) and click-to-open behaviour unchanged.
+
+On the list page the table's trailing edit column, which holds a changed row's Cancel and Save, is drawn only while a row has changes, so the list at rest ends on its last data column. `@object-ui/core` exports `resolveAffordanceGrant`, the grant half of `resolveAffordance`, which the list cell's read-only reason reads.
 
 New locale keys, in every pack: `table.cellReadOnly` and `grid.readOnlyReason.*` (nine reasons). No key is removed: `list.inlineEditShort` and `list.inlineEditLabel`, the toggle's words, stay in every pack, though the list no longer draws the toggle.

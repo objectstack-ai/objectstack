@@ -236,6 +236,35 @@ describe('data-table select-first — a cell that opens no editor says why', () 
   });
 });
 
+describe('data-table select-first — the edit-only column is drawn only while a row has changes (objectstack#35554)', () => {
+  const editHeader = (c: HTMLElement) => c.querySelector('[data-testid="data-table-edit-column-header"]');
+  const lastHeader = (c: HTMLElement) => [...c.querySelectorAll('thead th')].pop()!;
+  // The shape `ObjectGrid` hands the list page: a save path and no row menu.
+  const EDIT_ONLY = { rowActions: true, onRowSave: () => Promise.resolve() };
+
+  it('none at rest; a commit draws it with that row\'s Cancel and Save; Cancel takes it away', () => {
+    const t = renderTable({ extra: EDIT_ONLY });
+    expect(editHeader(t.container)).toBeNull();
+    expect(lastHeader(t.container)).toHaveTextContent('Site');
+    fireEvent.click(t.cell(0, 0));
+    fireEvent.change(t.catcher()!, { target: { value: 'A' } });
+    fireEvent.keyDown(t.editor()!, { key: 'Enter' });
+    expect(editHeader(t.container)).not.toBeNull();
+    expect(lastHeader(t.container)).toBe(editHeader(t.container));
+    const firstRow = t.container.querySelectorAll('tbody tr')[0] as HTMLElement;
+    expect(firstRow.querySelector('button[title="Save row"]')).not.toBeNull();
+    fireEvent.click(firstRow.querySelector('button[title="Cancel changes"]')!);
+    expect(editHeader(t.container)).toBeNull();
+    expect(lastHeader(t.container)).toHaveTextContent('Site');
+  });
+
+  it('control: without the provider the column is drawn at rest, as before', () => {
+    const t = renderTable({ selection: null, extra: EDIT_ONLY });
+    expect(editHeader(t.container)).not.toBeNull();
+    expect(lastHeader(t.container)).toBe(editHeader(t.container));
+  });
+});
+
 describe('data-table select-first — a touch tap opens the record', () => {
   it('opens the record through the row and selects or edits nothing', () => {
     const t = renderTable();

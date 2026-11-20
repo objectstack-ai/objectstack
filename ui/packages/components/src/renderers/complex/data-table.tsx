@@ -3599,6 +3599,13 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     (Array.isArray(schema.rowActionDefs) && schema.rowActionDefs.length > 0 && schema.onRowActionDef)
   );
   const rowActionsColumnIsEditOnly = editable && !!(schema.onRowSave || schema.onBatchSave) && !rowMenuDeclared;
+  // objectstack#35684 — interim, until objectstack#35685 retires this column:
+  // in the select-first model (the list page) the edit-only column is drawn
+  // only while a row holds pending changes, so a list at rest ends on its last
+  // data column (objectstack#35554). A commit draws it with that row's
+  // cancel/save pair, and the last save or cancel takes it away. A host that
+  // mounts no cell selection draws it as before.
+  const drawRowActionsColumn = rowActions && !(selectFirst && rowActionsColumnIsEditOnly && !hasPendingChanges);
 
   /**
    * objectstack#28434 — the items ONE row's context menu opens with, or `null`
@@ -3685,7 +3692,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   // The span of a row drawn as one cell across the table: the leading utility
   // cell, every column, the row-actions cell and the add-column cell.
-  const fullRowColSpan = columns.length + leadingCellCount + (rowActions ? 1 : 0) + (addColumnEnabled ? 1 : 0);
+  const fullRowColSpan = columns.length + leadingCellCount + (drawRowActionsColumn ? 1 : 0) + (addColumnEnabled ? 1 : 0);
 
   // What the body draws, in order. Flat: the data rows. Grouped (objectui#12620):
   // per group, its band, its data rows and its optional footer. A data row
@@ -4008,7 +4015,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               {/* The label sits in the same 13px muted span every data
                   column's header label uses (objectui#11816): a bare string
                   here took the cell's larger default type. */}
-              {rowActions && (rowActionsColumnIsEditOnly ? (
+              {drawRowActionsColumn && (rowActionsColumnIsEditOnly ? (
                 <TableHead
                   className="w-24 text-right bg-background"
                   title={t('table.edit')}
@@ -4822,7 +4829,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                           </TableCell>
                         );
                       })}
-                      {rowActions && (
+                      {drawRowActionsColumn && (
                         <TableCell className={cn("text-right", cellClassName)}>
                           <div className="flex items-center justify-end gap-1">
                             {rowHasChanges && (schema.onRowSave || schema.onBatchSave) ? (
@@ -4930,7 +4937,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                     </TableCell>
                   );
                 })}
-                {rowActions && <TableCell className="w-24 h-8 py-0 bg-background" />}
+                {drawRowActionsColumn && <TableCell className="w-24 h-8 py-0 bg-background" />}
                 {addColumnEnabled && <TableCell aria-hidden className="w-10 h-8 py-0" />}
               </TableRow>
             </tfoot>

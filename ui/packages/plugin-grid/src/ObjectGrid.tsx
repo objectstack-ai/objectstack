@@ -61,7 +61,7 @@ import {
   GridCellSelectionProvider,
   type GridCellSelection,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1167,7 +1167,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
             gridEditable: schema.editable ?? false,
             objectEditable: objectInlineEditable,
-            canUpdate: !objectName || perms.can(objectName, 'update'),
+            canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
             approvalLocked: approvalLocks.isLocked(recordId, row),
             recordUpdate: recordVerdict(recordId, 'update'),
           });
