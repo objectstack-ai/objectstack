@@ -4966,7 +4966,6 @@ const fr = {
   filterBuilder: {
     currency: 'Devise',
     currencyNeedsAnd: "Un montant en devise n'est comparé dans la devise choisie que lorsque toutes les conditions doivent être remplies (ET).",
-    where: "Où",
     and: "ET",
     or: "OU",
     clearAll: "Tout effacer",
@@ -5057,6 +5056,7 @@ const fr = {
       after: 'après',
     },
     sort: {
+      advanced: 'Tous les niveaux de tri',
       direction: 'Sens',
       ascending: 'Croissant',
       descending: 'Décroissant',

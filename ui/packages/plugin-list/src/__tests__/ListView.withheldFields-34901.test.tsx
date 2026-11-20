@@ -161,6 +161,8 @@ describe('ListView over a field a disabled package withholds (objectstack#34901)
 
     // The sort builder: remove the `name` row; the withheld row stays in the write.
     fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
+    // The builder is the Sort panel's advanced step (objectstack#35550).
+    fireEvent.click(await screen.findByTestId('sort-panel-open-advanced'));
     const rows = await screen.findAllByTestId('sort-builder-row');
     expect(rows).toHaveLength(2);
     fireEvent.click(within(rows[1]).getByRole('button'));

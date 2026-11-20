@@ -4965,7 +4965,6 @@ const pt = {
   filterBuilder: {
     currency: 'Moeda',
     currencyNeedsAnd: 'Um valor em moeda só é comparado na moeda escolhida quando todas as condições devem ser atendidas (E).',
-    where: "Onde",
     and: "E",
     or: "OU",
     clearAll: "Limpar tudo",
@@ -5056,6 +5055,7 @@ const pt = {
       after: 'depois de',
     },
     sort: {
+      advanced: 'Todos os níveis de ordenação',
       direction: 'Direção',
       ascending: 'Crescente',
       descending: 'Decrescente',
