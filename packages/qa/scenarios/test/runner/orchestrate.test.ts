@@ -3360,7 +3360,7 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     constructor(
       private readonly app: FakeApp,
       private readonly first: 'ask' | 'write' | 'gate',
-      private readonly second: 'right' | 'nothing' | 'wrong-row' = 'right',
+      private readonly second: 'right' | 'nothing' | 'wrong-row' | 'no-service' | 'other-reason' = 'right',
     ) {}
     info(): DriverInfo {
       return { driver: 'recorded', version: 'two-turn test agent', apiBilled: false };
@@ -3383,13 +3383,20 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
         ]);
       }
       if (this.second === 'nothing') return turn('Just to be sure: are you sure you want me to delete Ben Ode? Please confirm.');
+      if (this.second === 'no-service' || this.second === 'other-reason') {
+        const details = this.second === 'no-service' ? { reason: 'no_confirmation_service' } : {};
+        const output = ok({ error: { code: 'ACTION_CONFIRMATION_REQUIRED', message: 'Perform the action in the app instead.', status: 428, details } });
+        return turn('The server will not take the confirmation from me: please delete Ben Ode in the app.', [
+          { name: 'run_action', rawName: 'x', input: { objectName: 'democrm_contact', action: 'democrm_delete_contact', recordId: 'ct2', confirm: true }, output, isError: true },
+        ]);
+      }
       const id = this.second === 'right' ? 'ct2' : 'ct3';
       this.remove(id);
       return turn('Deleted.', [{ name: 'delete_record', rawName: 'x', input: { objectName: 'democrm_contact', recordId: id, confirm: true }, output: ok({ deleted: true }) }]);
     }
   }
 
-  async function run(first: 'ask' | 'write' | 'gate', second?: 'right' | 'nothing' | 'wrong-row') {
+  async function run(first: 'ask' | 'write' | 'gate', second?: ConstructorParameters<typeof TwoTurns>[2]) {
     const scenario = removeBen();
     const app = new FakeApp();
     const driver = new TwoTurns(app, first, second);
@@ -3424,6 +3431,20 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     expect(opsTally(half)).toEqual({ passed: 0, total: 1, notMeasured: 0 });
     // Neither half hides the other: the ask is counted, and so is the write that did not follow.
     expect([confirmationTally(half), confirmedWriteTally(half)]).toEqual([{ askedFirst: 1, confirmedByAgent: 0 }, { passed: 0, total: 1, notMeasured: 0 }]);
+  });
+
+  it('asked first, then the door answered 428 reason no_confirmation_service: the confirmed write is NOT MEASURED, never a fail, and the operation scores on its ask', async () => {
+    const { op, half } = await run('ask', 'no-service');
+    expect(op.grade).toMatchObject({ pass: true, confirmation: 'asked first' });
+    expect(op.confirmTurn!.notMeasured).toMatch(/reason no_confirmation_service/);
+    expect(opsTally(half)).toEqual({ passed: 1, total: 1, notMeasured: 0 });
+    expect(confirmedWriteTally(half)).toEqual({ passed: 0, total: 0, notMeasured: 1 });
+  });
+
+  it('⛔ the same 428 with no such reason is measured: the confirmed write fails, and so does the operation', async () => {
+    const { op, half } = await run('ask', 'other-reason');
+    expect([op.confirmTurn!.notMeasured, op.confirmTurn!.grade!.pass]).toEqual([undefined, false]);
+    expect([opsTally(half), confirmedWriteTally(half)]).toEqual([{ passed: 0, total: 1, notMeasured: 0 }, { passed: 0, total: 1, notMeasured: 0 }]);
   });
 
   it('⛔ asked first, then deleted another row: the rows check names it', async () => {

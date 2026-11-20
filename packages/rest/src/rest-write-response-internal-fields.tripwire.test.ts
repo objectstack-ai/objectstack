@@ -367,6 +367,13 @@ const DISPOSITIONS: Record<string, Disposition> = {
     kind: 'no-record-echo',
     why: 'Backfill report: counts, sample record ids and failure sentences, never a stored field value.',
   },
+  // [ADR-0158 U7 R1] Its twin answers the same shape, plus each distinct stored
+  // unit text of the field it converts (the operator maps those): a unit code
+  // field's own value, never another field's, and no row.
+  'POST /api/v1/meta/_migrate-unit-codes': {
+    kind: 'no-record-echo',
+    why: 'Backfill report: counts, sample record ids, failure sentences and the converted unit code field\'s distinct stored texts, never a row.',
+  },
   'PUT /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: metadata item, not a data record.' },
   'DELETE /api/v1/meta/:type/:name': { kind: 'no-record-echo', why: 'Metadata plane: delete receipt.' },
   'POST /api/v1/meta/:type/:name/publish': { kind: 'no-record-echo', why: 'Metadata plane: publish receipt.' },
