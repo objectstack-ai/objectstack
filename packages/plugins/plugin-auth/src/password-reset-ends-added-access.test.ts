@@ -179,7 +179,7 @@ async function stage(config: Record<string, unknown> = {}) {
   const keyAdmits = async (raw: string): Promise<boolean> =>
     (await resolveApiKeyAdmission(engine, { 'x-api-key': raw }, Date.now(), undefined, undefined, undefined)).outcome === 'admitted';
   const keyRow = async (name: string) => {
-    const row = ((await engine.find('sys_api_key', { where: { id: `key_${name}` }, ...SYS } as never)) as any[])[0];
+    const row = ((await engine.find('sys_api_key', { where: { id: `key_${name}` }, context: { isSystem: true } } as never)) as any[])[0];
     return { revoked: row.revoked === true || row.revoked === 1, revoked_reason: row.revoked_reason ?? null };
   };
 
@@ -264,10 +264,10 @@ describe('a completed self-service password reset ends what the account added be
     const s = await stage();
     const live = await s.mintKey('ci-deploy');
     const original = s.engine.update.bind(s.engine);
-    vi.spyOn(s.engine, 'update').mockImplementation(async (object: string, ...rest: unknown[]) => {
+    vi.spyOn(s.engine, 'update').mockImplementation((async (object: string, ...rest: unknown[]) => {
       if (object === 'sys_api_key') throw new Error('sys_api_key cannot be written');
       return (original as (...a: unknown[]) => Promise<unknown>)(object, ...rest);
-    });
+    }) as never);
 
     const res = await s.reset(SECOND);
 

@@ -564,6 +564,8 @@ export type AdminAuditDecisions =
       /** What the revocation landed (present only when it was asked for) — counts, never a credential. */
       revokedSessions?: number;
       revokedApiKeys?: number;
+      /** The linked sign-in accounts (other than the password) the revocation unlinked. */
+      revokedSignInAccounts?: number;
       revocationComplete?: boolean;
     };
 

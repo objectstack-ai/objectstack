@@ -241,7 +241,6 @@ async function endOrRemindWhatTheAccountAdded(
   if (!resetDoor && !changeDoor) return;
   if (!(await endpointSucceeded(ctx))) return;
   const internal = ctx?.context?.internalAdapter;
-  const engine = this.getDataEngine() as never;
   if (resetDoor) {
     const subject: unknown = ctx?.context?.[RESET_DOOR_SUBJECT];
     if (typeof subject !== 'string' || !subject || !internal) {
@@ -254,13 +253,13 @@ async function endOrRemindWhatTheAccountAdded(
       );
       return;
     }
-    await endWhatTheAccountAddedBeforeAReset({ accounts: internal, apiKeys: engine }, subject);
+    await endWhatTheAccountAddedBeforeAReset({ accounts: internal, apiKeys: this.getDataEngine() as never }, subject);
     return;
   }
   const user = ctx?.context?.session?.user as { id?: unknown; email?: unknown; name?: unknown } | undefined;
   if (!internal || typeof user?.id !== 'string' || !user.id || typeof user.email !== 'string' || !user.email) return;
   try {
-    const kept = await accessAPasswordChangeKeeps({ accounts: internal, apiKeys: engine }, user.id);
+    const kept = await accessAPasswordChangeKeeps({ accounts: internal, apiKeys: this.getDataEngine() as never }, user.id);
     if (kept.apiKeys.length === 0 && kept.signInAccounts.length === 0) return;
     await this.sendPasswordChangeReminder(
       { email: user.email, id: user.id, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
