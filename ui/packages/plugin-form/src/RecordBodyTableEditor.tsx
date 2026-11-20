@@ -44,7 +44,6 @@ import {
   extractFieldErrors,
   extractWriteErrorMessage,
   useRecordContext,
-  useSchemaContext,
 } from '@object-ui/react';
 import { buildMasterDetailEditBatch, idOf, isBlankRow, type ChildSchema } from './masterDetailTx';
 import { applyColumnPermissions } from './fieldWriteGate';
@@ -200,16 +199,16 @@ export interface RecordBodyTableEditorProps {
 const BODY_TABLE_EDIT_LIMIT = 500;
 
 /**
- * The editor itself. Reads the record (parent) from `RecordContextProvider`,
- * the data source from the schema context, and the session from
+ * The editor itself. Reads the record (parent) and the data source from
+ * `RecordContextProvider` (as the page's related lists do), and the session from
  * {@link RecordEditSessionContext}; with no session it renders nothing — it is
  * a part of the record page's edit state, never a standalone block.
  */
 export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ objectName, relationshipField, title }) => {
   const session = useContext(RecordEditSessionContext);
-  const ctx = useSchemaContext() as any;
-  const dataSource = ctx?.dataSource;
   const record = useRecordContext();
+  // The record page's adapter, as its related lists read it.
+  const dataSource = record?.dataSource as any;
   const parentObject = record?.objectName;
   const parentId = record?.recordId;
   const perms = usePermissions();

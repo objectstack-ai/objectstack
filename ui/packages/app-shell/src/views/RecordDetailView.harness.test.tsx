@@ -2841,3 +2841,283 @@ describe('RecordDetailView.objectRouteAbsence-34740', () => {
     expect(withheld.replaceAll(WITHHELD, 'NAME')).toBe(missing.replaceAll(MISSING, 'NAME'));
   });
 });
+
+// ── RecordDetailView.recordEditState-35599 ──────────────────────────────────
+
+/**
+ * objectstack#35599 — the record page's EDIT STATE, on a page that draws
+ * master-detail body tables: Edit turns the fields into inputs and the body
+ * tables into editable lines, the header shows Cancel / Save, and ONE Save
+ * writes the record and every table in one `batchTransaction` (one
+ * `POST /api/v1/batch`). A refused batch keeps every edit and places the
+ * reason on the line it is about; Cancel puts everything back.
+ *
+ * Also pinned: ruling B (OPEN, the recommended option) — a page with body
+ * tables offers no per-field inline edit outside the edit state, a page with
+ * none keeps it (CONTROL); ruling A's client half — a record an approval locks
+ * draws no New on its master-detail body table (CONTROL: the same page
+ * unlocked does); item 5 — a child without `bulk` keeps its table read-only
+ * in the edit state, with a notice saying why.
+ *
+ * Fixtures: the `bodyTablePredicate-27478` harness at 1440 px.
+ */
+describe('RecordDetailView.recordEditState-35599', () => {
+  restoreAfterBlock();
+
+  const PARENT = 'showcase_quote';
+  const RECORD_ID = 'q-1';
+  const fk = { type: 'master_detail', reference: PARENT, label: 'Quote' };
+
+  const objectsWith = ({ lineEnable, children = true }: { lineEnable?: Record<string, unknown>; children?: boolean } = {}) => [
+    {
+      name: PARENT,
+      label: 'Quote',
+      pluralLabel: 'Quotes',
+      fields: { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' }, summary: { type: 'text', label: 'Summary' } },
+    },
+    ...(children
+      ? [
+          {
+            name: 'showcase_line',
+            label: 'Line',
+            pluralLabel: 'Lines',
+            ...(lineEnable ? { enable: lineEnable } : {}),
+            fields: { id: { type: 'text', label: 'Id' }, product: { type: 'text', label: 'Product' }, quantity: { type: 'number', label: 'Quantity' }, quote: fk },
+          },
+          {
+            name: 'showcase_task',
+            label: 'Task',
+            pluralLabel: 'Tasks',
+            fields: { id: { type: 'text', label: 'Id' }, subject: { type: 'text', label: 'Subject' }, quote: fk },
+          },
+        ]
+      : []),
+    {
+      name: 'showcase_note',
+      label: 'Note',
+      pluralLabel: 'Notes',
+      fields: { id: { type: 'text', label: 'Id' }, body: { type: 'text', label: 'Body' }, quote: { type: 'lookup', reference: PARENT, label: 'Quote' } },
+    },
+  ];
+
+  const ROWS: Record<string, Array<Record<string, unknown>>> = {
+    showcase_line: [
+      { id: 'l1', product: 'Anvil', quantity: 1, quote: RECORD_ID },
+      { id: 'l2', product: 'Bolt', quantity: 2, quote: RECORD_ID },
+    ],
+    showcase_task: [{ id: 't1', subject: 'Call', quote: RECORD_ID }],
+  };
+
+  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean } = {}) {
+    const metadata = {
+      objects, pages: [], loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
+    } as never;
+    const dataSource = {
+      find: vi.fn(async (o: string) => {
+        const data = opts.emptyTables ? [] : (ROWS[o] ?? []).map((r) => ({ ...r }));
+        return { data, total: data.length };
+      }),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      findOne: vi.fn(async (_o: string, recordId: string) => ({ id: recordId, name: `Quote ${recordId}`, summary: 'First' })),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: vi.fn(async (o: string) => objects.find((d) => d.name === o) ?? null),
+      batchTransaction: vi.fn(async (ops: unknown[]) => ({ results: ops.map(() => ({})) })),
+    };
+    const onEdit = vi.fn();
+    const view = render(
+      <MemoryRouter initialEntries={[`/apps/demo/${PARENT}/record/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <NavigationProvider>
+            <Routes>
+              {/* The app route: the related-record bridge offers New only under an app. */}
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={<RecordDetailView dataSource={dataSource as never} objects={objects} onEdit={onEdit} />}
+              />
+            </Routes>
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ...view, dataSource, onEdit };
+  }
+
+  const jsonResponse = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+  /** `locked`: the approvals read answers a pending `lock_record` request (the `approvalLock-25934` shape). */
+  function stubApi({ locked = false }: { locked?: boolean } = {}) {
+    const request = {
+      id: 'req-1', process_name: 'flow:quote_review', object_name: PARENT, record_id: RECORD_ID,
+      status: 'pending', submitter_id: 'u_submitter', current_step: 'manager_review',
+      pending_approvers: ['u_manager'], lock_record: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (locked && u.includes('/approvals/requests?object=')) return jsonResponse(200, { data: [request] });
+      if (locked && u.endsWith('/approvals/requests/req-1')) return jsonResponse(200, request);
+      return jsonResponse(200, { data: [] });
+    }));
+  }
+
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    RelatedCountStore._reset();
+    stubApi();
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: 1440, bottom: 800, width: 1440, height: 800, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const headerButton = (label: string) =>
+    (Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === label) as HTMLButtonElement | undefined) ?? null;
+  const pencils = (container: HTMLElement) => container.querySelectorAll('button[aria-label="Double-click to edit"]').length;
+  const editor = (container: HTMLElement, id: string) => container.querySelector(`[data-body-table-editor="${id}"]`) as HTMLElement | null;
+  const cells = (scope: HTMLElement, label: string) => Array.from(scope.querySelectorAll(`input[aria-label="${label}"]`)) as HTMLInputElement[];
+  const summaryInput = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).find((i) => i.value === 'First') ?? null;
+
+  async function enterEditState(view: ReturnType<typeof renderPage>) {
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_line.quote')!, 'Product').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_task.quote')!, 'Subject').length).toBeGreaterThanOrEqual(1), { timeout: 5000 });
+  }
+
+  /** Edit the record and both tables: one changed line, one new line, one removed line, one changed task. */
+  function editEverything(container: HTMLElement) {
+    fireEvent.change(summaryInput(container)!, { target: { value: 'Second' } });
+    const lines = editor(container, 'showcase_line.quote')!;
+    fireEvent.change(cells(lines, 'Quantity')[0], { target: { value: '5' } });
+    fireEvent.click(lines.querySelectorAll('button[aria-label="Remove row"]')[1] as HTMLElement);
+    const products = cells(lines, 'Product');
+    fireEvent.change(products[products.length - 1], { target: { value: 'Crate' } });
+    const tasks = editor(container, 'showcase_task.quote')!;
+    fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
+  }
+
+  it('ruling B: a page drawing body tables offers no per-field inline edit; a page with none keeps it (CONTROL)', async () => {
+    const control = renderPage(objectsWith({ children: false }));
+    await waitFor(() => expect(pencils(control.container)).toBeGreaterThan(0), { timeout: 5000 });
+    cleanup();
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(pencils(view.container)).toBe(0);
+    // And Edit there is the edit state, not the record form.
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    expect(view.onEdit).not.toHaveBeenCalled();
+    expect(headerButton('Save')).not.toBeNull();
+    expect(headerButton('Cancel')).not.toBeNull();
+    expect(headerButton('Edit')).toBeNull();
+  });
+
+  it('one Save sends ONE batch carrying the record and both body tables', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update).not.toHaveBeenCalled();
+    expect(view.dataSource.create).not.toHaveBeenCalled();
+    expect(view.dataSource.delete).not.toHaveBeenCalled();
+    const ops = view.dataSource.batchTransaction.mock.calls[0][0] as Array<Record<string, any>>;
+    expect(ops[0]).toEqual({ object: PARENT, action: 'update', id: RECORD_ID, data: { summary: 'Second' } });
+    const rest = ops.slice(1).map((o) => [o.object, o.action, o.id ?? null]);
+    expect(rest).toEqual(expect.arrayContaining([
+      ['showcase_line', 'create', null],
+      ['showcase_line', 'update', 'l1'],
+      ['showcase_line', 'delete', 'l2'],
+      ['showcase_task', 'update', 't1'],
+    ]));
+    expect(rest).toHaveLength(4);
+    expect(ops.find((o) => o.action === 'create')?.data).toMatchObject({ product: 'Crate', quote: RECORD_ID });
+    expect(ops.find((o) => o.id === 'l1')?.data).toEqual({ quantity: 5 });
+    expect(ops.find((o) => o.id === 't1')?.data).toEqual({ subject: 'Visit' });
+    // Saved: the page leaves its edit state.
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+  });
+
+  it('a refused batch keeps every edit and places the reason on its line; Cancel then restores', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    view.dataSource.batchTransaction.mockRejectedValueOnce(
+      Object.assign(new Error('Validation failed'), {
+        details: { error: 'Validation failed', fields: [{ field: 'product', message: 'Unknown product' }] },
+      }),
+    );
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.container.querySelector('[data-body-table-row-error]')).not.toBeNull(), { timeout: 5000 });
+    expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1);
+    const lines = editor(view.container, 'showcase_line.quote')!;
+    const rowError = lines.querySelector('[data-body-table-row-error]')!;
+    // The new line is the second line drawn (the removed one is gone).
+    expect(rowError.getAttribute('data-body-table-row-error')).toBe('1');
+    expect(rowError.textContent).toContain('Unknown product');
+    expect(view.container.querySelector('[data-record-edit-error]')?.textContent).toBe('Validation failed');
+    // Every edit is still there, still in the edit state.
+    expect(summaryInput(view.container)).toBeNull();
+    expect((Array.from(view.container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).some((i) => i.value === 'Second')).toBe(true);
+    expect(cells(lines, 'Quantity')[0].value).toBe('5');
+    expect(cells(lines, 'Product').map((i) => i.value)).toContain('Crate');
+    expect(headerButton('Save')).not.toBeNull();
+
+    fireEvent.click(headerButton('Cancel')!);
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1);
+    // Back in: the lines and the record read as stored, not as edited.
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_line.quote') ?? document.body, 'Product').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+    const again = editor(view.container, 'showcase_line.quote')!;
+    expect(cells(again, 'Quantity')[0].value).toBe('1');
+    expect(cells(again, 'Product').map((i) => i.value)).toEqual(expect.arrayContaining(['Anvil', 'Bolt']));
+    expect(cells(again, 'Product').map((i) => i.value)).not.toContain('Crate');
+    expect(summaryInput(view.container)).not.toBeNull();
+  });
+
+  it('item 5: a child without bulk keeps its table read-only in the edit state, with the notice', async () => {
+    const view = renderPage(objectsWith({ lineEnable: { apiMethods: ['get', 'list', 'create', 'update', 'delete'] } }));
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(view.container.querySelector('[data-record-edit-tables-read-only]')).not.toBeNull(), { timeout: 5000 });
+    expect(view.container.querySelector('[data-body-table-editor]')).toBeNull();
+    // The record's own fields still edit and save, through the plain update.
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0]).toEqual([PARENT, RECORD_ID, { summary: 'Second' }]);
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+  });
+
+  it('ruling A client half: a locked record\'s body table draws no New; the same page unlocked does (CONTROL)', async () => {
+    const control = renderPage(objectsWith(), { emptyTables: true });
+    await waitFor(() => expect(control.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(2), { timeout: 5000 });
+    cleanup();
+    stubApi({ locked: true });
+    const view = renderPage(objectsWith(), { emptyTables: true });
+    await waitFor(() => expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-row]').length).toBe(2), { timeout: 5000 });
+    // The lock has been read (no Edit is drawn on a locked record) before the absence is read.
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).toBeNull(), { timeout: 5000 });
+    expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(0);
+  });
+});
