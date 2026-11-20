@@ -326,21 +326,67 @@ code still outstanding for that user: a completed reset, the user's own
 what one that was never issued answers (`400 INVALID_TOKEN` at
 `reset-password`); a link or code requested after the change works as usual.
 
-A change to a user's password also ends the following, issued before it. An
-email-change link minted before the change answers what a link that was never
-issued answers at `GET /api/v1/auth/verify-email` (`401 INVALID_TOKEN`, or the
-`error=INVALID_TOKEN` redirect to its callback), and a second-factor challenge
-opened by a password sign-in before the change answers what a challenge that
-was never opened answers; the person asks again. A door that ends the
-account's sessions — a completed reset, `change-password` with
-`revokeOtherSessions: true` (the session it installs is kept) and the one-step
-invitation acceptance — ends every session opened before its password write,
-and a password sign-in during which the password changes is refused with what
-a wrong password answers. The change's moment is the last time the account's
-local password was written over, so an administrator's `set-user-password`
-counts too, and an account's first password is not a change; an email-change
-link carries its issue time in whole seconds, so one minted in the same second
-as the change is refused as well.
+A change to a user's password also ends the following, issued before it:
+
+- an email-change link, and a verification link on a deployment that signs
+  its holder in when it verifies
+  (`emailVerification.autoSignInAfterVerification: true`), answer what a link
+  that was never issued answers at `GET /api/v1/auth/verify-email`
+  (`401 INVALID_TOKEN`, or the `error=INVALID_TOKEN` redirect to its
+  callback). With auto sign-in off, a verification link signs nobody in, and
+  it still verifies the address;
+- a magic link answers what a link that was never issued answers at
+  `GET /api/v1/auth/magic-link/verify` (the `error=INVALID_TOKEN` redirect)
+  and opens no session;
+- a second-factor challenge opened by a password sign-in answers what a
+  challenge that was never opened answers.
+
+The person asks for a new link, or a new challenge, which works as usual. A
+door that ends the account's sessions — a completed reset, `change-password`
+with `revokeOtherSessions: true` (the session it installs is kept) and the
+one-step invitation acceptance — ends every session opened before its
+password write, and a password sign-in during which the password changes is
+refused with what a wrong password answers.
+
+The change's moment is the last time the account's local password was
+written, so an administrator's `set-user-password` counts too. An account's
+first password counts when it is set onto an account that was already there:
+through either reset door, an administrator's `set-user-password`, the one-step
+invitation acceptance of an existing account, or `set-initial-password`. It
+does not count when the account and its password are created together, as at
+a sign-up with a password, an administrator's create-user or an import. An
+email-change or verification link carries its issue time in whole seconds, so
+one minted in the same second as the change is refused as well.
+
+#### What a password reset ends, and what a change keeps
+
+A completed password reset — the emailed link (`POST /api/v1/auth/reset-password`)
+or the texted code (`POST /api/v1/auth/phone-number/reset-password`) — ends,
+beside the account's sessions, what the account added before it:
+
+- **API keys.** Every API key the account owns is revoked, and the next call
+  with it is answered as with an unknown key. It is revoked as one its owner
+  revoked from the API Keys list, so the owner may restore it there.
+- **Linked sign-in accounts.** Every sign-in account linked to the account
+  other than its password — a social, OAuth or single sign-on link — is
+  unlinked. The provider may be linked again the way it was linked the first
+  time.
+- **Passkeys.** This build offers no passkey sign-in, so there are none to end.
+
+A reset that does not complete ends nothing; a key minted after the reset
+works as usual.
+
+A password change through `POST /api/v1/auth/change-password`, which proves
+the current password, ends none of these. When the account still holds an API
+key or a linked sign-in account after the change, the account's address is
+sent `auth.password_changed_notice`, naming each one, through the email service
+every auth mail goes through. The notice is best-effort: one that cannot be
+sent never fails the change. It is a built-in auth template, overridable like
+the others.
+
+An administrator's forced reset with `revokeSessionsAndKeys` on and the
+operator's `os user set-password` end the same, as
+[Set / Reset a Password](#set--reset-a-password) describes.
 
 #### Setting a first local password
 
@@ -1271,11 +1317,14 @@ same `mustChangePassword` flag. It also provisions a credential account for
 SSO-onboarded users who never had a local password.
 
 The forced reset also carries `revokeSessionsAndKeys`, **on by default**: it
-ends every session of the user and revokes every API key they own, so a
+ends every session of the user, revokes every API key they own and unlinks
+every sign-in account linked to the user other than the password, so a
 suspected compromise leaves no live credential behind. Pass
-`revokeSessionsAndKeys: false` for a routine reset. The response reports what
-was revoked (`revoked: { sessions, apiKeys, failed, complete }`), and revoked
-keys stay revoked after the password change.
+`revokeSessionsAndKeys: false` for a routine reset, which ends none of these.
+The response reports what was ended
+(`revoked: { sessions, apiKeys, signInAccounts, failed, complete }`), and
+revoked keys stay revoked after the password change. The operator's
+`os user set-password` ends the same three.
 
 #### Bulk Import Users
 
