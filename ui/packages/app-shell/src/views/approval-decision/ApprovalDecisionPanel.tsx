@@ -56,10 +56,9 @@
  *  4. **Who the pending step waits on** (objectui#12482) — each pending
  *     approver named, with a position's label and the countersign group the
  *     slot fills, as the approvals inbox's request sheet names them. See
- *     "Naming the pending approvers" below.
- *
- *  Parts 2 to 4 share the "Approval progress" card, and a card none of them
- *  draws into is not drawn at all (objectstack#35730).
+ *     "Naming the pending approvers" below. Parts 2 to 4 share the
+ *     "Approval progress" card, and a card none of them draws into is not
+ *     drawn at all (objectstack#35730).
  *  5. **Decisions** — `DeclaredActionsBar` over `sys_approval_request`'s OWN
  *     declared actions at `record_section`, the location and the bar the
  *     business record page already runs them through (objectui#3055). Every

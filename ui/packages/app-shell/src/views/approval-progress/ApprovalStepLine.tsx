@@ -59,7 +59,7 @@ import type { ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
 export type ApprovalFlowStep = NonNullable<ApprovalRequestLite['flow_route']>['steps'][number];
 
 export interface ApprovalStepLineProps {
-  /** The served route's steps (`flow_route.steps`), in route order. Fewer than two steps draws nothing. */
+  /** The served route's steps (`flow_route.steps`), in route order. Fewer than two draws nothing, unless `decided`. */
   steps: ReadonlyArray<ApprovalFlowStep> | null | undefined;
   /** The request's status when its route is decided (`flow_route.ahead === 'decided'`); else absent. */
   decided?: string;
