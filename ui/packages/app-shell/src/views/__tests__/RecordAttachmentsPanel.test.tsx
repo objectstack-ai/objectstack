@@ -37,12 +37,22 @@ function setup(dataSource: any) {
 beforeEach(() => vi.restoreAllMocks());
 
 /**
+ * Open the only row's ⋮ menu and choose `item`: a file row carries its
+ * Download and Delete in that menu since the dense attachments rows
+ * (objectstack#35602).
+ */
+async function chooseRowAction(user: ReturnType<typeof userEvent.setup>, item: string) {
+  await user.click(screen.getByRole('button', { name: /^More for / }));
+  await user.click(await screen.findByRole('menuitem', { name: item }));
+}
+
+/**
  * Press a row's delete and answer the confirm dialog it opens (objectui#12248:
  * the delete asks first, through `ActionConfirmDialog`). The delete-path pins
  * below are about what happens AFTER the user confirms.
  */
 async function deleteAndConfirm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Delete attachment' }));
+  await chooseRowAction(user, 'Delete attachment');
   const dialog = await screen.findByRole('alertdialog');
   await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
 }
@@ -600,7 +610,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const calledUrl = String(fetchSpy.mock.calls[0][0]);
@@ -629,7 +639,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -653,7 +663,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('Please sign in to download this attachment.'),
@@ -675,7 +685,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -700,7 +710,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(openSpy).toHaveBeenCalledWith(
@@ -766,7 +776,7 @@ describe('RecordAttachmentsPanel — mobile shell openFile', () => {
   async function tapDownload(rows: unknown[] = [ROW]) {
     setup(makeDataSource({ find: vi.fn(async () => rows) }));
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
   }
 
   afterEach(() => {
