@@ -159,6 +159,30 @@ describe('data-table select-first keys — on the selected cell (objectstack#356
       else delete (navigator as { clipboard?: unknown }).clipboard;
     }
   });
+
+  it('with CapsLock on, Ctrl+C (key `C`) still copies', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const had = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    try {
+      const t = renderTable();
+      t.select(2, 0);
+      fireEvent.keyDown(t.catcher(), { key: 'C', ctrlKey: true });
+      expect(writeText).toHaveBeenCalledWith('Gamma');
+    } finally {
+      if (had) Object.defineProperty(navigator, 'clipboard', had);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it('with CapsLock on, Ctrl+V (key `V`) types nothing into the cell, and the paste still commits', () => {
+    const t = renderTable();
+    t.select(0, 1);
+    fireEvent.keyDown(t.catcher(), { key: 'V', ctrlKey: true });
+    expect(t.editor()).toBeNull();
+    fireEvent.paste(t.catcher(), { clipboardData: { getData: () => '42' } });
+    expect(t.onCellChange).toHaveBeenCalledWith(0, 'amount', 42, ROWS[0]);
+  });
 });
 
 describe('data-table select-first keys — while editing', () => {

@@ -38,6 +38,14 @@ export function isCellWidgetTarget(target: EventTarget | null, cell: Element): b
     && !widget.matches('[data-slot="cell-type-catcher"], :disabled, [aria-disabled="true"]');
 }
 
+/**
+ * Ctrl/Cmd plus a letter, whatever its case: CapsLock or Shift reports the
+ * letter as upper case (`'C'`), and the shortcut is the same one.
+ */
+export function isCommandLetter(e: { key: string; ctrlKey: boolean; metaKey: boolean }, letter: string): boolean {
+  return (e.ctrlKey || e.metaKey) && e.key.length === 1 && e.key.toLowerCase() === letter;
+}
+
 /** A printable key with no command modifier — what typing on a selected cell is. */
 export function isPrintableKey(e: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
   return e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;

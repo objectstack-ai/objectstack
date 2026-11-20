@@ -14,7 +14,7 @@ import { hasDeclaredVisibilityGate } from '../action/visibility-gate';
 import { DisabledReasonMenuLabel, menuItemReasonAria, useDisabledReason } from '../action/disabled-reason';
 import { useGridFieldAuthoring } from '../../context/gridFieldAuthoring';
 import { useGridCellSelection } from '../../context/gridCellSelection';
-import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, isCellWidgetTarget, isImeKey, isPrintableKey } from './dataTableCellSelection';
+import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, isCellWidgetTarget, isCommandLetter, isImeKey, isPrintableKey } from './dataTableCellSelection';
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
@@ -3330,7 +3330,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
 
   const handleCellKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number, columnKey: string) => {
     if (selectFirst) {
-      if (!((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C'))) {
+      if (!isCommandLetter(e, 'c')) {
         handleSelectFirstKeyDown(e, rowIndex, colIndex);
         return;
       }
@@ -3355,8 +3355,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       }
     }
 
-    // Copy cell value with Ctrl+C / Cmd+C
-    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !editingCell) {
+    // Copy cell value with Ctrl+C / Cmd+C, CapsLock on or off.
+    if (isCommandLetter(e, 'c') && !editingCell) {
       // objectui#13188 — text the viewer selected in this cell is what they
       // copy: the browser's own copy runs. A masked cell never gets here
       // with its default intact — the mask rule below goes first.
