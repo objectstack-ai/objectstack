@@ -362,8 +362,16 @@ describe('the calendar hooks take the organization from the session', () => {
 
   for (const posture of ['single', 'isolated'] as const) {
     it(`${posture}: a member's create reads in the session's organization`, async () => {
+      // A default on a create placed in another organization is refused at the door, before any read.
       const h = bound(posture);
-      const row = created('org_b');
+      const placed = await refusal(Promise.resolve(h.insert(member, created('org_b'))));
+      expect(resolveThrownHttpError(placed)).toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
+      expect(placed.fields).toEqual([expect.objectContaining({ field: 'is_default', code: 'invalid_value' })]);
+      expect(placed.message).not.toContain('plant_b');
+      expect(h.reads).toEqual([]);
+      expect(h.zoneAsked).toEqual([]);
+      // CONTROL: the same create without a default passes, with no read and no time-zone fill.
+      const row: Row = { ...created('org_b'), is_default: false };
       await h.insert(member, row);
       expect(h.reads).toEqual([]);
       expect(h.zoneAsked).toEqual([]);
@@ -384,9 +392,21 @@ describe('the calendar hooks take the organization from the session', () => {
     const e = await refusal(Promise.resolve(h.insert({ isSystem: true, organizationId: 'org_b' }, created('org_b'))));
     expect(e.message).toContain('plant_b');
     expect(h.zoneAsked).toEqual(['org_b']);
+    // No organization of its own: a default is refused, a plain create passes, and neither reads.
     const other = bound('isolated');
-    await other.insert({ isSystem: true }, created('org_b'));
+    const d = await refusal(Promise.resolve(other.insert({ isSystem: true }, created('org_b'))));
+    expect(d.fields).toEqual([expect.objectContaining({ field: 'is_default', code: 'invalid_value' })]);
+    await other.insert({ isSystem: true }, { ...created('org_b'), is_default: false });
     expect(other.reads).toEqual([]);
+  });
+
+  it('a default set by an update is judged in the stored row\'s organization', async () => {
+    const h = bound('isolated');
+    const stored: Row = { ...created('org_b'), is_default: false };
+    const e = await refusal(Promise.resolve(h.update({ ...member, organizationId: 'org_b' }, { is_default: true }, stored)));
+    expect(e.fields).toEqual([expect.objectContaining({ field: 'is_default', code: 'invalid_value' })]);
+    expect(e.message).toContain('plant_b');
+    expect(h.reads.map((r) => r.query.context?.tenantId)).toEqual(['org_b']);
   });
 
   it('isolated: a write that names no organization reads nothing', async () => {

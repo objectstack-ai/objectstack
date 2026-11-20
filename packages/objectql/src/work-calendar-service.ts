@@ -63,6 +63,15 @@
  * seed or an import writes under its organization's tenant, so its session
  * names it. An update reads in the stored row's own organization. Outside the
  * `single` posture no hook reads without an organization, the service's rule.
+ *
+ * A create whose row names an organization other than the session's is not
+ * read for, so its one-default judgement cannot run where the row lands: when
+ * it sets `is_default` it is refused at the door, before any read — write it
+ * under that organization, or set the default afterwards by an update, which
+ * is judged in the stored row's own organization. A future seed that sets a
+ * calendar's default must therefore load pinned to its organization, or set
+ * the default by an update afterwards. Such a create without a default passes,
+ * and gets no time-zone fill.
  */
 
 import {
@@ -149,6 +158,8 @@ export function enginePostureOf(engine?: unknown): TenancyPosture {
 interface ReadScope {
   read: boolean;
   organizationId?: string | undefined;
+  /** The create's row names an organization other than the session's. */
+  elsewhere?: boolean;
 }
 
 /** May an elevated calendar read run in `organizationId`? Not without one, outside `single`. */
@@ -289,7 +300,7 @@ function periodsRefusal(field: string, value: unknown): FieldRefusal | undefined
 function insertReadOrganization(ctx: any, row: Row, posture: TenancyPosture): ReadScope {
   const organizationId = organizationOf(ctx?.session?.organizationId);
   const named = organizationOf(row.organization_id);
-  if (named !== undefined && named !== organizationId) return { read: false };
+  if (named !== undefined && named !== organizationId) return { read: false, elsewhere: true };
   return mayReadIn(organizationId, posture) ? { read: true, organizationId } : { read: false };
 }
 
@@ -333,7 +344,19 @@ async function judgeCalendar(
   }
   // One default per organization (ADR-0157 D2): judged when the write makes
   // this row a default, against every OTHER default the organization holds.
-  if (scope.read && data.is_default === true && previous?.is_default !== true) {
+  // A create placed in another organization cannot be judged there, so its
+  // default is refused, with no read (see the module note).
+  if (scope.elsewhere && data.is_default === true) {
+    problems.push({
+      field: 'is_default',
+      code: 'invalid_value',
+      message:
+        'This calendar is created in an organization other than the one you are working in, so it cannot be marked ' +
+        'the default here. Create it while working in that organization, or create it without Default and set ' +
+        'Default afterwards by editing it.',
+      value: true,
+    });
+  } else if (scope.read && data.is_default === true && previous?.is_default !== true) {
     const others = (await engine.find(WORK_CALENDAR_OBJECT, {
       where: { is_default: true },
       fields: ['id', 'code'],
