@@ -436,6 +436,15 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the code backfill reads the organization it counts and scopes a row by, and leaves the column out of its read on a federated object',
   },
+  // [ADR-0158 U7 R1] The unit code backfill scopes its walk exactly as its currency twin does.
+  'unit-code-backfill.ts#resolveScope :: isFederatedUnprovisionedInjectedColumn()': {
+    disposition: 'skips',
+    why: 'the unit code backfill never selects an injected column a federated object does not provision',
+  },
+  'unit-code-backfill.ts#resolveScope :: organization_id': {
+    disposition: 'skips',
+    why: 'the unit code backfill reads the organization it counts, scopes a row by and judges its unit codes in, and leaves the column out of its read on a federated object',
+  },
   'stored-expression-backfill.ts#backfillStoredExpressions :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'the backfill never sends an injected column a federated object does not provision',
@@ -801,7 +810,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     }
   }, SCAN_BUDGET_MS);
 
-  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute, the record-currency backfill and the stored-expression backfill', () => {
+  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute, the record-currency backfill, the stored-expression backfill and the unit code backfill', () => {
     const skipping = new Set(
       Object.entries(READERS)
         .filter(([, row]) => row.disposition === 'skips')
@@ -815,6 +824,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
       'record-currency-backfill.ts#resolveScope',
       'stored-expression-backfill.ts#backfillStoredExpressions',
+      'unit-code-backfill.ts#resolveScope',
     ]);
   });
 
