@@ -93,6 +93,11 @@ export interface AuditSealLockHold {
    * Let every lock of the hold go, once the run's last write is done, and say
    * whether each one still stood at that moment: a lock whose session ended
    * mid-run (a dropped connection) excluded nothing from then on.
+   *
+   * A stalled connection cannot hang it: the probe, the release and the close
+   * of each lock are bounded (`DATABASE_SESSION_LOCK_ANSWER_MS` in
+   * `@objectstack/objectql`), and a session that does not answer the probe in
+   * time is a lost lock, reported as one that ended is.
    */
   finish(): Promise<AuditSealLockFinish>;
 }
@@ -238,8 +243,8 @@ export async function holdAuditSealLock(engine: AuditSealLockEngine, options: Au
         lost: true,
         line:
           `The audit seal lock on the database of ${named(lost)} was lost during this run (its database session ` +
-          'ended), so a sealer pass may have sealed a row this run rewrote. Run `os audit verify`: a row it reports ' +
-          'modified was rewritten under such a pass.',
+          'ended, or stopped answering), so a sealer pass may have sealed a row this run rewrote. Run ' +
+          '`os audit verify`: a row it reports modified was rewritten under such a pass.',
       };
     },
   };
