@@ -39,6 +39,9 @@ type Read =
   | { readonly state: 'failed'; readonly message: string }
   | { readonly state: 'read'; readonly account: SlackAccount | null; readonly link: OwnSlackLink | null };
 
+const toRead = (out: Awaited<ReturnType<typeof readOwnSlackLink>>): Read =>
+  out.ok ? { state: 'read', ...out.data } : { state: 'failed', message: out.refusal.message };
+
 export function SlackLinkSection({ apiFetch }: { apiFetch: Fetch }) {
   const { t } = useObjectTranslation();
   const displayLocale = useDisplayLocale();
@@ -47,14 +50,17 @@ export function SlackLinkSection({ apiFetch }: { apiFetch: Fetch }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [noMatch, setNoMatch] = useState(false);
 
-  const reread = useCallback(async () => {
-    const out = await readOwnSlackLink(apiFetch);
-    setRead(out.ok ? { state: 'read', ...out.data } : { state: 'failed', message: out.refusal.message });
-  }, [apiFetch]);
+  const reread = useCallback(async () => setRead(toRead(await readOwnSlackLink(apiFetch))), [apiFetch]);
 
   useEffect(() => {
-    void reread();
-  }, [reread]);
+    let cancelled = false;
+    void readOwnSlackLink(apiFetch).then((out) => {
+      if (!cancelled) setRead(toRead(out));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
 
   /** Run one door call, show its refusal if any, then read the door again. */
   const act = async <T,>(call: () => Promise<SlackAnswer<T>>, after?: (data: T) => void) => {

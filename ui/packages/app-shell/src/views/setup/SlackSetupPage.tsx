@@ -112,8 +112,16 @@ function SlackSetupBody({ apiFetch }: { apiFetch: Fetch }) {
   }, [apiFetch]);
 
   useEffect(() => {
-    void reread();
-  }, [reread]);
+    let cancelled = false;
+    void Promise.all([readSlackAccount(apiFetch), listSlackLinks(apiFetch)]).then(([a, l]) => {
+      if (cancelled) return;
+      setAccount(loaded(a));
+      setLinks(loaded(l));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch]);
 
   /** Run one door call; on success show `done`, else the refusal; then read both doors again. */
   const act = async <T,>(call: () => Promise<SlackAnswer<T>>, done: (data: T) => string): Promise<boolean> => {
