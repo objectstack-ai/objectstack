@@ -263,9 +263,20 @@ async function stage(config: Record<string, unknown> = {}) {
   const admin = await signIn(ADMIN_EMAIL, FIRST);
   expect(admin.bearer, 'the administrator signs in on the bearer lane').toBeTruthy();
 
+  /** The account's credential clock, read through the request store's own adapter. */
+  const changedAt = async () => readCredentialChangedAt((await manager.getAuthContext()).internalAdapter as never, userId);
+
+  /** Remove the account's local password: an account that signs in some other way. */
+  const dropLocalPassword = async () => {
+    const internal: any = (await manager.getAuthContext()).internalAdapter;
+    const row = await internal.findCredentialAccount(userId);
+    await internal.deleteAccount(row.id);
+    expect(await internal.findCredentialAccount(userId)).toBeNull();
+  };
+
   return {
-    engine, manager, fire, bearer, signIn, whoIs, liveSessions, requestLink, reset, requestEmailChange,
-    verifyEmail, emailOf, userId, texts, adminBearer: admin.bearer!,
+    engine, manager, app, fire, bearer, signIn, whoIs, liveSessions, requestLink, reset, requestEmailChange,
+    verifyEmail, emailOf, userId, texts, mail, changedAt, dropLocalPassword, adminBearer: admin.bearer!,
   };
 }
 
@@ -676,7 +687,8 @@ describe('the predicate and its clock', () => {
   });
 
   it('the clock is the last write over the credential row; its creation and no row are no change', async () => {
-    const reader = (account: unknown) => ({ findCredentialAccount: async () => account }) as never;
+    const reader = (account: unknown) =>
+      ({ findCredentialAccount: async () => account, findUserById: async () => ({ createdAt: '2026-01-01T00:00:00.000Z' }) }) as never;
     const created = '2026-01-01T00:00:00.000Z';
     expect(await readCredentialChangedAt(reader(null), 'u')).toBeUndefined();
     expect(await readCredentialChangedAt(reader({ createdAt: created, updatedAt: created }), 'u')).toBeUndefined();
@@ -692,4 +704,176 @@ describe('the predicate and its clock', () => {
       readCredentialChangedAt({ findCredentialAccount: async () => { throw new Error('down'); } } as never, 'u'),
     ).rejects.toThrow('down');
   });
+
+  it("a credential row created onto an account that was already there is a change at its creation; one created with it is not", async () => {
+    const row = { createdAt: '2026-02-01T00:00:00.000Z', updatedAt: '2026-02-01T00:00:00.000Z' };
+    const on = (account: unknown) =>
+      ({ findCredentialAccount: async () => row, findUserById: async () => account }) as never;
+    // Created with the account, as a sign-up with a password creates it.
+    expect(await readCredentialChangedAt(on({ createdAt: '2026-01-31T23:59:59.700Z' }), 'u')).toBeUndefined();
+    // Created a month after the account: the account's first password, set onto it, is a change.
+    expect(await readCredentialChangedAt(on({ createdAt: '2026-01-01T00:00:00.000Z' }), 'u')).toBe(Date.parse(row.updatedAt));
+    // An account whose creation cannot be read is judged as one that was already there.
+    expect(await readCredentialChangedAt(on({}), 'u')).toBe(Date.parse(row.updatedAt));
+    expect(await readCredentialChangedAt(on(null), 'u')).toBe(Date.parse(row.updatedAt));
+    await expect(
+      readCredentialChangedAt({ findCredentialAccount: async () => row, findUserById: async () => { throw new Error('down'); } } as never, 'u'),
+    ).rejects.toThrow('down');
+  });
+});
+
+describe("a door that creates the account's first password is a credential change", () => {
+  it('the control: an account that signed up with a password has never changed it', async () => {
+    const s = await stage();
+    expect(await s.changedAt()).toBeUndefined();
+    const user = await s.signIn(EMAIL, FIRST);
+    expect(await s.verifyEmail(await s.requestEmailChange(user.bearer!))).toMatchObject({ status: 200 });
+  }, 60_000);
+
+  it('the emailed reset: an email-change link minted before it answers what a link never issued answers', async () => {
+    const s = await stage();
+    const user = await s.signIn(EMAIL, FIRST);
+    const before = await s.requestEmailChange(user.bearer!);
+    const neverIssued = await s.verifyEmail('a-token-never-issued');
+    await s.dropLocalPassword();
+    expect(await s.changedAt()).toBeUndefined();
+
+    advanceTheClock();
+    expect(await s.reset(SECOND)).toEqual({ status: 200 });
+
+    expect(await s.changedAt(), 'the reset created the first password: a change').toBeDefined();
+    expect(await s.verifyEmail(before)).toEqual(neverIssued);
+    expect(await s.emailOf()).toBe(EMAIL);
+
+    // The control: a link minted after the reset verifies.
+    advanceTheClock();
+    const again = await s.signIn(EMAIL, SECOND);
+    expect(await s.verifyEmail(await s.requestEmailChange(again.bearer!))).toMatchObject({ status: 200 });
+    expect(await s.emailOf()).toBe(NEW_ADDRESS);
+  }, 60_000);
+
+  it('the texted reset: the same', async () => {
+    const s = await stage({ plugins: { phoneNumber: true }, phoneOtp: { cooldownSeconds: 0 } });
+    await s.engine.update('sys_user', { id: s.userId, phone_number: PHONE, phone_number_verified: true }, SYS);
+    const user = await s.signIn(EMAIL, FIRST);
+    const before = await s.requestEmailChange(user.bearer!);
+    const neverIssued = await s.verifyEmail('a-token-never-issued');
+    await s.dropLocalPassword();
+
+    advanceTheClock();
+    const sent = await s.fire('/phone-number/request-password-reset', { phoneNumber: PHONE });
+    expect(sent.status, await sent.clone().text()).toBe(200);
+    await vi.waitFor(() => expect(s.texts.length).toBe(1));
+    const otp = String(s.texts[0].templateParams?.code ?? '');
+    expect(await answer(await s.fire('/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: SECOND }))).toEqual({ status: 200 });
+
+    expect(await s.changedAt()).toBeDefined();
+    expect(await s.verifyEmail(before)).toEqual(neverIssued);
+    expect(await s.emailOf()).toBe(EMAIL);
+  }, 60_000);
+
+  it("an administrator's /admin/set-user-password: the same", async () => {
+    const s = await stage();
+    const user = await s.signIn(EMAIL, FIRST);
+    const before = await s.requestEmailChange(user.bearer!);
+    const neverIssued = await s.verifyEmail('a-token-never-issued');
+    await s.dropLocalPassword();
+
+    advanceTheClock();
+    const set = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: SECOND, mustChangePassword: false, revokeSessionsAndKeys: false },
+      s.bearer(s.adminBearer),
+    );
+    expect(set.status, await set.clone().text()).toBe(200);
+
+    expect(await s.changedAt()).toBeDefined();
+    expect(await s.verifyEmail(before)).toEqual(neverIssued);
+    expect(await s.emailOf()).toBe(EMAIL);
+  }, 60_000);
+});
+
+describe('a link that signs its holder in, minted before a credential change, answers what a link never issued answers', () => {
+  /** The verification link `/send-verification-email` mails the account, for an account whose address is not yet verified. */
+  async function verificationLink(s: Awaited<ReturnType<typeof stage>>, bearerToken: string): Promise<string> {
+    await s.engine.update('sys_user', { id: s.userId, email_verified: false }, SYS);
+    const sent = () => s.mail.filter((m) => m.template === 'auth.verify_email' && m.to?.address === EMAIL);
+    const before = sent().length;
+    const res = await s.fire('/send-verification-email', { email: EMAIL }, s.bearer(bearerToken));
+    expect(res.status, `send-verification-email: ${await res.clone().text()}`).toBe(200);
+    await vi.waitFor(() => expect(sent().length).toBe(before + 1));
+    return String(sent()[before].data.token);
+  }
+  const verified = async (s: Awaited<ReturnType<typeof stage>>) =>
+    Boolean(((await s.engine.findOne('sys_user', { where: { id: s.userId }, context: { isSystem: true } } as never)) as { email_verified?: unknown }).email_verified);
+
+  it('a verification link with auto-sign-in: no session, the address stays unverified; one minted after signs in', async () => {
+    const s = await stage({ emailVerification: { autoSignInAfterVerification: true } });
+    const user = await s.signIn(EMAIL, FIRST);
+    const before = await verificationLink(s, user.bearer!);
+    const neverIssued = await s.verifyEmail('a-token-never-issued');
+    expect(neverIssued).toMatchObject({ status: 401, code: 'INVALID_TOKEN', opensSession: false });
+
+    advanceTheClock();
+    const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, s.bearer(user.bearer!));
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    expect(await s.verifyEmail(before)).toEqual(neverIssued);
+    expect(await verified(s)).toBe(false);
+
+    // The control: a link minted after the change verifies and signs its holder in.
+    advanceTheClock();
+    const again = await s.signIn(EMAIL, SECOND);
+    expect(await s.verifyEmail(await verificationLink(s, again.bearer!))).toMatchObject({ status: 200, opensSession: true });
+    expect(await verified(s)).toBe(true);
+  }, 60_000);
+
+  it('the control: with auto-sign-in off the link signs nobody in, and the vendor judges it as before', async () => {
+    const s = await stage();
+    const user = await s.signIn(EMAIL, FIRST);
+    const before = await verificationLink(s, user.bearer!);
+
+    advanceTheClock();
+    const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, s.bearer(user.bearer!));
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    expect(await s.verifyEmail(before)).toMatchObject({ status: 200, opensSession: false });
+    expect(await verified(s)).toBe(true);
+  }, 60_000);
+
+  it('a magic link: its never-issued redirect and no session; one minted after signs in', async () => {
+    const s = await stage({ plugins: { magicLink: true } });
+    const user = await s.signIn(EMAIL, FIRST);
+    const magicLink = async (): Promise<string> => {
+      const sent = () => s.mail.filter((m) => m.template === 'auth.magic_link');
+      const before = sent().length;
+      const res = await s.fire('/sign-in/magic-link', { email: EMAIL, callbackURL: '/' });
+      expect(res.status, `sign-in/magic-link: ${await res.clone().text()}`).toBe(200);
+      await vi.waitFor(() => expect(sent().length).toBe(before + 1));
+      return String(sent()[before].data.token);
+    };
+    const open = async (token: string) => {
+      const res = await s.app.request(`${ORIGIN}${BASE}/magic-link/verify?token=${encodeURIComponent(token)}&callbackURL=%2Fhome`, {
+        headers: { origin: ORIGIN },
+      });
+      const location = res.headers.get('location');
+      return {
+        status: res.status,
+        redirectError: location ? new URL(location, ORIGIN).searchParams.get('error') : undefined,
+        opensSession: /session_token=[^;]+/.test(res.headers.getSetCookie?.().join('\n') ?? ''),
+      };
+    };
+    const before = await magicLink();
+    const neverIssued = await open('a-link-never-issued');
+    expect(neverIssued).toMatchObject({ redirectError: 'INVALID_TOKEN', opensSession: false });
+
+    advanceTheClock();
+    const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, s.bearer(user.bearer!));
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    expect(await open(before)).toEqual(neverIssued);
+
+    // The control: a link minted after the change signs its holder in.
+    expect(await open(await magicLink())).toMatchObject({ redirectError: null, opensSession: true });
+  }, 60_000);
 });
