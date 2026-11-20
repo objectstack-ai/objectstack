@@ -161,6 +161,8 @@ export const useSummaryTranslation = createSafeTranslation(
  * the footer withholds) likewise.
  */
 const MENU_AGGREGATES: ReadonlyArray<ColumnSummaryType> = ['sum', 'avg', 'min', 'max'];
+/** The spec's boolean class (`BOOLEAN_AGGREGATE_FIELD_TYPES`): `toggle` is a boolean too. */
+const BOOLEAN_FIELD_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
 const MENU_COUNTS: ReadonlyArray<ColumnSummaryType> = [
   'count_unique', 'count_filled', 'count_empty', 'percent_filled', 'percent_empty',
 ];
@@ -168,7 +170,7 @@ export function offeredColumnSummaries(
   field: ({ type?: string } & NonNullable<Parameters<typeof recordCurrencyField>[0]>) | undefined,
 ): ColumnSummaryType[] {
   const type = field?.type;
-  const numeric = !!type && type !== 'boolean' && !recordCurrencyField(field);
+  const numeric = !!type && !BOOLEAN_FIELD_TYPES.has(type) && !recordCurrencyField(field);
   return [
     ...(numeric ? MENU_AGGREGATES.filter((m) => isAggregateCompatibleWithFieldType(m, type!)) : []),
     ...MENU_COUNTS.filter((m) => m !== 'count_unique' || (!!type && isAggregateCompatibleWithFieldType('count_distinct', type))),

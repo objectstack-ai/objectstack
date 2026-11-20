@@ -53,8 +53,9 @@ describe('offeredColumnSummaries (objectstack#35702)', () => {
     expect(isTemporalSummaryField({ type: 'date' })).toBe(true);
     expect(isTemporalSummaryField({ type: 'number' })).toBe(false);
   });
-  it('offers a boolean no sum, average or extremes', () => {
-    expect(offeredColumnSummaries({ type: 'boolean' }).filter((s) => ['sum', 'avg', 'min', 'max'].includes(s))).toEqual([]);
+  it.each(['boolean', 'toggle'])('offers a %s no sum, average or extremes', (type) => {
+    expect(offeredColumnSummaries({ type }).filter((s) => ['sum', 'avg', 'min', 'max'].includes(s))).toEqual([]);
+    expect(offeredColumnSummaries({ type })).toContain('count_filled');
   });
   it('offers an unknown field the counts it can draw, never count_unique', () => {
     expect(offeredColumnSummaries(undefined)).toEqual(['count_filled', 'count_empty', 'percent_filled', 'percent_empty']);
