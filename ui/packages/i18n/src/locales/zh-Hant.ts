@@ -525,16 +525,16 @@ const zhHant = {
     openRecord: '開啟記錄',
     cancelChanges: '取消更改',
     saveRow: '儲存行',
-    cellReadOnly: '此儲存格不能在這裡編輯。',
+    cellReadOnly: '此單元格不能在這裡編輯。',
   },
   grid: {
     // objectstack#35684 — why a list cell opens no editor, said on the cell.
     readOnlyReason: {
-      readonly: '此欄位為唯讀。',
+      readonly: '此欄位為只讀。',
       computed: '此值由計算得出，不能編輯。',
-      notInline: '此欄位不能在清單中編輯，請開啟記錄修改。',
+      notInline: '此欄位不能在列表中編輯，請開啟記錄修改。',
       noFieldPermission: '您沒有編輯此欄位的權限。',
-      viewOff: '此檢視已關閉清單內編輯。',
+      viewOff: '此檢視已關閉列表內編輯。',
       objectReadOnly: '這些記錄不能在這裡編輯。',
       noPermission: '您沒有編輯這些記錄的權限。',
       approvalLocked: '此記錄正在審批中，已鎖定。',

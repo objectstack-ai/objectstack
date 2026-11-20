@@ -160,18 +160,18 @@ describe('the list reports what of it differs from the view (objectstack#28950)'
     await waitFor(() => expect(reported()).toEqual(['hiddenFields', 'density']));
   });
 
-  it('a Display-only change is reported as the reader makes it, and the report follows it back', async () => {
-    // The row colour: its last switch-shaped neighbours, Row numbers and Edit
-    // inline, went with objectstack#35663 and objectstack#35684.
-    const { reported } = mount({ userActions: { ...BASE.userActions, rowColor: true }, rowColor: { field: 'stage', colors: {} } } as Partial<ListViewSchema>);
+  it('a Display menu change is reported as the reader makes it, and the report follows it back', async () => {
+    // The row height: the menu's switches, Row numbers and Edit inline, went
+    // with objectstack#35663 and objectstack#35684.
+    const { reported } = mount({});
     const content = await openDisplay();
     await waitFor(() => expect(reported()).toEqual([]));
-    fireEvent.click(within(content).getByTestId('options-row-color'));
-    fireEvent.click(await within(content).findByTestId('options-color-clear'));
-    await waitFor(() => expect(reported()).toEqual(['rowColor']));
+    fireEvent.click(within(content).getByTestId('options-row-row-height'));
 
-    fireEvent.click(within(content).getByTestId('options-back'));
-    fireEvent.click(within(content).getByTestId('display-reset-button'));
+    fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
+    await waitFor(() => expect(reported()).toEqual(['density']));
+
+    fireEvent.click(within(content).getByTestId('options-row-height-medium'));
     await waitFor(() => expect(reported()).toEqual([]));
   });
 
