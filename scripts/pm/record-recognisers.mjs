@@ -20,7 +20,7 @@
  * to release `.claude/**`. This file is what reads it, and nothing else:
  *
  *   locateReviewOfRecord     the record on this head, on the PR thread or its card
- *   deliveredCardNumber      which card thread a pull request's record may sit on
+ *   deliveredCardNumber      which card thread a pull request's record may sit on — and `deliveredCardsAtStrongest` every card a tie holds, for a reader that reads them all
  *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it — at the tier its face maps to
  *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
@@ -2259,6 +2259,33 @@ export const DELIVERY_EVIDENCE_PRECEDENCE = Object.freeze(['closing-keyword', 'p
  * @returns {{ card: number, evidence: string } | { card: null, reason: string }}
  */
 export function deliveredCardNumber(pr) {
+  const strongest = strongestDeliveredRows(pr);
+  if (strongest.length === 0) {
+    return {
+      card: null,
+      reason:
+        'its body names no card (no closing keyword and no `Part of` declaration) and its branch is not '
+        + 'the protocol dev-branch shape, so no card thread could be located for it',
+    };
+  }
+  if (strongest.length > 1) {
+    return {
+      card: null,
+      reason:
+        `it delivers ${strongest.length} cards at the same strength (${strongest.map((row) => `#${row.card}`).join(', ')}, `
+        + `${deliveryEvidenceNote(strongest[0].evidence)}), so WHICH card thread carries its record is not derivable `
+        + 'from the pull request alone',
+    };
+  }
+  return { card: strongest[0].card, evidence: strongest[0].evidence };
+}
+
+/**
+ * The delivered cards at the STRONGEST grade any of them carries, in the order the body names them — the ONE
+ * enumeration `deliveredCardNumber` and `deliveredCardsAtStrongest` both answer from, so the two can never
+ * disagree on which cards a tie holds. Each row is a card `deliveryEvidence` accepts, with its grade and rank.
+ */
+function strongestDeliveredRows(pr) {
   const body = String(pr?.body ?? '');
   const candidates = new Set([
     ...closingKeywordTargets(body).keys(),
@@ -2271,26 +2298,31 @@ export function deliveredCardNumber(pr) {
     if (evidence === null) continue;
     delivered.push({ card: Number(n), evidence, rank: DELIVERY_EVIDENCE_PRECEDENCE.indexOf(evidence) });
   }
-  if (delivered.length === 0) {
-    return {
-      card: null,
-      reason:
-        'its body names no card (no closing keyword and no `Part of` declaration) and its branch is not '
-        + 'the protocol dev-branch shape, so no card thread could be located for it',
-    };
-  }
+  if (delivered.length === 0) return [];
   const best = Math.min(...delivered.map((row) => row.rank));
-  const strongest = delivered.filter((row) => row.rank === best);
-  if (strongest.length > 1) {
-    return {
-      card: null,
-      reason:
-        `it delivers ${strongest.length} cards at the same strength (${strongest.map((row) => `#${row.card}`).join(', ')}, `
-        + `${deliveryEvidenceNote(strongest[0].evidence)}), so WHICH card thread carries its record is not derivable `
-        + 'from the pull request alone',
-    };
-  }
-  return { card: strongest[0].card, evidence: strongest[0].evidence };
+  return delivered.filter((row) => row.rank === best);
+}
+
+/**
+ * EVERY card a pull request delivers at its strongest grade — the cards `deliveredCardNumber` refuses to choose
+ * between when there is more than one, as numbers in the order the body names them, with that grade.
+ *
+ * ⭐ DERIVED THROUGH `deliveryEvidence` exactly as `deliveredCardNumber` is: the same enumeration
+ * (`strongestDeliveredRows`), so a card here is a card that relation accepts, and one card here is the one card
+ * `deliveredCardNumber` answers. ⛔ Never a second parser.
+ *
+ * ⛔ NOT a tie-break, and NOT for a reader that searches ONE thread. `deliveredCardNumber` stays the answer to
+ * "which thread may this pull request's record sit on", and it still answers `card: null` on a tie. This is for a
+ * reader that reads EVERY tied card and judges over all of them, so its verdict cannot depend on which card is
+ * read first: `label-write.mjs --land`'s dogfood gate on a folded pull whose body carries one closing keyword per
+ * card. The order is the reading order and nothing else; no reader may rank by it.
+ *
+ * @param {object} pr — a REST pull row: `body`, and `head.ref` for the fallback
+ * @returns {{ cards: number[], evidence: string | null }} — `cards` empty and `evidence` null when none is delivered
+ */
+export function deliveredCardsAtStrongest(pr) {
+  const strongest = strongestDeliveredRows(pr);
+  return { cards: strongest.map((row) => row.card), evidence: strongest[0]?.evidence ?? null };
 }
 
 /**
@@ -2875,6 +2907,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 24,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
+  // The tie relation: the cards a fold's equal closing keywords deliver, for the `--land` dogfood gate, which reads
+  // every one of them; `deliveredCardNumber`'s pairing stays refusing on a tie.
+  '⭐ the tie relation: `deliveredCardsAtStrongest` answers every card a tie holds, in body order, from the ONE enumeration `deliveredCardNumber` answers from — which still yields no card on a tie': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2899,7 +2934,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 16 → 17 with the hold-line battery (the maintainer's lane-hold rule): one battery, one row.
 // Raised 17 → 18 with the knock-signature battery (#33789 item 3, split to #34013): one battery, one row.
 // Raised 18 → 19 with the card-thread delegate battery (#34013 remainder 2): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 19;
+// Raised 19 → 20 with the tie-relation battery (`deliveredCardsAtStrongest`): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 20;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4010,6 +4046,22 @@ export async function selfTest() {
   t('namedCardNumbers names nothing a relation spelling does not: a bare mention, a spelling in a code span or a fence, and a branch outside the protocol shape name no card', namedCardNumbers(PIN_PULL('see #4444 and `Fixes #5555`\n```\nPart of #6666\n```\nRefs: #7777', 'feat/8888-x')).join() === '7777' && namedCardNumbers(PIN_PULL('nothing here')).length === 0 && namedCardNumbers(null).length === 0);
   t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
   t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
+
+  // `deliveredCardsAtStrongest` -- the cards a tie holds, for a reader that reads them ALL (the `--land` dogfood
+  // gate). It answers from the same enumeration as `deliveredCardNumber`, which still refuses to choose.
+  battery('⭐ the tie relation: `deliveredCardsAtStrongest` answers every card a tie holds, in body order, from the ONE enumeration `deliveredCardNumber` answers from — which still yields no card on a tie');
+  {
+    const tie = (body, ref) => deliveredCardsAtStrongest(PIN_PULL(body, ref));
+    const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+    t('⭐ two closing keywords: BOTH cards, at that grade, in the order the body names them -- never sorted', same(tie('Fixes #5555\nFixes #4444'), { cards: [5555, 4444], evidence: 'closing-keyword' }), JSON.stringify(tie('Fixes #5555\nFixes #4444')));
+    t('⛔ …and on that same body `deliveredCardNumber` still yields NO card: the record pairing is unchanged on a tie', (() => { const r = deliveredCardNumber(PIN_PULL('Fixes #5555\nFixes #4444')); return r.card === null && r.reason.includes('same strength') && r.reason.indexOf('#5555') < r.reason.indexOf('#4444'); })());
+    t('two `Part of` declarations and no keyword are a tie at `part-of`', same(tie('Part of #4444\nPart of #5555'), { cards: [4444, 5555], evidence: 'part-of' }), JSON.stringify(tie('Part of #4444\nPart of #5555')));
+    t('a STRONGER grade still leaves one card: a `Part of` beside a keyword is not in the tie', same(tie('Fixes #4444\nPart of #5555'), { cards: [4444], evidence: 'closing-keyword' }), JSON.stringify(tie('Fixes #4444\nPart of #5555')));
+    t('a branch named for a third card adds nothing once the body speaks', same(tie('Fixes #4444\nFixes #5555', 'claude/issue-6666-x'), { cards: [4444, 5555], evidence: 'closing-keyword' }), JSON.stringify(tie('Fixes #4444\nFixes #5555', 'claude/issue-6666-x')));
+    t('⛔ a body naming NO card is no tie: no cards and no grade', same([tie('nothing here'), deliveredCardsAtStrongest(null)], [{ cards: [], evidence: null }, { cards: [], evidence: null }]), JSON.stringify([tie('nothing here'), deliveredCardsAtStrongest(null)]));
+    t('⛔ CONTROL: one card here is exactly the card `deliveredCardNumber` answers, and none here is its null -- on every fixture above', ['Fixes #5555\nFixes #4444', 'Part of #4444\nPart of #5555', 'Fixes #4444\nPart of #5555', `Part of #${PIN_CARD}`, 'nothing here'].every((body) => { const all = deliveredCardsAtStrongest(PIN_PULL(body)); const one = deliveredCardNumber(PIN_PULL(body)); return all.cards.length === 1 ? one.card === all.cards[0] && one.evidence === all.evidence : one.card === null; }) && deliveredCardNumber(PIN_PULL('nothing', `claude/issue-${PIN_CARD}-x`)).card === tie('nothing', `claude/issue-${PIN_CARD}-x`).cards[0]);
+    t('structural: both relations answer from the ONE enumeration, and neither grades evidence itself', (() => { const own = readFileSync(fileURLToPath(import.meta.url), 'utf8'); const body = (name) => own.slice(own.indexOf(`export function ${name}(`), own.indexOf('\n}\n', own.indexOf(`export function ${name}(`))); return ['deliveredCardNumber', 'deliveredCardsAtStrongest'].every((name) => body(name).includes('strongestDeliveredRows(pr)') && !body(name).includes('deliveryEvidence(')); })());
+  }
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
