@@ -1347,11 +1347,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "Navegación",
-        helpText: "Configuración de la navegación al hacer clic en un elemento (panel lateral por defecto; también page, new_window o none)"
+        helpText: "Configuración de la navegación al hacer clic en un elemento: el tamaño del panel lateral y `preventNavigation` para una lista cuyas filas no abren nada (`mode` está obsoleto: el nombre del registro abre la página completa; el icono al pasar el cursor, el panel lateral)"
       },
       "navigation.mode": {
         label: "Modo",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[OBSOLETO] Ya no decide cómo la lista de un objeto abre un registro: en la consola, para todos los lectores, el nombre del registro abre la página completa y el icono que aparece junto a él al pasar el cursor abre el panel lateral. `drawer`, `page` y `new_window` se siguen analizando y no cambian nada; `none` sigue significando que las filas no abren nada (es preferible `preventNavigation: true`). Omite la clave."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegación",

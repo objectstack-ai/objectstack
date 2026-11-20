@@ -1347,11 +1347,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "导航",
-        helpText: "点击条目时的导航配置（默认为抽屉，也可为 page、new_window 或 none）"
+        helpText: "点击条目时的导航配置：抽屉尺寸，以及让列表行不打开任何内容的 `preventNavigation`（`mode` 已弃用——点记录名称进入整页，点悬停图标从侧边打开）"
       },
       "navigation.mode": {
         label: "模式",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[已弃用] 不再决定对象列表如何打开记录：在控制台中，对所有用户而言，点记录名称进入整页，点名称旁的悬停图标从侧边面板打开。`drawer`、`page`、`new_window` 仍可解析，但不再起作用；`none` 仍表示列表行不打开任何内容——建议改用 `preventNavigation: true`。请省略此键。"
       },
       "navigation.preventNavigation": {
         label: "禁止导航",

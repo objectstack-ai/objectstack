@@ -1347,11 +1347,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "ナビゲーション",
-        helpText: "項目をクリックしたときのナビゲーション設定（既定はドロワー。page、new_window、none も指定可）"
+        helpText: "項目をクリックしたときのナビゲーション設定：ドロワーのサイズと、行を開かないリスト用の `preventNavigation`（`mode` は非推奨——レコード名で全画面ページ、ホバー時のアイコンでサイドパネルが開きます）"
       },
       "navigation.mode": {
         label: "モード",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[非推奨] オブジェクトのリストがレコードをどう開くかを、もう決めません：コンソールでは、すべての閲覧者に対し、レコード名で全画面ページが、名前の横にホバー時に出るアイコンでサイドパネルが開きます。`drawer`、`page`、`new_window` は引き続き解析されますが、何も変えません。`none` は引き続き行を開かないことを意味します——`preventNavigation: true` を推奨します。このキーは省略してください。"
       },
       "navigation.preventNavigation": {
         label: "ナビゲーションを無効化",
