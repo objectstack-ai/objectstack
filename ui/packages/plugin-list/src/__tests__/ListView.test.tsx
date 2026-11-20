@@ -682,7 +682,7 @@ describe('ListView', () => {
     expect(screen.queryByTestId('sharing-locked-by')).not.toBeInTheDocument();
   });
 
-  it('should show record count bar when data is loaded', async () => {
+  it('should show the record count in the grid\'s footer row, and no count bar (objectstack#35702)', async () => {
     const mockItems = [
       { id: '1', name: 'Alice', email: 'alice@test.com' },
       { id: '2', name: 'Bob', email: 'bob@test.com' },
@@ -700,9 +700,10 @@ describe('ListView', () => {
     renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
     await vi.waitFor(() => {
-      expect(screen.getByTestId('record-count-bar')).toBeInTheDocument();
+      expect(screen.getByTestId('data-table-summary-lead')).toBeInTheDocument();
     });
-    expect(screen.getByText('3 records')).toBeInTheDocument();
+    expect(screen.getByTestId('data-table-summary-lead')).toHaveTextContent('3 records');
+    expect(screen.queryByTestId('record-count-bar')).not.toBeInTheDocument();
   });
 
   it('should not show record count bar when no data', async () => {
@@ -1431,7 +1432,7 @@ describe('ListView', () => {
       });
     });
 
-    it('should show record count bar by default (showRecordCount undefined)', async () => {
+    it('should show the record count by default (showRecordCount undefined), in the grid\'s footer row', async () => {
       const mockItems = [
         { id: '1', name: 'Alice', email: 'alice@test.com' },
       ];
@@ -1447,7 +1448,7 @@ describe('ListView', () => {
       renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
       await vi.waitFor(() => {
-        expect(screen.getByTestId('record-count-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toBeInTheDocument();
       });
     });
   });
@@ -2056,7 +2057,7 @@ describe('ListView', () => {
       renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
       await vi.waitFor(() => {
-        expect(screen.getByTestId('record-count-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toBeInTheDocument();
       });
       expect(screen.queryByTestId('page-size-selector')).not.toBeInTheDocument();
     });
@@ -2116,9 +2117,9 @@ describe('ListView', () => {
       renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
       await vi.waitFor(() => {
-        expect(screen.getByTestId('record-count-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toBeInTheDocument();
       });
-      expect(screen.getByText('2 records')).toBeInTheDocument();
+      expect(screen.getByTestId('data-table-summary-lead')).toHaveTextContent('2 records');
       expect(mockDataSource.find).not.toHaveBeenCalled();
     });
 
@@ -2138,9 +2139,9 @@ describe('ListView', () => {
       renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
       await vi.waitFor(() => {
-        expect(screen.getByTestId('record-count-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toBeInTheDocument();
       });
-      expect(screen.getByText('2 records')).toBeInTheDocument();
+      expect(screen.getByTestId('data-table-summary-lead')).toHaveTextContent('2 records');
       expect(mockDataSource.find).not.toHaveBeenCalled();
     });
 
@@ -2161,7 +2162,7 @@ describe('ListView', () => {
       renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
       await vi.waitFor(() => {
-        expect(screen.getByText('3 records')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toHaveTextContent('3 records');
       });
 
       // Open search popover and type search query
@@ -2169,7 +2170,7 @@ describe('ListView', () => {
       fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'alice' } });
 
       await vi.waitFor(() => {
-        expect(screen.getByText('1 record')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toHaveTextContent('1 record');
       });
       expect(mockDataSource.find).not.toHaveBeenCalled();
     });
@@ -2193,7 +2194,7 @@ describe('ListView', () => {
       renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
       await vi.waitFor(() => {
-        expect(screen.getByText('2 records')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toHaveTextContent('2 records');
       });
 
       // Open search popover and type search query
@@ -2201,7 +2202,7 @@ describe('ListView', () => {
       fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'bob' } });
 
       await vi.waitFor(() => {
-        expect(screen.getByText('1 record')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toHaveTextContent('1 record');
       });
       expect(mockDataSource.find).not.toHaveBeenCalled();
     });
@@ -2586,7 +2587,7 @@ describe('ListView', () => {
       renderWithProvider(<ListView schema={schema} dataSource={mockDataSource} />);
 
       await vi.waitFor(() => {
-        expect(screen.getByTestId('record-count-bar')).toBeInTheDocument();
+        expect(screen.getByTestId('data-table-summary-lead')).toBeInTheDocument();
       });
 
       expect(screen.queryByTestId('page-size-selector')).not.toBeInTheDocument();

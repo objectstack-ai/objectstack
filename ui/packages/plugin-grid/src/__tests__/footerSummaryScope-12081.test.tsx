@@ -593,17 +593,17 @@ describe('a date-family `min` / `max` in the footer reads as its cell, never as 
     render(hostGrid(ds, { rows, columns: CLOSED_MAX }));
     await waitFor(() => expect(footerText('closed_at')).toBeTruthy());
     await waitFor(() => expect(closedAtCell('Line 9')).toBeTruthy());
-    expect(footerText('closed_at')).toBe(`Closed At: Max: ${closedAtCell('Line 9')}`);
+    expect(footerText('closed_at')).toBe(`Closed At: Latest: ${closedAtCell('Line 9')}`);
     expect(footerText('closed_at')).not.toMatch(/2,025|NaN/);
   });
 
   it('own fetch, one page of 300: the whole set\'s `max` (the server\'s stored text) reads as the last row\'s cell', async () => {
     const ds = makeDataSource();
     render(ownFetchGrid(ds, CLOSED_MAX));
-    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Max: /));
+    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Latest: /));
     const footer = footerText('closed_at');
     expect(footer).not.toMatch(/2,025|NaN|this page/);
-    expect(footer).toBe(`Closed At: Max: ${await cellOf(ROWS[299])}`);
+    expect(footer).toBe(`Closed At: Latest: ${await cellOf(ROWS[299])}`);
   });
 
   it('a `sum` / `avg` over a datetime column draws no figure; CONTROL — a `max` over a number column still reads as a number', async () => {

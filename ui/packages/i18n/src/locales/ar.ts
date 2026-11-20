@@ -684,6 +684,13 @@ const ar = {
       avg: "المتوسط",
       min: "الأدنى",
       max: "الأعلى",
+      earliest: "الأقدم",
+      latest: "الأحدث",
+      pageName: "{{label}} (هذه الصفحة)",
+      calculate: "حساب",
+      none: "لا شيء",
+      menuPercentEmpty: "نسبة الفارغ",
+      menuPercentFilled: "نسبة المعبأ",
     },
     toolbar: {
       densityMode: "الكثافة",
