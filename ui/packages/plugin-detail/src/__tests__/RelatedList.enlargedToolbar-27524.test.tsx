@@ -214,6 +214,33 @@ describe('「+ 添加」 is decided by the relationship, and a pick is one trans
     await waitFor(() => expect(listReads(dataSource)).toBeGreaterThan(readsBefore));
   });
 
+  it('lookup: the picker offers only unlinked children, never a row here or under another parent', async () => {
+    const { dataSource } = renderList();
+    // A server stand-in for the picker's read: it honours the emptiness rule
+    // on the relationship, and serves all three rows when the rule is absent.
+    const pool = [
+      { id: 'p-here', name: 'Already here', lead: 'L-1' },
+      { id: 'p-other', name: 'Under another lead', lead: 'L-2' },
+      { id: 'p-free', name: 'Unlinked', lead: null },
+    ];
+    const listFind = dataSource.find.getMockImplementation()!;
+    dataSource.find.mockImplementation(async (resource: string, params?: any) => {
+      if (resource !== 'task' || JSON.stringify(params ?? {}).includes('L-1')) return listFind(resource, params);
+      const unlinkedOnly = JSON.stringify(params?.$filter ?? []).includes('["lead","is_empty"]');
+      const data = unlinkedOnly ? pool.filter((r) => r.lead == null) : pool;
+      return { data, total: data.length };
+    });
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    fireEvent.click(addButton()!);
+    const dialog = await screen.findByTestId('record-picker-dialog');
+    expect(await within(dialog).findByTestId('record-row-p-free')).toBeInTheDocument();
+    expect(within(dialog).queryByTestId('record-row-p-here')).toBeNull();
+    expect(within(dialog).queryByTestId('record-row-p-other')).toBeNull();
+    const pickerReads = dataSource.find.mock.calls.filter(([r, p]: [string, unknown]) => r === 'task' && !JSON.stringify(p ?? {}).includes('L-1'));
+    expect(pickerReads.length).toBeGreaterThan(0);
+    expect(pickerReads.every(([, p]: [string, any]) => JSON.stringify(p?.$filter ?? []).includes('["lead","is_empty"]'))).toBe(true);
+  });
+
   it('a failing batch adds nothing and says why; no single write is sent', async () => {
     const { dataSource } = renderList({
       batch: async () => { throw Object.assign(new Error("Field 'quantity' is required"), { status: 400 }); },

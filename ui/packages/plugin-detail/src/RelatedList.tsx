@@ -1036,7 +1036,11 @@ function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]
  * (objectstack#35601), decided by the relationship this list hangs on:
  *
  *  - `lookup`: the child is a record of its own, so the picker lists the
- *    child object and a pick re-parents it (`add` with no `linkField`);
+ *    child object and a pick re-parents it (`add` with no `linkField`). It
+ *    lists only UNLINKED children (this relationship empty): a row already
+ *    here would be a no-op pick, and a row under another parent would move
+ *    silently. Moving a child between parents stays on the child's own
+ *    form, where the change is visible (seat ruling on L1-a S1, #35725);
  *  - `master_detail` with a source catalog: the picker lists the catalog and
  *    a pick creates a row of this list naming it (`linkField`). The catalog
  *    is the child's one other REQUIRED single-valued `lookup` (a line's
@@ -1056,7 +1060,7 @@ export function derivedAddOf(
   const entries = relationFieldEntries(childFields);
   const rel = entries.find(([name]) => name === referenceField)?.[1];
   if (!rel || rel.multiple === true) return undefined;
-  if (rel.type === 'lookup') return { picker: { object: childObject } };
+  if (rel.type === 'lookup') return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }] } };
   if (rel.type !== 'master_detail') return undefined;
   const catalogs = entries.filter(([name, def]) =>
     name !== referenceField
