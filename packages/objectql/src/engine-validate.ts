@@ -651,7 +651,8 @@ export async function validate(
         // [#22474] The header the write binds: the insert's
         // `insertParentForRow`, the update's landing header and, for a
         // repoint, `roWhenPreviousParent`.
-        parent: previewParentMaster ? batchSummaries!.overlayRow(previewParentMaster, previewParents?.parents[i]) : previewParents?.parents[i],
+        // [#34821] Onto the columns the caller was served only (`servedColumns`).
+        parent: previewParentMaster ? batchSummaries!.overlayRow(previewParentMaster, previewParents?.parents[i], previewParents?.servedColumns[i] ?? new Set()) : previewParents?.parents[i],
         previousParent: previewParents?.previousParents[i],
         related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),

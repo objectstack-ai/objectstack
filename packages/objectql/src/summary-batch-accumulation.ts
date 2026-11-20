@@ -92,8 +92,15 @@ export interface BatchSummaryAccumulator {
    * row and not as a related binding. A copy; `row` itself is never mutated.
    * A row no admitted row moves, and an unbound header (`null` /
    * `undefined`, the fail-closed signal), are returned as they are.
+   *
+   * [#34821] `visible`, when given, names the only columns of `row` the
+   * reader was served (the insert preview's caller-visible header): no other
+   * column is moved or computed onto the copy, so it reads as served — the
+   * same at every row — and decides nothing it did not decide at the first.
+   * A roll-up the reader was not served is still moved, from the stored
+   * parent, for the visible fields calculated from it.
    */
-  overlayRow<R extends Record<string, unknown> | null | undefined>(object: string, row: R): R;
+  overlayRow<R extends Record<string, unknown> | null | undefined>(object: string, row: R, visible?: ReadonlySet<string>): R;
   /** Count `row` in. Call it only once the row's rules have admitted it. */
   accept(row: Record<string, unknown>): void;
   /**
@@ -248,18 +255,19 @@ export function createBatchSummaryAccumulator(
   /**
    * The summary values the admitted rows move parent `parentId` (a row of
    * `object`) to, or `undefined` when none moves. Each is moved from the value
-   * `row` carries, or, for a roll-up `row` was not handed (and for no row),
-   * from the stored parent the dependents read: both are read before the
-   * batch writes anything.
+   * `row` carries, or, for a roll-up `row` was not handed or not served
+   * (`visible`), and for no row, from the stored parent the dependents read:
+   * both are read before the batch writes anything.
    */
-  const movedOf = (object: string, parentId: string, row?: Record<string, unknown>): Record<string, number> | undefined => {
+  const movedOf = (object: string, parentId: string, row?: Record<string, unknown>, visible?: ReadonlySet<string>): Record<string, number> | undefined => {
     const stored = dependents?.stored?.(object, parentId);
     let out: Record<string, number> | undefined;
     for (const [desc, byParent] of deltas) {
       if (dropped.has(desc) || desc.parentObject !== object) continue;
       const delta = byParent.get(parentId);
       if (!delta) continue;
-      const from = row && desc.summaryField in row ? row : stored && desc.summaryField in stored ? stored : undefined;
+      const carried = row !== undefined && desc.summaryField in row && (!visible || visible.has(desc.summaryField));
+      const from = carried ? row : stored && desc.summaryField in stored ? stored : undefined;
       if (!from) continue;
       const value = moved(desc, from[desc.summaryField], delta);
       if (value === undefined) continue;
@@ -269,14 +277,16 @@ export function createBatchSummaryAccumulator(
   };
 
   /** A copy of `row` (a stored row of `object`) with every summary the admitted rows move, or `undefined` when none moves. */
-  const patchRow = (object: string, row: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const patchRow = (object: string, row: Record<string, unknown>, visible?: ReadonlySet<string>): Record<string, unknown> | undefined => {
     const parentId = singleId(row.id);
     if (parentId === undefined) return undefined;
-    const values = movedOf(object, parentId, row);
+    const values = movedOf(object, parentId, row, visible);
     if (!values) return undefined;
+    /** A column the reader was handed, and (with `visible`) served. */
+    const served = (field: string): boolean => field in row && (!visible || visible.has(field));
     let patched: Record<string, unknown> | undefined;
     for (const [field, value] of Object.entries(values)) {
-      if (!(field in row)) continue; // the reader was not handed this roll-up
+      if (!served(field)) continue; // the reader was not handed this roll-up
       patched ??= { ...row };
       patched[field] = value;
     }
@@ -286,7 +296,7 @@ export function createBatchSummaryAccumulator(
     const computed = dependents?.(object, parentId, values);
     if (computed) {
       for (const [field, value] of Object.entries(computed)) {
-        if (!(field in row)) continue;
+        if (!served(field)) continue;
         patched ??= { ...row };
         patched[field] = value;
       }
@@ -309,9 +319,9 @@ export function createBatchSummaryAccumulator(
     return out ?? binding;
   };
 
-  const overlayRow = <R extends Record<string, unknown> | null | undefined>(object: string, row: R): R => {
+  const overlayRow = <R extends Record<string, unknown> | null | undefined>(object: string, row: R, visible?: ReadonlySet<string>): R => {
     if (!row || deltas.size === 0) return row;
-    return (patchRow(object, row) as R | undefined) ?? row;
+    return (patchRow(object, row, visible) as R | undefined) ?? row;
   };
 
   const foldedSummaries = (rows: readonly unknown[], objects: ReadonlySet<string>): Map<string, { fields: Set<string>; parentIds: Set<string> }> => {
@@ -389,7 +399,27 @@ export type SummaryFoldStandDown = 'filter' | 'not_a_number' | 'exclusion_budget
 /** [#34821] Told once per roll-up a fold stands down, with why: the trace that makes the published limit observable. */
 export type SummaryFoldStandDownSink = (desc: SummaryDescriptor, reason: SummaryFoldStandDown) => void;
 
-/** The fields a filter names, or `undefined` when it holds a condition this cannot read the fields of. */
+/**
+ * [#34821] Add to `into` every field a condition's value reads as a
+ * `{ $field }` comparand, an `addDays: { $field }` offset included (the
+ * fold's walker resolves both against the row); `false` when one names no
+ * field by a string.
+ */
+function addFieldReferents(value: unknown, into: Set<string>): boolean {
+  if (Array.isArray(value)) return value.every((v) => addFieldReferents(v, into));
+  if (!value || typeof value !== 'object' || value instanceof Date) return true;
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    if (key === '$field') {
+      if (typeof inner !== 'string' || inner === '') return false;
+      into.add(inner.split('.')[0]!);
+      continue;
+    }
+    if (!addFieldReferents(inner, into)) return false;
+  }
+  return true;
+}
+
+/** The fields a filter names, as keys or as `{ $field }` referents, or `undefined` when it holds a condition this cannot read the fields of. */
 function filterFieldNames(cond: unknown, into: Set<string>): Set<string> | undefined {
   if (Array.isArray(cond)) {
     for (const c of cond) if (!filterFieldNames(c, into)) return undefined;
@@ -403,14 +433,16 @@ function filterFieldNames(cond: unknown, into: Set<string>): Set<string> | undef
     }
     if (key.startsWith('$')) return undefined;
     into.add(key.split('.')[0]!);
+    if (!addFieldReferents(value, into)) return undefined;
   }
   return into;
 }
 
 /**
  * [#34821] Whether a patch can move roll-up `desc` at all: it writes the
- * foreign key, the source field (not a `count`'s) or a field the filter names (or a filter
- * this cannot read the fields of). A patch that cannot leaves every matched
+ * foreign key, the source field (not a `count`'s) or a field the filter names
+ * (as a key, or as a `{ $field }` comparand or `addDays` offset), or holds a
+ * filter this cannot read the fields of. A patch that cannot leaves every matched
  * row's contribution where it stands, so the roll-up is not folded and its
  * rules read the stored value, as the by-id update reads it, at no cost: a
  * base aggregated from the children differs from the stored value only where

@@ -2799,7 +2799,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<{
     parents: Array<Record<string, unknown> | null>;
-    previousParents: Array<Record<string, unknown> | null | undefined>;
+    previousParents: Array<Record<string, unknown> | null | undefined>; servedColumns: Array<ReadonlySet<string> | null>;
   }> {
     // [#25522 cut 14] The body moved to `engine-master-detail-related.ts`, its docblock with it (see `MasterDetailRelatedHost`).
     const readLogger = () => this.logger;

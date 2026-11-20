@@ -405,6 +405,20 @@ describe('[#34821] summaryPatchCanMove — a roll-up a predicate update\'s patch
   it('a filter holding a condition whose fields it cannot read is taken to move', () => {
     expect(summaryPatchCanMove(desc({ fn: 'count', filter: { $expr: { $gt: ['$amount', 1] } } }), { kind: 'b' })).toBe(true);
   });
+
+  it('moves when the patch writes a field the filter reads as a { $field } comparand or an addDays offset, and not otherwise', () => {
+    const late = desc({ fn: 'count', summaryField: 'n', filter: { closed_day: { $gt: { $field: 'due_day' } } } });
+    expect(summaryPatchCanMove(late, { due_day: 1 })).toBe(true);
+    expect(summaryPatchCanMove(late, { closed_day: 1 })).toBe(true);
+    const shifted = desc({ fn: 'count', summaryField: 'n', filter: { $or: [{ closed_on: { $lt: { $field: 'due_on', addDays: { $field: 'grace' } } } }] } });
+    expect(summaryPatchCanMove(shifted, { grace: 2 })).toBe(true);
+    expect(summaryPatchCanMove(shifted, { due_on: '2026-01-01' })).toBe(true);
+    // CONTROL: a patch writing none of the filter's fields, as key or as referent.
+    expect(summaryPatchCanMove(late, { other: 1 })).toBe(false);
+    expect(summaryPatchCanMove(shifted, { other: 1 })).toBe(false);
+    // A referent naming no field by a string is a condition this cannot read.
+    expect(summaryPatchCanMove(desc({ fn: 'count', filter: { closed_day: { $gt: { $field: 7 } } } }), { other: 1 })).toBe(true);
+  });
 });
 
 describe('[#34821] each stand-down of a predicate update\'s fold is reported once, naming the roll-up and why', () => {
