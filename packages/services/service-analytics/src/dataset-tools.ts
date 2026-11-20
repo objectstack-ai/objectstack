@@ -169,6 +169,9 @@ export function getDatasetToolDefinitions(): readonly AIToolDefinition[] {
  * The array form is a complete read. The object form carries `partial: true`
  * and a `warning` when the read was degraded (the `list_objects` shape), and
  * the tools say so instead of presenting a short list as the whole catalogue.
+ * [#34993] A `warning` without `partial` is a whole read the host says
+ * something about (a translation fault: every row, its text untranslated):
+ * `list_datasets` says it, and `query_dataset` still answers.
  */
 export type DatasetToolSource =
   | readonly unknown[]
@@ -203,6 +206,13 @@ export interface DatasetToolsDeps {
    * degraded read: `list_datasets` answers `partial`, `query_dataset` 503.
    */
   readonly loadDatasets: (context: ExecutionContext | undefined) => Promise<DatasetToolSource>;
+  /**
+   * [#35083] The locale `loadDatasets` translated the rows for. Labels are
+   * read, and sentences (`nextStep`, `sourceLine`) composed, in it first, so
+   * one answer speaks one language. Optional: absent, answering `undefined` or
+   * throwing, the caller's locale ladder alone (`userTextLocalesOf`).
+   */
+  readonly translationLocale?: (context: ExecutionContext | undefined) => Promise<string | undefined>;
   /** `query_dataset`'s row cap — the bridge's `maxQueryLimit`. Default {@link DATASET_TOOL_DEFAULT_MAX_ROWS}. */
   readonly maxQueryLimit?: number;
   /**
@@ -384,6 +394,16 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     ? Math.floor(deps.maxQueryLimit)
     : DATASET_TOOL_DEFAULT_MAX_ROWS;
 
+  /** [#35083] The answer's locale ({@link DatasetToolsDeps.translationLocale}), and its sentence ladder. */
+  async function answerLocales(context: ExecutionContext | undefined): Promise<{ locale?: string; sentence: string[] }> {
+    const translated = await Promise.resolve()
+      .then(() => deps.translationLocale?.(context))
+      .catch(() => undefined);
+    const ladder = sentenceLocales(context);
+    if (typeof translated !== 'string' || translated === '') return { locale: context?.locale, sentence: ladder };
+    return { locale: translated, sentence: [translated, ...ladder.filter((l) => l !== translated)] };
+  }
+
   /**
    * The saved datasets, each stripped of read decorations and parsed as the
    * REST door parses a saved dataset; one that fails the parse is left out (a
@@ -393,6 +413,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const source = await deps.loadDatasets(context);
     const items = Array.isArray(source) ? source : (source as { items?: readonly unknown[] }).items ?? [];
     const degraded = !Array.isArray(source) && (source as { partial?: unknown }).partial === true;
+    const said = Array.isArray(source) ? undefined : (source as { warning?: unknown }).warning;
     const datasets: Dataset[] = [];
     const holdings: Array<LoadedDatasets['holdings'][number]> = [];
     for (const item of items) {
@@ -410,7 +431,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       datasets,
       holdings,
       partial: degraded,
-      ...(degraded ? { warning: String((source as { warning?: unknown }).warning ?? 'The dataset read was degraded.') } : {}),
+      ...(degraded ? { warning: String(said ?? 'The dataset read was degraded.') } : typeof said === 'string' ? { warning: said } : {}),
     };
   }
 
@@ -419,6 +440,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const parsed = ListDatasetsInputSchema.safeParse(input ?? {});
     if (!parsed.success) throw inputRefusal(LIST_DATASETS_TOOL_NAME, parsed.error.issues, input);
     const terms = parsed.data.terms;
+    const { locale, sentence } = await answerLocales(context);
 
     let loaded: LoadedDatasets;
     try {
@@ -426,7 +448,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     } catch (e) {
       // The #6504 shape: never a count that is not a fact.
       const nextStep = terms !== undefined
-        ? composeDatasetNextStep({ terms, datasets: [], candidates: [], partial: true, locales: sentenceLocales(context) })
+        ? composeDatasetNextStep({ terms, datasets: [], candidates: [], partial: true, locales: sentence })
         : undefined;
       return {
         datasets: [],
@@ -436,7 +458,6 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       };
     }
 
-    const locale = context?.locale;
     const entries: DatasetToolCatalogEntry[] = [];
     // The admitted members of each listed dataset, in its entry's order: the
     // only members a candidate may name (ADR-0149 D3 amendment note).
@@ -480,14 +501,14 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     const candidates = terms !== undefined ? findDatasetTermCandidates(terms, listed) : [];
 
     const warnings: string[] = [];
-    if (loaded.partial && loaded.warning) warnings.push(loaded.warning);
+    if (loaded.warning) warnings.push(loaded.warning);
     if (unresolved) {
       warnings.push('Some datasets or members could not be checked against this caller\'s permissions and are left out.');
     }
     // [ADR-0149 M1 note] Composed last, from this answer alone: the entries
     // and candidates above are the admitted members, and nothing else is read.
     const nextStep = terms !== undefined
-      ? composeDatasetNextStep({ terms, datasets: entries, candidates, partial: warnings.length > 0, locales: sentenceLocales(context) })
+      ? composeDatasetNextStep({ terms, datasets: entries, candidates, partial: warnings.length > 0, locales: sentence })
       : undefined;
     return {
       datasets: entries,
@@ -598,13 +619,14 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     }
 
     // Composed last, so nothing the answer carries can stand in for them.
-    const provenance = composeProvenance(dataset, raw.selection, context?.locale);
+    const { locale, sentence } = await answerLocales(context);
+    const provenance = composeProvenance(dataset, raw.selection, locale);
     return {
       ...rest,
       rows: served,
       provenance,
       // [ADR-0149 M1 note] The same source as one line, from `provenance` alone.
-      sourceLine: composeDatasetSourceLine(provenance, sentenceLocales(context)),
+      sourceLine: composeDatasetSourceLine(provenance, sentence),
       rowCount: served.length,
       truncated,
       ...(totalGroups !== undefined ? { totalGroups } : {}),

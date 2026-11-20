@@ -13,5 +13,4 @@ Metadata-protocol: none
 - The flag is not the app-authored flag: a host handler's `delete(…, { permanent: true })` still runs.
 - The api the audit writer holds (a hook registered in code) is unchanged: `platformSystemApi` still takes the mark off there.
 - Runtime's derivation walk now wraps the api any symbol-keyed member derives (`platformSystemApi`'s, the user-grants seeds'), awaited when it is a promise, so it is served through the stored-metadata read seam and the landed-write answer like `ctx.api.sudo()`.
-- Not covered: the api `ctx.api.object(o).execute(name)` hands the action it dispatches is built by the engine, not the action door, so `platformSystemApi` still takes the mark off there.
 - No new export, and `@objectstack/objectql` is unchanged but for its module header: the member's key is the `Symbol.for` key objectql already uses, which neither package entry exports.

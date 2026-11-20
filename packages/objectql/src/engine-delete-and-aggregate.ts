@@ -82,6 +82,7 @@ import type { EngineReadOptions, OperationContext } from './engine-top-level.js'
 import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
 import {
     aggregateOrderCutDirective, aggregateOrderCutRefusal, aggregateOrderCutRequestOf, assertAggregateOrderCutShape,
+    declineAggregateOrderCut,
     takeAggregateGroupCount, withAggregateOrderCutDirective,
 } from './aggregate-order-cut.js';
 import {
@@ -1549,6 +1550,8 @@ export class DeleteAndAggregateFacet {
         // [aggregate order and cut] Served only as the driver's own statement,
         // and refused — before the driver is asked — on every path that is not
         // one (`aggregateOrderCutRefusal`): no in-memory sort, no slower path.
+        // A caller that opted in (`declinable`) is declined instead, nothing
+        // read, and serves the groups its own way.
         if (orderCut !== undefined) {
             const refused = aggregateOrderCutRefusal(object, {
                 driver: drv,
@@ -1556,7 +1559,10 @@ export class DeleteAndAggregateFacet {
                 hasHaving: ast.having != null && typeof ast.having === 'object' && Object.keys(ast.having).length > 0,
                 hasRelationGroup: relationGroup !== undefined,
             });
-            if (refused !== undefined) throw refused;
+            if (refused !== undefined) {
+                if (orderCut.declinable === true) return declineAggregateOrderCut(orderCut, refused);
+                throw refused;
+            }
             const directive = aggregateOrderCutDirective(orderCut, aggregatedRowColumns(ast.groupBy, []));
             const cut = await drv.aggregate(object, withBucketZone(withAggregateOrderCutDirective(ast, directive)), aggregateOptions);
             return takeAggregateGroupCount(object, drv, cut, orderCut);

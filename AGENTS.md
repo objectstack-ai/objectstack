@@ -273,40 +273,40 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
 14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand (merge or enqueue)
     or an authorized approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI
     seat merges, queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
-    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
-    `CLAUDE.md` and `.github/workflows/**`, and under `ui/` `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`,
-    `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`. The register is `GOVERNED_SURFACES` in
-    `scripts/pm/check-governed-merges.mjs`, each row carrying its tier; adding a surface is an edit *there*, never here,
-    and `pnpm check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or
-    more. A fork PR (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies,
+    `docs/NORTH-STAR.md`, `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, `.github/workflows/**`, under `ui/`
+    `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`, `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`, and
+    the guard itself: `scripts/pm/check-governed-queue-guard.mjs`, `scripts/pm/record-recognisers.mjs`,
+    `scripts/pm/dispatch-gates.mjs` and the register, `GOVERNED_SURFACES` in `scripts/pm/check-governed-merges.mjs`,
+    each row carrying its tier; adding a surface is an edit *there*, never here (`pnpm check:pm-governed-prose` pins the
+    list). A fork PR (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies,
     queues, arms auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
-    **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
-    auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
-    its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
-    the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: every row outside Tier S): those four lift only for an authorized APPROVED review by an account in
-    `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per PR — the OWNING seat then lands
-    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档 L2 审核落地: `.claude/**`,
-    objectstack workflow edits (`readWorkflowDiff`), skills-only wording and add-only ADR notes (`lowRiskArmVerdict`, on
-    a `Security-touching: no` record, no named card ever labelled `security`; the seat labels unnamed security teaching)
-    read as S): those four lift once the PR thread or its card carries a PASS `## Contract review` record for the PR's
-    current head with `Served-tier: CONTRACT_REVIEW_TIER` and every check is green — the owning seat queues it. A PR
-    whose only governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals — an
-    uncertified recompute, drift or a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving
-    review on a governed-surface PR, under any account** — an authorized account is agent-operated too; "CI is green"
-    says nothing about a governance change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
+    **landing**: on such a PR ⛔ never merge, ⛔ never queue, ⛔ never arm auto-merge, ⛔ never flip it out of draft
+    to make any of those possible — judged on the PR's **file list**, not its description; a **mixed diff is not a
+    proportion question**, one path hit is enough; to land the rest, split off the governed files. **One Tier H path
+    makes the whole PR Tier H.** **Tier H** (人合: every row outside Tier S): those four lift only for an authorized
+    APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per
+    PR — the OWNING seat then lands it, later pushes included; the click stays the maintainer's. **Tier S**
+    (席内达档 L2 审核落地: `.claude/**`, objectstack workflow edits (`readWorkflowDiff`), skills-only wording
+    and add-only ADR notes (`lowRiskArmVerdict`, on a `Security-touching: no` record, no named card ever labelled
+    `security`; the seat labels unnamed security teaching) read as S): those four lift once the PR thread or its card
+    carries a PASS `## Contract review` record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and
+    every check is green — the owning seat queues it. `.claude/**` is S only on a line-start `Rule-change: none` in
+    the PR body (or `ruled` with a `Ruling-ref:` line quoting the maintainer) repeated on the record's
+    `Rule-change-verified:` line; no line, `yes`, settings and hooks are Tier H. A PR whose only governed paths are
+    register rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or
+    a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR,
+    under any account**. An authorized account's enqueue is a review record too: ⛔ never a seat's.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
-    an unqueued PR; a queued one's landing seat sends the relay's `pr_dequeue` (measured live, comment 6902190812); any
-    other seat, or a stroke that does not land, asks the maintainer at once — then confirm from the remote that it is
-    in neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
-    spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
-    governed diff without its tier's record; CODEOWNERS routes every Tier H surface but the low-risk arm's rows to the
-    approvers, the relay asks per pull on drafts (no barrier); the post-merge audit (`check-governed-merges.mjs`) lists
-    every governed-surface merge with its approver and merger — a merger the maintainer does not recognise, any agent
-    approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
+    an unqueued PR; a queued one's landing seat sends the relay's `pr_dequeue`; any other seat, or a stroke that does
+    not land, asks the maintainer at once — then confirm from the remote that it is in neither the queue nor
+    `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a spent approval or a
+    standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a governed diff
+    without its tier's record; the post-merge audit (`check-governed-merges.mjs`) lists every governed-surface merge
+    with its approver and merger — a merger the maintainer does not recognise, any agent approval, or a Tier S merge
+    without a PASS record is a seat violation, filed and rolled back. No seat judges this.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
     triggers a release, and none merges the Version Packages PR.** A rule that binds every seat lives here,

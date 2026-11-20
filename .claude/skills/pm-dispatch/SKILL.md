@@ -187,19 +187,17 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 ## 路径分叉
 
-- **ACCEPT 之后的路径分叉**:翻 ready / 挂 auto-merge / 入队前先取一次 PR 的路径面。
-- 路径面用 `get_files` 取,⛔ 不看报告自述;动手之前先分,不是事后对照。
-- governed 面(定 Tier,非车道):`docs/adr/**`+`.claude/**`+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`。
-- governed 面同含 `AGENTS.md`+`CLAUDE.md`;`GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
-- 另含 `ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
+- **ACCEPT 之后的路径分叉**:翻 ready/挂 auto-merge/入队前 `get_files` 取路径面,⛔ 不看报告自述。
+- governed 面(定 Tier,非车道):`docs/adr/**`+`.claude/**`+`skills/**`+`docs/NORTH-STAR.md`+`.github/workflows/**`+`AGENTS.md`+`CLAUDE.md`+`ui/docs/adr/**`+`ui/.claude/**`+`ui/skills/**`+`ui/AGENTS.md`+`ui/CLAUDE.md`+`ui/.github/workflows/**`。
+- `GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
+- 恒 H:守卫仪器 `scripts/pm/check-governed-merges.mjs`+`scripts/pm/check-governed-queue-guard.mjs`+`scripts/pm/record-recognisers.mjs`+`scripts/pm/dispatch-gates.mjs`+守卫 workflow+settings+hooks。
 - 定档 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
-- 改动 >3000 行(含生成物)同换终局四件套含③请审,⛔ 无 Tier S 例外;读数=PR additions+deletions。
+- >3000 行(含生成物,additions+deletions)或申报收窄同换终局四件套含③请审,⛔ 无 Tier S 例外。
 - ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读四行+席位意见,其下 `## 席位核对`。
 - ② PR 悬着等人批,同笔挂 `pm:awaiting-merge`;人工直合即审核记录,授权批准 ⇒ 席位落地。
 - 指针 `ACCEPT → PR #n comment <id>`;受管/spec 面欠 ①–④,席只达档补审现 head 记录未盖处。
 - 核对六项:形态/前提实测/门禁 check-runs/接受的偏差/范围外去向+`Skills-docs:`/落地条款。
-- 草稿归 dev:PR 正文带 `## 维护者速读` 四行(见 os-dev.md),中文业务话,不写席位意见。
-- 终稿 = 席位对照自己读的 diff 校正四行、加席位意见行,置顶席位记录;维护者只读评论。
+- 终稿 = 席位照自己读的 diff 校正 dev 草稿、加席位意见行,置顶席位记录;维护者只读评论。
 - `pm:awaiting-merge` 只挂 PR、不入六态,与请审同为等人批清单,随获批或撤回判决离开。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
 - ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮中继 `pr_request_reviewers` 请审批人。
@@ -207,8 +205,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「要你做什么」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
-- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地。
-- 受管面两层:Tier S = `.claude/**`+下行 S 面(该面独占),余皆 Tier H;S 经达档 PASS 后 ready→入队。
+- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地,守卫除外。
+- Tier S = `Rule-change: none`/`ruled` 记录核过的 `.claude/**`+下行面,余皆 H;达档 PASS 后 ready→入队。
 - 本仓 workflows 读 `readWorkflowDiff`(发布面/C2/拒读⇒H),技能与只增 ADR `lowRiskArmVerdict`,未读⇒H。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
 - 非必查红是真缺陷或坏门,归 PM 入队前处置;第三种按设计而红,三条全立才可带红入队:
