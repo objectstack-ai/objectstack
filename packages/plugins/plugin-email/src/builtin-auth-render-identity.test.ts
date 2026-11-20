@@ -53,6 +53,12 @@ const DATA = {
   // the timezone the render names (UTC below) so the bytes never follow the
   // machine's zone.
   expiresAt: '2031-03-04T05:06:07.000Z',
+  // What a password change leaves active (`auth.password_changed_notice`):
+  // each list arrives prepared, beside its count.
+  apiKeyCount: 2,
+  apiKeys: 'ci & <deploy>, laptop',
+  signInAccountCount: 1,
+  signInAccounts: 'github',
 };
 
 /**
@@ -236,6 +242,29 @@ const RENDERED: Record<string, { subject: string; html: string; text: string }> 
     html: 'c6abe9c3fc761d1dc88b0517ee65bce3dcedb01a425e6cdd3daebdd77aff1a00',
     text: '7d65c60ed0e8b415fe7aae7aff5c544318f81e3ab6c87525067af112a30d238b',
   },
+  // `auth.password_changed_notice` has no row-path render to match: it was
+  // added after the row path was deleted, and these are its registry renders
+  // captured in the commit that added it, so any later byte change is seen.
+  'auth.password_changed_notice@en-US': {
+    subject: 'Your Acme & <Co> password was changed: your API keys and linked sign-ins stay active',
+    html: 'c912c9ad9f2dfad8fd0a04c6f13fc1d2e4b35a7e43cdcf51bbd47f184d2cee56',
+    text: '5fdf147da742ec9a375176721616b52c0adf54bba86d63e55ed4c6e00703738d',
+  },
+  'auth.password_changed_notice@zh-CN': {
+    subject: '您的 Acme & <Co> 密码已修改：API 密钥与已关联的登录方式仍然有效',
+    html: '5b62c053ba6d9c8b8516e4373cba3ea9e67665bf8034558b2cca165d1f18f089',
+    text: '7d4493e6100427ae60b02d8d62d6876abb0ba4d1dcc84017c26fb57a3c4a4cc5',
+  },
+  'auth.password_changed_notice@ja-JP': {
+    subject: 'Acme & <Co> のパスワードが変更されました: API キーと連携済みのサインインは引き続き有効です',
+    html: '1ee2fc7327eca1c050c46c5b422c801b872b6f709a06adc17dc93afd4f4c9359',
+    text: '8b4ad3bc74b33b1b2419da645830814b7d57696e04911af17d8bf98c7fb41700',
+  },
+  'auth.password_changed_notice@es-ES': {
+    subject: 'Se ha cambiado tu contraseña de Acme & <Co>: tus claves de API e inicios de sesión vinculados siguen activos',
+    html: 'b66c66f4543f6a18f689c917aceae8de1010bfc2ccc11dec1a6b77295633fedd',
+    text: 'a72a6650cdfffed5217afe7f3fcda7a9e895c969339f832e06aeb0a0728baff5',
+  },
 };
 
 /** What the expiry instant is replaced with before a face is digested. */
@@ -297,7 +326,7 @@ describe('every built-in auth mail renders byte-identical from the registry', ()
       };
     }
 
-    expect(Object.keys(rendered)).toHaveLength(32);
+    expect(Object.keys(rendered)).toHaveLength(36);
     expect(rendered).toEqual(RENDERED);
   });
 });

@@ -569,3 +569,75 @@ describe('#25060 — auth.existing_account_sign_up renders its own text in each 
     expect(transport.sent).toEqual([]);
   });
 });
+
+// ── auth.password_changed_notice, in all four locales ──────────────────────
+
+/**
+ * The reminder an account is sent when its password was CHANGED and it still
+ * holds API keys or linked sign-in accounts, which a change, unlike a reset,
+ * does not end (`plugin-auth`'s `password-reset-ends-added-access.test.ts`
+ * owns the sender half). Same discipline as above: every expectation is an
+ * independent literal.
+ */
+const PASSWORD_CHANGED = 'auth.password_changed_notice';
+const PASSWORD_CHANGED_DATA = {
+  user: { name: 'Ada', email: 'ada@acme.test', id: 'u1' },
+  apiKeyCount: 2,
+  apiKeys: 'ci-deploy, laptop',
+  signInAccountCount: 1,
+  signInAccounts: 'github',
+  appName: 'Acme',
+};
+
+const PASSWORD_CHANGED_SUBJECT: Record<Locale, string> = {
+  'en-US': 'Your Acme password was changed: your API keys and linked sign-ins stay active',
+  'zh-CN': '您的 Acme 密码已修改：API 密钥与已关联的登录方式仍然有效',
+  'ja-JP': 'Acme のパスワードが変更されました: API キーと連携済みのサインインは引き続き有効です',
+  'es-ES': 'Se ha cambiado tu contraseña de Acme: tus claves de API e inicios de sesión vinculados siguen activos',
+};
+
+/** What stays active, and the road that ends it — the reader who did not change the password needs both. */
+const PASSWORD_CHANGED_PHRASES: Record<Locale, string[]> = {
+  'en-US': ['API keys (2): ci-deploy, laptop', 'Linked sign-in accounts (1): github', 'A password reset ends every API key'],
+  'zh-CN': ['API 密钥（2）：ci-deploy, laptop', '已关联的登录账号（1）：github', '重置密码会结束账号的全部 API 密钥'],
+  'ja-JP': ['API キー（2）: ci-deploy, laptop', '連携済みのサインイン アカウント（1）: github', 'すべての API キー'],
+  'es-ES': ['Claves de API (2): ci-deploy, laptop', 'Cuentas de inicio de sesión vinculadas (1): github', 'se cierran todas las claves de API'],
+};
+
+describe('auth.password_changed_notice is a registered built-in in all four locales', () => {
+  it('has exactly one row per supported locale, each a valid EmailTemplateDefinition', () => {
+    const rows = BUILTIN_AUTH_TEMPLATES.filter((t) => t.name === PASSWORD_CHANGED);
+    expect(rows.map((t) => t.locale).sort()).toEqual([...SUPPORTED_LOCALES].sort());
+    for (const t of rows) {
+      const parsed = EmailTemplateDefinitionSchema.safeParse(t);
+      expect(parsed.success, `${t.locale}: ${parsed.error?.message}`).toBe(true);
+    }
+  });
+
+  for (const locale of SUPPORTED_LOCALES) {
+    it(`${locale}: subject, what stays active and the reset road, in its own language`, async () => {
+      const transport = new CaptureTransport();
+      const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+      await svc.sendTemplate({ template: PASSWORD_CHANGED, to: 'ada@acme.test', locale, data: PASSWORD_CHANGED_DATA });
+      const sent = transport.sent[0]!;
+      expect(sent.subject).toBe(PASSWORD_CHANGED_SUBJECT[locale]);
+      const prose = [sent.subject, String(sent.html), String(sent.text)].join('\n');
+      for (const phrase of PASSWORD_CHANGED_PHRASES[locale]) expect(prose, phrase).toContain(phrase);
+      expect(prose).toContain('ada@acme.test');
+      expect(prose, 'a change the owner did not make is never "safe to ignore"').not.toContain(EXPECTED_FOOTER[locale]);
+      expect(prose).not.toContain('{{');
+    });
+  }
+
+  it('a zh-CN, ja-JP or es-ES send carries none of the en-US text', async () => {
+    for (const locale of ['zh-CN', 'ja-JP', 'es-ES'] as const) {
+      const transport = new CaptureTransport();
+      const svc = new EmailService({ transport, defaultFrom: { address: 'no-reply@acme.test' }, templateLoader: seededLoader });
+      await svc.sendTemplate({ template: PASSWORD_CHANGED, to: 'ada@acme.test', locale, data: PASSWORD_CHANGED_DATA });
+      const sent = transport.sent[0]!;
+      const prose = [sent.subject, sent.html, sent.text].join('\n');
+      expect(prose, locale).not.toContain(PASSWORD_CHANGED_SUBJECT['en-US']);
+      for (const phrase of PASSWORD_CHANGED_PHRASES['en-US']) expect(prose, `${locale}: ${phrase}`).not.toContain(phrase);
+    }
+  });
+});
