@@ -90,6 +90,16 @@
         "must_contain": ["timezone: 'Asia/Taipei'", "dateGranularity: 'month'", "zonedDateBucketing", "in memory", "in the database"],
         "must_not_contain": ["date_trunc"]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "A dashboard widget over `supply_plan` must always show the current week. `plan_week` is a text field holding ISO week keys such as `2026-W47`; `ship_date` is a date field. Write the widget filter on `plan_week`, then the same week as a filter on `ship_date`.",
+      "expected_output": "`{ plan_week: '{current_iso_week}' }` — the period-key token resolves to today's ISO week key (`YYYY-Www`, workspace time zone, Monday-start weeks), so it matches a text field that stores those keys. It is text, not a date: on `ship_date` it is refused (`INVALID_FILTER` / 400), so the date field takes the week's boundaries, `{ ship_date: { $gte: '{current_week_start}', $lte: '{current_week_end}' } }`. No hand-computed key or date, which would freeze into the metadata.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["plan_week: '{current_iso_week}'", "{current_week_start}", "{current_week_end}"],
+        "must_not_contain": ["{current_week}", "ship_date: '{current_iso_week}'"]
+      }
     }
   ]
 }

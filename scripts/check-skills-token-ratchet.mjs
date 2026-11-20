@@ -1370,7 +1370,21 @@ export const CEILINGS = new Map([
   // paragraph (home: SKILL.md, String Operators) and a second `$between` Date
   // example (home: the operator table's `$between` row). Arithmetic in bytes:
   // 9925 -> 9892 (-33 net) -> ceil(9892 / 4) = 2473; headroom 0 tokens.
-  ['skills/objectstack-query/rules/filters.md', 2473],
+  // 2473 -> 2596 (#35496): the `{current_iso_week}` period key in § Date Macros
+  // (its `YYYY-Www` value, the text-field-only rule, the `INVALID_FILTER` / 400
+  // refusal on date / datetime / time fields, the two date-only surfaces that
+  // refuse it) and the client resolver that covers all three vocabularies.
+  // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST — five restatements cut in the same
+  // section: the wrapper regex beside the prose that already says both
+  // spellings parse, the code comment repeating the sentence above its block,
+  // the second date-macro comparison in the session-token example (the week key
+  // takes its place), the two per-vocabulary predicates (one predicate answers
+  // for all three) and the driver sentence's list of value kinds. Arithmetic in
+  // bytes: 9876 landed -> 10382, +506 -> 127 tokens, the row's 4 tokens of
+  // headroom absorbed, ceiling +123, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-query/rules/filters.md) / 4) == ceil(10382 / 4)
+  ['skills/objectstack-query/rules/filters.md', 2596],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
