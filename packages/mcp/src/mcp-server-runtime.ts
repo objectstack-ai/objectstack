@@ -36,6 +36,7 @@ import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
 } from './metadata-completeness.js';
+import { createRequire } from 'node:module';
 import { DEFAULT_SERVER_VERSION, PACKAGE_VERSION } from './package-version.js';
 import { createPlatformMcpServer } from './request-params.js';
 import { protocolStdout } from './protocol-stdout.js';
@@ -1798,6 +1799,23 @@ const DEFAULT_HTTP_INSTRUCTIONS =
   'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
 
 /**
+ * [#34774] The authoring contract line (#34659 ruling D4 = A): the
+ * `@objectstack/spec` this process resolves (its `package.json`, the file the
+ * draft save's major check and the restriction profile route read too). Second
+ * among the paragraphs a client routes on, and only where the authoring family
+ * registers tools, as the drafts line: a connection with no build door is told
+ * nothing about building ([#32766]). No line when the manifest cannot be read.
+ */
+const AUTHORING_CONTRACT_LINE: string | undefined = (() => {
+  try {
+    const { version } = createRequire(import.meta.url)('@objectstack/spec/package.json') as { version?: unknown };
+    return typeof version === 'string' && version ? `Authoring contract: @objectstack/spec ${version}.` : undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
+/**
  * [#34686] The selection rule between a governed metric and an object query
  * (ADR-0149 D3), in the few lines `initialize` carries. It rides the
  * instructions because a client reads a tool's description only after it has
@@ -1934,7 +1952,8 @@ function definitionReaderServed(
 
 /**
  * [#34686] The open server's own `initialize` text for one HTTP request: the
- * default sentence, the selection rule when this request's grant registers
+ * default sentence, [#34774] the authoring contract line when it registers
+ * authoring tools, the selection rule when this request's grant registers
  * both dataset tools, [#35442] the answer-order rule when it registers both
  * doc tools, [#34766] the drafts line when it registers authoring tools, and
  * the skills install line. Read only when neither the
@@ -1949,6 +1968,7 @@ function openServerInstructions(
 ): string {
   return [
     DEFAULT_HTTP_INSTRUCTIONS,
+    authoringServed ? AUTHORING_CONTRACT_LINE : undefined,
     datasetRule ? DATASET_SELECTION_RULE : undefined,
     docRule.served ? packageDocAnswerRule(docRule.definitionReader) : undefined,
     authoringServed ? AUTHORING_DRAFTS_LINE : undefined,

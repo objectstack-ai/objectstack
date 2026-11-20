@@ -271,3 +271,36 @@ describe('[#35005] initialize instructions — the ask-back is scoped in the sam
     expect(list.description).not.toContain('possible readings: ask the same way');
   });
 });
+
+/**
+ * [#34774] The authoring contract line (#34659 ruling D4 = A), where authoring
+ * tools register; and the bound the longest default text stays under: a
+ * client reads the first 4,096 characters of a server's instructions.
+ */
+describe('[#34774] initialize instructions — the authoring contract line, and the 4,096-character bound', () => {
+  const SPEC_VERSION = (createRequire(import.meta.url)('@objectstack/spec/package.json') as { version: string }).version;
+  const LINE = `Authoring contract: @objectstack/spec ${SPEC_VERSION}.`;
+  const READER = { getAll: () => [{ name: 'get_metadata_item', description: 'Read one item.' }], execute: async () => ({}) as never };
+  const runtime = new MCPServerRuntime({ name: 't', version: '0.0.1-operator' });
+
+  it('is the second paragraph where authoring tools register, and absent everywhere else', async () => {
+    for (const grantedScopes of [[MCP_OAUTH_SCOPE_METADATA_WRITE], [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE]]) {
+      const text = await instructionsOf(runtime, makeBridge(), { grantedScopes, authoring: { registry: READER as never } });
+      expect(text.split('\n\n')[1]).toBe(LINE);
+    }
+    for (const o of [{}, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], authoring: { registry: READER as never } }, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoring: {} }] as Opts[]) {
+      expect(await instructionsOf(runtime, makeBridge(), o), JSON.stringify(o)).not.toContain('Authoring contract');
+    }
+  });
+
+  it('the longest default text (every conditional paragraph on) stays under 4,096 characters', async () => {
+    const docs = Object.assign(makeBridge(), { async searchPackageDocs() { return {} as never; }, async readPackageDoc() { return null as never; } });
+    const text = await instructionsOf(runtime, docs, {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      authoring: { registry: READER as never },
+    });
+    for (const part of [LINE, 'search_package_docs', 'They save drafts only', 'Published skills']) expect(text).toContain(part);
+    expect(carriesRule(text)).toBe(true);
+    expect(text.length).toBeLessThan(4096);
+  });
+});
