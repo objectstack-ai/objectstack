@@ -349,7 +349,7 @@ export function assertUnitCodes(
     const code = image[codeField];
     const verdict = membershipOf(code, organizationId, lookup);
     // A code the write carried is named; a resting one is named by its field only.
-    const named = codeWritten && typeof code === 'string' ? `'${code}'` : `the code stored in '${codeField}'`;
+    const named = codeWritten && typeof code === 'string' ? `'${code}'` : 'a code stored before this write';
     const quantity = source.quantityFields.find((q) => !isUnitValueBlank(image[q]));
     const remedyTail = codeWritten
       ? ''
