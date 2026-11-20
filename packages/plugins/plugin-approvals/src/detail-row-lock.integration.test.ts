@@ -143,6 +143,12 @@ describe('ruling A — a locked master\'s detail rows refuse insert / update / d
     expect(underLocked).toHaveLength(1);
   });
 
+  it('a non-scalar FK naming a locked master ({ id }) fails closed: refused, nothing lands', async () => {
+    expectLocked(await refusal(() => engine.insert('opportunity_line', { product: 'D', quantity: 1, opportunity: { id: lockedId } }, USER)));
+    const lines = await engine.find('opportunity_line', { where: { product: 'D' }, context: { isSystem: true } } satisfies EngineQueryOptions);
+    expect(lines).toHaveLength(0);
+  });
+
   it('update of a locked master\'s row is refused and nothing lands; a free master\'s row updates (CONTROL)', async () => {
     expectLocked(await refusal(() => engine.update('opportunity_line', { quantity: 9 }, { where: { id: lineOfLocked }, ...USER })));
     expect((await engine.findOne('opportunity_line', { where: { id: lineOfLocked } }))?.quantity).toBe(1);

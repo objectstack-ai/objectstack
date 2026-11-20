@@ -784,6 +784,17 @@ function scalarFk(value: unknown): string | null {
 }
 
 /**
+ * A supplied FK value that names SOMETHING but not as a scalar id — an object
+ * such as `{ id }`, or an array. The guard cannot tell which master it names
+ * and does not rely on a later step unwrapping it, so the write is judged as
+ * unresolved (fail closed), never as touching no master (L1-a R2, #35755).
+ */
+function unscalarFk(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return false;
+  return scalarFk(value) === null;
+}
+
+/**
  * Bind the DETAIL-ROW lock (ruling A on the record-page edit card,
  * 「一起锁」): while a master record is held by a LOCKING pending approval, its
  * master-detail rows refuse insert, update and delete with `RECORD_LOCKED`.
@@ -850,6 +861,7 @@ export function bindDetailRowLockHook(
       for (const e of edges) {
         const id = scalarFk(data[e.fk]);
         if (id) touched.push({ master: e.master, id });
+        else if (unscalarFk(data[e.fk])) unresolved = true;
       }
     } else {
       let previous = ctx?.previous as Record<string, unknown> | undefined;
@@ -875,6 +887,7 @@ export function bindDetailRowLockHook(
         if (event === 'update' && Object.prototype.hasOwnProperty.call(data, e.fk)) {
           const after = scalarFk(data[e.fk]);
           if (after && after !== before) touched.push({ master: e.master, id: after });
+          else if (unscalarFk(data[e.fk])) unresolved = true;
         }
       }
     }
@@ -882,6 +895,18 @@ export function bindDetailRowLockHook(
     const writerRun = (ctx?.provenance as any)?.flowRunId;
     const exempt = (pending: any) =>
       !!writerRun && !!pending?.flow_run_id && String(writerRun) === String(pending.flow_run_id);
+
+    // The end-user sentence naming the MASTER object (the record lock's own).
+    const sentenceFor = (master: string): string => {
+      let schema: unknown;
+      try { schema = engine.getSchema?.(master); } catch { /* registry unavailable — label degrades */ }
+      const declaredLabel = typeof (schema as any)?.label === 'string' && (schema as any).label
+        ? String((schema as any).label)
+        : undefined;
+      const { locale, service, translate } = refusalLocalization(ctx, i18nService);
+      const masterLabel = readerLabelsFor(service, locale)?.objectLabel(master) ?? declaredLabel;
+      return recordLockRefusal(masterLabel, undefined, locale, translate);
+    };
 
     // Fail closed on a write whose rows could not be named: refused when any
     // record of any master is held by a locking approval.
@@ -893,6 +918,7 @@ export function bindDetailRowLockHook(
           lockedError(
             `cannot determine which '${e.master}' record a ${event} on its detail object '${object}' falls under, ` +
             `and ${locking.length} record(s) of '${e.master}' carry a locking pending approval, so the write is refused`,
+            sentenceFor(e.master),
           );
         }
       }
@@ -901,18 +927,11 @@ export function bindDetailRowLockHook(
     for (const { master, id } of touched) {
       const locking = (await lockingRequestsForRecords(engine, master, [id])).filter((p) => !exempt(p));
       if (locking.length === 0) continue;
-      let schema: unknown;
-      try { schema = engine.getSchema?.(master); } catch { /* registry unavailable — label degrades */ }
-      const declaredLabel = typeof (schema as any)?.label === 'string' && (schema as any).label
-        ? String((schema as any).label)
-        : undefined;
-      const { locale, service, translate } = refusalLocalization(ctx, i18nService);
-      const masterLabel = readerLabelsFor(service, locale)?.objectLabel(master) ?? declaredLabel;
       logger?.info?.(
         `[approvals] ${event} on detail object '${object}' refused RECORD_LOCKED: its master '${master}' ` +
         `record '${id}' is held by pending approval request '${String(locking[0]?.id ?? '')}'`,
       );
-      const sentence = recordLockRefusal(masterLabel, undefined, locale, translate);
+      const sentence = sentenceFor(master);
       lockedError(sentence, sentence);
     }
   };
