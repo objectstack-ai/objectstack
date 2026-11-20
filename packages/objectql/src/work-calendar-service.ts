@@ -72,6 +72,11 @@
  * calendar's default must therefore load pinned to its organization, or set
  * the default by an update afterwards. Such a create without a default passes,
  * and gets no time-zone fill.
+ *
+ * An update that moves a calendar to another organization (it carries an
+ * `organization_id` other than the stored row's) while the row stays the
+ * default is refused at the door, before any read: clear Default first, then
+ * move it. A move without a default passes.
  */
 
 import {
@@ -160,6 +165,8 @@ interface ReadScope {
   organizationId?: string | undefined;
   /** The create's row names an organization other than the session's. */
   elsewhere?: boolean;
+  /** The update moves the row to an organization other than its stored one. */
+  moved?: boolean;
 }
 
 /** May an elevated calendar read run in `organizationId`? Not without one, outside `single`. */
@@ -345,8 +352,17 @@ async function judgeCalendar(
   // One default per organization (ADR-0157 D2): judged when the write makes
   // this row a default, against every OTHER default the organization holds.
   // A create placed in another organization cannot be judged there, so its
-  // default is refused, with no read (see the module note).
-  if (scope.elsewhere && data.is_default === true) {
+  // default is refused, with no read (see the module note). So is a move to
+  // another organization of a row that stays the default, set or kept.
+  const defaultAfter = hasOwn(data, 'is_default') ? data.is_default === true : previous?.is_default === true;
+  if (scope.moved && defaultAfter) {
+    problems.push({
+      field: 'is_default',
+      code: 'invalid_value',
+      message: 'A calendar marked Default cannot move to another organization. Clear Default first, then move it.',
+      value: true,
+    });
+  } else if (scope.elsewhere && data.is_default === true) {
     problems.push({
       field: 'is_default',
       code: 'invalid_value',
@@ -433,7 +449,11 @@ export function installWorkCalendarHooks(
     if (!isRow(data) || !previous) return;
     // The stored row's own organization: the engine read it under the write's own scope.
     const organizationId = organizationOf(previous.organization_id);
-    const scope: ReadScope = mayReadIn(organizationId, postureNow()) ? { read: true, organizationId } : { read: false };
+    // A move: the write carries an organization other than the stored row's. No read.
+    const moved = hasOwn(data, 'organization_id') && organizationOf(data.organization_id) !== organizationId;
+    const scope: ReadScope = moved
+      ? { read: false, moved: true }
+      : mayReadIn(organizationId, postureNow()) ? { read: true, organizationId } : { read: false };
     await judgeCalendar(engine, ctx, data, previous, scope);
   });
   bind('beforeInsert', WORK_CALENDAR_EXCEPTION_OBJECT, (ctx: any) => {

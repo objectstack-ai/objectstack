@@ -17,7 +17,9 @@
  *   rest of the file lands;
  * - an edit to a calendar is judged in the organization of the stored row:
  *   its one read for "one default per organization" runs there, whatever
- *   organization the session or the payload names.
+ *   organization the session or the payload names;
+ * - moving a calendar to another organization while it stays the default is
+ *   refused before any read; a move without a default lands.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -217,37 +219,40 @@ describe('sys_work_calendar_exception through the data doors (ADR-0157 D3, D10)'
   });
 });
 
+/** Every one-default read the hooks make, by the organization it ran in. */
+function recordDefaultReads(engine: ObjectQL): string[] {
+  const reads: string[] = [];
+  const find = engine.find.bind(engine);
+  (engine as any).find = (object: string, query: any) => {
+    if (object === 'sys_work_calendar' && query?.where?.is_default === true) reads.push(String(query?.context?.tenantId ?? '(none)'));
+    return find(object, query);
+  };
+  return reads;
+}
+
+async function seed(posture: 'group' | 'isolated') {
+  const ctx = await boot();
+  ctx.engine.setTenancyPostureProvider(() => posture);
+  const put = async (organizationId: string, code: string, extra: Record<string, unknown> = {}) =>
+    String(((await ctx.engine.insert('sys_work_calendar', calendar(code, { timezone: 'UTC', ...extra }), {
+      context: { userId: 'calendar-admin', tenantId: organizationId } as any,
+    })) as any).id);
+  // org_b holds a default; org_a holds none, so a read in org_a would admit the edit.
+  const storedDefault = await put('org_b', 'b_main', { is_default: true });
+  const stored = await put('org_b', 'b_alt');
+  await put('org_a', 'a_main');
+  return { ctx, stored, storedDefault, reads: recordDefaultReads(ctx.engine) };
+}
+
+/** The refusal an engine write meets, or `undefined` when it lands. */
+const refusalOf = (write: Promise<unknown>): Promise<any> => write.then(() => undefined, (e: unknown) => e);
+
 describe('an edit is judged in the organization of the stored row (ADR-0157 D2)', () => {
-  /** Every one-default read the hooks make, by the organization it ran in. */
-  function recordDefaultReads(engine: ObjectQL): string[] {
-    const reads: string[] = [];
-    const find = engine.find.bind(engine);
-    (engine as any).find = (object: string, query: any) => {
-      if (object === 'sys_work_calendar' && query?.where?.is_default === true) reads.push(String(query?.context?.tenantId ?? '(none)'));
-      return find(object, query);
-    };
-    return reads;
-  }
-
-  async function seed(posture: 'group' | 'isolated') {
-    const ctx = await boot();
-    ctx.engine.setTenancyPostureProvider(() => posture);
-    const put = async (organizationId: string, code: string, extra: Record<string, unknown> = {}) =>
-      String(((await ctx.engine.insert('sys_work_calendar', calendar(code, { timezone: 'UTC', ...extra }), {
-        context: { userId: 'calendar-admin', tenantId: organizationId } as any,
-      })) as any).id);
-    // org_b holds a default; org_a holds none, so a read in org_a would admit the edit.
-    await put('org_b', 'b_main', { is_default: true });
-    const stored = await put('org_b', 'b_alt');
-    await put('org_a', 'a_main');
-    return { ctx, stored, reads: recordDefaultReads(ctx.engine) };
-  }
-
   it('group: a session in org_a editing a row stored in org_b makes exactly one read, in org_b', async () => {
     const { ctx, stored, reads } = await seed('group');
-    const err: any = await ctx.engine.update('sys_work_calendar', { id: stored, is_default: true, organization_id: 'org_a' }, {
+    const err = await refusalOf(ctx.engine.update('sys_work_calendar', { id: stored, is_default: true, organization_id: 'org_a' }, {
       context: { userId: 'calendar-admin', tenantId: 'org_a', accessible_org_ids: ['org_a', 'org_b'] } as any,
-    }).then(() => undefined, (e: unknown) => e);
+    }));
 
     expect(reads).toEqual(['org_b']);
     expect(err?.code).toBe('VALIDATION_FAILED');
@@ -256,11 +261,43 @@ describe('an edit is judged in the organization of the stored row (ADR-0157 D2)'
 
   it('isolated: a session in org_a does not reach a row stored in org_b, and the hooks read nothing', async () => {
     const { ctx, stored, reads } = await seed('isolated');
-    const err: any = await ctx.engine.update('sys_work_calendar', { id: stored, is_default: true, organization_id: 'org_a' }, {
+    const err = await refusalOf(ctx.engine.update('sys_work_calendar', { id: stored, is_default: true, organization_id: 'org_a' }, {
       context: { userId: 'calendar-admin', tenantId: 'org_a' } as any,
-    }).then(() => undefined, (e: unknown) => e);
+    }));
 
     expect(reads).toEqual([]);
     expect(err?.code).toBe('RECORD_NOT_FOUND');
+  });
+});
+
+describe('moving a calendar to another organization (ADR-0157 D2)', () => {
+  // A system writer in the row's own organization, the one writer whose
+  // payload reaches the hooks with `organization_id` in it.
+  const asSystem = { context: { userId: 'calendar-admin', tenantId: 'org_b', isSystem: true } as any };
+
+  it('refuses moving a calendar that stays the default, before any read', async () => {
+    const { ctx, storedDefault, reads } = await seed('isolated');
+    const err = await refusalOf(ctx.engine.update('sys_work_calendar', { id: storedDefault, organization_id: 'org_a' }, asSystem));
+
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.fields?.map((f: any) => [f.field, f.code])).toEqual([['is_default', 'invalid_value']]);
+    expect(reads).toEqual([]);
+  });
+
+  it('refuses a move that sets the default, before any read', async () => {
+    const { ctx, stored, reads } = await seed('isolated');
+    const err = await refusalOf(ctx.engine.update('sys_work_calendar', { id: stored, is_default: true, organization_id: 'org_a' }, asSystem));
+
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect(err?.fields?.map((f: any) => [f.field, f.code])).toEqual([['is_default', 'invalid_value']]);
+    expect(reads).toEqual([]);
+  });
+
+  it('CONTROL: a move without a default lands', async () => {
+    const { ctx, stored } = await seed('isolated');
+    expect(await refusalOf(ctx.engine.update('sys_work_calendar', { id: stored, organization_id: 'org_a' }, asSystem))).toBeUndefined();
+
+    const moved: any = await ctx.engine.findOne('sys_work_calendar', { where: { id: stored }, context: { isSystem: true } as any });
+    expect(moved).toMatchObject({ organization_id: 'org_a', is_default: false });
   });
 });
