@@ -28,7 +28,7 @@ import {
 } from '../../scripts/vite-objectstack-workspace.ts';
 import { viteDeclaredLazyViews } from '../../scripts/vite-declared-lazy-views.ts';
 import { viteTypesZodLazy } from '../../scripts/vite-types-zod-lazy.ts';
-import { preloadStaticClosure, viteEagerPreload } from '../../scripts/vite-eager-preload.ts';
+import { eagerPreload } from '../../scripts/vite-eager-preload.ts';
 import { getServiceWorkerSource } from '../../packages/mobile/src/serviceWorkerSource.ts';
 import { compression } from 'vite-plugin-compression2';
 import { visualizer } from 'rollup-plugin-visualizer';
@@ -555,6 +555,9 @@ function serveRuntimeAssets(): Plugin {
 // stable across HTML revisions.
 const basePath = process.env.VITE_BASE_PATH || './';
 
+// One reading of the eager closure, shared by `build.modulePreload` and its guard.
+const consolePreload = eagerPreload();
+
 // The console's build identity (objectui#12970): `VITE_APP_VERSION` from the
 // build's environment when it is set (a CI or Docker build passes the objectui
 // commit), else the short sha of `HEAD` read from git right here, so a local
@@ -800,7 +803,7 @@ export default defineConfig({
     // chunk that imports it has arrived: an eager file without a
     // modulepreload tag in `index.html`, or a dynamic import whose static
     // closure is not preloaded beside it (objectstack#35455).
-    viteEagerPreload(),
+    consolePreload.plugin,
     // Fails the build if the lazily-imported linter is folded back into an
     // eagerly-loaded chunk. Runs on CI/Vercel too — it costs microseconds and
     // the regression it catches is invisible in every other signal.
@@ -917,10 +920,11 @@ export default defineConfig({
     // `import()` preloads the imported chunk's static closure beside it.
     // Moves no byte — the HTML host's deps are the eager closure, which the
     // `$initial`-tagged groups keep free of lazy-only modules, and an
-    // `import()`'s deps are files its chunk imports anyway; only WHEN they are
-    // requested changes. `polyfill: false`: without native modulepreload a
-    // browser just loads them later. `viteEagerPreload()` above enforces it.
-    modulePreload: { polyfill: false, resolveDependencies: preloadStaticClosure },
+    // `import()`'s deps are files its chunk imports anyway, minus the eager
+    // ones; only WHEN they are requested changes. `polyfill: false`: without
+    // native modulepreload a browser just loads them later.
+    // `consolePreload.plugin` above enforces it.
+    modulePreload: { polyfill: false, resolveDependencies: consolePreload.resolveDependencies },
     commonjsOptions: {
       include: [/node_modules/, /packages/],
       transformMixedEsModules: true

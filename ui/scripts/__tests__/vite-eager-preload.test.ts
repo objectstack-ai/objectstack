@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   REQUIRED_DYNAMIC_TARGETS,
   dynamicSitesOf,
+  eagerClosureOf,
   htmlNamedScripts,
   judgePreloadHops,
   measurePreloadHops,
@@ -59,8 +60,10 @@ function chunk(fileName: string, code: string, isEntry = false): EmittedChunk {
   return { fileName, name, isEntry, code, imports: staticImportsOf(fileName, code) };
 }
 
-const LIST_CLOSURE = [LIST, CRUD, PERSIST, SLUG];
-const RECORD_CLOSURE = [RECORD, ACTIONS];
+// What `preloadStaticClosure` hands Vite for each site: the target's static
+// closure without the target itself and without eager files.
+const LIST_CLOSURE = [CRUD, PERSIST, SLUG];
+const RECORD_CLOSURE = [ACTIONS];
 
 function build(opts: { htmlPreloads: string[]; listDeps: string[] | null; recordDeps: string[] | null }): {
   html: string;
@@ -116,7 +119,7 @@ describe('vite-eager-preload: the hop pin (objectstack#35455)', () => {
   });
 
   it('is red when a resolveDependencies filter drops one file of a route closure', () => {
-    const { html, chunks } = build({ htmlPreloads: [VENDOR, SHELL], listDeps: [LIST, CRUD, PERSIST], recordDeps: RECORD_CLOSURE });
+    const { html, chunks } = build({ htmlPreloads: [VENDOR, SHELL], listDeps: [CRUD, PERSIST], recordDeps: RECORD_CLOSURE });
     const hops = measurePreloadHops(html, chunks);
     expect(hops.dynamicSites.find((s) => s.targetName === 'ObjectView')?.late).toEqual([`${SLUG} (wave 2)`]);
     expect(judgePreloadHops(hops).ok).toBe(false);
@@ -133,9 +136,8 @@ describe('vite-eager-preload: the hop pin (objectstack#35455)', () => {
     const { html, chunks } = ONE_WAVE();
     const list = chunks.find((c) => c.fileName === LIST) as EmittedChunk;
     list.code =
-      mapDeps([RECORD]) +
       `import{c}from"${rel(CRUD)}";import{u}from"${rel(ACTIONS)}";` +
-      `const R=H(()=>import(\`${rel(RECORD)}\`),__vite__mapDeps([0]),import.meta.url);export const ObjectView=c;`;
+      `const R=H(()=>import(\`${rel(RECORD)}\`),[],import.meta.url);export const ObjectView=c;`;
     list.imports = staticImportsOf(LIST, list.code);
     const site = measurePreloadHops(html, chunks).dynamicSites.find((s) => s.importer === LIST);
     expect(site).toMatchObject({ targetName: 'RecordDetailView', maxWave: 1 });
@@ -208,15 +210,29 @@ describe('vite-eager-preload: readers', () => {
 describe('vite-eager-preload: the console build wires it', () => {
   const config = fs.readFileSync(VITE_CONFIG, 'utf8');
 
-  it('sets modulePreload to keep each dependency list whole, and runs the guard', () => {
-    expect(config).toMatch(/modulePreload:\s*\{\s*polyfill:\s*false,\s*resolveDependencies:\s*preloadStaticClosure\s*\}/);
+  it('sets modulePreload to the shared policy, and runs its guard', () => {
+    expect(config).toMatch(/const consolePreload = eagerPreload\(\);/);
+    expect(config).toMatch(/modulePreload:\s*\{\s*polyfill:\s*false,\s*resolveDependencies:\s*consolePreload\.resolveDependencies\s*\}/);
     expect(config).not.toMatch(/modulePreload:\s*false/);
-    expect(config).toMatch(/^\s*viteEagerPreload\(\),/m);
+    expect(config).toMatch(/^\s*consolePreload\.plugin,/m);
   });
 
-  it('preloadStaticClosure keeps every dep, for both hosts', () => {
-    const deps = ['assets/a.js', 'assets/b.js'];
-    expect(preloadStaticClosure('assets/index.js', deps, { hostId: 'index.html', hostType: 'html' })).toEqual(deps);
-    expect(preloadStaticClosure('assets/x.js', deps, { hostId: 'assets/y.js', hostType: 'js' })).toEqual(deps);
+  it('preloadStaticClosure keeps the HTML deps whole and drops eager files and the target from an import()', () => {
+    const resolve = preloadStaticClosure(new Set([ENTRY, VENDOR, SHELL]));
+    const html = [VENDOR, SHELL];
+    expect(resolve(ENTRY, html, { hostId: 'index.html', hostType: 'html' })).toEqual(html);
+    expect(resolve(LIST, [LIST, VENDOR, CRUD, SHELL, PERSIST], { hostId: ENTRY, hostType: 'js' })).toEqual([CRUD, PERSIST]);
+  });
+
+  it('eagerClosureOf walks static imports from the entries and not dynamic ones', () => {
+    const out = (fileName: string, imports: string[], isEntry = false) =>
+      ({ type: 'chunk', fileName, imports, dynamicImports: [], isEntry }) as unknown;
+    const bundle = Object.fromEntries(
+      [out(ENTRY, [VENDOR], true), out(VENDOR, [SHELL]), out(SHELL, []), out(LIST, [CRUD]), out(CRUD, [])].map((c) => [
+        (c as { fileName: string }).fileName,
+        c,
+      ]),
+    );
+    expect([...eagerClosureOf(bundle as never)].sort()).toEqual([SHELL, VENDOR, ENTRY].sort());
   });
 });

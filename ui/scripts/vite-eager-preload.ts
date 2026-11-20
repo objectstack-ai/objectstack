@@ -25,18 +25,38 @@ import type { Plugin, Rollup } from 'vite';
 /** Route chunks the #35455 measurement was taken on; each must be measured, or the verdict is refused. */
 export const REQUIRED_DYNAMIC_TARGETS = ['ObjectView', 'RecordDetailView'] as const;
 
+type ResolveDependencies = (filename: string, deps: string[], context: { hostId: string; hostType: 'html' | 'js' }) => string[];
+
 /**
- * `build.modulePreload.resolveDependencies`: keeps every dep. For the HTML
- * host the deps are the entry's static closure (the eager closure); for an
- * `import()` they are the imported chunk's static closure. ⛔ Filtering here
- * moves a file back to a later wave, and the guard below reds on it.
+ * `build.modulePreload.resolveDependencies`, given the eager closure:
+ *
+ *   - HTML host: every dep is kept. They are the entry's static closure, so
+ *     `index.html` names the whole eager closure.
+ *   - `import()`: the imported chunk's static closure, minus the eager
+ *     closure (always loaded before any code runs) and the target itself (the
+ *     `import()` requests it). Repeating eager files at every site would only
+ *     add bytes to the chunks holding the sites, the eager ones among them.
+ *
+ * ⛔ Dropping anything else moves a file back to a later wave; the guard reds.
  */
-export function preloadStaticClosure(
-  _filename: string,
-  deps: string[],
-  _context: { hostId: string; hostType: 'html' | 'js' },
-): string[] {
-  return deps;
+export function preloadStaticClosure(eager: ReadonlySet<string>): ResolveDependencies {
+  return (filename, deps, context) =>
+    context.hostType === 'html' ? deps : deps.filter((dep) => dep !== filename && !eager.has(dep));
+}
+
+/** The eager closure of an output bundle: the entries and everything they import statically. */
+export function eagerClosureOf(bundle: Rollup.OutputBundle): Set<string> {
+  const chunks = new Map<string, Rollup.OutputChunk>();
+  for (const output of Object.values(bundle)) if (output.type === 'chunk') chunks.set(output.fileName, output);
+  const eager = new Set<string>();
+  const stack = [...chunks.values()].filter((c) => c.isEntry).map((c) => c.fileName);
+  while (stack.length) {
+    const f = stack.pop() as string;
+    if (eager.has(f) || !chunks.has(f)) continue;
+    eager.add(f);
+    stack.push(...(chunks.get(f) as Rollup.OutputChunk).imports);
+  }
+  return eager;
 }
 
 /** One emitted JS chunk, as the browser sees it. */
@@ -320,17 +340,48 @@ export function emittedFrom(bundle: Rollup.OutputBundle): { html: string; chunks
   return { html, chunks };
 }
 
-export function viteEagerPreload(): Plugin {
-  return {
+/**
+ * The console's preload policy and its guard, sharing one reading of the
+ * eager closure: `plugin` records it in `generateBundle` (before Vite's
+ * import analysis, a post plugin, asks `resolveDependencies`) and judges the
+ * written output in `writeBundle`.
+ */
+export function eagerPreload(): { plugin: Plugin; resolveDependencies: ResolveDependencies } {
+  const eager = new Set<string>();
+  let recorded = false;
+  let askedEarly = 0;
+  const policy = preloadStaticClosure(eager);
+  const resolveDependencies: ResolveDependencies = (filename, deps, context) => {
+    // Asked before the closure was read (a plugin-order change): keep every
+    // dep, which costs bytes, not waves, and fail the build in writeBundle.
+    if (!recorded) {
+      askedEarly++;
+      return deps;
+    }
+    return policy(filename, deps, context);
+  };
+  const plugin: Plugin = {
     name: 'assert-eager-preload',
+    generateBundle(_options: Rollup.NormalizedOutputOptions, bundle: Rollup.OutputBundle) {
+      eager.clear();
+      for (const f of eagerClosureOf(bundle)) eager.add(f);
+      recorded = true;
+    },
     // writeBundle: after Vite has rewritten the `import()` preload markers and
     // injected the HTML tags, so this reads what the browser will read.
     writeBundle(_options: Rollup.NormalizedOutputOptions, bundle: Rollup.OutputBundle) {
       const { html, chunks } = emittedFrom(bundle);
       if (!html) return; // a build without the console page (a library build) has nothing to judge
+      if (!recorded || askedEarly > 0) {
+        this.error(
+          `[assert-eager-preload] resolveDependencies was asked ${askedEarly} time(s) before the eager closure was ` +
+            `recorded, so those import() sites repeat eager files: generateBundle must run before Vite's import analysis.`,
+        );
+      }
       const verdict = judgePreloadHops(measurePreloadHops(html, chunks));
       if (!verdict.ok) this.error(`[assert-eager-preload] ${verdict.message}`);
       this.info(`[assert-eager-preload] ${verdict.message}`);
     },
   };
+  return { plugin, resolveDependencies };
 }
