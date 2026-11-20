@@ -865,8 +865,8 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               <Icon className="h-3.5 w-3.5" />
             )}
           </div>
-          {/* Content */}
-          <div className="flex-1 min-w-0">
+          {/* Content: 13 px on a 20 px line, so the comment is one line under the row */}
+          <div className="flex-1 min-w-0 text-[13px] leading-5">
             {/* The row wraps between its pieces and the time is one
                 unbreakable piece (objectstack#34614): in a narrow drawer the
                 time moves to the next line instead of breaking per word. */}
@@ -877,33 +877,37 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                   {t('detail.via', { source: item.source })}
                 </span>
               )}
-              <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
-                {formatTimestamp(item.createdAt, t, displayLocale)}
-              </span>
               {item.edited && (
                 <span className="text-xs text-muted-foreground italic">{t('detail.edited')}</span>
               )}
               {item.pinned && (
                 <span className="text-xs text-amber-600">📌 {t('detail.pinned')}</span>
               )}
-              {(toggleReaction && (!item.reactions || item.reactions.length === 0)) || offersReply ? (
-                <span className={cn('ml-auto flex items-center gap-1', ROW_ACTIONS_REVEAL)}>
-                  {toggleReaction && (!item.reactions || item.reactions.length === 0) && (
-                    <ReactionPicker reactions={[]} onToggleReaction={toggleReaction} />
-                  )}
-                  {offersReply && (
-                    <button
-                      type="button"
-                      className="h-6 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      aria-expanded={replyOpen}
-                      onClick={() => toggleReply(item.id)}
-                      data-feed-reply-toggle=""
-                    >
-                      {t('detail.reply', { defaultValue: 'Reply' })}
-                    </button>
-                  )}
+              {/* The time sits on the right like every other row; the hover
+                  actions come in just before it. */}
+              <span className="ml-auto flex items-center gap-2">
+                {(toggleReaction && (!item.reactions || item.reactions.length === 0)) || offersReply ? (
+                  <span className={cn('flex items-center gap-1', ROW_ACTIONS_REVEAL)}>
+                    {toggleReaction && (!item.reactions || item.reactions.length === 0) && (
+                      <ReactionPicker reactions={[]} onToggleReaction={toggleReaction} />
+                    )}
+                    {offersReply && (
+                      <button
+                        type="button"
+                        className="h-6 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-expanded={replyOpen}
+                        onClick={() => toggleReply(item.id)}
+                        data-feed-reply-toggle=""
+                      >
+                        {t('detail.replyToComment', { defaultValue: 'Reply' })}
+                      </button>
+                    )}
+                  </span>
+                ) : null}
+                <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
+                  {formatTimestamp(item.createdAt, t, displayLocale)}
                 </span>
-              ) : null}
+              </span>
             </div>
 
             {/* Body text, and the author's Edit and Delete on their own
@@ -919,7 +923,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
               bodyClassName="inline text-[13px] leading-5 whitespace-pre-wrap break-words text-foreground"
-              controlsClassName={cn('ml-1 inline-flex items-center gap-0.5 align-middle', ROW_ACTIONS_REVEAL)}
+              controlsClassName={cn('ml-1 inline-flex h-5 items-center gap-0.5 align-top [&_button]:h-5 [&_button]:w-5', ROW_ACTIONS_REVEAL)}
             />
 
             {/* Drill to source rich entity (ADR-0052 ActivityPointer) */}

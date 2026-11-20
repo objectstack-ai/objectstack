@@ -1362,6 +1362,7 @@ const ru = {
     streamToday: "Сегодня",
     streamYesterday: "Вчера",
     viewApproval: "Открыть согласование",
+    replyToComment: "Ответить",
     attachmentsDropHint: "Перетащите файлы сюда или",
     attachmentsChooseFile: "выберите файл",
     attachmentActions: "Ещё для {{name}}",

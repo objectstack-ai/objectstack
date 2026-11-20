@@ -1675,6 +1675,7 @@ const en = {
     streamToday: 'Today',
     streamYesterday: 'Yesterday',
     viewApproval: 'View approval',
+    replyToComment: 'Reply',
     attachmentsDropHint: 'Drop files here, or',
     attachmentsChooseFile: 'choose a file',
     attachmentActions: 'More for {{name}}',

@@ -1287,6 +1287,7 @@ const ja = {
     streamToday: "今日",
     streamYesterday: "昨日",
     viewApproval: "承認を見る",
+    replyToComment: "返信",
     attachmentsDropHint: "ここにファイルをドロップ、または",
     attachmentsChooseFile: "ファイルを選択",
     attachmentActions: "{{name}} のその他の操作",

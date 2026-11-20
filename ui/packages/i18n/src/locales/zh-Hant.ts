@@ -1380,6 +1380,7 @@ const zhHant = {
     streamToday: '今天',
     streamYesterday: '昨天',
     viewApproval: '看審批',
+    replyToComment: '回覆',
     attachmentsDropHint: '拖入檔案，或',
     attachmentsChooseFile: '選擇檔案',
     attachmentActions: '{{name}} 的更多操作',

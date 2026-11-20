@@ -1459,6 +1459,7 @@ const de = {
     streamToday: "Heute",
     streamYesterday: "Gestern",
     viewApproval: "Genehmigung ansehen",
+    replyToComment: "Antworten",
     attachmentsDropHint: "Dateien hier ablegen oder",
     attachmentsChooseFile: "Datei auswählen",
     attachmentActions: "Mehr für {{name}}",

@@ -1503,6 +1503,7 @@ const es = {
     streamToday: "Hoy",
     streamYesterday: "Ayer",
     viewApproval: "Ver aprobación",
+    replyToComment: "Responder",
     attachmentsDropHint: "Suelta archivos aquí o",
     attachmentsChooseFile: "elige un archivo",
     attachmentActions: "Más para {{name}}",

@@ -1629,6 +1629,7 @@ const ar = {
     streamToday: "اليوم",
     streamYesterday: "أمس",
     viewApproval: "عرض الموافقة",
+    replyToComment: "رد",
     attachmentsDropHint: "أفلت الملفات هنا، أو",
     attachmentsChooseFile: "اختر ملفًا",
     attachmentActions: "المزيد لـ {{name}}",

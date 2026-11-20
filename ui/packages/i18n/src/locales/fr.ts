@@ -1500,6 +1500,7 @@ const fr = {
     streamToday: "Aujourd’hui",
     streamYesterday: "Hier",
     viewApproval: "Voir l’approbation",
+    replyToComment: "Répondre",
     attachmentsDropHint: "Déposez des fichiers ici, ou",
     attachmentsChooseFile: "choisissez un fichier",
     attachmentActions: "Plus pour {{name}}",

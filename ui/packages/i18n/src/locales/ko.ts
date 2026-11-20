@@ -1459,6 +1459,7 @@ const ko = {
     streamToday: "오늘",
     streamYesterday: "어제",
     viewApproval: "승인 보기",
+    replyToComment: "답글",
     attachmentsDropHint: "여기에 파일을 놓거나",
     attachmentsChooseFile: "파일 선택",
     attachmentActions: "{{name}} 추가 작업",
