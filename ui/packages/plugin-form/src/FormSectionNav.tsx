@@ -175,18 +175,21 @@ export function FormSectionNav({ items, className, onDrawnChange }: FormSectionN
     if (!anchorIds) return;
     const first = document.getElementById(anchorIds.split('\n')[0]);
     if (!first) return;
-    const scroller = scrollParentOf(first);
-    const check = () => setFits(contentFits(scroller));
+    // The scroller is resolved on every check, as the jump resolves it on
+    // every click: its overflow is read from computed style.
+    const check = () => setFits(contentFits(scrollParentOf(first)));
     check();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(check);
     // The headings' parent is the form's field grid, which every section's
-    // fields share: its height is the content's.
+    // fields share: its height is the content's. The scroller's own box
+    // changes with the dialog (maximized) and the window.
     if (first.parentElement) observer?.observe(first.parentElement);
+    const scroller = scrollParentOf(first);
     if (scroller) observer?.observe(scroller);
-    else window.addEventListener('resize', check);
+    window.addEventListener('resize', check);
     return () => {
       observer?.disconnect();
-      if (!scroller) window.removeEventListener('resize', check);
+      window.removeEventListener('resize', check);
     };
   }, [anchorIds]);
   const shown = listed && !fits ? listed : null;
