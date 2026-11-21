@@ -20,15 +20,16 @@ import { useObjectTranslation } from '@object-ui/i18n';
  * reader always knows where they are and has a way back, without pulling in
  * the full app shell (which ADR-0046 deliberately keeps out of v1).
  *
- * Under an app (`/apps/:appName/docs/...`, ADR-0048) the home link is that
- * app's docs index, so it keeps the reader inside the app shell, the same
- * answer the sidebar and the body cross-references give. The label reads the
- * session language (`help.documentation`).
+ * Under an app (`/apps/:appName/docs/...`, ADR-0048) it draws no bar of its
+ * own (objectstack#35424): the app bar above already reads 「APP /
+ * Documentation」, and the reader names its book and article above the
+ * article. The label reads the session language (`help.documentation`).
  */
 export function DocShell({ breadcrumb, children }: { breadcrumb?: string; children: ReactNode }) {
   const { appName } = useParams<{ appName?: string }>();
   const { t } = useObjectTranslation();
-  const home = appName ? `/apps/${appName}/docs` : '/docs';
+  if (appName) return <div className="min-h-full">{children}</div>;
+  const home = '/docs';
   return (
     <div className="min-h-full">
       <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">

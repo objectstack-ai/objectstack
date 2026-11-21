@@ -7,6 +7,7 @@
  */
 
 import * as React from "react"
+import { Dialog, DialogContent, DialogTitle } from "@object-ui/components"
 
 /**
  * Mermaid diagram renderer for ```mermaid fenced code blocks (ADR-0046).
@@ -22,6 +23,20 @@ import * as React from "react"
  * text, never this output), so the two sanitizers do not fight. A render
  * failure degrades to the raw source in a <pre>, never a thrown error.
  */
+
+/**
+ * The words of a diagram's enlarge control, in the host's language. A host
+ * that wants every rendered diagram to open full size (the docs reader)
+ * provides them; with no provider a diagram draws no control, as before.
+ */
+export interface MermaidEnlargeText {
+  /** The control's text, e.g. "Enlarge". */
+  enlarge: string
+  /** The enlarged view's accessible title, e.g. "Diagram". */
+  title: string
+}
+
+export const MermaidEnlargeContext = React.createContext<MermaidEnlargeText | null>(null)
 
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null
 function loadMermaid() {
@@ -98,7 +113,7 @@ export function Mermaid({ chart }: { chart: string }) {
     )
   }
 
-  return (
+  const diagram = (
     <div
       data-mermaid
       role="img"
@@ -106,5 +121,38 @@ export function Mermaid({ chart }: { chart: string }) {
       // mermaid strict-mode SVG, rendered post-sanitize by our own trusted component
       dangerouslySetInnerHTML={{ __html: svg }}
     />
+  )
+  return <EnlargeableDiagram svg={svg}>{diagram}</EnlargeableDiagram>
+}
+
+/** The diagram, plus an enlarge control and dialog when the host asks for one. */
+function EnlargeableDiagram({ svg, children }: { svg: string; children: React.ReactElement }) {
+  const text = React.useContext(MermaidEnlargeContext)
+  const [open, setOpen] = React.useState(false)
+  if (!text) return children
+  return (
+    <div className="relative">
+      {children}
+      <button
+        type="button"
+        data-mermaid-enlarge
+        onClick={() => setOpen(true)}
+        className="absolute right-2 top-2 rounded-md border bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {text.enlarge}
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-[95vw] w-[95vw] max-h-[90vh] overflow-auto sm:max-w-[95vw]">
+          <DialogTitle className="sr-only">{text.title}</DialogTitle>
+          <div
+            data-mermaid-enlarged
+            role="img"
+            className="flex justify-center [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-none"
+            // the same trusted strict-mode SVG as the inline diagram
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }

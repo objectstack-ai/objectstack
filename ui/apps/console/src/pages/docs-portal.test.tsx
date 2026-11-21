@@ -656,3 +656,103 @@ describe('objectstack#34070 — a doc name two packages ship lists its candidate
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// objectstack#35424 — the in-app reader: one docs column, a path above the
+// article, and the previous / next article at its end
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('objectstack#35424 — the in-app reader has one docs column and a path to its book', () => {
+  function Where() {
+    return <div data-testid="where">{useLocation().pathname}</div>;
+  }
+  function InApp({ entry }: { entry: string }) {
+    return (
+      <MemoryRouter initialEntries={[entry]}>
+        <Where />
+        <Routes>
+          <Route path="/apps/:appName/docs" element={<DocsLayout />}>
+            <Route path=":slug" element={<DocsSlug />} />
+            <Route path=":slug/:name" element={<DocPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+  /** The persistent column (the narrow-screen disclosure draws a second copy). */
+  const column = () => screen.getAllByTestId('docs-nav')[0];
+
+  it('draws no bar of its own: the app bar names 「APP / Documentation」', async () => {
+    render(<InApp entry="/apps/crm/docs/crm/crm_intro" />);
+    await screen.findByTestId('doc-content');
+    expect(document.querySelector('header')).toBeNull();
+  });
+
+  it('the column leads back to the app and ends with all documentation', async () => {
+    render(<InApp entry="/apps/crm/docs/crm/crm_intro" />);
+    await screen.findByTestId('doc-content');
+    expect(within(column()).getByTestId('docs-nav-back')).toHaveAttribute('href', '/apps/crm');
+    expect(within(column()).getByTestId('docs-nav-back')).toHaveTextContent('Back to crm');
+    expect(within(column()).getByTestId('docs-nav-all-docs')).toHaveAttribute('href', '/docs');
+  });
+
+  it('the path above the article names the book', async () => {
+    render(<InApp entry="/apps/crm/docs/crm/crm_intro" />);
+    await screen.findByTestId('doc-content');
+    const path = screen.getByTestId('doc-breadcrumb');
+    expect(within(path).getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', '/apps/crm/docs');
+    expect(within(path).getByRole('link', { name: 'Crm' })).toHaveAttribute('href', '/apps/crm/docs/crm');
+  });
+
+  it('the first article says so on its previous side and links its next one', async () => {
+    render(<InApp entry="/apps/crm/docs/crm/crm_intro" />);
+    await screen.findByTestId('doc-content');
+    expect(screen.getByTestId('doc-pager-first')).toHaveTextContent('This is the first article in this book');
+    expect(screen.getByTestId('doc-pager-next')).toHaveAttribute('href', '/apps/crm/docs/crm/crm_guide_lead');
+    expect(screen.getByTestId('doc-pager-next')).toHaveTextContent('Leads');
+  });
+
+  it('the last article links its previous one and says it is the last', async () => {
+    render(<InApp entry="/apps/crm/docs/crm/crm_guide_lead" />);
+    await screen.findByTestId('doc-content');
+    expect(screen.getByTestId('doc-pager-previous')).toHaveAttribute('href', '/apps/crm/docs/crm/crm_intro');
+    expect(screen.getByTestId('doc-pager-last')).toHaveTextContent('This is the last article in this book');
+  });
+
+  it('the search field narrows the column to matching titles, and says when none match', async () => {
+    render(<InApp entry="/apps/crm/docs/crm/crm_intro" />);
+    await screen.findByTestId('doc-content');
+    const search = within(column()).getByTestId('docs-nav-search');
+    fireEvent.change(search, { target: { value: 'lead' } });
+    expect(within(column()).getByRole('link', { name: 'Leads' })).toBeInTheDocument();
+    expect(within(column()).queryByRole('link', { name: 'CRM Intro' })).toBeNull();
+    fireEvent.change(search, { target: { value: 'zzz' } });
+    expect(within(column()).getByTestId('docs-nav-no-match')).toBeInTheDocument();
+  });
+
+  describe('a package with several books', () => {
+    beforeEach(() => {
+      WORLD.authored = true;
+    });
+    afterEach(() => {
+      WORLD.authored = false;
+    });
+
+    it('lists every book of the package, the current one open and the others folded', async () => {
+      render(<InApp entry="/apps/com.example.showcase/docs/manual/showcase_index" />);
+      await screen.findByTestId('doc-content');
+      const current = within(column()).getByRole('button', { name: /Showcase Manual/ });
+      const other = within(column()).getByRole('button', { name: /Leads Book/ });
+      expect(current).toHaveAttribute('aria-expanded', 'true');
+      expect(other).toHaveAttribute('aria-expanded', 'false');
+      // No book of another package is listed.
+      expect(within(column()).queryByRole('button', { name: /Alpha Manual/ })).toBeNull();
+      fireEvent.click(other);
+      expect(other).toHaveAttribute('aria-expanded', 'true');
+      const lead = within(column())
+        .getAllByRole('link', { name: 'Lead Guide' })
+        .map((l) => l.getAttribute('href'));
+      expect(lead).toContain('/apps/com.example.showcase/docs/leads/showcase_lead_guide');
+    });
+  });
+});
