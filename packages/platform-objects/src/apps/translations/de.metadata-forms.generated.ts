@@ -106,7 +106,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Verknüpfte Liste",
-        helpText: "Macht diesen Eintrag zur Tabelle einer verknüpften Liste statt zu einem Feldabschnitt: Nennen Sie das untergeordnete Objekt (oder object.field), dessen Liste an dieser Position in der Detailspalte des Datensatzes gezeichnet wird. Eine solche Gruppe enthält keine Felder; ein Feld, das sie als seine Gruppe nennt, wird abgelehnt, ebenso ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht. Die Datensatzseite zeichnet diese Platzierung noch nicht."
+        helpText: "Macht diesen Eintrag zur Tabelle einer verknüpften Liste statt zu einem Feldabschnitt: Nennen Sie das untergeordnete Objekt (oder object.field), dessen Liste an dieser Position in der Detailspalte des Datensatzes gezeichnet wird. Eine solche Gruppe enthält keine Felder; ein Feld, das sie als seine Gruppe nennt, wird abgelehnt, ebenso ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht. Die Erstellungs- und Bearbeitungsformulare des übergeordneten Datensatzes betten die Tabelle ebenfalls ein, und „Bearbeiten“ auf der Datensatzseite speichert den Datensatz und seine Zeilen gemeinsam."
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
@@ -791,7 +791,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Inline-Spalten",
-        helpText: "Spalten des Inline-Rasters im Formular des übergeordneten Datensatzes, in Anzeigereihenfolge; nur verwendet, wenn dieses Feld inlineEdit setzt, das im Quelltext geschrieben wird. Nicht gesetzt: von den bearbeitbaren Feldern dieses Objekts abgeleitet, und ab der siebten beginnen die übrigen in der Spaltenauswahl des Rasters. Ein Eintrag, der nur ein Feld nennt, übernimmt Typ, Optionen und Regeln von diesem Feld; die übrigen Spaltenschlüssel, allen voran type, werden im Quelltext geschrieben."
+        helpText: "Spalten des Inline-Rasters im Formular des übergeordneten Datensatzes, in Anzeigereihenfolge; nur verwendet, wenn eine Feldgruppe des übergeordneten Objekts dieses untergeordnete Objekt nennt (fieldGroups[].relatedList). Nicht gesetzt: von den bearbeitbaren Feldern dieses Objekts abgeleitet, und ab der siebten beginnen die übrigen in der Spaltenauswahl des Rasters. Ein Eintrag, der nur ein Feld nennt, übernimmt Typ, Optionen und Regeln von diesem Feld; die übrigen Spaltenschlüssel, allen voran type, werden im Quelltext geschrieben."
       },
       "inlineColumns.name": {
         label: "Spaltenname",
