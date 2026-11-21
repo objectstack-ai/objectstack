@@ -1,0 +1,8 @@
+{
+  "file": "packages/objectql/src/record-unit-aggregate-door.ts",
+  "adrs": [
+    "ADR-0158",
+    "ADR-0144"
+  ],
+  "invariant": "ADR-0158 U7 R1 (mirroring ADR-0144 D6): `sum`, `avg`, `min` or `max` over a `number` field declaring `unitConfig.unitMode: 'record'` is refused INVALID_FIELD / 400 in `ObjectQL.aggregate` unless the query groups by that quantity's `unitField`, and a `summary` rolling one up is refused INVALID_METADATA / 422 at registration, whichever end registers second. `count` and `count_distinct` are not judged; a `fixed` quantity and a plain number pass. ADR-0158 L3: in R1 EVERY such roll-up is refused, because a child quantity cannot follow its parent's unit, so there is no admitted roll-up and the recompute gets NO bypass channel like the currency door's `ROLLUP_AGGREGATE_OPTION`. Do NOT widen the raw set, admit a roll-up or add a bypass without an amendment of ADR-0158."
+}
