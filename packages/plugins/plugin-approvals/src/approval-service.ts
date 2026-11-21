@@ -3001,8 +3001,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     pending: readonly string[],
     actorId: string,
     context: ExecutionContext,
+    caller?: ActingCaller | null,
   ): Promise<string | undefined> {
-    return heldSlot(pending, actorId, await this.actingCaller(context));
+    // `caller`: the {@link actingCaller} a method already resolved for this
+    // context, so a method that reads it twice (reassign) asks once.
+    return heldSlot(pending, actorId, caller !== undefined ? caller : await this.actingCaller(context));
   }
 
   /**
@@ -7590,9 +7593,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null, pending);
+    // The caller, resolved once: the slot test below and the own-slot test in
+    // the hand-off branch read the same answer.
+    const caller = await this.actingCaller(context);
     // The slot the actor takes (`takenSlot`) — and, when `from` is not named,
     // the slot being handed over.
-    const slot = await this.takenSlot(pending, actorId, context);
+    const slot = await this.takenSlot(pending, actorId, context, caller);
     const from = String(input.from ?? slot ?? actorId).trim();
     // #4466 — same rule as `decideNode`: the marker records that the actor was
     // admitted only by the privileged branch, holding no slot themselves. A
@@ -7616,15 +7622,15 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           + `platform administrator, or the system`,
         );
       }
-      // A slot holder hands over their OWN slot and no other: `from` must be
-      // one of the addresses this actor acts under (`actorAddresses`, the
-      // same set the slot test reads). Moving another approver's slot is the
-      // system's or the override's (`isOverride` admits the system), never a
-      // fellow approver's.
-      if (!isOverride && !actorAddresses(actorId, await this.actingCaller(context)).includes(from)) {
+      // The call moves only a slot held by the actor it names: `from` must be
+      // one of that actor's addresses (`actorAddresses`, the same set the
+      // slot test reads; an omitted `actorId` names the caller). Moving any
+      // other slot is the system's or the override's (`isOverride` admits the
+      // system), never a fellow approver's.
+      if (!isOverride && !actorAddresses(actorId, caller).includes(from)) {
         throw new Error(
-          `FORBIDDEN: actor '${actorId}' may hand over only their own slot, and '${from}' is another approver's: `
-          + `it moves only for its holder, an administrator, or the system`,
+          `FORBIDDEN: actor '${actorId}' may move only a slot it holds, and does not hold '${from}': `
+          + `that slot moves only for its holder, an administrator, or the system`,
         );
       }
       next = pending.map(a => (a === from ? to : a));

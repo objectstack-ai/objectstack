@@ -1946,7 +1946,7 @@ describe('ApprovalService (node era)', () => {
     it('refuses a slot holder naming another approver\'s slot, and moves nothing', async () => {
       const id = await openUnanimous();
       await expect(svc.reassign(id, { actorId: 'u9', from: 'u2', to: 'u7' }, asUser('u9')))
-        .rejects.toThrow(/^FORBIDDEN: actor 'u9' may hand over only their own slot/);
+        .rejects.toThrow(/^FORBIDDEN: actor 'u9' may move only a slot it holds/);
       expect(slate(id)).toBe('u9,u2');
       expect(moves(id)).toEqual([]);
     });
@@ -1962,6 +1962,35 @@ describe('ApprovalService (node era)', () => {
       const id = await openUnanimous();
       const out = await svc.reassign(id, { actorId: 'root', from: 'u2', to: 'u7' }, PLATFORM_ADMIN_CTX);
       expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+
+    describe('a position slot', () => {
+      const FIN = { userId: 'u_fin', tenantId: 't1', positions: ['finance'], permissions: [] } as any;
+      const openOnPosition = async () => {
+        const req = await svc.openNodeRequest(openInput(['u2'], {}, {
+          approvers: [{ type: 'position' as const, value: 'finance' }, { type: 'user' as const, value: 'u2' }],
+          behavior: 'unanimous',
+        }), CTX);
+        staffDirectory(engine, 'u7');
+        const id = (req as { id: string }).id;
+        expect(slate(id), 'precondition: the slate holds the position slot and a user slot').toBe('position:finance,u2');
+        return id;
+      };
+
+      it('its holder moves it', async () => {
+        const id = await openOnPosition();
+        const out = await svc.reassign(id, { actorId: 'u_fin', from: 'position:finance', to: 'u7' }, FIN);
+        expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+        expect(moves(id)).toHaveLength(1);
+      });
+
+      it('its holder cannot move another approver\'s slot, and nothing moves', async () => {
+        const id = await openOnPosition();
+        await expect(svc.reassign(id, { actorId: 'u_fin', from: 'u2', to: 'u7' }, FIN))
+          .rejects.toThrow(/^FORBIDDEN: actor 'u_fin' may move only a slot it holds/);
+        expect(slate(id)).toBe('position:finance,u2');
+        expect(moves(id)).toEqual([]);
+      });
     });
 
     it('the system still moves another approver\'s slot', async () => {
