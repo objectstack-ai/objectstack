@@ -404,6 +404,10 @@ const en = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Complete required fields',
+    requiredPromptDescription: 'This change makes the fields below required. Fill them in to save it.',
     // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
     currencyCode: {
       placeholder: 'Select currency',

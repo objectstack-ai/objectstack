@@ -271,6 +271,10 @@ const ar = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'أكمل الحقول المطلوبة',
+    requiredPromptDescription: 'هذا التغيير يجعل الحقول أدناه مطلوبة. املأها لحفظه.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'فتح {{name}}',

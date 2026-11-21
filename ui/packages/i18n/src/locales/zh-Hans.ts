@@ -267,6 +267,10 @@ const zh = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '补填必填字段',
+    requiredPromptDescription: '这次改动让下面的字段变成必填，填好后和改动一起保存。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '打开 {{name}}',

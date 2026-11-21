@@ -257,6 +257,10 @@ const ja = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '必須項目を入力',
+    requiredPromptDescription: 'この変更により、以下の項目が必須になります。入力すると変更と一緒に保存されます。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} を開く',

@@ -48,6 +48,7 @@ import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { stateMachineNextValues } from './inline-edit-options';
 import { isStateMachineField, stateLabelOf, type StateChangeConfirm } from './objectGridStateConfirm';
+import { useCellRequiredPrompt } from './objectGridRequiredPrompt';
 import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
@@ -1237,6 +1238,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // does there and what pasted text stands for. `null` without the host's
   // ask, so every other grid keeps the table it had.
   const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  // objectstack#35956 — a cell change that makes other fields required asks
+  // for them first, and saves them with it (`./objectGridRequiredPrompt`).
+  const fieldLabelOf = (field: string): string => {
+    const declared = objectFields?.[field]?.label;
+    const fallback = typeof declared === 'string' && declared.length > 0 ? declared : field;
+    return columnHeaderOf(field) ?? (objectName ? resolveFieldLabel(objectName, field, fallback) : fallback);
+  };
+  const requiredPrompt = useCellRequiredPrompt({
+    objectName,
+    objectSchema,
+    objectFields,
+    perms,
+    labelOf: fieldLabelOf,
+    translateOptions,
+    optionLabel: (field, code, fallback) => (objectName ? resolveFieldOptionLabel(objectName, field, code, fallback) : fallback),
+    emptyText: t('grid.empty'),
+    save: async (row, changes) => {
+      const rows = loadedRowsRef.current.data;
+      const id = resolveRecordId(row);
+      const index = rows.findIndex((r: any) => r === row || (id != null && String(resolveRecordId(r)) === String(id)));
+      await (onRowSave ?? defaultRowSave)(Math.max(index, 0), changes, row);
+    },
+  });
   const gridCellSelection: GridCellSelection | null = hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
@@ -1267,6 +1291,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         // objectstack#35685 — a move of a state-machine field is confirmed
         // before anything is written (`./objectGridStateConfirm`).
         confirmCommit: (row, columnKey, value) => {
+          // A move that needs fields filled asks for them; that dialog is the
+          // confirmation, so a state-machine move does not ask twice.
+          const filled = requiredPrompt.ask(row, columnKey, value);
+          if (filled) return filled;
           if (!isStateMachineField(objectSchema, columnKey)) return null;
           const options = objectFields?.[columnKey]?.options;
           const labelOf = (v: unknown) => stateLabelOf(
@@ -4732,6 +4760,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {bulkDialog}
       {rowConflictDialog}
       {stateChangeDialog}
+      {requiredPrompt.renderDialog()}
     </div>
   );
 };

@@ -7,7 +7,9 @@
  */
 
 /**
- * The pre-evaluation half of objectui#4254, pinned directly.
+ * The pre-evaluation half of objectui#4254, pinned directly (moved here from
+ * `@object-ui/plugin-kanban` by objectstack#35956, when the list cell and the
+ * record page started asking too).
  *
  * The board-level test (`ObjectKanban.requiredWhenPrompt.test.tsx`) drives the
  * whole flow through a real drop; this file pins the SET the flow is built on,
@@ -40,8 +42,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
     const out = collectRequiredWhenPromptFields(
       fields({ requiredWhen: WHEN_WON }),
       record,
-      'stage',
-      'closed_won',
+      { stage: 'closed_won' },
     );
     expect(out.map((f) => f.name)).toEqual(['win_reason']);
     // The definition travels with it so the dialog can render the right widget.
@@ -53,8 +54,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
       collectRequiredWhenPromptFields(
         fields({ requiredWhen: WHEN_WON }),
         { ...record, stage: 'closed_won' },
-        'stage',
-        'negotiation',
+        { stage: 'negotiation' },
       ),
     ).toEqual([]);
   });
@@ -64,8 +64,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
       collectRequiredWhenPromptFields(
         fields({ requiredWhen: WHEN_WON }),
         { ...record, win_reason: 'Better price' },
-        'stage',
-        'closed_won',
+        { stage: 'closed_won' },
       ),
     ).toEqual([]);
   });
@@ -78,8 +77,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
         collectRequiredWhenPromptFields(
           { stage: {}, flag: { type: 'boolean', requiredWhen: WHEN_WON } },
           { stage: 'negotiation', flag: value },
-          'stage',
-          'closed_won',
+          { stage: 'closed_won' },
         ),
       ).toEqual([]);
     }
@@ -90,8 +88,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
       collectRequiredWhenPromptFields(
         fields({ requiredWhen: WHEN_WON, visibleWhen: 'false' }),
         record,
-        'stage',
-        'closed_won',
+        { stage: 'closed_won' },
       ),
     ).toEqual([]);
   });
@@ -101,8 +98,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
       collectRequiredWhenPromptFields(
         fields({ requiredWhen: WHEN_WON, readonlyWhen: 'true' }),
         record,
-        'stage',
-        'closed_won',
+        { stage: 'closed_won' },
       ),
     ).toEqual([]);
   });
@@ -112,19 +108,17 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
       collectRequiredWhenPromptFields(
         fields({ type: 'file', requiredWhen: WHEN_WON }),
         record,
-        'stage',
-        'closed_won',
+        { stage: 'closed_won' },
       ),
     ).toEqual([]);
   });
 
-  it('never prompts for the groupBy field itself — the drop IS its value', () => {
+  it('never prompts for a field the change itself writes — the change IS its value', () => {
     expect(
       collectRequiredWhenPromptFields(
         { stage: { type: 'picklist', requiredWhen: WHEN_WON } },
         { stage: null },
-        'stage',
-        'closed_won',
+        { stage: 'closed_won' },
       ),
     ).toEqual([]);
   });
@@ -134,15 +128,14 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
       collectRequiredWhenPromptFields(
         { stage: {}, note: { type: 'text', required: true } },
         { stage: 'negotiation', note: null },
-        'stage',
-        'closed_won',
+        { stage: 'closed_won' },
       ),
     ).toEqual([]);
   });
 
   it('returns [] rather than throwing on absent metadata or record', () => {
-    expect(collectRequiredWhenPromptFields(undefined, record, 'stage', 'x')).toEqual([]);
-    expect(collectRequiredWhenPromptFields(fields({}), undefined, 'stage', 'x')).toEqual([]);
+    expect(collectRequiredWhenPromptFields(undefined, record, { stage: 'x' })).toEqual([]);
+    expect(collectRequiredWhenPromptFields(fields({}), undefined, { stage: 'x' })).toEqual([]);
   });
 
   it('keeps the object’s declared field order', () => {
@@ -153,8 +146,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
         a_field: { type: 'text', requiredWhen: WHEN_WON },
       },
       { stage: 'negotiation', a_field: null, b_field: null },
-      'stage',
-      'closed_won',
+      { stage: 'closed_won' },
     );
     expect(out.map((f) => f.name)).toEqual(['b_field', 'a_field']);
   });
@@ -166,8 +158,7 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
       collectRequiredWhenPromptFields(
         fields({ requiredWhen: 'this is not ( valid CEL' }),
         record,
-        'stage',
-        'closed_won',
+        { stage: 'closed_won' },
       ),
     ).toEqual([]);
   });
@@ -197,8 +188,7 @@ describe('collectRequiredWhenPromptFields judges the transition gate (objectstac
       collectRequiredWhenPromptFields(
         contractFields,
         { id: 'c1', priority: 'low', status: 'activated', signed_copy: null },
-        'priority',
-        'high',
+        { priority: 'high' },
       ),
     ).toEqual([]);
   });
@@ -209,9 +199,63 @@ describe('collectRequiredWhenPromptFields judges the transition gate (objectstac
     const out = collectRequiredWhenPromptFields(
       contractFields,
       { id: 'c2', priority: 'low', status: 'draft', signed_copy: null },
-      'status',
-      'activated',
+      { status: 'activated' },
     );
     expect(out.map((f) => f.name)).toEqual(['signed_copy']);
+  });
+});
+
+/**
+ * objectstack#35956 — the generalised shape: a change of any keys, an
+ * `exclude` set that lets a dialog re-ask with what was typed into it, and the
+ * host's own `fillable` question.
+ */
+describe('collectRequiredWhenPromptFields over a change of several keys (objectstack#35956)', () => {
+  it('judges every key of the change, and skips each of them', () => {
+    const out = collectRequiredWhenPromptFields(
+      {
+        stage: { type: 'picklist', requiredWhen: 'record.amount > 10' },
+        amount: { type: 'number' },
+        win_reason: { type: 'text', requiredWhen: WHEN_WON },
+      },
+      { stage: 'negotiation', amount: 1, win_reason: null },
+      { stage: 'closed_won', amount: 50 },
+    );
+    expect(out.map((f) => f.name)).toEqual(['win_reason']);
+  });
+
+  it('chains: a value typed into the dialog can make one more field required', () => {
+    const objectFields = {
+      stage: { type: 'picklist' },
+      win_reason: { type: 'text', requiredWhen: WHEN_WON },
+      competitor: { type: 'text', requiredWhen: 'record.win_reason == "price"' },
+    };
+    const stored = { stage: 'negotiation', win_reason: null, competitor: null };
+    const change = { stage: 'closed_won' };
+    // CONTROL: before anything is typed, only the first field is asked.
+    expect(
+      collectRequiredWhenPromptFields(objectFields, stored, { ...change }, { exclude: Object.keys(change) })
+        .map((f) => f.name),
+    ).toEqual(['win_reason']);
+    // The typed value keeps its row (the stored record still lacks it) and
+    // brings the field it makes required.
+    expect(
+      collectRequiredWhenPromptFields(
+        objectFields,
+        stored,
+        { ...change, win_reason: 'price' },
+        { exclude: Object.keys(change) },
+      ).map((f) => f.name),
+    ).toEqual(['win_reason', 'competitor']);
+  });
+
+  it('asks the host whether each field is fillable', () => {
+    const out = collectRequiredWhenPromptFields(
+      fields({ requiredWhen: WHEN_WON }),
+      record,
+      { stage: 'closed_won' },
+      { fillable: (name) => name !== 'win_reason' },
+    );
+    expect(out).toEqual([]);
   });
 });

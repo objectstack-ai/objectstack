@@ -257,6 +257,10 @@ const de = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Pflichtfelder ausfüllen',
+    requiredPromptDescription: 'Durch diese Änderung werden die folgenden Felder zu Pflichtfeldern. Füllen Sie sie aus, um die Änderung zu speichern.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} öffnen',
