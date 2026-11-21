@@ -191,11 +191,8 @@ export function ObjectViewTitleSwitcher({
                     onClick={() => setOpen(true)}
                     className={cn(PHONE_CHIP, 'max-w-full justify-start text-foreground', open && 'bg-muted')}
                 >
-                    {ActiveIcon && (
-                        <span className="flex shrink-0 text-muted-foreground" data-testid="list-view-switcher-type-icon" aria-hidden="true">
-                            {createElement(ActiveIcon, { className: 'h-4 w-4' })}
-                        </span>
-                    )}
+                    {/* The view's name and its count, as the card draws it: no type icon, so a
+                        name keeps the room the three pills beside it leave. */}
                     <span className="min-w-0 truncate" data-testid="list-view-switcher-label">{activeLabel}</span>
                     {count !== null && (
                         <span className="shrink-0 font-normal tabular-nums text-muted-foreground" data-testid="list-view-switcher-count">

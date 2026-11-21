@@ -135,7 +135,7 @@ export function PhoneListToolbar({
       data-testid="phone-list-toolbar"
     >
       {lead != null && (
-        <div className="flex min-w-0 max-w-[55%] shrink items-center" data-testid="phone-list-toolbar-view">
+        <div className="flex min-w-0 shrink items-center" data-testid="phone-list-toolbar-view">
           {lead}
         </div>
       )}
