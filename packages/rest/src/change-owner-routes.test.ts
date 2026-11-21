@@ -2,6 +2,9 @@
 // [#35402] The REST face of Change Owner: the single and the bulk door.
 
 import { describe, it, expect, vi } from 'vitest';
+// The first load of the engine is paid at collection, not inside a test's clock:
+// the server under test reaches it through dynamic imports.
+import '@objectstack/objectql';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import { RestServer } from './rest-server';
@@ -43,8 +46,12 @@ function mockEngine(refuse: (id: string) => unknown = () => undefined) {
   return {
     rows,
     getSchema: vi.fn((name: string) => SCHEMAS[name]),
+    // Equality on plain fields only; a combinator this double does not implement is refused, never read as a field.
     find: vi.fn(async (o: string, q: any) => (o === 'sys_user' ? users : rows).filter((r: any) =>
-      Object.entries(q.where).every(([k, v]) => r[k] === v)).slice(0, q.limit ?? Infinity)),
+      Object.entries(q.where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`mock find: the ${k} combinator is not implemented`);
+        return r[k] === v;
+      })).slice(0, q.limit ?? Infinity)),
     update: vi.fn(async (_o: string, data: any, opts: any) => {
       assertEngineUpdateDispatch(data, opts);
       const row = rows.find((r) => r.id === opts.where.id);

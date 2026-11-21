@@ -51,7 +51,11 @@ function fakeEngine(opts: { refuse?: (id: string) => unknown } = {}) {
     getSchema: (name) => SCHEMAS[name],
     async find(object, q) {
       calls.push({ op: 'find', object, where: q?.where, context: q?.context });
-      return (tables[object] ?? []).filter((r) => Object.entries(q?.where ?? {}).every(([k, v]) => r[k] === v)).slice(0, q?.limit ?? Infinity);
+      // Equality on plain fields only; a combinator this double does not implement is refused, never read as a field.
+      return (tables[object] ?? []).filter((r) => Object.entries(q?.where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`mock find: the ${k} combinator is not implemented`);
+        return r[k] === v;
+      })).slice(0, q?.limit ?? Infinity);
     },
     async update(object, data, o) {
       assertEngineUpdateDispatch(data, o);
