@@ -1363,8 +1363,16 @@ export function ObjectListViewInspector({
       ? { status: 'loading' }
       : loaded(
           // `options` ride along for the filter's picklist value picker
-          // (objectstack#27515); the other pickers read name, label and type.
-          fields.map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.options ? { options: f.options } : {}) })),
+          // (objectstack#27515), `multiple` for its operator set (a list-valued
+          // column takes membership and the empty checks only); the other
+          // pickers read name, label and type.
+          fields.map((f) => ({
+            name: f.name,
+            label: f.label,
+            type: f.type,
+            ...(f.options ? { options: f.options } : {}),
+            ...(f.multiple ? { multiple: true } : {}),
+          })),
         );
   const labelOf = (name: string) => fields.find((f) => f.name === name)?.label ?? name;
   const sort = sortEntriesOf(body.sort);

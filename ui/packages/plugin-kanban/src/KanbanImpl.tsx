@@ -415,7 +415,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
               keeps its markup. */}
           {owner ? (
             <div className="flex items-start justify-between gap-2">
-              <CardTitle className="min-w-0 text-xs sm:text-sm font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
+              <CardTitle className="min-w-0 text-xs sm:text-sm font-medium tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
               <Avatar className="size-6 shrink-0" title={owner.name} aria-label={owner.name} data-kanban-card-owner="">
                 {owner.image && <AvatarImage src={owner.image} alt={owner.name} />}
                 <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-medium">
@@ -424,7 +424,7 @@ function SortableCard({ card, onCardClick, conditionalFormatting, objectFields }
               </Avatar>
             </div>
           ) : (
-            <CardTitle className="text-xs sm:text-sm font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
+            <CardTitle className="text-xs sm:text-sm font-medium tracking-tight text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-2">{card.title}</CardTitle>
           )}
           {!(card.cardFieldCells && card.cardFieldCells.length > 0) && (card.cardSubtitle ?? card.description) && (
             <CardDescription className="text-xs text-muted-foreground line-clamp-2 sm:line-clamp-none">
@@ -754,7 +754,7 @@ function LaneTotal({
   if (total === null) return null
   return (
     <span
-      className={cn("inline-flex items-center gap-0.5 text-[11px] font-medium text-muted-foreground tabular-nums whitespace-nowrap", className)}
+      className={cn("inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground tabular-nums whitespace-nowrap", className)}
       title={summary.label}
       data-kanban-lane-total=""
     >
@@ -898,7 +898,7 @@ function KanbanColumnView({
       )}
       <div className={cn("border-b border-border/40", isCollapsed ? "px-1 py-3" : "px-3 sm:px-4 pt-3 pb-2.5")}>
         <div className={cn("flex gap-2", isCollapsed ? "flex-col items-center" : "items-center justify-between")}>
-          <h3 id={`kanban-col-${column.id}`} className={cn("text-xs sm:text-[13px] font-semibold tracking-tight truncate text-foreground/85 uppercase", isCollapsed && "min-w-0")}>
+          <h3 id={`kanban-col-${column.id}`} className={cn("text-xs font-medium tracking-tight truncate text-foreground/85 uppercase", isCollapsed && "min-w-0")}>
             <LaneHeading
               column={column}
               collapsed={isCollapsed}
@@ -909,7 +909,7 @@ function KanbanColumnView({
           <div className="flex items-center gap-1.5 shrink-0">
             <span
               className={cn(
-                "inline-flex items-center justify-center min-w-[22px] h-[20px] px-1.5 rounded-md text-[11px] font-medium tabular-nums",
+                "inline-flex items-center justify-center min-w-[22px] h-[20px] px-1.5 rounded-md text-xs font-medium tabular-nums",
                 isLimitExceeded
                   ? "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30"
                   : "bg-muted/70 text-muted-foreground",
@@ -919,7 +919,7 @@ function KanbanColumnView({
               {column.limit && <span className="text-muted-foreground/70 font-normal">{` / ${column.limit}`}</span>}
             </span>
             {isLimitExceeded && (
-              <Badge variant="destructive" className="text-[10px] h-[20px] px-1.5">
+              <Badge variant="destructive" className="text-xs h-[20px] px-1.5">
                 Full
               </Badge>
             )}
@@ -1779,7 +1779,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                     collapsed={collapsed}
                     collapsible={col.collapsed === true}
                     onToggle={() => toggleColumnCollapse(col.id, !collapsed)}
-                    className=" text-xs sm:text-sm font-semibold tracking-wider text-primary/90 uppercase"
+                    className=" text-xs sm:text-sm font-medium tracking-wider text-primary/90 uppercase"
                   />
                   {/* objectstack#30431 — the count, and the total, wait for the
                       records like the flat header's do (`LaneCountPending`). */}
@@ -1813,7 +1813,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                   aria-expanded={!isCollapsed}
                 >
                   <span className={cn("transition-transform text-xs", isCollapsed ? "" : "rotate-90")}>▶</span>
-                  <span className=" text-xs font-semibold text-muted-foreground uppercase tracking-wider">{laneLabel}</span>
+                  <span className=" text-xs font-medium text-muted-foreground uppercase tracking-wider">{laneLabel}</span>
                   <span className=" text-xs text-muted-foreground">
                     {recordsSettled ? `(${laneCountLabel(laneCardCount, countsAreWindowed)})` : <LaneCountPending />}
                   </span>

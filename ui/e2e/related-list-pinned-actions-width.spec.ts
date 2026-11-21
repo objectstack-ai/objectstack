@@ -76,6 +76,9 @@ const FULL_PAGE = 1184;
  * The allocation-plan columns the card names, Status last. Their widths fit
  * the drawer menu-only and do not fit it with the inline button: the readings
  * each case reports say by how much, so a font that moves them is visible.
+ * With the 12px header and weight 500 (objectstack#36047) the table was 8 px
+ * short of overflowing, so the warehouse name carries a bay: menu-only it is
+ * 593 px wide in the 622 px drawer, and the inline button adds 64.
  */
 const PLAN_COLUMNS = ['name', 'plan_date', 'amount', 'warehouse', 'status'];
 /** Wide enough to overflow the drawer even menu-only. */
@@ -140,7 +143,7 @@ const FIELDS = {
 };
 const ROWS = [1, 2, 3].map((i) => ({
   id: 'p' + i, name: 'Allocation ' + i, plan_date: '2026-11-0' + i, quantity: 10 * i, amount: 1250.5 * i,
-  warehouse: 'Main warehouse east', owner: 'Dana Smith', note: 'Ship with the next batch',
+  warehouse: 'Main warehouse east, bay 2', owner: 'Dana Smith', note: 'Ship with the next batch',
   status: i === 1 ? 'confirmed' : 'draft',
 }));
 const dataSource = {

@@ -76,7 +76,10 @@ function FilterRulesField({ label, objectName, value, onChange, disabled }: {
   const { fields, error } = useObjectFields(objectName);
   const id = React.useId();
   const builderFields = React.useMemo(
-    () => fields.filter((f) => !f.hidden).map((f) => ({ name: f.name, label: f.label, type: f.type })),
+    () => fields
+      .filter((f) => !f.hidden)
+      // `multiple` decides the operators the builder offers a list-valued column.
+      .map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.multiple ? { multiple: true } : {}) })),
     [fields],
   );
   return (

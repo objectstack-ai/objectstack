@@ -219,9 +219,10 @@ describe('objectstack#27950, as redrawn by objectstack#35548 — the page bar na
     mount('/apps/crm/crm_lead/view/mine?recordId=lead_1');
     await listToolbar();
     expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
-    // objectstack#35878: the view bar names the object; no page bar is drawn.
-    expect(screen.getAllByTestId('list-view-bar-object')).toHaveLength(1);
-    expect(screen.queryAllByTestId('page-header').filter((h) => h.dataset.posture === 'list')).toHaveLength(0);
+    // objectstack#36113: the page bar names the object, once; the view bar
+    // does not (objectstack#35878 had moved the name into it).
+    expect(screen.getAllByTestId('page-header').filter((h) => h.dataset.posture === 'list')).toHaveLength(1);
+    expect(screen.queryByTestId('list-view-bar-object')).toBeNull();
   });
 
   it('a view with no label reads the plural in the switcher', async () => {

@@ -721,7 +721,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
                   record drawer below keeps the singular. */}
               {/* A served object's label is already translated (objectstack#30311): drawn as given. */}
               <span className="truncate">{servedObjectPluralLabel(objectDef, language, objectPluralLabel)}</span>
-              <span className="rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="rounded border px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t('console.objectData.badge', { defaultValue: 'Data' })}
               </span>
             </span>

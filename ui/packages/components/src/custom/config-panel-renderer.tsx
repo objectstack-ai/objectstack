@@ -304,7 +304,7 @@ export function ConfigPanelRenderer({
                 testId={`section-header-${section.key}`}
               />
               {section.hint && (
-                <p className="text-[10px] text-muted-foreground mb-1">
+                <p className="text-xs text-muted-foreground mb-1">
                   {section.hint}
                 </p>
               )}

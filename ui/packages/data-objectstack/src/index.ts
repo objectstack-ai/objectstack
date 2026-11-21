@@ -8,7 +8,7 @@
 
 import { ObjectStackClient, type QueryOptions as ObjectStackQueryOptions } from '@objectstack/client';
 import type { DroppedFieldsEvent, EngineAggregateOptions } from '@objectstack/spec/data';
-import type { ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import type { Dataset, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 // objectui#11013 — a VALUE import: the keys `listViews` carries off a stored
 // ViewItem record are the spec's own record of the console's round-trip keys,
 // read off the pin rather than hand-listed (see `VIEW_ITEM_ROUND_TRIP_KEYS`).
@@ -7321,6 +7321,42 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // Server doesn't support page metadata — return null to fall back to static config
       return null;
     }
+  }
+
+  /**
+   * Get a semantic-layer dataset definition (`DataSource.getDataset`).
+   *
+   * Reads `GET /api/v1/meta/dataset/:name` through the client's
+   * `meta.getItem`, with the reader's package as `callerPackage` when the
+   * caller names one (ADR-0150 D3), so the name resolves the way the
+   * dataset query that follows resolves it.
+   *
+   * No such dataset is `null`, in both answers a server gives for it: the
+   * envelope with no `item` ({@link metaEnvelopeCarriesItem}) and the `404`
+   * ({@link is404Error}). Every other failure rejects, unlike {@link getPage}:
+   * the dashboard reports a definition it could not read, and a swallowed
+   * failure would read as "no dataset".
+   *
+   * Cached per name and reader package; `invalidateCache` / `clearCache`
+   * drop it like every other metadata read here.
+   */
+  async getDataset(datasetName: string, options?: { callerPackage?: string }): Promise<Dataset | null> {
+    await this.connect();
+    const callerPackage = options?.callerPackage;
+    const cacheKey = `dataset:${datasetName}${callerPackage ? `@${callerPackage}` : ''}`;
+    return this.metadataCache.get(cacheKey, async () => {
+      try {
+        const envelope: unknown = await this.client.meta.getItem(
+          'dataset',
+          datasetName,
+          callerPackage ? { callerPackage } : undefined,
+        );
+        return metaEnvelopeCarriesItem(envelope) ? ((envelope as { item: Dataset }).item) : null;
+      } catch (error: unknown) {
+        if (is404Error(error)) return null;
+        throw error;
+      }
+    });
   }
 
   /**

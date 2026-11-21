@@ -1684,7 +1684,7 @@ const SavedMappingSummary: React.FC<{ mapping: SavedMapping; fields: ImportWizar
                 <TableCell>{r.target}</TableCell>
                 <TableCell className="text-center">
                   {r.transform
-                    ? <Badge variant="outline" className="text-[10px] font-normal">{r.transform}</Badge>
+                    ? <Badge variant="outline" className="text-xs font-normal">{r.transform}</Badge>
                     : <EmptyValue />}
                 </TableCell>
               </TableRow>
@@ -1793,7 +1793,7 @@ const StepMapping: React.FC<{
                 <div className="flex flex-col gap-0.5">
                   <span>{header}</span>
                   {inferred !== 'text' && (
-                    <Badge variant="outline" className="w-fit text-[10px] font-normal text-muted-foreground" data-testid={`import-inferred-${idx}`}>
+                    <Badge variant="outline" className="w-fit text-xs font-normal text-muted-foreground" data-testid={`import-inferred-${idx}`}>
                       {t(`grid.import.type.${inferred}`)}
                     </Badge>
                   )}
@@ -1812,12 +1812,12 @@ const StepMapping: React.FC<{
                   </SelectContent>
                 </Select>
                 {autoMatched && (
-                  <p className={cn('mt-1 flex items-center gap-1 text-[11px]', CONFIDENCE_CLASS[autoMatched])} data-testid={`import-automatch-${idx}`}>
+                  <p className={cn('mt-1 flex items-center gap-1 text-xs', CONFIDENCE_CLASS[autoMatched])} data-testid={`import-automatch-${idx}`}>
                     <CheckCircle2 className="h-3 w-3" /> {t('grid.import.autoMatched')} · {t(`grid.import.confidence.${autoMatched}`)}
                   </p>
                 )}
                 {typeMismatch && (
-                  <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-600" data-testid={`import-type-warn-${idx}`}>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-amber-600" data-testid={`import-type-warn-${idx}`}>
                     <AlertCircle className="h-3 w-3" /> {t('grid.import.typeMismatch', { type: t(`grid.import.type.${inferred}`) })}
                   </p>
                 )}
@@ -2076,7 +2076,7 @@ const ImportOptions: React.FC<{
             <Label className="text-xs">{t('grid.import.matchFields')}</Label>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {matchable.length === 0 && (
-                <span className="text-[11px] text-muted-foreground">{t('grid.import.matchFieldsPlaceholder')}</span>
+                <span className="text-xs text-muted-foreground">{t('grid.import.matchFieldsPlaceholder')}</span>
               )}
               {matchable.map((f) => (
                 <label key={f.name} className="flex items-center gap-1.5 text-xs" data-testid={`import-matchfield-${f.name}`}>
@@ -2088,7 +2088,7 @@ const ImportOptions: React.FC<{
                 </label>
               ))}
             </div>
-            <p className={cn('text-[11px]', matchFields.length === 0 ? 'text-destructive' : 'text-muted-foreground')}>
+            <p className={cn('text-xs', matchFields.length === 0 ? 'text-destructive' : 'text-muted-foreground')}>
               {matchFields.length === 0 ? t('grid.import.needMatchFields') : t('grid.import.matchFieldsHint')}
             </p>
           </div>
@@ -2110,7 +2110,7 @@ const ImportOptions: React.FC<{
               <Checkbox checked={backgroundImport} onCheckedChange={(v) => onBackgroundImport(v === true)} />
               <span>
                 {t('grid.import.optBackground')}
-                <span className="ml-1 text-[11px] text-muted-foreground">{t('grid.import.optBackgroundHint')}</span>
+                <span className="ml-1 text-xs text-muted-foreground">{t('grid.import.optBackgroundHint')}</span>
               </span>
             </label>
           )}

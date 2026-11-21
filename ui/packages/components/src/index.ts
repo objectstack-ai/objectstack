@@ -41,6 +41,10 @@ export { renderChildren, renderNodeSlot, isEmptyNodeSlot } from './lib/utils';
 export { cva } from 'class-variance-authority';
 export { getLazyIcon, isLucideIconName, LazyIcon, toKebabIconName } from './lib/lazy-icon';
 
+// The one "does the input method own this key?" predicate (objectstack#35996):
+// the list grid and the field widgets of `@object-ui/fields` both ask it.
+export { isImeKey } from './lib/ime-key';
+
 // The inline Markdown subset `element:text` draws (objectui#12778). Exported
 // because app-shell's marketplace README renderer draws its inline text with
 // the same one, so both share the raw-HTML skip and the link-scheme refusal.
@@ -116,6 +120,10 @@ export { PageHeaderActions } from './renderers/layout/containers';
 // The host slot at the end of that row (objectstack#27241): the console's
 // record view puts the reader's panel switches there.
 export { PageHeaderTrailingContext } from './renderers/layout/page-header-trailing-context';
+// The host owns the page's title (objectstack#36111): the console's page route
+// draws the page's name and description in its page header, so the page
+// renderer draws neither, and an authored titled `page:header` draws an `h2`.
+export { PageTitleHostContext } from './renderers/layout/page-title-host-context';
 // The phone's host slot (objectstack#27058): the console's record page hands
 // the header its bottom action bar, where the same row is drawn in its bar
 // face, and the subtitle it draws when the header declares none.

@@ -214,6 +214,8 @@ await (dataSource.batchMutationEvents ? dataSource.batchMutationEvents(write) : 
 
 `listMetadataItems(type)` lists one metadata registry type as `{ name, label }` headers, for the `position-ref` / `permission-ref` field widgets (see the [Fields guide](/docs/frontend/fields)). An empty array means the registry has no item of that type, so a failed load must **reject**, never resolve `[]`.
 
+`getDataset(name, { callerPackage })` reads a semantic-layer dataset definition (`GET /api/v1/meta/dataset/:name`). A dashboard reads it to learn a dataset-bound widget's base object, so a filter on a field holding several values is sent as `$contains` instead of `=` / `$in`. It resolves `null` when no such dataset is served, and a failed read must **reject**. The member is optional: without it, the dashboard sends `=` / `$in` and warns in the console, naming the filter.
+
 ### Cross-object atomic writes (`batchTransaction`)
 
 Master-detail saves (a parent record plus its child line items) go through

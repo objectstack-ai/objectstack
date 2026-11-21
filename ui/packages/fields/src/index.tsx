@@ -5402,6 +5402,10 @@ export * from './widgets/BooleanField.js';
 // highlights chip). `BooleanValueText` stays internal: its only caller is the
 // lookup column renderer in this package.
 export { useBooleanValueLabel, type BooleanValueLabel } from './widgets/booleanValueLabel.js';
+// objectstack#36070 — the up-to-two-character initials a person chip draws
+// when it has no avatar image (PersonRow, the people-field chips). Exported so
+// `@object-ui/plugin-detail`'s comment author avatar draws the same initials.
+export { getPersonInitials } from './widgets/personDisplay.js';
 export * from './widgets/SelectField.js';
 export * from './widgets/DateField.js';
 export * from './widgets/DateTimeField.js';

@@ -118,12 +118,13 @@ describe('objectstack#30126 — an object nav entry with no icon draws its objec
     }
   });
 
-  it('controls: an object with no icon and a dashboard entry draw the same generic icon each surface draws for no icon', async () => {
+  it('controls: an object with no icon draws the generic icon, and a dashboard entry its kind’s (objectstack#36141), never the object’s', async () => {
     render(tree(metadata('folder-kanban')));
     for (const surface of surfaces()) {
       await waitFor(() => expect(glyph(surface, 'Projects')).toContain('lucide-folder-kanban'));
-      expect(glyph(surface, 'Notes')).toBe(glyph(surface, 'Overview'));
+      await waitFor(() => expect(glyph(surface, 'Overview')).toContain('lucide-layout-dashboard'));
       expect(glyph(surface, 'Notes')).not.toContain('lucide-folder-kanban');
+      expect(glyph(surface, 'Overview')).not.toContain('lucide-folder-kanban');
     }
   });
 

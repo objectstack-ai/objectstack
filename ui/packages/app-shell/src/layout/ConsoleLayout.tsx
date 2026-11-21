@@ -25,9 +25,11 @@ import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
 import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
+import { PhonePageBarProvider } from './PhonePageBar.js';
 import { useLastApp } from '../context/LastAppProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
+import { ShellPageActionsScope } from './ShellPageActions.js';
 import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
@@ -258,6 +260,8 @@ export function ConsoleLayout({
     {/* objectstack#35881 — the phone app home's slot, shared by the sidebar
         (which draws the menu into it) and the route (which holds it). */}
     <PhoneAppHomeSlotProvider>
+    {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
+    <PhonePageBarProvider>
     <AppShell
       sidebar={
         docsPage ? undefined : (
@@ -313,6 +317,10 @@ export function ConsoleLayout({
       }
     >
       <ConsoleLayoutInner>
+        {/* objectstack#36111 — the shell decides whether the pages under it
+            draw the top-right button group: off while this layout draws the
+            top bar, which carries the same buttons. */}
+        <ShellPageActionsScope>
         {/* ADR-0037: unmistakable watermark while rendering the draft overlay
             (?preview=draft) — with one-click exit and one-click Publish. */}
         {/* objectui#12463 — the banners sit in one non-shrinking box, so in
@@ -348,6 +356,7 @@ export function ConsoleLayout({
         >
         {children}
         </div>
+        </ShellPageActionsScope>
       </ConsoleLayoutInner>
 
       {/* objectstack#35882 — the phone's bottom bar, after the page in reading order. */}
@@ -356,6 +365,7 @@ export function ConsoleLayout({
       {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
       {chatDock.sheet}
     </AppShell>
+    </PhonePageBarProvider>
     </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>
     </ChatDockControlProvider>
