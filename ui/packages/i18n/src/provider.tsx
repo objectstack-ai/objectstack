@@ -486,19 +486,32 @@ interface I18nContextValue {
   /** The underlying i18next instance */
   i18n: I18nInstance;
   /**
-   * The languages a switcher may offer: the platform locale table ∩ the
-   * app's own locale list (objectui#4039, ruling F of objectstack#29349), as
-   * table tags (`zh-Hans`, never `zh-CN`), de-duplicated, in the app's order.
-   * A code that lands on no table tag is not offered. Computed here because
-   * only the provider knows both sides.
+   * The languages a switcher may offer: every language of the platform locale
+   * table, as table tags (`zh-Hans`, never `zh-CN`), in the table's order.
    *
-   * `null` means "still asking the app". Consumers render nothing (or a
-   * skeleton) rather than a list they will have to retract a tick later.
-   * Without {@link I18nProviderProps.loadLocales} wiring, or when the app's
-   * answer names no table language, this is the offline fallback: the table's
-   * tags.
+   * The sign-in page, the in-app menu and the profile page's language card all
+   * offer this one list (maintainer ruling on objectstack#35425, option A). It
+   * is no longer narrowed to the app's own locale list: a language the app
+   * ships no translation for is still selectable — the interface renders in
+   * it, the app's own content falls back to the deployment's default language
+   * — and {@link I18nContextValue.appContentLanguages} says which those are.
+   * Never `null`: the list does not wait on the app's answer any more.
    */
-  offerableLanguages: readonly string[] | null;
+  offerableLanguages: readonly string[];
+  /**
+   * The table languages the app's own locale list covers (objectui#4039), as
+   * table tags, de-duplicated, in the app's order: the languages in which the
+   * app's content (object, field and view labels) is translated too. A menu
+   * marks every other offered language with a hint that the app's content
+   * shows in the default language (objectstack#35425).
+   *
+   * `null` means "not known": still asking, no
+   * {@link I18nProviderProps.loadLocales} wiring, a signed-out page (the
+   * console asks only with a session), a failed read, or an answer that names
+   * no table language. Mark nothing then: a hint on every row would claim a
+   * fact nobody has read.
+   */
+  appContentLanguages: readonly string[] | null;
 }
 
 const ObjectI18nContext = createContext<I18nContextValue | null>(null);
@@ -806,31 +819,33 @@ export function I18nProvider({
       });
   }, [loadLocales]);
 
-  const offerableLanguages = useMemo<readonly string[] | null>(() => {
-    // No wiring at all: the platform locale table is the whole truth. An entry
-    // in `config.resources` overlays a table language or names one outside the
-    // table, and neither adds a menu entry (see `offeredTableTags`).
-    if (!hasLocaleLoader) return BUILT_IN_LANGUAGE_CODES;
-    if (appLocales === null) return null;
-    const offerable = offeredTableTags(appLocales);
-    // An app that answers with no table language leaves the user with no way
-    // to switch at all — strictly worse than the offline fallback, so the
-    // fallback wins.
-    return offerable.length > 0 ? offerable : BUILT_IN_LANGUAGE_CODES;
+  // Every table language, whatever the app ships (objectstack#35425): the
+  // sign-in page and the in-app menu offer one list, so a language picked
+  // before sign-in is still there after it. A stable identity, so a reader
+  // keying an effect on it does not re-run.
+  const offerableLanguages: readonly string[] = BUILT_IN_LANGUAGE_CODES;
+
+  // Which of those the app's own content is translated into. `[]` (asked and
+  // got nothing usable) and an answer naming no table language are both "I
+  // don't know", the same reading the offered list used to give them.
+  const appContentLanguages = useMemo<readonly string[] | null>(() => {
+    if (!hasLocaleLoader || !appLocales) return null;
+    const covered = offeredTableTags(appLocales);
+    return covered.length > 0 ? covered : null;
   }, [hasLocaleLoader, appLocales]);
 
   // Self-heal: a stored language accepted on the loader's credit alone is
   // adjudicated once the app's real list lands — against what the menu
-  // OFFERS, not the raw list, so a locale the app lists but the platform
-  // locale table does not name (`th`) is reverted and purged like one the app
-  // dropped (objectstack#30514). Without this, widening the restore validation
+  // OFFERS (every table language, objectstack#35425), not the raw list, so a
+  // locale the app lists but the platform locale table does not name (`th`) is
+  // reverted and purged (objectstack#30514). Without this, widening the restore validation
   // would reintroduce exactly what it was written to stop — one stale entry
   // locking the UI to a locale with no translations. Scoped to our own
   // optimism: only the bootstrap language, only while the user has not moved
   // on, and never on an empty/failed answer.
   useEffect(() => {
     const provisional = bootstrap.provisional;
-    if (!provisional || !appLocales || appLocales.length === 0 || !offerableLanguages) return;
+    if (!provisional || !appLocales || appLocales.length === 0) return;
     if (offerableLanguages.includes(provisional)) return;
     if ((i18nInstance.language || '') !== provisional) return;
     const revertTo = config?.defaultLanguage || config?.fallbackLanguage || 'en';
@@ -895,8 +910,9 @@ export function I18nProvider({
       direction,
       i18n: i18nInstance,
       offerableLanguages,
+      appContentLanguages,
     }),
-    [language, direction, i18nInstance, loadLanguage, offerableLanguages],
+    [language, direction, i18nInstance, loadLanguage, offerableLanguages, appContentLanguages],
   );
 
   return React.createElement(
@@ -994,12 +1010,15 @@ export function useObjectTranslation(ns?: string) {
     /** The underlying i18next instance */
     i18n,
     /**
-     * Languages a switcher may offer (objectui#4039). `null` while the app's
-     * locale list is in flight. Outside a provider there is nobody to ask, so
-     * the built-in packs are the answer — not `null`, which would leave a
-     * standalone switcher permanently blank.
+     * Languages a switcher may offer: every platform locale table language
+     * (objectstack#35425), inside a provider or not.
      */
     offerableLanguages: context ? context.offerableLanguages : BUILT_IN_LANGUAGE_CODES,
+    /**
+     * The table languages the app's own content is translated into, or `null`
+     * when not known. Outside a provider there is nobody to ask: `null`.
+     */
+    appContentLanguages: context ? context.appContentLanguages : null,
   };
 }
 
