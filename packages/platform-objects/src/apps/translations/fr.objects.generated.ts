@@ -176,7 +176,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bannir l’utilisateur",
-        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement.",
+        description: "Bannir cet utilisateur ? Il sera déconnecté, ne pourra plus se connecter et ses clés API seront refusées jusqu’à la levée du bannissement, tout comme ses jetons d’accès OAuth et leurs renouvellements. Les clés fonctionnent de nouveau après la levée du bannissement. Le bannissement suspend aussi les comptes de service IA dont il est responsable, désactive les applications OAuth qu'il a enregistrées et révoque les identifiants SCIM qu'il a émis ; la levée du bannissement ne rétablit rien de tout cela.",
         successMessage: "Utilisateur banni",
         params: {
           banReason: {

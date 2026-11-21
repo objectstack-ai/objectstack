@@ -176,7 +176,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bloquear usuario",
-        description: "¿Bloquear a este usuario? Cerrará sesión, no podrá volver a iniciarla y sus claves de API se rechazarán hasta que se desbloquee, al igual que sus tokens de acceso OAuth y sus renovaciones de token. Las claves vuelven a funcionar tras el desbloqueo.",
+        description: "¿Bloquear a este usuario? Cerrará sesión, no podrá volver a iniciarla y sus claves de API se rechazarán hasta que se desbloquee, al igual que sus tokens de acceso OAuth y sus renovaciones de token. Las claves vuelven a funcionar tras el desbloqueo. El bloqueo también suspende las cuentas de servicio de IA de las que es responsable, desactiva las aplicaciones OAuth que registró y revoca las credenciales SCIM que emitió; el desbloqueo no restaura nada de esto.",
         successMessage: "Usuario bloqueado",
         params: {
           banReason: {
