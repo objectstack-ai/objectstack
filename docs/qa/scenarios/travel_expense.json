@@ -12,8 +12,8 @@
       "en": "Build a travel expense app: trip requests, expense claims with lines, grade-based travel standards and a two-step approval."
     },
     "detailed": {
-      "zh": "差旅报销应用。员工先提交出差申请(目的地、起止日期、事由),批准后出行;回来后填写报销单,报销单下有多条明细(住宿、餐补、机票),每条有数量、单价和金额,报销单合计自动汇总明细金额。报销明细是报销单的从属记录(主从关系),在报销单表单上直接内联编辑。差旅标准按职级(g1/g2/g3)和费用类型规定上限;超出标准的明细自动标记为超标,且必须填写超标原因,否则不能保存。报销单走两级审批:先由部门经理审批(经理本人的报销单由财务经理审批),再由财务审批;每一步都是一条独立的审批步骤记录(报销单、步骤、审批人、审批结果和日期),批准或驳回一步就是更新这条记录。财务审批通过后由财务付款,付款不可撤销。员工只能看到自己的出差申请和报销单,部门经理能看到本部门的,财务能看到全部报销单但不看出差申请;部门差旅预算只有经理和财务可见,员工银行账号只有本人和财务可见。需要一个按部门和费用类型统计明细金额的报表,数据取自 claim_lines 数据集。尽量用声明式配置(公式字段、汇总字段、校验规则)而不是代码钩子,以便应用能以非托管方式安装。",
-      "en": "A travel expense app. An employee first files a trip request (destination, start and end dates, purpose); once it is approved they travel. Afterwards they file an expense claim with several lines (hotel, meals, airfare), each with a quantity, a unit amount and an amount, and the claim total sums its line amounts. The lines are details of the claim (master-detail), edited inline on the claim's form. A travel standard caps each expense type per grade (g1/g2/g3); a line above the cap is flagged over-standard automatically and cannot be saved without a reason. A claim goes through a two-step approval: the department manager first (a manager's own claim goes to the finance manager), then Finance; each step is its own approval step record (the claim, the step, the approver, the decision and its date), and approving or rejecting a step updates that record; once Finance approves, Finance pays it, and a payment cannot be undone. An employee sees only their own trip requests and claims, a department manager sees their department's, and Finance sees every claim but no trip request; a department's travel budget is visible to managers and Finance only, and an employee's bank account to that employee and Finance only. Add a report of claim line amounts by department and expense type, built on the claim_lines dataset. Prefer declarative configuration (formula and roll-up fields, validation rules) over code hooks, so the app can be installed unmanaged."
+      "zh": "差旅报销应用。员工先提交出差申请(目的地、起止日期、事由),批准后出行;回来后填写报销单,报销单下有多条明细(住宿、餐补、机票),每条有数量、单价和金额,报销单合计自动汇总明细金额。报销明细是报销单的从属记录(主从关系),在报销单表单上直接内联编辑。差旅标准按职级(g1/g2/g3)和费用类型规定上限;超出标准的明细自动标记为超标,且必须填写超标原因,否则不能保存。报销单走两级审批:先由部门经理审批(经理本人的报销单由财务经理审批),再由一名财务专员(财务经理以外的财务人员)审批;每一步都是一条独立的审批步骤记录(报销单、步骤、审批人、审批结果和日期),批准或驳回一步就是更新这条记录。财务审批通过后由财务付款,付款不可撤销。员工只能看到自己的出差申请和报销单,部门经理能看到本部门的,财务能看到全部报销单但不看出差申请;部门差旅预算只有经理和财务可见,员工银行账号只有本人和财务可见。需要一个按部门和费用类型统计明细金额的报表,数据取自 claim_lines 数据集。尽量用声明式配置(公式字段、汇总字段、校验规则)而不是代码钩子,以便应用能以非托管方式安装。",
+      "en": "A travel expense app. An employee first files a trip request (destination, start and end dates, purpose); once it is approved they travel. Afterwards they file an expense claim with several lines (hotel, meals, airfare), each with a quantity, a unit amount and an amount, and the claim total sums its line amounts. The lines are details of the claim (master-detail), edited inline on the claim's form. A travel standard caps each expense type per grade (g1/g2/g3); a line above the cap is flagged over-standard automatically and cannot be saved without a reason. A claim goes through a two-step approval: the department manager first (a manager's own claim goes to the finance manager), then a Finance officer (Finance staff other than the finance manager); each step is its own approval step record (the claim, the step, the approver, the decision and its date), and approving or rejecting a step updates that record; once Finance approves, Finance pays it, and a payment cannot be undone. An employee sees only their own trip requests and claims, a department manager sees their department's, and Finance sees every claim but no trip request; a department's travel budget is visible to managers and Finance only, and an employee's bank account to that employee and Finance only. Add a report of claim line amounts by department and expense type, built on the claim_lines dataset. Prefer declarative configuration (formula and roll-up fields, validation rules) over code hooks, so the app can be installed unmanaged."
     }
   },
   "expect": {
@@ -874,6 +874,7 @@
       {
         "id": "paid_reimbursement",
         "ask": {"zh": "已付款报销单的报销金额合计是多少?", "en": "How much is the claimed amount for everything already paid?"},
+        "askKind": "count",
         "object": "expense_claim",
         "truth": {"kind": "sum", "field": "total_amount", "filter": [{"field": "status", "op": "eq", "value": "paid"}]},
         "personas": ["employee", "dept_manager"]
@@ -881,6 +882,7 @@
       {
         "id": "claims_by_status",
         "ask": {"zh": "各个状态的报销单数分别是多少?", "en": "What is the number of claims in each status?"},
+        "askKind": "group_sum",
         "object": "expense_claim",
         "truth": {"kind": "count", "groupBy": "status"},
         "personas": ["dept_manager"]
@@ -891,6 +893,7 @@
           "zh": "财务已批准或已付款的金额最多的三位报销人是谁?",
           "en": "Which three claimants account for the most money on finance-approved or paid claims?"
         },
+        "askKind": "top_n",
         "object": "expense_claim",
         "truth": {
           "kind": "topN",
@@ -904,6 +907,7 @@
       {
         "id": "claimed_last_month",
         "ask": {"zh": "上个月的报销金额合计是多少?", "en": "What do expense claims from last month add up to?"},
+        "askKind": "time_range",
         "object": "expense_claim",
         "truth": {
           "kind": "sum",
@@ -914,6 +918,7 @@
       {
         "id": "over_standard_by_department",
         "ask": {"zh": "每个部门各有多少条超标明细?", "en": "How many over-standard lines does each department have?"},
+        "askKind": "join",
         "object": "claim_line",
         "truth": {
           "kind": "count",
@@ -924,6 +929,7 @@
       {
         "id": "sales_paid_hotel",
         "ask": {"zh": "销售部已付款报销单里的住宿费合计多少?", "en": "How much hotel spend is on the Sales department's paid claims?"},
+        "askKind": "join",
         "object": "claim_line",
         "truth": {
           "kind": "sum",
@@ -938,6 +944,7 @@
       {
         "id": "trips_by_status",
         "ask": {"zh": "出差申请按状态各有多少?", "en": "How many trip requests are in each status?"},
+        "askKind": "group_sum",
         "object": "trip_request",
         "truth": {"kind": "count", "groupBy": "status"},
         "personas": ["employee", "finance_officer"]
@@ -945,6 +952,7 @@
       {
         "id": "ec_0093_waiting_on",
         "ask": {"zh": "报销单 EC-0093 现在卡在谁那里?", "en": "Who is claim EC-0093 waiting on right now?"},
+        "askKind": "owner_latest",
         "object": "approval_step",
         "truth": {
           "kind": "count",
@@ -955,6 +963,7 @@
       {
         "id": "department_budgets",
         "ask": {"zh": "各部门的差旅预算是多少?", "en": "What is each department's travel budget?"},
+        "askKind": "group_sum",
         "object": "department",
         "truth": {"kind": "sum", "field": "travel_budget", "groupBy": "name"},
         "personas": ["employee", "dept_manager"]
@@ -962,6 +971,7 @@
       {
         "id": "recoverable_vat",
         "ask": {"zh": "住宿明细里可以抵扣的进项税一共多少?", "en": "How much input VAT can be recovered on the hotel lines?"},
+        "askKind": "unanswerable",
         "object": "claim_line",
         "truth": {
           "kind": "unanswerable",
@@ -1165,11 +1175,11 @@
       }
     ],
     "datasetQuestions": [
-      {"id": "dq_expense_claims", "ask": {"zh": "我们的报销金额合计是多少?", "en": "What do our expense claims add up to in total?"}, "words": ["expense claims", "报销金额"], "expect": {"kind": "metric_selected", "dataset": "reimbursement", "measure": "claimed_amount"}},
-      {"id": "dq_trip_days", "ask": {"zh": "申请的出差天数一共多少?", "en": "How many trip days have been requested?"}, "words": ["trip days", "出差天数"], "expect": {"kind": "metric_selected", "dataset": "trip_plan", "measure": "trip_days"}},
-      {"id": "dq_travel_spend", "ask": {"zh": "我们的差旅花费一共多少?", "en": "What is our total travel spend?"}, "words": ["travel spend", "差旅花费"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "trip_plan", "measure": "estimated_spend"}, {"dataset": "reimbursement", "measure": "claimed_amount"}]}},
-      {"id": "dq_claimed_so_far", "ask": {"zh": "我们一共报销了多少?", "en": "What has been claimed so far?"}, "words": ["claimed", "报销"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "reimbursement", "measure": "claimed_amount"}]}},
-      {"id": "dq_employee_count", "ask": {"zh": "我们有多少名员工?", "en": "How many employees do we have?"}, "words": ["employees", "员工"], "expect": {"kind": "fallback_labelled", "object": "employee"}}
+      {"id": "dq_expense_claims", "ask": {"zh": "我们的报销金额合计是多少?", "en": "What do our expense claims add up to in total?"}, "askKind": "business_term", "words": ["expense claims", "报销金额"], "expect": {"kind": "metric_selected", "dataset": "reimbursement", "measure": "claimed_amount"}},
+      {"id": "dq_trip_days", "ask": {"zh": "申请的出差天数一共多少?", "en": "How many trip days have been requested?"}, "askKind": "business_term", "words": ["trip days", "出差天数"], "expect": {"kind": "metric_selected", "dataset": "trip_plan", "measure": "trip_days"}},
+      {"id": "dq_travel_spend", "ask": {"zh": "我们的差旅花费一共多少?", "en": "What is our total travel spend?"}, "askKind": "ambiguous", "words": ["travel spend", "差旅花费"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "trip_plan", "measure": "estimated_spend"}, {"dataset": "reimbursement", "measure": "claimed_amount"}]}},
+      {"id": "dq_claimed_so_far", "ask": {"zh": "我们一共报销了多少?", "en": "What has been claimed so far?"}, "askKind": "ambiguous", "words": ["claimed", "报销"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "reimbursement", "measure": "claimed_amount"}]}},
+      {"id": "dq_employee_count", "ask": {"zh": "我们有多少名员工?", "en": "How many employees do we have?"}, "askKind": "count", "words": ["employees", "员工"], "expect": {"kind": "fallback_labelled", "object": "employee"}}
     ]
   },
   "iterate": {

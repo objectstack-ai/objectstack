@@ -266,6 +266,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "编辑时间"
       },
+      is_resolved: {
+        label: "已解决",
+        help: "这条第一层评论开始的讨论串是否已解决；回复上不能设置"
+      },
+      resolved_by: {
+        label: "解决人",
+        help: "解决这一串的人——由平台记录，作者不能填写"
+      },
+      resolved_at: {
+        label: "解决时间",
+        help: "这一串被解决的时间——由平台记录，作者不能填写"
+      },
       created_at: {
         label: "创建时间"
       },
