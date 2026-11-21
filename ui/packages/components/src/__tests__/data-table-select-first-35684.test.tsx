@@ -94,7 +94,7 @@ describe('data-table select-first — a click selects (objectstack#35684)', () =
     fireEvent.click(t.cell(0, 0));
     expect(t.cell(0, 0)).toHaveAttribute('data-selected-cell');
     expect(t.cell(0, 0)).toHaveAttribute('aria-selected', 'true');
-    expect(t.cell(0, 0).className).toContain('outline-primary');
+    expect(t.cell(0, 0).querySelector('[data-slot="cell-selection-frame"]')).not.toBeNull();
     expect(t.editor()).toBeNull();
     expect(t.onRowClick).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(t.catcher());

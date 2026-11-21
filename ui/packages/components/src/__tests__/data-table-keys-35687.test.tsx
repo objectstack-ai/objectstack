@@ -396,4 +396,24 @@ describe('data-table select-first — clearing, the panel under the cell, a refu
     expect(injected()).toBeNull();
     expect(t.onCellChange).toHaveBeenCalledWith(0, 'name', 'Omega', ROWS[0]);
   });
+
+  it('the selected cell is framed by a child under the frozen columns, not by its outline, and Esc leaves no ring', () => {
+    const t = renderTable({ frozenColumns: 1 });
+    const frame = (row: number, col: number) => t.cell(row, col).querySelector('[data-slot="cell-selection-frame"]');
+    t.select(0, 1);
+    // The frame sits in the cell's own layer (below the sticky z-10 column).
+    expect(frame(0, 1)).toHaveClass('absolute', 'inset-0', 'pointer-events-none');
+    expect(frame(0, 1)!.className).not.toMatch(/z-(?:[1-9]\d|\[(?:[1-9]\d))/);
+    expect(t.cell(0, 1).className).not.toContain('outline-primary');
+    // A frozen cell selected is framed the same way.
+    t.select(0, 0);
+    expect(frame(0, 1)).toBeNull();
+    expect(frame(0, 0)).not.toBeNull();
+    // Esc deselects: the focus stays on the cell, which draws no ring at all.
+    fireEvent.keyDown(t.catcher(), { key: 'Escape' });
+    expect(t.selected()).toBeNull();
+    expect(document.activeElement).toBe(t.cell(0, 0));
+    expect(t.cell(0, 0)).toHaveClass('outline-none');
+    expect(frame(0, 0)).toBeNull();
+  });
 });

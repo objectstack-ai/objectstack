@@ -291,7 +291,12 @@ function TemporalPicker({
         selected={selected}
         onSelect={pickDay}
         autoFocus={!inCell}
-        className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
+        className={cn(
+          '[--cell-size:2.75rem] sm:[--cell-size:2rem]',
+          // Under a cell the calendar takes the panel's own surface, centred
+          // over the wider row of quick picks.
+          inCell && 'mx-auto bg-transparent',
+        )}
       />
       {withTime ? (
         <div

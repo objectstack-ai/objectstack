@@ -5007,8 +5007,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               // keeps overflow-hidden for truncation.
                               isFit ? 'whitespace-nowrap' : 'overflow-hidden',
                               !selectFirst && isEditable && !isEditing && "cursor-text hover:bg-muted/50",
-                              // A ring that moves no layout (outline, not border).
-                              isSelectedCell && "outline-2 -outline-offset-2 outline-primary",
+                              // objectstack#36023 — the selected cell's frame is a child
+                              // (below), not the cell's outline: an outline paints over a
+                              // frozen column the cell has scrolled under. A cell the
+                              // reader deselected with Esc keeps the focus with no ring.
+                              selectFirst && "outline-none",
                               selectFirst && !isFrozen && "relative",
                               !autosaves && hasPendingChange && "font-semibold text-amber-700 dark:text-amber-400",
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
@@ -5106,6 +5109,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             data-cell-error={cellError}
                             title={cellError}
                           >
+                            {isSelectedCell && (
+                              // A frame that moves no layout, drawn under the frozen
+                              // columns like the rest of the cell.
+                              <span
+                                aria-hidden
+                                data-slot="cell-selection-frame"
+                                className="pointer-events-none absolute inset-0 z-[1] border-2 border-primary"
+                              />
+                            )}
                             {isSelectedCell && !isEditing && (
                               <input
                                 data-slot="cell-type-catcher"
