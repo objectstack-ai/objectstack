@@ -2429,6 +2429,7 @@ const de = {
       progress: "{{done}} von {{total}} erledigt",
       dismiss: "Checkliste ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
+      showDoneSplit: "Erledigte anzeigen ({{required}} Pflicht · {{optional}} optional)",
       hideDone: "Erledigte ausblenden",
       optional: "Optional",
       set: "Festlegen",

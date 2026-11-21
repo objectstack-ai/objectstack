@@ -2425,10 +2425,11 @@ const ko = {
     },
     firstRunChecklist: {
       title: "시스템 준비하기",
-      description: "동료가 사용을 시작하기 전에 설정해 둘 항목입니다. 모든 항목은 나중에 Setup에서 변경할 수 있습니다.",
+      description: "동료가 사용을 시작하기 전에 설정해 둘 항목입니다. 모든 항목은 나중에 설정에서 변경할 수 있습니다.",
       progress: "{{total}}개 중 {{done}}개 완료",
       dismiss: "체크리스트 숨기기",
       showDone: "완료된 항목 보기({{done}})",
+      showDoneSplit: "완료된 항목 보기(필수 {{required}} · 선택 {{optional}})",
       hideDone: "완료된 항목 접기",
       optional: "선택 사항",
       set: "설정",
@@ -2473,13 +2474,13 @@ const ko = {
       aiProvider: {
         title: '내장 AI 설정',
         todo: '아직 사용 중인 AI 제공자가 없습니다. 제공자를 선택하고 키를 추가하세요.',
-        doneSettings: '{{provider}}, Setup에서 설정됨.',
+        doneSettings: '{{provider}}, 설정에서 지정됨.',
         doneEnvironment: '{{provider}}, 서버 환경에서 감지됨.',
         action: '설정',
       },
       connectAssistant: {
         title: '외부 AI 어시스턴트 연결',
-        todo: 'MCP를 통해 Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요. 내장 AI는 Setup → AI 및 Embedder에서 따로 설정합니다.',
+        todo: 'MCP를 통해 Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요. 내장 AI는 설정 → AI 및 Embedder에서 따로 설정합니다.',
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },

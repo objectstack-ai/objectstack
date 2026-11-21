@@ -2493,10 +2493,11 @@ const pt = {
     },
     firstRunChecklist: {
       title: "Prepare seu sistema",
-      description: "O que configurar antes de seus colegas começarem. Cada item pode ser alterado depois em Setup.",
+      description: "O que configurar antes de seus colegas começarem. Cada item pode ser alterado depois em Configuração.",
       progress: "{{done}} de {{total}} concluídos",
       dismiss: "Ocultar lista",
       showDone: "Mostrar concluídos ({{done}})",
+      showDoneSplit: "Mostrar concluídos ({{required}} obrigatórios · {{optional}} opcionais)",
       hideDone: "Ocultar concluídos",
       optional: "Opcional",
       set: "Definir",
@@ -2541,13 +2542,13 @@ const pt = {
       aiProvider: {
         title: 'Configurar a IA integrada',
         todo: 'Nenhum provedor de IA está em uso ainda. Escolha um e adicione a chave dele.',
-        doneSettings: '{{provider}}, definido no Setup.',
+        doneSettings: '{{provider}}, definido em Configuração.',
         doneEnvironment: '{{provider}}, detectado no ambiente do servidor.',
         action: 'Configurar',
       },
       connectAssistant: {
         title: 'Conectar um assistente de IA externo',
-        todo: 'Trabalhe neste sistema como você mesmo pelo Claude, Doubao e assistentes semelhantes, via MCP. A IA integrada é configurada à parte, em Setup → IA e Embedder.',
+        todo: 'Trabalhe neste sistema como você mesmo pelo Claude, Doubao e assistentes semelhantes, via MCP. A IA integrada é configurada à parte, em Configuração → IA e Embedder.',
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
