@@ -19,6 +19,9 @@
  *   3. The lock is read from the approvals service's per-record answer when a
  *      cell of the row is selected; with no answer the row's
  *      `approval_status` stands in (`resolveApprovalLock`).
+ *   4. A single click on a cell's email link or referenced record's chip only
+ *      selects it, the title link still opens the record, and the email cell
+ *      draws its copy button as the one the table hides (objectstack#36015).
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -47,6 +50,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 
 // Registers `object-grid`, the block under test.
 import { ObjectGridRenderer } from '../index';
+import { RelatedRecordActionsProvider, type RelatedRecordActionsValue } from '@object-ui/react';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { __resetApprovalsServiceLatch } from '../hooks/useRowApprovalLocks';
 
@@ -187,5 +191,86 @@ describe('ObjectGrid cellSelection — why a cell opens no editor', () => {
     await new Promise((r) => setTimeout(r, 0));
     fireEvent.doubleClick(g.cell(1, 0));
     await waitFor(() => expect(g.container.querySelector('td[data-editing-cell]')).not.toBeNull());
+  });
+});
+
+describe('ObjectGrid cellSelection — a click on a link a cell draws only selects (objectstack#36015)', () => {
+  const opened: Array<[string, string | number]> = [];
+  const host: RelatedRecordActionsValue = {
+    resolve: () => ({}),
+    recordHref: (objectName, recordId) => `/apps/demo/${objectName}/record/${encodeURIComponent(String(recordId))}`,
+    openRecord: (objectName, recordId) => { opened.push([objectName, recordId]); },
+  };
+  const onRowClick = vi.fn();
+
+  async function renderLinked() {
+    opened.length = 0;
+    onRowClick.mockReset();
+    const utils = render(
+      <RelatedRecordActionsProvider value={host}>
+        <ObjectGridRenderer
+          schema={{
+            type: 'object-grid',
+            objectName: 'probe',
+            columns: ['name', 'contact', 'parent_id'],
+            data: {
+              provider: 'value',
+              items: [{ id: '1', name: 'Alpha', contact: 'ada@example.com', parent_id: { id: '9', name: 'Grace' } }],
+            },
+            editable: true,
+          }}
+          objectFields={{
+            name: { type: 'text', label: 'Name' },
+            contact: { type: 'email', label: 'Contact' },
+            parent_id: { type: 'lookup', reference: 'probe', label: 'Parent' },
+          }}
+          cellSelection
+          onRowClick={onRowClick}
+        />
+      </RelatedRecordActionsProvider>,
+    );
+    await waitFor(() => expect(utils.container.querySelector('a[href="/apps/demo/probe/record/9"]')).not.toBeNull());
+    const cell = (col: number) =>
+      utils.container.querySelectorAll('tbody tr')[0].querySelectorAll<HTMLElement>('td[data-grid-cell]')[col];
+    return { ...utils, cell };
+  }
+
+  it('the email link and the referenced record chip select their cell and open nothing', async () => {
+    const g = await renderLinked();
+    const mail = g.container.querySelector<HTMLElement>('a[href="mailto:ada@example.com"]')!;
+    expect(fireEvent.click(mail)).toBe(false);
+    expect(g.cell(1)).toHaveAttribute('data-selected-cell');
+    const chip = g.container.querySelector<HTMLElement>('a[href="/apps/demo/probe/record/9"]')!;
+    expect(fireEvent.click(chip)).toBe(false);
+    expect(g.cell(2)).toHaveAttribute('data-selected-cell');
+    expect(opened).toEqual([]);
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl+Enter on the selected chip cell opens the referenced record; the open button does too', async () => {
+    const g = await renderLinked();
+    fireEvent.click(g.container.querySelector<HTMLElement>('a[href="/apps/demo/probe/record/9"]')!);
+    const catcher = g.container.querySelector<HTMLElement>('[data-slot="cell-type-catcher"]')!;
+    fireEvent.keyDown(catcher, { key: 'Enter', ctrlKey: true });
+    expect(opened).toEqual([['probe', '9']]);
+    const open = g.cell(2).querySelector<HTMLElement>('[data-testid="cell-open-button"]')!;
+    await waitFor(() => expect(open.className).toMatch(/(^|\s)flex(\s|$)/));
+    fireEvent.click(open);
+    expect(opened).toEqual([['probe', '9'], ['probe', '9']]);
+  });
+
+  it('the title link keeps its click and is the one link marked so', async () => {
+    const g = await renderLinked();
+    const title = screen.getByText('Alpha').closest('a')!;
+    expect(title).toHaveAttribute('data-opens-on-click');
+    expect(g.container.querySelectorAll('[data-opens-on-click]')).toHaveLength(1);
+    fireEvent.click(title);
+    expect(g.cell(0)).not.toHaveAttribute('data-selected-cell');
+  });
+
+  it('the email cell draws its copy button as the one the select-first table hides', async () => {
+    const g = await renderLinked();
+    expect(g.cell(1).querySelector('button[data-cell-copy]')).not.toBeNull();
+    expect(g.cell(1).className).toContain('[&_[data-cell-copy]]:hidden');
   });
 });
