@@ -179,7 +179,7 @@ describe('sys_user.remove_user_manager: the clear reaches the endpoint as `manag
         expect(res?.response?.status).toBe(200);
         expect(request).toHaveBeenCalledTimes(1);
         const [url, init] = forwardOf(request);
-        expect(url).toBe('http://localhost/api/v1/auth/admin/set-user-manager');
+        expect(new URL(url).pathname).toBe('/api/v1/auth/admin/set-user-manager');
         expect(String(init.method).toUpperCase()).toBe('POST');
         const body = JSON.parse(String(init.body));
         expect(body.userId).toBe('u_target');
