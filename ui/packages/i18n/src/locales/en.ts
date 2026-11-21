@@ -3252,11 +3252,25 @@ const en = {
       // (rename / pin / set-as-default / configure), so the copy has to cover
       // any change to a built-in view rather than name one operation.
       cannotEditMetaView: 'This view is built in and defined in code — it cannot be changed.',
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: 'Reset to view',
       resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
-      linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalized: 'Personalized',
       personalizedHeading: 'Your list differs from this view in',
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: 'Discard',
+        discardTitle: 'Puts the list back as its view declares it: filters, sort, grouping, columns and layout. Column widths and row height stay.',
+        save: 'Save',
+        heading: 'Unsaved changes',
+        partSeparator: ', ',
+        saveToView: 'Save to this view',
+        saveAsMyView: 'Save as my view',
+        copyName: '{{name}} copy',
+        saved: 'Saved',
+      },
+      linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {
         filters: 'Filters',
         search: 'Search',
