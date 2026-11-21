@@ -7,7 +7,9 @@
  * every in-app page — a list, a record, a dashboard, a report, a custom page.
  *
  * The SHELL decides whether it is drawn, not the page: `ConsoleLayout` mounts
- * `ShellPageActionsScope`, and each page's header draws `<ShellPageActions/>`
+ * `ShellPageActionsScope`, which hands the group to the headers through the
+ * slot in `shellPageActionsSlot.ts` (a header imports the slot, never this
+ * module and its metadata, Studio and AI reads), and each header draws it
  * where its top-right is — the console `PageHeader` after the page's own
  * actions (reports and every custom page draw that header too), the record
  * page's navigation row before its ✕.
@@ -37,7 +39,11 @@ import { matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
 import { useStudioEntryGate, type StudioEntry } from '../hooks/useStudioDesignGate.js';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
-import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import {
+  ShellPageActionsSlotContext,
+  useShellPageActionsSlot,
+  type ShellPageActionsSlotProps,
+} from './shellPageActionsSlot.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { HelpMenu } from './HelpMenu.js';
 
@@ -61,19 +67,23 @@ export function readShellPageActionsSwitch(): boolean {
   }
 }
 
-const ShellPageActionsContext = React.createContext<boolean>(false);
-
-/** The shell's decision for the pages under it. `on` absent: the switch's answer. */
+/**
+ * The shell's decision for the pages under it. `on` absent: the switch's
+ * answer. On, it hands the group to the headers through the slot
+ * (`shellPageActionsSlot.ts`), so a header never imports the group itself.
+ */
 export function ShellPageActionsScope({ on, children }: { on?: boolean; children: React.ReactNode }) {
   const [switched] = React.useState(readShellPageActionsSwitch);
-  return <ShellPageActionsContext.Provider value={on ?? switched}>{children}</ShellPageActionsContext.Provider>;
+  return (
+    <ShellPageActionsSlotContext.Provider value={(on ?? switched) ? renderShellPageActionsGroup : null}>
+      {children}
+    </ShellPageActionsSlotContext.Provider>
+  );
 }
 
 /** Whether the group is drawn here: inside a scope that turned it on, and not on a phone. */
 export function useShellPageActionsOn(): boolean {
-  const on = React.useContext(ShellPageActionsContext);
-  const phone = usePhoneViewport();
-  return on && !phone;
+  return useShellPageActionsSlot() !== null;
 }
 
 /**
@@ -148,19 +158,17 @@ function EditAppButton({ entry, appText }: { entry: StudioEntry; appText: string
   );
 }
 
-export interface ShellPageActionsProps {
-  /**
-   * The comments entry, first in the group: handed by the list and record
-   * pages only, nothing until the comments work puts its icon here.
-   */
-  comments?: React.ReactNode;
-}
+export type ShellPageActionsProps = ShellPageActionsSlotProps;
 
 /** The group, where the shell turned it on; nothing anywhere else. */
 export function ShellPageActions({ comments }: ShellPageActionsProps) {
-  const on = useShellPageActionsOn();
-  if (!on) return null;
-  return <ShellPageActionsGroup comments={comments} />;
+  const renderGroup = useShellPageActionsSlot();
+  return renderGroup ? renderGroup({ comments }) : null;
+}
+
+/** The slot's value while the group is on: one stable function, never remade. */
+function renderShellPageActionsGroup(props: ShellPageActionsSlotProps): React.ReactNode {
+  return <ShellPageActionsGroup {...props} />;
 }
 
 function ShellPageActionsGroup({ comments }: ShellPageActionsProps) {

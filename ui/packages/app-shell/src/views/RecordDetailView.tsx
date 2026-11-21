@@ -65,7 +65,7 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
-import { ShellPageActions, useShellPageActionsOn } from '../layout/ShellPageActions.js';
+import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -974,7 +974,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // this page (off while the top bar stands); the page face draws it in its
   // navigation row, before ✕. A pane or drawer never does: the page under it
   // has the group already.
-  const shellActions = useShellPageActionsOn() && !embedded;
+  const renderShellGroup = useShellPageActionsSlot();
+  const shellActions = renderShellGroup !== null && !embedded;
   // `language` is also the language a flow launch reads a refused write's
   // permission line in.
   const { t, language } = useObjectTranslation();
@@ -5401,7 +5402,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
   const pageFrame = closePage || shellActions ? (
     <>
-      {shellActions && <ShellPageActions />}
+      {shellActions && renderShellGroup?.({})}
       {closePage && (
         <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
           <X className="h-3.5 w-3.5" />

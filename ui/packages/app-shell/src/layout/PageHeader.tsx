@@ -59,7 +59,7 @@ import * as React from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import { useInSetupApp } from '../console/setupApp.js';
-import { ShellPageActions, useShellPageActionsOn } from './ShellPageActions.js';
+import { useShellPageActionsSlot } from './shellPageActionsSlot.js';
 
 /**
  * Props of the app-shell `<PageHeader>` React component.
@@ -271,9 +271,9 @@ export function PageHeader({
   // objectstack#36111 — the shell's top-right button group, after the page's
   // own actions, where the shell turned it on (`ShellPageActions`); a hairline
   // sets it apart from them.
-  const shellActions = useShellPageActionsOn();
+  const renderShellGroup = useShellPageActionsSlot();
   const pageActions = refreshButton || drawnActions;
-  const trailing = (pageActions || shellActions) && (
+  const trailing = (pageActions || renderShellGroup) && (
     <div
       ref={clusterRef}
       className="flex items-center gap-1.5 sm:gap-2 shrink-0"
@@ -282,10 +282,10 @@ export function PageHeader({
     >
       {refreshButton}
       {drawnActions}
-      {shellActions && pageActions && (
+      {renderShellGroup && pageActions && (
         <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" data-testid="page-header-shell-divider" />
       )}
-      {shellActions && <ShellPageActions />}
+      {renderShellGroup?.({})}
     </div>
   );
 

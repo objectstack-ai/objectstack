@@ -28,7 +28,7 @@ import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { PageHeader } from '../layout/PageHeader.js';
-import { ShellPageActions, useShellPageActionsOn } from '../layout/ShellPageActions.js';
+import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
@@ -177,7 +177,6 @@ export function ObjectViewPageHeader(props: ObjectViewPageBarProps) {
         setPageColumn(el?.parentElement ?? null);
     }, []);
     useListPageScope(pageColumn);
-    const shellActions = useShellPageActionsOn();
     return (
              <div className="hidden sm:block" ref={headerRootRef}>
              <PageHeader
@@ -272,7 +271,7 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
         setPageColumn(el?.closest<HTMLElement>(`[${OBJECT_VIEW_PAGE_COLUMN_ATTR}]`) ?? null);
     }, []);
     useListPageScope(pageColumn);
-    const shellActions = useShellPageActionsOn();
+    const renderShellGroup = useShellPageActionsSlot();
     return (
         <div
             ref={rootRef}
@@ -285,10 +284,10 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
                     <ObjectViewPageBarActions {...props} />
                 </span>
             </div>
-            {shellActions && (
+            {renderShellGroup && (
                 <>
                     <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border" data-testid="list-view-bar-shell-divider" />
-                    <ShellPageActions />
+                    {renderShellGroup({})}
                 </>
             )}
         </div>
