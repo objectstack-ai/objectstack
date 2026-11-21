@@ -1294,8 +1294,6 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
 
   const [resolvedEntries, setResolvedEntries] = useState<DetailEntry[] | null>(null);
   const entries = resolvedEntries ?? baseEntries; // length always matches rawDetails
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
   /**
    * What the line grids draw: `entries`, each derived entry's columns re-run
    * with the CURRENT session words (objectui#12924). A host that has not
@@ -1546,8 +1544,6 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     }
     return out;
   }, [childSchemas, perms.userId, homeCurrency, homeTimeZone]);
-  const newRowValuesRef = useRef(newRowValuesByChild);
-  newRowValuesRef.current = newRowValuesByChild;
   // objectstack#35940 — set when a save is tried, cleared when one lands: a
   // new line's empty required cell reads red from the try on.
   const [saveTried, setSaveTried] = useState(false);
@@ -1892,16 +1888,11 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     [],
   );
 
-  /**
-   * List/form mode "Add": append a row on the child's defaults
-   * (objectstack#35940) and open it in the full form.
-   */
+  /** List/form mode "Add": append a blank row and open it in the full form. */
   const addRowViaForm = useCallback((entryId: string) => {
-    const childObject = entriesRef.current.find((e) => e.id === entryId)?.config.childObject;
-    const seed = childObject ? newRowValuesRef.current[childObject] : undefined;
     setRowState((prev) => {
       const cur = prev[entryId] ?? { rows: [], original: [] };
-      const rows = [...cur.rows, { ...seed }];
+      const rows = [...cur.rows, {}];
       setExpanded({ entryId, rowIdx: rows.length - 1, isNew: true });
       return { ...prev, [entryId]: { ...cur, rows } };
     });

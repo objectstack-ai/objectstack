@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import { MePermissionsProvider } from '@object-ui/permissions';
@@ -437,19 +437,6 @@ describe('MasterDetailForm — a new line starts on the child\'s defaults and wa
     expect(createOps(batchTransaction)).toEqual([
       expect.objectContaining({ data: expect.objectContaining({ name: 'Bolts', note: 'Pending', applicant: USER_ID }) }),
     ]);
-  });
-
-  it('form mode: Add opens the row editor on the defaults', async () => {
-    const ds = lineDataSource();
-    render(<MasterDetailForm schema={schemaWith({ inlineMode: 'form', formFields: ['name', 'note'] })} dataSource={ds} />);
-    // The defaults come from the child schema: let its read answer first.
-    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('po_line'));
-    await act(async () => {});
-    fireEvent.click(screen.getByTestId('line-items-add'));
-    const editor = await waitFor(() => screen.getByTestId('md-row-form'));
-    await waitFor(() =>
-      expect((editor.querySelector('input[name="note"]') as HTMLInputElement | null)?.value).toBe('Pending'),
-    );
   });
 
   it('a line Add started and the row editor then applied is input, and is written', async () => {
