@@ -5,4 +5,4 @@
 Clause-②: no
 Metadata-protocol: none
 
-`objectstack-ui` actions rule: a bulk action is wired by the list view. Under `bulkActions` the body runs once per ticked row with `recordId`; only a `bulkActionDefs` entry with `operation: 'custom', execution: 'aggregate'` hands the body `input._selectedIds` (not `input.selectedIds`). Also: the new-tab example's `target` uses `${ctx.recordId}` on `record_header`.
+`objectstack-ui` actions rule: a bulk action that writes rows is named in the list view's `bulkActions` and runs once per ticked row, its body reading `ctx.recordId`. Also: the new-tab example's `target` uses `${ctx.recordId}` on `record_header`.

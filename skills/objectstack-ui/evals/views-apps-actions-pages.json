@@ -24,10 +24,10 @@
     {
       "id": 3,
       "prompt": "Add a Convert action on `lead` — only for qualified, not-yet-converted leads, from the record header and each list row, launching the `crm_lead_conversion` flow — and a bulk 'Add to campaign' that asks which campaign, for the selected rows.",
-      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'crm_lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `execution: 'aggregate'`, placed by the lead list view's `bulkActionDefs` entry `{ name, operation: 'custom', execution: 'aggregate' }` (a `list_toolbar` button's body gets no `_selectedIds`), a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that reads `input._selectedIds`.",
+      "expected_output": "Two `defineAction` items. Convert: `type: 'flow'`, `target: 'crm_lead_conversion'`, `locations: ['record_header', 'list_item']`, `visible: P`record.status == \"qualified\" && record.is_converted == false`` (bare CEL, never brace-wrapped), `confirmText`, `successMessage`, `refreshAfter: true`. Bulk: `type: 'script'`, `execution: 'perRecord'`, wired by the lead list view's `bulkActions: ['<name>']`, a field-backed `params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }]`, and a `body` that runs once per ticked row and reads that row's id as `ctx.recordId`.",
       "files": [],
       "assertions": {
-        "must_contain": ["defineAction", "locations", "record_header", "bulkActionDefs", "aggregate", "visible", "successMessage", "_selectedIds"],
+        "must_contain": ["defineAction", "locations", "record_header", "bulkActions", "visible", "successMessage", "ctx.recordId"],
         "must_not_contain": ["{record.", "input.selectedIds"]
       }
     },

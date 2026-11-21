@@ -99,18 +99,16 @@ export const AddToCampaignAction = defineAction({
   objectName: 'lead',
   icon: 'send',
   type: 'script',
-  execution: 'aggregate',
+  execution: 'perRecord',
   params: [
     { field: 'campaign_id', objectOverride: 'campaign', required: true },
   ],
   body: {
     language: 'js',
     source: `
-      for (const leadId of input._selectedIds) {
-        await ctx.api.object('campaign_member').insert({
-          campaign_id: input.campaign_id, lead_id: leadId, status: 'sent',
-        });
-      }
+      await ctx.api.object('campaign_member').insert({
+        campaign_id: input.campaign_id, lead_id: ctx.recordId, status: 'sent',
+      });
     `,
     capabilities: ['api.write'],
     timeoutMs: 10000,
