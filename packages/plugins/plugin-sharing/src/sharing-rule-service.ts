@@ -862,6 +862,20 @@ export class SharingRuleService implements ISharingRuleService {
         const refusal = this.sharing.sharingRuleObjectRefusal(input.object);
         if (refusal) throw new SharingRuleObjectNotEnforcedError(input.object, refusal);
       }
+      // [#33912] A `user` recipient is materialised verbatim into every
+      // grant's `recipient_id`, so one that names no user the gates could
+      // match saves a rule that grants no one anything. Judged by the same
+      // verdict as a manual share (`SharingService.userRecipientRefusal`), in
+      // the rule's organization; an upsert that keeps the stored recipient is
+      // not re-judged, so a rule whose user has since left can still be
+      // switched off.
+      if (
+        input.recipientType === 'user'
+        && (!stored || stored.recipient_type !== 'user' || stored.recipient_id !== input.recipientId)
+      ) {
+        const unresolved = await this.sharing.userRecipientRefusal(String(input.recipientId), orgId, 'rule');
+        if (unresolved) throw new Error(`VALIDATION_FAILED: ${unresolved}`);
+      }
     }
 
     if (Array.isArray(existing) && existing[0]) {

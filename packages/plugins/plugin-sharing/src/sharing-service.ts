@@ -30,7 +30,7 @@ import { PLATFORM_CAPABILITY_PROVIDERS, type ExecutionContext } from '@objectsta
 // [commit 3f64fe6c6] The engine's own answer to "which column is this object walled
 // by?" — the twin of `SqlDriver.computeTenantField`, so the organization a grant
 // is stamped from is read off the SAME column the wall scopes the record by.
-import { resolveTenantFieldName } from '@objectstack/objectql';
+import { organizationMemberStanding, resolveTenantFieldName } from '@objectstack/objectql';
 // [Ruling of record 6355206139] The EXTERNAL rung's OWD floor — the stamp
 // plugin-security makes and this service reads, named once in core.
 import { owdForAudience } from '@objectstack/core';
@@ -1875,6 +1875,77 @@ export class SharingService implements ISharingService {
     return `A sharing rule on '${object}' would never share anything: ${reason}. ${this.sharingRuleObjectRemedy(object)}`;
   }
 
+  /**
+   * [#33912] The refusal of a `user` recipient no sharing gate could ever
+   * match, or `null` when `recipientId` resolves.
+   *
+   * "Resolves" is the scope the gates consult, never wider and never narrower:
+   *
+   * - **Behind a wall** (`group` / `isolated`, {@link organizationScopeRequired})
+   *   and with the grant's organization known: a `sys_member` of THAT
+   *   organization (`organizationMemberStanding`, the engine's one membership
+   *   predicate). The record's own wall admits nobody else, so a share to a
+   *   user of another organization is as inert as one to an id that does not
+   *   exist — and it is refused with the SAME sentence, byte for byte, so the
+   *   door is no oracle for who exists in another tenant. A banned member
+   *   resolves: the ban is a sign-in fact, and the share applies again the
+   *   moment it lapses.
+   * - **Otherwise** (`single`, a grant that carries no organization, or a
+   *   deployment that registers no membership table): a `sys_user` row with
+   *   that id. No wall stands between such a record and any user.
+   *
+   * A deployment that registers no `sys_user` at all has no directory to
+   * resolve against, and the check stands aside rather than refuse every
+   * grant. A failed read throws: the write fails loudly, never unjudged.
+   */
+  async userRecipientRefusal(
+    recipientId: string,
+    organizationId: string | null,
+    subject: 'record' | 'rule',
+  ): Promise<string | null> {
+    if (await this.userRecipientResolves(recipientId, organizationId)) return null;
+    return subject === 'record'
+      ? `recipientId ${JSON.stringify(recipientId)} does not name a user this record can be shared with, `
+        + 'so no access check would ever match the share. Name an existing user '
+        + "(on a multi-organization deployment, a member of the record's organization)."
+      : `recipientId ${JSON.stringify(recipientId)} does not name a user this rule can share with, `
+        + 'so the rule would grant no one access. Name an existing user '
+        + "(on a multi-organization deployment, a member of the rule's organization).";
+  }
+
+  private async userRecipientResolves(userId: string, organizationId: string | null): Promise<boolean> {
+    const registered = (object: string): boolean => {
+      if (typeof this.engine.getSchema !== 'function') return false;
+      try {
+        return Boolean(this.engine.getSchema(object));
+      } catch {
+        return false;
+      }
+    };
+    if (organizationId && this.organizationScopeRequired()) {
+      const standing = await organizationMemberStanding(
+        {
+          hasObject: registered,
+          find: (object, where, context, limit) =>
+            this.engine.find(object, { where, context, ...(limit ? { limit } : {}) }) as Promise<any[]>,
+        },
+        userId,
+        organizationId,
+      );
+      if (standing === 'member' || standing === 'banned') return true;
+      if (standing === 'not_member') return false;
+      // `unconfirmable`: no membership table, so no organization to be a member of.
+    }
+    if (!registered('sys_user')) return true;
+    const users = await this.engine.find('sys_user', {
+      where: { id: userId },
+      fields: ['id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    return Array.isArray(users) && users.length > 0;
+  }
+
   /** [#30621] How to make `object` one a sharing rule applies to, per D7 arm. */
   private sharingRuleObjectRemedy(object: string): string {
     if (this.bypassObjects.has(object)) {
@@ -2069,6 +2140,18 @@ export class SharingService implements ISharingService {
       this.assertSharingEnforced(input.object);
       await this.assertCanManageShares(input.object, input.recordId, context);
       organizationId = await this.resolveDirectGrantOrganization(input, context);
+      // [#33912] The recipient must be a user the gates could ever match: the
+      // read and write gates look a share up by `recipient_id = context.userId`,
+      // so an id naming no user — or, behind a wall, a user who cannot enter
+      // the record's organization — is a row that looks granted and enforces
+      // nothing, the class #3865 closed for the access level and D7 for the
+      // recipient type. Asked after authorization (a refused caller learns
+      // nothing about the directory) and after the organization (membership is
+      // judged in it). The direct path only: rule-materialised grants are the
+      // platform's own writes, and their recipient is judged where the rule is
+      // authored (`SharingRuleService.defineRule`).
+      const unresolved = await this.userRecipientRefusal(input.recipientId, organizationId, 'record');
+      if (unresolved) throw new Error(`VALIDATION_FAILED: ${unresolved}`);
     }
     // [#25549] The recipient half, on both paths: after authorization, so a
     // refused caller never learns a recipient's population, and after the
