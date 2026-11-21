@@ -1281,11 +1281,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         if (isSelected) {
           onChange(currentValues.filter((v: any) => v !== option.value));
         } else {
-          if (referenceTo) pushRecentLookupId(referenceTo, option.value);
+          if (referenceTo) pushRecentLookupId(referenceTo, option.value, perms.userId);
           onChange([...currentValues, option.value]);
         }
       } else {
-        if (referenceTo) pushRecentLookupId(referenceTo, option.value);
+        if (referenceTo) pushRecentLookupId(referenceTo, option.value, perms.userId);
         if (onSelectRecord) onSelectRecord(option);
         else {
           onChange(option.value);
@@ -1296,7 +1296,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         setIsOpen(false);
       }
     },
-    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets, inCell, onCommit],
+    [multiple, value, onChange, onSelectRecord, referenceTo, normalizeId, idField, fillDeclaredTargets, inCell, onCommit, perms.userId],
   );
 
   const handleRemove = (optionValue: any) => {
@@ -1315,7 +1315,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const handlePickerSelectRecords = useCallback(
     (records: Record<string, unknown>[]) => {
       if (referenceTo) {
-        records.forEach((r) => pushRecentLookupId(referenceTo, recordValue(r, idField) as string | number | undefined));
+        records.forEach((r) => pushRecentLookupId(referenceTo, recordValue(r, idField) as string | number | undefined, perms.userId));
       }
       // A single pick from a Level-2 picker commits its id through `onSelect`
       // (`onChange`) just before this, so the declared targets fill here, from
@@ -1323,7 +1323,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       if (!multiple && records.length === 1) fillDeclaredTargets(records[0]);
       setPickedRecords(records);
     },
-    [idField, referenceTo, multiple, fillDeclaredTargets],
+    [idField, referenceTo, multiple, fillDeclaredTargets, perms.userId],
   );
 
   /**
@@ -1347,7 +1347,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         return;
       }
       const row = records[0];
-      if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined);
+      if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined, perms.userId);
       setPickedRecords(records);
       onSelectRecord(recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo));
     },
@@ -1395,7 +1395,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     if (!isOpen || !hasDataSource || !dataSource || !referenceTo || searchQuery) return;
     if (dependenciesMissing) { setRecentRows([]); return; }
     if (recordReadsPending) return;
-    const ids = getRecentLookupIds(referenceTo);
+    const ids = getRecentLookupIds(referenceTo, perms.userId);
     if (!ids.length) { setRecentRows([]); return; }
     let cancelled = false;
     (async () => {
@@ -1425,7 +1425,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, hasDataSource, referenceTo, searchQuery, dependenciesMissing, recordReadsPending, popoverFilter, idField, candidateExpandKey]);
+  }, [isOpen, hasDataSource, referenceTo, searchQuery, dependenciesMissing, recordReadsPending, popoverFilter, idField, candidateExpandKey, perms.userId]);
   const recentOptions = useMemo(
     () =>
       recentRows.map((r) =>

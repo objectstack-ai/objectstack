@@ -270,8 +270,8 @@ export function PeoplePicker({
 
   // Recent ids captured once per open.
   const recentIds = useMemo(
-    () => (open ? getRecentLookupIds(objectName) : []),
-    [open, objectName],
+    () => (open ? getRecentLookupIds(objectName, perms.userId) : []),
+    [open, objectName, perms.userId],
   );
 
   // The current value's ids, for hydrating the SelectionTray on edit.
@@ -390,10 +390,10 @@ export function PeoplePicker({
     (ids: any[], records: any[]) => {
       onSelect(multiple ? ids : (ids[0] ?? null));
       onSelectRecords?.(records);
-      ids.forEach(id => pushRecentLookupId(objectName, id));
+      ids.forEach(id => pushRecentLookupId(objectName, id, perms.userId));
       onOpenChange(false);
     },
-    [multiple, objectName, onSelect, onSelectRecords, onOpenChange],
+    [multiple, objectName, onSelect, onSelectRecords, onOpenChange, perms.userId],
   );
 
   // Inline mode has no confirm step — push the value out on every change.
@@ -421,11 +421,11 @@ export function PeoplePicker({
       // Inline: commit live (chips live in the field), stay open for more.
       // Modal: stage in the tray until Confirm.
       if (inline) {
-        if (!exists) pushRecentLookupId(objectName, id);
+        if (!exists) pushRecentLookupId(objectName, id, perms.userId);
         commitLive(next);
       }
     },
-    [multiple, idField, commit, selectedRecords, inline, objectName, commitLive],
+    [multiple, idField, commit, selectedRecords, inline, objectName, commitLive, perms.userId],
   );
 
   const handleRemove = useCallback(
