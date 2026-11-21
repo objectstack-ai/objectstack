@@ -48,6 +48,7 @@ import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { stateMachineNextValues } from './inline-edit-options';
 import { isStateMachineField, stateLabelOf, type StateChangeConfirm } from './objectGridStateConfirm';
+import { useCellRequiredPrompt } from './objectGridRequiredPrompt';
 import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
@@ -759,6 +760,40 @@ function RowGroupsReport({
   return null;
 }
 
+/**
+ * objectstack#35688 — how wide a field type's editor layer starts. The layer
+ * is never narrower than its cell and grows to fit this; the editor fills it.
+ */
+function cellEditorWidthClass(type: string): string {
+  switch (type) {
+    case 'address':
+    case 'location':
+      return 'w-full min-w-[22rem]';
+    case 'textarea':
+    case 'markdown':
+    case 'code':
+    case 'json':
+      return 'w-full min-w-80';
+    case 'lookup':
+    case 'master_detail':
+    case 'user':
+      return 'w-full min-w-72';
+    case 'multiselect':
+    case 'tags':
+    case 'checkboxes':
+      return 'w-full min-w-64';
+    case 'date':
+    case 'datetime':
+    case 'phone':
+    case 'url':
+    case 'email':
+    case 'currency':
+      return 'w-full min-w-56';
+    default:
+      return 'w-full min-w-40';
+  }
+}
+
 export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   schema,
   dataSource,
@@ -1237,6 +1272,41 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // does there and what pasted text stands for. `null` without the host's
   // ask, so every other grid keeps the table it had.
   const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  // objectstack#35956 — a cell change that makes other fields required asks
+  // for them first, and saves them with it (`./objectGridRequiredPrompt`).
+  const fieldLabelOf = (field: string): string => {
+    const declared = objectFields?.[field]?.label;
+    const fallback = typeof declared === 'string' && declared.length > 0 ? declared : field;
+    return columnHeaderOf(field) ?? (objectName ? resolveFieldLabel(objectName, field, fallback) : fallback);
+  };
+  const requiredPrompt = useCellRequiredPrompt({
+    objectName,
+    objectSchema,
+    objectFields,
+    perms,
+    labelOf: fieldLabelOf,
+    translateOptions,
+    optionLabel: (field, code, fallback) => (objectName ? resolveFieldOptionLabel(objectName, field, code, fallback) : fallback),
+    emptyText: t('grid.empty'),
+    save: async (row, changes) => {
+      const rows = loadedRowsRef.current.data;
+      const id = resolveRecordId(row);
+      const index = rows.findIndex((r: any) => r === row || (id != null && String(resolveRecordId(r)) === String(id)));
+      // A row no longer loaded (the list re-read under the open dialog) has
+      // no index to hand a host's `onRowSave`; the dialog says the save failed
+      // rather than guessing one.
+      if (index < 0) throw new Error(t('table.saveFailed'));
+      await (onRowSave ?? defaultRowSave)(index, changes, row);
+    },
+    // The row is the view's projection; the prompt reads the keys it lacks.
+    read: dataSource && objectName && typeof dataSource.findOne === 'function'
+      ? async (row, keys) => {
+          const id = resolveRecordId(row);
+          if (id == null) return null;
+          return dataSource.findOne(objectName, String(id), { $select: keys });
+        }
+      : undefined,
+  });
   const gridCellSelection: GridCellSelection | null = hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
@@ -1265,26 +1335,32 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           approvalLocks.probe(rowRecordId(row));
         },
         // objectstack#35685 — a move of a state-machine field is confirmed
-        // before anything is written (`./objectGridStateConfirm`).
-        confirmCommit: (row, columnKey, value) => {
-          if (!isStateMachineField(objectSchema, columnKey)) return null;
-          const options = objectFields?.[columnKey]?.options;
-          const labelOf = (v: unknown) => stateLabelOf(
-            options,
-            v,
-            (code, fallback) => (objectName ? resolveFieldOptionLabel(objectName, columnKey, code, fallback) : fallback),
-            t('grid.empty'),
-          );
-          const declared = objectFields?.[columnKey]?.label;
-          const fallback = typeof declared === 'string' && declared.length > 0 ? declared : columnKey;
-          return askStateChange({
-            field: columnHeaderOf(columnKey) ?? (objectName ? resolveFieldLabel(objectName, columnKey, fallback) : fallback),
-            from: labelOf(row?.[columnKey]),
-            to: labelOf(value),
-          });
-        },
+        // before anything is written (`./objectGridStateConfirm`). A move that
+        // needs fields filled asks for them first; that dialog is the
+        // confirmation, so a state-machine move does not ask twice.
+        confirmCommit: (row, columnKey, value) =>
+          requiredPrompt.ask(row, columnKey, value, () => askStateMove(row, columnKey, value)),
       }
     : null;
+  // objectstack#35685 — the state-machine confirm, the grid's next question
+  // when the required-fields prompt has nothing to ask.
+  function askStateMove(row: any, columnKey: string, value: unknown): Promise<boolean> | null {
+    if (!isStateMachineField(objectSchema, columnKey)) return null;
+    const options = objectFields?.[columnKey]?.options;
+    const labelOf = (v: unknown) => stateLabelOf(
+      options,
+      v,
+      (code, fallback) => (objectName ? resolveFieldOptionLabel(objectName, columnKey, code, fallback) : fallback),
+      t('grid.empty'),
+    );
+    const declared = objectFields?.[columnKey]?.label;
+    const fallback = typeof declared === 'string' && declared.length > 0 ? declared : columnKey;
+    return askStateChange({
+      field: columnHeaderOf(columnKey) ?? (objectName ? resolveFieldLabel(objectName, columnKey, fallback) : fallback),
+      from: labelOf(row?.[columnKey]),
+      to: labelOf(value),
+    });
+  }
 
   // The projection keys and the filter, sort, search and server-paging state,
   // read here in hook order (`./objectGridQueryInputs`).
@@ -3389,6 +3465,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             };
           }
           return (
+            // objectstack#35688 — the editor draws on a layer over the cell; this
+            // sets how wide the layer starts for the field's type.
+            <div className={cellEditorWidthClass(fieldDef.type)}>
             <FieldEditWidget
               field={field}
               value={ctx.value}
@@ -3424,6 +3503,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // is the spelling objectui#7188's ruling chose.
               dependentValues={ctx.pendingRow ?? ctx.row}
             />
+            </div>
           );
         }
       : undefined,
@@ -4732,6 +4812,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       {bulkDialog}
       {rowConflictDialog}
       {stateChangeDialog}
+      {requiredPrompt.renderDialog()}
     </div>
   );
 };

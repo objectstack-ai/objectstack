@@ -280,7 +280,7 @@ import { ManagedDriftFacet } from './sql-driver-managed-drift.js';
 // [#29520 codemod] Schema Introspection: the methods of the same names below hand the bodies what they read (`SchemaIntrospectionHost`).
 import { SchemaIntrospectionFacet } from './sql-driver-schema-introspection.js';
 // [#29520 codemod] Internal helpers: the methods of the same names below hand the bodies what they read (`InternalHelpersHost`).
-import { InternalHelpersFacet } from './sql-driver-internal-helpers.js';
+import { InternalHelpersFacet, type FixedReadLeafOuter } from './sql-driver-internal-helpers.js';
 // [#29520 codemod] Filter helpers: the methods of the same names below hand the bodies what they read (`FilterHelpersHost`).
 import { FilterHelpersFacet } from './sql-driver-filter-helpers.js';
 // [#29520 codemod] Field mapping: the methods of the same names below hand the bodies what they read (`FieldMappingHost`).
@@ -413,9 +413,9 @@ export class SqlDriver implements IDataDriver {
       // here. Every dialect; `SqliteWasmDriver` and `TursoDriver` inherit it
       // (Turso's remote transport compiles the leaf with its own compiler).
       readableIdsLeaf: true,
-      // [ADR-0155 D4] The filter compiler compiles a `SharedRecordIds` leaf to its
-      // fixed inner read as one subquery (`applyFilterCondition`), every dialect;
-      // TursoDriver's remote transport compiles it with its own compiler.
+      // [ADR-0155 D4] One subquery per `SharedRecordIds` leaf (`applyFilterCondition`)
+      // on every dialect; same rows as the id list measured on SQLite, PostgreSQL, Oracle
+      // (RAW(16), NUMBER) (O2: `fixed-read-leaf-key-type.ts`, `oracleUuidRawProjection`). Turso: its own.
       fixedReadLeaves: ['SharedRecordIds' as const],
     };
   }
@@ -6525,9 +6525,9 @@ export class SqlDriver implements IDataDriver {
     return InternalHelpersFacet.readableIdsSubquery.call(internalHelpersHost.of(this), leaf, options);
   }
 
-  private fixedReadLeafSubquery(leaf: FixedReadLeaf): Knex.QueryBuilder {
-    // [ADR-0155 D2] The body lives in `sql-driver-internal-helpers.ts`, its docblock with it.
-    return InternalHelpersFacet.fixedReadLeafSubquery.call(internalHelpersHost.of(this), leaf);
+  private fixedReadLeafSubquery(leaf: FixedReadLeaf, outer?: FixedReadLeafOuter): Knex.QueryBuilder {
+    // [ADR-0155 D2, O2] The body lives in `sql-driver-internal-helpers.ts`, its docblock with it.
+    return InternalHelpersFacet.fixedReadLeafSubquery.call(internalHelpersHost.of(this), leaf, outer);
   }
 
   /**

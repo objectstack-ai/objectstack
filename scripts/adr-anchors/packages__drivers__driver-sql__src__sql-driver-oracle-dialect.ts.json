@@ -1,0 +1,7 @@
+{
+  "file": "packages/drivers/driver-sql/src/sql-driver-oracle-dialect.ts",
+  "adrs": [
+    "ADR-0155"
+  ],
+  "invariant": "ADR-0155 D-0, D2, O2 (ruling A carried to Oracle): where the outer column is a RAW(16) uuid column by the catalog prime the list's HEXTORAW(?) binding reads (`oracleRawUuidFieldsByObject`, same object and field), the fixed-read leaf's inner read projects `oracleUuidRawProjection`: HEXTORAW(CASE WHEN REGEXP_LIKE(record_id, ORACLE_UUID_TEXT_PATTERN, 'i') THEN REPLACE(record_id, '-', '') ELSE 'not-a-uuid' END), the pattern derived from the list's own UUID_TEXT gate. A grant UUID_TEXT admits is the same 16 bytes the list binds, so the leaf answers the list's rows; every grant the list refuses before SQL (INVALID_FILTER / 400) fails the statement (ORA-01465, DATABASE_ERROR / 500) on the read and its negation. A bare HEXTORAW(REPLACE(...)) is not the gate: it matches misplaced-dash and left-padded 31-digit grants and turns a dash-only grant into NULL, emptying the negation. Without any projection Oracle compares the RAW column as its upper-case hex text and the leaf silently answers no row (its negation every row). Any other Oracle key keeps step 3's statement."
+}

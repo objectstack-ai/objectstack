@@ -114,7 +114,7 @@ function mount(conditions: Row[], language?: string) {
  */
 async function openFilterPanel(dataSource: { getObjectSchema: ReturnType<typeof vi.fn> }): Promise<HTMLElement> {
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
-  fireEvent.click(await screen.findByTestId('toolbar-filter-trigger'));
+  fireEvent.click(await screen.findByTestId('condition-add-filter'));
   const dialog = await screen.findByRole('dialog');
   await openAdvancedFilter();
   return dialog;

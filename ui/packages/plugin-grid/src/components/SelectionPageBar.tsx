@@ -13,7 +13,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@object-ui/components';
-import { Edit, MoreHorizontal, X } from 'lucide-react';
+import { Edit, MoreVertical, X } from 'lucide-react';
 import type { BulkActionDef } from '@object-ui/types';
 import { useObjectTranslation, useRowPredicate } from '@object-ui/react';
 import {
@@ -98,11 +98,13 @@ const OverflowMenu: React.FC<{ label: string; children: React.ReactNode; onOpen?
       <Button
         variant="ghost"
         size="sm"
-        className="h-8 px-2"
+        // The page's ⋮ More, in the same place with the same icon
+        // (objectstack#35678): the view bar's last control either way.
+        className="h-7 w-7 px-0 shadow-none"
         aria-label={label}
         data-testid="selection-actions-more"
       >
-        <MoreHorizontal className="h-4 w-4" />
+        <MoreVertical className="h-4 w-4" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end">{children}</DropdownMenuContent>

@@ -22,8 +22,15 @@ export async function openAdvancedFilter(): Promise<HTMLElement> {
   return screen.findByTestId('filter-panel-advanced');
 }
 
-/** After the Sort trigger: step into the advanced panel and wait for it (any locale). */
+/**
+ * After the Sort trigger: the panel of every sort level (any locale). With a
+ * sort in force the row's one sort chip opens it at once (objectstack#35878 on
+ * objectstack#35876's `sort-chip-panel`); with none, the dashed 「Sort」 opens
+ * the field list, and its footer steps into the same content.
+ */
 export async function openAdvancedSort(): Promise<HTMLElement> {
+  const levels = screen.queryByTestId('sort-chip-panel');
+  if (levels) return levels;
   fireEvent.click(await screen.findByTestId('sort-panel-open-advanced'));
   return screen.findByTestId('sort-panel-advanced');
 }

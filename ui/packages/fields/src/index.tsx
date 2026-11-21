@@ -5355,6 +5355,21 @@ export {
 } from './widgets/file-value.js';
 export type { FileValueView, UploadResultLike } from './widgets/file-value.js';
 export * from './FieldEditWidget.js';
+// objectstack#35956 — the in-place fill-in a change opens when it makes other
+// fields required: the pre-evaluation and the dialog, shared by the kanban
+// drop, the list cell and the record page's inline edit.
+export {
+  collectRequiredWhenPromptFields,
+  requiredWhenPromptReads,
+  type RequiredWhenPromptField,
+  type RequiredWhenPromptOptions,
+} from './requiredWhenPrompt.js';
+export {
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredFieldsDialogChange,
+  type RequiredFieldsDialogProps,
+} from './RequiredFieldsDialog.js';
 export * from './widgets/TextField.js';
 export * from './widgets/NumberField.js';
 export * from './widgets/BooleanField.js';
@@ -5417,8 +5432,8 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow } from './widgets/GridField.js';
-export type { ColumnCurrencies } from './widgets/GridField.js';
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
+export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
 // objectstack#32770 (ADR-0150 D8 R1) — the grant's set-name column and the

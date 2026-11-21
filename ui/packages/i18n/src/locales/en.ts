@@ -351,6 +351,12 @@ const en = {
       notLoaded: 'This record’s line items have not been loaded.',
       loadFailed: 'Failed to load line items',
       saveFailed: 'Failed to save line items',
+      // The notice after a save that skipped lines Add started on their
+      // defaults and nobody edited (objectstack#35940): the master-detail
+      // form and the record page's edit state. `{{count}}` is how many.
+      untouchedNotSaved: '{{count}} blank line was not saved',
+      untouchedNotSaved_one: '{{count}} blank line was not saved',
+      untouchedNotSaved_other: '{{count}} blank lines were not saved',
       noChildObject: 'This panel has no child object configured: set {{property}} to the object whose rows it lists.',
     },
     keepEditing: 'Keep editing',
@@ -404,6 +410,10 @@ const en = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Complete required fields',
+    requiredPromptDescription: 'This change makes the fields below required. Fill them in to save it.',
     // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
     currencyCode: {
       placeholder: 'Select currency',
@@ -1259,6 +1269,7 @@ const en = {
     dataLimitReached: 'Showing first {{limit}} records. More data may be available.',
     display: 'Display',
     options: 'Options',
+    viewSettings: 'View settings',
     layout: 'Layout',
     resetToViewDefault: 'Reset to view default',
     addGroup: 'Add group field',
@@ -1283,6 +1294,8 @@ const en = {
       rowHeightSpacious: 'Spacious',
       more: 'More',
       restoreDefaults: 'Restore defaults',
+      shownColumns: 'Shown columns',
+      addColumn: 'Add column',
     },
   },
   managedByBadge: {
@@ -2594,6 +2607,7 @@ const en = {
       progress: '{{done}} of {{total}} done',
       dismiss: 'Hide checklist',
       showDone: 'Show completed ({{done}})',
+      showDoneSplit: 'Show completed ({{required}} required · {{optional}} optional)',
       hideDone: 'Hide completed',
       optional: 'Optional',
       set: 'Set',
@@ -3962,6 +3976,18 @@ const en = {
     docConflictCandidates: 'Packages that provide this document',
     documentation: 'Documentation',
     uncategorized: 'Uncategorized',
+    backToApp: 'Back to {{app}}',
+    searchDocs: 'Search docs',
+    noDocsMatch: 'No articles match.',
+    docsNavigation: 'Documentation navigation',
+    docsBreadcrumb: 'Documentation path',
+    articlePager: 'Previous and next article',
+    previousArticle: 'Previous',
+    nextArticle: 'Next',
+    firstInBook: 'This is the first article in this book',
+    lastInBook: 'This is the last article in this book',
+    enlargeDiagram: 'Enlarge',
+    diagram: 'Diagram',
     about: 'About',
     aboutTitle: 'About this console',
     aboutDescription: 'The build this console was compiled from.',
@@ -5756,6 +5782,9 @@ const en = {
       listJoiner: ', ',
       or: ' or ',
       addFilter: 'Add filter',
+      sort: 'Sort',
+      filter: 'Filter',
+      sortedBy: 'Sorted by {{field}}',
       reset: 'Reset',
       resetHint: 'Back to the view as saved',
       remove: 'Remove {{label}}',

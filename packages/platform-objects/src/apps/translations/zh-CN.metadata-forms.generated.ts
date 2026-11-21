@@ -70,7 +70,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "重点字段",
-        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列、卡片、子记录预览和详情页的重点信息条。不是本对象字段的名称会在发布时被拒绝。"
+        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列和相关列表列、卡片、子记录预览、记录悬停卡片和记录选择器。不是本对象字段的名称会在发布时被拒绝。"
       },
       relatedLists: {
         label: "相关列表顺序",
@@ -106,7 +106,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "相关列表",
-        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝，不对应任何指向本对象的关系的名称也会被拒绝。记录页目前还不会绘制这种位置。"
+        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝，不对应任何指向本对象的关系的名称也会被拒绝。父记录的新建和编辑表单也会内嵌这张表，在记录页点「编辑」时主记录和这些行一起保存。"
       },
       "fieldGroups.collapse": {
         label: "折叠",
@@ -791,7 +791,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "内嵌表格列",
-        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当本字段设置了 inlineEdit（在源码中编写）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
+        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当父对象的某个字段分组指向这张子表（fieldGroups[].relatedList）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
       },
       "inlineColumns.name": {
         label: "名称",

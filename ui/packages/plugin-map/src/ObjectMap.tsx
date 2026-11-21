@@ -32,8 +32,9 @@ import {
   useResolvedFilter,
   useObjectTranslation,
   useHostMapStyle,
+  classifyLoadError,
 } from '@object-ui/react';
-import { NavigationOverlay, cn, useIsMobile } from '@object-ui/components';
+import { NavigationOverlay, DataEmptyState, LazyIcon, cn, useIsMobile } from '@object-ui/components';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
 import {
@@ -1382,6 +1383,34 @@ export const ObjectMap: React.FC<ObjectMapProps> = ({
         <div className="flex items-center justify-center h-96 bg-muted rounded-lg border">
           <div className="text-muted-foreground">Loading map...</div>
         </div>
+      </div>
+    );
+  }
+
+  // A refused read (403 / PERMISSION_DENIED, by the shared `classifyLoadError`
+  // verdict the list page, the related list and the gantt use) is not a
+  // failure of anything the reader did: they may open the page without being
+  // granted the records this map reads. It is drawn as the calm no-access
+  // state (`role="status"`, the shared `list.loadErrorForbidden*` sentence in
+  // the reader's language), never the server's text. Every other failure
+  // keeps the error screen below.
+  // This package has no default-translation table, so the `defaultValue`s are
+  // the provider-less fallback (they say exactly what the `en` pack says), and
+  // the Lock glyph comes through the shared `LazyIcon`: it declares no icon
+  // library of its own. The style/tile failure (`mapStyleError`) is not a data
+  // load and is not routed here.
+  if (error && classifyLoadError(error) === 'forbidden') {
+    return (
+      <div className={cn("min-w-0 overflow-hidden", className)}>
+        <DataEmptyState
+          data-testid="map-no-access"
+          className="h-96"
+          icon={<LazyIcon name="lock" className="size-5 text-muted-foreground" aria-hidden />}
+          title={t('list.loadErrorForbiddenTitle', { defaultValue: 'You don’t have access' })}
+          description={t('list.loadErrorForbiddenMessage', {
+            defaultValue: 'You don’t have permission to view these records. Contact your administrator if you think you should have access.',
+          })}
+        />
       </div>
     );
   }

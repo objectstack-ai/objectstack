@@ -14,8 +14,9 @@ export const Lead = ObjectSchema.create({
   pluralLabel: 'Leads',
   icon: 'funnel',
   description: 'An inbound prospect not yet qualified as an opportunity.',
-  // What the record page shows at a glance, under the title. The stage is
-  // not here: the record page already draws it as the stage path.
+  // The record's most important fields: the hover card, list columns and
+  // the record picker read them. The stage is not here: the record header
+  // already shows it as the status tag beside the name.
   highlightFields: ['company', 'source', 'lead_score', 'assigned_to'],
   // Field history on the record page: the timeline shows each field change
   // with its before and after values, and offers the Changes filter. The audit

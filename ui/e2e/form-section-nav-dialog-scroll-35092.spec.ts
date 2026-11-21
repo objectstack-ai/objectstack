@@ -115,7 +115,9 @@ const ENTRY = '\0form-section-nav-35092:entry';
 /** Classes the transcribed dialog uses besides the ones read from source. */
 const HARNESS_CLASSES =
   'sm:max-w-2xl shrink-0 px-2 sm:px-4 px-6 pt-6 pb-2 text-lg font-semibold border-t py-3 flex justify-end gap-2 h-16 h-9 px-4 rounded-md border grid grid-cols-2 gap-4 relative ' +
-  'inline-flex gap-1 overflow-x-auto border-b border-border -mb-px items-center whitespace-nowrap border-b-2 py-2 text-sm border-primary font-medium border-transparent';
+  // The jump bar's own classes (objectstack#35472: pills, not underlined tabs).
+  'flex items-center gap-1.5 overflow-x-auto border-b border-border py-2 inline-flex gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 ' +
+  'text-xs border-primary/40 bg-primary/10 font-medium text-foreground text-muted-foreground h-3 w-3 opacity-60';
 
 function fixtures(): Plugin {
   const at = (file: string) => JSON.stringify(file);
