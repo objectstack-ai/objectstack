@@ -6,7 +6,7 @@
 
 feat(record-page): the record's header is two rows — navigation over the record — and shows up to three actions again
 
-Clause-②: no
+Clause-②: yes (widening) — `@object-ui/components` takes four optional members: `RecordTopBarProps.record`, `RecordTopBarStepper.onScope`, `NavigationOverlayProps.recordRow` and `PageHeaderActionsProps.fitWidth`; nothing removed or renamed
 Metadata-protocol: none
 
 The record's top bar, on the full page and in the drawer alike, is now two rows:

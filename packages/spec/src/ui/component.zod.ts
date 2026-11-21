@@ -853,7 +853,7 @@ export const PageHeaderProps = strictObject({
    * as the record picker's `limit` docblock records for its own 50.
    */
   maxVisible: z.number().int().positive().optional().describe(
-    'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 3 on every header; in a record page\'s header bar, actions that do not fit its width fold as well, so a narrow drawer shows fewer.',
+    'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 3 on every header. In a record page\'s header bar the number, authored or not, is an upper bound: actions that do not fit the bar\'s width fold as well, so a narrow drawer shows fewer.',
   ),
   mobileMaxVisible: z.number().int().positive().optional().describe(
     'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one, 1 on any other header.',

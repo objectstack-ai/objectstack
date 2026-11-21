@@ -1944,7 +1944,7 @@ export interface PageHeaderActionsProps {
    * live, in place of an `actions` list. Only the boolean `true` opts in.
    */
   placedActions?: unknown;
-  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default: 1 in a record page's one-row header (`defaultMaxVisible`), 3 on any other header. */
+  /** The inline-button budget on desktop, as `page:header`'s `maxVisible`; an out-of-contract value falls back to the unset default, 3 on every header. In a record page's header bar (`fitWidth`) the number is an upper bound: what does not fit the bar's width folds as well. */
   maxVisible?: unknown;
   /** The inline-button budget on mobile, as `page:header`'s `mobileMaxVisible`; an out-of-contract value falls back to the unset default: 2 in a record page's phone bottom bar (`face: 'bar'`, the host's Edit included), 1 on any other header. */
   mobileMaxVisible?: unknown;
