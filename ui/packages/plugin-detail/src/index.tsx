@@ -252,10 +252,38 @@ export {
   // panel's most entries (the host asks that many activity rows at open).
   RecordTimelineTotalContext,
   RECORD_TIMELINE_PANEL_MAX_ENTRIES,
+  // objectstack#36075 — the record's comments live in its comment panel.
+  RecordCommentsInPanelContext,
   auditEntriesToFeedItems,
   mergeTimelineStream,
 } from './recordTimelineStream';
 export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStream';
+// objectstack#36075 — the record's comment panel and the parts the phone's
+// comment page shares with it.
+export {
+  useRecordComments,
+  buildCommentThreads,
+  latestRepliers,
+  CommentAvatar,
+  CommentItem,
+  CommentThread,
+  CommentComposer,
+  CommentHoverActions,
+  CommentsPanel,
+  CommentsButton,
+} from './comments';
+export type {
+  RecordComments,
+  CommentThreadData,
+  CommentAvatarProps,
+  CommentItemProps,
+  CommentThreadProps,
+  CommentItemActions,
+  CommentComposerProps,
+  CommentHoverActionsProps,
+  CommentsPanelProps,
+  CommentsButtonProps,
+} from './comments';
 // objectstack#27055 — the reader's arrangement of the related cards: the pure
 // merge rule and the stored record's codec halves, for the host's
 // workspace-preference store.

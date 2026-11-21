@@ -1229,7 +1229,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             )}
           </h2>
           <div className="flex items-center gap-1">
-            {isStream && (
+            {isStream && streamFilters.length > 0 && (
               <div
                 role="group"
                 aria-label={t('detail.filterActivity')}
