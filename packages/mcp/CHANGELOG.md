@@ -1,5 +1,344 @@
 # @objectstack/plugin-mcp-server
 
+## 18.7.0
+
+### Patch Changes
+
+- c4a73be: fix(mcp): the open MCP door's `tools/list` is a quarter smaller; teaching prose moves to the served SKILL.md
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every MCP connection pays for `tools/list` before any work starts. Its total for an API key on a self-hosted app (17 tools) drops from 47,712 to 36,481 bytes; the descriptions `@objectstack/mcp` owns drop from 18,213 to about 8,740. No tool is removed or renamed, and nothing a tool accepts changes: only description strings.
+  
+  Each description keeps what a call needs: the arguments, the confirmation a destructive call takes, the refusal it may answer and what to do about it. Worked examples, answer-reading guidance and edge cases move to the SKILL.md the server serves at `/api/v1/mcp/skill` (and the Console's "Download skill" copy of it): `describe_object`'s field facts, `query_records`' `latestPer` / `expand` examples (its approvals-waiting-on-you filter and the `sys_user` colleague lookup stay in the description, one line each), `aggregate_records` under the `query_records` entry, `get_record`'s `related`, `run_action`'s `FLOW_FAILED` relay, and `create_upload_link`'s read-only and locked-record cases. `validate_expression`'s description now names the facts to pass per site and points at the skill for the full list of checks.
+  
+  The skill's `validate_expression` entry now names its `variables` input, and says that at a `flow_condition` the shadowed-read warning, and the binding of a bare name to the variable rather than the field, need it.
+- 2d33205: feat(runtime,mcp): the open MCP server saves and discards metadata drafts, and every save answers with what publishing the draft would say
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The open draft door on a self-hosted runtime gains its write half. It is served to the same OAuth clients as the read tools: the token carries `metadata:write` and its user holds `manage_metadata`.
+  
+  - `save_metadata_draft({ type, name, item, package, ifMatch? })` saves `item` as a pending draft in `package`, recorded as an MCP save by the token's OAuth client. The reply carries `saved` (type, name, package, state, version), `verdict` and `review`. `verdict` is what publishing the stored draft would say: `publishable`, `refusals` (the issues a publish would refuse the draft on) and `advisories`, each with `rule`, `path`, `message`, `hint` and `severity`. `review` holds the Console routes where a person reviews and publishes the draft in Studio. `ifMatch` is the version the save expects to replace; a stale one is refused as the `/meta` draft save refuses it.
+  - A save that names no `package` is refused `400 VALIDATION_ERROR`, and nothing is saved. The refusal names the writable packages in that environment.
+  - `delete_metadata_draft({ type, name, package? })` discards a pending draft. The published version, if any, is left as it is.
+  - `list_drafts` now gives each draft its `verdict`. A draft the user may not read (for example a dashboard whose `requiredPermissions` they lack) is listed with `verdict: null` and the reason it was withheld.
+  
+  A plural type spelling (`dashboards`) is folded to its singular before any gate, verdict or write, as the `/meta` doors fold it. Both writes ask the type-level write admission every `/meta` write asks, so a metadata type the user may not write is refused `403 PERMISSION_DENIED` and nothing is written; a verdict, on a save or a listed draft, is withheld for a type the user may not read. A tenant whose catalog is walled refuses both writes `403 PERMISSION_DENIED`, as the `/meta` write path does; a platform admin is admitted. Nothing on this server publishes: there is no publish tool and no `force`.
+  
+  When the authoring tools are listed, the open server's default `initialize` instructions add one paragraph saying that they save drafts only and that a person publishes in Studio. The paragraph is absent when the tools are not served, and a host's own instructions replace the default text as before.
+- 3c038eb: Clause-②: yes — widening: a new optional tool input and one new instructions line; the major refusal applies only to a client that sends the new input, so nothing a client could send before is refused.
+  Metadata-protocol: none
+  
+  feat(mcp): the open server states its authoring contract version and refuses a client on another spec major
+  
+  - **`initialize` instructions.** Where a connection lists authoring tools, the open server's default instructions now carry `Authoring contract: @objectstack/spec <version>` as their second paragraph, with the `@objectstack/spec` version the server resolves. A host's own text and a configured text are unchanged. The longest default text stays under 4,096 characters.
+  - **`save_metadata_draft` takes an optional `clientSpecVersion`**, the `@objectstack/spec` version the client built against. Another major is refused before anything is saved (`VALIDATION_ERROR`, 400), naming both versions and the command to run: `npm i -D @objectstack/spec@<server version>`. Another minor is saved as usual, and the answer carries a `specVersionAdvisory`. A value that is not a SemVer version is refused as an input error. A save without it, or with the same major and minor, answers exactly as before. The item's own validation is still the final gate.
+- e22502c: fix(mcp): a `read_file` stop before the first page or paragraph says so, and never calls its text partial
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the extraction worker's wall-clock ceiling stopped a PDF read before page 1 came back, `read_file` answered `content: none` with the note `Reading stopped at the CPU-time budget for one file (N ms) after page 0 of M, so the text is partial.` No text came back, so an agent acting on that sentence believed it held part of the file. A Word read stopped before its first paragraphs came back said the same with `after 0 paragraphs`. Such a stop now answers `content: none` with `Reading stopped at the CPU-time budget for one file (N ms) before page 1 of M was read, so no text came back. Download the file with the link instead.` (`before page 1 was read` when the PDF had not opened yet, and `before the first paragraph was read` for Word).
+  
+  A read stopped at the budget after pages or paragraphs that held no text (a scanned PDF, say) also answered `content: none` with the partial-text note. It now says `after page P of M, and no text was found in what was read. Download the file with the link instead.`
+  
+  Nothing else moves. A stop that did return text keeps `truncated: true` and the note `… after page P of M, so the text is partial. Download the file with the link for the rest.`
+- f54fc93: docs(skills): the `objectstack-ask` skill follows `list_datasets` `nextStep` and cites `query_dataset` `sourceLine` as given, before `provenance`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, now tell a connected client two things. Under the step 2 decision table: when the `list_datasets` answer has `nextStep`, follow its `decision` and `note`. In step 3's citation bullet: cite the `query_dataset` answer's `sourceLine` as given, and build the source from `provenance` only when the answer has no `sourceLine`. Both members are answered by servers whose dataset tools fill them; a server that does not answer them leaves the skill's existing steps in force, with the `provenance` citation as before. When a `nextStep` note says to answer one measure and to ask about a word that has only candidates, the skill says to do both and to use none of that word's candidates until the user answers; the question-alone rule (no tool call until the user answers) covers a reply that only asks.
+  
+  Two sentences that restated another line of the same skill are removed: the fallback row's "and say in the answer that no governed metric was used" (step 4 opens every fallback answer with that line) and "no figure" in the paragraph under the table (its next sentence says the same). The `candidates` row also drops "one or several", which its own right cell states. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- 96faf44: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  fix(i18n, mcp): a translation fault serves the untranslated text and the fault is logged, instead of failing the read; `list_datasets` is flagged `partial` with a `warning`, while REST `/meta`, the MCP object tools and `query_dataset` log only
+  
+  When the i18n service resolves but its `getLocales` or `getTranslations` throws, the shared `/meta` translator (`translationBundleOf`, `@objectstack/rest`) now answers it as no bundle: the text is served untranslated and the server log says so at `warn` (`The translations could not be read (…), so labels and descriptions are served untranslated.`). Before, the translation rejected, so `GET /meta/:type` and `GET /meta/:type/:name` answered 500, the MCP object tools failed, `list_datasets` answered `datasets: []` with `partial: true`, and `query_dataset` refused 503 on both MCP transports.
+  
+  Now `list_datasets` keeps every dataset, in its authored text, with `partial: true` and that sentence as its `warning`; `query_dataset` answers. A dataset host's `loadDatasets` may return `{ items, warning }` without `partial`: a whole read the tools say something about, which `query_dataset` does not refuse. The translator's sources take an optional `reportTranslationFault(warning)` to carry the sentence on an answer.
+  
+  fix(mcp): `?locale=` reaches the MCP labels, and the dataset tools answer in one language
+  
+  The HTTP MCP door now reads a `?locale=` query parameter as the `/meta` doors do (after `Accept-Language`, before the i18n default), for the object and dataset labels and the app-docs tools; it read headers only, though its docblock promised both. The dataset executor (`createDatasetTools`) takes an optional `translationLocale` dependency, the locale its `loadDatasets` translated the rows for, and reads labels and composes `nextStep` and `sourceLine` in it first. Both MCP transports pass it, so a call with no `Accept-Language` (common for MCP clients, and every stdio call) no longer mixes labels in the i18n default with sentences in the workspace locale.
+- d6ce9ba: docs(skills): the `objectstack-ask` skill says what the client does after the user answers an ask-back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Step 2 of the `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, told a connected client to ask which reading the user meant and stopped there. It now carries the turn after the answer: an option is used only once the user picks it, and is then computed by its exact name as step 3 says (`query_dataset`, with the source cited from the tool's answer); a reply that names another word ("no, I mean ARR") starts at step 1, a new `list_datasets` lookup with that word, before anything else; a user who only picks none of the options gets step 4, the object-query fallback with its label. This is ADR-0149 D3 rule 1, rule 2 and rule 4 applied to the user's reply; no rule is added. The another-word case is also part of the ask-skill iteration loop (Part of #34996, item a of its third round).
+  
+  Four restatements are cut from the same file, each keeping its other home, so the skill does not grow: "and in the user's language" in step 1 (beside "Do not translate or reword a term"), "a fragment's matches are not the user's" in the same bullet (beside "a match on a word you supplied is your reading, not the user's"), the "by stage" example and "You still need a measure match" in the grouping row of step 2, and "use none of that word's candidates until the user answers" under the step 2 table, which the new sentence now states for every option. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- 7ed18b5: fix(analytics): a grouping or time word with only a near dimension no longer stops a matched measure with a question
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A question like 「按行业看销售额」 or "revenue this quarter" sends `list_datasets` a measure word with an exact match (销售额, revenue) and a grouping or time word that matches nothing exactly but is near a dimension (「按行业」 contains 行业, "this quarter" contains `quarter`). The `nextStep` note used to tell the model to ask the user about that word before using it, so an ordinary question got a clarifying question back. Now a word whose candidates are all dimensions is offered as a possible grouping: the note says not to ask about it and that it does not stop the matched measure, which is computed. A word with a measure among its candidates still asks, as before: a bare near-miss measure word (销售 near 销售额) is still `candidates_only` and computes nothing until the user answers, and beside a matched measure it is still asked about.
+  
+  What changes is the note only. `decision`, `terms`, `matches` and `candidates` are the same as before for every input: a word with only dimension candidates is still `candidates_only` when it is the reported case, and its candidates are still listed. When such a word is the only word sent, the note offers the grouping and asks which number is meant, as it does for a word that equals a dimension.
+  
+  The `list_datasets` tool description and the MCP `initialize` selection rule now state the scoped rule in the same words: "A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure."
+- ba304e0: fix(mcp, lint): `create_record` and `update_record` over stdio answer `droppedFields` and no longer echo a dropped value; a flow write to a roll-up summary field draws a warning
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  On the stdio MCP transport, `create_record` and `update_record` now answer `droppedFields`, as the HTTP transport has: each entry names the object, the fields the engine did not store and the reason. A non-system write of a `readonly: true` column or of a roll-up `summary` field (read-only on create and update whether or not it declares `readonly: true`) reports the field there with reason `readonly`. Before, the stdio answer carried no `droppedFields`, and `update_record` answered the caller's own value for such a field over the stored one, so the answer read as if the write had landed. The `record` in both answers now leaves a dropped key's caller value out: an update answers the stored value, and a create answers what the write stored. A write that drops nothing answers as before, with no `droppedFields` key. No MCP tool input, `@objectstack/mcp` export or metadata key changes.
+  
+  `os validate`, `os lint` and `os build` now report a new warning, `flow-update-summary-field`, when a flow's `create_record` or `update_record` node that does not run as `runAs: 'system'` writes a roll-up `summary` field that does not declare `readonly: true`. The engine drops that value on create and on update, so the step changes nothing in that column. It is a warning, so no build that passes today fails. Like every warning, it makes `os validate --strict` and `os lint --strict` exit 1; there is no per-rule switch, so a strict run fails until the field is removed from the node. The metadata save and publish answers carry it under `advisories`, never as a refusal: on a flow save whose user-run node writes such a roll-up, and on an object save that makes a field such a roll-up while a live user-run flow of the same package writes it. A roll-up that declares `readonly: true` is reported as `flow-update-readonly-field`, an error, as before. `os explain flow-update-summary-field` gives the details. The fix is to remove the field from the node, since the engine recomputes it from the child records.
+  
+  New export: `FLOW_UPDATE_SUMMARY_FIELD` from `@objectstack/lint`, the rule id constant.
+- ec227fc: feat(mcp, runtime): `query_records` and `get_record` name the fields field-level security withheld from the caller
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A row served over MCP leaves out every field the caller may not read, and nothing in it said so, so an AI client read a withheld field as blank. `query_records` and `get_record` now add two members to their result when a field was withheld, on the HTTP and the stdio server alike:
+  
+  - `withheldFields`: the names of the withheld fields, field names only, never values. With `fields` in the call, only the asked fields are named; without it, any field of the object.
+  - `withheldFieldsNote`: one sentence saying these fields exist and are not visible to the caller, and that they must not be described as empty.
+  
+  A field is named only when the caller's own served schema shows it (the object as `describe_object` serves it to them) and the security service does not answer it readable for them. Both are asked as the caller; nothing is derived from the rows. A field the caller's schema does not show is never named. Under the default object-schema masking, a field a caller may not read is usually left out of their schema too, so `withheldFields` appears for a caller who is served the whole schema (a caller holding `manage_metadata`, `studio.access` or `setup.access`) or where schema masking is switched off.
+  
+  A caller with nothing withheld, a deployment with no security service, and a server whose bridge does not provide the new optional `McpDataBridge.fieldVisibilityOf` member get the result they got before, byte for byte. The two tool descriptions gain one sentence about the member.
+  
+  `aggregate_records` is unchanged: a withheld field asked as a measure or a group is already refused `403 PERMISSION_DENIED`.
+- ba6556c: feat(mcp): `aggregate_records` returns select groups in their declared option order and names the currency of a fixed-currency amount
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two facts the MCP `aggregate_records` tool now reads from the object as the caller is served it, on both the HTTP and the stdio door:
+  
+  - Groups keyed by a `select` or `radio` field come back in the order the field declares its options, instead of the order the driver returned them in. A value no option declares, such as a null, sorts last. When the call groups by several keys, the order is applied to the leading select keys. From the first key that is not a select field onward, the driver's order stays. The groups are sorted before the tool's row cap, so the groups the cap keeps are the first ones in declared order.
+  - An amount column (`sum`, `avg`, `min` or `max`) over a field whose `currencyConfig` is `currencyMode: 'fixed'` is named in a new result member `currencies`, which maps the column's alias to its ISO 4217 code, e.g. `"currencies": { "total": "USD" }`. The member is present only when at least one column has a currency. `count`, `count_distinct`, non-currency fields and `dynamic`-mode amounts carry none. A `record`-mode amount is still answered only when it is grouped by its currency code field, so each group's code is already in its row.
+  
+  A field the caller's served schema does not show is never ordered by its options or named. A host whose bridge cannot serve the definition answers exactly as before. Existing members (`rows`, `totalGroups`, `truncated`) are unchanged.
+- 8856afc: feat(mcp): a refused record read says the data is not recorded, in the caller's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When `query_records`, `aggregate_records` or `get_record` is refused and the call named an object, or a field, that the caller's own schema does not show (the object as `describe_object` serves it to them), the refusal now carries two members beside it, on the HTTP and the stdio server alike:
+  
+  - `notRecorded`: what is not recorded, as the caller sent it: `{ "object": "<name>" }`, or `{ "object": "<name>", "fields": ["<name>", …] }` for the field names the call sent that the schema does not show, in the order sent. Every sent name is read by its head on every channel (`where`, `fields`, `orderBy`, `groupBy`, an aggregation's `field` and `filter`), so `owner.name` is judged by `owner`, and a dotted name whose head the schema shows is never named.
+  - `ifNotRecorded`: one sentence, in the caller's language (English, Simplified and Traditional Chinese, Japanese), telling the model to say the data is not recorded, never to report 0 or an empty result for it, and not to answer with another object or field in its place.
+  
+  The answer names only what the caller can see: both members are built from the names the caller sent and from the caller's served schema, and nothing else. The refusal itself (`isError`, its `code`, `message` and `status`) is unchanged, byte for byte. A read that answers, a refusal about a field the caller's schema shows, a server fault, and a refusal whose schema read cannot be made carry no member. `id`, `created_at` and `updated_at`, which every object answers, are never named.
+  
+  The language is chosen by one shared picker, `pickSentenceLocale` (with `platformLocaleNamedBy`), now exported from `@objectstack/core`: the first of the caller's locales (the request's, then the workspace default) that names a language the sentence is written in, else `en`. The dataset tools' `nextStep` and `sourceLine` (`@objectstack/service-analytics`) use the same picker, with unchanged behaviour. `McpDataBridge` gains an optional `userTextLocales()` member: the HTTP bridge answers the request's ladder, the stdio bridge the principal's ladder and then the i18n service's default. A bridge without it is answered in `en`.
+- 96a1f2b: feat(mcp): `query_records` and `aggregate_records` answer a `source` block, with a finished `line` in the caller's language
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A successful `query_records` or `aggregate_records` answer now carries a top-level `source` key on both MCP doors (HTTP and stdio): the block `ObjectQuerySourceSchema` (`@objectstack/spec/ai`) already types, composed from the read the tool ran. It names the object, the caller's `where` exactly as sent (`filter`), the aggregations and group keys, the caller's own `orderBy` with the cut beside it (`limit`), the lookups read through `expand` (`related`), a one-record-per-group reading over one key (`latestPer`), and `records` where the read established it: a page read's counted total, or an uncut aggregate's bare `count` summed over every group, never after a cut. `scope` is `visible_to_you` on every call: these doors ask no row-filter question, and the read runs under the caller's permissions and row-level security.
+  
+  `source.line` is that source as one sentence of at most 280 characters, in the caller's language (en, zh-Hans, zh-Hant, ja; the shared picker `pickSentenceLocale` over the bridge's `userTextLocales`, the ladder `ifNotRecorded` reads), naming the object and its fields by the labels the caller's served definition shows and by the caller's own names otherwise. The tool descriptions tell the model to quote it as the source of a figure. Before this, an aggregate answer came back as a bare number.
+  
+  No existing key changes. An error answers no block; `get_record` answers none, since its answer is the record itself. A read the schema cannot state truthfully (one record per group over several keys), or a block the schema refuses, is answered without the block. Each call now reads the caller's served object definition once for the labels; a bridge without `servedObjectDefinitionOf` gets machine names, and one without `userTextLocales` gets English.
+- c787255: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `query_records` says when a page hit its row cap. The tool asks for one row more than the page; when that row comes back, it serves the page and adds `truncated: true`. The member is present only when true, so a page that holds every matching row, exactly `limit` rows included, is unchanged. The tool description now tells a model not to sum, count or rank a truncated page as if whole, and to read on with `offset` or use `aggregate_records` for totals.
+  
+  The stdio door's `query_records` now answers the same page facts as the HTTP door: a paged read is counted under the same filter, as the caller, so `total` is the match total and `hasMore` says whether rows remain. Before, a capped stdio page answered `total` equal to the page length. If the count fails, `total` is left out and is never estimated.
+  
+  When the host's read window (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`) would refuse the extra row, the page is read as asked, and the door's counted `hasMore` decides `truncated`.
+- 65b67be: feat(mcp): `aggregate_records` orders, cuts and counts its groups in the database
+  
+  Clause-②: yes (widening: `orderBy` and `limit` arguments on `aggregate_records`)
+  Metadata-protocol: none
+  
+  A ranking question ("the top five customers by revenue") over more groups than the tool's row cap used to come back as every group, or the first page of them, in no stated order, and the client ranked what it happened to get. `aggregate_records` now takes `orderBy` — a list of `{ field, order }` naming an aggregation alias or a group key (its alias when it has one) — and `limit` (at most the row cap). The database orders the groups, cuts them, and counts how many groups it formed before the cut, in one statement; the result carries the groups, `totalGroups` (the key the tool already answers, now the database's count of the groups before the cut), and `truncated: true` when more groups existed than came back.
+  
+  - An order key that names no column of the aggregated row is refused `INVALID_SORT` / 400, naming the columns the query projects.
+  - Only a driver that runs the cut in its own SQL statement serves it: `driver-sql` (every dialect it speaks; the window `count(*) over ()` needs MySQL 8 or later), the WASM SQLite driver, and the Turso driver's local and replica faces. Every other driver (the in-memory driver, MongoDB, OData, Turso's remote face), an aggregate the engine computes in memory (a date bucket, a reference timezone or a measure filter the driver does not run), and an aggregate with `having` are refused `INVALID_QUERY` / 400 before anything is read. Groups are never ordered or cut in the application.
+  - On an order key without a `rank`, a NULL ranks last in either direction, except a `sum` or a count with no value, which ranks as the `0` it is served as. Group keys the order does not name, and a group key it names only by a `rank`, break ties, ascending, NULL last, so two runs of one call answer the same groups in the same order.
+  - An order key may carry a `rank`, a list of the column's values: the statement ranks each listed value by its position and every other value (a NULL among them) on one rank past them, before the cut, so the unlisted values come after the listed ones ascending and before them descending; among themselves they follow the column's own ascending order, NULL last. It is the tool's own, never an `aggregate_records` argument.
+  - A `limit` with no `orderBy` keeps the declared option order the uncut answer already follows: groups keyed by a leading select or radio field come back in the order the field declares its options, a value no option declares last, and the database takes that order before the cut, so the cut keeps the first declared groups. An `orderBy` the caller sends overrides it.
+  - The cut answer carries what the uncut one does: a fixed-currency amount's currency in `currencies`, and `KEY__label` beside each lookup or master-detail group key, the record's name read with the caller's own permissions.
+  - An amount whose records each carry their own currency is ranked by its bare numbers across currencies: the tool description says to rank it inside one currency by filtering `where` on its currency code field.
+  - Without `orderBy` and `limit` the tool answers as before.
+  
+  `@objectstack/objectql` exports `AGGREGATE_ORDER_CUT`, the engine-internal read option of `aggregate` that carries the request (a symbol, so no wire request can set it), with the `AggregateOrderCutRequest`, `AggregateOrderKey` and `AggregateOrderCutOutcome` types. `McpDataBridge` gains the optional member `aggregateGroups`; a bridge without it refuses `orderBy` / `limit` with `NOT_IMPLEMENTED` / 501 and keeps serving the rest of the tool. Nothing that was accepted before is refused.
+- 1caee8c: feat(mcp): "each X with its latest Y" in one `query_records` call — `latestPer`
+  
+  Clause-②: yes (widening): a new read form on the published MCP tool surface. Judged from the card content; the build confirms it
+  Metadata-protocol: none
+  
+  `query_records` takes `latestPer: { by, orderBy }`: one row per group, the group's first row in the given order. `by` names 1 to 3 fields, `orderBy` 1 to 3 keys (`asc` / `desc`); a tie goes to the record id in the direction of the last key, and an empty order value ranks last. "Each account with its latest deal" is `{ objectName: 'crm_opportunity', latestPer: { by: ['account'], orderBy: [{ field: 'close_date', order: 'desc' }] } }`.
+  
+  - The row is chosen among the rows the caller may read and the `where` admits: a group whose newest row is hidden from the caller answers its newest readable row, never the hidden one and never nothing. The organization wall holds inside the choice. Field masking still applies to the returned rows.
+  - A partition or order field the caller may not read is refused as it is in `orderBy`; a computed, JSON or multi-value field, or a dotted path, is refused as a partition or order field.
+  - `limit` counts groups, capped at the tool's `maxLimit` like any list. The answer is `{ object, records, hasMore }` and never a `total`; when more groups exist than came back it carries `truncated: true`.
+  - Served by the SQL driver (Postgres, MySQL, SQLite) and by `driver-sqlite-wasm` and the Turso driver on a local or embedded-replica database: the driver compiles a `ROW_NUMBER()` window over the read's own scoped selection. Every other driver (in-memory, Turso's remote connection, MongoDB), an object with an `afterFind` hook and an object with object-scoped read middleware refuse with `INVALID_QUERY` / 400 before anything is read. The Turso driver's remote face refuses the directive itself too.
+  - New exports: `LATEST_PER`, `LATEST_PER_MAX_KEYS` and the `LatestPerRequest` / `LatestPerOrder` / `LatestPerOutcome` types from `@objectstack/objectql`; `LATEST_PER_DIRECTIVE`, `latestPerDirectiveOf` and the `LatestPerDirective` / `LatestPerDirectiveOrder` types from `@objectstack/driver-sql`; `McpLatestPer` from `@objectstack/mcp`. The request rides an in-process read option, never a wire or query key; `@objectstack/spec` is unchanged.
+  
+  Without `latestPer`, `query_records` and every read are unchanged.
+- dbb2f68: feat(mcp): a record with its related records in one call — `expand` on `query_records`, `related` on `get_record`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `query_records` takes `expand`: up to 3 of the queried object's lookup, master-detail, user or tree fields, each answered as the record it names, one level deep. `get_record` takes `related`: up to 3 child objects that point at the record, each answered as a list of at most 20 rows (never above the tool's `maxQueryLimit`), as `{ record, related: [{ object, field, records, total, hasMore }] }`.
+  
+  - Every object a new read shape reaches is judged by the MCP read guard exactly as the object the call names. A target the guard refuses refuses the whole call with `PERMISSION_DENIED` / 403 before any record is read. A related object whose definition is not served to the caller refuses it with `OBJECT_NOT_FOUND` / 404, also before any read.
+  - An `expand` name that is not a relationship field of the object as the caller is served it, and a `related` link `field` that does not point at the record, are refused with `INVALID_FIELD` / 400 before any read. A child that points at the record through several fields needs `field`.
+  - `expand` runs through the engine's one expansion path: one batched `id IN (...)` read per field, under the target's own permissions, row-level security and field masking. It combines with `latestPer`. Only the read guard's refusal refuses the call: a record the caller may not read on an admitted target object is not expanded, and the field keeps its stored id.
+  - A related list is one `query_records` read of the child, filtered only by the link to the record, with the child's own `fields` and `orderBy` and no caller filter. It is read only after the record itself. A list with more rows than its cap carries `truncated: true`.
+  - Each related list carries the delegation notice `query_records` carries (`delegationNarrowed`, `warning`) when the agent ceiling narrowed the read.
+  - The record and each related list carry `withheldFields` exactly as a plain `get_record` and a plain `query_records` of that object do.
+  - The stdio bridge serves `expand` too, built as the data door builds it (a target that does not serve `get` keeps its stored id). `McpDataBridge.query` gains an optional `expand` member.
+  
+  Without `expand` or `related`, both tools answer exactly as before. `@objectstack/spec` is unchanged.
+- 09ba0c7: docs(skills): the `objectstack-ask` skill and the `list_datasets` output schema ask back only about a word with a measure among its `candidates`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `list_datasets` tool description and the MCP `initialize` selection rule already scope the ask-back: "A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure." Two texts a connected client also reads still said to ask about every word with candidates. The skill now carries the same sentence, and the schema description states the same scope in its own words.
+  
+  - The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it. Step 2's `candidates` row is now two rows. A word with a measure among its `candidates` is asked about the same way as a word that matches several measures; with one candidate, the client asks whether it is the one meant. A word whose `candidates` are all dimensions is at most a possible grouping: the client never asks about it, and it never stops a matched measure. So 「按行业看销售额」, where 销售额 matches a measure and 「按行业」 is only near a 行业 dimension, is computed and grouped with no question back.
+  - `@objectstack/spec`: the description of `ListDatasetsOutputSchema.candidates`, which `list_datasets` serves in its `outputSchema`. It said every candidate is offered for a clarifying question. It now says the clarifying question is for a term with a measure among its candidates, and that a term whose candidates are all dimensions is offered them as a possible grouping, not for a question, and does not stop a matched measure. It states what the candidates are offered for and does not carry the sentence above: the instruction stays in the tool description and the skill. The doc comment of `DatasetTermCandidateSchema` says the same. No shape changes: `candidates` holds the same entries in the same order.
+  
+  The new skill row is paid for inside the same file, by removing text that restated another line of it: the `candidates` row's own listing instruction and "Do not pick one." (the row above states both, and the row now says "Ask the same way"), "A word matches nothing, and" in its left cell (step 1 says a word that matched nothing may have `candidates`), and "on the answer" in that step 1 bullet. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill and `content/docs/references/ai/dataset-tools.mdx` from the spec; no code path changes.
+- abb40ae: docs(skills): the `objectstack-ask` skill reads `withheldFields`, asks `aggregate_records` for a top or bottom N, and answers "how many" from `totalGroups`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, now tell a connected client three things. In step 4: a `query_records` or `get_record` answer whose `withheldFields` names a field means the field exists but is hidden from the caller, so the client says it is not visible, never that it is empty; and a top or bottom N is asked of `aggregate_records` with `orderBy` (an aggregation alias or a group key) and `limit: N`, so the database ranks and cuts the groups. In step 6, one bullet covers `truncated: true`: more rows or groups existed than came back, so the client says the result is partial, and cites `totalGroups` (answered by `query_dataset` and `aggregate_records`) as how many groups existed before the cut; a `query_dataset` answer without `totalGroups` has an unknown total, never `rowCount`. A capped `query_records` page keeps stating its own `total`, which the bullet leaves alone.
+  
+  The two per-tool `truncated` sentences that bullet replaces are removed from steps 3 and 4. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- 53c9575: feat(mcp): the MCP door can search and read the installed apps' manuals, and tells the client how to answer a question about the app
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  An AI client connected over MCP (a user's own Claude, Cursor, …) can now answer "what is X?" and "how does this approval work?" from the manuals the installed apps ship, instead of from its own guess:
+  
+  - **`search_package_docs({ terms, package? })`** finds the pages whose title, a heading or text contains one of the terms (case aside, in the page's base text or a translation). Pages that contain more of the terms come first, then pages where the terms sit higher (the sum of title 3, heading 2, text 1), then by title; at most 10, each with an excerpt, its manual and, where the page has one, its console address (`/_console/apps/<package>/docs/<book>/<page>`) to cite. The heading parse is line-based and linear.
+  - **`read_package_doc({ name, package?, locale? })`** reads one page: its title, manual, Markdown content and, where the page has one, its console address (cut at 60,000 characters, and the answer says so).
+  - **Who sees what.** Both tools read the `doc` items through the `/meta/doc` docs-audience gate (ADR-0046 §6.7) with the request's execution context as the caller: a page the caller may not read is neither found nor read, and answers as not found. On an OAuth grant that caller is the agent, so the docs audience is judged on the token's grant (its scope-derived permission sets), not on the person's own permission sets: a manual whose audience is a permission set the person holds stays hidden on that connection. Both tool descriptions say so. Both are read tools: they register for an API key, a session, or a token granted `data:read`. The runtime's HTTP bridge carries them where the protocol serves the `/meta` list read; the stdio bridge does not.
+  - **The answer order.** Where both tools register, the HTTP `initialize` instructions say: read the manuals first; answer a concept from the manual, and label a general explanation as one when no page covers it; for a process or rule, also read its real definition, which wins where the two differ; end with each page's title and url. The rule names a definition reader only where the connection lists one (`describe_metadata`, else `get_metadata_item`, both under `metadata:write`); without one it says to answer from the manual and state that the configured process was not checked. A host's own instructions and a configured `instructions` option are served unchanged.
+  
+  The two names are the ones the cloud AI runtime already registers, so `MCP_DOOR_TOOL_NAMES` (`@objectstack/spec/system`) now lists them too; `PLATFORM_PROVIDED_TOOL_NAMES` is unchanged. No metadata key, value or default changes.
+- 61831d2: feat(mcp): export the app-docs answer-order rule and its served-check from the package barrel
+  
+  Clause-②: yes — widening: four new exported symbols on the published `@objectstack/mcp` barrel (`packageDocAnswerRule`, `packageDocToolsServed`, `definitionReaderOf`, `DEFINITION_READER_TOOL_NAMES`); nothing removed or refused. Seat runs a contract read before ready.
+  Metadata-protocol: none
+  
+  `@objectstack/mcp` now exports `packageDocAnswerRule(definitionReader?)`, `packageDocToolsServed(bridge, options)`, `definitionReaderOf(toolNames)` and `DEFINITION_READER_TOOL_NAMES`. A host that writes its own `initialize` text (`instructions` / `dataOnlyInstructions`) can carry the same "read the manuals first, end with sources" rule the open server appends to its default text: send it where `packageDocToolsServed` is true, naming the reader `definitionReaderOf` picks from the tool names the connection lists. The open server calls the same exports, so there is one copy of the sentence. Nothing else changes.
+- 084156d: feat(mcp): `aggregate_records` names the record of a lookup group beside its id, read as the caller
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When the MCP `aggregate_records` tool groups by a `lookup` or `master_detail` field, each group now carries a new member `<key>__label` beside the key: the name of the referenced record, from the referenced object's name field (`nameField`, as ADR-0079 resolves it). `<key>` is the group column, which is the key's alias when the call gives one. The same spelling is used by the hosted ask tools, so one prompt reads both. This holds on both the HTTP and the stdio door.
+  
+  The name is read as the caller, through the same bridge and context as the aggregate, in one batched read of the referenced object for the groups the tool serves. Nothing is read with other rights, so the caller's object, field and record permissions apply as they do for any read the caller makes.
+  
+  - A label is present only for a key whose record the caller's read returns with a non-blank name. Any other key carries no label, and nothing else in the answer changes.
+  - No label is added, and the answer is exactly as before, when the caller is not served the referenced object, its name field or the lookup field, when the referenced object is a system object the tool does not read, or when the read fails. A failed name read never fails the aggregate.
+  
+  The tool description now tells a model to name such a group by its `__label`, never by the id, and to say the record cannot be named where no label is present. Existing members (`rows`, `totalGroups`, `truncated`, `currencies`) are unchanged.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [806bba8]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [1950f07]
+- Updated dependencies [9c29d73]
+- Updated dependencies [f848e37]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [96faf44]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [ba304e0]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [7702f09]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [a8126d2]
+- Updated dependencies [65fddc8]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/lint@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/rest@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

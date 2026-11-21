@@ -1,5 +1,86 @@
 # @object-ui/plugin-map
 
+## 18.7.0
+
+### Patch Changes
+
+- be91bfc: fix(ui): the kanban, calendar, timeline and map views draw the no-access state for a refused read, not the raw error
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A reader who may open a page but is not granted the records its kanban board, calendar, timeline or map reads saw the transport's own string where the view would be, untranslated (for example `Error loading kanban data: ApiDataSource: HTTP 403 Forbidden — {…}`). Each of the four views now classifies a failed load with the shared load-error verdict the list page, the related list and the Gantt chart use, and for a permission refusal (a 403, or a `PERMISSION_DENIED` / `FORBIDDEN` code) draws the calm no-access state those surfaces draw: a neutral status panel with the shared `list.loadErrorForbiddenTitle` / `list.loadErrorForbiddenMessage` sentence in the reader's language, and none of the server's text. Every other failure (a 500, a dropped connection) keeps each view's existing error screen. The map's tile-style failure is not a data load and is unchanged.
+- Updated dependencies [ee5fdc8]
+- Updated dependencies [d6d9645]
+- Updated dependencies [1c05546]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [89364b4]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [55020c3]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [f2078e3]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [34308dc]
+- Updated dependencies [eb1f85d]
+- Updated dependencies [3819afe]
+- Updated dependencies [a5ddeb6]
+- Updated dependencies [9212119]
+- Updated dependencies [b65488a]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [ccded86]
+- Updated dependencies [e01b8be]
+- Updated dependencies [d96c878]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [227a16a]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [a8126d2]
+- Updated dependencies [65fddc8]
+- Updated dependencies [6b360ab]
+- Updated dependencies [d19d875]
+- Updated dependencies [c7174c3]
+- Updated dependencies [1d7015a]
+- Updated dependencies [9972432]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [dea68e9]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [cf45e4f]
+- Updated dependencies [f548bdc]
+- Updated dependencies [9a98a46]
+- Updated dependencies [96b66ca]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [a23164e]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+  - @object-ui/plugin-detail@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @object-ui/components@18.7.0
+  - @object-ui/react@18.7.0
+  - @object-ui/permissions@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

@@ -1,5 +1,225 @@
 # @objectstack/plugin-approvals
 
+## 18.7.0
+
+### Minor Changes
+
+- e6fa510: feat(approvals): an escalation deadline can count working time on an organization's working calendar (`escalation.clock: 'working_time'`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-automation/references/state-machines-and-approvals.md
+  
+  An approval node's `escalation` gains two optional keys (ADR-0157 D5):
+  
+  - **`clock`**: `'wall_clock'` (the default) or `'working_time'`. Under `wall_clock` nothing changes: `timeoutHours` counts elapsed hours from `created_at`, nights, weekends and holidays included, and every request already open keeps its deadline (a stored snapshot carries no `clock`). Under `working_time` the hours count only the working periods of a working calendar (`sys_work_calendar`), skipping its holidays and counting its make-up workdays: a request opened at 17:00 on a Friday with `timeoutHours: 4`, on 09:00-12:00 and 13:00-18:00 periods, escalates at 12:00 on the next working day.
+  - **`calendar`**: the code of the working calendar to count on. Left out, the request organization's default calendar counts. There is never a fallback to wall-clock hours.
+  
+  The approvals sweep and the request read share one deadline function. A `working_time` deadline is counted again on every sweep and every read and is never stored, so a holiday entered after a request opened moves its deadline; an escalation that already fired stays fired (single-shot, ADR-0042). When the calendar cannot count the deadline (no calendar has the code, the organization has no default, or the calendar is not maintained as far as the deadline needs), the request does not escalate, the next sweep tries again, and the request read carries a new additive field, `sla_due_refusal` (`code`, `reason` or `date`, `message`), in place of `sla_due_at`. The approvals inbox shows "Calendar can't compute" with the reason where the SLA countdown sits, in every console language.
+  
+  `@objectstack/lint` refuses a `calendar` written beside the wall clock (`approval-escalation-calendar-without-working-time`, error): nothing would read it. Whether the named calendar exists is the organization's runtime data and is never checked at publish. The Studio approval inspector offers the clock and, under working time only, the calendar.
+  
+  Not released alone: this ships in the same release as the working-calendar objects and service and the working-day formula functions (ADR-0157 D4).
+
+### Patch Changes
+
+- 8f49499: fix(approvals): a recall or subflow-parent strand reports the hook refusal that stranded the run
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  When an approval decision strands its flow run because the next step was refused (a record hook's declared refusal, a validation rule, a permission), the thrown `RESUME_FAILED` already carries `innerRefusal` and the refusal's marked `userMessage`. Two doors report a stranded run on a success answer instead, through `resumeFailure`: the recall door, whose own resume stranded, and a subflow parent that stranded after the run this door resumed advanced (through `decide` and through `recall`). Those reports carried `code`, `runId`, `status` and `repairable` only, so the approver saw a stranded run with no reason.
+  
+  - `ResumeFailureReport` (`@objectstack/spec/contracts`) gains two optional members, `innerRefusal` (`{ code, message }`, the engine's `AutomationResult.innerRefusal`) and `userMessage` (the declared sentence in the language of whoever started the run, since a resumed leg keeps the starter's locale; the authored message when no person started the run). The names and shapes are the ones the thrown `RESUME_FAILED` uses. `innerRefusal` is absent when the strand met no refusal (a fault), and `userMessage` is absent unless the failure carried a marked end-user text, so it can ride alone; neither changes how `code` and `repairable` are read. `ResumeFailureDetailsSchema` is unchanged. On the resume door these members already ride the error envelope.
+  - `AutomationEngine.takeSubflowParentStrand` now returns the stranded parent's `innerRefusal` / `userMessage` beside `runId`, `repairable` and `error`, read from the parent's own result.
+  - The approvals recall door and the subflow-parent strand fill both members whenever the strand met a refusal, read the way the thrown `RESUME_FAILED` reads them: an `innerRefusal` whose `code` is outside the registered error codes or whose `message` is not a string, and a blank or non-string `userMessage`, are dropped, so a node that returns a malformed pair answers the same on the success channel as on the thrown one.
+  
+  No migration: the change only adds optional members, and a caller that ignores them reads exactly what it read before.
+- 8e46424: Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  feat(messaging): Slack DM delivery — a `slack` channel, a per-person link store, approval requests by DM
+  
+  An organization can now receive notifications in Slack, as direct messages to each person who connected their own Slack user (ADR-0013 addendum of 2026-11-19, step 2 of #34730).
+  
+  - **The install.** An organization administrator (`setup.write` in their current organization) installs the organization's own Slack app with `PUT /api/v1/messaging/slack/account` `{ token }`. Slack proves the bot token (`auth.test`) before it is saved. The app's bot token needs the scopes `chat:write`, `im:write`, `users:read` and `users:read.email` (the methods called are `auth.test`, `users.lookupByEmail`, `conversations.open` and `chat.postMessage`); `auth.test` does not check scopes, so an app without `users:read.email` installs and every proposal then answers 502. The token is kept in `sys_channel_account.bot_token`, a `secret` field: encrypted at rest by the host's `ICryptoProvider`, masked on every read, never returned by any route, and read only by the server when it calls Slack. `GET` and `DELETE` on the same route read and remove the install.
+  - **A person's link.** `POST /api/v1/messaging/me/slack-link/proposal` proposes a link by the person's email (Slack `users.lookupByEmail`); it delivers nothing until the person confirms it with `POST /api/v1/messaging/me/slack-link/confirm`. A Slack link is proposed only for a verified email and names no one before it is confirmed. `GET` and `DELETE /api/v1/messaging/me/slack-link` read and remove it. An administrator lists links with `GET /api/v1/messaging/slack/links` and removes one with `DELETE /api/v1/messaging/slack/links/:id`; the person is told by inbox and e-mail (topic `messaging.slack_link_removed`) and may link again. A link goes when the person is deleted, banned, or leaves the organization. Links are `sys_channel_user_link` rows; every write names who acted, so the platform's write audit records each one.
+  - **The channel, only where connector-slack is composed.** `slack` is registered beside inbox, email, sms and push only on a composition where connector-slack's `slack` client service resolves at boot: `ConnectorSlackPlugin` now registers that service, which sends with a caller-held token. On such a composition, and only there, the `/automation` save doors accept `slack` on a `notify` node, and `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list `slack` as a channel. A `notify` node naming `slack` delivers only where connector-slack is composed, the organization installed Slack and the recipient confirmed a link. Without connector-slack, those doors answer as before: a `notify` node naming `slack` is refused 400, and neither preference door lists it. It sends `conversations.open` then `chat.postMessage` with the notification's title linked to its deep link, made absolute under `OS_AUTH_URL` / `OS_BASE_URL`. Preferences, digest and quiet hours apply as on every channel. A recipient with no confirmed link is skipped before any delivery row is written, so nothing is dead-lettered for them; a refused token stops delivery on that install until an administrator sets it again; a rate limit is retried.
+  - **Approval requests.** `approval.requested` also asks for `slack`, beside inbox and e-mail, only while the `slack` channel is registered and mounted (connector-slack composed).
+  - `MessagingChannel` gains an optional `reachableRecipients(ctx, { organizationId, recipients })`, consulted once per channel per emit after preferences. A channel without it reaches every recipient, as before.
+  - `PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']` lists `sys_channel_account` and `sys_channel_user_link`, and the organization ownership inventory gives both a row.
+- bfd6b6b: fix(i18n): an approval rejection reads 驳回 in Chinese, on the runtime surfaces and in the designer's approval panel
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Chinese, the approval runtime now names the reject decision 驳回 (zh-Hant 駁回), the word the flow designer gives the approval branch and the server notifications already use. Before, the designer's branch said 驳回 while its approval-node help and the approver's buttons said 拒绝 for the same decision.
+  
+  - `@object-ui/i18n`: the `approvalsInbox` strings in zh-Hans and zh-Hant: the inbox and record-bar buttons, the bulk and single confirm dialogs, the toasts, the status chip (已拒绝 → 已驳回), the history row, the keyboard hint and the send-back limit notice.
+  - `@objectstack/plugin-approvals`: the zh-CN labels of `sys_approval_request` (the `approval_reject` lever, its confirm question and success toast, the `rejected` status) and of the `reject` row of `sys_approval_action`; the zh-Hant bundle already said 駁回. The email action-link confirm and result pages read 驳回.
+  - `@object-ui/app-shell`: the approval node's zh panel in the flow designer: the multi-approver help, the status-mirror help, the escalation help and its `auto_reject` option label (自动拒绝 → 自动驳回; the stored `auto_reject` value is unchanged), and the revision-limit help. Its branch label and Problems hint already said 驳回; a zh-Hant session draws the same Simplified table.
+  
+  拒绝 stays where it means access denial or declining an invitation, in the AI tool approvals, and in the designer's end-node refused outcome and its API-key, bulk-update and audit-outcome refusals. Display text only: the stored `rejected` status and the `reject` action key are unchanged, and English and the other languages are untouched.
+- 03865ae: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(approvals): a request no one can approve tells its submitter and names the remedy
+  
+  When an approval step resolves to no one who can decide it and no administrator other than the submitter can take it (an organization of one whose step sets `excludeSubmitter` is the common case), the request opened silently: no one was notified and the submitter saw only "Submitted". It now writes a note on its timeline, rendered in the reader's language, and tells the submitter under the `approval.comment` topic: "No one else can approve this request yet. An organization administrator must add a member who can approve it, then reassign the request to them." When the slate kept an unstaffed position, the note names it: "…must add a member who holds position 'legal'; that member can then decide it."
+  
+  The submitter still cannot approve their own request, not even through the administrator override. When no one else is on the slate, the two refusals of that approval now end with the same remedy instead of "Another approver on the step decides it" / "An approver on the step decides it"; with another approver on the slate the text is unchanged. The `excludeSubmitter` note for that route no longer says a privileged override can decide it: it reads "…because this step sets excludeSubmitter, and no one else could take it."
+  
+  A `platform_admin` approver step's slot is now labelled "Platform administrators" (in the reader's language on the approvals door, `pending_approver_names`; in English on the stored `pending_approver_labels`) instead of its raw address `platform_admin:*`. The approvals guide now says that on a deployment where no one holds platform-administrator standing such a step waits with no warning.
+- fe75349: fix(approvals): the approval timeline names an unstaffed position by its label, and the platform's own rows read as the system's
+  
+  Clause-②: yes (widening) — @objectstack/plugin-approvals adds the optional `ApprovalServiceOptions.positionLabelSource`; @object-ui/i18n adds approvalsInbox.systemActor and approvalsInbox.actSystemNote; nothing removed
+  Metadata-protocol: none
+  
+  When a request goes to the organization's administrators because a position on its approver list has no holder, its timeline note named the position by its machine name ("岗位「crm_sales_manager」无人任职"). The note a reader is served now names it by its label: the reader's language pack (`positions.<name>.label`) first, else the position's declared `label`, else the name as before ("岗位「销售经理」无人任职"). The English the row stores for audit keeps the name.
+  
+  On the timeline, a row no person took read its actor as "—", and the routing, submitter-exclusion and no-approver notes read as "Commented". A row with no actor now reads its actor as "System", and a `comment` row with no actor reads as "System note". A person's comment keeps "Commented" and its author.
+  
+  New locale keys: `approvalsInbox.systemActor` and `approvalsInbox.actSystemNote`, in all eleven packs.
+- 1e018d6: feat: edit a record and its line tables together, and lock a record's lines while an approval locks the record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A locked record's lines are locked too.** While a record is held by an approval that locks it, writes to its master-detail child rows are refused with `RECORD_LOCKED` (409), the same answer a write to the record itself gets: inserting a row under it, updating or deleting one of its rows, and moving a row into it or out of it (both ends of a reparent are checked). A multi-row write that touches any such row is refused as a whole, and a row whose parent cannot be read is refused when the parent object has a locking approval the writer's run does not own. The approval's own exemptions carry over: system writes and the flow run that opened the approval still write. The refusal names the record by its object's label ("This Opportunity is locked while an approval is in progress, …"). Lookup children are not affected. `@objectstack/plugin-approvals` binds the new `bindDetailRowLockHook` beside the record lock it already binds.
+  
+  **`@object-ui/plugin-form` exports the record-page body-table editor.** `RecordBodyTableEditor` draws a master-detail body table as editable lines (the `LineItemsField` grid, with the child columns, field permissions and add / remove rules the master-detail form uses) for a host's edit session (`RecordEditSessionContext`). `buildRecordEditBatch` folds a record's field changes and every table's lines into one batch (the `buildMasterDetailEditBatch` diff, table by table), and `attributeRecordEditRefusal` places a refused batch's reasons on the record's field or on the line whose write carried the refused field.
+  
+  **`@object-ui/i18n`** adds `detail.bodyTableRow`, `detail.bodyTablesReadOnlyBulk` and `detail.discardInlineEditsMessage` to every built-in pack.
+  
+  **`@object-ui/plugin-detail`** exports `RecordBodyTableEditorSlotContext`: while a host provides it, a `record:related_list` whose relationship id (`CHILD_OBJECT.FK_FIELD`) is in the slot's set draws the host's element in its place instead of the read-only list. The record page's edit state draws its body-table editors through it; no new node type is registered.
+  
+  In the console, Edit on a record page that draws master-detail body tables now opens the page's edit state: the fields become inputs, the body tables editable lines, and one Save writes all of it in one batch. Per-field inline edit stays on every record page, those included, and saves the record alone through its save bar. One mode runs at a time: the edit state offers no per-field inline edit, and pressing Edit while inline changes are unsaved first asks whether to discard them.
+- 03bce5c: fix(approvals): rejecting through the `approval_reject` action requires a reason
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is one param declaration in this plugin's own object metadata: approval_reject's comment goes from optional to required, so a call to that action without a reason is refused. No stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of the `approval_reject` action on `sys_approval_request` that sends no `comment`: the call used to reject the request and is now refused before the approvals route runs. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): the declaration belongs to this plugin, and nothing a metadata author writes changes, so `Metadata-protocol` is `none`.
+  
+  `approval_reject` declares its `comment` param `required: true`, so a reject through `approval_reject` always carries its reason. The declared param contract judges the call before the target route runs, and it counts an empty or whitespace-only string as missing: the REST action door (`POST /api/v1/actions/sys_approval_request/approval_reject`) and MCP `run_action` answer `400` with the param contract's refusal naming `comment`, and the console's param dialog holds Confirm until a reason is typed. A reject with a reason runs as before. The action's AI tool description now says the reason is required. The `POST /api/v1/approvals/requests/:id/reject` route itself is unchanged.
+  
+  Fix for a caller: send the reason as `params.comment` when you run `approval_reject`.
+- d9be915: fix(approvals): a reject through the approvals route or `IApprovalService.decide` requires a reason
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is one runtime check in this plugin's decide(): a reject without a non-blank string comment is refused. No stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of `POST /api/v1/approvals/requests/:id/reject`, or of `IApprovalService.decide()` with `decision: 'reject'`, that sends no `comment`, an empty or whitespace-only one, or one that is not a string: the call used to reject the request and is now refused before anything is read or written. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): nothing a metadata author writes changes, so `Metadata-protocol` is `none`.
+  
+  The refusal is the one the `approval_reject` action door gives, judged by the same rules over the same `textarea` param: `400 VALIDATION_ERROR` with `Invalid action params: Action param "comment" is required` for an absent, `null`, empty or whitespace-only value, and `Invalid action params: Action param "comment" (textarea): …` for a value that is not a string (a number, a boolean, an array or an object). The request stays pending. A reject with a reason runs as before, and an approve keeps its comment optional. The platform's own rejects keep working: the SLA escalation's `auto_reject` and the revision-limit auto-reject do not pass through `decide()`, and the email action link records its fixed text. The email action link still records no reason the approver typed; that is a separate follow-up.
+  
+  Fix for a caller: send the reason as `comment` in the reject body (`{ "comment": "Over budget." }`).
+- bb1c55d: docs(approvals): a reject reason is required at every human door — the contract docblock, the docs and the platform checklist say so
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Text only; no behaviour changes. `ApprovalService.decide()` already refuses a reject whose `comment` is missing, blank or not a string with `400 VALIDATION_ERROR` before any write, and an approve keeps its comment optional. The texts that still called the reason optional now state that rule: the `ApprovalDecisionInput.comment` and `IApprovalService.decide` docblocks in `@objectstack/spec` (the type is unchanged: `comment` stays optional in the interface, because an approve may omit it), and the `approval_reject` action's source comment in `@objectstack/plugin-approvals`, which said the target route does not judge the reason.
+- 62daf7d: fix(approvals): a working-time SLA deadline whose calendar read errors no longer fails the request open or the whole list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When an approval step's escalation counts `working_time` and the working calendar read itself fails (an error that is not a calendar refusal, such as a driver error reading `sys_work_calendar`), opening the request threw after the `sys_approval_request` row was written and its approvers were told, so the approval node failed its flow run. The same error failed every list read and single read that included the row, and so every decision that loads it.
+  
+  That row is now served with no deadline and the error is logged as a warning; the open returns the request, the run suspends as usual, and the other rows of a list keep their deadlines. A calendar refusal is still served as `sla_due_refusal`, the deadline never falls back to wall-clock hours, and the escalation sweep still skips the row and asks the calendar again on its next pass. The served request shape is unchanged.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

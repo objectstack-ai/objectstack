@@ -1,5 +1,157 @@
 # @objectstack/metadata-core
 
+## 18.7.0
+
+### Minor Changes
+
+- 2495486: feat(spec): `userActions.transfer`, the per-object switch for the Change Owner action, and its structural eligibility
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An object can now say whether it offers the Change Owner action. The action is not meant for every record that happens to carry an `owner_id`: line items, invoices and other details get one injected too, and an admin holding `modifyAllRecords` would otherwise see the action everywhere.
+  
+  - **Structural eligibility (derived, never overridable).** `isTransferEligible(def)` from `@objectstack/spec/data` answers true only when the platform injects the object's reassignable `owner_id` (`resolveInjectedSystemColumns(def).owner`), an owner is provable for it, and the object does not declare that field `readonly: true` (in either `fields` shape, record or array). So `ownership: 'business_unit' | 'org' | 'none'`, every `managedBy` object, every `sys_*` object and `systemFields: false` never offer the action, and neither does an `external` object whose owner is unprovable (`isOwnerAnchorUnprovable`: it neither declares `owner_id` nor maps a remote column onto it in `external.columnMap`). `transferIneligibilityReason(def)` names the structural fact when the answer is no, and, where the object can be made eligible, the change that does it (drop `readonly` from `owner_id`, set `ownership` to `user`, declare or map the external owner).
+  - **The switch.** `userActions.transfer` takes the same shape as the CRUD entries beside it: a boolean, or `{ enabled, visibleWhen, disabledWhen }` whose CEL predicates read the record the action acts on. Omitted, it is on for `sharingModel` `private`, `public_read` and `public_read_write`, and for an object that declares no `sharingModel` (a custom object then resolves to `private`); it is off for a `controlled_by_parent` detail. Authors override both ways: `transfer: true` on a detail with a real owner, `transfer: false` where the owner is the actor by rule.
+  - **The one resolution.** `resolveUserActionTransfer(def)` returns `{ enabled, predicates? }`: structural eligibility first, then the switch, then the `sharingModel` default. It is the answer the Change Owner endpoint and the console action will read once they ship, each still asking the caller's own transfer verdict per record; neither exists in this release.
+  - **Refused at parse.** `transfer: true` or `{ enabled: true }` on an object that is not eligible is refused at `userActions.transfer`, with the structural reason and its remedy in the message. Closing the switch there (`false`) is accepted. `changeOwner` and `reassign` under `userActions` are refused with a pointer to `transfer`.
+  
+  The switch gates the dedicated action, not the raw write: a plain `owner_id` update stays governed by `allowTransfer` alone, so import mappings and hooks are unaffected. To block every change of owner, declare `owner_id` `readonly`.
+  
+  The Studio object form gains a Change Owner row under User Actions, with its label and help text translated in every shipped locale.
+  
+  The served object document classifies `userActions.transfer` beside the four CRUD entries: for a caller who cannot read a field, a `transfer` predicate that names it is removed and the switch with its other predicate stays, as for `edit` and `delete`, instead of the whole entry being dropped.
+  
+  Nothing reads the switch at runtime yet. The Change Owner endpoint and the console action come in follow-up changes, so the liveness ledger grades `userActions.transfer` `planned` and `os lint` / `os validate` warn an author who sets it to `true` or uses the object form that nothing honours it yet. The key is new, so no stored object carries it and nothing needs migrating.
+  
+  **Existing objects that set `userActions.exportCsv: true` get a new warning.** Drilling `userActions` showed that no export menu reads `exportCsv`: setting it to `false` does not hide CSV export, which follows the view's `exportOptions` and the object's effective API operations. The ledger now grades it `dead`, so `exportCsv: true` raises a `liveness-dead-property` warning at `os lint` / `os validate`, and the hint says to remove it (`exportCsv: false` is not flagged). It is a warning, not a refusal: every stored object still loads. A follow-up (#35619) either makes the export menus honour the key or removes it.
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+- 170ca48: feat(spec): a field group lists its own members and their order (`fieldGroups[].fields`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A field group may now list which fields it shows and in what order:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic', fields: ['account', 'name', 'valid_until'] },
+    { key: 'terms', label: 'Terms', fields: ['terms'] },
+  ]
+  ```
+  
+  The record page, the create and edit forms and the drawer show the group's fields in the list's order, whatever order the object's `fields` declares them in, so a group can be reordered without moving any field (and without changing a list view's default column order).
+  
+  Nothing changes for an object that writes no `fields` on its groups: a group without the list still holds the fields whose `group` names it, in field declaration order. `Field.group` is the older spelling and is still read; it is not deprecated for removal.
+  
+  The two spellings must agree. The object parse refuses a field one group lists while its own `group` names another declared group (reported at both places; a `group` naming no declared key is not another group, so the list wins), a field two groups list, a name one list repeats, and `fields` on a group that places a related list (`relatedList`). A field whose `group` names a listing group that leaves it out is shown after the listed fields, never dropped. A listed name the object does not declare is skipped, so removing a field never makes the object unparseable; `os lint` warns about it (`field-group-member-unknown`).
+  
+  New export: `readFieldGroupMembership` (`@objectstack/spec/data`), the membership `deriveFieldGroupLayout` places sections from, for editors that also show hidden fields.
+  
+  Studio: dragging a field inside a group, or into another group, now writes those groups' `fields` lists and leaves the object's field declaration order alone. Only the ungrouped bucket, which has no list, still reorders by declaration order. Moving a field to another group from the field inspector does the same once a list is involved.
+  
+  Field-level security: the object document served to a caller who cannot read some fields keeps each group's `fields` list, with the hidden names filtered out and the rest in order, so the record page and forms keep the layout for that caller.
+
+### Patch Changes
+
+- a23164e: feat(spec, ui): an object takes a colour from a fixed palette, and its icon is drawn as a white glyph on a square of that colour
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`ObjectSchema.color` (new, optional).** One name from a closed palette of nine: `gray`, `blue`, `teal`, `green`, `amber`, `orange`, `red`, `pink`, `purple` (exported as `OBJECT_COLORS` and the `ObjectColor` type from `@objectstack/spec/data`). No free colour values: `color: '#ff0000'` is refused, and the refusal lists the nine names. An object without a `color` is drawn in the neutral `gray`. Nothing to migrate: every existing object stays valid and simply has no colour.
+  - **The AI blueprint carries it too.** `BlueprintObjectSchema.color` is the same leaf (required-but-nullable on `SolutionBlueprintStrictSchema`, like `icon`), and its rule asks the model to colour every object and give each object of one solution a different colour while the palette lasts. A producer of the STRICT shape must now send `color` on each object, `null` when it has none; the lenient shape a stored blueprint is read with keeps it optional.
+  - **`ObjectIconTile` (new, `@object-ui/components`).** Draws an icon name as a white glyph on a rounded square of a palette colour, in four sizes. Each name has a light-theme and a dark-theme value chosen so the white glyph keeps at least 3:1 contrast. `OBJECT_COLOR_TILE_CLASS` and `objectColorOrDefault` are exported with it.
+  - **Navigation draws objects as tiles.** In the sidebar, the app-home menu and the phone menu, every entry that opens an object is drawn as that object's tile: the entry's own `icon` when it names one, else the object's, on the object's colour. Dashboards, pages and links keep their line icons. `NavigationRenderer` takes a new `resolveTargetColor` resolver (`NavTargetColorResolver`) beside `resolveTargetIcon`; the console answers it from the object metadata it already holds (`useNavTargetColor`). A host that passes no `resolveTargetColor` gets its object entries as gray tiles where it had line icons.
+  - **The designer picks icon and colour together.** In the object's settings, the icon picker shows the nine colour swatches, and the trigger and every icon in the grid are previewed as the tile they become. The picker elsewhere (pages, apps, navigation entries) is unchanged: only objects carry a colour.
+  - The other places that draw an object's icon (list and record headers, search, related-record chips, the designer's object lists) switch to the tile in a follow-up release.
+  
+  `@objectstack/metadata-core`: the field-level-security reference table classifies the new `color` key as `keep` (a palette name names no field).
+  
+  `@objectstack/platform-objects`: the generic object form's metadata-form packs ship the new `color` row's label and help text in all 10 locales.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

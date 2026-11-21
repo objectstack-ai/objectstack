@@ -1,5 +1,286 @@
 # Changelog
 
+## 18.7.0
+
+### Patch Changes
+
+- 5f18b9b: fix(plugin-auth): removing a pending person writes an admin audit row, and the host-failure texts say the removal is refused
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/auth/admin/remove-sso-user` now writes one `sys_audit_log` row for a removal that committed, through the same writer the add doors use: `action: 'delete'` on the removed `sys_user`, naming the administrator, with `metadata` `{ event: 'user.admin_removed_pending', hostNotified }` (`hostNotified` is whether the environment-user host took the cancellation of the invitation; `false` with no host wired). A refused removal (a host that cannot be reached, a host's refusal, a person who is not pending, a failed delete) writes no row. With plugin-audit uninstalled no row is written, as for the other admin user doors.
+  
+  The removal door already refused with `503 SERVICE_UNAVAILABLE` when the environment-user host could not be reached, but the `warn` line logged in that case still said "The removal goes ahead.", and the `EnvironmentUserHost` and `environmentUserHost` option docs said a host failure is only reported on a removal. All three now say the removal is refused. Behaviour of the door is unchanged.
+- d053c7d: feat(identity): the Add User result says when the address was already pending
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a cloud-managed environment, Setup → Users → Add User now says when the address you added was already waiting for its first sign-in, including when you sent only an email. Before, that answer looked exactly like a fresh add.
+  
+  - `POST /api/v1/auth/admin/add-sso-user` answers `pendingAgain: true` on a re-add of a person who is still pending, and leaves the key out on a fresh add. It never answers `false`. `alreadyPending` is unchanged and is still on every answer, so nothing an API reader reads today changes.
+  - The `sys_user.add_sso_user` result dialog gains an "Already pending" row that reads `pendingAgain`. The dialog skips a field whose path is absent from the answer, so the row is drawn only on a re-add; a fresh add shows no `false` row.
+- 7bd5d28: feat(auth): `directSignIn.afterSignOut` lets an explicit sign-out return through the identity provider's sign-in page
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A deployment with direct sign-in on can now choose where an explicit sign-out returns once the identity provider has ended its own session. The default keeps today's behaviour, so nothing changes until a deployment sets the new value.
+  
+  - The auth plugin's `directSignIn` option takes `afterSignOut: 'hold' | 'identity-provider'`, and the environment variable `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT` wins over it, like the other direct sign-in settings. `hold` is the default. Any other value refuses to boot, naming the variable and both values.
+  - `GET /api/v1/auth/config` serves `features.afterSignOut` while the direct sign-in setting is on, on the same terms as `features.localSignIn`, and leaves it out otherwise. `AuthFeaturesConfigSchema` in `@objectstack/spec` gains the optional `afterSignOut` enum, and `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` gains `'afterSignOut'`.
+  - `hold`: the Console's sign-out sends the sign-in page as the provider's return address, and the page holds with a button to sign in again, as before.
+  - `identity-provider`: while `features.directSignIn` reads `true`, the Console's sign-out sends `{basePath}/sign-in/direct` instead, so after the provider's logout the browser goes through the direct sign-in door to the provider's own sign-in page. The door starts a fresh sign-in without the browser's cookies, and the provider has just ended its session, so it asks for credentials; it does not loop. Register the door's absolute address as a post-logout redirect URI at the provider.
+  - `@object-ui/auth`: `AuthPublicConfig.features` gains the optional `afterSignOut`. When the tab holds no auth config at sign-out, the client reads it once (3 seconds at most) and keeps the sign-in page if it cannot.
+  - Module exports on the `@objectstack/plugin-auth` entry: the type `DirectSignInAfterSignOut`. In `direct-sign-in.ts` (not on the package entry): `DIRECT_SIGN_IN_AFTER_SIGN_OUT`, and `DIRECT_SIGN_IN_ENV.afterSignOut`.
+- 9e65474: fix(plugin-auth): an invitation mail sent outside a better-auth endpoint still carries the mailbox proof
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A host that calls the organization plugin's `sendInvitationEmail` from its own code, outside any better-auth endpoint, now sends the same mail the console's invite sends: its link carries the invitation's mailbox proof, so the invitee can use the one-step acceptance from it. The proof is minted through the auth manager's own context when no endpoint context exists. Nothing else changes: the proof is still delivered only in the mail and never stored in clear, and a send inside an endpoint mints exactly as before.
+- c9aad65: Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/auth/admin/ban-user` and `POST /api/v1/auth/admin/unban-user` now write one `sys_audit_log` row for a change that committed, through the same writer the other admin user doors use: `action: 'update'` on the target `sys_user`, naming the administrator, with `metadata` `{ event: 'user.admin_banned' | 'user.admin_unbanned', hostNotified }`. A refused ban or unban writes no row. Without the admin plugin, the ban columns' write now carries the administrator's attribution too, so plugin-audit's own row for that change names the administrator instead of the system, as it already did with the admin plugin; the written fields are unchanged. The ban reason and expiry stay on plugin-audit's row for the user's change, not in `metadata`. The route ledger note for `admin/remove-sso-user` and the authentication docs now name that door's `user.admin_removed_pending` row.
+- 7eaa3f5: fix(auth): the direct sign-in door accepts the `state` an identity provider passes back after a sign-out
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With direct sign-in on and `afterSignOut: 'identity-provider'`, a sign-out that carried a `state` came back from the identity provider's logout to `GET /api/v1/auth/sign-in/direct?state=…`, and the door answered `400 VALIDATION_ERROR` instead of showing the identity provider's sign-in page, so the person was left on an error. The door now accepts one `state` and ignores it: it starts a new sign-in with its own state, as it does without one. A `state` sent twice is still refused `400`, like a repeated `callbackURL`, and any other unknown query parameter is refused as before. The shipped Console sends no `state`, so its sign-out is unchanged.
+- cf7e443: feat(plugin-auth): a host's session-creation organization choice can fall back when that organization's access policy would refuse the sign-in
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A host's `session.create.before` hook (`AuthManagerOptions.databaseHooks`) chooses the organization a new session is scoped to, and the framework then refuses the sign-in (`IP_NOT_ALLOWED`, 403) when that organization's own allowed IP ranges do not admit the request. The hook can now return an ordered list of fallbacks beside `data`:
+  
+  ```ts
+  import type { SessionCreateBeforeResult } from '@objectstack/plugin-auth';
+  
+  databaseHooks: {
+    session: {
+      create: {
+        before: async (session): Promise<SessionCreateBeforeResult> => ({
+          data: { ...session, activeOrganizationId: lastUsedOrgId },
+          activeOrganizationCandidates: [ownedOrgId, oldestOrgId],
+        }),
+      },
+    },
+  },
+  ```
+  
+  The session is scoped to the first organization, `data.activeOrganizationId` first and then the list in order, that the organization's scoping admits. Each one is judged exactly as the single choice is: the same client address the server established for the request, the same organization policy, the same tenant-level administrator exemption. When no candidate is admitted, the sign-in is refused as before, and the `login_failed` audit row names the host's first choice. The list never reaches the stored session.
+  
+  `data` is required, as in better-auth's own hook result: a hook that returns only a list still returns `data: session` beside it. The candidates are the host's word: plugin-auth judges each organization's access policy, never membership, so list only organizations the user is a member of. A non-member candidate can be admitted at creation, and the per-request membership check then drops the session's organization.
+  
+  Nothing changes for a host that returns no list or an empty one. A value that is not an array of non-empty organization ids is a host error and fails the session creation with a `TypeError`. The new public export is the type `SessionCreateBeforeResult`.
+- 92ab056: fix(plugin-auth)!: a credential change ends access issued before it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or export is added, removed, renamed or re-shaped, and nothing stored is rewritten: what moves is the answer the auth doors give to an email-change link, a second-factor challenge or a password sign-in that predates the account's last password change, which is now the answer a link, challenge or password that was never valid gets. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  Once an account's password changes, the following, issued for that account before the change, no longer grant access after it:
+  
+  - An email-change link (any link the email-change flow begun at `POST /api/v1/auth/change-email` mails, at either of its steps and to either address: the confirmation sent to the current address, and the link sent to the new one) minted before the change answers at `GET /api/v1/auth/verify-email` exactly what a link that was never issued answers: `401 INVALID_TOKEN`, or the `error=INVALID_TOKEN` redirect to its callback. Its owner requests a new one. A link's issue time is whole seconds, so one minted in the same second as the change is refused too.
+  - A second-factor challenge opened by a password sign-in before the change answers what a challenge that was never opened answers. The person signs in again with the new password.
+  - A door that ends the account's sessions when it sets the password ends every session opened before its password write: both reset doors, `POST /api/v1/auth/change-password` with `revokeOtherSessions: true` (the session it installs is kept), and the one-step invitation acceptance (ahead of the session it opens).
+  - A password sign-in during which the account's password changes is refused with what a wrong password answers at that door, and leaves no session.
+  
+  The moment of the change is the last time the account's local password was written over, so every door that replaces a password counts, an administrator's `POST /api/v1/auth/admin/set-user-password` included. A check that cannot read the record refuses. Access issued after the change, and an account that never changed its local password, are untouched. No request, response or metadata shape changes.
+  
+  **BREAKING** for a client that opens an email-change link, completes a second-factor challenge, or finishes a password sign-in after the account's password changed underneath it: each is now refused as above, with the code a never-issued link, a never-opened challenge or a wrong password already answers, so a client that handles those answers needs no change. The fix for a person: request a new email-change link, or sign in again with the new password.
+- b3247dd: fix(auth)!: a server outside development mode refuses a development seed credential, and `os user set-password` sets a new one on the server
+  
+  Clause-②: yes (narrowing) — narrowed: on a server whose `NODE_ENV` is not `development`, a password sign-in that submits the development seed password (`admin123`, or the value `OS_SEED_ADMIN_PASSWORD` sets) is refused on every account, and an account the development seed created opens no session while its stored password is still the one it was seeded with. Widened: the `os user set-password` command, the `sys_user.dev_seed_credential` column, and new `@objectstack/plugin-auth` exports `setOperatorPassword`, `findAccountByEmail`, `operatorPasswordRefusal`, `OPERATOR_PASSWORD_MIN_LENGTH`, `OPERATOR_PASSWORD_MAX_LENGTH` and the types `OperatorPasswordResetEngine`, `OperatorPasswordResetOutcome`, `OperatorPasswordResetRefusalReason`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, accepted value or metadata type is added, removed or renamed; a system column is added; nothing stored is rewritten: the moved answer is whether a server outside development mode accepts a development seed credential at sign-in. The one-line fix for a refused account is in the body: set a new password on the server with os user set-password. -->
+  
+  **BREAKING** for a deployment that serves, outside development mode, a database `os dev` seeded, or any account whose password is the development seed password. Such a sign-in is refused. Set a new password on the server with `os user set-password <email>`; the refusal names the command. A server in development mode (`os dev`) is unchanged.
+  
+  **The rule: a server outside development mode never accepts a development seed credential.** Development mode is `NODE_ENV=development`, the condition the development seed itself runs under. The rule lives in the auth plugin, so `os start`, `os serve`, the image and a custom host all apply it.
+  
+  - **The seed password is refused at sign-in, on any account.** A password sign-in with the development seed password answers `403 PERMISSION_DENIED`, and its message names `os user set-password`. It is decided on the submitted password alone, before any account is read, so every address gets the same answer. This covers the seeded admin, the stack's `demoStaff`, any other account on that password, and a database seeded by an earlier release.
+  - **The accounts the development seed creates are marked.** `os dev`'s admin and each `demoStaff` account carry `sys_user.dev_seed_credential`: a one-way digest of the password hash the seed stored, never the password. The column is never returned on reads, and any password change stops it matching.
+  - **A marked account still on its seed password opens no session**, on any sign-in door (password, emailed link, one-time code, passkey, social or SSO, impersonation), whatever password it was seeded with, `os dev --admin-password` included. A password check never confirms that seed password: a password sign-in answers it as a wrong password.
+  - **No password change is offered at sign-in.** Whoever signed in first could perform it. The way out is the operator's reset on the server.
+  
+  **`os user set-password <email>`** sets the account's password in the project database. It reads the new password from a terminal prompt (twice, not echoed) or from standard input with `--password-stdin`, never from the command line, and takes `--database-url` like the other one-shot commands. It checks that the new password is not a development seed password and is 8 to 128 characters long; the deployment's own password policy and password history are not applied. It writes nothing on a refusal. It deletes the account's outstanding password-reset links and codes from the project database before the new password lands. It clears the account's development seed mark and any sign-in lock, records the change time, and ends every session and revokes every API key of the account, as an administrator's forced reset does. It asks for no password change at the next sign-in. It writes the project database only: a secondary storage the host configures for the auth service is out of its reach, for the reset links and the sessions alike. With one configured, run the command with the server stopped, or restart the server afterwards; a secondary storage kept outside the server process outlives a restart and is cleared of the account's entries by hand.
+  
+  **Not detected:** a database seeded before this release with a custom seed password carries no mark and no well-known password. Set a new password with `os user set-password` on each account it seeded before serving it outside development mode.
+  
+  **Not ended at boot:** this release refuses the development seed password and every new session for a seeded account still on it. Sessions and API keys a seeded account was issued before the server left development mode are ended by `os user set-password`; run it on each seeded account before serving the database. Ending them at boot is follow-up #35184.
+- df8a1b8: fix(plugin-auth)!: a password reset disables the OAuth applications the account registered and revokes the SCIM credentials it minted
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what a completed password reset ends: rows the account owns are written disabled or revoked by the doors administrators already use, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an account that registered an OAuth application or minted a SCIM provisioning credential, and then has its password reset.
+  
+  - FROM: a completed password reset (the emailed link, the texted code, an administrator's `POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, and `os user set-password`) ended the account's sessions, API keys, linked sign-in accounts, authorized apps and device sign-ins. The OAuth applications the account registered (`sys_oauth_application.user_id`) stayed enabled, and the SCIM credentials it minted (`sys_scim_connection_credential.user_id`) stayed active. A self-service reset sent the account no notice.
+  - TO: the same resets also disable every OAuth application the account registered that is not disabled, as a platform administrator's Disable action does (the provider issues it no token, client-credentials tokens included, answers its tokens inactive at introspection, and the MCP endpoint refuses every token it holds), and revoke every SCIM credential the account minted that is still active, as Revoke Credential does, each revoke writing the `sys_audit_log` row Revoke Credential writes (`scim_credential_revoked`) naming the account for a self-service reset and the administrator for a forced one (`os user set-password` names no one and writes none). An application another account registered and a credential another administrator minted are not touched. The account's single sign-on providers and two-factor enrolment are kept.
+  - A completed self-service reset then mails the account `auth.password_reset_notice` (a new built-in template, in en-US, zh-CN, ja-JP and es-ES): how many API keys, linked sign-in accounts and authorized apps it ended, each application it disabled and each credential it revoked by name, and the single sign-on providers and second factor it kept. It is best-effort: a notice that cannot be sent never fails the reset. The forced resets send no notice and answer their requester instead.
+  - The administrator's forced reset reports the new counts on `data.revoked` (`ownedApps`, `scimCredentials`) and on its ledger row (`revokedOwnedApps`, `revokedScimCredentials`); `setOperatorPassword` answers `ownedAppsDisabled` and `scimCredentialsRevoked`, and `os user set-password` prints them. A disable or revoke that does not land answers the self-service requester an error, with no notice, and keeps the forced reset's `complete` false, as for the other rows; every other kind is still ended first, so an application that cannot be disabled leaves no API key, linked sign-in account or credential in place.
+  - A password change disables and revokes nothing. Its reminder, `auth.password_changed_notice`, now also lists the OAuth applications the account registered that are still enabled and the SCIM credentials it minted that are still active and not past their own expiry, and is sent when the account holds only those.
+  
+  The fix for an owner after a reset: ask a platform administrator to enable an application you still need again, and have a platform administrator mint a new SCIM credential for a connection whose credential was revoked.
+- 75925e1: fix(plugin-auth)!: a password reset ends what the account added before it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or export shape is added, removed, renamed or re-shaped, and no stored row is rewritten by a migration: what moves is what the auth doors end when a password is reset or first set, and the answer they give a link minted before it, which is now the answer a link that was never issued gets. The forced reset response gains two counts, its ledger row two keys and the operator outcome two fields. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  A password reset ends what the account added before it, and a password change reminds the account what it keeps.
+  
+  - **A completed self-service reset** (the emailed link at `POST /api/v1/auth/reset-password`, the texted code at `POST /api/v1/auth/phone-number/reset-password`) now ends, beside the account's sessions, every API key the account owns that is not revoked, its `revoked` flag false or unset (revoked as one its owner revoked, so the owner may restore it from the API Keys list), and every sign-in account linked to it other than its password (a social, OAuth or single sign-on link; the provider may be linked again as it was the first time). Where the OAuth provider is enabled it also ends every app authorized to the account: the account's consents, refresh tokens and stored access tokens are deleted, so the app asks to be authorized again, and an MCP access token is refused on its next request. Where device authorization is enabled it ends a device sign-in approved for the account and not yet collected. This build offers no passkey sign-in, so there are no passkeys to end. A reset that does not complete ends nothing. A completed reset that cannot end one of these (a record it cannot read or write, a linked account a host's `account.delete.before` hook keeps, an account it cannot name) answers an error once the password is written; the password stands, its change time and password history are recorded all the same, and resetting again ends what remains.
+  - **A password change** (`POST /api/v1/auth/change-password`) ends none of these: an authorized app keeps its authorization and gets a new MCP access token with its refresh token, issued after the change. When the account still holds an API key that is neither revoked nor past its own expiry, a linked sign-in account or an authorized app afterwards, the account's address is sent the new built-in template `auth.password_changed_notice`, naming each (its variables are `apiKeyCount`, `apiKeys`, `signInAccountCount`, `signInAccounts`, `authorizedAppCount` and `authorizedApps`), through the email service. It is best-effort and never fails the change. plugin-email ships it in `en-US`, `zh-CN`, `ja-JP` and `es-ES`, so `BUILTIN_AUTH_TEMPLATES` grows from 32 rows to 36, and core's `PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template` names it beside the other eight, so it resolves environment-wide and keeps one overriding package per deployment.
+  - **An administrator's forced reset** (`POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, the default) and the operator's `os user set-password` also unlink every linked sign-in account and end every app authorized to the account and every device sign-in approved for it, as the self-service reset does: where the OAuth provider is enabled, the account's consents, refresh tokens and stored access tokens are deleted; where device authorization is enabled, its pending device codes. The operator's command, which runs with no server, ends the ones the project database holds. Both now revoke a key whose `revoked` flag is unset as well. The forced reset's response reports the unlinks as `revoked.signInAccounts` and the apps as `revoked.authorizedApps` (its ledger row as `revokedSignInAccounts` and `revokedAuthorizedApps`), and the operator command prints both (`signInAccountsUnlinked`, `authorizedAppsEnded` on `setOperatorPassword`'s outcome). `revokeSessionsAndKeys: false` still ends nothing.
+  - **An account's first password counts as a password change when it is set onto an account that was already there**: through either reset door, an administrator's `set-user-password`, the one-step invitation acceptance of an existing account, or `POST /api/v1/auth/set-initial-password`. So links and challenges issued before it end, exactly as they do for any other password change. A password created in the same request as its account, as at a sign-up with a password, an administrator's create-user or a one-step invitation acceptance that creates the account, is still not a change, however long the steps between the two take. A password created outside such a request (written straight to the store), or before this release, counts as a change at its creation, so a verification link that signs in, mailed in the same second as that creation, answers as never issued and its owner requests a new one.
+  - **A verification link that signs its holder in** (on a deployment with `emailVerification.autoSignInAfterVerification: true`), **a magic link** and **a texted sign-in code**, issued before the account's password changed, now answer what a link or code that was never issued answers: `401 INVALID_TOKEN` or the `error=INVALID_TOKEN` redirect at `GET /api/v1/auth/verify-email`, the `error=INVALID_TOKEN` redirect with no session at `GET /api/v1/auth/magic-link/verify`, and `400 OTP_NOT_FOUND` with no session at `POST /api/v1/auth/phone-number/verify` (a code sent by `POST /api/v1/auth/phone-number/send-otp`). With auto sign-in off, a verification link still verifies the address. An MCP access token issued before the account's password changed (a reset, a change, or an administrator's `set-user-password`) is refused at the MCP endpoint, as a signed link is, in whole seconds; where the app's authorization still stands (a change, or `revokeSessionsAndKeys: false`), the app gets a new token with its refresh token. A link, code or token issued after the change works as usual.
+  
+  **BREAKING** for a client or integration that keeps using what a reset now ends: an API key the account owned before a completed password reset is refused as revoked (`403 API_KEY_REVOKED`), a linked sign-in account is no longer linked, an authorized app must be authorized again (after a forced reset with revocation on, too), a verification link that signs in, a magic link or a texted sign-in code issued before the account's password changed answers as a never-issued one, and an MCP access token issued before it is refused. The fix: mint a new key after the reset (or restore the old one from the API Keys list), link the provider again, authorize the app again, request a new link or code, or let the app refresh its token.
+- 6927c3f: fix(plugin-auth)!: a self-serve social creation is admitted only with a provider-verified address under an address-based posture
+  
+  Clause-②: no (narrowing: a creation admitted today is refused; owes one CONTRACT_REVIEW_TIER review before the queue)
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the audience posture or a social-provider sign-in; `content/docs/permissions/authentication.mdx` and `content/docs/deployment/tenancy-modes.mdx` gain the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answer is an account the admission gate does not create, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment under the `email_domain` audience posture, or under `open` while email verification is in force, where people create their account by signing in through a social provider that reports the address unverified.
+  
+  - Under `email_domain`, and under `open` while email verification is in force (the default there; only the deployment can declare it off), a new account through a social provider (`socialProviders`) is created only when the provider reports the address verified. Any other is refused `403 SELF_REGISTRATION_CLOSED` at the admission gate, as `invite_only` already refuses it: no account, no session, no membership. A browser sign-in redirects with `error=SELF_REGISTRATION_CLOSED`.
+  - A pending invitation addressed to that person does not admit the creation either, under both postures: the invitation is matched by the same address.
+  - The rule is told by the creation class, not by a list of providers, so a social provider added later is covered without being named.
+  
+  Unchanged: a social provider that reports the address verified, which is admitted and bound as before; identity providers an operator registers (`oidcProviders` entries and SSO providers); accounts an administrator creates, SCIM provisioning and accounts a boot command provisions; the first account of a fresh install; email-and-password, magic-link and email-OTP sign-ups; `open` with the deployment's email verification declared off; and the `invite_only` posture.
+  
+  What to do: a person refused this way verifies the address with the social provider and signs in again, or, where the deployment offers it, signs up with email and password and completes the verification mail. An invited person can also open the invitation mail's own link, which verifies the address and accepts in one step.
+- ecd4b2b: fix(plugin-auth)!: SSO discovery connects only to addresses that are public at connect time
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. What moves is runtime answers of the SSO doors: a read of an identity provider's OpenID Connect configuration is sent only to an address that is public when the connection is made, unless the deployment's trusted origins list its origin. `AuthManagerOptions` gains one optional member and the guarded fetch's init one optional member; nothing stored, no registry key and no authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an identity provider whose OpenID Connect host resolves to a private, loopback, link-local, cloud metadata or host-platform address (`168.63.129.16` included), or to any other non-public address, on an origin `OS_TRUSTED_ORIGINS` does not list, at the moment the server reads it: a registration (`POST /api/v1/auth/sso/register`, or the Register SSO Provider bridge) is refused `400 VALIDATION_FAILED` on `issuer` (or on `oidcConfig.discoveryEndpoint` when the registration names one), an update that turns "sign out of the company sign-in too" on is refused `400 VALIDATION_FAILED` on `signOutOfIdp`, and a sign-in's callback ends on the error page with `invalid_provider`. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no metadata author writes an SSO provider, so `Metadata-protocol` is `none`.
+  
+  SSO discovery connects only to addresses that are public at connect time. Every read the server makes of an identity provider (a registration's discovery document, the sign-out switch's read of that document on a registration or an update, a sign-in's discovery, and the token, key-set and userinfo reads of a sign-in's callback) is sent through the platform's outbound-request guard (`@objectstack/core/egress`): the connection resolves the host, judges every address by the platform's address classes, and connects to an address it judged, so the address judged is the address connected. A host that is not public is refused and nothing is sent to it, whatever an earlier lookup of the same name answered, and so is a name that does not resolve when the read connects. Only reads at the origins the provider's configuration names are judged (the registration's body, or the provider row the sign-in reads): every other request the server makes while answering, such as a datastore or a rate-limit store reached over HTTP, is sent as before. A registration still judges its discovery host before reading it, now by the same rule and the same address classes, an address literal included; a name that does not resolve there is left to the read, which refuses it. The origins a registration names stay trusted for that registration's discovery checks only, and `OS_EGRESS_ALLOWED_TARGETS` does not open SSO discovery.
+  
+  `@objectstack/core`: the guarded fetch's init takes fetch's `redirect` mode; `manual` answers a redirect response as it is and follows nothing, for a caller that refuses redirects itself.
+  
+  Fix for an operator whose identity provider runs on an internal network: list its origin in `OS_TRUSTED_ORIGINS`, and its reads are sent as before.
+- 1e692d1: fix(plugin-auth)!: SSO discovery fetches only hosts that resolve to public addresses
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is one runtime answer of the SSO provider register door: a registration whose discovery document sits on a host that resolves to an address that is not public, on an origin the deployment's trusted origins do not list, is refused before anything is read. No stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an SSO provider registration (`POST /api/v1/auth/sso/register`, or the Register SSO Provider bridge `POST /api/v1/auth/admin/sso/register`) whose OpenID Connect discovery document sits on a host that resolves to a private, loopback, link-local or otherwise non-public address, on an origin `OS_TRUSTED_ORIGINS` does not list: it is refused `400 VALIDATION_FAILED` on `issuer` (or on `oidcConfig.discoveryEndpoint` when the registration names one), and the bridge answers `400 SSO_REGISTER_FAILED`. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no metadata author writes an SSO provider registration, so `Metadata-protocol` is `none`.
+  
+  SSO discovery fetches only hosts that resolve to public addresses. Before a registration reads its discovery document, the server resolves that document's host and every address must be public (the same predicate `@better-auth/sso` applies to the endpoints it reads at sign-in). The origins a registration names stay trusted for that registration's discovery checks, as before; that trust never stands in for this one. A registration that reads no discovery document (a SAML provider, or `skipDiscovery`) resolves nothing, and a registration with no session is answered `401` before any name is resolved.
+  
+  Fix for an operator whose identity provider runs on an internal network: list its origin in `OS_TRUSTED_ORIGINS`, and the registration reads its discovery document as before.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [1950f07]
+- Updated dependencies [9c29d73]
+- Updated dependencies [f848e37]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [96faf44]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [eb9f8ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [a8126d2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/service-messaging@18.7.0
+  - @objectstack/rest@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

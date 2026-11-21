@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/cli 18.x and @objectstack/verify 18.x; the check lists below are that version's.
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "18.7.0"
   domain: process
   tags: project, process, testing, verify, release, changeset, upgrade, backfill, platform-gap
 ---

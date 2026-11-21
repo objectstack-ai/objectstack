@@ -1,5 +1,525 @@
 # @object-ui/plugin-detail
 
+## 18.7.0
+
+### Minor Changes
+
+- 5dd856f: fix(lint): `field-group-shadowed` judges the six highlights the record page draws, from one shared constant
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  The default record page draws the first six of an object's `highlightFields` (after the title field leaves the list) in its header strip and leaves those fields out of the Details body. The `field-group-shadowed` warning judged only the first four, so a field group whose only member sat fifth or sixth in `highlightFields` was empty on the record page and passed `os lint --strict`. It now judges the same six, and its hint says "first 6 highlightFields".
+  
+  What was accepted before and is warned now: an object whose field group is emptied by its fifth or sixth highlight. Fix it as the hint says: keep a member of that group out of the first six highlights, or drop the group. A list the old count warned is still warned: six hoisted fields include the first four, so no list that passed only under six is refused.
+  
+  New export: `@objectstack/spec/ui` adds `RECORD_HIGHLIGHTS_MAX` (6), the count both the lint and `@object-ui/plugin-detail`'s record page synthesizer read. `@object-ui/plugin-detail` now takes its own `RECORD_HIGHLIGHTS_MAX` from there; the value and the page are unchanged.
+  
+  <!-- adr-0087: registered field-group-shadowed-six-highlights -->
+- 9b6db73: feat(spec, ui): a master_detail child is a table in the record overview by default
+  
+  Clause-②: yes (widening: a master_detail FK with no `relatedList` now reads as `'primary'`)
+  Metadata-protocol: semantic
+  
+  A `master_detail` child used to be a side list unless it also declared `inlineEdit`. Now the relation type decides: a `master_detail` FK that declares no `relatedList` is a body table in the parent's record overview. `inlineEdit` is no longer needed for that; it stays what it was, the write side (whether the edit form inlines the child as line items).
+  
+  - `relatedList: false` hides the list, `relatedList: true` keeps it a side list (a card in the related column, a tab on the tab row), `relatedList: 'primary'` is unchanged. A `lookup` FK with no `relatedList` stays a side list.
+  - `isBodyTableRelationship` is still the one judgement. The field-group placement check at `defineStack` and at the publish door follows it, so a field group may now name a plain `master_detail` child to position its table. Studio reads a plain `master_detail` FK as "primary" and writes an explicit `true` when you pick "Show".
+  - Placement: the body tables of a synthesized page are drawn in the overview's left column above the field sections (under the stage bar and key fields), in the parent's `relatedLists` order. A field group that names one still positions it. They never get a tab or a related-column card. The drawer uses the same page.
+  - An empty body table draws its column headers and one empty row holding the empty sentence and a New button.
+  - The table shows 10 rows by default (the page can set its own page size). "Show all N" expands it in place, and ↗ opens the child list filtered to the parent.
+  - Totals come from the server: the parent's `summary` field over the same child rows when there is one, otherwise a sum aggregate over every child row of this parent (the existing data query, no new endpoint). They are drawn in the table's summary row. The old "this page" sum of the shown rows is gone; a data source with no `aggregate` draws no total.
+  - A `master_detail` related list placed on an authored record page gets the same body-table treatment (the totals and the empty row).
+  
+  To keep an existing `master_detail` child as a side list, write `relatedList: true` on its FK.
+- c7174c3: fix(record-page): business dates read as dates, Save is the edit state's primary button, a new detail line starts on its defaults, and the tabs follow the header with no blank band
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  Four things on the record page.
+  
+  **Dates.** A `date` field that declares no `format` read as a relative phrase on the record page ("6 days ago", "Tomorrow") while the list beside it wrote the date ("Nov 13"), so the reader had to work the day out. The record page's field sections and its highlights strip now write the date itself, with its year, as the list's columns do; the relative phrase (an overdue deadline's "Overdue 5d" included) is the date's tooltip, and a deadline past due still reads red. A declared `format`, `'relative'` included, still wins. A `datetime` field already read as an absolute date there (its cell's default face is the compact one, never the relative phrase), and is now pinned to stay so. The record footer's created and modified times keep their relative wording, and card surfaces (kanban, gallery) are unchanged. `@object-ui/fields`' cell props gain `absoluteDate`, read by the `date` cell.
+  
+  **Edit-state buttons.** In the record page's edit state, Cancel drew as the filled primary button and Save as an outline one, so the hand fell on the button that throws the edit away. Save is now the one filled button, after Cancel, the order a form's footer uses. `page:header` now makes a host button declaring `variant: 'primary'` the primary over the page's own actions, in the place the host gave it; no other host button declares one, so every other header is unchanged.
+  
+  **New detail lines.** A line added to a master-detail table in the record page's edit state started blank, so a required column with a default (a status that defaults to "Pending") read red although the save then stored the default. A new line now starts on the child object's static defaults, the values a create form seeds; a default the server resolves at insert (`NOW()`, a CEL expression) is left to the server. A new line's empty required cell reads red only after a save was refused, with the server's reason listed under the table; a stored line is flagged as before. A line added and never edited, holding only its defaults, is still skipped at save like a blank one; once the user edits a cell of it, it is input and is saved, even when every value they typed equals a default. `LineItemsField` gains `newRowValues` and `newRowRequiredShown`; a line its Add starts on `newRowValues` carries the `UNTOUCHED_NEW_ROW` mark (a symbol key no payload carries) until its first edit, and `isBlankRow` reads that mark. `@object-ui/fields` exports `UNTOUCHED_NEW_ROW` and `isUntouchedNewRow`. A host that passes neither prop sees no change. The save request and its transaction are unchanged.
+  
+  **The band above the tabs.** The record page's scroller and its column layout each padded their top by 24px on a desktop, so a 48px empty band stood between the header and the tab row. The scroller now pads only its sides and bottom, and the column layout keeps a 12px top on every width, so the tabs follow the header at the gap the rest of the page uses; on a phone the title block keeps 16px to the tabs. The print chrome and the approval actions bar that render above the columns keep their own top margin, and an authored page the page renderer draws keeps its own top padding. Side padding is unchanged.
+- f3c9d42: feat(spec, ui): a master_detail child is a tab by default; a field group puts it in the overview and the form
+  
+  Clause-②: yes (widening: `@objectstack/spec/data` exports `isGroupPlaceableRelationship`, `fieldGroupsPlaceRelationship` and the `BodyTableContext` type, and `isBodyTableRelationship` takes an optional second argument)
+  Metadata-protocol: semantic
+  
+  A `master_detail` FK that declares no `relatedList` used to put its child list into the parent record's overview as a table (since #35597). Now it is a tab of the record page with its count, like any other related list, `inlineEdit` or not. It goes into the overview only where a field group of the PARENT names it (`fieldGroups[].relatedList`).
+  
+  - Placed by a group, the child's table is drawn at that group's position in the overview, the parent's create and edit forms inline it, and the record page's Edit saves the record fields and the rows in one save. Its tab stays on the tab row too, with its count.
+  - `relatedList: 'primary'` on the FK is unchanged on the record page: a body table with no group, and no tab of its own whether or not a group positions it. Its forms follow ruling B like every other child: a field group naming it inlines it in the parent's create and edit forms, `inlineEdit` or not, and with no group naming it the forms do not inline it, even with `inlineEdit`. `relatedList: true` keeps a tab that no group may place, and `false` hides the list.
+  - A field group may name exactly what it could name before: a plain `master_detail` child or a `'primary'` one. `isGroupPlaceableRelationship` is that test; `isBodyTableRelationship(field, { placedByGroup })` is still the one body-table judgement.
+  - `inlineEdit` on the FK no longer inlines a child in the parent's form by itself (maintainer ruling B: only the field group decides). It now only picks the form factor of a child a group places: `'grid'`, `'form'`, or `true` / absent for the shape-picked default. A child with `inlineEdit` that no group names is a tab and is not in the form.
+  - `os lint`: `relationship/line-items-inline-edit` now suggests a field group on the parent (with its required `label`) instead of `inlineEdit: true`, and only for a FK a group may place; `relationship/association-inline-edit` and `relationship/inline-edit-needs-bulk` judge the children a parent group places; the field-consumer rule credits a child's inline grid columns only when a parent group places it.
+  - The showcase invoice and expense report, and the CRM opportunity, gain a field group naming their lines, so their forms and record pages keep the line table.
+  - In the entry form a placed table sits at its group's place too: between the sections of the groups around it, or in a tab of its own (labelled with the group) in a tabbed form. A form whose sections name no field group keeps it below the record's fields.
+  - Studio's field-group picker offers the same children as before. The relationship field inspector reads a plain `master_detail` FK as "Show", and "Show" leaves the key absent so a group can still place it.
+  
+  To keep a master-detail child's table in the overview and its rows in the form (including a child that set `inlineEdit`), add a field group to the parent that names it, in the place the table should sit:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic information' },
+    { key: 'lines', label: 'Lines', relatedList: 'order_line' }, // or 'order_line.order' for one FK
+    { key: 'terms', label: 'Terms' },
+  ],
+  ```
+  
+  Such a group holds no fields. Or write `relatedList: 'primary'` on the child's FK to keep it in the overview with no group. A group may name only a list it can place: for an `inlineEdit` child on a `lookup` FK, or on a FK declaring `relatedList: true`, also write `relatedList: 'primary'` on the FK (a `master_detail` FK may instead drop `relatedList: true`). A form view that declares its own subforms still inlines what it declares.
+- 52fb30c: feat(plugin-detail): the default record page draws no stage bar and no key-field strip; the stage moves from the header's status tag
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  The default record page (`buildDefaultPageSchema`) no longer emits `record:highlights` or `record:path`. The stage is the status tag beside the record's name: a reader who may edit the stage field sees it with an arrow and opens a menu listing every stage in order, the current one checked; a stage the field's blocking `state_machine` cannot reach is disabled with its reason under the name. Picking a stage confirms, and a stage that makes other fields required (their `requiredWhen` holds once the record stands on it, such as a loss reason on a lost stage) asks for exactly those fields in the same dialog and writes them with the move. A refusal stays in the dialog, beside the field it names, and the stage does not move. A reader who may not edit the field, an approval lock or an open draft leaves the plain tag. A plain status field (no stage role) is read and moved the same way.
+  
+  The details body now draws every field its groups hold: the highlight fields and the stage field are no longer taken out of their groups, so a record reads in the same groups and order in view and in edit (objectstack#35849). `highlightFields` itself is unchanged and still drives the hover card, a related list's default columns and the record picker; nothing is picked when an object declares none.
+  
+  `buildDefaultHighlights` and both blocks are kept: an authored page, or a slotted page's `highlights` slot, still places a strip and a path where it wants them.
+  
+  - `@object-ui/components`: `RecordHeaderState` gains an optional `stage` renderer (with the exported `RecordHeaderStageParts`), which the header calls with the stage tag it would draw. Without a host bar (a phone) the header now draws the stage tag in the row under the record's name, beside the state's tags; before, a phone showed no stage at all.
+  - `@object-ui/plugin-detail`: exports `RecordStageMenu`, the menu a host hands the header as `RecordHeaderState.stage`. Its fields-a-stage-needs dialog comes from the package-internal `useStageChange` (`record:path` keeps its plain confirmation).
+  - `@object-ui/plugin-detail`: `BuildPageOptions.highlightFields`, `.statusField` and `.stages` are still accepted by `buildDefaultPageSchema` and `buildDefaultTabs` but no longer do anything there, since the default page draws no strip and no stage bar; `buildDefaultHighlights` still reads them. Retiring them is objectstack#35943.
+  - `@object-ui/i18n`: four `detail.stageMenu*` strings in every locale.
+  - `@objectstack/lint`: `field-group-shadowed` no longer counts the highlight strip as hiding fields from the detail body, since the default record page leaves them in their groups; a group whose only visible member is the record title still warns.
+- 170ca48: feat(spec): a field group lists its own members and their order (`fieldGroups[].fields`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A field group may now list which fields it shows and in what order:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic', fields: ['account', 'name', 'valid_until'] },
+    { key: 'terms', label: 'Terms', fields: ['terms'] },
+  ]
+  ```
+  
+  The record page, the create and edit forms and the drawer show the group's fields in the list's order, whatever order the object's `fields` declares them in, so a group can be reordered without moving any field (and without changing a list view's default column order).
+  
+  Nothing changes for an object that writes no `fields` on its groups: a group without the list still holds the fields whose `group` names it, in field declaration order. `Field.group` is the older spelling and is still read; it is not deprecated for removal.
+  
+  The two spellings must agree. The object parse refuses a field one group lists while its own `group` names another declared group (reported at both places; a `group` naming no declared key is not another group, so the list wins), a field two groups list, a name one list repeats, and `fields` on a group that places a related list (`relatedList`). A field whose `group` names a listing group that leaves it out is shown after the listed fields, never dropped. A listed name the object does not declare is skipped, so removing a field never makes the object unparseable; `os lint` warns about it (`field-group-member-unknown`).
+  
+  New export: `readFieldGroupMembership` (`@objectstack/spec/data`), the membership `deriveFieldGroupLayout` places sections from, for editors that also show hidden fields.
+  
+  Studio: dragging a field inside a group, or into another group, now writes those groups' `fields` lists and leaves the object's field declaration order alone. Only the ungrouped bucket, which has no list, still reorders by declaration order. Moving a field to another group from the field inspector does the same once a list is involved.
+  
+  Field-level security: the object document served to a caller who cannot read some fields keeps each group's `fields` list, with the hidden names filtered out and the rest in order, so the record page and forms keep the layout for that caller.
+
+### Patch Changes
+
+- ee5fdc8: fix(record-page): an authored record page's feed panels show the record's field history, and offer Field Changes
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On an authored (assigned) record page, a `record:discussion`, `record:chatter` or `record:activity` panel never showed who changed which field from what to what, never offered the Field Changes filter, and an authored `filterMode: 'changes_only'` silently opened on All Activity. The record page read the audit log only for the page it synthesizes.
+  
+  Now, on an object with `enable.trackHistory`, the record page reads the record's field history (the newest 50 audit entries, plus one user-name lookup) while one of those panels is on screen, at open or when its tab opens; a page with no such panel on screen, or an object without `trackHistory`, reads nothing more. The panel merges the field changes into its feed the way the default page's activity stream does: an update that wrote both an activity row and an audit entry is one row, now showing its before and after values; a change with no activity row is its own row; and an `updated` activity row with no audit entry steps aside, as on the stream. Field Changes is offered, and an authored `changes_only` holds those changes, exactly when the reader's audit read answered: a reader the server refuses the audit log to is offered no Field Changes, as before. A panel authored with `unifiedTimeline: false` shows no field changes and offers no Field Changes.
+  
+  Visible change on existing authored pages: on a `trackHistory` object, a feed panel's All Activity now includes the field changes with their before and after values, and its filter gains Field Changes. The default record page is unchanged. `@object-ui/plugin-detail` adds `mergeFieldHistoryIntoFeed` to its `recordTimelineStream` module (not re-exported from the package entry); no locale keys, props or entry exports change.
+- d6d9645: fix(plugin-detail): a long text summary roll-up wraps on the record page, and the summary's read display follows dark mode
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A summary (roll-up) field whose value is text read on the record page cut to one line with an ellipsis, the whole value only in a hover tooltip, as a formula did before. The record page's field rows now read a summary through the summary field's own read display, the face the record form draws, so the whole value shows and wraps. A number or money roll-up reads the same text it did.
+  
+  That read display used a fixed grey text colour that stayed the same in dark mode. It now uses the theme's foreground colour, so a roll-up reads at full contrast in both themes.
+  
+  What does not change: list and grid rows keep the one-line cell with the whole value in its tooltip, and the record page's highlights strip keeps its face. A host that registered its own `summary` face keeps it on the record page. No metadata key, value or default changes.
+- 2df9691: fix(plugin-detail): an authored record page folds its all-empty field groups into one closing line, as the default page does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record page you author, the details body (`record:details`) used to draw every field group the page keeps with `hideEmpty: false` as its own bordered card, even when every field in it was empty: a card holding nothing but its heading and one "Show N empty fields" row. A new opportunity on such a page showed two of these, one per empty group.
+  
+  Now every `record:details` body does what the default record page already did. The groups whose fields are all empty leave their places, and the body ends in one quiet line that names them, for example "Deal Narrative · Notes & Next Steps · 2 empty sections · Expand". Expanding the line draws each group in its own place, as its heading plus its "Show N empty fields" row, and from there the fields can be shown and edited in place. "Collapse" folds them back.
+  
+  What does not change:
+  
+  - A group with at least one value draws as before, its own "Show N empty fields" row included.
+  - `hideEmpty` keeps its default. An omitted key still hides an all-empty group outright, and such a group is not named in the line.
+  - Edit mode draws every group with every field as an input, and a print page prints every row.
+  - A standalone `detail-view` keeps one section per group, and still folds a body whose groups are all empty into one "Show N empty fields" row.
+  
+  No metadata key, value or default changes. The `@objectstack/spec` `describe()` of `record:details` `sections[].hideEmpty`, the `@object-ui/types` docs and the component manifest now describe the closing line.
+- f2078e3: fix(plugin-detail): a record page's empty-sections line follows the reader's remembered "show empty fields" choice
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A reader who chose "show empty fields" for an object found the record page's closing empty-sections line ("Deal Narrative · Notes & Next Steps · 2 empty sections · Expand") folded again on every visit, on the default record page and on an authored one alike, and expanding the line was forgotten as soon as the page closed.
+  
+  The line now reads and writes the same remembered choice each section's own "Show N empty fields" row already uses, kept per user and object. With "show empty fields" remembered, the line opens on its own, on both page kinds. Expanding or collapsing the line is that choice: it is remembered for every record of the object, after a reload and on another device, and it also opens or folds each section's own empty fields, since it is one choice.
+  
+  What does not change: with no signed-in user or no host preference store, the line keeps its own state, forgotten when the page closes, as before. Edit mode and a print page still draw every section. No metadata key, value or default changes.
+- 34308dc: fix(plugin-detail): the record page draws its approval band once when the details are split around a body table
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The synthesized default record page splits its details around a body table (a `relatedList: 'primary'` list, such as a quote's or an opportunity's line items): one `record:details` part per run of sections. Each part mounted its own `DetailView`, and each drew the record's approval band, so an approval-locked record showed "Locked for approval" twice, above the table and again above the next section. The laid-out page now has the first details part alone draw the band, above the table. An authored page's details body, a standalone `DetailView` and the record drawer are unchanged, and so is the lock rule: an approval node with `lockRecord: false` still reads as an editable approval.
+- eb1f85d: fix(plugin-detail): a record page's compact related card labels its rows from the list's columns when those columns leave the child's name out
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A compact related card in the record page's right column labelled every row by the child's record title, so a line item named by a stored copy of its product's title read the product page's own name on every row, even when the relationship declared the columns that tell the lines apart (`relatedListColumns: [opportunity, quantity, ...]`). When the related list declares columns and they leave the child's name field out, the compact row is now labelled from the first of those columns that is a lookup to another record, the principal may read and the block does not redact; the card still asks the server for that one column and nothing more. A list with no declared columns, columns that include the name, no readable lookup among them, or a template title (`titleFormat`) keeps the record title, and a child named by the key back to the page keeps the rule it had.
+- a5ddeb6: fix(plugin-detail): a record page no longer draws a field whose own `visibleWhen` is false for the record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `record:details` now honours a field's object-level `visibleWhen` (`Field.visibleWhen`: "field is shown only when TRUE") on every field it draws, the way the edit form does. The synthesized default record page used to draw such a field, label and value, on every record, so the page and the form disagreed about the same record. It applies to every body `record:details` draws: a `{ group }` reference, an enumerated section (the default page's ungrouped bucket, its split for an object with no `fieldGroups`, or an authored page's section) and a flat `fields` list.
+  
+  The verdict is the form's own: the same evaluator call (`resolveFieldRuleState`), over the record the page shows (bound as `record` and as `previous`) and the host predicate scope (`current_user`). A field predicate that cannot be evaluated still shows the field and warns once in the console, as on the form (ADR-0137 D3). That is the opposite of a field GROUP's `visibleWhen`, which hides the group on a fault. A section whose every field is hidden this way draws no heading. Display only: the record API still returns the field.
+- b65488a: fix(plugin-detail): the highlights strip, the detail view and the record drawer no longer draw a field whose own `visibleWhen` is false for the record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A field's object-level `visibleWhen` (`Field.visibleWhen`: "field is shown only when TRUE") now hides it on every record surface that draws fields, not only on the `record:details` body: the header highlights strip (`record:highlights`, and the strip a `detail-view` draws from `highlightFields`), the `detail-view` node's body and its header summary chips, and the record drawer that list, kanban, calendar, gantt and the other views open. Before, these surfaces drew such a field, label and value, on every record, so they disagreed with the edit form and the details body about the same record.
+  
+  Every surface calls the one implementation the details body uses, so the verdict is the form's own (`resolveFieldRuleState`), over the record shown (bound as `record` and as `previous`) and the host predicate scope (`current_user`). A predicate that cannot be evaluated still shows the field and warns once, as on the form (ADR-0137 D3). The verdict is the saved record's: an inline edit reveals a gated field after save. Display only: the record API still returns the field.
+- 72d19c4: feat(record-page): the record's header is one row with one button group
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record page used to stack its top bar, the record's header row under it and, while an approval was pending, a band of decision buttons above the body. They are now one 44px row:
+  
+  - **Full page.** The object icon and name, `/`, the record's name, its stage tag and an approval tag on the left; the record counter and prev/next, a divider and the record's ONE button group on the right.
+  - **Drawer.** The record's icon, name, stage tag and approval tag, then the button group, 整页打开 and 关闭. The drawer's bar draws no object name, counter or prev/next once the record's header holds it.
+  - **One button group, by the approval's state.** Normal: Edit, the record's one primary action and ⋯. Pending on the viewer: 通过 (the only filled button), 驳回, and ⋮ with the other approval levers, a separator and the record's actions. The viewer's own submission pending: 撤回, 催办 and the same ⋮. An administrator who holds only the override keeps the marked override menu ahead of the group. On a phone the bottom bar draws the same group, with 通过 the only filled button.
+  - **Approval tag.** 「待你审批」, 「审批中」, 「已退回修改」 or 「已驳回」 beside the record's name; it opens the approval's detail, today the approvals panel on the page.
+  - **Locks.** A record an approval locks draws no Edit and no 「审批中已锁定」 badge in the body; the approval tag says why (its tooltip names the lock). A lock from the record's state keeps Edit drawn and disabled, with its lock tag beside the record's name.
+  - **Reject asks for a reason.** The record page's reject dialog requires its comment. The declaration and the approvals list are unchanged.
+  
+  A record page whose layout has no `page:header` keeps the decision band above its body, since no header draws the group there. The request page's `ApprovalDecisionPanel` band is unchanged.
+  
+  `@object-ui/components` adds `RecordHeaderBarContext` (the slots a host's bar offers the record's header) and `RecordHeaderStateContext` (the tags and the button group a host's record state hands it); `RecordTopBar` and `NavigationOverlay` take an `actionSlotRef`, and `NavigationOverlay` a `stepperHidden`. `PageHeaderActions` takes a `defaultMaxVisible`. `@object-ui/react`'s `InlineEditProvider` takes `approvalTagDrawnByHost`, and `DetailView`'s approval band then draws no badge for an approval lock (the tally stays). Nothing an app authors changes.
+- b0c624a: feat(record-page): one tab per related list, and an Overview rail that sums up the other tabs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page's tab row and its right column are redrawn (supersedes objectstack#28469):
+  
+  - **Tabs.** Overview, then one tab per related list in its order, then Attachments, Approvals and Activity last. Every tab is there at first paint and none moves when the counts land. A list with no records keeps its place, greyed, with no number. The width is the row's only fold: the tabs that do not fit go into 「更多 N ▾」, whose items keep their counts. Approvals carries a dot while a request waits, not a count. A tab that merges several tables (only an explicit page can write one) carries no count.
+  - **Overview.** The stage path and the key fields sit across the whole width on Overview only; every other tab draws its block in full in their place.
+  - **Right rail.** On Overview, the right column sums up the other tabs, in this order: Approvals, Attachments, Recent activity, then 「其他相关」 with a card for each related list that has records. Each card has a title (which opens its tab), a grey count and at most three rows. A card with nothing to show is not drawn, and there is no 「还有 N 个空关联」 line. Nothing in the rail is editable. A rail with no cards folds away. A drawer draws no rail and no right-column switch. The rail's rows come from the page's one read: it reads nothing more.
+  - **No band at the foot.** A page drawn as written that places no approvals or attachments panel gets them as tabs of its first tab strip, not as bands under the page. The header's approval tag opens the Approvals tab.
+  - **One approval band.** A page drawn as written whose details are split into several `record:details` nodes draws the record's approval band once, on the first body that reaches it, recall included.
+  
+  - **Reader arrangement leaves with the cards.** The related cards' ⠿ handle, ⌥↑ / ⌥↓ and 「隐藏」 are gone with the cards, so a reader can no longer reorder or hide a related list on the page. An order or hides already stored still apply, and 「恢复默认顺序」 / 「显示」 still undo them.
+  - **`?tab=related` is retired.** The single 「Related」 tab is gone, so a saved link carrying `?tab=related` opens Overview.
+  
+  `@object-ui/plugin-detail` adds `ApprovalBandOnceScope`. `@object-ui/i18n` adds the 「更多 N」 trigger and the rail's labels in every pack. Nothing an app authors changes.
+- 1e018d6: feat: edit a record and its line tables together, and lock a record's lines while an approval locks the record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A locked record's lines are locked too.** While a record is held by an approval that locks it, writes to its master-detail child rows are refused with `RECORD_LOCKED` (409), the same answer a write to the record itself gets: inserting a row under it, updating or deleting one of its rows, and moving a row into it or out of it (both ends of a reparent are checked). A multi-row write that touches any such row is refused as a whole, and a row whose parent cannot be read is refused when the parent object has a locking approval the writer's run does not own. The approval's own exemptions carry over: system writes and the flow run that opened the approval still write. The refusal names the record by its object's label ("This Opportunity is locked while an approval is in progress, …"). Lookup children are not affected. `@objectstack/plugin-approvals` binds the new `bindDetailRowLockHook` beside the record lock it already binds.
+  
+  **`@object-ui/plugin-form` exports the record-page body-table editor.** `RecordBodyTableEditor` draws a master-detail body table as editable lines (the `LineItemsField` grid, with the child columns, field permissions and add / remove rules the master-detail form uses) for a host's edit session (`RecordEditSessionContext`). `buildRecordEditBatch` folds a record's field changes and every table's lines into one batch (the `buildMasterDetailEditBatch` diff, table by table), and `attributeRecordEditRefusal` places a refused batch's reasons on the record's field or on the line whose write carried the refused field.
+  
+  **`@object-ui/i18n`** adds `detail.bodyTableRow`, `detail.bodyTablesReadOnlyBulk` and `detail.discardInlineEditsMessage` to every built-in pack.
+  
+  **`@object-ui/plugin-detail`** exports `RecordBodyTableEditorSlotContext`: while a host provides it, a `record:related_list` whose relationship id (`CHILD_OBJECT.FK_FIELD`) is in the slot's set draws the host's element in its place instead of the read-only list. The record page's edit state draws its body-table editors through it; no new node type is registered.
+  
+  In the console, Edit on a record page that draws master-detail body tables now opens the page's edit state: the fields become inputs, the body tables editable lines, and one Save writes all of it in one batch. Per-field inline edit stays on every record page, those included, and saves the record alone through its save bar. One mode runs at a time: the edit state offers no per-field inline edit, and pressing Edit while inline changes are unsaved first asks whether to discard them.
+- bae933b: fix(record-page): the related tab offers only 「↗」 and 「+ 添加」, and a pick of several is added all or none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page's related tab drew a filter box, condition chips, an options menu, an export and its own New, and repeated the row count under the table. It now carries two entries at its right end. 「↗」 opens the child object's list under this record, on an empty list too. 「+ 添加」 is the one add entry, chosen by the relationship when the page authored no `add`: a `lookup` child opens a picker of that object whose first row is New; a `master_detail` child whose rows name a catalog record (one other required lookup) opens a picker of that catalog; one with no catalog opens the new-record form directly. The count shows once, in the tab title.
+  
+  A pick of several records is one request to the transactional batch route: every row is added or none is, and the list says why when none was. Before, each pick was its own write, and a failure part way left the earlier rows added. A data source without the batch route offers no picker.
+  
+  A child with a status and a deadline that the status settles is grouped by status on the tab: open groups first in the order the status lists them, completed groups last, each collapsible.
+  
+  The reader's header sort and column widths on the tab are remembered per list in the record page's existing per-user preferences.
+  
+  The list page 「↗」 opens names the record it came from: its condition tag reads the record's name, a breadcrumb leads back to it, 「Reset」 puts that condition back after the reader changed the filters, and New opens the record form linked to it.
+  
+  A body table's total under a currency column whose currency does not resolve is drawn as its cells are, an amount with no symbol, instead of being left out (objectstack#35710). Rows that name their own currency are still totalled per currency.
+- a3a74f2: feat(record-page): dense field rows, one-line activity entries grouped by day, and one row per attachment
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page now fits more on one screen: fields read as one row each with the label on the left, the activity feed shows one line per entry under a day heading with a one-line comment box, and each attachment is one file row with its actions in a ⋮ menu.
+  
+  New locale keys in every pack: `detail.streamToday`, `detail.streamYesterday`, `detail.viewApproval`, `detail.replyToComment`, `detail.attachmentsDropHint`, `detail.attachmentsChooseFile`, `detail.attachmentActions`. `RecordActivityTimeline` takes an optional `onViewApprovals`; `RichTextCommentInput` takes an optional `compact`; `CommentBody` takes an optional `controlsClassName`. No metadata key, value or default changes.
+- 8500ee7: feat(list): confirm a state-machine move before a list cell saves it; the drawer's save bar says when the record changed elsewhere
+  
+  Clause-②: yes (widening) — `GridCellSelection` in `@object-ui/components` takes an optional `confirmCommit(row, columnKey, value)` member; nothing removed or renamed
+  Metadata-protocol: none
+  
+  In a grid that mounts `GridCellSelection` (the select-first grid every `ListView` draws):
+  
+  - **A move of a state-machine field asks first.** When an active `state_machine` validation rule of the object governs the field on update, a new value committed into its cell (picked in the editor, or pasted) opens a confirm naming the field and both values and saying saving may trigger related automation. Cancel writes nothing and the cell keeps what it showed; Change saves the value as any commit is saved. Focus goes back to the cell either way.
+  - **The generic seam:** `GridCellSelection.confirmCommit` is asked before a value that changes what a cell shows is staged or saved. A promise holds the write until it settles (`true` writes, `false` or a rejection writes nothing); `null` or `undefined` means no question, as before.
+  
+  On a record page or in a record drawer, `InlineEditSaveBar` now says so when the record is read again at another version while an inline edit session is open (a list cell beside the drawer saved it, say). The draft stays as typed, and Save writes it over the version now read, as it did before; only the note is new.
+- a8126d2: feat(rest): a refused cross-object batch names the operation that caused it, and a related list's multi-pick add names that record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST {basePath}/batch` (the cross-object transactional batch) now adds `failedOperation: { index, object }` to its refusal body when one operation is the cause: `index` is that operation's position in the request's `operations`, and `object` is the object it named. It rides beside the existing `error`, `code` and `userMessage`. It is present when an `update` or `delete` op is refused up front for naming no row (`400 VALIDATION_FAILED`), and when an op fails while the transaction runs (for example `404 RECORD_NOT_FOUND`, a `400 VALIDATION_FAILED` validation refusal, `400 BATCH_UNRESOLVED_REF`, `409 RESOURCE_CONFLICT`). It is absent when the request as a whole is refused (schema, `atomic: false`, size, no transaction), on the per-object API exposure and API-key management refusals, which are judged once per object and action, and on a failure after the last op ran.
+  
+  The key is additive. The success body does not change, and the batch stays all or nothing: a refused batch writes no row. Through `@objectstack/client` the key reaches `err.details.failedOperation`, because the client hands a flat refusal body with no `details` of its own over as `err.details`. A refusal that carries its own `details` (a package-scoped `409 RESOURCE_CONFLICT` with `details.candidates`) still carries the key on the body, but the client exposes only its `details` there.
+  
+  The related list's "Add" picker (`@object-ui/plugin-detail`) uses it: when a multi-pick add is refused for one picked record, the inline error names that record by the label the picker shows, followed by the server's reason. A refusal without an index inside the operations sent shows the server's reason alone, as before.
+- 65fddc8: fix: a `percent` or `currency` formula is a KPI chip on the record header; the lint prescription names all six return types
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `formula` field whose `returnType` is `percent` drew percentages in its list cells, and the record header strip drew it without the figure typography a `percent` field's chip has. The strip now reads a formula's declared `returnType` before it picks its face, for the two return types the spec reads as a field type, `percent` and `currency`. Both are KPI chips on the header strip. A formula of any other return type chips as before.
+  
+  The grid's footer formatting reads the same two return types, so a browser-computed footer over a `percent` formula reads `Sum: 75%` rather than `Sum: 0.75`, and over a `currency` formula reads as money. That is not a supported authoring shape: a `sum`, `avg`, `min` or `max` column summary over a `formula` field is refused at authoring by `list-view-summary-field-type-refused`, whatever its `returnType`, because a formula is computed on read and stored in no column, and the whole-set footer query answers `400 INVALID_FIELD`. The formatting reaches only an ungrouped, one-page footer the browser computes over a declaration `os validate` refuses. To total a formula's value, make it a stored field of its own, of the formula's `returnType` and carrying the same `expression`, which the engine computes and stores on every write, and summarise that field.
+  
+  `os explain dimension-virtual-field-refused` told the author to make a stored copy "of the formula's `returnType` (`number`, `text`, `boolean`, `date` or `currency`)", which named no type for a `percent` formula. It now lists all six, and a test holds the list to the spec's own `returnType` enum.
+- d19d875: fix(plugin-detail): the record page Overview draws the record's own field groups first and its master-detail tables under them, at the list's dense row height, never with a half-cut column
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Order.** On the default record page's Overview, a master-detail (body) table now follows the field sections the page draws open, instead of leading them: stage bar and key fields (the strip across the top), then the record's field groups, then its body tables. An object with no stage bar and no key fields opens on its own fields. A field group whose `relatedList` names a body table still places it at that group's position. Sections drawn closed (a field group with `collapse: 'collapsed'`, or a `collapsible` section that is `defaultCollapsed`) that trail the last open one follow the tables; a closed section between open ones keeps its declared place. With every section closed, the tables follow them all.
+  - **Density.** A body table's data rows are 33px (a 32px cell over the row line) under a 32px header, the measures of a list's compact rows (`BODY_TABLE_DENSITY`).
+  - **Width.** A body table draws the leading columns, in their order, that fit whole in the details column, and offers the rest behind its labelled ⤢ "All columns" button; it no longer scrolls sideways with a column cut at the right edge. Only a table whose first column alone is wider than the column still scrolls, with that column pinned.
+- 1d7015a: feat(record-page): a related list's tab moves left or right and hides, and 「更多」 restores the default order
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Reader arrangement is back.** The related cards' ⠿ handle, ⌥↑ / ⌥↓ and 「隐藏」 left the page with objectstack#35595, and with them the reader's way to reorder or hide a related list. This note supersedes the "Reader arrangement leaves with the cards" bullet of that release's note: 「左移」, 「右移」 and 「隐藏」 now sit on each related tab's own menu, 「恢复默认顺序」 sits in 「更多」 (in a drawer and an embedded pane too), and an arrangement already stored keeps applying.
+  
+  - **A related list's tab is its menu.** Open a list's tab and click it again (or press Enter, Space or ↓ on it): 「左移」 and 「右移」 move it one place among the related lists, and 「隐藏」 takes it off the row into 「更多」's hidden lists and returns to Overview. The open tab draws a ▾ to say so.
+  - **「更多」 restores the default.** While the order or the hidden set is not the default, 「更多」 ends with 「恢复默认顺序」: the default order with every list shown. It is in a drawer and an embedded pane too, which have no rail.
+  - **Fixed tabs.** Overview, Attachments, Approvals and Activity have no menu and never move.
+  - **One stored arrangement.** The tabs write the same per-reader, per-object arrangement the related cards wrote, so an order or hides already stored keep working, and the rail's 「已隐藏 N · 显示」 and 「恢复默认顺序」 still undo them.
+  
+  `@object-ui/i18n` adds `detail.recordTabMoveBefore` / `detail.recordTabMoveAfter` (左移 / 右移) in every pack. `@object-ui/plugin-detail` removes the unused `RelatedCardStack` and `useRelatedArrangement` modules (not exported from the package). Nothing an app authors changes.
+- 9972432: fix(record-page): the 动态 tab's Changes chip no longer counts the record's creation as one more edit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record of a history-tracked object that one person created and then edited on the same day, the Changes (变更) chip folded the creation's own audit entry into the run of edits: the fold said "4 updates" for three edits, and its first "edit" was the creation drawn as field changes from empty values. The All view of the same stream was right (the edits plus one Created row).
+  
+  Now the creation's audit entry never joins a fold of field changes, under All and Changes alike: the Changes chip folds the edits alone and shows the creation once, as its own row. No props, locale keys or entry exports change; `isRecordCreationEntry` is added to the `recordTimelineStream` module (not re-exported from the package entry).
+- cf45e4f: fix(plugin-detail): the record page names the owner once when a details section already shows the owner field
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the default record page, the meta line at the foot of the details column (created · updated · owner · id) always named the record's owner, and a details section usually showed the `owner_id` field as well: in a declared field group, in the "Other" group that collects fields no declared group takes, or in the derived section of an object that declares no groups. So the owner was shown twice. The meta line already left the owner out when the highlight strip showed it, and the default page no longer draws a strip, so that rule never applied.
+  
+  The meta line now also leaves the owner out when a details section of the page's own record draws the `owner_id` row. The owner then shows once, as the section's field, where it can also be changed. The sections report the rows they actually draw, so the owner stays on the meta line whenever no section draws it: the field is hidden, the reader may not read it, a `visibleWhen` hides it or its group, or its section is collapsed. When a collapsed section holding it is opened, the owner moves from the meta line to that section. The field groups are drawn as declared. The highlight strip rule is unchanged.
+  
+  This changes the laid-out default record page, the one `RecordPageColumns` draws. A default page whose tab strip cannot be laid out keeps the strip-only rule. No metadata key, value or default changes, and no prop, export or locale key is added.
+- f548bdc: fix: descriptions and help text no longer say the default record page draws a key-field strip or a stage path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default record page draws no key-field strip and no stage path: the stage is the status tag beside the record name. These texts said otherwise and now say what each key drives:
+  
+  - `@objectstack/spec`: the `highlightFields` describe ("Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it") and its Studio help text. The `stageField` and `RECORD_HIGHLIGHTS_MAX` doc comments say the header's status tag reads the stage and the count cuts only a strip a page places in its `highlights` slot. The upgrade-guide entry `field-group-shadowed-six-highlights` no longer tells authors to move highlights: the warning now judges the record title alone, and no action is owed.
+  - `@objectstack/platform-objects`: the `highlightFields` help text in every metadata-form locale.
+  - `@objectstack/lint`: the `os explain` text of `object-field-ref-unknown` and `semantic-role-field-unprovisioned` names the hover card and the record picker in place of the strip.
+  - `@object-ui/plugin-detail`: the `record:details` `hideFields` description no longer says the default page fills it. The key is still accepted.
+  - `@object-ui/i18n`: Studio's lifecycle-field help (`stageField`, and its "None" choice) talks about the status tag, not a progress bar.
+  - `@object-ui/types`: the page `highlights` slot doc says it places a strip the synthesized default does not draw.
+  - `@object-ui/app-shell`: on a phone the default record page no longer hands the synthesizer a highlight list it never read. The page looks the same, and the subtitle under the record name is unchanged.
+- 9a98a46: feat(list,detail): a change that makes other fields required asks for them in place — the kanban drop's fill-in, now shared by the list cell and the record page
+  
+  Clause-②: yes (widening) — `@object-ui/fields` exports `collectRequiredWhenPromptFields`, `RequiredFieldsDialog` and their types (moved from `@object-ui/plugin-kanban`, which never exported them) and the new `requiredWhenPromptReads`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  When a value about to be written makes another field's `requiredWhen` true while that field is still empty, the write is held and one dialog asks for the missing values:
+  
+  - **Where:** a list cell in the select-first grid every `ListView` draws, the record page's inline Save, and the kanban drop (as before).
+  - **What it shows:** the record's name, the change that set it off (read-only), and one row per field to fill, with the editors the record form uses. A value typed there that makes one more field required adds that field; Save waits for it.
+  - **Save** writes the change and the typed values as ONE update. **Cancel** writes nothing: the list cell keeps its value; on the record page the edit session and its draft stay.
+  - **A refusal of that update stays in the dialog:** under the field it names, as a new row for another field the reader can fill, or at the dialog's foot.
+  - **Not asked for**, and written and refused as before: a field that already has a value, is hidden or read-only, that the reader may not write, or that has no in-place editor (a file, rich text, a formula). The record drawer's per-field save does not ask either.
+  
+  The pre-evaluation is the one the kanban drop already used (`resolveFieldRuleState`, the evaluator the form and the server share, judged as the engine's transition gate), generalised from one key to any set of changed keys.
+- 96b66ca: feat(detail): the record header's stage menu asks for the fields a stage needs through the shared fill-in dialog
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The stage menu beside the record's name now opens the same dialog the list cell, the record page's inline Save and the kanban drop open (`RequiredFieldsDialog`, with `collectRequiredWhenPromptFields` judging which fields to ask for), and its own copy of the pre-check and field form is gone:
+  
+  - **What it shows:** the record's name and the move (「阶段：赢单」, read-only), then the fields the stage makes required while they are still empty. A stage that needs nothing opens the same dialog as the move's confirmation, with Move focused so Enter confirms.
+  - **Move** writes the stage and the typed values as ONE update; **Cancel** writes nothing. A value typed there that makes one more field required adds that field, and Move waits for it.
+  - **A refusal stays in the dialog** and the stage does not move: under the field it names, as a new row for another field the reader can fill, or at the foot (someone else changed the record, which is then re-read; a permission or other refusal as the stage line it was before).
+  - **Now not asked for, and refused as before:** a field with no in-place editor (rich text, a file, a formula). The menu's old form did not ask whether a field has one; the shared pre-check never offers such a field.
+  
+  `record:path`'s stage press keeps its plain confirmation.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [d6d9645]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [a9b36ef]
+- Updated dependencies [9f352e8]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [3819afe]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [9212119]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [ec24363]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [227a16a]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [f51578e]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [5a68b57]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9a98a46]
+- Updated dependencies [96b66ca]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [eb53d63]
+- Updated dependencies [a23164e]
+- Updated dependencies [b89f1b5]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/i18n@18.7.0
+  - @object-ui/fields@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @object-ui/components@18.7.0
+  - @object-ui/react@18.7.0
+  - @object-ui/permissions@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

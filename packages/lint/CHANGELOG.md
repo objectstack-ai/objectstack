@@ -1,5 +1,431 @@
 # @objectstack/lint
 
+## 18.7.0
+
+### Minor Changes
+
+- 4ffe9d3: feat(actions): an action writes the sentences it declares in the organization's language
+  
+  Clause-②: yes (widening: a new optional authorable key `ActionSchema.texts`, and new translation keys)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md, skills/objectstack-i18n/SKILL.md
+  
+  A `script` action's `js` body can now write a sentence into a record in the organization's language, the way a hook does: declare it under `texts`, keyed by a snake_case key, and ask for it by key — `texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }`, then `await ctx.text('email_subject', { subject })` where the body used to write `'Email: ' + subject`. The answer is in the organization's language, because everyone in the organization reads the record: the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person who ran the action. The translation is picked first, then its `{{ }}` holes are filled from `params`. The entry is the hook text's, built by the same shared factory.
+  
+  - The translation sits beside the action's other copy: `objects.<object>._actions.<action>.texts.<key>.message` for an action bound to an object, `globalActions.<action>.texts.<key>.message` for an object-less one. `os i18n extract` scaffolds the keys and the existing coverage check counts them; `objectstack validate` refuses a translation over a key the action does not declare.
+  - A missing translation, or no language to pick, answers the declared sentence, and the action goes on. A Localization setting that cannot be read rejects the call.
+  - Only declared text is translated: a string the body builds itself is written as it is. A key `texts` does not declare is refused when the action is saved if the body asks for it literally (`ctx.text('key')`), otherwise when it runs, as a fault naming the action and the key.
+  - `texts` is read only for a `type: 'script'` action with a `js` body (an inline `target` function is lowered to one by `os build`); on any other action, or with no body, it is refused at save. A `flow` action's record writes are the flow's own, marked and translated there (`flows.<flow>.records.…`).
+  - A text with `params` is compiled like a hook's: a hole over another name is refused when the action is saved, and `objectstack validate`, `compile` and the publish gate refuse a hole holding logic, an unknown formatter, an empty hole and `{{ amount | currency }}` with no code. A translation whose holes do not render at run time is dropped for the declared sentence, filled.
+  - Text is picked when it is written. Records already written are not changed. An action without `texts` runs exactly as before.
+  
+  `@object-ui/core` lists `texts` among the spec's declared action keys, so an action carrying them is not reported as having an unknown key; the console reads nothing new, because the body stores the sentence already picked.
+  
+  New exports: `@objectstack/spec` adds `ActionTextSchema` and the `ActionText` type (`ui`), `actionTextMessageKey` (`system`), and `ACTION_TEXT_MESSAGE_HOLE_REFUSED`, `actionTextsWithoutRunnableCode`, `undeclaredActionTextKeyAtSave` and `undeclaredActionTextAtRun` (`data`); `@objectstack/runtime` adds none. Nothing that was accepted before is refused.
+- f796089: fix(spec,metadata-protocol)!: retire the seed modes `insert` and `replace`, which inserted every record again on each replay
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #34798
+  
+  <!-- adr-0087: registered seed-mode-insert-replace-retired -->
+  
+  **BREAKING** for a seed dataset authored with `mode: 'insert'` or `mode: 'replace'`. A seed is replayed on every single-tenant boot, every package install or upgrade and every publish, and neither mode matched an existing row, so every replay inserted each record again: an un-walled install went from 1 to 2 to 3 rows over three boots, a person reference the first load had to leave empty stayed empty on the first row while only the newest copy named the person, and with a unique field the replay insert was refused and the one row stayed empty. `replace` expected the caller to clear the table first, and no load path ever clears one.
+  
+  What moves (each line FROM → TO):
+  
+  - `SeedSchema.mode` / `SeedMode` (`@objectstack/spec/data`; `defineSeed`, `defineStack({ data })`, a `seed` metadata item, a package body's seed): FROM `insert` / `update` / `upsert` / `replace` / `ignore` TO `update` / `upsert` / `ignore` (default `ignore`, unchanged). `mode: 'insert'` or `mode: 'replace'` fails parse with a prescription naming the fix; the save and publish doors refuse it with the same message. The retired pair is exported as `RETIRED_SEED_MODE_VALUES` (`@objectstack/spec/data`): it is derived from the parse refusal's own table, and the loader and the artifact door read it.
+  - a stored dataset that still declares one, replayed by the boot seed, the per-organization replay, the dev hot reload or a package install, upgrade or sample-data reseed (`SeedLoaderService.loadStored`, `@objectstack/metadata-protocol`): FROM inserted again on every load TO refused alone — it writes nothing, the load result carries one error with the prescription and `success: false`, and every other dataset loads. `SeedLoaderService.load()` and `validate()` refuse the dataset the same way when handed one unparsed, so a dry run reports what a real load does.
+  - a compiled artifact (`objectstack.json`) carrying such a dataset, booted by `os serve` / `os start` / `os dev` (the artifact door, `MetadataPlugin`, `@objectstack/metadata`): the door parses the artifact without that dataset and hands it back to the seed load, which refuses it alone; the door logs a warning naming the dataset and the fix. Everything else in the artifact registers and boots.
+  - `os diff` (`@objectstack/cli`) on a dataset declaring either mode: FROM "a replay inserts these again" TO a note that the mode is retired, that a replay refuses the dataset, and what to declare.
+  - the advisory lint rule `seed-insert-mode-duplicates-on-replay` (`validateSeedReplaySafety`, `@objectstack/lint`): FROM a warning on `mode: 'insert'` TO removed; the schema refusal does its job for both modes. The author-time rule count `os validate` / `os build` print drops by one (71 to 70 at this release).
+  - the save door's and the loader's hint for a key no record carries: FROM "or use mode 'insert' for rows with no natural key" TO a list of fields when no single field names a row, or `'id'` when the records carry their own ids.
+  
+  The fix: declare which field identifies a row and drop the mode (or declare `upsert` for reference data the package keeps current). Set `externalId` to the field that names a row, to a list of fields when no single field does (a junction table's `['team', 'project']`), or to `'id'` when the records carry their own ids. Rebuild the package, and reinstall it where it was installed with `os package install`, so the stored body carries the new declaration.
+  
+  No conversion is made, at load, at save or by a migration (ADR-0087 D3, entry `seed-mode-insert-replace-retired`): a keyed mode needs the field that identifies a row, and only the author knows it. Rows earlier replays duplicated are data and are left as they are.
+  
+  Unchanged: `ignore`, `upsert` and `update` datasets load byte-identically.
+- f4dbcc2: feat(lint): five publish-time checks for metadata that passes the schema and does nothing at run time, and four build probes over what landed
+  
+  Clause-②: no (narrowing: four publish-time refusals of metadata the schema accepts today)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #35245
+  
+  <!-- adr-0087: registered publish-refuses-metadata-the-runtime-ignores -->
+  
+  Five authoring rules join the registry the runtime publish gate and `objectstack validate` / `lint` / `compile` run. Each finding names its fix.
+  
+  - `flow-node-type-no-executor` (error): a flow node whose `type` no executor in this deployment runs fails every run with `NO_EXECUTOR`. Judged only against the automation engine's SEALED node-type vocabulary, which the publish gate reads from the new `AutomationEngine.getSealedNodeTypeVocabulary()` (it answers `undefined` until `sealNodeTypeVocabulary()` ran at `kernel:bootstrapped`). The CLI does not know which plugins a deployment loads, so it judges nothing here.
+  - `flow-approval-decision-unrouted` (error): an `approval` node whose decision out-edges are not labelled exactly `approve` and `reject` runs every out-edge for a decision no label claims, so the approving and the rejecting branch both run.
+  - `flow-http-timeout-missing` (warning): an `http` node with no positive `config.timeoutMs` and no positive node-level `timeoutMs` waits on a slow upstream for as long as the connection stays open; the engine arms no default timer. A `durable: true` node, which does not wait on the endpoint, is not reported. Like every warning, it makes `os validate --strict` exit 1.
+  - `state-machine-no-initial-states` (error): an active `state_machine` validation without `initialStates` (or with an empty list) lets a record be created already in any state. Add `initialStates`.
+  - `action-no-object-binding` (error): a standalone action that declares `locations` but no `objectName` binds to no object, so its button never renders. Set `objectName`, or write `locations: []` for a headless action.
+  
+  What was accepted before and is refused at publish now: a flow with an unrouted approval decision or a node type the deployment cannot run, a state machine without `initialStates`, a placed action with no object. The fix for each is in the finding.
+  
+  Four post-publish build probes report, as warnings on the publish receipt, what the person will see: `widget_empty_result` (a dashboard card whose real query reads only zeros), `rollup_never_computed` (a roll-up blank on all of the sampled parents that have children, judged inside one organization when the rows carry one), `seed_reference_unresolved` (a sample record the seed loader landed whose reference names no row in the organization that record belongs to, so the reference leads nowhere) and `flow_connector_action_unresolved` (a `connector_action` step naming a connector or action this environment does not serve). Each carries its sentence for the person in every platform locale. `RunBuildProbesOptions` gains `automation`, `packageId` and `seedLanded`; the publish passes the automation engine's connector lookups, the publishing package and its `seedApplied.landed` ids. `ProbeEngine` gains an optional `getSchema`, which names the column a row's organization is stamped in; the roll-up and seed probes judge each row inside that organization.
+  
+  New exports: `@objectstack/lint` adds `validateFlowNodeExecutors`, `validateInertObjectDeclarations`, `validateActionObjectBinding`, their finding types, and the rule ids `FLOW_NODE_TYPE_NO_EXECUTOR`, `FLOW_APPROVAL_DECISION_UNROUTED`, `FLOW_HTTP_TIMEOUT_MISSING`, `STATE_MACHINE_NO_INITIAL_STATES`, `ACTION_NO_OBJECT_BINDING`; `@objectstack/metadata-protocol` adds the `ProbeAutomation` and `SeedLandedRows` types; `@objectstack/service-automation` adds `AutomationEngine.getSealedNodeTypeVocabulary()`. `@objectstack/spec` changes only descriptions: those of `RuntimeBuildIssueSchema`, and that of a state machine validation's `initialStates`.
+- 0739dee: fix(objectql)!: a field that is `required` and hidden by its own `visibleWhen` is required only when shown, so one admin setting no longer locks every record outside the condition
+  
+  Clause-②: yes (narrowing + widening of the required write contract) — widened: an insert or update whose record a `required` field's own `visibleWhen` cleanly hides no longer needs that field, and an explicit null onto a row already shown and empty is accepted. Narrowed: a write that moves a record INTO the condition while that field is empty is refused; 18.5.0 accepted it.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is when the engine enforces required on a field that also declares visibleWhen. The one-line fix for a refused write is in the body: fill the field in the same write that moves the record into the condition. -->
+  
+  **BREAKING** for flows, bulk updates, imports and API PATCHes that move existing records into a `required` field's `visibleWhen` condition without filling the field. Such a write is now refused with `required` naming the field (on a bulk update, one such row refuses the batch). Fill the field in the same write. A field with `required` and no `visibleWhen` is unchanged.
+  
+  **What changed (ADR-0113 D1 and D5, amended).** A field that declares `required: true` and its own `visibleWhen` used to be enforced on every save. In Studio an administrator can add one in a few clicks, and from then on every record that fails the condition refused every write, even an edit of an unrelated field, naming a field nobody could see. The engine now judges such a field from its visibility on the write:
+  
+  - the predicate evaluates cleanly to anything but TRUE on the record (the stored row with the write over it), so FALSE, or `null` such as an unset boolean: the field is not required for that write, so a record outside the condition can be created and edited, and the form's clear-on-hide `null` is accepted;
+  - the predicate is true: the field is required by the same non-regression rule `requiredWhen` uses, against the prior record, which the engine now reads on update for objects with such a field;
+  - the predicate cannot be evaluated: it counts as shown, the field stays required exactly as before, and the server logs a warning naming the field and the fault.
+  
+  The predicate is evaluated with the acting user bound as `current_user`, so a role-gated field is judged per writer; a system write with no user counts as shown. A `formula` field it reads is computed over the record first, as a read of that record computes it. A formula that faults for a reason a read shares (an empty operand) is judged on the `null` a read serves; a formula whose read value the write path cannot know (it reads through a reference, calls `label()`, calls `can` on a write that picks no permission-gated option and so resolves no permission map, reads `current_user` on a system write with no user, or reads such a formula at any depth) counts as shown; the system-write case is logged as `no-acting-user`, as the direct `current_user` spelling is. Only the field's own `visibleWhen` is read: a field group's `visibleWhen` and form-view predicates are not.
+  
+  The refusal for such a field now comes from the rule pass rather than the record walk. A single-fault write gets the same `required` code and sentence; a write with several faults may name fewer of them in one `400`, or answer a dangling reference first, and a `beforeUpdate` hook now runs before the refusal and may fill the field.
+  
+  **A formula-driven `visibleWhen` on the form.** The form computes the object's formula fields over the record being edited before it judges the field rules (the form-side recompute in `@object-ui/core`, `@object-ui/components` and `@object-ui/console`), so it shows such a field where the server requires it. A formula the form cannot compute (it reads through a reference, calls `label()` or `can()`, reads `os`, or reads the user when nobody is signed in) leaves the field shown and required, and the server decides on save.
+  
+  **`@objectstack/lint`.** Three new warnings at `objectstack validate` and the object save door, on a `required` field with a `visibleWhen`: the predicate reads through a reference field (the server cannot evaluate it, so the field stays required everywhere); the predicate reads a `formula` field (with the counts-as-shown consequence when a formula it reads, at any depth, reads through a reference, calls `label()`, or calls `can`, which a write computes only when it picks a permission-gated option); and `storage.notNull: true` beside the pair (the column still refuses the null on a record outside the condition).
+  
+  **`@object-ui/app-shell`.** Studio's field inspector shows the reference-read and formula-read warnings under the Visible-when editor of a required field.
+  
+  **`@objectstack/spec`.** The `required` and `visibleWhen` descriptions on `FieldSchema` say how the two combine.
+- 5ecf937: fix(lint)!: a hook body or job body that does not compile in the wrapper the runtime runs it in is refused
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up owed — skills/objectstack-data/references/data-hooks.md (its "Sandbox restrictions" section teaches what a body may contain and names no compile check)
+  
+  <!-- adr-0087: registered hook-job-body-does-not-compile-refused -->
+  
+  **BREAKING** only for a hook or job body that never ran. The runtime runs an L2 hook body and an L2 job body (`body.language: 'js'`) as the body of `(async (ctx) => { … })`. A source that does not compile there, such as `const ctx = ctx.input || {}` (the parameter declared again) or `let x = 1; let x = 2;`, raised a SyntaxError before its first statement on every run, yet passed `os validate`, `os build`, `os lint` and the runtime publish door: the hook parse check reads the source with a parser, which reports no redeclaration, and a job body had no check at all.
+  
+  What moves (FROM → TO):
+  
+  - New gating rule `validateHookAndJobBodyCompiles` (`@objectstack/lint`), rule ids `hook-body-does-not-compile` and `job-body-does-not-compile`: FROM no finding TO `error` at `os validate`, `os build`, `os lint`, and at the runtime publish door for `hook` writes (`422 INVALID_METADATA`). No door publishes a job, so a job body is refused by the three commands. A hook lowered from an inline `handler` is located at `hooks[N].handler`. The severity split is `action-body-does-not-compile`'s, read through the same `judgeBodyCompile`: a regular-expression pattern the host engine refuses is a `warning`, and every other compile failure is an `error`.
+  - `hookBodyFunctionExpression` and `HOOK_BODY_PARAMETERS` (`@objectstack/lint`, the first also on `@objectstack/lint/runtime`): the one spelling of the `(ctx)` wrapper. The runtime's QuickJS runner now builds the hook and job wrapper from it, byte for byte the wrapper it built before, so the check and the run cannot disagree about it.
+  - `judgeBodyCompile`, `BodyCompileVerdict` and `BodyCompileShape` (`@objectstack/lint`): the compile-and-classify core both rules share. `action-body-does-not-compile` reads it with unchanged findings.
+  - `os explain hook-body-does-not-compile` and `os explain job-body-does-not-compile` explain both rules.
+  
+  The fix: use `ctx` as it is, or give the local another name (`const input = ctx.input || {}` in a hook, `const api = ctx.api` in a job); declare each name once; fix any other compile error at the line of `body.source` the finding names.
+  
+  No conversion is made (ADR-0087 D3, entry `hook-job-body-does-not-compile-refused`): which name the author meant for the local is a judgement. Measured first-party exposure: zero.
+- feb9b79: fix(lint)!: an action body whose regular-expression literal never closes, or whose flags are not a flag set, is refused, not only warned about
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no published skill teaches the action-body compile check or regular-expression literals in an action body
+  
+  <!-- adr-0087: registered action-body-regexp-literal-token-refused -->
+  
+  **BREAKING** only for an action body that never ran. `action-body-does-not-compile` compiles an L2 action's `body.source` inside `(async (input, ctx) => { … })` with the host's JavaScript engine, and reported every failure whose sentence opens `Invalid regular expression` at `warning`, because the host's V8 and the runtime's QuickJS differ on some patterns. That sentence also opens V8's two token errors: a literal that never closes on its line (`return /abc;`, `return /[/;`, a literal broken by a line terminator: `Invalid regular expression: missing /`) and a flag set that is not one (`/a/gg`, `/a/zz`, `/a/uv`: `Invalid regular expression flags`). QuickJS refuses every one of them, so such a body passed `os validate`, `os build`, `os lint` and the runtime publish door, and every run of the action failed with the coded `500` that names the action and the compile error.
+  
+  What moves (FROM → TO):
+  
+  - `action-body-does-not-compile` on an unterminated regular-expression literal or an invalid flag set (`validateActionBodyCompiles`, `@objectstack/lint`): FROM `warning` TO `error` at `os validate`, `os build`, `os lint` and the runtime publish door (`action` and `object` writes, `422 INVALID_METADATA`), with a hint that names the fix. A failure in the literal's pattern (a duplicate named capture group, a modifier group: syntax QuickJS accepts and runs) is still a `warning`.
+  - `os explain action-body-does-not-compile` and the ADR-0087 entry `action-body-does-not-compile-refused` now say that only a pattern the host refuses is a warning.
+  
+  The fix: close the literal with `/`, write a `/` inside it as `\/`, or, when the `/` is a division, give it a left-hand operand; write the flags as letters from `dgimsuvy`, each at most once, never `u` with `v`.
+  
+  No conversion is made (ADR-0087 D3, entry `action-body-regexp-literal-token-refused`): whether a `/` opened a literal or meant a division is the author's choice. Measured first-party exposure: zero.
+- 5dd856f: fix(lint): `state-machine-no-initial-states` judges only state machines that run on insert
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The publish-time rule `state-machine-no-initial-states` now refuses an active `state_machine` validation with no (or an empty) `initialStates` only when the machine runs on insert: its `events` include `insert`, or are left to the default `['insert', 'update']`. The engine runs a rule only on the write contexts its `events` name, so a machine declared `events: ['update']` (or `events: []`) never runs on create and never reads `initialStates`. Such a machine is accepted at publish and by `os validate` again, with no `initialStates`; adding one to satisfy the rule produced metadata the runtime ignores. A machine that runs on insert without `initialStates` is still refused, with the same fix.
+  
+  `@objectstack/spec` changes only the description of a state machine validation's `initialStates`, which now says the rule judges a machine that runs on insert.
+- 5dd856f: fix(lint): `field-group-shadowed` judges the six highlights the record page draws, from one shared constant
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  The default record page draws the first six of an object's `highlightFields` (after the title field leaves the list) in its header strip and leaves those fields out of the Details body. The `field-group-shadowed` warning judged only the first four, so a field group whose only member sat fifth or sixth in `highlightFields` was empty on the record page and passed `os lint --strict`. It now judges the same six, and its hint says "first 6 highlightFields".
+  
+  What was accepted before and is warned now: an object whose field group is emptied by its fifth or sixth highlight. Fix it as the hint says: keep a member of that group out of the first six highlights, or drop the group. A list the old count warned is still warned: six hoisted fields include the first four, so no list that passed only under six is refused.
+  
+  New export: `@objectstack/spec/ui` adds `RECORD_HIGHLIGHTS_MAX` (6), the count both the lint and `@object-ui/plugin-detail`'s record page synthesizer read. `@object-ui/plugin-detail` now takes its own `RECORD_HIGHLIGHTS_MAX` from there; the value and the page are unchanged.
+  
+  <!-- adr-0087: registered field-group-shadowed-six-highlights -->
+- e6fa510: feat(approvals): an escalation deadline can count working time on an organization's working calendar (`escalation.clock: 'working_time'`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-automation/references/state-machines-and-approvals.md
+  
+  An approval node's `escalation` gains two optional keys (ADR-0157 D5):
+  
+  - **`clock`**: `'wall_clock'` (the default) or `'working_time'`. Under `wall_clock` nothing changes: `timeoutHours` counts elapsed hours from `created_at`, nights, weekends and holidays included, and every request already open keeps its deadline (a stored snapshot carries no `clock`). Under `working_time` the hours count only the working periods of a working calendar (`sys_work_calendar`), skipping its holidays and counting its make-up workdays: a request opened at 17:00 on a Friday with `timeoutHours: 4`, on 09:00-12:00 and 13:00-18:00 periods, escalates at 12:00 on the next working day.
+  - **`calendar`**: the code of the working calendar to count on. Left out, the request organization's default calendar counts. There is never a fallback to wall-clock hours.
+  
+  The approvals sweep and the request read share one deadline function. A `working_time` deadline is counted again on every sweep and every read and is never stored, so a holiday entered after a request opened moves its deadline; an escalation that already fired stays fired (single-shot, ADR-0042). When the calendar cannot count the deadline (no calendar has the code, the organization has no default, or the calendar is not maintained as far as the deadline needs), the request does not escalate, the next sweep tries again, and the request read carries a new additive field, `sla_due_refusal` (`code`, `reason` or `date`, `message`), in place of `sla_due_at`. The approvals inbox shows "Calendar can't compute" with the reason where the SLA countdown sits, in every console language.
+  
+  `@objectstack/lint` refuses a `calendar` written beside the wall clock (`approval-escalation-calendar-without-working-time`, error): nothing would read it. Whether the named calendar exists is the organization's runtime data and is never checked at publish. The Studio approval inspector offers the clock and, under working time only, the calendar.
+  
+  Not released alone: this ships in the same release as the working-calendar objects and service and the working-day formula functions (ADR-0157 D4).
+- af566c2: feat(spec): `count_true` / `count_false` column summaries — a boolean column's Yes and No counts in the list footer and group headers
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `ListColumn.summary` accepts two more members, `count_true` and `count_false`: the number of rows whose boolean (or toggle) cell is true, and the number whose cell is false. A cell with no value is neither; it stays `count_empty`'s, so `count_true + count_false = count_filled`.
+  
+  Both are answered on the server with no new aggregation function: booleans aggregate as numbers on every backend, so `count_true` is `SUM(field)` and `count_false` is `COUNT(field) − SUM(field)`, read off the group header row (or the footer's whole-set row) by `deriveColumnSummary`. `COLUMN_SUMMARY_AGGREGATION`'s derived rows now carry `reads`, every node the member reads (`from` is its first); `columnSummaryNodeFunctions(mapping)` is the one reading of a row's nodes, which the group header compiler, the footer's whole-set query and the lint now share. `COLUMN_SUMMARY_FIELD_TYPES` / `isColumnSummaryCompatibleWithFieldType` say the two members apply to `boolean` and `toggle` only.
+  
+  `@objectstack/lint` refuses `count_true` / `count_false` over any other field type under `list-view-summary-field-type-refused` (an error, so `os validate` and the save door fail): over a number the same `SUM(field)` is a total, and the footer would print it as a count.
+  
+  `@object-ui/plugin-grid`'s footer menu offers Count of Yes and Count of No first on a boolean or toggle column, and only there; the footer draws them as `Yes 12` / `No 3`, from the whole matched set when the server answers it and from the page, labelled as the page's, when it does not. `@object-ui/i18n` adds the `grid.summary` keys `countTrue`, `countFalse`, `menuCountTrue` and `menuCountFalse` in every pack.
+- f3c9d42: feat(spec, ui): a master_detail child is a tab by default; a field group puts it in the overview and the form
+  
+  Clause-②: yes (widening: `@objectstack/spec/data` exports `isGroupPlaceableRelationship`, `fieldGroupsPlaceRelationship` and the `BodyTableContext` type, and `isBodyTableRelationship` takes an optional second argument)
+  Metadata-protocol: semantic
+  
+  A `master_detail` FK that declares no `relatedList` used to put its child list into the parent record's overview as a table (since #35597). Now it is a tab of the record page with its count, like any other related list, `inlineEdit` or not. It goes into the overview only where a field group of the PARENT names it (`fieldGroups[].relatedList`).
+  
+  - Placed by a group, the child's table is drawn at that group's position in the overview, the parent's create and edit forms inline it, and the record page's Edit saves the record fields and the rows in one save. Its tab stays on the tab row too, with its count.
+  - `relatedList: 'primary'` on the FK is unchanged on the record page: a body table with no group, and no tab of its own whether or not a group positions it. Its forms follow ruling B like every other child: a field group naming it inlines it in the parent's create and edit forms, `inlineEdit` or not, and with no group naming it the forms do not inline it, even with `inlineEdit`. `relatedList: true` keeps a tab that no group may place, and `false` hides the list.
+  - A field group may name exactly what it could name before: a plain `master_detail` child or a `'primary'` one. `isGroupPlaceableRelationship` is that test; `isBodyTableRelationship(field, { placedByGroup })` is still the one body-table judgement.
+  - `inlineEdit` on the FK no longer inlines a child in the parent's form by itself (maintainer ruling B: only the field group decides). It now only picks the form factor of a child a group places: `'grid'`, `'form'`, or `true` / absent for the shape-picked default. A child with `inlineEdit` that no group names is a tab and is not in the form.
+  - `os lint`: `relationship/line-items-inline-edit` now suggests a field group on the parent (with its required `label`) instead of `inlineEdit: true`, and only for a FK a group may place; `relationship/association-inline-edit` and `relationship/inline-edit-needs-bulk` judge the children a parent group places; the field-consumer rule credits a child's inline grid columns only when a parent group places it.
+  - The showcase invoice and expense report, and the CRM opportunity, gain a field group naming their lines, so their forms and record pages keep the line table.
+  - In the entry form a placed table sits at its group's place too: between the sections of the groups around it, or in a tab of its own (labelled with the group) in a tabbed form. A form whose sections name no field group keeps it below the record's fields.
+  - Studio's field-group picker offers the same children as before. The relationship field inspector reads a plain `master_detail` FK as "Show", and "Show" leaves the key absent so a group can still place it.
+  
+  To keep a master-detail child's table in the overview and its rows in the form (including a child that set `inlineEdit`), add a field group to the parent that names it, in the place the table should sit:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic information' },
+    { key: 'lines', label: 'Lines', relatedList: 'order_line' }, // or 'order_line.order' for one FK
+    { key: 'terms', label: 'Terms' },
+  ],
+  ```
+  
+  Such a group holds no fields. Or write `relatedList: 'primary'` on the child's FK to keep it in the overview with no group. A group may name only a list it can place: for an `inlineEdit` child on a `lookup` FK, or on a FK declaring `relatedList: true`, also write `relatedList: 'primary'` on the FK (a `master_detail` FK may instead drop `relatedList: true`). A form view that declares its own subforms still inlines what it declares.
+- 52fb30c: feat(plugin-detail): the default record page draws no stage bar and no key-field strip; the stage moves from the header's status tag
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  The default record page (`buildDefaultPageSchema`) no longer emits `record:highlights` or `record:path`. The stage is the status tag beside the record's name: a reader who may edit the stage field sees it with an arrow and opens a menu listing every stage in order, the current one checked; a stage the field's blocking `state_machine` cannot reach is disabled with its reason under the name. Picking a stage confirms, and a stage that makes other fields required (their `requiredWhen` holds once the record stands on it, such as a loss reason on a lost stage) asks for exactly those fields in the same dialog and writes them with the move. A refusal stays in the dialog, beside the field it names, and the stage does not move. A reader who may not edit the field, an approval lock or an open draft leaves the plain tag. A plain status field (no stage role) is read and moved the same way.
+  
+  The details body now draws every field its groups hold: the highlight fields and the stage field are no longer taken out of their groups, so a record reads in the same groups and order in view and in edit (objectstack#35849). `highlightFields` itself is unchanged and still drives the hover card, a related list's default columns and the record picker; nothing is picked when an object declares none.
+  
+  `buildDefaultHighlights` and both blocks are kept: an authored page, or a slotted page's `highlights` slot, still places a strip and a path where it wants them.
+  
+  - `@object-ui/components`: `RecordHeaderState` gains an optional `stage` renderer (with the exported `RecordHeaderStageParts`), which the header calls with the stage tag it would draw. Without a host bar (a phone) the header now draws the stage tag in the row under the record's name, beside the state's tags; before, a phone showed no stage at all.
+  - `@object-ui/plugin-detail`: exports `RecordStageMenu`, the menu a host hands the header as `RecordHeaderState.stage`. Its fields-a-stage-needs dialog comes from the package-internal `useStageChange` (`record:path` keeps its plain confirmation).
+  - `@object-ui/plugin-detail`: `BuildPageOptions.highlightFields`, `.statusField` and `.stages` are still accepted by `buildDefaultPageSchema` and `buildDefaultTabs` but no longer do anything there, since the default page draws no strip and no stage bar; `buildDefaultHighlights` still reads them. Retiring them is objectstack#35943.
+  - `@object-ui/i18n`: four `detail.stageMenu*` strings in every locale.
+  - `@objectstack/lint`: `field-group-shadowed` no longer counts the highlight strip as hiding fields from the detail body, since the default record page leaves them in their groups; a group whose only visible member is the record title still warns.
+- 170ca48: feat(spec): a field group lists its own members and their order (`fieldGroups[].fields`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A field group may now list which fields it shows and in what order:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic', fields: ['account', 'name', 'valid_until'] },
+    { key: 'terms', label: 'Terms', fields: ['terms'] },
+  ]
+  ```
+  
+  The record page, the create and edit forms and the drawer show the group's fields in the list's order, whatever order the object's `fields` declares them in, so a group can be reordered without moving any field (and without changing a list view's default column order).
+  
+  Nothing changes for an object that writes no `fields` on its groups: a group without the list still holds the fields whose `group` names it, in field declaration order. `Field.group` is the older spelling and is still read; it is not deprecated for removal.
+  
+  The two spellings must agree. The object parse refuses a field one group lists while its own `group` names another declared group (reported at both places; a `group` naming no declared key is not another group, so the list wins), a field two groups list, a name one list repeats, and `fields` on a group that places a related list (`relatedList`). A field whose `group` names a listing group that leaves it out is shown after the listed fields, never dropped. A listed name the object does not declare is skipped, so removing a field never makes the object unparseable; `os lint` warns about it (`field-group-member-unknown`).
+  
+  New export: `readFieldGroupMembership` (`@objectstack/spec/data`), the membership `deriveFieldGroupLayout` places sections from, for editors that also show hidden fields.
+  
+  Studio: dragging a field inside a group, or into another group, now writes those groups' `fields` lists and leaves the object's field declaration order alone. Only the ungrouped bucket, which has no list, still reorders by declaration order. Moving a field to another group from the field inspector does the same once a list is involved.
+  
+  Field-level security: the object document served to a caller who cannot read some fields keeps each group's `fields` list, with the hidden names filtered out and the rest in order, so the record page and forms keep the layout for that caller.
+
+### Patch Changes
+
+- 806bba8: fix(lint, service-automation): the date-text refusal on a flow value envelope names the rewrite for a record-triggered flow that a parent also starts
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow with its own record trigger or time-relative sweep gets the date-text check on its value envelopes (`update_record` / `create_record` `fields.*`, `assignment` values). Example: `timestamp(record.borrow_date)` over a `date` field. The check is refused at `os validate` / `os build` and at `registerFlow`. It stays refused when another flow also starts the same flow through a `subflow` or `map` node, because the flow's own trigger hands it a row of the typed object on every run it starts. The set of refused flows does not change.
+  
+  The refusal now also says how to share the steps with such a parent. Move the shared steps into a child flow with no trigger of its own, which is judged untyped because its `record` is whatever each caller hands it. Then start that child from both flows. Both doors append the same sentence after the verdict's own fix. The stored pass of `os migrate meta --stored` lists that sentence too.
+- 89364b4: feat(spec, core, ui): `{current_iso_week}` defaults a week-keyed filter to the current ISO week
+  
+  Clause-②: yes (widening: the closed filter-placeholder vocabulary gains one token)
+  Metadata-protocol: added
+  
+  A dashboard whose rows carry a text week key (`cost_week: '2026-W47'`) could only default its week filter to a fixed week, which went stale the next Monday. Write the placeholder instead and the filter opens on the current week each time:
+  
+  ```ts
+  globalFilters: [
+    { field: 'cost_week', label: 'Week', type: 'text', defaultValue: '{current_iso_week}' },
+  ],
+  ```
+  
+  - It resolves to the ISO-8601 week key of today, `YYYY-Www`: Monday-start weeks, week 1 is the week that holds the year's first Thursday, and the year is the ISO week-numbering year, so 2027-01-01 is `2026-W53` and 2025-12-29 is `2026-W01`. "Today" is the day in the workspace time zone, on the server and in the browser alike; the label is the one the analytics week bucket already uses.
+  - It is a period key, not a date. It lives in its own closed list, `PERIOD_KEY_TOKENS`, beside `DATE_MACRO_TOKENS` and not inside it, so a date filter default and a calendar `initialDate` still refuse it. `classifyFilterToken` answers a new kind, `period-key`, and `isKnownFilterToken` knows it, so lint, flow filter operands and the server resolver accept it wherever a filter placeholder is accepted. A consumer that switches exhaustively on `kind` gets a compile error until it handles the new kind.
+  - The server resolves it in `resolveFilterTokens`; the browser resolves it in `resolveFilterPlaceholders` and in the dashboard filter defaults (every filter type except `date` and `dateRange`), so the filter box opens showing the resolved key. A literal `2026-W47` default keeps working and stays fixed.
+  - Every filter and default written before parses and resolves exactly as before. Only the whole value is a placeholder: `'week {current_iso_week}'` is left as written. A near spelling such as `{currentIsoWeek}` is still refused as an unknown token.
+  - Use it only on a field that stores week keys. On a date, datetime or time field the placeholder is refused (`INVALID_FILTER` / 400), as the literal key is; filter those with the `this_week` preset or `{current_week_start}` / `{current_week_end}`.
+- f19e6c6: fix(lint): `ai-skill-tool-unresolved` resolves every tool the MCP door registers for a skill offered over MCP, and says why when a skill kept out of MCP names one
+  
+  Clause-②: yes (widening) — `ai-skill-tool-unresolved` stops warning on eight tool names the MCP door registers, and `@objectstack/spec/system` gains the export `MCP_DOOR_TOOL_NAMES`; nothing that resolved before is reported
+  Metadata-protocol: none
+  
+  The MCP door in `@objectstack/mcp` registers record, file, action, federation and dataset tools, and offers a skill bound to them over MCP. The lint rule knew only the two file tools, so a skill bound to `aggregate_records`, `delete_record`, `delete_records`, `list_actions`, `run_action`, `resume_run`, `list_remote_tables` or `import_object` was warned that the agent cannot call it, and `os lint --strict` failed.
+  
+  `@objectstack/spec/system` now exports `MCP_DOOR_TOOL_NAMES`, every tool the door registers on a bridge carrying every optional member under a grant naming every scope. For a skill offered over MCP (`mcpPrompt` not `false`), the rule resolves every name in it. `@objectstack/mcp` has a test that keeps this list equal to what the door registers, so a tool added to or renamed at the door fails there until the list follows it. Some door names (`get_record`, `query_records`, `describe_object`, …) are cloud registrations as well and stay in `PLATFORM_PROVIDED_TOOL_NAMES`; the door's names do not join `PLATFORM_TOOLS_BY_PACKAGE`, so each group there stays the exact set one cloud package registers. `MCP_FILE_TOOL_NAMES` stays as it was and is part of the new list.
+  
+  A skill kept out of MCP (`mcpPrompt: false`) runs only in the in-product agents, which do not have the door tools no cloud package registers, so naming one there is still reported. The warning now says so: "Tool "run_action" resolves only for a skill offered over MCP, and this skill sets `mcpPrompt: false`, so the in-product agents it runs in have no such tool". The fix line offers dropping `mcpPrompt: false` or removing the name. A trailing-wildcard entry that matches only door tools gets the same verdict.
+  
+  `os explain ai-skill-tool-unresolved` names `MCP_DOOR_TOOL_NAMES` as the third source and adds that a skill which runs an app action binds `action_<name>` (or `action_*`) rather than `run_action`: the MCP door serves that entry through `run_action`, and the in-product agents call the action tool itself.
+- ba304e0: fix(mcp, lint): `create_record` and `update_record` over stdio answer `droppedFields` and no longer echo a dropped value; a flow write to a roll-up summary field draws a warning
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  On the stdio MCP transport, `create_record` and `update_record` now answer `droppedFields`, as the HTTP transport has: each entry names the object, the fields the engine did not store and the reason. A non-system write of a `readonly: true` column or of a roll-up `summary` field (read-only on create and update whether or not it declares `readonly: true`) reports the field there with reason `readonly`. Before, the stdio answer carried no `droppedFields`, and `update_record` answered the caller's own value for such a field over the stored one, so the answer read as if the write had landed. The `record` in both answers now leaves a dropped key's caller value out: an update answers the stored value, and a create answers what the write stored. A write that drops nothing answers as before, with no `droppedFields` key. No MCP tool input, `@objectstack/mcp` export or metadata key changes.
+  
+  `os validate`, `os lint` and `os build` now report a new warning, `flow-update-summary-field`, when a flow's `create_record` or `update_record` node that does not run as `runAs: 'system'` writes a roll-up `summary` field that does not declare `readonly: true`. The engine drops that value on create and on update, so the step changes nothing in that column. It is a warning, so no build that passes today fails. Like every warning, it makes `os validate --strict` and `os lint --strict` exit 1; there is no per-rule switch, so a strict run fails until the field is removed from the node. The metadata save and publish answers carry it under `advisories`, never as a refusal: on a flow save whose user-run node writes such a roll-up, and on an object save that makes a field such a roll-up while a live user-run flow of the same package writes it. A roll-up that declares `readonly: true` is reported as `flow-update-readonly-field`, an error, as before. `os explain flow-update-summary-field` gives the details. The fix is to remove the field from the node, since the engine recomputes it from the child records.
+  
+  New export: `FLOW_UPDATE_SUMMARY_FIELD` from `@objectstack/lint`, the rule id constant.
+- 7702f09: fix(lint, studio): warn about a required field's `visibleWhen` formula read only when the form cannot compute the formula
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `required` field whose `visibleWhen` reads a `formula` field used to draw a warning from `os validate` (and the object save door) and an advisory in Studio's field inspector for every formula it read. The form now computes the object's formulas over the record being edited, so for a formula it can compute the form and the server judge the same value, and that warning named no real problem. Both now fire only for a formula the form cannot compute:
+  
+  - **The server cannot compute it either.** The formula reads through a reference, calls `label()` or `current_user.can()`, or reads such a formula. The server counts the field as shown, so it stays required on every record. Same verdict as before, now stated on its own.
+  - **Only the form cannot compute it.** The formula reads `os`, or reads such a formula. The server computes it and can waive the field where the form still shows it and keeps it required. Before this change such a formula drew only the generic warning, which said the form computes it.
+  
+  Either message now says that the form's half holds for a form that computes the object's formulas. A form check that computes none judges the value it last read, and can hide the field or not ask for it.
+  
+  A formula that reads the acting user draws nothing, as before. Both sides compute it for a signed-in writer.
+  
+  Studio catalogue (en, zh): `designer.field.requiredVisibleWhenFormula` is removed. `designer.field.requiredVisibleWhenFormulaUnservable` is now a full sentence on its own. `designer.field.requiredVisibleWhenFormulaFormOnly` is new. The lint rule's location and severity (warning) are unchanged. No props or exports change.
+- f6902e9: feat(lint): warn when a text field named like a currency, country or time zone code declares no valueDomain
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `os lint` gains `field/missing-value-domain`, a warning. It fires on a `text` field that declares no `valueDomain` and whose whole name, compared case-insensitively, reads as a standard code: `currency` or `currency_code` (fix: `valueDomain: 'iso_4217_currency'`), `country` or `country_code` (`iso_3166_alpha2`), `time_zone`, `timezone` or `tz` (`iana_time_zone`). The fix line names the domain to add. A field that already declares a domain, a `select` field, any other type and any other name are not judged. It is a warning only: `os validate`, `os build` and the metadata save door are unchanged. Like every warning, it makes `os lint --strict` exit 1; there is no per-rule switch, so a strict run fails until the field declares the domain. Declaring it does not re-read rows that already hold free text; only a later write that carries a non-member is refused. `os explain field/missing-value-domain` gives the reasoning.
+  
+  New exports: `VALUE_DOMAIN_FIELD_NAMES` from `@objectstack/spec/shared`, the one word list (domain → field names) the rule reads, and `FIELD_MISSING_VALUE_DOMAIN` from `@objectstack/lint`. The word list adds no member to `ValueDomainSchema`.
+- 65fddc8: fix: a `percent` or `currency` formula is a KPI chip on the record header; the lint prescription names all six return types
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `formula` field whose `returnType` is `percent` drew percentages in its list cells, and the record header strip drew it without the figure typography a `percent` field's chip has. The strip now reads a formula's declared `returnType` before it picks its face, for the two return types the spec reads as a field type, `percent` and `currency`. Both are KPI chips on the header strip. A formula of any other return type chips as before.
+  
+  The grid's footer formatting reads the same two return types, so a browser-computed footer over a `percent` formula reads `Sum: 75%` rather than `Sum: 0.75`, and over a `currency` formula reads as money. That is not a supported authoring shape: a `sum`, `avg`, `min` or `max` column summary over a `formula` field is refused at authoring by `list-view-summary-field-type-refused`, whatever its `returnType`, because a formula is computed on read and stored in no column, and the whole-set footer query answers `400 INVALID_FIELD`. The formatting reaches only an ungrouped, one-page footer the browser computes over a declaration `os validate` refuses. To total a formula's value, make it a stored field of its own, of the formula's `returnType` and carrying the same `expression`, which the engine computes and stores on every write, and summarise that field.
+  
+  `os explain dimension-virtual-field-refused` told the author to make a stored copy "of the formula's `returnType` (`number`, `text`, `boolean`, `date` or `currency`)", which named no type for a `percent` formula. It now lists all six, and a test holds the list to the spec's own `returnType` enum.
+- f548bdc: fix: descriptions and help text no longer say the default record page draws a key-field strip or a stage path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default record page draws no key-field strip and no stage path: the stage is the status tag beside the record name. These texts said otherwise and now say what each key drives:
+  
+  - `@objectstack/spec`: the `highlightFields` describe ("Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it") and its Studio help text. The `stageField` and `RECORD_HIGHLIGHTS_MAX` doc comments say the header's status tag reads the stage and the count cuts only a strip a page places in its `highlights` slot. The upgrade-guide entry `field-group-shadowed-six-highlights` no longer tells authors to move highlights: the warning now judges the record title alone, and no action is owed.
+  - `@objectstack/platform-objects`: the `highlightFields` help text in every metadata-form locale.
+  - `@objectstack/lint`: the `os explain` text of `object-field-ref-unknown` and `semantic-role-field-unprovisioned` names the hover card and the record picker in place of the strip.
+  - `@object-ui/plugin-detail`: the `record:details` `hideFields` description no longer says the default page fills it. The key is still accepted.
+  - `@object-ui/i18n`: Studio's lifecycle-field help (`stageField`, and its "None" choice) talks about the status tag, not a progress bar.
+  - `@object-ui/types`: the page `highlights` slot doc says it places a strip the synthesized default does not draw.
+  - `@object-ui/app-shell`: on a phone the default record page no longer hands the synthesizer a highlight list it never read. The page looks the same, and the subtitle under the record name is unchanged.
+- d280de9: docs: stale prose on summary currency, the temporal-comparand door and analytics filters now says what the code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No accepted value, key or answer moves. Two refusal messages change their words:
+  
+  - A `currencyMode: 'dynamic'` summary over a child `currency` field that is neither `dynamic` nor a well-formed `record` / `fixed` (a stored `fixed` field with no `defaultCurrency`, or a `currencyMode` outside the three) is still refused, and the refusal now names what the child lacks: "is a 'currency' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)", or "is a 'currency' field whose `currencyMode` 'X' is none of `dynamic`, `fixed` and `record`". Before, it said only "is a 'currency' field, not a `currency` field in `dynamic` mode".
+  - The temporal-comparand door's refusal of a comparand no temporal rule reads (`'not-a-date'`, the preset name `'last_30_days'`) now ends "As written it would reach the driver and be compared as text: it may select every row, none or the wrong ones (or raise a database error), an answer indistinguishable from a real one." Before, it said the comparison would "compare false for EVERY row", which was wrong for `$lt` and others that selected every row, for a partial day such as `'2026-06'` that selected a subset, and on PostgreSQL, which raised a database error. Its `having` twin says the same of the groups it would keep, where it said "no group or every group, a 200".
+  
+  The upgrade-guide entry `summary-dynamic-currency-rollup-home-amount-judged-as-served` now states the admitted set as both doors enforce it: a `dynamic` summary may roll up any child `currency` field in `dynamic` mode, a stored home amount included. Source comments and published docblocks that said every `{placeholder}` is stepped around by the temporal door now state the per-kind rule: a date macro is stepped around and judged by its year once resolved, a period key and a context token are judged as written, and an unknown or record-context token is left to the resolver.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/sdui-parser@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

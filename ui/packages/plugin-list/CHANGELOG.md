@@ -1,5 +1,350 @@
 # @object-ui/plugin-list
 
+## 18.7.0
+
+### Minor Changes
+
+- 811858c: feat(list): a list's cells are selected by a click and edited by a double-click, Enter or typing, with no inline-edit toggle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  Skills-docs: none — `skills/objectstack-ui/rules/list-views.md` already teaches that inline editing is on by default for a user who may update the object, with `userActions: { editInline: false }` as the opt-out, which the list page now does with no toggle; no skill teaches the toggle or a single-click edit.
+  
+  **The list page (`ListView`) has no inline-edit mode and no toggle.** Its grid is editable in place wherever the reader may update the object and the view does not declare `userActions.editInline: false`; a view's boolean `inlineEdit` still folds into that switch, so `inlineEdit: false` reads off and `inlineEdit: true` reads on. Before, a view that declared neither opened read-only with an "Edit inline" toggle in the toolbar and in the Display menu, the mode lasted for the session, and a click on a cell edited it. Both toggles are gone, and `ListViewProps.onInlineEditChange` is deprecated and never called; the console stops passing it.
+  
+  **The select-first cell model** (`data-table`, behind the new `GridCellSelectionProvider` in `@object-ui/components`; `ObjectGrid` mounts it when its host passes the new `cellSelection` prop, and `ListView` passes it for every `object-grid` view it draws, on the hosts listed below):
+  
+  - A click selects a cell (a ring around it) and neither edits it nor opens the record. A link the cell draws (the name, a lookup, a phone or an email) keeps its own click. A touch tap opens the record and never edits in place.
+  - Double-click, Enter or F2 edits, keeping the value with the caret at its end; typing a character replaces the value with it (a picker or a date opens instead); Backspace or Delete opens an empty editor and saves nothing.
+  - While editing, Enter commits and moves down, Tab and Shift+Tab commit and move right and left, Escape cancels and keeps the cell selected; in a multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. Commits are the grid's staged edits, saved by the row's Save and Save All as before.
+  - On the selected cell the arrows and Tab move the selection, Space opens the record (a checkbox cell flips and commits instead, as a second click on it does), Ctrl/Cmd+C copies, Ctrl/Cmd+V converts the text to the field's type and commits it, and Escape clears the selection.
+  - An input method's composition is kept whole: keys pressed while composing, and the 229 Enter Safari raises after it, never commit, cancel or move, and a composition started on a selected cell opens the editor with the composed text. This guard applies to every `data-table` editor.
+  - A cell that opens no editor says why on the cell: the field is read-only, calculated or not editable in a list, the reader may not edit the field, these records or this record, the view turned editing off, or the record is locked by an approval. The approval lock is read from the approvals service's per-record lock when a cell of the row is selected, through the record page's rule (`resolveApprovalLock`); until it answers, the row's `approval_status` stands in only where the view fetches that column, which a view that authors its columns does only when a column, a row predicate or a grouping names it.
+  
+  Every grid a `ListView` draws has this model, because `ListView` passes `cellSelection` to each `object-grid` view: the console's object list pages, interface list pages, the object data page (`/apps/:app/:object/data`), the Studio Data pillar's records artboard, and every `list-view` block, whether an SDUI page node or a `ListView` on a `kind: 'react'` page; a grid no `ListView` draws mounts no provider and keeps its click-to-edit (`singleClickEdit`) and click-to-open behaviour unchanged: an authored `object-grid` node, `ObjectView`'s own grid (the `object-view` block, or a host that passes no `renderListView`), a related list, a dashboard table, the record picker and the designer's grids.
+  
+  On every `ListView` grid (the select-first model) the table's trailing edit column, which holds a changed row's Cancel and Save, is drawn only while a row has changes, so the list at rest ends on its last data column. `@object-ui/core` exports `resolveAffordanceGrant`, the grant half of `resolveAffordance`, which the list cell's read-only reason reads.
+  
+  New locale keys, in every pack: `table.cellReadOnly` and `grid.readOnlyReason.*` (nine reasons). No key is removed: `list.inlineEditShort` and `list.inlineEditLabel`, the toggle's words, stay in every pack, though the list no longer draws the toggle.
+- d6be99d: feat(console)!: an object's list opens a record one way — the name opens the page, the hover icon opens the side panel; `navigation.mode` is deprecated
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/components#NavigationOverlayProps.maximizable, @object-ui/plugin-list#ListViewProps.recordOpen) the retired operands are a prop of the drawer component and a host prop of the list, in published ui package entries; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that passed `NavigationOverlay` its `maximizable` prop or passed `ListView` a `recordOpen` choice. The maintainer ruled one way to open a record from an object's list, with no setting (「这样就不需要任何设置」), and deprecated `navigation.mode` (「废弃」).
+  
+  On a Console object list the record's name now opens the full record page, and the icon shown beside the name while the row is hovered (「在侧边打开」 / "Open in side panel") opens the record in the drawer over the list. There is no setting to choose between them: the Display menu's 「打开记录：抽屉 / 整页」 section and the browser-kept preference behind it are gone. A touch screen has no hover, so there the name opens the page. A ⌘/Ctrl or middle click on the name still opens the page in a new tab.
+  
+  The drawer is a card floating 8 px clear of the window's top, right and bottom edges, rounded and shadowed. Its full-width "maximize in place" state is gone (a reload lost it, and the full page is the wide face): the bar's one ⤢ opens the full page. The page's 「收为抽屉」 / "Collapse to drawer" hop is gone with it.
+  
+  A page the list opens remembers the list in its history entry (`location.state.from`): the list's URL (view, filters, sort, search, grouping, page), its view's name, the rows it showed and, new here, the count its query matched (`total`). A reload of the tab keeps it, and going back to that URL restores the list's scroll position. A page opened any other way carries none.
+  
+  `navigation.mode` (`NavigationConfigSchema.mode`) is deprecated on an object's list (`@deprecated`, `[DEPRECATED]` describe; ADR-0087 D3 semantic entry `navigation-mode-record-open-deprecated`). The key stays in the shape and every value still parses, so existing metadata loads. On an object's list (a list view, an object's `listViews`) `drawer`, `page` and `new_window` change nothing: a view that declares one behaves as a view that declares nothing. `none` keeps "rows open nothing", because a read-only list that started opening records would be a regression nobody chose; prefer `navigation: { preventNavigation: true }`. `navigation.openNewTab: true` stays live: on an object's list the record's name then opens the full page in a new tab, and the list stays. A page's blocks that carry `navigation` (a list block, the timeline, an embedded view) still honour `drawer`, `page` and `new_window` as before: keep the key there.
+  
+  The i18n keys `list.recordOpen`, `list.recordOpenDrawer`, `list.recordOpenPage`, `list.optionsMenu.recordOpenAlwaysPage`, `detail.collapseToDrawer` and `console.objectView.openAsPage` are removed from every pack, and `console.objectView.openInSidePanel` is added.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `NavigationOverlayProps.maximizable` TO nothing, in the components package: the drawer has no full-width state. Fix: delete `maximizable`; the drawer's ⤢ opens the full page.
+  - FROM `ListViewProps.recordOpen` TO nothing, in the list plugin: the Display menu has no Open records section. Fix: delete `recordOpen`; the list opens a record one way.
+
+### Patch Changes
+
+- 9e02112: fix(plugin-list): a list page reads its first page once on a cold load, also when the view definitions arrive after the first read
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Opening a list no longer sends the same first-page request twice when the saved view definitions answer after the list has already started reading: a host that hands over an equal view again (a fresh `data` block of the same content) no longer re-arms the read. A real change still reads again: the view's filter or sort, a view switch, or the reader's own filter or sort.
+- e01b8be: feat(console): the list page's frame — a 44px page bar, a 40px view bar, a denser grid and per-column totals in the grid's own last row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The object list page is redrawn around two bars and a denser grid (objectstack#35548, the first card of the list-page epic):
+  
+  - **Page bar, 44px.** The object's icon in one colour and its name on the left; ⋮ and 「+ 新建」 on the right. The object's description, Import and Favorite moved into ⋮.
+  - **View bar, 40px.** The view switcher is one trigger on the left, reading the view type's icon, the view name, the record count and a caret (the count beside the name returns, after objectstack#34603 removed it). 「筛选」「排序」「选项」 are text buttons on the right beside the search icon, and open the same panels as before; below `sm` they stay icons. The kanban and every other view type draw the same two bars. An empty condition row under the bar takes no height.
+  - **Grid.** A 32px header and 33px default rows, 13px on the header, the cells and the bar buttons, faint row lines, no rule after the first column, and the frozen-column shadow only once the grid scrolls sideways. The row ⋮ trigger is 24px so it fits the row. Lookup values read as small chips, money and number columns (a money formula with `returnType: 'currency'` among them) align right with tabular digits, and select labels keep their colour at lower saturation.
+  - **Totals.** Column summaries are drawn as the table's own last row, each figure under its column (so they line up at any width and are never covered by pinned columns), led by 「计数 N」; the separate footer line and its doubled colon are gone.
+  
+  `DataTableSchema` gains one host-only runtime slot, `summaryRow` (`{ lead?, cells }`), which `ObjectGrid` fills; like `rowGroups`, the zod face refuses it by name, so it is not authorable. New locale keys: `list.options`, `grid.summary.countLead`.
+- 238661f: feat(list): the list's options panel is a menu of second levels, and the view dropdown creates a view in place
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The options panel (选项) is a menu.** Each row names a setting on the left and shows its current value on the right, and opens a second level: the view name, Layout, Fields (「已显示 N 个」), Grouping, Row color, Row height (紧凑 / 标准 / 宽松), and More (how records open, row numbers, inline edit). On a phone a Sort row is added, as before. The Layout level lists every layout the view offers as one choice each, at any count. The Fields level is the list's shared field list (the one 筛选 and 排序 open), as the view's field manager: a search box on top; the shown fields are listed in their order, can be dragged (or moved with the arrow keys) and hidden by their eye, and the hidden fields sit below, where one click shows a field again or adds a readable field the view does not list. Only fields the reader may read are offered. The footer reads 「恢复默认」 and 「刷新」, and — on one of the reader's own views that differs from what it stores — 「保存」 beside 「恢复默认」, which writes the list on screen into that view (as the 「已个性化」 marker's 保存 does); in the console 「恢复默认」 is the marker's reset, dimmed while there is nothing to restore. The view name at the top is renamed in place by the view's owner, or by an admin on a saved shared view; opening the menu does not put the cursor in it. Fields reorders the grid's columns through the same state a header drag writes, and Row height on a gallery picks its card size by name; every icon button has a name; the developer note under Open records is gone. These settings stay the reader's own preference, stored as before.
+  
+  **The view dropdown** keeps its search and lists one row per view, led by its type's icon, with the reader's own views (我的视图) and the shared views in groups of their own; a long name wraps instead of being cut. 「添加视图」 at the bottom turns the dropdown into a create card (the separate 「另存为我的视图」 entry and its name dialog are folded into it; the full Create View dialog stays reachable from 「管理视图」): a name, the view type (with icons), the one field the type needs (kanban: the group field; calendar: the date field), 「包含当前的筛选和排序」 while the list holds unsaved conditions (on by default), and — for a reader who may create shared views — a personal / shared switch. The one field a type needs defaults to one the list shows (a kanban groups by 阶段 on a list that shows it, not by a hidden status-like field). 「创建」 creates one of the reader's own views by default and opens it; a shared view goes through the existing draft-and-publish door unchanged. No machine name is asked for: a unique one is generated from the name. A kanban or gallery created this way lists the view's columns as its card fields, as the add-view door does.
+  
+  The fields count label (`list.optionsMenu.fieldsShown`) is a count family in every pack. Keys no surface reads any more are dropped from every pack: `list.recordOpenNote`, `list.recordOpenDeclaredPage`, `view.switcher.all` and `view.switcher.saveAsMyView`.
+- d96c878: feat(list): the object list page has no Actions column; a selection swaps the page bar, and a list with no declared pagination loads as it scrolls
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **No Actions column on the list page.** The list's rows carry no control: no Actions column and no "⋮" at the row end, on hover or at rest. A row's actions are reached by selecting it or by right-clicking it. Grids outside a list page (related lists, page blocks, the record drawer) keep their Actions column and their bottom bulk bar.
+  - **Selection in the page bar.** Ticking rows swaps the page bar to 「对象名 / 已选 N 条」, Cancel, and the actions for what is selected: one record shows its own row actions, two or more show the bulk actions. The first two are buttons (in the order the actions are declared, by their `order`), the rest are behind "⋮", and Delete is never a button. Cancel, or clearing the selection, brings the page bar back. The bottom bulk bar no longer floats over the list on the list page.
+  - **Context menu.** In a row's menu (its context menu, and the "⋮" where one is still drawn) Delete is the last item, after a separator, in the danger colour; a selection's menu closes with its destructive actions the same way.
+  - **Checkboxes.** The whole leading cell toggles a row, and Shift extends the selection over the rows between the last toggled row and this one.
+  - **Scroll loading.** A grid list view that declares no `pagination` draws no pager: it loads 50 rows and the next 50 as the list nears its end, and shows the match total beside the view name. With every loaded row ticked, the page bar offers 「选择全部 M 条」 (capped at 5000 as before). Opening a record on its own page and coming back returns to the same place in the list. A view that declares `pagination` keeps its pager. Footer totals are still computed by the server over every matching record.
+- 598a34d: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(list): the list page lines up on one 16px left edge; the checkbox column is 40px at any width; no row numbers
+  
+  The list page drew five different left edges, and on a list with more columns than fit, the selection column was squeezed to the checkbox's own 16px, flush against the left of the page. Now the page bar's object icon, the view bar's view icon, the header's select-all box, every row's checkbox and the footer's record count all start 16px in, and the selection column is 40px (16px in, the 16px box, 8px before the first column) on a list that scrolls sideways, on one that fits, and after scrolling sideways and back. The view bar's last text trigger ends 16px in, where the page bar's button ends.
+  
+  The grid no longer draws row numbers unless a host asks for them (`showRowNumbers`): each row's leading cell is its checkbox, shown at rest rather than on hover. This applies to every grid, the list page, related lists and the designers' grids among them. The list page's Options menu no longer offers a 行号 (Row numbers) switch, the 「已个性化」 (Personalized) marker no longer names row numbers, and `ListView` drops its `defaultRowNumbers` host prop; the `list.rowNumbers` and `console.objectView.personalizedParts.rowNumbers` keys leave every language pack.
+  
+  A non-selectable grid with a row click drew a hover 「打开 ›」 (Open) button in its row-number cell; with row numbers off by default that button now appears only where a host opts into row numbers. Clicking the row, and Cmd/Ctrl-clicking it, still open the record.
+  
+  Removed from `@object-ui/plugin-list`'s exports:
+  - `ListViewProps.defaultRowNumbers`: `<ListView defaultRowNumbers={…}>` → delete the prop. Row numbers are off by default; a grid host that wants them passes `showRowNumbers` to `ObjectGrid`.
+  - `'rowNumbers'` in `ListPersonalizationPart`: an `onPersonalizationChange` handler or a label map keyed on it → drop that entry; the list no longer reports it. A grid whose authored columns all fail to resolve now says it renders "NO data columns" in its console diagnostic, since it no longer draws a row-number column.
+- fac1e7d: feat(list): a list cell saves the moment it is committed, and Space types into the selected cell
+  
+  Clause-②: yes (widening) — new members on the `@object-ui/react` package entry: `createOwnWrites`, `OwnWritesContext`, `useOwnWrites` and the `OwnWrites` type, and an optional third parameter on `useDataInvalidation`; three new `table.*` keys in every `@object-ui/i18n` locale (`cellSaving`, `cellSaved`, `openRecordToFinish`); nothing removed or renamed
+  Metadata-protocol: none
+  
+  In a grid that mounts `GridCellSelection` (the select-first grid every `ListView` draws), a committed cell edit is now saved at once, as one update for that record:
+  
+  - **No save bar, no row Save/Cancel column, no amber row.** The cell shows a small spinner while the save runs and a check mark once it landed.
+  - **Only that row is redrawn**, from the record the write answered with, so a value a server hook rewrote shows as stored. The list is not read again, though the write is still announced to every other reader (the record's detail pane, related lists, counts): the grid holds the record in the list's `OwnWritesContext` registry for the length of its write, and `ListView` lets that one write go by. So a row whose new value would sort it elsewhere stays where it is until the next load (refresh, sort, filter or page change). The counts on group headers, read with the rows, follow on the next load too; the footer's whole-set summary is its own reader and still refreshes on the write.
+  - **A refused save keeps the typed value** and shows the server's reason on the cell. Esc puts the stored value back. Later edits on the same row are sent together with the refused one as one update. When the reason names a field the list does not show (a rule that needs another field), the notice offers to open the record.
+  - **The 409 conflict dialog is unchanged.** The next save on a row sends the version the previous save answered.
+  - **Space** on a selected cell now types a space and opens its editor, as any other key does. A two-state (boolean) cell still flips. The record opens from the title link or a touch tap; the "Space opens the record" key added in #35747 is gone, so a master-detail page opens its pane only that way too.
+  
+  `@object-ui/react` adds that registry: `createOwnWrites()`, `OwnWritesContext` / `useOwnWrites()`, and `useDataInvalidation(objectName, recordId, ownWrites)`, which skips a change naming a held record.
+  
+  Grids without `GridCellSelection` keep the staged save bar and its batch save unchanged.
+  
+  New `table.*` strings in every locale: `cellSaving`, `cellSaved`, `openRecordToFinish`.
+- f909734: feat(ui): a resident footer row on list tables, where a reader who may change the view picks each column's calculation
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A list's table view now always ends in one footer row, aligned with the columns and held at the bottom of the table: the record count in its first cell, and under each column its calculation, if any, written as the calculation's name in the secondary text colour and the figure in the normal one, with a space and no colon (`Sum ¥1,234,500`). A `min` / `max` over a date reads Earliest / Latest. The list's own "N records" line at the foot of the page is gone from a table that draws this row; the data-cap notice stays there. A grouped table, the phone's card list and every other view type are unchanged.
+  
+  A reader who may change the open view clicks a cell to pick the column's calculation from one menu that lists what the field type allows (sum and average on numbers and amounts, earliest and latest on dates, the counts on any field), the current one ticked and None last. The console saves it as the column's `summary` on the view, and nothing else of the reader's layout. On a personal view it is saved at once and stays drawn. On a shared view the console saved, a reader who may edit it saves it as a draft through the view settings' own save: the draft save reloads the list, which then draws the published view again, so the pick shows for a moment and is drawn again, for every reader, once the draft is published. Until #35932, each pick's draft is built on the published view, so a second pick before Publish replaces the first in the draft: only the latest pick is published. The menu is offered on the columns the view itself declares; a column the reader added for themselves and a view that declares no columns draw the figures with no menu. A pick that is not saved is taken back, with the refusal said (a view a read-only package ships is refused this way: its changes go to the package's customization). A reader who may not change the view sees the figures and no menu.
+  
+  New host props, all optional and never authored metadata: `ObjectGrid` takes `residentSummaryRow`, `onColumnSummaryPick(field, summary)` (answer `false` to have the pick taken back), `summaryPickFields` and `onResidentSummaryRowChange(drawn)`; `ListView` takes `onColumnSummaryPick` and `columnSummaryPickFields`. `ColumnSummaryResult` gains `name` and `text`, the two halves of its `label`. `@object-ui/i18n` adds the `grid.summary` keys `earliest`, `latest`, `pageName`, `calculate`, `none`, `menuPercentEmpty` and `menuPercentFilled` in every pack.
+- 06faee5: fix(list): a list opened from a record shows its condition once, by name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A list opened from a record's related tab (「↗」) now shows its condition once, as the data page's own 「Filtered by」 tag: the list under it still filters on the condition but no longer repeats it as a locked chip printing the record's raw id beside a second 「Reset」. Where a list does lock a lookup condition (a saved view filtered on a lookup), the chip names the record it points at — and so does the reader's own lookup filter chip — keeping the id only when the name cannot be read. The condition row's 「Reset」 is drawn only while the reader has something of their own to reset (a filter they added, a sort they changed); it is no longer drawn disabled.
+  
+  `ListView` takes a host prop, `hostDrawnConditionFields`: the fields whose conditions in `schema.filter` the host draws as its own tags. The list keeps filtering on them and draws no locked chip for them. It is not a schema key.
+- dea68e9: fix(plugin-list): a list's column header opens a menu and keeps a multi-level sort; a sort chip opens the sort panel
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a list page (the grid `ListView` draws), a click on a column header no longer sorts at once. It opens the column menu: sort ascending, sort descending, hide the column (a column that does not sort offers hide alone). Enter, Space or ArrowDown on the focused header opens the same menu, the arrows move through it, Enter chooses, and Esc shuts it without touching the sort. With no sort or a single level, the column picked in the menu replaces the sort; with two levels or more it becomes the first level, the other levels keep their order after it, and a column already in the sort moves up with the picked direction. No level is dropped. The ↑1 / ↓2 marks on the headers are unchanged.
+  
+  A sort chip under the view bar no longer reverses its direction on a click: it opens every sort level in one panel. Each level row in the sort builder now has a handle; dragging it, or ArrowUp / ArrowDown on the focused handle, reorders the levels.
+  
+  New public surface, all additive: `GridHeaderMenuProvider` and `useGridHeaderMenu` from `@object-ui/components` (a host opts a data-table into the header menu; without it a header click sorts as before, so related lists, dashboard tables and every other host keep click-to-sort); the `headerMenu` runtime prop on `ObjectGrid`; and the `sortBuilder.reorder` key in every `@object-ui/i18n` locale. The column menu itself is now a menu (`role="menu"` entries, keyboard reachable) wherever it opens, including a right-click on a header and the design host's caret.
+- b113178: feat(list): the list page's toolbar is two rows: 「Object / View ▾ · View settings … Search · New · ⋮」 and a resident condition row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The console's object list drew three rows above the table: the object's name with ⋮ More and New, the view bar with Filter N, Sort N, Options and search, and a condition row that appeared only once a sort or filter was set. It now draws two:
+  
+  - The view bar starts with the object's icon and name, 「/」 and the view switcher, then 「View settings」. Its right end is the search, the page's toolbar actions, New, and ⋮ More last at the right edge. While rows are selected the right end shows what the selection offers, and ⋮ More keeps its place and its icon (⋮, also in the selection face).
+  - The Filter N and Sort N buttons are gone from the bar. The condition row is always there: with nothing set it shows dashed 「Sort」 and 「Filter」 buttons; a sort of any number of levels is one chip, 「Sorted by X」 with 「+N」 for the further levels, which opens the sort panel; each filter is its own chip with ×, followed by 「+」. The row's right end is 「Personalized」 and 「Reset」 while the list differs from its view. The table no longer moves down when the first condition is set.
+  - 「Options」 is renamed 「View settings」 and sits beside the view name. Its first level shows the content itself: the view's name, the shown columns (drag to reorder, the eye to hide) and 「+ Add column」, then Layout, Group, Row height and Row color where offered, and Save, Restore defaults and export in its footer. The More level and its inline edit switch, and Refresh, are gone.
+  - As the list narrows, 「View settings」 folds to its icon first, then the word 「Personalized」 goes, then 「Reset」 folds to its icon. The condition row stays one line and scrolls sideways.
+  
+  For hosts of `ListView`: two optional host props, `toolbarTrailing(tools)` (the bar's right end, given the list's search) and `conditionRowEnd` (the condition row's right end, drawn in place of the row's own Reset). A host that passes neither gets the search alone at the bar's end and the row's own Reset.
+- 9ed18a5: fix(ui): danger colours render red in both themes, and light danger text clears 4.5:1
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - The grid and list views' export-error line, and the Markdown caution alert's border and title, set their colour to a bare `var(--destructive)`. That variable holds an HSL triplet, not a colour, so the browser dropped the declaration and the text rendered in the inherited colour. The export-error line now uses the `text-destructive` utility and the caution alert reads `hsl(var(--destructive-text, var(--destructive)))`. The Markdown theme's heading anchors, quote and meta tokens and blockquote border and background had the same defect with other theme variables and now wrap them in `hsl()` too.
+  - The flow preview's invalid-edge stroke and arrowhead paint with the danger text colour, so they stay readable on the dark theme.
+  - The light theme now sets its own `--destructive-text`, red-700 (`#b91c1c`, `0 73.7% 41.8%`), so `text-destructive` reads at 6.47:1 on white instead of 3.76:1. `--destructive`, the brand red used for button and badge fills, is unchanged. The same value is in the stylesheet that `objectui init` generates.
+  - A theme's `error` colour applied through the theme engine still sets `--destructive`, and now also derives a danger text colour for each mode from it (same hue, lightness moved until it reads at 4.5:1 on that mode's surfaces), written as `--destructive-text-light` and `--destructive-text-dark`. The shipped stylesheets read those into `--destructive-text` in their light and dark blocks, so a custom red drives danger text and stays readable in both modes. A host stylesheet that overrides `--destructive` by hand should set `--destructive-text` beside it in each mode.
+- 378c955: feat(plugin-list): the list's Filter and Sort open the shared field list, and the conditions show as chips under the view bar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The toolbar's Filter opens a searchable field list (the fields the view shows first, a type icon on each), then the values by field type; every pick applies at once. Sort opens the same list with the direction on top. Under the view bar, the condition row shows the sort chips first (click to reverse, drag or Alt+Arrow to reorder, × to remove), then the view's own conditions as locked chips, then the reader's filter chips, 「Add filter」 and 「Reset」, which puts the filter and sort back to the view as saved. A column header click shows up there as a sort chip. The full FilterBuilder and SortBuilder stay one click away, behind 「Advanced filter」 and 「All sort levels」. The FilterBuilder no longer draws its 「Where」 label: `filterBuilder.where` is retired from the locale packs, and `listConditions.sort.advanced` is added. No filter storage format, `uf_*` parameter or server sort changes.
+- 56fa31b: fix(ui): a multi-select field's list filter offers 「包含 / 不包含」 instead of operators the server refuses
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Filtering a list by a multi-value field (`multiselect`, `checkboxes`, `tags`, or a `select` / `lookup` / `user` with `multiple: true`) now offers contains, does not contain, is empty and is not empty, and the query runs, where it used to offer equals and is any of, which the server answers with `400 INVALID_FILTER`. A structured-JSON field (`json`, `address`, …) offers is empty / is not empty. A saved filter that already holds a refused operator still loads and shows it, so it can be changed. `FilterBuilder` fields accept `multiple`, and `jsonColumnFilterOperators` / `operatorsForField` are exported from `@object-ui/components`.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [ee5fdc8]
+- Updated dependencies [d6d9645]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [a9b36ef]
+- Updated dependencies [9f352e8]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [f2078e3]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [34308dc]
+- Updated dependencies [eb1f85d]
+- Updated dependencies [3819afe]
+- Updated dependencies [a5ddeb6]
+- Updated dependencies [0ce2598]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [9212119]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [b65488a]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [ec24363]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [227a16a]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [a8126d2]
+- Updated dependencies [f51578e]
+- Updated dependencies [65fddc8]
+- Updated dependencies [6b360ab]
+- Updated dependencies [d19d875]
+- Updated dependencies [c7174c3]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [9972432]
+- Updated dependencies [5a68b57]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [32409a9]
+- Updated dependencies [cf45e4f]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9a98a46]
+- Updated dependencies [96b66ca]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [eb53d63]
+- Updated dependencies [a23164e]
+- Updated dependencies [b89f1b5]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/i18n@18.7.0
+  - @object-ui/plugin-detail@18.7.0
+  - @object-ui/fields@18.7.0
+  - @object-ui/plugin-grid@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @object-ui/components@18.7.0
+  - @object-ui/react@18.7.0
+  - @object-ui/mobile@18.7.0
+  - @object-ui/permissions@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

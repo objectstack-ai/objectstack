@@ -1,5 +1,517 @@
 # @objectstack/cli
 
+## 18.7.0
+
+### Minor Changes
+
+- f44758b: feat(units): `os migrate unit-codes` converts stored unit text into unit codes, from the operator's mapping
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 U7 R1, the backfill door (#35492). It is the twin of `os migrate record-currency-codes`.
+  
+  **What it is for.** A field declared a unit code field after its rows were stored still holds free text such as `kg`, `公斤` or `lbs`. Since #35489 the engine checks each unit code it writes, so editing a quantity beside such a value is refused until the row holds a code. This door converts those rows in one run.
+  
+  **`backfillUnitCodes`** (`@objectstack/objectql`, also exported: `formatUnitCodeBackfillReport`, `unitCodeBackfillComplete`, `unitCodeMappingOf` and the report types):
+  
+  - **Which field.** `field` names the unit code field: the `text` field a quantity's `unitConfig.unitField` names, or a standalone `unitConfig: { unitMode: 'code' }` field. If you name the quantity, the refusal is `INVALID_FIELD` and names the field to use.
+  - **The mapping.** It is the operator's, never derived. It maps stored text, exactly as written, to a unit code. Matching is exact: `kg ` and `KG` need their own entries.
+  - **Targets are judged before any row is read**, as the write would judge them. A target that is not a standard UN/ECE Recommendation 20 code or one of the organization's own units, a retired unit, or a unit of another dimension than the field's `unitDimension` is refused `INVALID_FIELD` / 400 on the field. With no organization named, organization codes are judged in each organization the run would write them in, still before any write.
+  - **Rows already holding a unit code are never rewritten**, so the run is idempotent: a second apply run writes nothing. That includes a unit the organization retired and a code of another dimension. Both are codes, not free text, and rewriting them from a mapping would change what the stored quantity means. Neither is a code the field admits: beside a quantity, the write check refuses each at the row's next quantity edit; a standalone unit field has no quantity, so the next write of the field must carry another code. So they are listed as `retired` and `other-dimension` and counted apart (`skippedRetired`, `skippedOtherDimension`), never as a code the field admits.
+  - **A blank unit beside a quantity** is written only from an explicit `""` entry; without one it is counted (`blankBesideQuantity`) and named in the report. A blank unit with no quantity is left alone.
+  - **Complete.** `unitCodeBackfillComplete` answers true only when every row holds a unit code the field admits: no unmatched value, no blank beside a quantity, no retired unit, no code of another dimension, no failed or unexamined row. The report prints its ✓ line only then.
+  - **Dry run by default.** It lists each distinct stored value with its row count and what the mapping does with it, and writes nothing. With no mapping, the listing shows which spellings to map.
+  - **Unmatched values.** An apply run that meets a value with no mapping entry is refused `VALIDATION_ERROR` / 400 on `mapping` before any write. The refusal names each value with its row count, and carries them as `unmatched`.
+  - **Scope.** Scope is `organizationId` or `allOrganizations`, as on the currency backfill. An unscoped run over the rows of several organizations is refused with each organization's counts.
+  - **Writes.** Each row is written through `engine.update` as a system write, so the unit check judges every converted code.
+  
+  **`os migrate unit-codes --object O --field F [--map-file mapping.json] [--org ID | --all-organizations] [--apply] [--yes]`** (`@objectstack/cli`):
+  
+  - It has the precedent's confirmation and exit behaviour: `--apply` asks first, and exits 1 under `--json` or with no terminal unless `--yes` is given.
+  - A mapping file that is not JSON, or a mapping the engine refuses as malformed, is refused before the occupancy probe, the prompt and the boot.
+  - Any refusal exits 1. Under `--json` it carries the code, the HTTP status, and `unmatched` or `organizations` where those apply.
+  - It closes with a ✓ only when `unitCodeBackfillComplete` holds. A run that leaves a blank beside a quantity, a retired unit or a code of another dimension closes with a warning naming what is left.
+  
+  **`POST /api/v1/meta/_migrate-unit-codes`** (`@objectstack/rest`) is the tenant-admin twin of `_migrate-record-currency-codes`.
+  
+  - Its body is `{ object, field, mapping?, apply? }`, and any other key is refused 400.
+  - It sits behind `metadata.endpoints.maintenance` and requires `setup.write`. It converts the caller's current organization only, and is a preview unless `apply: true`.
+  - The report is the `data` of the shared envelope. A refusal over unmatched values answers 400 with `error.details.unmatched`.
+  
+  **The unit refusals name the door** (`@objectstack/objectql`). The `ERR_UNIT_CODE_REQUIRED` and `ERR_UNIT_CODE_UNKNOWN` refusals of a quantity written beside a stored value the write did not supply now end with the remedy: the `os migrate unit-codes` command for that object and field, or the REST door. The refusal of a blank names the `""` entry. A refusal of a code the caller wrote carries no remedy.
+  
+  **A metadata save that makes a stored field a unit code field is a destructive change** (`@objectstack/metadata-protocol`, `@objectstack/spec`). The detector judges the declaration and reads no row. Two findings sit beside `currency_mode_to_record` on the 409 `DESTRUCTIVE_CHANGE`, and `force: true` lifts them:
+  
+  - `unit_code_field_declared`, on the code field: a stored field that is a unit code field after the save and was not one before. Any declaration can do it: a quantity, new or stored, whose `unitField` names the field; a `unitField` re-pointed at it; or its own `unitMode: 'code'`. A field that already was a unit code field raises nothing.
+  - `unit_mode_to_record`, on the quantity: a stored quantity switched to `unitMode: 'record'`, whatever its `unitField`'s history (a unit code field already, or a field new in the same save). It names the blank units beside the quantity and the `""` entry that writes them. It is not raised when the same save raises `unit_code_field_declared` on that `unitField`, since that finding names the quantity, its blanks and the `""` entry, so each debt is reported once.
+  
+  Each names the conversion run for that object and code field, CLI and REST.
+
+### Patch Changes
+
+- e2f3094: fix(cli): a config that fails to load is no longer reported as "Compile failed"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When the `os compile` child that `os dev`, `os start`, `os serve --dev` and `os environments bind --build` run exits non-zero, the closing line said `Compile failed — fix errors above …`. The parent sees only the child's exit status, so the same line followed a refusal raised while `objectstack.config.ts` loads (for example a licence or key-management refusal), and an operator went looking for a code error.
+  
+  The line now says what is true of every way the child fails, a syntax error, a refusal thrown at load or a refusal that prints and exits: `objectstack.config did not load or compile — the reason is printed above; fix it before …`, with each command's own tail (`starting dev server`, `starting the server` with the `--artifact` hint, `starting the dev server.`, `binding`). The `os dev` watch recompile's failure line reads `✗ objectstack.config did not load or compile (Nms)` in place of `✗ compile failed (Nms)`, with the compile output after it as before. Nothing classifies the failure: exit statuses, error codes and the text the child prints are unchanged.
+  
+  A script that matched `Compile failed` in this output should match `did not load or compile`.
+- 7a3f86c: fix: four refusals say what the author can act on — the clone control by its console label, an empty or short unknown key, and an unknown CLI command
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Nothing new is accepted or refused; only the words change.
+  
+  - **Packaged permission sets.** The `ITEM_LOCKED` save refusal and the `NOT_OVERRIDABLE` lock refusals sent the admin to a "Clone" action. Studio's Access pillar and Setup label that control "New similar" ("新建类似" in a Chinese session), so the diagnostic and both end-user messages, in every language they ship, now name it that way.
+  - **Unknown keys.** A refusal naming an empty key printed it as empty backticks; it now says "an empty key (`""`)" and offers no rename. On a key of five characters or fewer, a "Did you mean" rename is offered only when the declared key is one edit away, counting a swap of two adjacent letters as one: `lable` → `label` is still offered, while a removed `aria` is no longer answered with `areas`.
+  - **CLI.** `os <topic> <unknown>` and `os <unknown>` still exit 2 without running anything, and now name the command as typed (`command environments frobnicate not found`) and end with the help that lists the real ones (`See more help with \`os environments --help\``).
+- f796089: fix(spec,metadata-protocol)!: retire the seed modes `insert` and `replace`, which inserted every record again on each replay
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #34798
+  
+  <!-- adr-0087: registered seed-mode-insert-replace-retired -->
+  
+  **BREAKING** for a seed dataset authored with `mode: 'insert'` or `mode: 'replace'`. A seed is replayed on every single-tenant boot, every package install or upgrade and every publish, and neither mode matched an existing row, so every replay inserted each record again: an un-walled install went from 1 to 2 to 3 rows over three boots, a person reference the first load had to leave empty stayed empty on the first row while only the newest copy named the person, and with a unique field the replay insert was refused and the one row stayed empty. `replace` expected the caller to clear the table first, and no load path ever clears one.
+  
+  What moves (each line FROM → TO):
+  
+  - `SeedSchema.mode` / `SeedMode` (`@objectstack/spec/data`; `defineSeed`, `defineStack({ data })`, a `seed` metadata item, a package body's seed): FROM `insert` / `update` / `upsert` / `replace` / `ignore` TO `update` / `upsert` / `ignore` (default `ignore`, unchanged). `mode: 'insert'` or `mode: 'replace'` fails parse with a prescription naming the fix; the save and publish doors refuse it with the same message. The retired pair is exported as `RETIRED_SEED_MODE_VALUES` (`@objectstack/spec/data`): it is derived from the parse refusal's own table, and the loader and the artifact door read it.
+  - a stored dataset that still declares one, replayed by the boot seed, the per-organization replay, the dev hot reload or a package install, upgrade or sample-data reseed (`SeedLoaderService.loadStored`, `@objectstack/metadata-protocol`): FROM inserted again on every load TO refused alone — it writes nothing, the load result carries one error with the prescription and `success: false`, and every other dataset loads. `SeedLoaderService.load()` and `validate()` refuse the dataset the same way when handed one unparsed, so a dry run reports what a real load does.
+  - a compiled artifact (`objectstack.json`) carrying such a dataset, booted by `os serve` / `os start` / `os dev` (the artifact door, `MetadataPlugin`, `@objectstack/metadata`): the door parses the artifact without that dataset and hands it back to the seed load, which refuses it alone; the door logs a warning naming the dataset and the fix. Everything else in the artifact registers and boots.
+  - `os diff` (`@objectstack/cli`) on a dataset declaring either mode: FROM "a replay inserts these again" TO a note that the mode is retired, that a replay refuses the dataset, and what to declare.
+  - the advisory lint rule `seed-insert-mode-duplicates-on-replay` (`validateSeedReplaySafety`, `@objectstack/lint`): FROM a warning on `mode: 'insert'` TO removed; the schema refusal does its job for both modes. The author-time rule count `os validate` / `os build` print drops by one (71 to 70 at this release).
+  - the save door's and the loader's hint for a key no record carries: FROM "or use mode 'insert' for rows with no natural key" TO a list of fields when no single field names a row, or `'id'` when the records carry their own ids.
+  
+  The fix: declare which field identifies a row and drop the mode (or declare `upsert` for reference data the package keeps current). Set `externalId` to the field that names a row, to a list of fields when no single field does (a junction table's `['team', 'project']`), or to `'id'` when the records carry their own ids. Rebuild the package, and reinstall it where it was installed with `os package install`, so the stored body carries the new declaration.
+  
+  No conversion is made, at load, at save or by a migration (ADR-0087 D3, entry `seed-mode-insert-replace-retired`): a keyed mode needs the field that identifies a row, and only the author knows it. Rows earlier replays duplicated are data and are left as they are.
+  
+  Unchanged: `ignore`, `upsert` and `update` datasets load byte-identically.
+- 910306b: feat(cli): `os validate`, `os verify` and `os serve` name a declared enterprise or cloud capability that no provider enforces
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A stack that declares `requires: ['hierarchy-security']` and runs without the enterprise provider wired into `plugins[]` gets owner-only hierarchy scopes (`own_and_reports`, `unit`, `unit_and_below`), and before this nothing said so past `os validate`'s install hint.
+  
+  - `os verify` now runs the capability-provider check `os validate` runs and reports every finding as an advisory: a `capabilities` array on the `--json` report (`token`, `message`, and `validate`: `error` when `os validate` refuses the stack over it, `warning` when it reports it), and one line each on the text face. It never changes `os verify`'s exit status, for any token.
+  - `os validate` and `os build` (and through the first, `os verify`) add a wiring check: an `enterprise`-edition token whose package resolves but which no `plugins[]` entry provides is a warning. Which tokens are `enterprise` is read from the capability registry's edition tags.
+  - `os validate --strict` (and `os validate --json --strict`), which already fails on any warning, now exits 1 for a stack whose `enterprise` capability package resolves but is not wired into `plugins[]`, or resolves but fails to load, while without `--strict`, and in `os build` (which has no flag that fails on warnings), the exit status is unchanged.
+  - The `enterprise` message names what happens without a provider (for `hierarchy-security`: the hierarchy scopes behave as owner-only) and its remedy reads "Install the package and add its plugin to `plugins[]`, or remove the token from `requires`".
+  - `os serve` prints the same sentence once at start-up for a declared enterprise or cloud token that nothing mounts. The boot itself is unchanged.
+- 8e46424: Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  feat(messaging): Slack DM delivery — a `slack` channel, a per-person link store, approval requests by DM
+  
+  An organization can now receive notifications in Slack, as direct messages to each person who connected their own Slack user (ADR-0013 addendum of 2026-11-19, step 2 of #34730).
+  
+  - **The install.** An organization administrator (`setup.write` in their current organization) installs the organization's own Slack app with `PUT /api/v1/messaging/slack/account` `{ token }`. Slack proves the bot token (`auth.test`) before it is saved. The app's bot token needs the scopes `chat:write`, `im:write`, `users:read` and `users:read.email` (the methods called are `auth.test`, `users.lookupByEmail`, `conversations.open` and `chat.postMessage`); `auth.test` does not check scopes, so an app without `users:read.email` installs and every proposal then answers 502. The token is kept in `sys_channel_account.bot_token`, a `secret` field: encrypted at rest by the host's `ICryptoProvider`, masked on every read, never returned by any route, and read only by the server when it calls Slack. `GET` and `DELETE` on the same route read and remove the install.
+  - **A person's link.** `POST /api/v1/messaging/me/slack-link/proposal` proposes a link by the person's email (Slack `users.lookupByEmail`); it delivers nothing until the person confirms it with `POST /api/v1/messaging/me/slack-link/confirm`. A Slack link is proposed only for a verified email and names no one before it is confirmed. `GET` and `DELETE /api/v1/messaging/me/slack-link` read and remove it. An administrator lists links with `GET /api/v1/messaging/slack/links` and removes one with `DELETE /api/v1/messaging/slack/links/:id`; the person is told by inbox and e-mail (topic `messaging.slack_link_removed`) and may link again. A link goes when the person is deleted, banned, or leaves the organization. Links are `sys_channel_user_link` rows; every write names who acted, so the platform's write audit records each one.
+  - **The channel, only where connector-slack is composed.** `slack` is registered beside inbox, email, sms and push only on a composition where connector-slack's `slack` client service resolves at boot: `ConnectorSlackPlugin` now registers that service, which sends with a caller-held token. On such a composition, and only there, the `/automation` save doors accept `slack` on a `notify` node, and `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list `slack` as a channel. A `notify` node naming `slack` delivers only where connector-slack is composed, the organization installed Slack and the recipient confirmed a link. Without connector-slack, those doors answer as before: a `notify` node naming `slack` is refused 400, and neither preference door lists it. It sends `conversations.open` then `chat.postMessage` with the notification's title linked to its deep link, made absolute under `OS_AUTH_URL` / `OS_BASE_URL`. Preferences, digest and quiet hours apply as on every channel. A recipient with no confirmed link is skipped before any delivery row is written, so nothing is dead-lettered for them; a refused token stops delivery on that install until an administrator sets it again; a rate limit is retried.
+  - **Approval requests.** `approval.requested` also asks for `slack`, beside inbox and e-mail, only while the `slack` channel is registered and mounted (connector-slack composed).
+  - `MessagingChannel` gains an optional `reachableRecipients(ctx, { organizationId, recipients })`, consulted once per channel per emit after preferences. A channel without it reaches every recipient, as before.
+  - `PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']` lists `sys_channel_account` and `sys_channel_user_link`, and the organization ownership inventory gives both a row.
+- f5b2eea: feat(cli): `os meta register --mode draft` stages a draft for review and prints its publish verdict, and `os lint --item <file> --type <type>` judges one item
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  For a developer or an AI client that authors metadata item by item from the command line against a self-hosted runtime (signed in with an API key), with no project on disk:
+  
+  - **`os meta register <type> --data <file> --mode draft`** saves through the same door with `?mode=draft`: the item is stored as a pending draft and nothing is published until a person publishes it in Studio's Changes. A draft names its package with `--package <id>`: Studio lists drafts per package, so `--mode draft` without `--package` is refused before any request, and the command prints that package's Changes route. After the save it reads the draft back (`GET /meta/<type>/<name>?package=<id>&state=draft`) and prints the publish verdict the runtime serves on it: `valid`, its errors (each with its rule code) and its warnings, also as `publishVerdict` on `--format json|yaml`. A `valid: false` verdict is printed, not turned into a failed run: the draft is stored either way. `--mode publish` is the default spelled out and sends exactly the request an unflagged run sends (an active save, no query string, no read after it).
+  - **`os lint --item <file> --type <type>`** lints the JSON body `os meta register --data` takes, alone. It runs the shared author-time rule table (the one `os build` and `os validate` run) and `os lint`'s per-entry naming, label and structure conventions over a stack holding only that item. A rule whose verdict needs the rest of the stack is not run and is named: each rule is measured, on that item, by the top-level stack keys it reads, and a rule that read anything beside the item's own collection is listed under `notJudged` with those keys instead of reporting findings. `os lint`'s namespace-prefix, i18n-coverage and (for objects) data-model families are listed under `familiesNotRun`. The exit code reads as a project run's, `--strict` included. `--item` refuses to combine with a configuration path, `--score` or `--eval`, and `--type` without `--item` (or the reverse) exits 1.
+- 00110fd: feat(verify): run a flow locally and report its node trace before it is submitted
+  
+  Clause-②: yes (widening: a new `os verify --flow` option, and new `@objectstack/verify` exports)
+  Metadata-protocol: none
+  
+  `os verify --flow <name>` runs one flow once on a fresh in-memory boot of the app and reports what the engine did: each node's status as the run's log records it, the first failure with its code and the node named, and every write the run made.
+  
+  - The run starts the way production starts it. A record-change flow is fired by its own trigger: the run writes the record `--flow-record '{"field":"value"}'` names as the dev admin (inserted for a create or write leg; seeded and saved unchanged for an update leg; seeded and deleted for a delete leg). A flow its own trigger starts is started with no caller, with the context that trigger builds: an API-triggered flow gets `--flow-input '{...}'` as its record and its params (the request body); a time-relative flow gets the `--flow-record` row, seeded first, as its record (the acting organization a sweep can set is not reproduced); a schedule or another `runAs: 'system'` flow gets `--flow-input` as its params. Any other flow goes through the trigger route as the dev admin, with `--flow-input` as its params.
+  - A node whose type no installed plugin runs is named, whether the run reached it or not. A flow whose trigger never binds is reported with the trigger and the engine's reason, and is not run. A schedule or time-relative trigger left unarmed by the deployment's scheduled-work switch (the default) is not a defect: it is reported as not armed and the flow is still run.
+  - The run writes to the in-memory database the boot creates and nowhere else: a write to an object bound to any other datasource is refused before that datasource's driver is called, and the node that made it fails naming the object and the datasource. Four outbound node types are not executed: `http`, `connector_action` (with every connector a plugin contributes behind it), `notify` and `script`; a plugin's own node type that calls out under another name is not stood in and runs for real. A run that ends at one of them stops there and the report names it (`outbound_not_run`), in a child flow too; every node before it ran for real. A stop a `try_catch` catches is listed in `outboundStops`, and a later node that fails is still the first failure.
+  - A failed run, a missing executor, an unbound trigger, a record-change or time-relative flow given no record, and a write refused outside the ephemeral stack each fail `os verify`. A run its start condition skipped, one that paused at a screen, wait or approval, and one stopped at an outbound node are reported and do not.
+  - `--json` carries the report as `flowRun`.
+  
+  New exports from `@objectstack/verify`: `runFlowProof`, `formatFlowRunReport`, and the `FlowRunRequest`, `FlowRunVerdict`, `FlowRunStart`, `FlowRunStep`, `FlowRunWrite`, `FlowRunFailureKind`, `FlowRunFailure`, `FlowRunTrigger` and `FlowRunReport` types. Nothing that ran before changes.
+- 6f36818: fix(cli): `os doctor --verbose` no longer ends by telling you to run with --verbose
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When `os doctor` finished with warnings it always closed with "Run with --verbose to see fix suggestions.", including on a run that already passed `--verbose` and had already printed those suggestions. The line is now printed only when `--verbose` is off; a run without the flag reads exactly as before.
+- 6ffa816: feat(security): an unmanaged install copies an app's capabilities, renamed with the copy
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An app that gates an action on its own capability can now install as an unmanaged copy (`installModes: ['unmanaged']`). Before, `capability` was code-only (`allowRuntimeCreate: false`), so the validator refused the mode for any app that declared one, and the install door had no channel to write the copy's capabilities.
+  
+  - **`capability` is runtime-creatable.** Its `DEFAULT_METADATA_TYPE_REGISTRY` entry is now `allowRuntimeCreate: true`, and overlays stay closed (`supportsOverlay: false`, `allowEnvironmentOverlay: false`). A body is judged by `CapabilityDeclarationSchema`, as before.
+  - **The save door refuses two names.**
+    - A platform capability's name (`manage_users`, `setup.access`, every name in `PLATFORM_CAPABILITIES`) answers `422 NAMESPACE_CONFLICT`. An environment item under that name would shadow the platform's definition, because the registry answers its bare slot first.
+    - A name an installed package's capability holds answers `422 NAMESPACE_CONFLICT`, naming the holder. A capability holds one name per deployment, the same rule permission sets and positions follow.
+  - **The environment catalog holds capabilities.** `ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES` is `['position', 'permission', 'capability']`. A package that ships a capability name the environment already authored is refused at boot, as a position or permission-set name is. `os migrate security-catalog-overlays`, the remedy that refusal names, lists and deletes such a capability row too (`capability` and `capabilities` spellings).
+  - **An unmanaged copy renames its capabilities.** When the copy takes a new namespace, a capability whose name starts with the source namespace (`<ns>.` or `<ns>_`) is renamed into the copy's namespace. Every reference is rewritten with it: a permission set's `systemPermissions` (list or per-operation map), an object's or action's `requiredPermissions`, and a quoted `current_user.hasCapability('<name>')` in a predicate. There the object-name rename never touches a name the package declares, so a capability named after a renamed object has one name in the copy; a token the package does not declare follows a renamed object as before. An unprefixed capability keeps its name. A renamed capability that collides with another package's capability refuses the install, naming both. Install again under another namespace.
+  - **Duplicating a package refuses a shared gate.** `duplicatePackage` keeps its source installed, so a capability it cannot rename (no source prefix, or a copy name the package already declares) is refused, and so is every copied item that grants, requires or tests for it, each at its own name in `failed[]`.
+  - **The `everyone` anchor excuses only a declaration that carries a package.** The check that refuses a high-privilege permission set bound to `everyone` excuses the tokens an app declared itself. It now counts only declarations bound to a package (`_packageId`), as ADR-0090 D5 rules: an app's shipped capabilities, an unmanaged copy's, and one saved into a writable package. A capability saved with no package excuses nothing. What bounds a saved declaration is the two refusals above: a platform capability is never excused, and a name a package declares cannot be declared again. A name nobody declares can be declared once, by a `manage_metadata` holder, inside a writable package.
+  - **The gate is unchanged.** It still matches capability names. The copy's action is gated on the copy's capability: a holder of the copy's permission set passes, and a holder of only the source's set does not.
+- d99b746: fix(plugin-sharing): a hierarchy scope that falls back to owner-only for want of a resolver now says so once per boot
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a permission set grants a hierarchy scope (`own_and_reports`, `unit`, `unit_and_below`) and no `hierarchy-scope-resolver` service is registered (the `hierarchy-security` capability, provided by `@objectstack/security-enterprise`), the sharing layer fails closed to owner-only. It used to do so without a word, so a runtime booted without the CLI gave an operator nothing to explain why every user saw only their own records.
+  
+  - The first time the fallback is taken, the sharing service logs one `warn` naming the capability, its provider and the owner-only consequence. It is logged once per service instance, which is once per boot, never once per request.
+  - Nothing is logged for an app that never asks for a hierarchy scope, or when a resolver is registered.
+  - The answer does not change: the scope still resolves to the caller alone.
+  - `os validate`, `os verify` and `os serve` no longer end the `hierarchy-security` advisory with "and no log line says so": for that token they now say the runtime logs one warning, opening `[sharing] hierarchy scope NOT widened`, the first time it falls back. Other enterprise tokens keep their wording.
+- 0188989: feat(scaffold): new projects run their tests in CI
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `npm create objectstack` projects now run `pnpm test` in `.github/workflows/ci.yml`, after `validate`, `lint` and `typecheck`, so the starter `note.test.ts` and every test you add run on each push.
+  
+  `os init -t app` and `os init -t empty` now declare a `test` script (`vitest run`), list `vitest` in `devDependencies`, and ship one starter test (`app.test.ts`, `project.test.ts`) that reads the project's definition, so the same CI workflow passes on a project made either way. To test what the engine does with a record, add `@objectstack/verify` and boot the stack with `bootStack`; the `objectstack-project` skill shows how.
+  
+  Existing projects are not changed. To take the CI step, add `- run: pnpm test` after `- run: pnpm typecheck` in your `ci.yml`; a project with no `test` script adds vitest and the script first.
+- df81f4c: feat: working calendars in Setup — `sys_work_calendar` and `sys_work_calendar_exception` (ADR-0157, part two of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Not released alone; pair #35641/#35642. The first half, #35641 (the calendar service and its arithmetic), is merged; this half ships in the same release as it, with the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Two platform objects** (`@objectstack/platform-objects`). `sys_work_calendar` holds a calendar's `code` (unique per organization, snake_case), `name`, required IANA `timezone`, `is_default` (one per organization), the required `maintained_from` .. `maintained_through` span its holidays are entered for, and one period column per weekday (`monday_periods` … `sunday_periods`, `HH:mm-HH:mm` periods separated by commas, blank for a day off). `sys_work_calendar_exception` holds dated overrides: `calendar`, `date`, `kind` (`off`, no periods; `on`, that date's full periods), `periods` and `note`, one row per calendar and date. Both are organization data an administrator keeps, audited, like `sys_exchange_rate`; a package may seed rows under the existing seed contract and name a calendar by code. Their names join the platform object name list (`@objectstack/spec`).
+  - **Setup.** Two entries under Exchange Rates: Working Calendars (with a Needs Maintenance list of every calendar whose maintained span ends within 60 days) and Calendar Exceptions, whose list page imports a year of holidays from a file; the `calendar` column names a calendar by its code or name. Labels and help text ship in all eleven locales.
+  - **Time zone on create** (`@object-ui/plugin-form`, ADR-0157 D7). A create form opens a required time-zone field that declares no default (`valueDomain: 'iana_time_zone'`) on the organization's time zone, as it opens a record-currency field on the organization's currency; the user can change it. A create that leaves the calendar's `timezone` out takes the same zone on the server. An optional time-zone field, where blank means "take the parent's", is not prefilled.
+  - **Refusal wording** (`@objectstack/objectql`). The refusal of a create that marks a calendar the default in another organization no longer assumes the writer is working in an organization.
+  - **A calendar stays in its organization** (`@objectstack/objectql`). An update that changes the organization of a calendar or of an exception date is refused with `400 VALIDATION_FAILED` on `organization_id` (`invalid_value`), before any read and for every writer, system writes included. To have a calendar in another organization, create it there. An edit that leaves `organization_id` out or repeats the stored one is judged as before; a predicate update is judged row by row, and one matched row whose organization would change refuses it.
+  - **An exception date names a calendar of its own organization** (`@objectstack/objectql`). On a create, and on an update that carries `calendar`, the calendar is read by id in the exception's organization; when it is not there, the write is refused with `400 VALIDATION_FAILED` on `calendar` (`invalid_value`). A calendar of another organization and an id that names no calendar get the same refusal, word for word. The import door is judged the same way, row by row.
+  - **Organization ownership** (`@objectstack/cli`). Both objects are organization-owned; an exception reaches its organization through its calendar.
+- f6b095a: fix(cli): `os doctor` no longer advises `--verbose` when no warning has a fix for it to show
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When `os doctor` finished with warnings it closed with "Run with --verbose to see fix suggestions." whenever any warning fired. Several warnings have no fix suggestion in either mode (a missing `*.test.ts` beside a `*.zod.ts`, `@deprecated` usages, circular dependencies, unused objects, orphan views), so for those the re-run printed nothing new. The line is now printed only when at least one warning that fired carries a fix that `--verbose` would reveal. The warnings themselves, and exit codes, are unchanged.
+- 7411f9b: feat(spec, platform-objects): the standard unit table and the organization unit object `sys_unit` (ADR-0158 U1–U3)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Units of measure, first release (ADR-0158 U7 R1). Nothing reads these tables yet: the unit declaration on a `number` field, the write-time membership check and the display of a quantity with its unit ship with their own cards. No field key ships here.
+  
+  - **`@objectstack/spec`** (`@objectstack/spec/data`) exports `STANDARD_UNITS`, a closed table of 41 UN/ECE Recommendation 20 codes. Each code carries its dimension (`UNIT_DIMENSIONS`: `mass`, `length`, `area`, `volume`, `time`, `count`, `package`) and its ratio to the dimension's base unit (`UNIT_DIMENSION_BASE_CODES`: `KGM`, `MTR`, `MTK`, `MTQ`, `SEC`, `H87`), as an exact decimal string: `1 CODE = ratio × BASE`. Package codes (`XBX`, `XCT`, `XPX`, …) carry no ratio. The piece is `H87`; `C62` and `EA` are not members. `ORGANIZATION_UNIT_CODE_PATTERN` is the namespace of an organization's own codes (uppercase letters, digits and underscores, at least 4 characters or containing an underscore), which no standard code can match. `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` gains `sys_unit`. The table is not a value domain: `ValueDomainSchema` keeps its three members.
+  - **`@objectstack/platform-objects`** registers `sys_unit` (Setup → Configuration → Units of Measure), an organization's own units: `code`, `label`, `dimension`, `ratio` (scale 12; required on every dimension but `package`, refused on `package`), `decimal_places` (a display default) and `retired`. It is organization-owned behind the tenant wall and ships no rows. A code outside the organization namespace is refused, the code is unique within the organization, and the code and dimension cannot change after create. A unit is retired instead of deleted, and retiring cannot be undone, so a code is never created again with another meaning; the data API serves no delete on it. Every column carries field history.
+  - **`@objectstack/plugin-security`**: `member_default` reads `sys_unit`, so a unit's label displays to every member; organization administrators write it through their existing grant.
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_unit` as attributed to its organization.
+- b3247dd: fix(auth)!: a server outside development mode refuses a development seed credential, and `os user set-password` sets a new one on the server
+  
+  Clause-②: yes (narrowing) — narrowed: on a server whose `NODE_ENV` is not `development`, a password sign-in that submits the development seed password (`admin123`, or the value `OS_SEED_ADMIN_PASSWORD` sets) is refused on every account, and an account the development seed created opens no session while its stored password is still the one it was seeded with. Widened: the `os user set-password` command, the `sys_user.dev_seed_credential` column, and new `@objectstack/plugin-auth` exports `setOperatorPassword`, `findAccountByEmail`, `operatorPasswordRefusal`, `OPERATOR_PASSWORD_MIN_LENGTH`, `OPERATOR_PASSWORD_MAX_LENGTH` and the types `OperatorPasswordResetEngine`, `OperatorPasswordResetOutcome`, `OperatorPasswordResetRefusalReason`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, accepted value or metadata type is added, removed or renamed; a system column is added; nothing stored is rewritten: the moved answer is whether a server outside development mode accepts a development seed credential at sign-in. The one-line fix for a refused account is in the body: set a new password on the server with os user set-password. -->
+  
+  **BREAKING** for a deployment that serves, outside development mode, a database `os dev` seeded, or any account whose password is the development seed password. Such a sign-in is refused. Set a new password on the server with `os user set-password <email>`; the refusal names the command. A server in development mode (`os dev`) is unchanged.
+  
+  **The rule: a server outside development mode never accepts a development seed credential.** Development mode is `NODE_ENV=development`, the condition the development seed itself runs under. The rule lives in the auth plugin, so `os start`, `os serve`, the image and a custom host all apply it.
+  
+  - **The seed password is refused at sign-in, on any account.** A password sign-in with the development seed password answers `403 PERMISSION_DENIED`, and its message names `os user set-password`. It is decided on the submitted password alone, before any account is read, so every address gets the same answer. This covers the seeded admin, the stack's `demoStaff`, any other account on that password, and a database seeded by an earlier release.
+  - **The accounts the development seed creates are marked.** `os dev`'s admin and each `demoStaff` account carry `sys_user.dev_seed_credential`: a one-way digest of the password hash the seed stored, never the password. The column is never returned on reads, and any password change stops it matching.
+  - **A marked account still on its seed password opens no session**, on any sign-in door (password, emailed link, one-time code, passkey, social or SSO, impersonation), whatever password it was seeded with, `os dev --admin-password` included. A password check never confirms that seed password: a password sign-in answers it as a wrong password.
+  - **No password change is offered at sign-in.** Whoever signed in first could perform it. The way out is the operator's reset on the server.
+  
+  **`os user set-password <email>`** sets the account's password in the project database. It reads the new password from a terminal prompt (twice, not echoed) or from standard input with `--password-stdin`, never from the command line, and takes `--database-url` like the other one-shot commands. It checks that the new password is not a development seed password and is 8 to 128 characters long; the deployment's own password policy and password history are not applied. It writes nothing on a refusal. It deletes the account's outstanding password-reset links and codes from the project database before the new password lands. It clears the account's development seed mark and any sign-in lock, records the change time, and ends every session and revokes every API key of the account, as an administrator's forced reset does. It asks for no password change at the next sign-in. It writes the project database only: a secondary storage the host configures for the auth service is out of its reach, for the reset links and the sessions alike. With one configured, run the command with the server stopped, or restart the server afterwards; a secondary storage kept outside the server process outlives a restart and is cleared of the account's entries by hand.
+  
+  **Not detected:** a database seeded before this release with a custom seed password carries no mark and no well-known password. Set a new password with `os user set-password` on each account it seeded before serving it outside development mode.
+  
+  **Not ended at boot:** this release refuses the development seed password and every new session for a seeded account still on it. Sessions and API keys a seeded account was issued before the server left development mode are ended by `os user set-password`; run it on each seeded account before serving the database. Ending them at boot is follow-up #35184.
+- df8a1b8: fix(plugin-auth)!: a password reset disables the OAuth applications the account registered and revokes the SCIM credentials it minted
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what a completed password reset ends: rows the account owns are written disabled or revoked by the doors administrators already use, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an account that registered an OAuth application or minted a SCIM provisioning credential, and then has its password reset.
+  
+  - FROM: a completed password reset (the emailed link, the texted code, an administrator's `POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, and `os user set-password`) ended the account's sessions, API keys, linked sign-in accounts, authorized apps and device sign-ins. The OAuth applications the account registered (`sys_oauth_application.user_id`) stayed enabled, and the SCIM credentials it minted (`sys_scim_connection_credential.user_id`) stayed active. A self-service reset sent the account no notice.
+  - TO: the same resets also disable every OAuth application the account registered that is not disabled, as a platform administrator's Disable action does (the provider issues it no token, client-credentials tokens included, answers its tokens inactive at introspection, and the MCP endpoint refuses every token it holds), and revoke every SCIM credential the account minted that is still active, as Revoke Credential does, each revoke writing the `sys_audit_log` row Revoke Credential writes (`scim_credential_revoked`) naming the account for a self-service reset and the administrator for a forced one (`os user set-password` names no one and writes none). An application another account registered and a credential another administrator minted are not touched. The account's single sign-on providers and two-factor enrolment are kept.
+  - A completed self-service reset then mails the account `auth.password_reset_notice` (a new built-in template, in en-US, zh-CN, ja-JP and es-ES): how many API keys, linked sign-in accounts and authorized apps it ended, each application it disabled and each credential it revoked by name, and the single sign-on providers and second factor it kept. It is best-effort: a notice that cannot be sent never fails the reset. The forced resets send no notice and answer their requester instead.
+  - The administrator's forced reset reports the new counts on `data.revoked` (`ownedApps`, `scimCredentials`) and on its ledger row (`revokedOwnedApps`, `revokedScimCredentials`); `setOperatorPassword` answers `ownedAppsDisabled` and `scimCredentialsRevoked`, and `os user set-password` prints them. A disable or revoke that does not land answers the self-service requester an error, with no notice, and keeps the forced reset's `complete` false, as for the other rows; every other kind is still ended first, so an application that cannot be disabled leaves no API key, linked sign-in account or credential in place.
+  - A password change disables and revokes nothing. Its reminder, `auth.password_changed_notice`, now also lists the OAuth applications the account registered that are still enabled and the SCIM credentials it minted that are still active and not past their own expiry, and is sent when the account holds only those.
+  
+  The fix for an owner after a reset: ask a platform administrator to enable an application you still need again, and have a platform administrator mint a new SCIM credential for a connection whose credential was revoked.
+- 75925e1: fix(plugin-auth)!: a password reset ends what the account added before it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or export shape is added, removed, renamed or re-shaped, and no stored row is rewritten by a migration: what moves is what the auth doors end when a password is reset or first set, and the answer they give a link minted before it, which is now the answer a link that was never issued gets. The forced reset response gains two counts, its ledger row two keys and the operator outcome two fields. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  A password reset ends what the account added before it, and a password change reminds the account what it keeps.
+  
+  - **A completed self-service reset** (the emailed link at `POST /api/v1/auth/reset-password`, the texted code at `POST /api/v1/auth/phone-number/reset-password`) now ends, beside the account's sessions, every API key the account owns that is not revoked, its `revoked` flag false or unset (revoked as one its owner revoked, so the owner may restore it from the API Keys list), and every sign-in account linked to it other than its password (a social, OAuth or single sign-on link; the provider may be linked again as it was the first time). Where the OAuth provider is enabled it also ends every app authorized to the account: the account's consents, refresh tokens and stored access tokens are deleted, so the app asks to be authorized again, and an MCP access token is refused on its next request. Where device authorization is enabled it ends a device sign-in approved for the account and not yet collected. This build offers no passkey sign-in, so there are no passkeys to end. A reset that does not complete ends nothing. A completed reset that cannot end one of these (a record it cannot read or write, a linked account a host's `account.delete.before` hook keeps, an account it cannot name) answers an error once the password is written; the password stands, its change time and password history are recorded all the same, and resetting again ends what remains.
+  - **A password change** (`POST /api/v1/auth/change-password`) ends none of these: an authorized app keeps its authorization and gets a new MCP access token with its refresh token, issued after the change. When the account still holds an API key that is neither revoked nor past its own expiry, a linked sign-in account or an authorized app afterwards, the account's address is sent the new built-in template `auth.password_changed_notice`, naming each (its variables are `apiKeyCount`, `apiKeys`, `signInAccountCount`, `signInAccounts`, `authorizedAppCount` and `authorizedApps`), through the email service. It is best-effort and never fails the change. plugin-email ships it in `en-US`, `zh-CN`, `ja-JP` and `es-ES`, so `BUILTIN_AUTH_TEMPLATES` grows from 32 rows to 36, and core's `PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template` names it beside the other eight, so it resolves environment-wide and keeps one overriding package per deployment.
+  - **An administrator's forced reset** (`POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, the default) and the operator's `os user set-password` also unlink every linked sign-in account and end every app authorized to the account and every device sign-in approved for it, as the self-service reset does: where the OAuth provider is enabled, the account's consents, refresh tokens and stored access tokens are deleted; where device authorization is enabled, its pending device codes. The operator's command, which runs with no server, ends the ones the project database holds. Both now revoke a key whose `revoked` flag is unset as well. The forced reset's response reports the unlinks as `revoked.signInAccounts` and the apps as `revoked.authorizedApps` (its ledger row as `revokedSignInAccounts` and `revokedAuthorizedApps`), and the operator command prints both (`signInAccountsUnlinked`, `authorizedAppsEnded` on `setOperatorPassword`'s outcome). `revokeSessionsAndKeys: false` still ends nothing.
+  - **An account's first password counts as a password change when it is set onto an account that was already there**: through either reset door, an administrator's `set-user-password`, the one-step invitation acceptance of an existing account, or `POST /api/v1/auth/set-initial-password`. So links and challenges issued before it end, exactly as they do for any other password change. A password created in the same request as its account, as at a sign-up with a password, an administrator's create-user or a one-step invitation acceptance that creates the account, is still not a change, however long the steps between the two take. A password created outside such a request (written straight to the store), or before this release, counts as a change at its creation, so a verification link that signs in, mailed in the same second as that creation, answers as never issued and its owner requests a new one.
+  - **A verification link that signs its holder in** (on a deployment with `emailVerification.autoSignInAfterVerification: true`), **a magic link** and **a texted sign-in code**, issued before the account's password changed, now answer what a link or code that was never issued answers: `401 INVALID_TOKEN` or the `error=INVALID_TOKEN` redirect at `GET /api/v1/auth/verify-email`, the `error=INVALID_TOKEN` redirect with no session at `GET /api/v1/auth/magic-link/verify`, and `400 OTP_NOT_FOUND` with no session at `POST /api/v1/auth/phone-number/verify` (a code sent by `POST /api/v1/auth/phone-number/send-otp`). With auto sign-in off, a verification link still verifies the address. An MCP access token issued before the account's password changed (a reset, a change, or an administrator's `set-user-password`) is refused at the MCP endpoint, as a signed link is, in whole seconds; where the app's authorization still stands (a change, or `revokeSessionsAndKeys: false`), the app gets a new token with its refresh token. A link, code or token issued after the change works as usual.
+  
+  **BREAKING** for a client or integration that keeps using what a reset now ends: an API key the account owned before a completed password reset is refused as revoked (`403 API_KEY_REVOKED`), a linked sign-in account is no longer linked, an authorized app must be authorized again (after a forced reset with revocation on, too), a verification link that signs in, a magic link or a texted sign-in code issued before the account's password changed answers as a never-issued one, and an MCP access token issued before it is refused. The fix: mint a new key after the reset (or restore the old one from the API Keys list), link the provider again, authorize the app again, request a new link or code, or let the app refresh its token.
+- Updated dependencies [b02484e]
+- Updated dependencies [c6558d0]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [4c2d8d7]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [7878cf0]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [37e7fdf]
+- Updated dependencies [2a0cd20]
+- Updated dependencies [22af9e6]
+- Updated dependencies [a998964]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [cceb5c6]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [5f18b9b]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [895dd43]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c4a73be]
+- Updated dependencies [806bba8]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [2d33205]
+- Updated dependencies [2d33205]
+- Updated dependencies [78f3ab2]
+- Updated dependencies [3c038eb]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [f5b2eea]
+- Updated dependencies [00110fd]
+- Updated dependencies [1950f07]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [c05a8a0]
+- Updated dependencies [e22502c]
+- Updated dependencies [35c6331]
+- Updated dependencies [de395b4]
+- Updated dependencies [f848e37]
+- Updated dependencies [fe3ebc8]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [f54fc93]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [24cc61f]
+- Updated dependencies [5ecf937]
+- Updated dependencies [96faf44]
+- Updated dependencies [d6ce9ba]
+- Updated dependencies [7ed18b5]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [961f474]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [338448e]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9e65474]
+- Updated dependencies [8596c80]
+- Updated dependencies [ba304e0]
+- Updated dependencies [ec227fc]
+- Updated dependencies [ba6556c]
+- Updated dependencies [8856afc]
+- Updated dependencies [96a1f2b]
+- Updated dependencies [c787255]
+- Updated dependencies [c480f33]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [dbb2f68]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [d99b746]
+- Updated dependencies [467b13b]
+- Updated dependencies [7702f09]
+- Updated dependencies [abb40ae]
+- Updated dependencies [b863d2b]
+- Updated dependencies [ee40658]
+- Updated dependencies [068a0f9]
+- Updated dependencies [afbd903]
+- Updated dependencies [0188989]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [cf6bb70]
+- Updated dependencies [78fd762]
+- Updated dependencies [a35187e]
+- Updated dependencies [c321914]
+- Updated dependencies [03865ae]
+- Updated dependencies [37f7814]
+- Updated dependencies [c0484c8]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [d76d57a]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3ce6b65]
+- Updated dependencies [edc5355]
+- Updated dependencies [2211bb1]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [819c067]
+- Updated dependencies [4890cd0]
+- Updated dependencies [c9aad65]
+- Updated dependencies [53c9575]
+- Updated dependencies [7eaa3f5]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [eb9f8ed]
+- Updated dependencies [986a0f2]
+- Updated dependencies [c99156e]
+- Updated dependencies [c6b07c2]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [61831d2]
+- Updated dependencies [c03a8a3]
+- Updated dependencies [03bce5c]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [d9be915]
+- Updated dependencies [d9be915]
+- Updated dependencies [a8126d2]
+- Updated dependencies [65fddc8]
+- Updated dependencies [c4d6acc]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [1c4db09]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [cf7e443]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [850bcec]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [907b378]
+- Updated dependencies [62daf7d]
+- Updated dependencies [a23164e]
+- Updated dependencies [702b0cf]
+- Updated dependencies [92ab056]
+- Updated dependencies [b3247dd]
+- Updated dependencies [084156d]
+- Updated dependencies [97f3420]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [d2bc1ff]
+- Updated dependencies [6927c3f]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [1e692d1]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+- Updated dependencies [1104ee5]
+  - @objectstack/spec@18.7.0
+  - @objectstack/metadata-protocol@18.7.0
+  - @objectstack/plugin-security@18.7.0
+  - @objectstack/runtime@18.7.0
+  - @objectstack/objectql@18.7.0
+  - @objectstack/plugin-audit@18.7.0
+  - @objectstack/service-storage@18.7.0
+  - @objectstack/service-settings@18.7.0
+  - @objectstack/lint@18.7.0
+  - @objectstack/plugin-auth@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/driver-mongodb@18.7.0
+  - @objectstack/cloud-connection@18.7.0
+  - @objectstack/metadata@18.7.0
+  - @objectstack/service-automation@18.7.0
+  - @objectstack/plugin-approvals@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/mcp@18.7.0
+  - @objectstack/service-messaging@18.7.0
+  - @objectstack/client@18.7.0
+  - @objectstack/verify@18.7.0
+  - @objectstack/rest@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/driver-sql@18.7.0
+  - @objectstack/service-analytics@18.7.0
+  - @objectstack/driver-turso@18.7.0
+  - create-objectstack@18.7.0
+  - @objectstack/plugin-sharing@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/plugin-hono-server@18.7.0
+  - @objectstack/plugin-email@18.7.0
+  - @objectstack/account@18.7.0
+  - @objectstack/setup@18.7.0
+  - @objectstack/driver-memory@18.7.0
+  - @objectstack/driver-sqlite-wasm@18.7.0
+  - @objectstack/observability@18.7.0
+  - @objectstack/plugin-pinyin-search@18.7.0
+  - @objectstack/plugin-webhooks@18.7.0
+  - @objectstack/service-cache@18.7.0
+  - @objectstack/service-datasource@18.7.0
+  - @objectstack/service-job@18.7.0
+  - @objectstack/service-mailbox@18.7.0
+  - @objectstack/service-package@18.7.0
+  - @objectstack/service-push@18.7.0
+  - @objectstack/service-queue@18.7.0
+  - @objectstack/service-realtime@18.7.0
+  - @objectstack/service-sms@18.7.0
+  - @objectstack/trigger-api@18.7.0
+  - @objectstack/trigger-record-change@18.7.0
+  - @objectstack/trigger-schedule@18.7.0
+  - @objectstack/types@18.7.0
+  - @objectstack/console@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

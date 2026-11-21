@@ -1,5 +1,152 @@
 # @objectstack/service-messaging
 
+## 18.7.0
+
+### Minor Changes
+
+- 8e46424: Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  feat(messaging): Slack DM delivery — a `slack` channel, a per-person link store, approval requests by DM
+  
+  An organization can now receive notifications in Slack, as direct messages to each person who connected their own Slack user (ADR-0013 addendum of 2026-11-19, step 2 of #34730).
+  
+  - **The install.** An organization administrator (`setup.write` in their current organization) installs the organization's own Slack app with `PUT /api/v1/messaging/slack/account` `{ token }`. Slack proves the bot token (`auth.test`) before it is saved. The app's bot token needs the scopes `chat:write`, `im:write`, `users:read` and `users:read.email` (the methods called are `auth.test`, `users.lookupByEmail`, `conversations.open` and `chat.postMessage`); `auth.test` does not check scopes, so an app without `users:read.email` installs and every proposal then answers 502. The token is kept in `sys_channel_account.bot_token`, a `secret` field: encrypted at rest by the host's `ICryptoProvider`, masked on every read, never returned by any route, and read only by the server when it calls Slack. `GET` and `DELETE` on the same route read and remove the install.
+  - **A person's link.** `POST /api/v1/messaging/me/slack-link/proposal` proposes a link by the person's email (Slack `users.lookupByEmail`); it delivers nothing until the person confirms it with `POST /api/v1/messaging/me/slack-link/confirm`. A Slack link is proposed only for a verified email and names no one before it is confirmed. `GET` and `DELETE /api/v1/messaging/me/slack-link` read and remove it. An administrator lists links with `GET /api/v1/messaging/slack/links` and removes one with `DELETE /api/v1/messaging/slack/links/:id`; the person is told by inbox and e-mail (topic `messaging.slack_link_removed`) and may link again. A link goes when the person is deleted, banned, or leaves the organization. Links are `sys_channel_user_link` rows; every write names who acted, so the platform's write audit records each one.
+  - **The channel, only where connector-slack is composed.** `slack` is registered beside inbox, email, sms and push only on a composition where connector-slack's `slack` client service resolves at boot: `ConnectorSlackPlugin` now registers that service, which sends with a caller-held token. On such a composition, and only there, the `/automation` save doors accept `slack` on a `notify` node, and `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list `slack` as a channel. A `notify` node naming `slack` delivers only where connector-slack is composed, the organization installed Slack and the recipient confirmed a link. Without connector-slack, those doors answer as before: a `notify` node naming `slack` is refused 400, and neither preference door lists it. It sends `conversations.open` then `chat.postMessage` with the notification's title linked to its deep link, made absolute under `OS_AUTH_URL` / `OS_BASE_URL`. Preferences, digest and quiet hours apply as on every channel. A recipient with no confirmed link is skipped before any delivery row is written, so nothing is dead-lettered for them; a refused token stops delivery on that install until an administrator sets it again; a rate limit is retried.
+  - **Approval requests.** `approval.requested` also asks for `slack`, beside inbox and e-mail, only while the `slack` channel is registered and mounted (connector-slack composed).
+  - `MessagingChannel` gains an optional `reachableRecipients(ctx, { organizationId, recipients })`, consulted once per channel per emit after preferences. A channel without it reaches every recipient, as before.
+  - `PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']` lists `sys_channel_account` and `sys_channel_user_link`, and the organization ownership inventory gives both a row.
+
+### Patch Changes
+
+- c9b3f7a: feat(account): a Notification Settings page where each person chooses their own notification topics, channels, digest and quiet hours
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The Account app has a new **Notification Settings** page, under Inbox and only when the messaging service runs. It shows one row per notification topic and one column per channel. Each cell shows whether that notification reaches you on that channel, and where the answer comes from: your own setting, your organization's default, the built-in default, or a mandatory topic. Mandatory topics are always delivered and cannot be switched off. A channel the deployment cannot send on yet says so in its column header. Above the matrix you can set your digest and your quiet hours.
+  
+  - **The read: `GET /api/v1/messaging/me/preferences`.** This new door answers the signed-in person's *effective* preferences. The server computes them with the same resolver `emit` uses to filter (`PreferenceResolver.effectiveFor`), so the page shows what is actually sent and computes nothing itself. The door takes no parameters and answers only about the caller: there is no `user` parameter, and any parameter is refused `VALIDATION_ERROR` / `400`. It keeps the posture of `GET /api/v1/messaging/preference-options`:
+    - an anonymous caller gets `401`;
+    - a held sign-in gets `403`;
+    - a source it cannot read is `500` / `INTERNAL_ERROR`, never a partial or "everything on" answer.
+  
+    The door reads only what the answer needs: the caller's own rows and the organization's default rows, each by equality on `user_id` within the caller's organization. A read that comes back with more rows than its cap is a fault (`500`), never a page.
+  
+    The organization's defaults appear only as `source: 'default'` on the caller's own cells. No other person's row, and no row id except the caller's own, is ever answered.
+  - **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default`, the baseline set every signed-in person resolves (external members excepted), now carries a grant of read, create and edit on the object, with no delete. Two row policies come with it:
+    - `sys_notification_preference_self` binds every principal that holds the grant. Its row scope is `user_id == current_user.id`, and its write check is the same expression, so the row as written must still be your own.
+    - `sys_notification_preference_org_admin` widens organization owners and administrators back to every row of their organization. Its write check is `topic != null`, which holds on every row being created because `topic` is required with a default. If `topic` ever becomes optional, an administrator's create is refused, never widened.
+  
+    An ordinary member or a delegated administrator lists only their own rows. Their create with `user_id` omitted, empty or naming another person is refused `403` / `PERMISSION_DENIED`, as is moving their own row to another person or to the organization default.
+  - **Owners and administrators are unchanged.** They still list every row, create and edit the organization default, create and edit another person's row, and delete in the Setup grid.
+  - **App-authored grants are narrowed too.** `sys_notification_preference_self` carries no `positions` domain, so it binds every principal that holds a grant on this object, including through an app's own permission set. A role other than organization owner or administrator that an app grants this object reads and writes only its own rows, unless the app declares its own widening policy for that role.
+  
+  There is no "reset to the organization's default" button, because that needs a delete, which members are not granted. Changing your digest or quiet hours saves your own general setting, and the page says so beside the control. From then on, that setting applies in place of the organization's defaults to every topic and channel you have not set yourself.
+- 01e6af6: Clause-②: no
+  Metadata-protocol: none
+  
+  feat(messaging): Setup lists the Slack page where connector-slack is composed
+  
+  - **Setup › Integrations › Slack.** Where connector-slack is composed, Setup now lists a Slack entry under Integrations. It opens the console's Slack page (`messaging:slack`), where an organization administrator installs or replaces the organization's Slack token, removes the install, and reviews or removes each member's Slack link. The entry asks `setup.write`, the capability every Slack administrator door asks. `MessagingServicePlugin` registers it in the same `kernel:ready` hook, and on the same condition, as the `slack` channel. Without connector-slack, Setup lists no Slack entry. The label is translated in every locale the platform ships. The bundle is exported as `SLACK_SETUP_UI_BUNDLE`, with `SLACK_SETUP_COMPONENT_REF`.
+  - **The Slack link removal topic, on every deployment.** `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list the topic `messaging.slack_link_removed` on every deployment, including one without connector-slack. It is emitted only where connector-slack is composed, when an administrator removes a person's Slack link or removes the organization's Slack install.
+- eb9f8ed: perf(service-messaging): the inbox feed's receipt window read is served by an index
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console bell polls a user's `sys_notification_receipt` rows on the `inbox` channel every 10 seconds, newest first, top 20. The table had no key that leads on `user_id` and `channel` and continues with `created_at`, so each poll collected and sorted the user's whole receipt history. It now declares `(user_id, channel, created_at)` beside its two existing indexes.
+  
+  Measured on SQLite with 56,000 receipts: the read went from about 3 ms to 0.1 ms for a user with 5,000 inbox receipts, and from about 2 ms to 0.1 ms for a user with 3,000 older ones. The plan changes from sorting the user's whole range to searching the new index and stopping at the window.
+  
+  On existing databases the next boot creates the index. On PostgreSQL it is built concurrently, because the table already exists. On MySQL it is created where `user_id` and `channel` are already `varchar`, which holds for receipt tables created since those columns declared their bounds. On an older receipt table, the existing `(user_id, state)` index is already refused, so nothing changes there.
+  
+  The matching `(user_id, created_at)` index on `sys_inbox_message` is deferred: on existing MySQL tables `user_id` is stored as `TEXT`, which MySQL cannot index, and schema sync never rewrites a column type.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

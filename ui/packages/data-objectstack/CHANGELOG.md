@@ -1,5 +1,109 @@
 # @object-ui/data-objectstack
 
+## 18.7.0
+
+### Patch Changes
+
+- b2d4355: fix(app-shell, plugin-designer, console): app writes send the app as its author stored it, not as the console's locale serves it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The served app list is translated for the reader's locale, and the metadata save door stores a body verbatim. Four writers seeded a whole-app save from that served list: the Edit app wizard, App management's Disable / Enable / Set default and bulk toggles, the navigation sync that adds or removes an entry when a page, dashboard, report or object is created or deleted, and the Publish button on an unpublished app. In a zh-CN session each of them stored the app's label and every navigation label in Chinese, and readers in every other locale were then served Chinese. Each writer now reads the stored app from the untranslated layers through the new `ObjectStackAdapter.getAuthoredItem(type, name, { packageId })`, and changes only the keys its control owns. The served list is still used to find the app. When the stored app cannot be read, the writer refuses with an error and saves nothing; the Edit app page shows the read error instead of opening the wizard.
+- b1eb500: fix(app-shell, data-objectstack, console): view, form, pair-action and report edits start from the stored item, not the translated served one
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The served metadata reads are translated for the reader's locale, and the metadata save door stores a body verbatim. Four more writers seeded a whole-item save from a served read, so in a zh-CN session each stored the translations as the item's source text and readers in every other locale were then served Chinese. The view config panel (and its draft-bar resume) seeded its buffer from the served view; the adapter's `updateView`, behind Manage views' Rename, Pin and Set as Default, merged onto the served draft or the served published view; Developer → Public Forms spread the served form view into its Publish and Edit writes and prefilled the thank-you text from it; and Studio's pair actions on an installed app's object buffered the pair's served actions. Each now starts from the untranslated layered read through `authoredBuffer` (the pending draft as stored, else the published item) or, for the live-row writers, `authoredPublished`, and changes only the keys its control owns. A pending draft whose stored copy the layered read does not serve is refused, and so is an item with nothing stored to read: nothing is written from the served copy. The report quick edit now hands its served draft to `authoredBuffer`, so a pending report draft the layers do not serve opens no editor instead of one seeded from the published report.
+- f9f45d3: fix(ui): a view a read-only package ships offers no footer calculation menu and no Rename
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a list view that ships inside a read-only package (a code or installed package), an admin was offered the footer's calculation menu and the options menu's Rename; the server refuses both saves ("save it into the customization package"), so the pick was taken back with a toast. Neither is offered there now. A shared view the console saved into the customization package, a stored view bound to no package and the reader's own view keep them.
+  
+  The view's name cannot tell these apart, since every stored view is named `object.key`; the package the row was served under does. `listViews()` in `@object-ui/data-objectstack` now carries the row's served `_packageId` on both of its arms (the `config`-flattening arm dropped it). The console reads the server's `writable` verdict for that package from the package list it already holds for the session, the one the app bar's Studio entries read. While that list is unread, or when the read fails or does not name the package, the menu stays offered as before and the server's refusal still applies.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [f5b2eea]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [af566c2]
+- Updated dependencies [d9be915]
+- Updated dependencies [6b360ab]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @objectstack/client@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

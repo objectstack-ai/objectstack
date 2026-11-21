@@ -1,5 +1,198 @@
 # @object-ui/react
 
+## 18.7.0
+
+### Patch Changes
+
+- 5bd7257: fix(react): a print page is never the record page an object falls back to
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A print page is no longer the record page an object falls back to. When an object has no `isDefault` record page, the console's record route used to open the first record page of the object in declaration order, so an app that authored only a print page for an object (a quote, a contract) opened every record as that printed document, with no path, tabs, related lists or edit flow. The fallback now skips pages that declare `print`: the first record page that does not print opens, and with none the record route draws the synthesized default record page. A print page still opens on the named record page route, and where its author declares it the object's default record page (`isDefault`) or scopes it to an app (`apps`).
+- 72d19c4: feat(record-page): the record's header is one row with one button group
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record page used to stack its top bar, the record's header row under it and, while an approval was pending, a band of decision buttons above the body. They are now one 44px row:
+  
+  - **Full page.** The object icon and name, `/`, the record's name, its stage tag and an approval tag on the left; the record counter and prev/next, a divider and the record's ONE button group on the right.
+  - **Drawer.** The record's icon, name, stage tag and approval tag, then the button group, 整页打开 and 关闭. The drawer's bar draws no object name, counter or prev/next once the record's header holds it.
+  - **One button group, by the approval's state.** Normal: Edit, the record's one primary action and ⋯. Pending on the viewer: 通过 (the only filled button), 驳回, and ⋮ with the other approval levers, a separator and the record's actions. The viewer's own submission pending: 撤回, 催办 and the same ⋮. An administrator who holds only the override keeps the marked override menu ahead of the group. On a phone the bottom bar draws the same group, with 通过 the only filled button.
+  - **Approval tag.** 「待你审批」, 「审批中」, 「已退回修改」 or 「已驳回」 beside the record's name; it opens the approval's detail, today the approvals panel on the page.
+  - **Locks.** A record an approval locks draws no Edit and no 「审批中已锁定」 badge in the body; the approval tag says why (its tooltip names the lock). A lock from the record's state keeps Edit drawn and disabled, with its lock tag beside the record's name.
+  - **Reject asks for a reason.** The record page's reject dialog requires its comment. The declaration and the approvals list are unchanged.
+  
+  A record page whose layout has no `page:header` keeps the decision band above its body, since no header draws the group there. The request page's `ApprovalDecisionPanel` band is unchanged.
+  
+  `@object-ui/components` adds `RecordHeaderBarContext` (the slots a host's bar offers the record's header) and `RecordHeaderStateContext` (the tags and the button group a host's record state hands it); `RecordTopBar` and `NavigationOverlay` take an `actionSlotRef`, and `NavigationOverlay` a `stepperHidden`. `PageHeaderActions` takes a `defaultMaxVisible`. `@object-ui/react`'s `InlineEditProvider` takes `approvalTagDrawnByHost`, and `DetailView`'s approval band then draws no badge for an approval lock (the tally stays). Nothing an app authors changes.
+- bae933b: fix(record-page): the related tab offers only 「↗」 and 「+ 添加」, and a pick of several is added all or none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page's related tab drew a filter box, condition chips, an options menu, an export and its own New, and repeated the row count under the table. It now carries two entries at its right end. 「↗」 opens the child object's list under this record, on an empty list too. 「+ 添加」 is the one add entry, chosen by the relationship when the page authored no `add`: a `lookup` child opens a picker of that object whose first row is New; a `master_detail` child whose rows name a catalog record (one other required lookup) opens a picker of that catalog; one with no catalog opens the new-record form directly. The count shows once, in the tab title.
+  
+  A pick of several records is one request to the transactional batch route: every row is added or none is, and the list says why when none was. Before, each pick was its own write, and a failure part way left the earlier rows added. A data source without the batch route offers no picker.
+  
+  A child with a status and a deadline that the status settles is grouped by status on the tab: open groups first in the order the status lists them, completed groups last, each collapsible.
+  
+  The reader's header sort and column widths on the tab are remembered per list in the record page's existing per-user preferences.
+  
+  The list page 「↗」 opens names the record it came from: its condition tag reads the record's name, a breadcrumb leads back to it, 「Reset」 puts that condition back after the reader changed the filters, and New opens the record form linked to it.
+  
+  A body table's total under a currency column whose currency does not resolve is drawn as its cells are, an amount with no symbol, instead of being left out (objectstack#35710). Rows that name their own currency are still totalled per currency.
+- fac1e7d: feat(list): a list cell saves the moment it is committed, and Space types into the selected cell
+  
+  Clause-②: yes (widening) — new members on the `@object-ui/react` package entry: `createOwnWrites`, `OwnWritesContext`, `useOwnWrites` and the `OwnWrites` type, and an optional third parameter on `useDataInvalidation`; three new `table.*` keys in every `@object-ui/i18n` locale (`cellSaving`, `cellSaved`, `openRecordToFinish`); nothing removed or renamed
+  Metadata-protocol: none
+  
+  In a grid that mounts `GridCellSelection` (the select-first grid every `ListView` draws), a committed cell edit is now saved at once, as one update for that record:
+  
+  - **No save bar, no row Save/Cancel column, no amber row.** The cell shows a small spinner while the save runs and a check mark once it landed.
+  - **Only that row is redrawn**, from the record the write answered with, so a value a server hook rewrote shows as stored. The list is not read again, though the write is still announced to every other reader (the record's detail pane, related lists, counts): the grid holds the record in the list's `OwnWritesContext` registry for the length of its write, and `ListView` lets that one write go by. So a row whose new value would sort it elsewhere stays where it is until the next load (refresh, sort, filter or page change). The counts on group headers, read with the rows, follow on the next load too; the footer's whole-set summary is its own reader and still refreshes on the write.
+  - **A refused save keeps the typed value** and shows the server's reason on the cell. Esc puts the stored value back. Later edits on the same row are sent together with the refused one as one update. When the reason names a field the list does not show (a rule that needs another field), the notice offers to open the record.
+  - **The 409 conflict dialog is unchanged.** The next save on a row sends the version the previous save answered.
+  - **Space** on a selected cell now types a space and opens its editor, as any other key does. A two-state (boolean) cell still flips. The record opens from the title link or a touch tap; the "Space opens the record" key added in #35747 is gone, so a master-detail page opens its pane only that way too.
+  
+  `@object-ui/react` adds that registry: `createOwnWrites()`, `OwnWritesContext` / `useOwnWrites()`, and `useDataInvalidation(objectName, recordId, ownWrites)`, which skips a change naming a held record.
+  
+  Grids without `GridCellSelection` keep the staged save bar and its batch save unchanged.
+  
+  New `table.*` strings in every locale: `cellSaving`, `cellSaved`, `openRecordToFinish`.
+- 4609c48: feat(list): undo a list cell save from its toast or with Ctrl+Z
+  
+  Clause-②: yes (widening) — `toastRecordSave` in `@object-ui/react` takes an optional fourth argument, an `action` button the toast carries (new exported type `RecordSaveToastAction`), and `RecordSaveSink`'s options accept that `action`; nothing removed or renamed
+  Metadata-protocol: none
+  
+  In a grid that mounts `GridCellSelection` (the select-first grid every `ListView` draws), a landed cell save can be taken back:
+  
+  - **The save toast has an Undo button**, and **Ctrl+Z** (Cmd+Z on macOS) on a cell of the grid undoes the newest save, then the one before it. Each save is taken back once.
+  - **An undo is a new update, not a local rollback.** It writes the value each saved field held before the save (a relation as its stored id), with the version this grid's own newest write of the record answered as `If-Match`, so a change someone else made since answers 409 and opens the same conflict dialog as a save instead of being overwritten. A refused or cancelled undo is used up; the next Ctrl+Z undoes the save before it. The server's history records the save and its undo as two changes. Only the row is redrawn, as for a save.
+  - Inside an open editor Ctrl+Z stays the editor's own text undo. On a cell, the grid's key is handled by the grid alone: the console's shared Ctrl+Z undo stack is not popped by it.
+  - A save of a field the row did not read offers no Undo, rather than a partial one.
+  
+  A grid without `GridCellSelection` (a related list in a record drawer, for one) now re-reads on every write of its object again, including a write the list around it draws itself: before, it skipped the writes that list held while they ran.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [9f352e8]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [8500ee7]
+- Updated dependencies [c00be39]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [f51578e]
+- Updated dependencies [6b360ab]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9a98a46]
+- Updated dependencies [eb53d63]
+- Updated dependencies [a23164e]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/i18n@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

@@ -1,5 +1,179 @@
 # @objectstack/rest
 
+## 18.7.0
+
+### Minor Changes
+
+- f44758b: feat(units): `os migrate unit-codes` converts stored unit text into unit codes, from the operator's mapping
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 U7 R1, the backfill door (#35492). It is the twin of `os migrate record-currency-codes`.
+  
+  **What it is for.** A field declared a unit code field after its rows were stored still holds free text such as `kg`, `公斤` or `lbs`. Since #35489 the engine checks each unit code it writes, so editing a quantity beside such a value is refused until the row holds a code. This door converts those rows in one run.
+  
+  **`backfillUnitCodes`** (`@objectstack/objectql`, also exported: `formatUnitCodeBackfillReport`, `unitCodeBackfillComplete`, `unitCodeMappingOf` and the report types):
+  
+  - **Which field.** `field` names the unit code field: the `text` field a quantity's `unitConfig.unitField` names, or a standalone `unitConfig: { unitMode: 'code' }` field. If you name the quantity, the refusal is `INVALID_FIELD` and names the field to use.
+  - **The mapping.** It is the operator's, never derived. It maps stored text, exactly as written, to a unit code. Matching is exact: `kg ` and `KG` need their own entries.
+  - **Targets are judged before any row is read**, as the write would judge them. A target that is not a standard UN/ECE Recommendation 20 code or one of the organization's own units, a retired unit, or a unit of another dimension than the field's `unitDimension` is refused `INVALID_FIELD` / 400 on the field. With no organization named, organization codes are judged in each organization the run would write them in, still before any write.
+  - **Rows already holding a unit code are never rewritten**, so the run is idempotent: a second apply run writes nothing. That includes a unit the organization retired and a code of another dimension. Both are codes, not free text, and rewriting them from a mapping would change what the stored quantity means. Neither is a code the field admits: beside a quantity, the write check refuses each at the row's next quantity edit; a standalone unit field has no quantity, so the next write of the field must carry another code. So they are listed as `retired` and `other-dimension` and counted apart (`skippedRetired`, `skippedOtherDimension`), never as a code the field admits.
+  - **A blank unit beside a quantity** is written only from an explicit `""` entry; without one it is counted (`blankBesideQuantity`) and named in the report. A blank unit with no quantity is left alone.
+  - **Complete.** `unitCodeBackfillComplete` answers true only when every row holds a unit code the field admits: no unmatched value, no blank beside a quantity, no retired unit, no code of another dimension, no failed or unexamined row. The report prints its ✓ line only then.
+  - **Dry run by default.** It lists each distinct stored value with its row count and what the mapping does with it, and writes nothing. With no mapping, the listing shows which spellings to map.
+  - **Unmatched values.** An apply run that meets a value with no mapping entry is refused `VALIDATION_ERROR` / 400 on `mapping` before any write. The refusal names each value with its row count, and carries them as `unmatched`.
+  - **Scope.** Scope is `organizationId` or `allOrganizations`, as on the currency backfill. An unscoped run over the rows of several organizations is refused with each organization's counts.
+  - **Writes.** Each row is written through `engine.update` as a system write, so the unit check judges every converted code.
+  
+  **`os migrate unit-codes --object O --field F [--map-file mapping.json] [--org ID | --all-organizations] [--apply] [--yes]`** (`@objectstack/cli`):
+  
+  - It has the precedent's confirmation and exit behaviour: `--apply` asks first, and exits 1 under `--json` or with no terminal unless `--yes` is given.
+  - A mapping file that is not JSON, or a mapping the engine refuses as malformed, is refused before the occupancy probe, the prompt and the boot.
+  - Any refusal exits 1. Under `--json` it carries the code, the HTTP status, and `unmatched` or `organizations` where those apply.
+  - It closes with a ✓ only when `unitCodeBackfillComplete` holds. A run that leaves a blank beside a quantity, a retired unit or a code of another dimension closes with a warning naming what is left.
+  
+  **`POST /api/v1/meta/_migrate-unit-codes`** (`@objectstack/rest`) is the tenant-admin twin of `_migrate-record-currency-codes`.
+  
+  - Its body is `{ object, field, mapping?, apply? }`, and any other key is refused 400.
+  - It sits behind `metadata.endpoints.maintenance` and requires `setup.write`. It converts the caller's current organization only, and is a preview unless `apply: true`.
+  - The report is the `data` of the shared envelope. A refusal over unmatched values answers 400 with `error.details.unmatched`.
+  
+  **The unit refusals name the door** (`@objectstack/objectql`). The `ERR_UNIT_CODE_REQUIRED` and `ERR_UNIT_CODE_UNKNOWN` refusals of a quantity written beside a stored value the write did not supply now end with the remedy: the `os migrate unit-codes` command for that object and field, or the REST door. The refusal of a blank names the `""` entry. A refusal of a code the caller wrote carries no remedy.
+  
+  **A metadata save that makes a stored field a unit code field is a destructive change** (`@objectstack/metadata-protocol`, `@objectstack/spec`). The detector judges the declaration and reads no row. Two findings sit beside `currency_mode_to_record` on the 409 `DESTRUCTIVE_CHANGE`, and `force: true` lifts them:
+  
+  - `unit_code_field_declared`, on the code field: a stored field that is a unit code field after the save and was not one before. Any declaration can do it: a quantity, new or stored, whose `unitField` names the field; a `unitField` re-pointed at it; or its own `unitMode: 'code'`. A field that already was a unit code field raises nothing.
+  - `unit_mode_to_record`, on the quantity: a stored quantity switched to `unitMode: 'record'`, whatever its `unitField`'s history (a unit code field already, or a field new in the same save). It names the blank units beside the quantity and the `""` entry that writes them. It is not raised when the same save raises `unit_code_field_declared` on that `unitField`, since that finding names the quantity, its blanks and the `""` entry, so each debt is reported once.
+  
+  Each names the conversion run for that object and code field, CLI and REST.
+
+### Patch Changes
+
+- 1950f07: fix(rest): a public form whose view a `.custom` pair overrides reads the pair's own translation, as `/meta` does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /forms/:slug` now translates the public form's view in the same label order the `/meta/view` reads already use for a `.custom` pair's declared override (ADR-0146 D2): a translation the pair ships, then the override's own text, then the base's translation. Before, an anonymous visitor read the override's text as written in every locale (the form's `title` and its section headings), while a signed-in reader of the same view got the pair's translation. A form view no pair overrides, or whose pair ships no translation for the request's locale, is served exactly as before. The form's field labels (the object half) do not change: an object is extended, never replaced, so it has no pair rank on any read. No metadata key, value or default changes.
+- f848e37: fix(rest): `POST /api/v1/batch` answers a request-schema refusal with the per-field `fields[]` list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A cross-object batch body the request schema refuses (for example `{"operations":"x"}`, or `{}`) is still answered `400 VALIDATION_FAILED`, but the answer now carries `fields`, the same list of `{ field, code, message }` entries the per-object batch doors (`/data/:object/batch`, `createMany`, `updateMany`, `deleteMany`) answer: `{"operations":"x"}` names `operations` with `invalid_type`, `{}` names `operations` with `required`, and an operation missing its object names `operations.0.object` with `required`. A client's `err.fields` (`@objectstack/client`) is now filled on this door too.
+  
+  The raw schema-library `issues` list is no longer on this refusal: field errors are mapped at the boundary, never passed through (ADR-0114 D3), and no client, SDK or test read it. A caller that read `issues[i].path` reads `fields[i].field` (the path joined with dots) and `fields[i].code` instead.
+- 96faf44: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  fix(i18n, mcp): a translation fault serves the untranslated text and the fault is logged, instead of failing the read; `list_datasets` is flagged `partial` with a `warning`, while REST `/meta`, the MCP object tools and `query_dataset` log only
+  
+  When the i18n service resolves but its `getLocales` or `getTranslations` throws, the shared `/meta` translator (`translationBundleOf`, `@objectstack/rest`) now answers it as no bundle: the text is served untranslated and the server log says so at `warn` (`The translations could not be read (…), so labels and descriptions are served untranslated.`). Before, the translation rejected, so `GET /meta/:type` and `GET /meta/:type/:name` answered 500, the MCP object tools failed, `list_datasets` answered `datasets: []` with `partial: true`, and `query_dataset` refused 503 on both MCP transports.
+  
+  Now `list_datasets` keeps every dataset, in its authored text, with `partial: true` and that sentence as its `warning`; `query_dataset` answers. A dataset host's `loadDatasets` may return `{ items, warning }` without `partial`: a whole read the tools say something about, which `query_dataset` does not refuse. The translator's sources take an optional `reportTranslationFault(warning)` to carry the sentence on an answer.
+  
+  fix(mcp): `?locale=` reaches the MCP labels, and the dataset tools answer in one language
+  
+  The HTTP MCP door now reads a `?locale=` query parameter as the `/meta` doors do (after `Accept-Language`, before the i18n default), for the object and dataset labels and the app-docs tools; it read headers only, though its docblock promised both. The dataset executor (`createDatasetTools`) takes an optional `translationLocale` dependency, the locale its `loadDatasets` translated the rows for, and reads labels and composes `nextStep` and `sourceLine` in it first. Both MCP transports pass it, so a call with no `Accept-Language` (common for MCP clients, and every stdio call) no longer mixes labels in the i18n default with sentences in the workspace locale.
+- a8126d2: feat(rest): a refused cross-object batch names the operation that caused it, and a related list's multi-pick add names that record
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST {basePath}/batch` (the cross-object transactional batch) now adds `failedOperation: { index, object }` to its refusal body when one operation is the cause: `index` is that operation's position in the request's `operations`, and `object` is the object it named. It rides beside the existing `error`, `code` and `userMessage`. It is present when an `update` or `delete` op is refused up front for naming no row (`400 VALIDATION_FAILED`), and when an op fails while the transaction runs (for example `404 RECORD_NOT_FOUND`, a `400 VALIDATION_FAILED` validation refusal, `400 BATCH_UNRESOLVED_REF`, `409 RESOURCE_CONFLICT`). It is absent when the request as a whole is refused (schema, `atomic: false`, size, no transaction), on the per-object API exposure and API-key management refusals, which are judged once per object and action, and on a failure after the last op ran.
+  
+  The key is additive. The success body does not change, and the batch stays all or nothing: a refused batch writes no row. Through `@objectstack/client` the key reaches `err.details.failedOperation`, because the client hands a flat refusal body with no `details` of its own over as `err.details`. A refusal that carries its own `details` (a package-scoped `409 RESOURCE_CONFLICT` with `details.candidates`) still carries the key on the body, but the client exposes only its `details` there.
+  
+  The related list's "Add" picker (`@object-ui/plugin-detail`) uses it: when a multi-pick add is refused for one picked record, the inline error names that record by the label the picker shows, followed by the server's reason. A refusal without an index inside the operations sent shows the server's reason alone, as before.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/metadata@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/observability@18.7.0
+  - @objectstack/service-package@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

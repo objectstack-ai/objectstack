@@ -17,7 +17,7 @@ license: Apache-2.0
 compatibility: Requires an environment served by @objectstack/mcp 18.x
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "18.7.0"
   domain: process
   tags: ask, question, metric, dataset, mcp, list_datasets, query_dataset, 问数, 指标
 ---

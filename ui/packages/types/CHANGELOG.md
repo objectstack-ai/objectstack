@@ -1,5 +1,144 @@
 # @object-ui/types
 
+## 18.7.0
+
+### Patch Changes
+
+- 1c05546: feat(plugin-grid): an aggregate bulk action that resolves with a `BulkActionResult` is reported per row: the rows it moved, the rows it refused with its own reasons, and the rows it did not confirm
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The grid's bulk executor now reads the resolve value of an `execution: 'aggregate'` bulk handler. When it is a `BulkActionResult` (`{ succeeded: string[], failed: { id, message }[] }`, `BulkActionResultSchema` in `@objectstack/spec/ui`), the result panel shows how many selected rows were moved, lists each refused row under its record with the handler's `message` (and in the error CSV), and lists every selected row the result names in neither list as "not confirmed", never as succeeded. Ids are read against the dispatched `params._selectedIds`: an id outside the selection is dropped, a duplicate counts once, an id in both lists counts as failed, and when one id is in `failed` twice the first entry's message wins. A rejection is unchanged: it stays one outcome for the whole selection.
+  
+  A handler that partly succeeds no longer has to reject to avoid being reported as full success: resolve with the per-row answer instead. The `[PLANNED — not enforced]` marker is removed from `BulkActionResultSchema`'s description and its reference page, and the "all-or-nothing" wording is removed from the `bulkActionDefs` description (`@objectstack/spec`) and the `BulkActionDef.execution` TSDoc (`@object-ui/types`).
+  
+  **Declared behaviour change.** An existing aggregate handler whose own return value carries a top-level `succeeded` or `failed` member in another form (for example counts, `{ succeeded: 2, failed: 1 }`, or only one of the two lists) was reported as full success and is now reported as "unreadable": the panel says the action finished but its result could not be read, prints no per-row count, and the grid re-reads its rows when the dialog closes. To keep the success report, return a value with neither member (a summary under another name), or return both lists in the `BulkActionResult` shape. A handler that returns nothing, or a value with neither member, keeps today's report.
+  
+  The widening is additive: three new keys in every locale pack `@object-ui/i18n` publishes (`grid.bulk.resultNotConfirmed`, `grid.bulk.notConfirmedRecords`, `grid.bulk.aggregateUnreadable`). No metadata key, value or default changes.
+- 2df9691: fix(plugin-detail): an authored record page folds its all-empty field groups into one closing line, as the default page does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record page you author, the details body (`record:details`) used to draw every field group the page keeps with `hideEmpty: false` as its own bordered card, even when every field in it was empty: a card holding nothing but its heading and one "Show N empty fields" row. A new opportunity on such a page showed two of these, one per empty group.
+  
+  Now every `record:details` body does what the default record page already did. The groups whose fields are all empty leave their places, and the body ends in one quiet line that names them, for example "Deal Narrative · Notes & Next Steps · 2 empty sections · Expand". Expanding the line draws each group in its own place, as its heading plus its "Show N empty fields" row, and from there the fields can be shown and edited in place. "Collapse" folds them back.
+  
+  What does not change:
+  
+  - A group with at least one value draws as before, its own "Show N empty fields" row included.
+  - `hideEmpty` keeps its default. An omitted key still hides an all-empty group outright, and such a group is not named in the line.
+  - Edit mode draws every group with every field as an input, and a print page prints every row.
+  - A standalone `detail-view` keeps one section per group, and still folds a body whose groups are all empty into one "Show N empty fields" row.
+  
+  No metadata key, value or default changes. The `@objectstack/spec` `describe()` of `record:details` `sections[].hideEmpty`, the `@object-ui/types` docs and the component manifest now describe the closing line.
+- e01b8be: feat(console): the list page's frame — a 44px page bar, a 40px view bar, a denser grid and per-column totals in the grid's own last row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The object list page is redrawn around two bars and a denser grid (objectstack#35548, the first card of the list-page epic):
+  
+  - **Page bar, 44px.** The object's icon in one colour and its name on the left; ⋮ and 「+ 新建」 on the right. The object's description, Import and Favorite moved into ⋮.
+  - **View bar, 40px.** The view switcher is one trigger on the left, reading the view type's icon, the view name, the record count and a caret (the count beside the name returns, after objectstack#34603 removed it). 「筛选」「排序」「选项」 are text buttons on the right beside the search icon, and open the same panels as before; below `sm` they stay icons. The kanban and every other view type draw the same two bars. An empty condition row under the bar takes no height.
+  - **Grid.** A 32px header and 33px default rows, 13px on the header, the cells and the bar buttons, faint row lines, no rule after the first column, and the frozen-column shadow only once the grid scrolls sideways. The row ⋮ trigger is 24px so it fits the row. Lookup values read as small chips, money and number columns (a money formula with `returnType: 'currency'` among them) align right with tabular digits, and select labels keep their colour at lower saturation.
+  - **Totals.** Column summaries are drawn as the table's own last row, each figure under its column (so they line up at any width and are never covered by pinned columns), led by 「计数 N」; the separate footer line and its doubled colon are gone.
+  
+  `DataTableSchema` gains one host-only runtime slot, `summaryRow` (`{ lead?, cells }`), which `ObjectGrid` fills; like `rowGroups`, the zod face refuses it by name, so it is not authorable. New locale keys: `list.options`, `grid.summary.countLead`.
+- 0585797: feat(plugin-grid): selected rows get one small bar floating at the bottom centre of the list
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Selecting rows in a grid now shows one bar floating at the bottom centre of the list area: 「已选 N 条」 and ×, up to three labelled actions, and the rest under 「更多」. When the selection offers no more than three actions they are all buttons, so a lone Delete is a button; over three, Delete goes behind 「更多」 with the rest. The bar sits above the footer calc row, the list keeps room after its last row so that row scrolls fully clear of the bar, and when every loaded row is selected and more match, the bar offers 「选择全部 N 条」. × or Esc clears the selection; Esc that belongs to a field, or to another open menu or dialog, does not.
+  
+  The same bar serves the object list page, a record's child-table tabs, the side record and embedded tables. The old bottom strip and the list page's 「已选」 face in the view bar are both retired, so the top of the list page no longer changes when rows are selected. On the list page, where rows draw no actions of their own, one selected record offers that record's actions; elsewhere the bar offers the bulk actions at any count. A narrow list gives actions back to 「更多」 until the bar fits on one line.
+  
+  - `@object-ui/plugin-grid`: `BulkActionBar` is redrawn as the floating bar; its props gain `singleRowMenu`. `useListPageScope(scope)` replaces the unpublished `useListPageBarHost`.
+  - `@object-ui/types` / `@object-ui/components`: `DataTableSchema.floatingBar` is a runtime slot (refused by the zod twin like the other runtime slots). The table floats it over its scroll box, above its summary row, with room after its last row.
+  - `@object-ui/app-shell`: the list page header and the view bar no longer swap to a selection face.
+  
+  This supersedes the selection behaviour in the list-page entry of this release (no Actions column on the list page): the selection is no longer shown in the page bar, up to three actions are buttons and a lone Delete is one, and grids outside a list page no longer draw a bottom bulk bar.
+- f548bdc: fix: descriptions and help text no longer say the default record page draws a key-field strip or a stage path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default record page draws no key-field strip and no stage path: the stage is the status tag beside the record name. These texts said otherwise and now say what each key drives:
+  
+  - `@objectstack/spec`: the `highlightFields` describe ("Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it") and its Studio help text. The `stageField` and `RECORD_HIGHLIGHTS_MAX` doc comments say the header's status tag reads the stage and the count cuts only a strip a page places in its `highlights` slot. The upgrade-guide entry `field-group-shadowed-six-highlights` no longer tells authors to move highlights: the warning now judges the record title alone, and no action is owed.
+  - `@objectstack/platform-objects`: the `highlightFields` help text in every metadata-form locale.
+  - `@objectstack/lint`: the `os explain` text of `object-field-ref-unknown` and `semantic-role-field-unprovisioned` names the hover card and the record picker in place of the strip.
+  - `@object-ui/plugin-detail`: the `record:details` `hideFields` description no longer says the default page fills it. The key is still accepted.
+  - `@object-ui/i18n`: Studio's lifecycle-field help (`stageField`, and its "None" choice) talks about the status tag, not a progress bar.
+  - `@object-ui/types`: the page `highlights` slot doc says it places a strip the synthesized default does not draw.
+  - `@object-ui/app-shell`: on a phone the default record page no longer hands the synthesizer a highlight list it never read. The page looks the same, and the subtitle under the record name is unchanged.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

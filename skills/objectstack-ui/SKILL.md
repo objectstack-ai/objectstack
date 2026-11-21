@@ -11,7 +11,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "18.7.0"
   domain: ui
   tags: view, app, page, dashboard, report, chart, action, widget, doc
 ---

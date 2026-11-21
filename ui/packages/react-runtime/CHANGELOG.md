@@ -1,5 +1,9 @@
 # @object-ui/react-runtime
 
+## 18.7.0
+
+No changes in this release.
+
 ## 18.6.0
 
 No changes in this release.

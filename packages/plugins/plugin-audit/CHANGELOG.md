@@ -1,5 +1,165 @@
 # @objectstack/plugin-audit
 
+## 18.7.0
+
+### Patch Changes
+
+- ef39b2c: fix(objectql, plugin-audit): a database session lock whose connection stalls no longer hangs the audit sealer, `os migrate audit-* --apply` or a migrator's release
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A held database session lock (the audit seal lock, and the schema-migration lock) used to wait for its connection with no limit when it checked or let go of the lock. A connection stalled half-open, with no reply and no reset, never fails a statement, so the liveness probe (`select 1`), the unlock statement and the close of the raw connection could each wait for good. That hung a sealer pass checking its lock before a checkpoint, the `finish()` of an `os migrate audit-* --apply` run, and a migrator's release.
+  
+  Each of the three steps now gives up after 10 seconds (`DATABASE_SESSION_LOCK_ANSWER_MS`). A live session answers each one in milliseconds and waits exactly as before.
+  
+  - A probe the session does not answer in time reads as a lost lock. The session is not probed again, and the release sends it no unlock: it closes the connection, which releases the lock.
+  - An `--apply` run whose lock's session stopped answering reports the lock lost, as for a session that ended: it prints the line at error, names `os audit verify` and exits non-zero. The line now reads `(its database session ended, or stopped answering)`.
+  - A sealer pass whose lock's session stops answering reports that the audit seal lock lapsed and writes no checkpoint. The next pass tries again.
+  - The schema-migration lock runs the same statements. A release on a session that has stopped answering returns after the bound instead of hanging the migration or the boot. The lock then stays with the database session until that connection dies, as it would if the process had been killed.
+  
+  Nothing an author writes, no exported signature and no statement changes.
+- 2a0cd20: feat(plugin-audit): export the readers that rebuild a stored checkpoint or amendment row into its signed body
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `@objectstack/plugin-audit` now exports `checkpointBodyFromRow` and `amendmentBodyFromRow` from its package entry, with the two body types they answer, `CheckpointSignedBody` and `AmendmentSignedBody` (ADR-0154 D11).
+  
+  A checkpoint sink (`audit.checkpointSink`) is handed each signed checkpoint and amendment once, and re-delivers what a failed call missed by re-reading the stored records. Read from an unaltered stored `sys_audit_checkpoint` or `sys_audit_amendment` row, these readers answer the body the sink was handed: its RFC 8785 serialization is the bytes the row's `signature` covers, so a sink outside the package can rebuild and re-send a record without copying the body's shape or its parsing. A malformed row is refused with an error whose `name` is `SignedBodyError` and whose message names the field.
+  
+  The readers validate and normalize; they never verify the signature. A row whose signed columns were rewritten reads back into a body that fails verification (a rewrite of an unsigned column, `id`, `chain_key` or a checkpoint's `leaf_hashes`, reads back into the same body, and a malformed one is refused with a `SignedBodyError`). A row rewritten and re-signed under a key planted on the host fails under a key the sink trusts itself. A row rewritten and re-signed by whoever holds the genuine signing key verifies, and only the copies already off the host can catch it: a later checkpoint's signed `previous_digest` no longer matches a rewritten checkpoint, while no later record carries an amendment's digest at all. So a sink verifies the row's `signature` over the rebuilt body, under a key it trusts itself, before it treats the row as delivered.
+  
+  A sink assembles the entry it re-delivers itself: `kind` is `checkpoint` or `amendment`, from the table it read; `keyId` is `body.signing_key_id`; and `signature` is the row's `signature` column. The signed bytes are the body's RFC 8785 (JCS) serialization, which the sink computes with its own serializer: this package does not export one.
+- cceb5c6: fix(audit): the action invocation row of an aggregate bulk call records how many selected rows succeeded, failed or were not confirmed
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  An `execution: 'aggregate'` bulk action is one call for the whole selection, with the ids in `params._selectedIds`. When its handler moved some rows and failed others, it resolves with a `BulkActionResult` (`{ succeeded: [ids], failed: [{ id, message }] }`, `@objectstack/spec/ui`) and does not throw. The `action_invocation` row in `sys_audit_log` recorded only `outcome: 'succeeded'` for that call, so the audit trail said a partly failed run fully succeeded.
+  
+  The outcome stays `succeeded`. When the call carried `_selectedIds` and its resolve value carries a `succeeded` or `failed` member, the row's `metadata` now also records what that value reads as under `BulkActionResultSchema`, counted by the rules the console's bulk dialog counts with: an id outside the selection is dropped, a duplicate counts once, an id in both lists counts as failed, and a selected id in neither list is not confirmed.
+  
+  - `bulk_selected`, `bulk_succeeded`, `bulk_failed` and `bulk_unconfirmed`, where `bulk_selected = bulk_succeeded + bulk_failed + bulk_unconfirmed`;
+  - or, when the value carries a member but does not parse, `bulk_unreadable: true` alone and no succeeded count.
+  
+  A handler that resolves with nothing, or with a value that has neither member (a summary, a download link), records the row as before. A call with no `_selectedIds`, a failed call and a `resume_run` add no bulk key. Both the REST `POST /actions/:object/:action` door (and a host's `dispatchAction`) and the MCP `run_action` tool record the counts.
+  
+  `ActionInvocationAuditEvent` gains an optional `bulk` member in both packages, and `@objectstack/plugin-audit` exports its type, `ActionInvocationBulkReading`. A reader of the ledger that lists `metadata` keys sees the new keys on these rows only.
+- 4b1eb0e: fix(plugin-audit): the platform's own audit and activity rows are no longer judged as an automation's insert
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The audit writer records every audited write with a `sys_audit_log` row and its `sys_activity` mirror. It wrote both through the `sudo()` of the hook api it is handed, and `sudo()` spreads the audited write's context. When that write was made by app-authored automation, the elevation kept the automation's provenance: an action body's or a system hook's app-automation elevation mark, or a flow run's `flowRunId`. plugin-security therefore read the platform's own ledger rows as the automation inserting into an append-only object. Today that logged the "Deprecated: inserting into 'sys_audit_log'" (and `'sys_activity'`) warning on the first such write. Once the announced refusal of those inserts ships, it would have refused the rows and lost the audit trail of every action-body, system-hook and flow write.
+  
+  - The audit writer now writes both rows through the platform's own system api. `platformSystemApi(api)` is a new export of `@objectstack/objectql` and `@objectstack/objectql/core`. It derives from a hook's api the same elevated context `sudo()` gives, minus the app-automation mark and minus `flowRunId`. Every other key is kept, so the rows stay in the write's transaction, organization and attribution. On an app-authored hook's api it sheds nothing: there it returns what that api's `sudo()` returns, the mark and `flowRunId` kept.
+  - `withoutAppAutomationElevation(context)` is a new export of `@objectstack/core`. It returns the context without the mark.
+  - What an automation writes itself is unchanged. An action body's or a hook's insert into `sys_activity` or `sys_audit_log`, through its `ctx.api` or its `ctx.api.sudo()`, still carries the mark and still logs the deprecation. `sudo()` itself is unchanged too: it never sheds the mark.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [c321914]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [4890cd0]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/objectql@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

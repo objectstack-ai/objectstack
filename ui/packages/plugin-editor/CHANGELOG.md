@@ -1,5 +1,53 @@
 # @object-ui/plugin-editor
 
+## 18.7.0
+
+### Patch Changes
+
+- Updated dependencies [1c05546]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [89364b4]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [55020c3]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [3819afe]
+- Updated dependencies [9212119]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [ccded86]
+- Updated dependencies [e01b8be]
+- Updated dependencies [d96c878]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [227a16a]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [dea68e9]
+- Updated dependencies [6b51822]
+- Updated dependencies [52fb30c]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [f548bdc]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [a23164e]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @object-ui/components@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes
