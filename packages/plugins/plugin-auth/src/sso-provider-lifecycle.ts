@@ -665,6 +665,8 @@ export interface SsoProviderAccessSwept {
 /** The logger the boot sweep reports through. */
 export interface SsoProviderAccessSweepLogger {
   info?: (message: string, meta?: Record<string, unknown>) => void;
+  /** The fallback when the host's sink carries no `error`: a failed sweep is never silent. */
+  warn: (message: string, meta?: Record<string, unknown>) => void;
   error?: (message: string) => void;
 }
 
@@ -765,7 +767,8 @@ export async function reportSsoProviderAccessSweep(
     }
     return swept;
   } catch (error) {
-    logger?.error?.(
+    const say = (message: string) => (logger?.error ? logger.error(message) : logger?.warn(message));
+    say(
       '[auth] Removing what deleted SSO providers left behind FAILED at boot: a permission-set grant projected by a '
         + 'provider that no longer exists still gives its set, and a session signed in through one is still live. '
         + `Remedy: fix the cause and restart; or delete the sys_user_permission_set rows whose reason starts with "${SSO_GRANT_REASON_HEAD}" `
