@@ -434,7 +434,20 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
       aria-label={t('grid.bulkActions', { defaultValue: 'Bulk actions' })}
       data-testid="bulk-actions-bar"
     >
-      <span className="shrink-0 text-[13px] font-medium tabular-nums" data-testid="bulk-selection-count">
+      <span
+        className="shrink-0 text-[13px] font-medium tabular-nums"
+        // objectstack#28552 — the whole sentence, cap named, where the chip is short.
+        title={allMatchingSelected
+          ? overCap
+            ? t('grid.bulkAllMatchingSelectedCapped', {
+                cap: BULK_SELECT_ALL_MATCHING_CAP,
+                total: totalMatching,
+                defaultValue: 'Only the first {{cap}} of {{total}} matching records will be processed.',
+              })
+            : t('grid.bulkAllMatchingSelected', { count: totalMatching, defaultValue: 'All {{count}} matching records are selected.' })
+          : undefined}
+        data-testid="bulk-selection-count"
+      >
         {allMatchingSelected
           ? overCap
             ? t('grid.bulkSelectedAllMatchesCapped', {
