@@ -7,7 +7,7 @@ docs(skills): the objectstack-data and objectstack-automation entry files become
 Clause-②: no
 Metadata-protocol: none
 
-`skills/objectstack-data/SKILL.md` goes from 26.6 KB to 9.0 KB and `skills/objectstack-automation/SKILL.md` from 28.2 KB to 9.0 KB. Each now holds three things: four first checks (the installed `@objectstack/spec` version, what the project already has, the type's contract, `os validate`), the traps that parse and then fail at run time, and a table that says which file to open for what you are writing. No rule's teaching changes. Text moved, and this entry says where it went. The two skills together are 34 bytes smaller.
+`skills/objectstack-data/SKILL.md` goes from 26.6 KB to 9.0 KB and `skills/objectstack-automation/SKILL.md` from 28.2 KB to 9.0 KB. Each now holds three things: four first checks (the installed `@objectstack/spec` version, what the project already has, the type's contract, `os validate`), the traps that parse and then fail at run time, and a table that says which file to open for what you are writing. No rule's teaching changes. Text moved, and this entry says where it went. The two skills together did not grow.
 
 **objectstack-data.** The entry keeps `Conditional Field Rules`, `Object Definition`, `Field Type Selection`, `Relationship Patterns`, `Validation Patterns` and `Access depth` under their headings, each cut to the rules that fail silently. What left:
 

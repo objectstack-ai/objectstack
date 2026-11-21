@@ -154,7 +154,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 ## Filter operands — the rest
 
-- **Query placeholders** (`{current_year_start}` among them) are handed to the
+- **Query placeholders** (`{current_user_id}`, `{current_year_start}`, …) are handed to the
   query engine; a flow variable never shadows one, and only `filter` gets this
   hand-off.
 - **A `null` operand**: the dropped condition would let a routed `delete_record`
@@ -168,8 +168,6 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
   itself.
 
 ## Value slots and the other silent traps — the rest
-
-Items 1, 3 and 4 of `SKILL.md` § Valid-but-silently-wrong.
 
 1. **Value slots**, all of them: `assignments.*`, `fields.*`, `subflow` / `map`
    `input.*`, `script` `inputs.*`, `loop` / `map` `collection`, notify

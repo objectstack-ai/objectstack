@@ -1737,7 +1737,7 @@ export const CEILINGS = new Map([
   // each bound being a CEL envelope). 5957 -> 6170 bytes; the row moves +49, the
   // measured remainder, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(6170 / 4)
-  // 1543 -> 6638 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
+  // 1543 -> 6627 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
   // teaching: the CEL-envelope note, `## Flow Types`, `## A flow an installed package
   // ships`, `## Flow Node Types` (the Control Flow table whole; of the External Integration
   // rows only what the entry's rows no longer say), the remainder of § notify, § Failure
@@ -1748,16 +1748,16 @@ export const CEILINGS = new Map([
   // `### Time-relative triggers — scheduled per-record date sweep` among them. PAID DOWN
   // FIRST: each moved section was cut to the complement of its SKILL.md section before it
   // landed, so nothing is stated twice (the full-section copies measured 29784 bytes). The
-  // file is 6170 -> 26552 bytes (+20382) -> 6638 tokens, ceiling +5095, pinned AT the
-  // measurement; the three objectstack-automation files this change touches are 3026 bytes
-  // larger together (44699 -> 47725), the cost of the entry's first checks and routing
-  // table, and the nine files of both skills 7 bytes smaller.
+  // file is 6170 -> 26506 bytes (+20336) -> 6627 tokens, ceiling +5084, pinned AT the
+  // measurement; the three objectstack-automation files this change touches are 2980 bytes
+  // larger together (44699 -> 47679), the cost of the entry's first checks and routing
+  // table, and the nine files of both skills 53 bytes smaller.
   // Authority: the ruling of record that orders the entry file down to router size, decision
   // record 6943107981 S3 = A (this header: a ruling of record that orders text into a file
   // authorises its own measured delta), quoted in the PR body beside the standing 2026-10-27
   // ruling 「A:先削重复,余额按实测提高」 (record 6513306068); as the objectstack-ui rows of part 1.
-  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26552 / 4)
-  ['skills/objectstack-automation/references/examples-flows.md', 6638],
+  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26506 / 4)
+  ['skills/objectstack-automation/references/examples-flows.md', 6627],
   // NEW FILE (card #27223): one recipe per integration archetype — OpenAPI with
   // a static key, remote MCP with a static header, plain REST, the vendor
   // callback, a hand-written document for a spec-less vendor — plus the two
