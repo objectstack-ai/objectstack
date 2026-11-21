@@ -24,6 +24,7 @@ vi.mock('./metadata-admin/inspectors/ViewVariantInspector', () => ({
       type="button"
       data-testid="mock-inspector-edit"
       data-readonly={String(!!readOnly)}
+      data-columns={JSON.stringify(draft?.config?.columns ?? null)}
       onClick={() =>
         onPatch({ config: { ...(draft?.config ?? {}), columns: ['a', 'b', 'c'] } })
       }
@@ -117,6 +118,45 @@ describe('ViewConfigPanel — read-only (objectstack#35974)', () => {
     fireEvent.click(screen.getByTestId('view-config-close'));
     expect(props.onClose).toHaveBeenCalledTimes(1);
     expect(props.onSave).not.toHaveBeenCalled();
+  });
+
+  it('a verdict that lands after an edit: the edit is discarded, the panel stays open and shows the view', () => {
+    const props = makeProps({ mode: 'edit' });
+    const view = render(<ViewConfigPanel {...props} />);
+    const opened = screen.getByTestId('mock-inspector-edit').getAttribute('data-columns');
+
+    // Opened editable while the package list was still being read; edited.
+    fireEvent.click(screen.getByTestId('mock-inspector-edit'));
+    expect(props.onViewUpdate).toHaveBeenCalledWith('columns', ['a', 'b', 'c']);
+    expect(screen.getByTestId('mock-inspector-edit').getAttribute('data-columns')).not.toBe(opened);
+    props.onViewUpdate.mockClear();
+
+    // The read-only verdict lands.
+    view.rerender(<ViewConfigPanel {...props} readOnly />);
+
+    // The host's list is told to restore the opening view, as Discard would.
+    expect(props.onViewUpdate).toHaveBeenCalledWith('columns', ['a', 'b']);
+    expect(props.onViewUpdate).not.toHaveBeenCalledWith('columns', ['a', 'b', 'c']);
+    // The panel shows the view, not the edit, and stays open, read-only.
+    expect(screen.getByTestId('mock-inspector-edit').getAttribute('data-columns')).toBe(opened);
+    expect(screen.getByTestId('mock-inspector-edit').getAttribute('data-readonly')).toBe('true');
+    expect(screen.queryByTestId('view-config-discard')).toBeNull();
+    expect(screen.queryByTestId('view-config-save')).toBeNull();
+    expect(props.onClose).not.toHaveBeenCalled();
+
+    // Nothing more is relayed: a later edit is taken by no one.
+    props.onViewUpdate.mockClear();
+    fireEvent.click(screen.getByTestId('mock-inspector-edit'));
+    expect(props.onViewUpdate).not.toHaveBeenCalled();
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
+
+  it('a verdict that lands before any edit relays nothing', () => {
+    const props = makeProps({ mode: 'edit' });
+    const view = render(<ViewConfigPanel {...props} />);
+    view.rerender(<ViewConfigPanel {...props} readOnly />);
+    expect(props.onViewUpdate).not.toHaveBeenCalled();
+    expect(screen.getByTestId('mock-inspector-edit').getAttribute('data-readonly')).toBe('true');
   });
 
   it('a savable view (the default) keeps its editable controls, Save, Discard and the draft bar', () => {

@@ -77,7 +77,7 @@
  * @module
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { useCanAuthorMetadata } from './useCanAuthorMetadata.js';
 import { fetchSessionPackages, type PkgEntry } from '../views/studio-design/packages-io.js';
@@ -214,39 +214,50 @@ const NO_REFUSING_PACKAGES: ReadonlySet<string> = new Set();
  * objectstack#35974 — {@link usePackageRefusesSaves} for a list of packages
  * at once, for a surface that draws one row per view (Manage views): the ids
  * among `packageIds` the package list carries as read-only. The same
- * `writable` verdict, the same session-held read (one request, answered per id
- * by `fetchSessionPackages`) and the same fail-open: an id still being read, an
+ * `writable` verdict, the same session-held read (`fetchSessionPackages`: at
+ * most one `GET /api/v1/packages` per new package id per session, concurrent
+ * asks sharing it) and the same fail-open: an id still being read, an
  * id whose read failed and an id the list leaves out are not in the answer, so
  * that row keeps what it offered before this read.
  *
  * Keyed on the ids themselves, never on the array's identity: callers may hand
- * a fresh array each render.
+ * a fresh array each render. Each id's answer is kept for the session as it
+ * lands, so a change to the list of ids (a refetch that brings a view of a new
+ * package) never takes back what is already known: a surface reading this
+ * while open, such as the view panel, cannot flip back to savable.
  */
 export function usePackagesRefusingSaves(packageIds: readonly string[]): ReadonlySet<string> {
   const session = usePackageListSession();
   const key = JSON.stringify([...new Set(packageIds)].sort());
-  const [verdict, setVerdict] = useState<{
-    key: string;
+  const [answers, setAnswers] = useState<{
     session: string;
-    refusing: ReadonlySet<string>;
+    refuses: ReadonlyMap<string, boolean>;
   } | null>(null);
   useEffect(() => {
     const ids = JSON.parse(key) as string[];
-    if (ids.length === 0) return undefined;
     let cancelled = false;
-    void Promise.allSettled(ids.map((id) => fetchSessionPackages(session, id))).then((answers) => {
-      if (cancelled) return;
-      const refusing = new Set<string>();
-      answers.forEach((answer, i) => {
-        if (answer.status === 'fulfilled' && packageStudioPosture(answer.value, ids[i]) === 'view') {
-          refusing.add(ids[i]);
-        }
+    for (const id of ids) {
+      fetchSessionPackages(session, id).then((list) => {
+        if (cancelled) return;
+        const refuses = packageStudioPosture(list, id) === 'view';
+        setAnswers((prev) => {
+          const known = prev && prev.session === session ? prev.refuses : new Map<string, boolean>();
+          if (known.get(id) === refuses) return prev;
+          const next = new Map(known);
+          next.set(id, refuses);
+          return { session, refuses: next };
+        });
+      }, () => {
+        // A failed read answers nothing: the id keeps what it offered.
       });
-      setVerdict({ key, session, refusing });
-    });
+    }
     return () => {
       cancelled = true;
     };
   }, [key, session]);
-  return verdict && verdict.key === key && verdict.session === session ? verdict.refusing : NO_REFUSING_PACKAGES;
+  return useMemo(() => {
+    if (!answers || answers.session !== session) return NO_REFUSING_PACKAGES;
+    const refusing = (JSON.parse(key) as string[]).filter((id) => answers.refuses.get(id) === true);
+    return refusing.length === 0 ? NO_REFUSING_PACKAGES : new Set(refusing);
+  }, [answers, key, session]);
 }

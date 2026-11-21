@@ -430,5 +430,5 @@ export function useObjectViewTitleSwitcher({
         />
     ) : null;
 
-    return { viewTabItems, titleSwitcher, titleLabel };
+    return { viewTabItems, titleSwitcher, titleLabel, refusingPackages };
 }

@@ -1020,7 +1020,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
-    const { viewTabItems, titleSwitcher } = useObjectViewTitleSwitcher({
+    const { viewTabItems, titleSwitcher, refusingPackages } = useObjectViewTitleSwitcher({
         views,
         savedViews,
         objectDef,
@@ -1060,6 +1060,28 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             : undefined,
         onDeletePersonalView: personalViewsReady ? (id: string) => { void handleDeletePersonalView(id); } : undefined,
     });
+
+    // objectstack#35974 — the view panel is read-only on a view a read-only
+    // package ships, judged from the SAME answer that drew its Manage views
+    // row (`refusingPackages`), so the row's "View config" never opens an
+    // editable panel. The view it was opened for counts as well as the open
+    // one: a row of another view switches views in a transition, and the
+    // panel opens before the switch lands.
+    const [configTargetId, setConfigTargetId] = useState<string | null>(null);
+    useEffect(() => {
+        if (!showViewConfigPanel) setConfigTargetId(null);
+    }, [showViewConfigPanel]);
+    const viewRefusesSaves = (id: string | null | undefined): boolean => {
+        if (!isAdmin || !id) return false;
+        const packageId = studioPackageId(savedViews.find((sv: any) => viewRowId(sv) === id));
+        return packageId !== null && refusingPackages.has(packageId);
+    };
+    const viewConfigPanelReadOnly = viewConfigPanelMode === 'edit'
+        && (viewRefusesSaves(activeView?.id) || viewRefusesSaves(configTargetId));
+    const handleConfigViewFromRow = (id: string) => {
+        setConfigTargetId(id);
+        handleConfigView(id);
+    };
 
     // objectstack#35878 — the page bar's props, for the view bar's right end
     // (`viewBarTrailing` below). Filled on every render once the header chrome
@@ -1402,7 +1424,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  onSetPinned={handlePinView}
                  onReorder={handleReorderViews}
                  onAddView={handleAddView}
-                 onConfigView={handleConfigView}
+                 onConfigView={handleConfigViewFromRow}
                />
              )}
 
@@ -1448,7 +1470,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                             metadataClient={metadataClient}
                             dataSource={dataSource}
                             onAfterChange={() => setRefreshKey(k => k + 1)}
-                            readOnly={viewConfigPanelMode === 'edit' && activeViewPackageRefusesSaves}
+                            readOnly={viewConfigPanelReadOnly}
                         />
                     </Suspense>
                 </div>

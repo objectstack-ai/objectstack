@@ -351,24 +351,37 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // reach the list only through `onViewUpdate` (see `handlePatch`), so we
     // replay the panel's opening values — and clear any keys the edits
     // introduced — through the same seam, then reset the local draft.
-    const handleDiscard = useCallback(() => {
-        if (mode === 'edit') {
-            if (onViewUpdate) {
-                const original = inspectorDraftToRuntimeView(openingDraft);
-                const edited = inspectorDraftToRuntimeView(draftRef.current);
-                const fields = new Set([...Object.keys(edited), ...Object.keys(original)]);
-                for (const field of fields) {
-                    if (field === 'id') continue;
-                    onViewUpdate(field, original[field]);
-                }
+    const revertEdits = useCallback(() => {
+        if (onViewUpdate) {
+            const original = inspectorDraftToRuntimeView(openingDraft);
+            const edited = inspectorDraftToRuntimeView(draftRef.current);
+            const fields = new Set([...Object.keys(edited), ...Object.keys(original)]);
+            for (const field of fields) {
+                if (field === 'id') continue;
+                onViewUpdate(field, original[field]);
             }
-            draftRef.current = initialDraft;
-            relayedRef.current = new Set();
-            setDraft(initialDraft);
-            setIsDirty(false);
         }
+        draftRef.current = initialDraft;
+        relayedRef.current = new Set();
+        setDraft(initialDraft);
+        setIsDirty(false);
+    }, [initialDraft, openingDraft, onViewUpdate]);
+    const handleDiscard = useCallback(() => {
+        if (mode === 'edit') revertEdits();
         onClose();
-    }, [initialDraft, openingDraft, mode, onClose, onViewUpdate]);
+    }, [mode, onClose, revertEdits]);
+
+    // objectstack#35974 — the host's read-only verdict can land after the
+    // panel opened editable (the package list was still being read) and after
+    // an edit. A read-only panel offers no Discard, so the edit would be
+    // stranded on the host's list and shown here in place of the stored view.
+    // It is discarded instead, the panel staying open.
+    const wasReadOnlyRef = useRef(readOnly);
+    useEffect(() => {
+        const turnedReadOnly = readOnly && !wasReadOnlyRef.current;
+        wasReadOnlyRef.current = readOnly;
+        if (turnedReadOnly && mode === 'edit' && (isDirty || relayedRef.current.size > 0)) revertEdits();
+    }, [readOnly, mode, isDirty, revertEdits]);
 
     // A publish or a discard from the draft bar changes what is stored: the
     // buffer is read again (objectstack#35054), then the host refreshes.

@@ -12,7 +12,9 @@
  *
  * The verdict is objectstack#35933's: the package the row was served under
  * (`listViews()` carries `_packageId`) and the session-held package list
- * (`fetchSessionPackages`), stubbed here.
+ * (`fetchSessionPackages`), stubbed here. The panel's read-only verdict is
+ * the very answer that drew the row (`usePackagesRefusingSaves`), so the two
+ * cannot disagree, and that answer is kept per package as it lands.
  *
  * What runs: the real `ObjectView` on a stub data source. `ListView` is a
  * stand-in (the list itself is not under test). The real `ManageViewsDialog`
@@ -93,11 +95,12 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
   };
 });
 
-/** The props the view panel was last handed. */
-const panelProps = vi.hoisted(() => ({ current: null as Record<string, any> | null }));
+/** The props the view panel was last handed, and every render's, in order. */
+const panelProps = vi.hoisted(() => ({ current: null as Record<string, any> | null, renders: [] as Record<string, any>[] }));
 vi.mock('./ViewConfigPanel', () => ({
   ViewConfigPanel: (props: any) => {
     panelProps.current = props;
+    panelProps.renders.push(props);
     return null;
   },
 }));
@@ -111,6 +114,7 @@ vi.mock('./studio-design/packages-io', async (importOriginal) => ({
 
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
+import { usePackagesRefusingSaves } from '../hooks/useStudioDesignGate';
 
 const OBJECT = 'showcase_task';
 const SHIPPED_PACKAGE = 'com.example.showcase';
@@ -216,6 +220,7 @@ async function clickConfig(id: string) {
 
 beforeEach(() => {
   panelProps.current = null;
+  panelProps.renders = [];
   packageList.answer = () => Promise.resolve(PACKAGES);
   localStorage.clear();
 });
@@ -242,6 +247,21 @@ describe('objectstack#35974 — a read-only package\'s view: no Delete, a read-o
     await waitFor(() => expect(panelProps.current?.activeView?.id).toBe(SHIPPED.name));
     await waitFor(() => expect(panelProps.current?.readOnly).toBe(true));
     expect(panelProps.current?.mode).toBe('edit');
+  });
+
+  it('"View config" on a shipped row while another package\'s view is open: no render of the open panel is editable', async () => {
+    mount(CUSTOM.name);
+    await settle();
+    await waitFor(async () => expect((await rowOffers(SHIPPED.name)).configLabel).toBe('View config'));
+    const before = panelProps.renders.length;
+    await clickConfig(SHIPPED.name);
+    await waitFor(() => expect(panelProps.current?.activeView?.id).toBe(SHIPPED.name));
+    await waitFor(() => expect(panelProps.current?.open).toBe(true));
+    const opened = panelProps.renders.slice(before).filter((props) => props.open);
+    expect(opened.length).toBeGreaterThan(0);
+    // The first render after the click already reads the row's own verdict:
+    // no switch-first answer for the newly open view is waited for.
+    expect(opened.map((props) => props.readOnly)).toEqual(opened.map(() => true));
   });
 
   it('the custom row\'s "Edit view config" opens the panel savable', async () => {
@@ -294,5 +314,29 @@ describe('objectstack#35974 — a read-only package\'s view: no Delete, a read-o
     await waitFor(() => expect(screen.getByTestId(`manage-views-row-${SHIPPED.name}`)).toBeTruthy());
     expect(await rowOffers(SHIPPED.name)).toEqual(OFFERED);
     expect(panelProps.current?.readOnly).toBe(false);
+  });
+});
+
+describe('objectstack#35974 — the verdict is kept per package as it lands', () => {
+  function Probe({ ids }: { ids: string[] }) {
+    const refusing = usePackagesRefusingSaves(ids);
+    return <span data-testid="refusing">{[...refusing].sort().join(',')}</span>;
+  }
+
+  it('a new package id joining the list takes back none of what is known', async () => {
+    const pending: Array<(rows: any[]) => void> = [];
+    packageList.answer = () => Promise.resolve(PACKAGES);
+    const view = render(<Probe ids={[SHIPPED_PACKAGE]} />);
+    await waitFor(() => expect(screen.getByTestId('refusing').textContent).toBe(SHIPPED_PACKAGE));
+    // A refetch brings a view of a package whose answer is still on the wire.
+    packageList.answer = () => new Promise<any[]>((resolve) => { pending.push(resolve); });
+    view.rerender(<Probe ids={[SHIPPED_PACKAGE, 'com.example.other']} />);
+    expect(screen.getByTestId('refusing').textContent).toBe(SHIPPED_PACKAGE);
+    await settle();
+    expect(screen.getByTestId('refusing').textContent).toBe(SHIPPED_PACKAGE);
+    expect(pending.length).toBeGreaterThan(0);
+    const rows = [...PACKAGES, { id: 'com.example.other', name: 'Other', writable: false }];
+    await act(async () => { pending.forEach((resolve) => resolve(rows)); });
+    await waitFor(() => expect(screen.getByTestId('refusing').textContent).toBe(`com.example.other,${SHIPPED_PACKAGE}`));
   });
 });
