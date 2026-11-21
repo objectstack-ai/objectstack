@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const uiRoot = path.resolve(here, '../../../..');
@@ -74,7 +75,7 @@ const THEME_FILES = [
   'packages/cli/src/utils/app-generator.ts',
 ];
 
-/** The bodies of every `:root { … }` and `.dark { … }` block in `text`, comments removed. */
+/** The bodies of every `:root { … }` and `.dark { … }` block in `text`, comments blanked by the shared mask. */
 function themeBlocks(text: string): string[] {
   const out: string[] = [];
   const open = /(?:^|[\s}`])(?::root|\.dark)\s*\{/g;
@@ -86,7 +87,7 @@ function themeBlocks(text: string): string[] {
       else if (text[i] === '}') depth--;
       i++;
     }
-    out.push(text.slice(open.lastIndex, i - 1).replace(/\/\*[\s\S]*?\*\//g, ''));
+    out.push(maskComments(text.slice(open.lastIndex, i - 1)));
   }
   return out;
 }
