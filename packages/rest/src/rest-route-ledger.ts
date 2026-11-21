@@ -182,6 +182,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/discovery', family: 'discovery', source: 'route-manager', disposition: 'sdk', client: 'connect',
     responseSchema: 'DiscoverySchema',
     note: 'duplicate mount with the dispatcher /discovery branch — REST registers first and wins. Answers BARE (res.json(discovery), no envelope), so `DiscoverySchema` names the whole body here while the dispatcher row names its envelope `data`; discovery-schema-conformance.test.ts drives THIS handler through the double assertion: the live body parses against `DiscoverySchema`, and it carries no key the protocol does not declare' },
+  // [#34774] Read by the CLI (`os validate --target <url>`, `RESTRICTION_PROFILE_ROUTE`), not by `@objectstack/client`.
+  { route: 'GET /api/v1/discovery/restriction-profile', family: 'discovery', source: 'route-manager', disposition: 'server-only',
+    note: 'the restriction profile `os validate --target <url>` reads: `{ success, data }`, `data` a `RestrictionProfileSchema` value; the open runtime restricts nothing and states the spec/skills versions it runs' },
 
   // ── openapi ───────────────────────────────────────────────────────────────
   // [#25104] The document's HTML viewer page (`GET /api/v1/docs`) is retired
