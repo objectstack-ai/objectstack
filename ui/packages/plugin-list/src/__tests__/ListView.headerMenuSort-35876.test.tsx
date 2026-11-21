@@ -130,32 +130,33 @@ describe('ListView — a sort chip opens the sort panel (objectstack#35876)', ()
   it('a click on the chip opens every level and leaves the direction alone', async () => {
     const { ds, onSortChange } = mount(TWO);
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    const chip = await within(slot()).findByTestId('sort-chip-meeting_date');
-    expect(chip).toHaveAttribute('data-order', 'asc');
-    fireEvent.click(within(slot()).getByTestId('sort-chip-open-meeting_date'));
+    // Since objectstack#35878 the sort is ONE chip, however many levels.
+    const chip = await within(slot()).findByTestId('condition-sort');
+    expect(chip).toHaveAttribute('data-levels', '2');
+    fireEvent.click(chip);
     const panel = await screen.findByTestId('sort-chip-panel');
     expect(within(panel).getAllByTestId('sort-builder-row')).toHaveLength(2);
     expect(within(panel).getAllByTestId('sort-builder-handle')).toHaveLength(2);
-    expect(within(slot()).getByTestId('sort-chip-meeting_date')).toHaveAttribute('data-order', 'asc');
+    expect(levels(lastGridProps.sort)).toEqual([['meeting_date', 'asc'], ['location', 'asc']]);
     expect(onSortChange).not.toHaveBeenCalled();
   });
 
   it("a level's handle moves it: ArrowUp on the second handle makes it the first level", async () => {
     const { ds, onSortChange } = mount(TWO);
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    fireEvent.click(await within(slot()).findByTestId('sort-chip-open-location'));
+    fireEvent.click(await within(slot()).findByTestId('condition-sort'));
     const panel = await screen.findByTestId('sort-chip-panel');
     fireEvent.keyDown(within(panel).getAllByTestId('sort-builder-handle')[1], { key: 'ArrowUp' });
     await waitFor(() => expect(onSortChange).toHaveBeenCalled());
     expect(levels(onSortChange.mock.calls.at(-1)![0])).toEqual([['location', 'asc'], ['meeting_date', 'asc']]);
     await waitFor(() => expect(levels(lastGridProps.sort)).toEqual([['location', 'asc'], ['meeting_date', 'asc']]));
-    expect(within(slot()).getByTestId('sort-chip-location')).toHaveAttribute('data-priority', '1');
+    expect(within(slot()).getByTestId('condition-sort')).toHaveTextContent(/^Sorted by Location/);
   });
 
   it("a mouse drag of a level's handle onto another row moves it there, and the chip it sits in does not undo it", async () => {
     const { ds, onSortChange } = mount([...TWO, { field: 'name', order: 'desc' }]);
     await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
-    fireEvent.click(await within(slot()).findByTestId('sort-chip-open-location'));
+    fireEvent.click(await within(slot()).findByTestId('condition-sort'));
     const panel = await screen.findByTestId('sort-chip-panel');
     const handles = within(panel).getAllByTestId('sort-builder-handle');
     const rows = within(panel).getAllByTestId('sort-builder-row');

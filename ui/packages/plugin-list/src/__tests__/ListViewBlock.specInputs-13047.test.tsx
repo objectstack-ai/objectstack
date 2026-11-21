@@ -272,14 +272,14 @@ describe('objectui#13047 — the toolbar and chrome keys, drawn by `ListView` it
   it('`userActions`: `sort: false` takes the Sort control off the toolbar; absent keeps it', async () => {
     const control = mount();
     await loaded(control.dataSource);
-    expect(screen.queryByTestId('toolbar-sort-trigger')).not.toBeNull();
+    expect(screen.queryByTestId('condition-sort')).not.toBeNull();
     cleanup();
 
     const { dataSource } = mount({ userActions: { sort: false } });
     await loaded(dataSource);
-    expect(screen.queryByTestId('toolbar-sort-trigger')).toBeNull();
+    expect(screen.queryByTestId('condition-sort')).toBeNull();
     // Only the member it names: Filter stays.
-    expect(screen.queryByTestId('toolbar-filter-trigger')).not.toBeNull();
+    expect(screen.queryByTestId('condition-add-filter')).not.toBeNull();
   });
 
   it('`compactToolbar: false` puts the wide buttons back on the toolbar; the default keeps them in the Display form', async () => {
