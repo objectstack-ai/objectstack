@@ -64,6 +64,7 @@ import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from '.
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { ROLLUP_AGGREGATE_OPTION, assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
+import { assertRecordUnitAggregatesGrouped } from './record-unit-aggregate-door.js';
 import {
     assertAggregatedColumnsAreDistinct,
     assertDateBucketTargetsAreTemporal,
@@ -1096,6 +1097,10 @@ export class DeleteAndAggregateFacet {
         object, this._registry.getObject(object), query.groupBy, query.aggregations,
         (options as Record<symbol, unknown> | undefined)?.[ROLLUP_AGGREGATE_OPTION],
       );
+      // [ADR-0158 U7 R1] …and the same over a `record`-mode quantity that
+      // does not group by its unit field: 10 KGM and 10 LBR summed to 20. No
+      // roll-up channel: R1 admits no roll-up over such a quantity (L3).
+      assertRecordUnitAggregatesGrouped(object, this._registry.getObject(object), query.groupBy, query.aggregations);
       // [#25818] …and the two shapes that answered a plausible wrong table: a
       // `dateGranularity` over a field declared neither a date nor a datetime
       // (every row in one null bucket), and two columns of the aggregated row
