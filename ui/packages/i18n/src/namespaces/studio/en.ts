@@ -2350,7 +2350,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.addFieldOption': '+ Add field…',
   'engine.studio.settings.undeclared': '(not declared — surfaces pick heuristically)',
   'engine.studio.settings.highlightMax': 'Up to {max} highlight fields — remove one to add another.',
-  'engine.studio.settings.highlightPreview': 'Highlight strip preview',
   'engine.studio.settings.relatedLists': 'Related list order (relatedLists) — the order of the lists of child records on this object\'s record page, most important first; it orders only, and showing or hiding a list stays on its relationship field',
   'engine.studio.settings.relatedListsAdd': '+ Add relationship…',
   'engine.studio.settings.relatedListsTail': 'Not listed — shown after these, in the default order',
