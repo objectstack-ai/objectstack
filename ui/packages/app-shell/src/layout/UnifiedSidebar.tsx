@@ -54,6 +54,7 @@ import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
 import { ContentItemTile, favoriteItemObject } from './contentItemTile.js';
 import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
+import { readRecentObjects } from '../console/home/readRecentObjects.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -244,7 +245,8 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   const recentLabel = useRecentItemLabel();
   const { favorites, removeFavorite, reorderFavorites } = useFavorites();
 
-  const { apps: metadataApps } = useMetadata();
+  const metadata = useMetadata();
+  const { apps: metadataApps } = metadata;
   const apps = metadataApps || [];
   // objectui#7256 — every "Home" row below follows the product's DECLARED
   // landing, so the sidebar cannot offer a second home the top bar disowns.
@@ -548,10 +550,23 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // rows are the user's to order: dragged, they keep the order on every device
   // (the favorites store's `reorderFavorites`). A phone, which draws no drag,
   // keeps them in that order.
+  // The objects the Recent, Favorites and Starred rows name, asked in ONE
+  // presence read; a name not answered `read` is asked nothing by name
+  // (objectstack#34692, as Home's recent rows).
+  const contentObjectNames = [
+    ...new Set(
+      [
+        ...favorites.map((f) => favoriteItemObject(f)),
+        ...recentItems.slice(0, 5).map((r) => recentItemObject(r)),
+      ].filter((name): name is string => !!name),
+    ),
+  ].sort();
+  const contentObjectReading = readRecentObjects(metadata, contentObjectNames);
   const contentTile = (kind: string, objectName?: string, icon?: string) => (
     <ContentItemTile
       kind={kind}
       objectName={objectName}
+      objectRead={!objectName || contentObjectReading(objectName) === 'read'}
       icon={icon}
       targetIcon={resolveNavTargetIcon}
       targetColor={resolveNavTargetColor}

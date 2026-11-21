@@ -112,8 +112,11 @@ describe('objectstack#36141 — NeutralIconTile', () => {
     expect(classes).toHaveLength(4);
     expect(contrast(HEX[bg], HEX[fg])).toBeGreaterThanOrEqual(4.5);
     expect(contrast(HEX[darkBg], HEX[darkFg])).toBeGreaterThanOrEqual(4.5);
-    // Light means lighter than every palette square, so it never reads as a colour of its own.
-    expect(luminance(HEX[bg])).toBeGreaterThan(luminance(HEX['gray-500']));
+    // Light means lighter than every palette square (light theme), so it never reads as a colour of its own.
+    for (const name of OBJECT_COLORS) {
+      const shade = OBJECT_COLOR_TILE_CLASS[name].split(' ').find((c) => /^bg-/.test(c))!.replace(/^bg-/, '');
+      expect(luminance(HEX[bg]), name).toBeGreaterThan(luminance(HEX[shade]));
+    }
   });
 
   it('has the object tile\'s edge, glyph and corners at every size, and no palette colour', () => {

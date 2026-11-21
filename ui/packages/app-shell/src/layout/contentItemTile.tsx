@@ -17,19 +17,17 @@
 
 import * as React from 'react';
 import { NeutralIconTile, ObjectIconTile, type ObjectIconTileSize } from '@object-ui/components';
-import type { NavTargetColorResolver, NavTargetIconResolver } from '@object-ui/layout';
+import { NAV_KIND_ICON, type NavTargetColorResolver, type NavTargetIconResolver } from '@object-ui/layout';
 import type { FavoriteItem } from '../context/FavoritesProvider.js';
 import { getIcon } from '../utils/getIcon.js';
 
 /**
  * The icon a content entry's neutral tile draws, per kind: the menu's glyphs
- * for the kinds the menu has (`NAV_KIND_ICON` in `@object-ui/layout`), and one
- * each for the Studio kinds only Recent holds.
+ * ({@link NAV_KIND_ICON}) for the kinds the menu has, and one each for the
+ * Studio kinds only Recent holds.
  */
 export const CONTENT_KIND_ICON: Readonly<Record<string, string>> = {
-  dashboard: 'layout-dashboard',
-  report: 'chart-column',
-  page: 'file',
+  ...NAV_KIND_ICON,
   package: 'package',
   metadata: 'file-code',
 };
@@ -52,13 +50,23 @@ export interface ContentItemTileProps {
   objectName?: string;
   /** An icon the entry carries itself (a view favourite's), else the object's, else the kind's. */
   icon?: string;
+  /**
+   * The object's definition may be read by name (`readRecentObjects` answered
+   * `read`). Otherwise (`unread`, `absent`) the row draws the object tile in
+   * its neutral colour and the generic glyph, and asks nothing about the
+   * object by name (objectstack#34692). Default `true`.
+   */
+  objectRead?: boolean;
   targetIcon: NavTargetIconResolver;
   targetColor: NavTargetColorResolver;
   size?: ObjectIconTileSize;
   className?: string;
 }
 
-export function ContentItemTile({ kind, objectName, icon, targetIcon, targetColor, size = 'sm', className }: ContentItemTileProps) {
+export function ContentItemTile({ kind, objectName, icon, objectRead = true, targetIcon, targetColor, size = 'sm', className }: ContentItemTileProps) {
+  if (objectName && !objectRead) {
+    return <ObjectIconTile icon={icon} glyph={getIcon(icon)} size={size} className={className} />;
+  }
   if (objectName) {
     const target = { kind: 'object', objectName } as const;
     const name = icon ?? targetIcon(target);

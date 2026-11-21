@@ -239,8 +239,8 @@ export type NavTargetLabelResolver = (target: NavLabelTarget) => string | undefi
  * What a navigation entry that names no `icon` draws instead: the icon of the
  * object it opens. An `object` entry opens an object's list (a `viewName`
  * picks the list, not the object), so the object page's own icon is the one
- * that says which list the row leads to. Every other entry keeps the
- * renderer's generic icon.
+ * that says which list the row leads to. Every other entry draws its kind's
+ * icon ({@link NAV_KIND_ICON}) on the neutral tile.
  */
 export type NavIconTarget = { kind: 'object'; objectName: string };
 
