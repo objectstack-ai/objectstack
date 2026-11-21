@@ -481,6 +481,51 @@ describe('deleting an SSO provider names what it removes, and removes what the p
   }, 30_000);
 });
 
+// ── 1b. A projected grant whose provider no longer exists ──────────────────
+
+describe('a projected grant whose provider no longer exists is removed at boot', () => {
+  /** Run every `kernel:ready` hook `AuthPlugin.start()` registers, over `engine`, each on its own. */
+  async function boot(engine: ObjectQL): Promise<ReturnType<typeof vi.fn>> {
+    const handlers = new Map<string, Array<() => Promise<void>>>();
+    const error = vi.fn();
+    const ctx = {
+      ...mockCtx(),
+      getService: vi.fn((name: string) => (name === 'manifest' ? { register: vi.fn() } : name === 'objectql' ? engine : undefined)),
+      hook: vi.fn((name: string, handler: () => Promise<void>) => {
+        if (!handlers.has(name)) handlers.set(name, []);
+        handlers.get(name)!.push(handler);
+      }),
+      logger: { info: vi.fn(), error, warn: vi.fn(), debug: vi.fn() },
+    } as unknown as PluginContext;
+    const plugin = new AuthPlugin({ secret: SECRET, baseUrl: BASE, registerRoutes: false });
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    for (const handler of handlers.get('kernel:ready') ?? []) {
+      try { await handler(); } catch { /* a sibling hook this harness cannot serve */ }
+    }
+    return error;
+  }
+
+  it("removes the grants of a provider deleted earlier; a live provider's, one by hand and SCIM's stay", async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    const grant = (id: string, set: string, reason: string | null) =>
+      residue(s.engine, 'sys_user_permission_set', { id, user_id: mia, permission_set: set, organization_id: ORG, reason });
+    // `acme-okta` has no provider row: it was deleted before its grants were removed with it.
+    await grant('ups_gone_sales', 'sales_reader', MARKER);
+    await grant('ups_gone_support', 'support_agent', MARKER);
+    await grant('ups_live_globex', 'sales_reader', ssoGroupProjectionReason(OTHER));
+    await grant('ups_by_hand', 'support_agent', null);
+    await grant('ups_scim', 'sales_reader', "scim-group-projection: provisioning domain 'acme-okta'");
+
+    await boot(s.engine);
+
+    const left = (await rows(s, 'sys_user_permission_set', { user_id: mia })).map((r) => r.id).sort();
+    expect(left).toEqual(['ups_by_hand', 'ups_live_globex', 'ups_scim']);
+  });
+});
+
 // ── 2. One domain, one provider ─────────────────────────────────────────────
 
 describe('an email domain another provider serves is refused on register and on a domain edit', () => {
