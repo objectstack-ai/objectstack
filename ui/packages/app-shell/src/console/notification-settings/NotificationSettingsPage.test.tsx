@@ -30,6 +30,7 @@ import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { NotificationSettingsPage } from './NotificationSettingsPage';
 import { MY_PREFERENCES_URL } from './myPreferences';
+import { SLACK_LINK_URL } from './slackDoors';
 import { getAppComponent } from '../../services/componentRegistry';
 // The registry check below loads every built-in page, which reaches the
 // metadata admin's dynamic `@objectstack/lint` import: pay that load at
@@ -66,10 +67,22 @@ function answer(taskEnabled: boolean, taskRow?: string, general: General = BUILT
   };
 }
 
-function host(apiFetch: ReturnType<typeof vi.fn>, adapter: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> }) {
+const NO_SLACK_INSTALL = { data: { account: null, link: null } };
+
+/**
+ * The Slack link door (`/me/slack-link`) answers through `slackFetch`, so
+ * `apiFetch` counts only the preference reads these tests are about.
+ */
+function host(
+  apiFetch: ReturnType<typeof vi.fn>,
+  adapter: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> },
+  slackFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => json(NO_SLACK_INSTALL),
+) {
+  const prefsFetch = apiFetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+  const routed = (url: string, init?: RequestInit) => (url.startsWith(SLACK_LINK_URL) ? slackFetch(url, init) : prefsFetch(url, init));
   return ({ children }: { children: ReactNode }) => (
     <AdapterCtx.Provider value={adapter as never}>
-      <SchemaRendererProvider dataSource={adapter as never} apiFetch={apiFetch as never}>
+      <SchemaRendererProvider dataSource={adapter as never} apiFetch={routed as never}>
         {children}
       </SchemaRendererProvider>
     </AdapterCtx.Provider>
@@ -364,5 +377,31 @@ describe('the caller\'s grant on sys_notification_preference decides whether the
         enabled: true,
       }),
     );
+  });
+});
+
+describe('the Slack section is drawn only where the preference door lists slack', () => {
+  const withoutSlack = () => {
+    const body = answer(false);
+    body.data.channels = body.data.channels.filter((c) => c.channel !== 'slack');
+    body.data.topics = body.data.topics.map((t) => ({ ...t, channels: t.channels.filter((c) => c.channel !== 'slack') }));
+    return body;
+  };
+
+  it('with slack listed, the section reads the person’s link', async () => {
+    const slackFetch = vi.fn(async () => json(NO_SLACK_INSTALL));
+    render(<NotificationSettingsPage />, { wrapper: host(vi.fn(async () => json(answer(false))), { create: vi.fn(), update: vi.fn() }, slackFetch) });
+
+    expect(await screen.findByTestId('slack-link-section')).toBeInTheDocument();
+    await waitFor(() => expect(slackFetch).toHaveBeenCalledWith(SLACK_LINK_URL, expect.objectContaining({ method: 'GET' })));
+  });
+
+  it('without slack listed, no section and no Slack door is called', async () => {
+    const slackFetch = vi.fn(async () => json(NO_SLACK_INSTALL));
+    render(<NotificationSettingsPage />, { wrapper: host(vi.fn(async () => json(withoutSlack())), { create: vi.fn(), update: vi.fn() }, slackFetch) });
+
+    await screen.findByTestId('notification-settings-matrix');
+    expect(screen.queryByTestId('slack-link-section')).toBeNull();
+    expect(slackFetch).not.toHaveBeenCalled();
   });
 });
