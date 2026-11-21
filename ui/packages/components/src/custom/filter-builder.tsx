@@ -1444,6 +1444,9 @@ function emptyCheckArm(field: FilterFieldStorageFacts | undefined) {
  * Decided from the same two field facts the server's faces read (the
  * engine's `declaredJsonStoredFields`: `STRUCTURED_JSON_TYPES` or
  * `isMultiValueField`), through the spec's own sets — never a local type list.
+ * The driver's own JSON-column test and the spec predicate are related here,
+ * so the card that owns their divergence is cited: objectstack#17469
+ * (`multiple: true` on a type that cannot hold several values).
  * Shared by every filter surface that offers operators per field, so the
  * list's quick filter and this builder cannot disagree.
  */
