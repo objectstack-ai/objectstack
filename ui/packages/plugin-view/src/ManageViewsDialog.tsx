@@ -173,8 +173,9 @@ const SortableRow: React.FC<RowProps> = ({
   const isReadonly = !!view.readonly;
   // A row whose definition is read-only but whose row state is not
   // (`ViewTabItem.definitionReadonly`): no Delete, and its configuration is
-  // offered to look at. `readonly` wins.
-  const definitionReadonly = !isReadonly && !!view.definitionReadonly;
+  // offered to look at. `readonly` wins without a check here: it already
+  // drops both entries this flag changes.
+  const definitionReadonly = !!view.definitionReadonly;
 
   /**
    * The overflow menu's entries, each resolved ONCE to the handler it will
