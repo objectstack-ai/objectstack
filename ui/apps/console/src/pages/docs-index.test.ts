@@ -69,6 +69,16 @@ describe('groupBooksByApp (objectstack#35424)', () => {
     ]);
   });
 
+  it('a platform book an app in the list links is listed under that app, never under the ungrouped group', () => {
+    const linking = { ...SALES, navigation: [{ type: 'doc', book: 'com.objectstack.setup' }] };
+    expect(shape([linking])).toEqual([
+      ['Sales', ['User Manual', 'Setup']],
+      [null, ['Revenue Manual', 'Service Manual', 'Tools']],
+    ]);
+    // With its own app in the list too, it keeps that app's name under the app linking it.
+    expect(shape([linking, SETUP])[0]).toEqual(['Sales', ['User Manual', 'System Settings']]);
+  });
+
   it('no card carries the package id line', () => {
     const groups = groupBooksByApp(BOOKS, CARDS, DOCS, [SETUP, SALES]);
     for (const g of groups) for (const c of g.cards) expect(c.subtitle).toBeUndefined();
@@ -113,6 +123,16 @@ describe('the full-text search (objectstack#35424)', () => {
     expect(hit).toMatchObject({ doc: 'setup_overview', bookLabel: 'System Settings' });
     // CONTROL: the book's own label is its package's humanized id.
     expect(BOOKS.find((b) => b.name === 'com.objectstack.setup')?.label).not.toBe('System Settings');
+  });
+
+  it('answers every match, so the page\'s count is the true count', () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ name: `crm_note_${i}`, label: `Leads note ${i}`, packageId: 'app.crm' }));
+    const manyDocs: ResolverDoc[] = many.map((d) => ({ name: d.name, label: d.label, packageId: d.packageId }));
+    const books = buildPortalBooks([], manyDocs);
+    const asListed = new Map(buildBookCards(books, manyDocs).map((c) => [c.name, c.label] as const));
+    expect(searchDocs('leads', many, books, manyDocs, asListed)).toHaveLength(60);
+    // CONTROL: an explicit limit still caps the answer.
+    expect(searchDocs('leads', many, books, manyDocs, asListed, 5)).toHaveLength(5);
   });
 
   it('searches the words a reader sees: no diagram source, no markup', () => {

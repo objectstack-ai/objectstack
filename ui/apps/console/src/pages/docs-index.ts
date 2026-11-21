@@ -84,9 +84,11 @@ function docEntries(app: DocsIndexApp): Array<{ book?: string; doc?: string }> {
  * contributions are part of the app it contributes to, as served), else to the
  * first app of the book's own package. A book no app carries goes to the
  * ungrouped group at the end, except a platform package's book
- * (`com.objectstack.*`): that one is listed only under its app, so it is not
- * listed for a caller whose app list does not include that app (the Setup app
- * is served to administrators only). This is a listing rule, not a read gate:
+ * (`com.objectstack.*`): that one is listed only under an app in the caller's
+ * list that carries it (one linking it, else its own package's app), never
+ * under 「Other documentation」, so it is not listed for a caller whose app list
+ * has no such app (the Setup app is served to administrators only). This is a
+ * listing rule, not a read gate:
  * the server's audience gate (ADR-0046 §6.7) is what decides who may read a
  * doc.
  *
@@ -122,7 +124,9 @@ export function groupBooksByApp(
       if (!isPlatformPackage(pkg)) ungrouped.push(rest);
       continue;
     }
-    const named = book.implicit ? { ...rest, label: owner.label } : rest;
+    // An implicit book is named by its own package's app, never by another app that links it.
+    const homeApp = apps.find((app) => app._packageId === pkg);
+    const named = book.implicit && homeApp ? { ...rest, label: homeApp.label } : rest;
     const list = byApp.get(owner.name) ?? [];
     list.push(named);
     byApp.set(owner.name, list);
@@ -233,7 +237,8 @@ export function markTerms(text: string, terms: string[]): SnippetPart[] {
  * read in one of `listedBooks` are answered, so the search never offers a doc
  * the page itself does not list; each hit names its book as the page's card
  * does (`listedBooks` maps a listed book's name to its card label, so an
- * implicit book reads as its app, not its package).
+ * implicit book reads as its app, not its package). Every match is answered
+ * unless `limit` caps it, so a count read from the answer is the true count.
  */
 export function searchDocs(
   query: string,
@@ -241,7 +246,7 @@ export function searchDocs(
   books: Book[],
   docs: ResolverDoc[],
   listedBooks: ReadonlyMap<string, string>,
-  limit = 50,
+  limit = Number.POSITIVE_INFINITY,
 ): DocSearchHit[] {
   const terms = searchTerms(query);
   if (terms.length === 0) return [];
