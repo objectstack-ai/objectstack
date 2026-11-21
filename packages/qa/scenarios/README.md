@@ -682,7 +682,10 @@ npx @objectstack/scenarios help                                      # the comma
   it may not see. Each charge is a failed Build check (in total, never in passed; `rollup-source-unreadable:<persona>:<parent.field>`
   in the record's evidence) and a Build finding naming the persona, the roll-up and the withheld child, so such a build
   is never `pass` and is never installed as a verified build. A finding on a set no persona holds, on a child the card
-  lets the persona read, or the rule's `info` row-scope arm is not charged. The remedy is the rule's own: mask the
+  lets the persona read, or the rule's `info` row-scope arm is not charged. A finding the build acknowledged
+  (`rollupSourceUnreadableReason` on the set's entry for the roll-up, which turns the rule's finding to `info` and
+  suffixes its message with the reason) is still charged, in the same check: a written reason does not change what
+  the persona sees, and a total the card withholds is masked, never explained. The remedy is the rule's own: mask the
   parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
   charged.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
