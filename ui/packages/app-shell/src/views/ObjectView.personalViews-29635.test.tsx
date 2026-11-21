@@ -789,4 +789,28 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
     expect(draftOf('v1')).toEqual({});
   });
+
+  it('objectstack#35955 — the draft\'s row colour is saved too: into the reader\'s own view, and into a view of their own', async () => {
+    const RED = { field: 'status', colors: { open: 'red' } };
+    storeListState({ perView: { pv_mine: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
+    await listToolbar();
+    await saveToThisView();
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    const patch = dataSource.update.mock.calls[0][2];
+    expect(patch.config.rowColor).toEqual(RED);
+    expect(patch.config.sort).toEqual([{ field: 'name', order: 'desc' }]);
+    expect(ListViewSchema.safeParse(patch.config).success).toBe(true);
+    cleanup();
+
+    storeListState({ perView: { v1: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const second = mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    await screen.findByDisplayValue('View 1 copy');
+    fireEvent.click(screen.getByTestId('personal-view-name-submit'));
+    await waitFor(() => expect(second.dataSource.create).toHaveBeenCalledTimes(1));
+    expect(second.dataSource.create.mock.calls[0][1].config.rowColor).toEqual(RED);
+  });
 });
