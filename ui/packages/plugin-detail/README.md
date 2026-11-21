@@ -723,8 +723,9 @@ wiring exists to remove.
 On the record page, a related list opened as its own **tab** is the child
 object's full list (objectstack#35892). Its first row is the list's tile and
 name on the left and **+ Add** on the right; its second row is the list page's
-own condition row (`plugin-list` registers it as `list-conditions`, since that
-package depends on this one): **Sort** and **Filter**, with no view switch, no
+own condition row (`plugin-list`'s `ListConditionsBlock`, which the record page
+hands in through `RelatedListConditionsSlotContext`, since that package depends
+on this one; a host that supplies none gets no condition row): **Sort** and **Filter**, with no view switch, no
 view settings and no search. The table is the list page's grid: the column
 menu, cell editing where the reader may edit the child object, row selection
 with the floating bulk bar, and the footer row, whose calculations cover every

@@ -9,9 +9,10 @@
 /**
  * The list page's condition row for a host that is not a `ListView`
  * (objectstack#35892): a record page's related tab, which draws the child
- * object's rows itself. Registered as `list-conditions` because that host sits
- * below this package (`plugin-list` depends on `plugin-detail`), the way the
- * same host reaches `object-grid`.
+ * object's rows itself. That host sits below this package (`plugin-list`
+ * depends on `plugin-detail`), so it gets this block through its own slot
+ * (`RelatedListConditionsSlotContext`), which the record page fills. A host
+ * element, never a registered node type: nothing about it is authored.
  *
  * It is the list page's own parts, not a copy: `ConditionChipRow` with the
  * `SortPanel`, the `FilterPanel` and their advanced steps (`SortBuilder`,
@@ -23,7 +24,7 @@
  *
  * Controlled, like the row: the host holds the sort and the filter group and
  * says what is offered; nothing here stores anything. Every input is a React
- * prop on the host channel, never a node key.
+ * prop, never a node key.
  */
 
 import * as React from 'react';
@@ -75,10 +76,7 @@ export interface ListConditionsHostProps {
   className?: string;
 }
 
-/** The registry hands a component its node as `schema`; this one reads nothing from it. */
-type ListConditionsBlockProps = ListConditionsHostProps & { schema?: unknown };
-
-export const ListConditionsBlock: React.FC<ListConditionsBlockProps> = ({
+export const ListConditionsBlock: React.FC<ListConditionsHostProps> = ({
   objectName,
   objectDef,
   shownFields,

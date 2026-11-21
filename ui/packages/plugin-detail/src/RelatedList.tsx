@@ -48,7 +48,7 @@ import {
   Maximize2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { DataSource, DeclaredNode, FieldMetadata } from '@object-ui/types';
+import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterElement } from '@objectstack/spec/ui';
 import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard, formatCurrency } from '@object-ui/fields';
 import {
@@ -86,7 +86,6 @@ import {
   type ActionResult,
   type FilterNode,
   withHeaderSortPick,
-  ComponentRegistry,
 } from '@object-ui/core';
 import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type RelatedListPreference } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
@@ -101,6 +100,7 @@ import {
   RelatedCardCountContext,
   RelatedEnlargeContext,
   RelatedListCompactContext,
+  RelatedListConditionsSlotContext,
   RelatedListEnlargedContext,
   RelatedListTotalReportContext,
   useSeenOnce,
@@ -1285,14 +1285,6 @@ const RELATED_TAB_COLUMNS_IN_PREFERENCES = false;
  */
 export const RELATED_TAB_WINDOW = 50;
 
-/**
- * The condition row `plugin-list` registers (objectstack#35892); one node, so
- * its identity never changes. Not an authored type (no page declares it, it
- * reads only host props), so no `DeclaredNode` arm names it: the cast says
- * this node is the host's, never a page's.
- */
-const LIST_CONDITIONS_NODE = { type: 'list-conditions' } as unknown as DeclaredNode;
-
 /** How far below the view the next window is asked for, as the list page asks (`LOAD_MORE_THRESHOLD_PX`). */
 const RELATED_TAB_LOAD_AHEAD = '320px';
 
@@ -1585,9 +1577,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     discard: discardTabConditions,
   } = useRelatedTabConditions(tabRecord, tabList ? ownRelationshipId : null);
   const tabChanged = tabList && relatedTabConditionsChanged(tabConditions);
-  // Registered by `plugin-list`, which this package cannot import (it depends
-  // on this one): without it the tab draws no condition row.
-  const listConditionsRegistered = ComponentRegistry.has('list-conditions') || ComponentRegistry.hasLazy('list-conditions');
+  // Supplied by the host (`plugin-list`'s row, which this package cannot
+  // import: it depends on this one): without it the tab draws no condition row.
+  const renderListConditions = React.useContext(RelatedListConditionsSlotContext);
   // The filter the reader set on the tab, ANDed with the list's own scope.
   const tabFilterNode = tabList ? tabConditions.filterNode : undefined;
   const tabFilterKey = tabFilterNode === undefined ? null : JSON.stringify(tabFilterNode);
@@ -4309,27 +4301,23 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // full list (it was objectstack#35601's bare table). Row one: the child
   // list's tile and name on the left; the child object's toolbar actions and
   // 「+ 添加」, the one add entry (`addEntry`), on the right. Row two: the list
-  // page's own condition row (`list-conditions`, registered by `plugin-list`):
+  // page's own condition row (the host's `RelatedListConditionsSlotContext`):
   // 「排序」 and 「筛选」, no view switch, view settings or search, and 「放弃」
   // at its end while the reader changed anything. The tab title keeps the
   // count of every child; the table's footer counts the matching ones. No
   // 「在列表中打开」. The rows load as the page scrolls.
   if (enlargedFace) {
-    const conditionRow = tabList && listConditionsRegistered ? (
-      <SchemaRenderer
-        schema={LIST_CONDITIONS_NODE}
-        objectName={api}
-        objectDef={objectSchema}
-        shownFields={tabShownFields}
-        sort={tabConditions.sort}
-        onSortChange={(sort: typeof tabConditions.sort) => patchTabConditions({ sort })}
-        filters={tabConditions.filters}
-        onFiltersChange={(filters: typeof tabConditions.filters, filterNode: unknown[] | undefined) =>
-          patchTabConditions({ filters, filterNode })}
-        dataSource={dataSource}
-        {...(tabChanged ? { onDiscard: discardTabConditions } : {})}
-      />
-    ) : null;
+    const conditionRow = tabList && renderListConditions ? renderListConditions({
+      objectName: api,
+      objectDef: objectSchema,
+      shownFields: tabShownFields,
+      sort: tabConditions.sort,
+      onSortChange: (sort) => patchTabConditions({ sort }),
+      filters: tabConditions.filters,
+      onFiltersChange: (filters, filterNode) => patchTabConditions({ filters, filterNode }),
+      dataSource,
+      ...(tabChanged ? { onDiscard: discardTabConditions } : {}),
+    }) : null;
     // A re-read after a new sort or filter dims the rows it replaces; the
     // next window as the page scrolls does not.
     const rereading = loading && !(tabGrows && currentPage > 0);

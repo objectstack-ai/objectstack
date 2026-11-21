@@ -56,12 +56,6 @@ ComponentRegistry.registerLazy('object-gallery', () => import('@object-ui/plugin
   namespace: 'plugin-list',
   category: 'view',
 });
-// objectstack#35892 — the list page's condition row, for the record page's
-// related tab (`plugin-detail`, which cannot import this package).
-ComponentRegistry.registerLazy('list-conditions', () => import('@object-ui/plugin-list'), {
-  namespace: 'plugin-list',
-  category: 'Views',
-});
 
 // The form and the object view: the shell takes their pure helpers from the
 // side-effect-free `/core` subpaths and draws their components behind

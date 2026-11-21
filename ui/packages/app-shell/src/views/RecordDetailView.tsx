@@ -83,7 +83,8 @@ import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
-import { ApprovalBandOnceScope, RecordStageMenu } from '@object-ui/plugin-detail';
+import { ApprovalBandOnceScope, RecordStageMenu, RelatedListConditionsSlotContext } from '@object-ui/plugin-detail';
+import { renderRelatedListConditions } from './relatedListConditions.js';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
@@ -5583,6 +5584,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         attachments: !!(filesEnabled && !hasAttachments && pureRecordId),
       });
   const pageTree = (
+    // objectstack#35892 — a related tab draws the list page's condition row.
+    <RelatedListConditionsSlotContext.Provider value={renderRelatedListConditions}>
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
@@ -6081,6 +6084,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     </div>
     </RecordHeaderStateContext.Provider>
     </RecordHeaderBarContext.Provider>
+    </RelatedListConditionsSlotContext.Provider>
   );
   // A drawer draws this view embedded and is its own host. A page is the host
   // of the drawer its related rows and lookups open over it

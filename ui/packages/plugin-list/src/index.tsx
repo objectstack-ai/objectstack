@@ -34,6 +34,12 @@ export type { ObjectGalleryProps } from './ObjectGallery';
 // `ListViewSwitcherProps`, because `@object-ui/plugin-view` publishes
 // `ViewSwitcherProps` for a different switcher (objectui#6349, batch 8).
 export type { ListViewSwitcherProps } from './ViewSwitcher';
+// objectstack#35892 — the list page's condition row for a host that draws its
+// own rows and sits below this package: a record page's related tab gets it
+// through `@object-ui/plugin-detail`'s `RelatedListConditionsSlotContext`,
+// which the record page fills with this block. A host element, not a
+// registered node type: nothing about it is authored.
+export { ListConditionsBlock };
 export type { ListConditionsHostProps } from './conditions/ListConditionsBlock';
 export { ConditionDiscardButton } from './conditions/ListConditionControls';
 export type { ConditionDiscardButtonProps } from './conditions/ListConditionControls';
@@ -412,14 +418,3 @@ ComponentRegistry.register('list', ListViewRenderer, {
   inputs: LIST_VIEW_INPUTS.map((input) => ({ ...input })),
 });
 
-// objectstack#35892 — the list page's condition row (sort and filter chips,
-// the Sort and Filter panels) for a host that draws its own rows and sits
-// below this package: a record page's related tab reaches it here, as it
-// reaches `object-grid`. Host props only (`ListConditionsHostProps`): it
-// declares no input, since nothing about it is authored.
-ComponentRegistry.register('list-conditions', ListConditionsBlock, {
-  namespace: 'plugin-list',
-  label: 'List Conditions',
-  category: 'Views',
-  icon: 'ListFilter',
-});

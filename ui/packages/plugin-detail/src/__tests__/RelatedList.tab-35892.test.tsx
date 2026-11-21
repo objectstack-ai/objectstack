@@ -8,8 +8,8 @@
 
 /**
  * objectstack#35892 — the record page's related tab is the child object's
- * full list: the list page's condition row (`list-conditions`, through the
- * registry), its grid with the column menu, cell editing, selection and the
+ * full list: the list page's condition row (the host's, through
+ * `RelatedListConditionsSlotContext`), its grid with the column menu, cell editing, selection and the
  * footer row, rows that load as the page scrolls, and 「Discard」 while the
  * reader changed anything. What they change holds for this visit to the
  * record: across a remount (another tab and back), not on another record.
@@ -20,29 +20,36 @@ import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { ComponentRegistry } from '@object-ui/core';
 import { RelatedList } from '../RelatedList';
-import { RelatedListEnlargedContext, RelatedListTotalReportContext } from '../relatedListCompact';
+import {
+  RelatedListConditionsSlotContext,
+  RelatedListEnlargedContext,
+  RelatedListTotalReportContext,
+  type RelatedListConditionsProps,
+} from '../relatedListCompact';
 import { resetRelatedTabConditionsForTests } from '../relatedTabConditions';
 
-/** What `RelatedList` hands each `SchemaRenderer`, by node type. */
+/** What `RelatedList` hands each `SchemaRenderer` by node type, and the host's condition row its props. */
 const h = vi.hoisted(() => ({ byType: {} as Record<string, { schema: any; props: any }> }));
 vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<Record<string, any>>();
   function CapturingRenderer({ schema, ...props }: any) {
     h.byType[schema?.type] = { schema, props };
-    if (schema?.type === 'list-conditions' && props.onDiscard) {
-      return <button type="button" data-testid="condition-discard" onClick={props.onDiscard}>Discard</button>;
-    }
     return null;
   }
   return { ...actual, SchemaRenderer: CapturingRenderer };
 });
 
+/** The host's condition row (the record page passes `plugin-list`'s block). */
+function CapturingConditions(props: RelatedListConditionsProps) {
+  h.byType.conditions = { schema: undefined, props };
+  return props.onDiscard
+    ? <button type="button" data-testid="condition-discard" onClick={props.onDiscard}>Discard</button>
+    : null;
+}
+
 beforeAll(() => {
   Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1440 });
-  // `plugin-list` registers it in the app; this package cannot import that one.
-  if (!ComponentRegistry.has('list-conditions')) ComponentRegistry.register('list-conditions', () => null);
 });
 
 afterEach(() => {
@@ -69,13 +76,17 @@ function dataSourceFor() {
   };
 }
 
-function Tab({ parentId = 'O-1', dataSource, onTotal, onRowDelete }: {
+const renderCapturing = (props: RelatedListConditionsProps) => <CapturingConditions {...props} />;
+
+function Tab({ parentId = 'O-1', dataSource, onTotal, onRowDelete, slot = renderCapturing }: {
   parentId?: string;
   dataSource: ReturnType<typeof dataSourceFor>;
   onTotal?: (n: number) => void;
   onRowDelete?: (row: any) => Promise<void> | void;
+  slot?: ((props: RelatedListConditionsProps) => React.ReactNode) | null;
 }) {
   return (
+    <RelatedListConditionsSlotContext.Provider value={slot}>
     <RelatedListTotalReportContext.Provider value={onTotal}>
       <RelatedListEnlargedContext.Provider value>
         <RelatedList
@@ -92,11 +103,12 @@ function Tab({ parentId = 'O-1', dataSource, onTotal, onRowDelete }: {
         />
       </RelatedListEnlargedContext.Provider>
     </RelatedListTotalReportContext.Provider>
+    </RelatedListConditionsSlotContext.Provider>
   );
 }
 
 const lastFind = (find: ReturnType<typeof vi.fn>) => find.mock.calls[find.mock.calls.length - 1][1];
-const conditions = () => h.byType['list-conditions'];
+const conditions = () => h.byType.conditions;
 const grid = () => h.byType['object-grid'];
 const AMOUNT_OVER_600 = ['amount', '>', 600];
 const AMOUNT_GROUP = { id: 'root', logic: 'and' as const, conditions: [{ id: 'r1', field: 'amount', operator: '>', value: 600 }] };
@@ -108,9 +120,14 @@ describe('the related tab is the child object\'s full list (objectstack#35892)',
     expect(conditions().props).toMatchObject({ objectName: 'quote', shownFields: ['name', 'amount'], sort: [] });
     expect(conditions().props.objectDef?.fields).toEqual(FIELDS);
     expect(conditions().props).not.toHaveProperty('onDiscard');
-    for (const key of ['sort', 'filters', 'onSortChange', 'onFiltersChange']) {
-      expect(conditions().schema, `${key} is a host prop, never a node key`).not.toHaveProperty(key);
-    }
+    expect(h.byType['list-conditions'], 'a host element, never a node').toBeUndefined();
+  });
+
+  it('a host that supplies no condition row gets the table without one', async () => {
+    render(<Tab dataSource={dataSourceFor()} slot={null} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    expect(conditions()).toBeUndefined();
+    expect(document.querySelector('[data-related-enlarged-conditions]')).toBeNull();
   });
 
   it('hands the grid the list page\'s host keys: column menu, select-first cells, footer row, its query, selection', async () => {

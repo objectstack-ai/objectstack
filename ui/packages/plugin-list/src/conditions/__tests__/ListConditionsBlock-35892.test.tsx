@@ -8,8 +8,9 @@
 
 /**
  * objectstack#35892 — the list page's condition row for a host that is not a
- * `ListView` (a record page's related tab): registered as `list-conditions`,
- * reached through the registry with React props, controlled by the host. It
+ * `ListView` (a record page's related tab): a host element the record page
+ * hands to `plugin-detail`'s slot, never a registered node type; controlled by
+ * the host through React props. It
  * is the list page's own row, so its field lists follow the list page's rules,
  * a filter reaches the host as the query node the list page sends, and its
  * 「Discard」 is the list page's button.
@@ -23,7 +24,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import { ListConditionsBlock } from '../ListConditionsBlock';
 import { ConditionDiscardButton } from '../ListConditionControls';
-import '../../index';
+import { ListConditionsBlock as ListConditionsFromIndex } from '../../index';
 
 const OBJECT = {
   name: 'quote',
@@ -59,8 +60,9 @@ function Host(props: Partial<React.ComponentProps<typeof ListConditionsBlock>>) 
 }
 
 describe('list-conditions (objectstack#35892)', () => {
-  it('is registered, for the hosts below plugin-list', () => {
-    expect(ComponentRegistry.has('list-conditions')).toBe(true);
+  it('is exported for the record page, and is no registered node type a page could carry', () => {
+    expect(ListConditionsFromIndex).toBe(ListConditionsBlock);
+    expect(ComponentRegistry.has('list-conditions')).toBe(false);
   });
 
   it('draws the list page\'s Sort and Filter, and no view switch, view settings or search', () => {

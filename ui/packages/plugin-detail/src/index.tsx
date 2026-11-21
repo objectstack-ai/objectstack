@@ -237,6 +237,10 @@ export { RecordBodyTablesContext } from './relatedListCompact';
 // the host's editor through this slot.
 export { RecordBodyTableEditorSlotContext } from './relatedListCompact';
 export type { RecordBodyTableEditorSlot } from './relatedListCompact';
+// objectstack#35892 — the related tab's condition row, supplied by the host
+// (`plugin-list`'s `ListConditionsBlock`) through this slot.
+export { RelatedListConditionsSlotContext } from './relatedListCompact';
+export type { RelatedListConditionsProps } from './relatedListCompact';
 // objectstack#27056 — for the app-shell record drawer's prefetch: it warms
 // the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn } from './useRelatedCounts';
