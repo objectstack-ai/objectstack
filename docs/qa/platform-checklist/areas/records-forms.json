@@ -2932,7 +2932,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2957,7 +2957,8 @@
         "read where the toolbar filter and sort are kept: nowhere durable. Since objectstack#35955 they are the list's DRAFT, held in this tab's memory (ui/packages/app-shell/src/views/listDraftStore.ts): the signed-in user's sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key) gains no filters, sort or search from the change — it holds only what is remembered for the reader (perView.<view>.columnState.widths, rowHeight, viewOrder) — and localStorage gains no list-filters:<userId>:showcase_task:<viewId> key. Reload the page: the list opens as the view declares it",
         "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage). That Log out itself removes the signed-out user's list-state:* and list-filters:* keys from localStorage (purgeSignedOutUserClientState, ui/packages/auth/src/ActiveOrganizationStorage.ts, run by AuthProvider's sign-out), so the first account's keys are gone by the time the second signs in; the clause holds by that wipe AND by the user-keyed row. Sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
-        "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak"
+        "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak",
+        "shared-view save (objectstack#35955): as the seeded admin on the in_progress saved view (a stored view the showcase package takes saves into), change the sort, pick Kanban in the Display panel's layout and a row colour, open a record and come back with Back (the layout and the row colour are part of the draft and are still there), then set the row height to Spacious on the options menu's Row height level. Press 「Save」 at the condition row's end (Save to this view): it asks once, 「Save to this view?」, saying everyone who uses the view will see the changes. Confirm; capture the two writes: PUT /api/v1/meta/view/<view> as a draft carrying If-None-Match: *, then POST /api/v1/meta/view/<view>/publish. The console toasts 「Saved, visible to everyone」 and the condition row's 「Discard」/「Save」 go away. Sign in as the second account and open the same view: it shows the saved sort and the Kanban layout, with the second account's own row height. Back as the admin, change something in the view settings and save it there as a draft without publishing it; change the sort and press 「Save」 again: the console says the view has unpublished changes, to publish or discard them in the view settings first, and writes nothing. Discard that settings draft afterwards"
       ],
       "acceptance": [
         {
@@ -2989,13 +2990,20 @@
           "oracle": "network",
           "verify": "opening the copied URL fresh issues the same filtered data request and returns the same rows (app-shell/src/views/userFilterUrlState.ts parseUserFilterParams/applyUserFilterParams)",
           "evidence": "the shared URL + the reproduced rows"
+        },
+        {
+          "clause": "Save to this view on a shared view (objectstack#35955) is offered only to a reader who may edit the view, asks once, then saves the draft and publishes it in one step so every reader sees it on their next read; it never writes the saver's row height into the view, and it never publishes a draft someone else left pending: with one pending it writes nothing and says so",
+          "oracle": "network",
+          "verify": "the confirmed save issues PUT /api/v1/meta/view/<view> (a draft, If-None-Match: *) then POST /api/v1/meta/view/<view>/publish, and the published view carries the new sort, the kanban type and the row colour but not rowHeight tall; the second account's read of the view shows them; with a settings draft pending the second Save issues no PUT and no publish (or only a PUT the server refuses 409 METADATA_CONFLICT) and the pending draft is still there, unpublished (ui/packages/app-shell/src/views/runtime-metadata-persistence.ts saveAndPublishRuntimeMetadata)",
+          "evidence": "the two captured writes + the published view body + the second account's screenshot + the refused second save"
         }
       ],
       "negative": [
         "a toolbar filter that REPLACES the view's stored filter (rows appear that the view filter should exclude) is a FAIL — buildEffectiveFilter merges, it does not overwrite the base",
         "tabs-element userFilters (preset chips, the uf__tab preset) leaking onto a bare OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616) (the list-view-capabilities item flags the same regression). The reserved list-state params an object list writes for ITSELF — uf__filter, uf__search, uf__sort, uf__group (objectui#11860, userFilterUrlState.ts), e.g. uf__sort after a toolbar sort — are the list's own state mirrored into the URL, not userFilters, and do not count",
         "a cached toolbar filter from account A visible to account B on the same browser (A signed out through the account menu's Log out, never by clearing storage) is a FAIL — the key embeds the user id precisely to prevent that leak",
-        "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)"
+        "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)",
+        "a Save to this view that publishes a view draft which was already pending before the save (saved from the view settings, by anyone) is a FAIL — the draft write carries the first-write pin, so a pending draft refuses it; a shared save that writes the saver's row height into the view is a FAIL too"
       ],
       "traps": [
         "hydration-race",
@@ -3090,6 +3098,12 @@
           "revision": 13,
           "date": "2026-11-21",
           "change": "steps[3], steps[4], acceptance[2] (clause, verify, evidence), acceptance[3] (clause, verify, evidence) and source[1] re-pointed to the list draft (objectstack#35955): a toolbar filter, sort and search are a draft held in the tab's memory, kept on opening a record and coming back and dropped on opening another object or view or on a reload; they are no longer stored in the user's ui.list.<object> row. The in-app-navigation restore of revision 3 is replaced by the record round trip, and the user-scope clause now reads that nothing is stored at all. Not loosened: a second account must still see none of the first account's filters",
+          "ref": "#35955"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-21",
+          "change": "steps[8], acceptance[5] and negative[4] added for the shared-view save (objectstack#35955 PR 2): Save to this view on a stored view an administrator may edit asks once, then saves the draft and publishes it; the saver's row height stays theirs; a pending view draft is never published on anyone's behalf. steps[8] also reads the Display panel's layout and row colour back across a record round trip, since they are now part of the draft. Not loosened: every earlier clause is unchanged",
           "ref": "#35955"
         }
       ]
