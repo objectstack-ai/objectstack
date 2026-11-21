@@ -555,4 +555,24 @@ describe('ObjectGrid — a state-machine field is confirmed before a list cell s
     await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
+
+  it('a machine bound to insert alone does not govern an update: the move saves without asking', async () => {
+    const ds = makeMachineDataSource({ events: ['insert'] });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('an advisory (warning-severity) machine still asks: the move is what automation listens for', async () => {
+    const ds = makeMachineDataSource({ severity: 'warning', events: ['update'] });
+    const { container } = renderMachineGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Stage changes from New to Won.');
+    expect(ds.update).not.toHaveBeenCalled();
+  });
 });

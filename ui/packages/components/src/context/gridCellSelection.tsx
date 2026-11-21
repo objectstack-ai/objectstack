@@ -61,8 +61,10 @@ export interface GridCellSelection {
    * or saved. A promise holds the write until it settles: `true` writes the
    * value as any commit is written, `false` (or a rejection) writes nothing
    * and the cell keeps what it showed. `null` / `undefined` ⇒ no question;
-   * the value is written at once. A host asks, for example, before a move of
-   * a state-machine field (objectstack#35685).
+   * the value is written at once. Only a table that saves each cell as it is
+   * committed (one wired with `onRowSave`) asks; a table on `onBatchSave`
+   * alone never does. A host asks, for example, before a move of a
+   * state-machine field (objectstack#35685).
    */
   confirmCommit?: (row: any, columnKey: string, value: unknown) => Promise<boolean> | null | undefined;
 }
