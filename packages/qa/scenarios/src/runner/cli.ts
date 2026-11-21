@@ -440,6 +440,17 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
 }
 
 /**
+ * What a booted app's environment gains over the runner's own: door mode's
+ * host serves the OAuth authorization server its client's token comes from,
+ * and a masking-off round sets the D8 opt-out (`schema-masking.ts`) on the
+ * app's process alone, never on a model turn or a project command. `{}` on a
+ * default round outside door mode, as before the flag.
+ */
+export function bootEnv(args: Pick<CliArgs, 'schemaMasking'>, authoringDoor: boolean | undefined): Record<string, string> {
+  return { ...(authoringDoor ? { OS_OIDC_PROVIDER_ENABLED: 'true' } : {}), ...schemaMaskingHostEnv(args.schemaMasking) };
+}
+
+/**
  * The record with its supplied template named (`template`, top level), when a
  * template or ask mode of the run installed the `--template` file; the record
  * unchanged otherwise, so a run without one keeps its bytes.
@@ -553,9 +564,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     os: (dir, a) => os(dir, a),
     readArtifact,
     namespace: readNamespace,
-    // Door mode's host serves the OAuth authorization server its client's token comes from.
-    // A masking-off round sets the D8 opt-out on the app's process alone (`schema-masking.ts`).
-    boot: (dir, o) => bootDev(dir, undefined, { ...(o?.authoringDoor ? { OS_OIDC_PROVIDER_ENABLED: 'true' } : {}), ...schemaMaskingHostEnv(args.schemaMasking) }),
+    // Door mode's OAuth server, and a masking-off round's D8 opt-out (`bootEnv`).
+    boot: (dir, o) => bootDev(dir, undefined, bootEnv(args, o?.authoringDoor)),
     harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }),
   };
   const templateBytes = args.template ? readFileSync(args.template) : undefined;
