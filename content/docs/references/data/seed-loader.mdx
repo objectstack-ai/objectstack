@@ -163,6 +163,7 @@ Result of loading a single dataset
 | **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
 | **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
 | **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
+| **summariesDropped** | `integer` | optional (default: `0`) | Roll-up summary values supplied by seed records and not written (a seed never stores a roll-up) |
 | **landedIds** | `string[]` | optional (default: `[]`) | Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay |
 | **insertedIds** | `string[]` | optional (default: `[]`) | Ids among landedIds whose row this load created (a successful insert); every other landed id was a pre-existing row a record key matched |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
@@ -304,6 +305,7 @@ Result of loading a single dataset
 | **referencesDeferred** | `integer` | ✅ | References deferred to second pass |
 | **referencesDropped** | `integer` | optional (default: `0`) | Reference fields dropped from records that were still written |
 | **summariesStale** | `integer` | optional (default: `0`) | Roll-up summary values left stale by writes for this dataset |
+| **summariesDropped** | `integer` | optional (default: `0`) | Roll-up summary values supplied by seed records and not written (a seed never stores a roll-up) |
 | **landedIds** | `string[]` | optional (default: `[]`) | Ids of the stored rows this dataset landed on: inserted, updated, or matched on replay |
 | **insertedIds** | `string[]` | optional (default: `[]`) | Ids among landedIds whose row this load created (a successful insert); every other landed id was a pre-existing row a record key matched |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | optional (default: `[]`) | Reference resolution errors |
@@ -336,6 +338,7 @@ Actionable error for a failed reference resolution
 | **totalReferencesDeferred** | `integer` | ✅ | Total references deferred |
 | **totalReferencesDropped** | `integer` | optional (default: `0`) | Total reference fields dropped from written records |
 | **totalSummariesStale** | `integer` | optional (default: `0`) | Total roll-up summary values left stale across the load |
+| **totalSummariesDropped** | `integer` | optional (default: `0`) | Total roll-up summary values supplied by seed records and not written |
 | **circularDependencyCount** | `integer` | ✅ | Circular dependency chains detected |
 | **durationMs** | `number` | ✅ | Load duration in milliseconds |
 
