@@ -380,6 +380,10 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone',
     responseSchema: 'CloneDataResponseSchema',
     note: 'Answers BARE with 201 (res.status(201).json(result), no envelope), so the named schema is the whole body. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real cloneData producer' },
+  // [#35402] The Change Owner doors (`change-owner-routes.ts`): no response schema
+  // yet — the answers are core's `ChangeOwnerResult` / `ChangeOwnerReport`, enveloped.
+  { route: 'POST /api/v1/data/:object/change-owner', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.changeOwnerMany' },
+  { route: 'POST /api/v1/data/:object/:id/change-owner', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.changeOwner' },
   { route: 'GET /api/v1/data/:object/:id/field-access', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.fieldAccess',
     responseSchema: 'GetRecordFieldAccessResponseSchema',
     note: 'The field projection of ONE record, for its edit form: `editable` is the write gate\'s own verdict (SecurityPlugin computeForbiddenFieldWrites) on an update of the stored row, so a row-conditioned field permission (`when`) locks only the rows it names; `/auth/me/permissions` stays row-less. Reads the record through getData first, so an absent or unreadable row answers the record read\'s 404. Enveloped ({ success, data }); record-field-access-when.dogfood.test.ts parses `data` against the named schema on the real mount' },

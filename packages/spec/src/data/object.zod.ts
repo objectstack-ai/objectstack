@@ -4103,8 +4103,8 @@ const ObjectSchemaBase = strictObject(
    * off on a `controlled_by_parent` detail), and it can open the action only
    * on an object that is structurally eligible for it — see
    * `user-action-transfer.ts` (`isTransferEligible`,
-   * `resolveUserActionTransfer`). Nothing reads it at runtime yet: the Change
-   * Owner endpoint and the console action are cards #35402 and #35403.
+   * `resolveUserActionTransfer`). The server's Change Owner endpoint reads it
+   * (card #35402); the console action is card #35403.
    */
   userActions: strictObject({
     surface: "this object's `userActions` block",
