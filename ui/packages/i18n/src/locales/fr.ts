@@ -1595,6 +1595,7 @@ const fr = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: "Activité",
+    relatedColumn: "Colonne de droite",
     timelineComposer: "Écrire une note… @ pour mentionner",
     streamToday: "Aujourd’hui",
     streamYesterday: "Hier",
@@ -1630,6 +1631,11 @@ const fr = {
     relatedDefaultChanged: "Ordre par défaut mis à jour",
     relatedRestoreDefault: "Rétablir par défaut",
     relatedRestoreDefaultOrder: "Rétablir l'ordre par défaut",
+    relatedHiddenCount: "{{count}} masquées",
+    relatedHiddenCount_one: "{{count}} masquée",
+    relatedHiddenCount_many: "{{count}} masquées",
+    relatedHiddenCount_other: "{{count}} masquées",
+    relatedShowHidden: "Afficher",
     recordTabs: "Onglets de l'enregistrement",
     recordTabOverview: "Détails",
     detailsColumnResize: "Redimensionner la colonne des détails",
@@ -1644,6 +1650,15 @@ const fr = {
     recordTabsMoreTrigger_one: "Plus {{count}}",
     recordTabsMoreTrigger_many: "Plus {{count}}",
     recordTabsMoreTrigger_other: "Plus {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: "Approuvé",
+    summaryApprovalMine: "En attente de vous",
+    summaryApprovalWaitingOn: "En attente de {{name}}",
+    summaryApprovalWaiting: "En attente",
+    summaryRecentActivity: "Activité récente",
+    summaryOtherRelated: "Autres éléments liés",
     recordTabsHidden: "Masqués",
     bodyTableTotals: "Totaux (cette page)",
     streamAll: "Tout",
@@ -2619,6 +2634,7 @@ const fr = {
       newChat: "Nouvelle discussion",
       toggleChatsList: "Basculer la liste des discussions",
       goHome: "Retour à l'accueil",
+      toggleRelated: "Afficher / masquer la colonne de droite",
     },
     reportIndex: {
       title: "Rapports",

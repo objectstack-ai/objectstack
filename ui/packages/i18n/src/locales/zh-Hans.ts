@@ -1458,6 +1458,7 @@ const zh = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: '动态',
+    relatedColumn: '右栏',
     timelineComposer: '写一条备注… @ 提到同事',
     streamToday: '今天',
     streamYesterday: '昨天',
@@ -1490,6 +1491,10 @@ const zh = {
     relatedDefaultChanged: '默认顺序已更新',
     relatedRestoreDefault: '恢复默认',
     relatedRestoreDefaultOrder: '恢复默认顺序',
+    relatedHiddenCount: '已隐藏 {{count}} 张',
+    relatedHiddenCount_one: '已隐藏 {{count}} 张',
+    relatedHiddenCount_other: '已隐藏 {{count}} 张',
+    relatedShowHidden: '显示',
     recordTabs: '记录页签',
     recordTabOverview: '详情',
     detailsColumnResize: '调整详情栏宽度',
@@ -1502,6 +1507,15 @@ const zh = {
     recordTabsMoreTrigger: '更多 {{count}}',
     recordTabsMoreTrigger_one: '更多 {{count}}',
     recordTabsMoreTrigger_other: '更多 {{count}}',
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: '已通过',
+    summaryApprovalMine: '待你审批',
+    summaryApprovalWaitingOn: '等待 {{name}}',
+    summaryApprovalWaiting: '等待中',
+    summaryRecentActivity: '最近动态',
+    summaryOtherRelated: '其他相关',
     recordTabsHidden: '已隐藏',
     bodyTableTotals: '本页合计',
     streamAll: '全部',
@@ -2290,6 +2304,7 @@ const zh = {
       newChat: '新建对话',
       toggleChatsList: '切换对话列表',
       goHome: '返回首页',
+      toggleRelated: '显示 / 隐藏右栏',
     },
     reportIndex: {
       title: '报表',

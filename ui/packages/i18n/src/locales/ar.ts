@@ -1730,6 +1730,7 @@ const ar = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: "النشاط",
+    relatedColumn: "العمود الجانبي",
     timelineComposer: "اكتب ملاحظة… @ للإشارة",
     streamToday: "اليوم",
     streamYesterday: "أمس",
@@ -1774,6 +1775,14 @@ const ar = {
     relatedDefaultChanged: "تم تحديث الترتيب الافتراضي",
     relatedRestoreDefault: "استعادة الافتراضي",
     relatedRestoreDefaultOrder: "استعادة الترتيب الافتراضي",
+    relatedHiddenCount: "المخفية: {{count}}",
+    relatedHiddenCount_zero: "المخفية: {{count}}",
+    relatedHiddenCount_one: "المخفية: {{count}}",
+    relatedHiddenCount_two: "المخفية: {{count}}",
+    relatedHiddenCount_few: "المخفية: {{count}}",
+    relatedHiddenCount_many: "المخفية: {{count}}",
+    relatedHiddenCount_other: "المخفية: {{count}}",
+    relatedShowHidden: "إظهار",
     recordTabs: "علامات تبويب السجل",
     recordTabOverview: "التفاصيل",
     detailsColumnResize: "تغيير عرض عمود التفاصيل",
@@ -1795,6 +1804,15 @@ const ar = {
     recordTabsMoreTrigger_few: "المزيد {{count}}",
     recordTabsMoreTrigger_many: "المزيد {{count}}",
     recordTabsMoreTrigger_other: "المزيد {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: "تمت الموافقة",
+    summaryApprovalMine: "بانتظارك",
+    summaryApprovalWaitingOn: "بانتظار {{name}}",
+    summaryApprovalWaiting: "قيد الانتظار",
+    summaryRecentActivity: "النشاط الأخير",
+    summaryOtherRelated: "عناصر مرتبطة أخرى",
     recordTabsHidden: "مخفية",
     bodyTableTotals: "المجاميع (هذه الصفحة)",
     streamAll: "الكل",
@@ -2834,6 +2852,7 @@ const ar = {
       newChat: "محادثة جديدة",
       toggleChatsList: "تبديل قائمة المحادثات",
       goHome: "العودة إلى الرئيسية",
+      toggleRelated: "إظهار / إخفاء العمود الجانبي",
     },
     reportIndex: {
       title: "التقارير",

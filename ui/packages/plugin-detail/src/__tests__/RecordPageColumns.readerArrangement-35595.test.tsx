@@ -238,6 +238,45 @@ describe('a related tab\'s menu and 「更多」\'s reset (objectstack#35783)', 
     expect(hiddenItem?.getAttribute('data-record-tab-menu-item')).toBe('note.parent_id');
   });
 
+  it('a hidden list still opens: from its item in 「更多」, and from an address that names it (objectstack#35890)', async () => {
+    const user = userEvent.setup();
+    const hidden = editRelatedArrangement(DEFAULT, undefined, { kind: 'hide', id: 'note.parent_id' }, Date.now());
+    const { container, unmount } = render(<TabHost initial={hidden} />);
+    expect(listTabs()).toEqual(['task.lead_id', 'call.lead_id']);
+    await user.click(document.querySelector('[data-record-tab-more]') as HTMLElement);
+    await user.click(
+      document.querySelector('[data-record-tab-hidden][data-record-tab-menu-item="note.parent_id"]') as HTMLElement,
+    );
+    expect(container.querySelector('[data-related-enlarged="note.parent_id"]')).not.toBeNull();
+    unmount();
+    // The address names the hidden list (?related=note.parent_id): its face opens.
+    const page = render(
+      <RecordPageColumns
+        tier="wide"
+        columns={columnsOf()}
+        relatedArrangement={hidden}
+        onRelatedArrangementChange={vi.fn()}
+        enlargedRelated="note.parent_id"
+        onEnlargeRelated={vi.fn()}
+        onCloseEnlargedRelated={vi.fn()}
+      />,
+    );
+    expect(page.container.querySelector('[data-related-enlarged="note.parent_id"]')).not.toBeNull();
+    // CONTROL: an id naming no list still draws the columns.
+    page.rerender(
+      <RecordPageColumns
+        tier="wide"
+        columns={columnsOf()}
+        relatedArrangement={hidden}
+        onRelatedArrangementChange={vi.fn()}
+        enlargedRelated="nope.nope"
+        onEnlargeRelated={vi.fn()}
+        onCloseEnlargedRelated={vi.fn()}
+      />,
+    );
+    expect(page.container.querySelector('[data-related-enlarged]')).toBeNull();
+  });
+
   it('「更多」 ends with 「恢复默认顺序」 while the arrangement is not the default: the default order, every list shown — in a drawer too', async () => {
     const user = userEvent.setup();
     const onWrite = vi.fn();

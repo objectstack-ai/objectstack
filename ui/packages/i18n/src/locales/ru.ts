@@ -1434,6 +1434,7 @@ const ru = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: "Активность",
+    relatedColumn: "Правая колонка",
     timelineComposer: "Написать заметку… @ — упомянуть",
     streamToday: "Сегодня",
     streamYesterday: "Вчера",
@@ -1472,6 +1473,12 @@ const ru = {
     relatedDefaultChanged: "Порядок по умолчанию обновлён",
     relatedRestoreDefault: "Восстановить по умолчанию",
     relatedRestoreDefaultOrder: "Восстановить порядок по умолчанию",
+    relatedHiddenCount: "Скрыто: {{count}}",
+    relatedHiddenCount_one: "Скрыто: {{count}}",
+    relatedHiddenCount_few: "Скрыто: {{count}}",
+    relatedHiddenCount_many: "Скрыто: {{count}}",
+    relatedHiddenCount_other: "Скрыто: {{count}}",
+    relatedShowHidden: "Показать",
     recordTabs: "Вкладки записи",
     recordTabOverview: "Детали",
     detailsColumnResize: "Изменить ширину столбца сведений",
@@ -1488,6 +1495,15 @@ const ru = {
     recordTabsMoreTrigger_few: "Ещё {{count}}",
     recordTabsMoreTrigger_many: "Ещё {{count}}",
     recordTabsMoreTrigger_other: "Ещё {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: "Одобрено",
+    summaryApprovalMine: "Ожидает вас",
+    summaryApprovalWaitingOn: "Ожидает: {{name}}",
+    summaryApprovalWaiting: "Ожидает",
+    summaryRecentActivity: "Недавние действия",
+    summaryOtherRelated: "Другие связанные",
     recordTabsHidden: "Скрытые",
     bodyTableTotals: "Итоги (эта страница)",
     streamAll: "Все",
@@ -2698,6 +2714,7 @@ const ru = {
       newChat: "Новый чат",
       toggleChatsList: "Переключить список чатов",
       goHome: "Вернуться на главную",
+      toggleRelated: "Показать / скрыть правую колонку",
     },
     reportIndex: {
       title: "Отчёты",

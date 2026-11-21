@@ -1552,6 +1552,7 @@ const ko = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: "활동",
+    relatedColumn: "오른쪽 열",
     timelineComposer: "메모 작성… @로 멘션",
     streamToday: "오늘",
     streamYesterday: "어제",
@@ -1584,6 +1585,10 @@ const ko = {
     relatedDefaultChanged: "기본 순서가 업데이트됨",
     relatedRestoreDefault: "기본값 복원",
     relatedRestoreDefaultOrder: "기본 순서 복원",
+    relatedHiddenCount: "{{count}}개 숨김",
+    relatedHiddenCount_one: "{{count}}개 숨김",
+    relatedHiddenCount_other: "{{count}}개 숨김",
+    relatedShowHidden: "표시",
     recordTabs: "레코드 탭",
     recordTabOverview: "상세정보",
     detailsColumnResize: "세부 정보 열 너비 조정",
@@ -1596,6 +1601,15 @@ const ko = {
     recordTabsMoreTrigger: "더보기 {{count}}",
     recordTabsMoreTrigger_one: "더보기 {{count}}",
     recordTabsMoreTrigger_other: "더보기 {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: "승인됨",
+    summaryApprovalMine: "내 승인 대기",
+    summaryApprovalWaitingOn: "{{name}} 승인 대기",
+    summaryApprovalWaiting: "대기 중",
+    summaryRecentActivity: "최근 활동",
+    summaryOtherRelated: "기타 관련",
     recordTabsHidden: "숨김",
     bodyTableTotals: "합계(이 페이지)",
     streamAll: "전체",
@@ -2550,6 +2564,7 @@ const ko = {
       newChat: "새 채팅",
       toggleChatsList: "채팅 목록 전환",
       goHome: "홈으로 돌아가기",
+      toggleRelated: "오른쪽 열 표시 / 숨기기",
     },
     reportIndex: {
       title: "보고서",

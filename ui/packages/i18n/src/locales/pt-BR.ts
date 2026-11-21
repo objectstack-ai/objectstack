@@ -1595,6 +1595,7 @@ const pt = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: "Atividade",
+    relatedColumn: "Coluna direita",
     timelineComposer: "Escreva uma nota… @ para mencionar",
     streamToday: "Hoje",
     streamYesterday: "Ontem",
@@ -1630,6 +1631,11 @@ const pt = {
     relatedDefaultChanged: "Ordem padrão atualizada",
     relatedRestoreDefault: "Restaurar padrão",
     relatedRestoreDefaultOrder: "Restaurar ordem padrão",
+    relatedHiddenCount: "{{count}} ocultas",
+    relatedHiddenCount_one: "{{count}} oculta",
+    relatedHiddenCount_many: "{{count}} ocultas",
+    relatedHiddenCount_other: "{{count}} ocultas",
+    relatedShowHidden: "Mostrar",
     recordTabs: "Abas do registro",
     recordTabOverview: "Detalhes",
     detailsColumnResize: "Redimensionar a coluna de detalhes",
@@ -1644,6 +1650,15 @@ const pt = {
     recordTabsMoreTrigger_one: "Mais {{count}}",
     recordTabsMoreTrigger_many: "Mais {{count}}",
     recordTabsMoreTrigger_other: "Mais {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: "Aprovado",
+    summaryApprovalMine: "Aguardando você",
+    summaryApprovalWaitingOn: "Aguardando {{name}}",
+    summaryApprovalWaiting: "Pendente",
+    summaryRecentActivity: "Atividade recente",
+    summaryOtherRelated: "Outros relacionados",
     recordTabsHidden: "Ocultas",
     bodyTableTotals: "Totais (esta página)",
     streamAll: "Tudo",
@@ -2618,6 +2633,7 @@ const pt = {
       newChat: "Nova conversa",
       toggleChatsList: "Alternar lista de conversas",
       goHome: "Voltar ao início",
+      toggleRelated: "Mostrar / ocultar a coluna direita",
     },
     reportIndex: {
       title: "Relatórios",

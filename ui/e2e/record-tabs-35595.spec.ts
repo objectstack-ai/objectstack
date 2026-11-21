@@ -106,17 +106,17 @@ interface Case {
   fullPage?: boolean;
 }
 
-const ENTRY = '\0record-tabs-rail:entry';
-const REACT_SHIM = '\0record-tabs-rail:react';
-const STUB = '\0record-tabs-rail:stub';
+const ENTRY = '\0record-tabs-35595:entry';
+const REACT_SHIM = '\0record-tabs-35595:react';
+const STUB = '\0record-tabs-35595:stub';
 
 /** `@object-ui/<pkg>` to `packages/<pkg>/src`; the page's `@object-ui/react` to the shim. */
 function workspaceSources(): Plugin {
   return {
-    name: 'record-tabs-rail-workspace-src',
+    name: 'record-tabs-35595-workspace-src',
     enforce: 'pre',
     async resolveId(id, importer) {
-      if (id === 'record-tabs-rail:react-real') {
+      if (id === 'record-tabs-35595:react-real') {
         return this.resolve(REACT_BINDINGS, importer, { skipSelf: true });
       }
       const m = /^@object-ui\/([a-z0-9-]+)(?:\/(.+))?$/.exec(id);
@@ -161,7 +161,7 @@ export function SchemaRenderer({ schema }) {
 `;
 
 const SHIM_CODE = `
-export * from 'record-tabs-rail:react-real';
+export * from 'record-tabs-35595:react-real';
 export { SchemaRenderer } from ${JSON.stringify(STUB)};
 `;
 
@@ -170,7 +170,7 @@ function entry(): Plugin {
   const code = `
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
-import { RecordContextProvider } from 'record-tabs-rail:react-real';
+import { RecordContextProvider } from 'record-tabs-35595:react-real';
 import { I18nProvider } from ${JSON.stringify(I18N)};
 import { RelatedCountStore } from ${JSON.stringify(COUNT_STORE)};
 import { RecordPageColumns } from ${JSON.stringify(PAGE_COLUMNS)};
@@ -248,8 +248,8 @@ window.__remount = () => {
 window.__remount();
 `;
   return {
-    name: 'record-tabs-rail-entry',
-    resolveId: (id) => (id === 'record-tabs-rail:entry' ? ENTRY : id === REACT_SHIM || id === STUB ? id : null),
+    name: 'record-tabs-35595-entry',
+    resolveId: (id) => (id === 'record-tabs-35595:entry' ? ENTRY : id === REACT_SHIM || id === STUB ? id : null),
     load: (id) => (id === ENTRY ? code : id === REACT_SHIM ? SHIM_CODE : id === STUB ? STUB_CODE : null),
   };
 }
@@ -260,7 +260,7 @@ async function bundlePage(): Promise<string> {
     configFile: false,
     root: REPO_ROOT,
     // Out of the tree: this run must leave nothing behind in the checkout.
-    cacheDir: path.join(os.tmpdir(), 'objectui-record-tabs-rail'),
+    cacheDir: path.join(os.tmpdir(), 'objectui-record-tabs-35595'),
     logLevel: 'error',
     mode: 'production',
     define: { 'process.env.NODE_ENV': JSON.stringify('production') },
@@ -272,7 +272,7 @@ async function bundlePage(): Promise<string> {
       modulePreload: false,
       reportCompressedSize: false,
       rollupOptions: {
-        input: 'record-tabs-rail:entry',
+        input: 'record-tabs-35595:entry',
         output: { format: 'es', codeSplitting: false },
       },
     },
@@ -423,8 +423,8 @@ const ALL_TABS = [
 ];
 
 function report(testInfo: import('@playwright/test').TestInfo, name: string, reading: unknown): void {
-  testInfo.annotations.push({ type: `record-tabs-rail@${name}`, description: JSON.stringify(reading) });
-  process.stdout.write(`[record-tabs-rail ${name}] ${JSON.stringify(reading)}\n`);
+  testInfo.annotations.push({ type: `record-tabs-35595@${name}`, description: JSON.stringify(reading) });
+  process.stdout.write(`[record-tabs-35595 ${name}] ${JSON.stringify(reading)}\n`);
 }
 
 const box = (page: Page, selector: string) =>

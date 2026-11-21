@@ -1355,6 +1355,7 @@ const ja = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 动态 panel's one-line composer.
     timeline: "アクティビティ",
+    relatedColumn: "右側の列",
     timelineComposer: "メモを書く… @ でメンション",
     streamToday: "今日",
     streamYesterday: "昨日",
@@ -1387,6 +1388,10 @@ const ja = {
     relatedDefaultChanged: "既定の順序が更新されました",
     relatedRestoreDefault: "既定に戻す",
     relatedRestoreDefaultOrder: "既定の順序に戻す",
+    relatedHiddenCount: "{{count}} 件非表示",
+    relatedHiddenCount_one: "{{count}} 件非表示",
+    relatedHiddenCount_other: "{{count}} 件非表示",
+    relatedShowHidden: "表示",
     recordTabs: "レコードのタブ",
     recordTabOverview: "詳細",
     detailsColumnResize: "詳細列の幅を調整",
@@ -1399,6 +1404,15 @@ const ja = {
     recordTabsMoreTrigger: "さらに {{count}}",
     recordTabsMoreTrigger_one: "さらに {{count}}",
     recordTabsMoreTrigger_other: "さらに {{count}}",
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: "承認済み",
+    summaryApprovalMine: "あなたの承認待ち",
+    summaryApprovalWaitingOn: "{{name}} の承認待ち",
+    summaryApprovalWaiting: "承認待ち",
+    summaryRecentActivity: "最近のアクティビティ",
+    summaryOtherRelated: "その他の関連",
     recordTabsHidden: "非表示",
     bodyTableTotals: "合計（このページ）",
     streamAll: "すべて",
@@ -2552,6 +2566,7 @@ const ja = {
       newChat: "新しいチャット",
       toggleChatsList: "チャット一覧を切り替え",
       goHome: "ホームに戻る",
+      toggleRelated: "右側の列の表示 / 非表示",
     },
     reportIndex: {
       title: "レポート",

@@ -1458,6 +1458,7 @@ const zhHant = {
     // panel, its tab and the strip's label; the right column's ⊟, and the
     // 動態 panel's one-line composer.
     timeline: '動態',
+    relatedColumn: '右欄',
     timelineComposer: '寫一條備註… @ 提到同事',
     streamToday: '今天',
     streamYesterday: '昨天',
@@ -1490,6 +1491,10 @@ const zhHant = {
     relatedDefaultChanged: '預設順序已更新',
     relatedRestoreDefault: '恢復預設',
     relatedRestoreDefaultOrder: '恢復預設順序',
+    relatedHiddenCount: '已隱藏 {{count}} 張',
+    relatedHiddenCount_one: '已隱藏 {{count}} 張',
+    relatedHiddenCount_other: '已隱藏 {{count}} 張',
+    relatedShowHidden: '顯示',
     recordTabs: '記錄頁籤',
     recordTabOverview: '詳情',
     detailsColumnResize: '調整詳情欄寬度',
@@ -1502,6 +1507,15 @@ const zhHant = {
     recordTabsMoreTrigger: '更多 {{count}}',
     recordTabsMoreTrigger_one: '更多 {{count}}',
     recordTabsMoreTrigger_other: '更多 {{count}}',
+    // objectstack#35596 — the 概覽 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
+    summaryApprovalDone: '已通過',
+    summaryApprovalMine: '待你審批',
+    summaryApprovalWaitingOn: '等待 {{name}}',
+    summaryApprovalWaiting: '等待中',
+    summaryRecentActivity: '最近動態',
+    summaryOtherRelated: '其他相關',
     recordTabsHidden: '已隱藏',
     bodyTableTotals: '本頁合計',
     streamAll: '全部',
@@ -2290,6 +2304,7 @@ const zhHant = {
       newChat: '新建對話',
       toggleChatsList: '切換對話列表',
       goHome: '返回首頁',
+      toggleRelated: '顯示 / 隱藏右欄',
     },
     reportIndex: {
       title: '報表',

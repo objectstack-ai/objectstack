@@ -185,10 +185,12 @@ list, then **Attachments** for an object with `enable: { files: true }`, **Appro
 record has approval requests, and **动态** (Activity) last, each with its count. A relationship
 whose child field declares `relatedList: 'primary'` is part of the record's body: its list is a
 full-width table in the details, after the first field section, with no tab of its own. **动态**
-is one stream: the discussion, the activity and, with `enable: { trackHistory: true }`, the
-record's field changes; there is no separate History tab. It opens filtered by All / Activity /
-Discussion / Changes (`?related=timeline`); a list's tab is that list's whole table
-(`?related=<object>.<field>`). The tab row shows as many tabs as its width fits and folds the
+(`?related=timeline`) holds the record's system entries: its activity and, with
+`enable: { trackHistory: true }`, its field changes; there is no separate History tab. On the
+desktop the record's comments are not in it but in the comment panel, opened from the
+comments icon in the record header ([the record's comment panel](/docs/frontend/plugins/plugin-detail#the-records-comment-panel)); on a phone they are still
+in **动态**, with its All / Activity / Discussion / Changes filter. A list's tab is that list's
+whole table (`?related=<object>.<field>`). The tab row shows as many tabs as its width fits and folds the
 rest into a **+N** menu; the open tab is always on the row. The related tabs are the reader's
 to arrange: move one before or after its neighbour, hide one, and bring hidden ones back. The
 arrangement is kept per user and object, never in the object's declaration.

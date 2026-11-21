@@ -568,7 +568,12 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   // The open tab: the address's when it names one this page has; pinned, the
   // first of the row otherwise (it is implied, never written, until the page
   // narrows out of the pinned layout).
-  const requested = enlargedRelated && otherTabs.some((tab) => tab.id === enlargedRelated) ? enlargedRelated : undefined;
+  // A list the reader hid still opens: from its item in 「更多」, or from an
+  // address that names it (card acceptance: 「带页签参数的链接仍然打开对应页签」).
+  const requested =
+    enlargedRelated && (otherTabs.some((tab) => tab.id === enlargedRelated) || resolved.hidden.includes(enlargedRelated))
+      ? enlargedRelated
+      : undefined;
   const impliedTab = pinned && !requested ? otherTabs[0].id : undefined;
   const openTab = requested ?? impliedTab;
   const activeTab = openTab ?? RECORD_TAB_OVERVIEW;
