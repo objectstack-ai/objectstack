@@ -81,9 +81,12 @@ derivation off for that class: an authored `update` predicate then joins
 the `update` *filter* as one more OR term, widening past the platform's
 owner-scoped write floor exactly as written. A write policy adds rows; it
 does not take away a row the floor admits (one the caller created), whether
-or not record sharing replaces the floor for that row. (A
-`controlled_by_parent` detail is the exception: its master gate judges the
-write instead of the floor, so a detail policy bounds every detail row.) To cap what a caller
+or not record sharing replaces the floor for that row. Two exceptions: on an
+object whose org-wide default is `public_read_write`, an `update` has no floor,
+so an authored `update` policy is the whole scope and does refuse the caller's
+own non-matching row; and on a `controlled_by_parent` detail, a by-id write is
+judged by its master gate instead of the floor, so a detail policy bounds every
+detail row written by id (a predicate write on a detail keeps the floor). To cap what a caller
 may do to rows they created, use a `check` (it judges the stored image) or a
 `beforeUpdate` / `beforeDelete` lifecycle hook (it sees the prior row as
 `ctx.previous`). Nothing is derived for `insert`
