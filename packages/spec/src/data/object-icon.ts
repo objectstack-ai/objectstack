@@ -11,7 +11,10 @@ import { z } from 'zod';
  *
  * Declared in its own module, outside the `data` barrel, so the blueprint
  * reads this leaf without the object schema joining the AI entry's module
- * graph, and the leaf does not join the package's published exports.
+ * graph. `OBJECT_ICON_SCHEMA` and `OBJECT_COLOR_SCHEMA` stay out of the
+ * package's published exports; the palette, `OBJECT_COLORS` and its
+ * `ObjectColor` type, is re-exported from `@objectstack/spec/data` for the
+ * console's tile and picker.
  */
 export const OBJECT_ICON_SCHEMA = z.string().optional().describe('Icon name (Lucide/Material) for UI representation');
 
