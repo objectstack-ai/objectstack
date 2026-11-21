@@ -13,7 +13,7 @@
  * Aligns with @objectstack/spec FormView type: 'tabbed'
  */
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { FormField, FormSchema, DataSource, ObjectFormSchema, ObjectFormSection } from '@object-ui/types';
 import { cn, toast } from '@object-ui/components';
 import { useLocalization } from '@object-ui/i18n';
@@ -42,6 +42,7 @@ import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { useFormChromeTranslation } from './formChrome';
+import { formSlotGroupIndex, formSlotRow, placeFormSlots, type FormSlotHandoff } from './formSlots';
 
 export interface FormSectionConfig {
   /**
@@ -297,7 +298,7 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
   dataSource,
   className,
 }) => {
-  const { fieldLabel } = useSafeFieldLabel();
+  const { fieldLabel, sectionLabel } = useSafeFieldLabel();
   // The loading line, the load-failure heading and the default submit label,
   // in the session locale (objectui#11039). See `formChrome.ts`.
   const { t } = useFormChromeTranslation();
@@ -587,6 +588,27 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
     }
   }, [schema]);
 
+  // objectstack#35889 — a collection a field group places is a tab of its
+  // own at that group's position among the tabs (`formSlots.ts`, the record
+  // page's rule), labelled with the group's label. The claim names what the
+  // drawn tabs place, and is never made while the form is still loading.
+  const formSlots = (schema as FormSlotHandoff).formSlots;
+  const slotPlacement = useMemo(
+    () => placeFormSlots(
+      schema.sections,
+      (section) => (typeof section?.name === 'string' ? section.name : undefined),
+      objectSchema?.fieldGroups,
+      formSlots?.requests,
+    ),
+    [schema.sections, objectSchema, formSlots?.requests],
+  );
+  const slotClaim = loading ? null : (error ? [] : slotPlacement.placed).join('\n');
+  const slotHost = formSlots?.host;
+  useEffect(() => {
+    if (slotClaim === null || !slotHost) return;
+    slotHost.claim(slotClaim ? slotClaim.split('\n') : []);
+  }, [slotClaim, slotHost]);
+
   // Generate tab value
   const getTabValue = (section: FormSectionConfig, index: number): string => {
     return section.name || section.label || `tab-${index}`;
@@ -634,7 +656,43 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
   const formColumns = sectionGrid.columns;
   const containerFieldClass = sectionGrid.fieldContainerClass;
 
-  const tabGroups = schema.sections.map((section, index) => {
+  type TabGroup = {
+    key: string;
+    label: string;
+    description?: string;
+    containerClass?: string;
+    visibleWhen?: FormSectionConfig['visibleWhen'];
+    visibleWhenFault?: FormSectionConfig['visibleWhenFault'];
+    fields: FormField[];
+  };
+  const tabGroups: TabGroup[] = [];
+  let slotTab: { at: number; group: TabGroup } | null = null;
+  slotPlacement.sequence.forEach((item) => {
+    if ('section' in item) {
+      slotTab = null;
+      const index = schema.sections.indexOf(item.section);
+      tabGroups.push(sectionTabGroup(item.section, index));
+      return;
+    }
+    if (!slotHost) return;
+    const at = formSlotGroupIndex(objectSchema?.fieldGroups, item.slot) ?? -1;
+    const row = formSlotRow(item.slot, slotHost) as FormField;
+    // Two collections one group places share its tab.
+    if (slotTab && slotTab.at === at) {
+      slotTab.group.fields.push(row);
+      return;
+    }
+    const group = (objectSchema?.fieldGroups as Array<{ key?: string; label?: string }> | undefined)?.[at];
+    const key = typeof group?.key === 'string' ? group.key : `__form_slot_tab__${item.slot.id}`;
+    const label = typeof group?.key === 'string'
+      ? sectionLabel(schema.objectName, group.key, group.label || group.key)
+      : item.slot.childObject;
+    const tab: TabGroup = { key, label, fields: [row] };
+    slotTab = { at, group: tab };
+    tabGroups.push(tab);
+  });
+
+  function sectionTabGroup(section: FormSectionConfig, index: number): TabGroup {
     const body = buildSectionFields(section);
     return {
       key: getTabValue(section, index),
@@ -648,7 +706,7 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
       visibleWhenFault: section.visibleWhenFault,
       fields: sectionGrid.layOut(body, section.columns),
     };
-  });
+  }
 
   // ── "Collapse below two tabs", the ruling's third binding semantic ─────────
   // Two different situations wear that name, and only one of them was answered

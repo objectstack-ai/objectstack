@@ -2634,7 +2634,7 @@ ComponentRegistry.register('form',
       const drawn = new Set<string>();
       const changeable = new Set<string>();
       for (const f of fields as FormFieldConfig[]) {
-        if (!f?.name || f.type === 'section-divider') continue;
+        if (!f?.name || f.type === 'section-divider' || f.type === 'form-slot') continue;
         drawn.add(f.name);
         if (f.hidden || (f as any).readonly === true || f.disabled === true) continue;
         changeable.add(f.name);
@@ -3710,6 +3710,15 @@ ComponentRegistry.register('form',
 
       // Skip hidden fields
       if (hidden) return null;
+
+      // A host slot (objectstack#35889): an empty full-width element the form's
+      // host fills through a portal (`@object-ui/plugin-form` `formSlots.ts`,
+      // a master-detail form's collection at its field group). It holds no
+      // value and registers no control; `slotRef` is the host's callback.
+      if (type === 'form-slot') {
+        const { slotRef } = fieldProps as { slotRef?: React.Ref<HTMLDivElement> };
+        return <div key={name} ref={slotRef} className="col-span-full min-w-0 space-y-4" data-form-slot={name} />;
+      }
 
       // A field claimed by a HIDDEN section is not drawn (#6236) — the same
       // `return null` a field's own false predicate takes, so the ruled
