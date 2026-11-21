@@ -13,7 +13,10 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EXTERNAL_READ_GRANT_KEY, EXTERNAL_WRITE_GRANT_KEY } from '@objectstack/core';
+import { SharedRecordIds } from '@objectstack/spec/data';
 import { SharingService } from './sharing-service.js';
+import { WRITE_ACCESS_LEVELS } from './access-level.js';
+import { inMembers } from './shared-record-ids.testkit.js';
 
 type Row = Record<string, any>;
 
@@ -75,9 +78,11 @@ describe('the EXTERNAL OWD floor — reads', () => {
   }
 
   it('a share reaches the external on a public_read_write object (OR-ed beside the owner arm)', async () => {
-    expect(await svc.buildReadFilter('board', { ...EXTERNAL } as any)).toEqual({
-      $or: [{ owner_id: 'u_ext' }, { id: { $in: ['b_shared'] } }],
+    const f: any = await svc.buildReadFilter('board', { ...EXTERNAL } as any);
+    expect(f).toEqual({
+      $or: [{ owner_id: 'u_ext' }, { id: { $in: SharedRecordIds.read('board', 'u_ext') } }],
     });
+    expect(inMembers(f.$or[1].id.$in, TABLES().sys_record_share)).toEqual(['b_shared']);
   });
 
   it('either carried value floors it: audience alone, or the EXTERNAL rung alone', async () => {
@@ -102,7 +107,9 @@ describe('the EXTERNAL OWD floor — reads', () => {
   });
 
   it('private stays owner ∪ shares, as for a member', async () => {
-    expect(await svc.buildReadFilter('private_doc', { ...EXTERNAL } as any)).toEqual({ owner_id: 'u_ext' });
+    expect(await svc.buildReadFilter('private_doc', { ...EXTERNAL } as any)).toEqual({
+      $or: [{ owner_id: 'u_ext' }, { id: { $in: SharedRecordIds.read('private_doc', 'u_ext') } }],
+    });
   });
 
   it('an object with no owner column is not under OWD: the sharing layer abstains, for an external as for a member', async () => {
@@ -123,9 +130,11 @@ describe('the EXTERNAL OWD floor — writes', () => {
   });
 
   it('bulk writes on public_read_write are owner ∪ edit-shares for an external, open for a member', async () => {
-    expect(await svc.buildWriteFilter('board', { ...EXTERNAL } as any, 'update')).toEqual({
-      $or: [{ owner_id: 'u_ext' }, { id: { $in: ['b_shared'] } }],
+    const update: any = await svc.buildWriteFilter('board', { ...EXTERNAL } as any, 'update');
+    expect(update).toEqual({
+      $or: [{ owner_id: 'u_ext' }, { id: { $in: SharedRecordIds.write('board', 'u_ext', WRITE_ACCESS_LEVELS) } }],
     });
+    expect(inMembers(update.$or[1].id.$in, TABLES().sys_record_share)).toEqual(['b_shared']);
     expect(await svc.buildWriteFilter('board', { ...EXTERNAL } as any, 'delete')).toEqual({ owner_id: 'u_ext' });
     expect(await svc.buildWriteFilter('board', { ...MEMBER } as any, 'update')).toBeNull();
   });

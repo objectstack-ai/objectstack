@@ -540,8 +540,11 @@ describe('[#5386] controlled_by_parent folds the master\'s ownership and share g
       userId: REP,
       tenantId: 'org-1',
     } as any);
+    // [ADR-0155 plan step 6] Its share arm is the share-grant leaf; the
+    // testkit evaluates it over the double's share rows, as a driver does.
+    const masterWhere = await h.compose(masterFilter, { userId: REP, tenantId: 'org-1' });
     const directlyReadable = (h.store.rows.crm_account ?? [])
-      .filter((r) => matchesFilterCondition(r, masterFilter as any))
+      .filter((r) => matchesFilterCondition(r, masterWhere as any))
       .map((r) => String(r.id));
     expect(directlyReadable).toEqual(['acct_us', 'acct_own']);
   });
@@ -581,7 +584,7 @@ describe('[#5386] controlled_by_parent folds the master\'s ownership and share g
   });
 
   // ── boundary conditions ──────────────────────────────────────────────────
-  it('the derivation does NO store work; the grant table is read when the master\'s scope is composed, and the detail is never re-entered', async () => {
+  it('the derivation does NO store work; the master\'s share arm is answered inside the composition, and the detail is never re-entered', async () => {
     const h = await boot({ shareLevel: 'edit' });
     h.store.find.mockClear();
     // [ADR-0139 D6] The middleware writes the leaf and walks the chain over
@@ -590,15 +593,19 @@ describe('[#5386] controlled_by_parent folds the master\'s ownership and share g
     const during = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
     expect(during).not.toContain('crm_account');
     expect(during).not.toContain('crm_contact');
-    // The master's scope is composed by the engine (here, by the testkit):
-    // THAT is where the grant table is consulted — direct evidence the sharing
-    // half runs inside the composition and not merely that some filter came
-    // back — and the detail itself is never read to answer its own scope.
-    await h.compose(injected, h.repContext());
+    // The master's scope is composed by the engine (here, by the testkit),
+    // and the detail itself is never read to answer its own scope.
+    // [ADR-0155 plan step 6] The master's share arm is the share-grant leaf,
+    // evaluated inside the composed statement: no grant row is read on its
+    // own. `acct_us`, which the rep reaches only through its grant, in the
+    // composed set is the direct evidence the sharing half ran inside the
+    // composition and not merely that some filter came back.
+    const composed = await h.compose(injected, h.repContext());
     const reads = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
-    expect(reads).toContain('sys_record_share');
+    expect(reads).not.toContain('sys_record_share');
     expect(reads).not.toContain('crm_account');
     expect(reads).not.toContain('crm_contact');
+    expect(JSON.stringify(composed)).toContain('acct_us');
   });
 
   it('a deployment WITHOUT plugin-sharing is unchanged — RLS-only derivation, nothing to fold', async () => {
@@ -704,13 +711,16 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
     expect(before).not.toContain('crm_account');
     expect(before).not.toContain('crm_contact');
     // Composing the leaf asks `getReadFilter(account)`, whose sharing half
-    // reads the grant table — direct evidence the derivation runs on THIS
-    // path rather than a filter merely coming back from somewhere.
+    // carries the share-grant leaf (ADR-0155 plan step 6), evaluated inside
+    // the composed statement: `acct_us`, reached only through its grant, in
+    // the composed set is direct evidence the derivation runs on THIS path
+    // rather than a filter merely coming back from somewhere.
     h.store.find.mockClear();
-    await h.compose(filter ?? null, h.repContext());
+    const composed = await h.compose(filter ?? null, h.repContext());
     const reads = h.store.find.mock.calls.map((c: any[]) => String(c[0]));
-    expect(reads).toContain('sys_record_share');
+    expect(reads).not.toContain('sys_record_share');
     expect(reads).not.toContain('crm_contact');
+    expect(JSON.stringify(composed)).toContain('acct_us');
   });
 
   it('a delegated (on-behalf-of) read whose delegator does not exist still denies outright — unchanged by the added layer', async () => {
