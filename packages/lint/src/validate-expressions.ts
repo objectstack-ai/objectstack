@@ -138,6 +138,7 @@ import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } 
 import {
   injectedSystemColumnDefs,
   isInjectedColumnDefinition,
+  isMultiValueField,
   platformProvisionsStorage,
   referenceCarrierOf,
   referenceTargetOf,
@@ -482,6 +483,30 @@ function buildFieldTypeIndex(objects: AnyRec[]): Map<string, Record<string, stri
       }
     }
     idx.set(name, types);
+  }
+  return idx;
+}
+
+/**
+ * [#36167] object name → the fields whose stored value is a list, read
+ * through `isMultiValueField` (`@objectstack/spec/data`): an inherently-multi
+ * option type, or a multi-capable type declared `multiple: true`. Handed to
+ * the shared validator as `ExprSchemaHint.multiValueFields` beside the field
+ * types, so a `==` / `!=` between such a field and a scalar is refused there
+ * (`list-equality`) — the type alone cannot say a `select` / `lookup` /
+ * `user` is multiple. Built from the same objects as {@link buildFieldTypeIndex}
+ * (a field two packages tie on has no definition here either).
+ */
+function buildMultiValueFieldIndex(objects: AnyRec[]): Map<string, string[]> {
+  const idx = new Map<string, string[]>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const multi: string[] = [];
+    for (const [fn, def] of fieldEntries(obj)) {
+      if (typeof def.type === 'string' && isMultiValueField({ type: def.type, multiple: def.multiple === true })) multi.push(fn);
+    }
+    idx.set(name, multi);
   }
   return idx;
 }
@@ -2644,6 +2669,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
+  const multiValueFieldIndex = buildMultiValueFieldIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
   // [#33435] The flow and hook condition sites also judge the injected
   // columns a stored row can hold `null` in, and a `beforeInsert` hook the two
@@ -2990,12 +3016,15 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `record.<field>` read at a `record` site; the bare name and its
     // `record.<field>` / `previous.<field>` read at a flattened one (#29959).
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
+    // [#36167] The list-valued fields, so a list compared with a scalar is refused.
+    const multiValueFields = objectName ? multiValueFieldIndex.get(objectName) : undefined;
     // Spread only when given, so every other site's hint is unchanged.
     const roots = extraRoots ? { roots: extraRoots } : {};
     const res = validatorRunByCaller ? VALIDATOR_RUN_BY_CALLER : validateExpression('predicate', raw as string | { dialect?: string; source?: string },
       objectName
         ? {
           objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots,
+          ...(multiValueFields ? { multiValueFields } : {}),
           ...(faultOutcome ? { faultOutcome } : {}),
           ...(flowBare ? { flowVariables: flowBare.variables } : {}),
           ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
@@ -3890,6 +3919,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
               objectName,
               fields: fieldIndex.get(objectName),
               fieldTypes: fieldTypeIndex.get(objectName),
+              multiValueFields: multiValueFieldIndex.get(objectName),
               scope: 'record',
               traversalHydration: true,
               optionFields,
