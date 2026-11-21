@@ -1261,9 +1261,6 @@ const en = {
     options: 'Options',
     layout: 'Layout',
     resetToViewDefault: 'Reset to view default',
-    recordOpen: 'Open records',
-    recordOpenDrawer: 'Drawer',
-    recordOpenPage: 'Full page',
     addGroup: 'Add group field',
     collapsedByDefault: 'Collapsed by default',
     removeGroup: 'Remove',
@@ -1286,7 +1283,6 @@ const en = {
       rowHeightSpacious: 'Spacious',
       more: 'More',
       restoreDefaults: 'Restore defaults',
-      recordOpenAlwaysPage: 'Records always open as a full page',
     },
   },
   managedByBadge: {
@@ -1685,9 +1681,6 @@ const en = {
     // a possessive particle (ja/zh) writes its own arrangement here.
     recordDetailWithLabel: '{{label}} Detail',
     openAsFullPage: 'Open as full page',
-    // The record page's way back into the drawer it was expanded from
-    // (objectstack#26679).
-    collapseToDrawer: 'Collapse to drawer',
     recordDetailOverlay: 'Record detail overlay for {{title}}.',
     addToFavorites: 'Add to favorites',
     removeFromFavorites: 'Remove from favorites',
@@ -3251,7 +3244,7 @@ const en = {
       },
       cannotDeleteMetaView: 'This view is built in and defined in code — it cannot be deleted.',
       expandToPage: 'Open as full page',
-      openAsPage: 'Open as full page',
+      openInSidePanel: 'Open in side panel',
       allRecords: 'All Records',
       new: 'New',
       import: 'Import',

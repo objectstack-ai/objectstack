@@ -55,10 +55,10 @@ import { IdentityImportOptions, IdentityImportResultExtra, identityImportFields 
 import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
-import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { usePackageRefusesSaves } from '../hooks/useStudioDesignGate.js';
+import { studioPackageId } from '../utils/appRoute.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
-import type { ListViewProps } from '@object-ui/plugin-list';
 import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
 import { useObjectActions } from '../hooks/useObjectActions.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -830,6 +830,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // along, and a column the view does not declare is not offered. Each
     // resolves whether the pick was saved; on `false` the grid takes it back.
     const personalViewRow = activeView ? personalViews.views.find((v) => v.id === activeView.id) : undefined;
+    // objectstack#35933 — the open saved shared view's own package (its row's
+    // served `_packageId`), and whether the server refuses saves into it: a
+    // view a read-only package ships is offered no save of its own. Read for
+    // an admin only, the one reader offered such a save; unknown offers it.
+    const activeSavedViewRow = activeView && isAdmin
+        ? savedViews.find((sv: any) => viewRowId(sv) === activeView.id)
+        : undefined;
+    const activeViewPackageRefusesSaves = usePackageRefusesSaves(studioPackageId(activeSavedViewRow));
     const handlePickPersonalViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
         if (!personalViewRow) return false;
         const columns = columnsWithSummary(personalViewRow.config.columns as ListColumn[] | string[] | undefined, field, summary);
@@ -961,19 +969,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#25992 slice 6: the record navigation overlay (drawer state in the
     // URL, row click, open as page, record links) moved to `./objectViewRecordNavigation.ts`.
-    // objectstack#26677 — how a drawer-mode record opens is a READER's
-    // preference, not a `navigation.mode`: the drawer (the default) or the
-    // full page. Live state: the Display menu's Open records section writes it
-    // (objectstack#26681) and the next row click opens the new way. It applies
-    // only to a record that opens in the drawer: an object that declares
-    // `page` (or `new_window` / `none`) keeps its declaration. objectstack#28915
-    // — the pane beside the list retired, so the drawer is the default and the
-    // list under it keeps its full width.
-    const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
+    // objectstack#35854 — one rule, no setting: the record's name opens the
+    // full page, the name cell's hover icon the side drawer over the list.
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -988,31 +989,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewLabel,
         unlabelledViewText,
         language,
-        recordOpenPreference,
         phone,
     });
-    // objectstack#26681 — the Display menu's Open records section: the mode this
-    // object and view resolved to, and the reader's preference with its setter:
-    // the drawer or the full page (objectstack#27545, objectstack#28915). A
-    // reader who prefers the page still gets the drawer for a `?recordId=`
-    // link. Not on a phone, where every record is a page (objectstack#27058).
-    const recordOpen = useMemo<ListViewProps['recordOpen']>(
-        () => (phone ? undefined : {
-            resolvedMode: navOverlay.mode,
-            preference: recordOpenPreference,
-            setPreference: setRecordOpenPreference,
-        }),
-        [phone, navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
-    );
-    // objectstack#26681 — the name cell's ↗, "open as full page", for a row that
-    // opens the drawer. A `page` object's row
-    // already opens the page; a `new_window` / `none` one keeps its declaration.
-    const openAsPageLabel = t('console.objectView.openAsPage', { defaultValue: 'Open as full page' });
-    const openAsPage = useMemo(
-        () => (navOverlay.mode === 'drawer'
-            ? { objectName: objectDef.name, label: openAsPageLabel, open: handleOpenRowAsPage }
+    // objectstack#35854 — the name cell's 「在侧边打开」 icon, for a row with a
+    // record surface on a desktop; a phone opens every record as a page.
+    const openInPanelLabel = t('console.objectView.openInSidePanel', { defaultValue: 'Open in side panel' });
+    const openInPanel = useMemo(
+        () => (navOverlay.mode === 'drawer' && !phone
+            ? { label: openInPanelLabel, open: handleOpenRowInPanel }
             : null),
-        [navOverlay.mode, objectDef.name, openAsPageLabel, handleOpenRowAsPage],
+        [navOverlay.mode, phone, openInPanelLabel, handleOpenRowInPanel],
     );
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
@@ -1096,8 +1082,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         actions,
         handleRowClick,
         handleListRowsChange,
-        recordOpen,
-        openAsPage,
+        handleListTotalChange,
+        openInPanel,
         // objectstack#33317 — the resolved mode: `none` for an authored
         // `none` and for a list-only object (`servesRecordRead`).
         rowOpensRecord: navOverlay.mode !== 'none',
@@ -1122,7 +1108,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listViewActions: {
             rename: activeView && activeIsPersonal && personalViewsReady && personalGrant('update')
                 ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
-                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                : activeView && isAdmin && !activeViewPackageRefusesSaves && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
             save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
@@ -1140,10 +1126,13 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                     // views is drawn with. Every stored view has a qualified,
                     // dotted name, the console's own saved views included
                     // (`object.key` in the custom package), so the name cannot
-                    // tell a view a read-only package ships; the door refuses
-                    // that save by design (it goes to the custom package) and
-                    // the refused pick is taken back, as the panel's save is.
-                    : isAdmin && isSavedViewId(savedViews, String(activeView.id))
+                    // tell a view a read-only package ships: its row's package
+                    // does (objectstack#35933), and such a view is offered no
+                    // menu. While that is unknown the menu stays; the door
+                    // refuses that save by design (it goes to the custom
+                    // package) and the refused pick is taken back, as the
+                    // panel's save is.
+                    : isAdmin && !activeViewPackageRefusesSaves && isSavedViewId(savedViews, String(activeView.id))
                         ? handlePickSharedViewSummary
                         : undefined,
             summaryPickFields: declaredColumnFields(

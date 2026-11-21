@@ -1351,10 +1351,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "导航",
-        helpText: "点击条目时的导航配置（默认为抽屉，也可为 page、new_window 或 none）"
+        helpText: "点击条目时的导航配置：抽屉尺寸，以及让列表行不打开任何内容的 `preventNavigation`（`mode` 已弃用——点记录名称进入整页，点悬停图标从侧边打开）"
       },
       "navigation.mode": {
-        label: "模式"
+        label: "模式",
+        helpText: "[已弃用] 在对象列表（列表视图、对象的 `listViews`）上不再决定记录如何打开：在控制台中，对所有用户而言，点记录名称进入整页，点名称旁的悬停图标从侧边面板打开。这里 `drawer`、`page`、`new_window` 仍可解析，但不再起作用，请省略此键；`none` 仍表示列表行不打开任何内容——建议改用 `preventNavigation: true`。带 `navigation` 的页面区块（列表区块、时间线、嵌入视图）仍按所有取值生效。"
       },
       "navigation.preventNavigation": {
         label: "禁止导航",
@@ -1362,7 +1363,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "在新标签页打开",
-        helpText: "强制在新标签页打开（适用于 page 模式）"
+        helpText: "点击记录时在新的浏览器标签页中打开其整页；设为不打开的行保持不打开，手机上仍在当前页打开"
       },
       "navigation.size": {
         label: "尺寸",

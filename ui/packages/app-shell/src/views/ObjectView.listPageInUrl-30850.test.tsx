@@ -235,9 +235,8 @@ describe('the console list keeps the page a reader turned to (objectstack#30850)
     await screen.findByText('Task 11');
     expect(host.navigations().every((type) => type === 'REPLACE')).toBe(true);
 
-    // The row's ↗ — "Open as full page" — on a row of page 2.
-    const row = screen.getByText('Task 11').closest('tr')!;
-    fireEvent.click(row.querySelector('[data-testid="record-open-as-page"]')!);
+    // The record's name opens the full page (objectstack#35854), on a row of page 2.
+    fireEvent.click(screen.getByText('Task 11'));
     await screen.findByTestId('record-page-route', undefined, { timeout: 5000 });
     expect(host.pathname()).toBe(`/apps/demo/${OBJ}/record/t11`);
     expect(screen.queryByText('Task 11')).toBeNull();
