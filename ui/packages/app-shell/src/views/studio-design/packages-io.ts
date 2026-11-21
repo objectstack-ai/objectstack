@@ -38,6 +38,7 @@ import {
   validateObjectNamespacePrefix,
 } from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
+import { whenQuiet } from '../../observability/settleSignal.js';
 
 export interface PkgEntry {
   id: string;
@@ -449,6 +450,14 @@ interface HeldPackageList {
 
 const heldPackageLists = new WeakMap<typeof fetch, HeldPackageList>();
 
+/**
+ * objectstack#35416 — how long the page's counted requests must stay quiet
+ * before {@link fetchSessionPackages} starts its read, and the longest it
+ * waits for that (a page that never goes quiet still gets its entries).
+ */
+export const SESSION_PACKAGE_READ_QUIET_MS = 750;
+export const SESSION_PACKAGE_READ_MAX_WAIT_MS = 8_000;
+
 /** Bumped by every forget, so a read asked before a write never becomes the hold. */
 let heldPackageListEpoch = 0;
 
@@ -465,9 +474,23 @@ function forgetHeldPackageList(): void {
  */
 export async function fetchSessionPackages(session: string, packageId: string): Promise<PkgEntry[]> {
   const transport = globalThis.fetch;
-  const held = heldPackageLists.get(transport);
-  if (held && held.session === session && (held.listed.has(packageId) || held.unlisted.has(packageId))) {
-    return parsePackages(held.payload);
+  const heldAnswer = (): PkgEntry[] | null => {
+    const held = heldPackageLists.get(transport);
+    return held && held.session === session && (held.listed.has(packageId) || held.unlisted.has(packageId))
+      ? parsePackages(held.payload)
+      : null;
+  };
+  const fromHold = heldAnswer();
+  if (fromHold) return fromHold;
+  // objectstack#35416 — the list is the largest response an app page reads
+  // (megabytes unpacked), and the entries it gates are a shortcut, absent
+  // while it is unread. So a read it starts waits until the page's own
+  // requests have gone quiet, instead of sharing the link with the record
+  // or list the page is opening. A read already on the wire is joined at once.
+  if (!pendingPackageReads.has(transport)) {
+    await whenQuiet(SESSION_PACKAGE_READ_QUIET_MS, SESSION_PACKAGE_READ_MAX_WAIT_MS);
+    const heldSince = heldAnswer();
+    if (heldSince) return heldSince;
   }
   const epoch = heldPackageListEpoch;
   const payload = await readPackagesPayload();
