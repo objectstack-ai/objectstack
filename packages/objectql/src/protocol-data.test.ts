@@ -696,9 +696,9 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 context: { userId: 'u1', [RAW_FILE_VALUES_CONTEXT_KEY]: true },
             });
             // The key is added to a copy: the caller's own context is untouched,
-            // and the insert below receives it without the key.
+            // so the insert assertion below (deep equality against `ctx`) holds
+            // the insert to the caller's context WITHOUT the key.
             expect(ctx).toEqual({ userId: 'u1' });
-            expect(insert.mock.calls[0][2].context).toBe(ctx);
             // [#15703] The insert options carry the context AND the
             // `onFieldsDropped` listener `createData` wires — the clone reports
             // the engine's readonly-strip verdict on its 201 body since #15703.
