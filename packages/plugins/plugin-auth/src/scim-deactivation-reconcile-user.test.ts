@@ -135,6 +135,9 @@ import '@better-auth/core/context';
 import '@better-auth/core/error';
 import '@better-auth/oauth-provider';
 import '@better-auth/scim';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here too, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 
 /**
  * [#23184] Every sign-in below verifies the password the case attached, which

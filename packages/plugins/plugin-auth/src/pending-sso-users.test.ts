@@ -28,6 +28,9 @@ import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed';
 import { PENDING_SSO_MESSAGES, PENDING_SSO_SOURCE } from './pending-sso-marker';
 import { BANNED_USER_SESSION_REFUSAL, PENDING_SSO_SESSION_REFUSAL } from './user-session-admission';
 import { EnvironmentUserHostRefusal, type EnvironmentUserEvent, type EnvironmentUserHost } from './environment-user-host';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// during collection rather than inside a clocked case (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { runAdminUnbanUser } from './admin-ban-endpoints';
 import { runAddSsoUser } from './pending-sso-users';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
