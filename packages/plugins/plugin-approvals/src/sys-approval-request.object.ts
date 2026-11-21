@@ -66,10 +66,11 @@ export const SysApprovalRequest = ObjectSchema.create({
   // page fell through to the since-retired `titleFormat`, the machine name and
   // the raw subject record id.
   //
-  // The title names no subject record. The request page names the subject on
-  // the card the `record_id` / `object_name` pair draws in the Details tab,
-  // which says so when the reader may not read the record or it was deleted;
-  // a title cannot, so a bare record id is never shown there.
+  // The title names no subject record: lists and search name a request by its
+  // flow. On the request's own page the console's header names the subject by
+  // the `record_title` the approvals get serves for it, linked to it, and
+  // keeps this title where the get serves none (objectstack#35415), so a bare
+  // record id is never shown there either.
   //
   // Where `process_label` is empty — a row written before the column, until the
   // boot fill labels it (`display-label-backfill.ts`) — the retired
