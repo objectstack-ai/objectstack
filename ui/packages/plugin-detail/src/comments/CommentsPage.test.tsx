@@ -21,7 +21,8 @@
  * - A long press (or the context menu) raises the comment's actions: the six
  *   reactions, Mark resolved on a thread's comment only, Edit and Delete only
  *   where the comment thread hands them (the viewer's own comment). The click
- *   that ends the hold opens nothing. The first hold tells the host.
+ *   that ends the hold opens nothing. The press tells the host, and the sheet
+ *   follows the comment's actions while it is up.
  * - The filter (resolved shown, only mine) is the desktop panel's.
  */
 
@@ -252,6 +253,40 @@ describe('CommentsPage — the long press', () => {
     renderPage();
     fireEvent.contextMenu(commentEl('c2'));
     expect(sheet()).not.toBeNull();
+  });
+
+  it('the press engages before the hold opens, and a verdict that lands while the sheet is up adds its rows', () => {
+    const writes = {
+      onToggleReaction: vi.fn(),
+      onEditComment: vi.fn(),
+      onDeleteComment: vi.fn(),
+      onResolveComment: vi.fn(),
+    };
+    const onEngage = vi.fn();
+    const view = (updatesOthers: boolean | undefined) => (
+      <DiscussionContextProvider items={ITEMS as any[]} {...writes} moderatesComments updatesOthersComments={updatesOthers}>
+        <CommentsPage threadId={null} backLabel="Acme" onOpenThread={vi.fn()} onBack={vi.fn()} onEngage={onEngage} />
+      </DiscussionContextProvider>
+    );
+    const { rerender } = render(view(undefined));
+    const el = commentEl('c2');
+    fireEvent.pointerDown(el, { pointerType: 'touch', button: 0, clientX: 10, clientY: 10 });
+    // The host is told at the press, not at the end of the hold.
+    expect(onEngage).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(COMMENT_LONG_PRESS_MS);
+    });
+    fireEvent.pointerUp(el, { pointerType: 'touch' });
+    fireEvent.click(el);
+    const rows = () =>
+      Array.from(sheet()!.querySelectorAll('[data-comment-action]')).map((row) => row.getAttribute('data-comment-action'));
+    // Grace's comment, before the host has its answer: the viewer moderates, so Delete only.
+    expect(rows()).toEqual(['delete']);
+    // The answer lands with the sheet still up.
+    rerender(view(true));
+    expect(rows()).toEqual(['resolve', 'edit', 'delete']);
+    fireEvent.click(sheet()!.querySelector('[data-comment-action="resolve"]')!);
+    expect(writes.onResolveComment).toHaveBeenCalledWith('c2', true);
   });
 
   it('a read-only discussion raises no sheet and docks no box', () => {

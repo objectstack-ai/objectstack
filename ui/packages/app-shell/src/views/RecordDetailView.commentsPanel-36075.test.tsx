@@ -60,6 +60,7 @@ import { MetadataCtx } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { toast } from 'sonner';
 import { RecordDetailView } from './RecordDetailView';
+import { __clearRecordEditableCache } from '../../../plugin-detail/src/useRecordEditable';
 
 const OBJECT_NAME = 'crm_case';
 const NO_FEEDS = 'crm_note';
@@ -384,6 +385,62 @@ describe("the phone's comment page (objectstack#36076)", () => {
     await act(async () => {});
     expect(within(container).queryByText(ADA_BODY)).toBeNull();
     expect(within(container).queryByText('Ctrl+Enter', { exact: false })).toBeNull();
+  });
+
+  it("a moderator's first long press on another's comment: the sheet gains Edit when the late answer lands", async () => {
+    __clearRecordEditableCache();
+    // The record's update is answered at once (the viewer moderates); the row
+    // floor's answer for a comment the viewer did not write comes later.
+    let answerFloor!: () => void;
+    const floor = new Promise<void>((resolve) => {
+      answerFloor = resolve;
+    });
+    const explained: string[] = [];
+    const allow = () =>
+      new Response(JSON.stringify({ allowed: true, record: { visible: true } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).endsWith('/security/explain')) {
+          const body = JSON.parse(String(init?.body ?? '{}'));
+          explained.push(body.object);
+          if (body.object === 'sys_comment') await floor;
+          return allow();
+        }
+        return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }),
+    );
+    try {
+      await mount({ search: '?comments=' });
+      await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'list'));
+      const grace = (await within(page()!).findByText(GRACE_BODY)).closest('[data-comment-id]') as HTMLElement;
+      // Opening the page asks nothing about other people's comments.
+      await act(async () => {});
+      expect(explained).not.toContain('sys_comment');
+      vi.useFakeTimers();
+      fireEvent.pointerDown(grace, { pointerType: 'touch', button: 0, clientX: 10, clientY: 10 });
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      fireEvent.pointerUp(grace, { pointerType: 'touch' });
+      vi.useRealTimers();
+      // The press asked; the hold opened before the answer.
+      expect(explained).toContain('sys_comment');
+      const sheet = () => document.querySelector('[data-comment-action-sheet]') as HTMLElement | null;
+      const rows = () =>
+        Array.from(sheet()?.querySelectorAll('[data-comment-action]') ?? []).map((row) => row.getAttribute('data-comment-action'));
+      await waitFor(() => expect(rows()).toEqual(['delete']));
+      await act(async () => {
+        answerFloor();
+      });
+      await waitFor(() => expect(rows()).toEqual(['edit', 'delete']));
+    } finally {
+      vi.useRealTimers();
+      __clearRecordEditableCache();
+    }
   });
 
   it('no icon on an object with feeds off', async () => {

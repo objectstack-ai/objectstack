@@ -76,6 +76,14 @@ export interface RecordCommentThreadProps {
    * press and tap (`useCommentPress`). Spread on each comment's box.
    */
   itemInteraction?: (actions: CommentItemActions) => React.HTMLAttributes<HTMLDivElement>;
+  /**
+   * The comment whose actions the surface holds open, by id (the phone's long
+   * press sheet). While it is one of this thread's, its current actions go to
+   * `onHeldActions` each time what they offer changes, so a gate that opens
+   * while the sheet is up (the host's answer to `updatesOthers`) adds its row.
+   */
+  heldId?: string | null;
+  onHeldActions?: (actions: CommentItemActions) => void;
   className?: string;
 }
 
@@ -126,6 +134,8 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   onOpen,
   renderActions,
   itemInteraction,
+  heldId,
+  onHeldActions,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -170,6 +180,21 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
     onEdit: onEditComment && editableComment(item, moderates, updatesOthers) ? () => setEditingId(item.id) : undefined,
     onDelete: onDeleteComment && deletableComment(item, moderates) ? () => void onDeleteComment(item.id) : undefined,
   });
+
+  // The held comment's actions, reported again whenever what they offer changes.
+  const heldItem = heldId == null ? undefined : [root, ...replies].find((item) => String(item.id) === heldId);
+  const held = heldItem ? actionsOf(heldItem, heldItem === root) : undefined;
+  const heldOffer = held
+    ? [!!held.onReact, !!held.onResolve, !!held.resolved, !!held.onEdit, !!held.onDelete].join()
+    : null;
+  const heldReport = React.useRef({ held, onHeldActions });
+  React.useLayoutEffect(() => {
+    heldReport.current = { held, onHeldActions };
+  });
+  React.useLayoutEffect(() => {
+    const { held: current, onHeldActions: report } = heldReport.current;
+    if (current) report?.(current);
+  }, [heldItem, heldOffer]);
 
   const itemOf = (item: FeedItem, isRoot: boolean, footer?: React.ReactNode, itemClassName?: string) => {
     const actions = renderActions || itemInteraction ? actionsOf(item, isRoot) : undefined;

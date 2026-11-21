@@ -28,8 +28,10 @@ export interface CommentsPageProps {
   /** The list's 「‹」 names where it returns: the record. */
   backLabel: string;
   /**
-   * The reader first held a comment: the host may now ask what the comment's
-   * actions take (`updatesOthers`), and not before (objectstack#28470).
+   * The reader began a press on a comment: the host may now ask what the
+   * comment's actions take (`updatesOthers`), and not before
+   * (objectstack#28470). The hold that opens them lasts long enough for the
+   * answer.
    */
   onEngage?: () => void;
   className?: string;
@@ -99,20 +101,26 @@ export const CommentsPage: React.FC<CommentsPageProps> = ({
   // A thread that is not (or no longer) here — deleted, or a stale link — shows the list.
   const inThread = !!thread;
 
+  // The held comment's actions. The thread that holds it hands them again when
+  // what they offer changes (`onHeldActions`), so the sheet is never the
+  // snapshot of the press: a verdict that lands while it is up adds its rows.
   const [sheet, setSheet] = React.useState<CommentItemActions | null>(null);
-  const engage = React.useCallback(
-    (actions: CommentItemActions) => {
-      onEngage?.();
-      // A comment with nothing to do on it (a read-only discussion) raises nothing.
-      if (actions.onReact || actions.onResolve || actions.onEdit || actions.onDelete) setSheet(actions);
-    },
-    [onEngage],
-  );
+  const hold = React.useCallback((actions: CommentItemActions) => {
+    // A comment with nothing to do on it (a read-only discussion) raises nothing.
+    if (actions.onReact || actions.onResolve || actions.onEdit || actions.onDelete) setSheet(actions);
+  }, []);
+  const refreshHeld = React.useCallback((actions: CommentItemActions) => {
+    setSheet((current) => (current && String(current.item.id) === String(actions.item.id) ? actions : current));
+  }, []);
+  const heldId = sheet ? String(sheet.item.id) : null;
+  // The press itself engages, not the hold it may become: the 500 ms hold
+  // covers the host's question about the comment's actions.
   const listPress = useCommentPress({
-    onLongPress: engage,
+    onPressStart: onEngage,
+    onLongPress: hold,
     onTap: (actions) => onOpenThread(String(actions.item.id)),
   });
-  const threadPress = useCommentPress({ onLongPress: engage });
+  const threadPress = useCommentPress({ onPressStart: onEngage, onLongPress: hold });
   // Moving between the list and a thread closes a sheet left open (adjusted while rendering).
   const [sheetThread, setSheetThread] = React.useState(threadId);
   if (sheetThread !== threadId) {
@@ -205,6 +213,8 @@ export const CommentsPage: React.FC<CommentsPageProps> = ({
             mode="summary"
             onOpen={() => onOpenThread(String(th.root.id))}
             itemInteraction={listPress.bind}
+            heldId={heldId}
+            onHeldActions={refreshHeld}
           />
         ))}
       </div>
@@ -263,6 +273,8 @@ export const CommentsPage: React.FC<CommentsPageProps> = ({
             mode="page"
             onOpen={() => setComposerFocus((n) => n + 1)}
             itemInteraction={threadPress.bind}
+            heldId={heldId}
+            onHeldActions={refreshHeld}
           />
         </div>
       )}

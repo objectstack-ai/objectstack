@@ -22,6 +22,13 @@ export interface CommentPressOptions {
   onLongPress: (actions: CommentItemActions) => void;
   /** The comment was tapped outside its own controls (the phone's list: open the thread). */
   onTap?: (actions: CommentItemActions) => void;
+  /**
+   * A press began (a finger or the mouse went down, the context menu was asked
+   * for, Enter or Space on a focused comment): the host may start asking what
+   * the comment's actions take, so the answer is in by the time a hold opens
+   * them.
+   */
+  onPressStart?: () => void;
 }
 
 export interface CommentPress {
@@ -36,18 +43,20 @@ export interface CommentPress {
  * nothing else. The context menu opens them too: Android's own long press,
  * the keyboard's menu key (Shift+F10) on a focused comment, a right click. A
  * tap outside the comment's own controls is `onTap`, and so is Enter on a
- * focused comment. One press at a time, so one record serves every comment.
+ * focused comment. Each of these first calls `onPressStart`, so the host can
+ * begin asking what the comment's actions take before the hold completes. One
+ * press at a time, so one record serves every comment.
  */
-export function useCommentPress({ onLongPress, onTap }: CommentPressOptions): CommentPress {
+export function useCommentPress({ onLongPress, onTap, onPressStart }: CommentPressOptions): CommentPress {
   const press = React.useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number; fired: boolean }>({
     timer: null,
     x: 0,
     y: 0,
     fired: false,
   });
-  const latest = React.useRef({ onLongPress, onTap });
+  const latest = React.useRef({ onLongPress, onTap, onPressStart });
   React.useLayoutEffect(() => {
-    latest.current = { onLongPress, onTap };
+    latest.current = { onLongPress, onTap, onPressStart };
   });
   const cancel = React.useCallback(() => {
     const p = press.current;
@@ -63,6 +72,7 @@ export function useCommentPress({ onLongPress, onTap }: CommentPressOptions): Co
         tabIndex: 0,
         onPointerDown: (e) => {
           if (e.pointerType === 'mouse' && e.button !== 0) return;
+          latest.current.onPressStart?.();
           cancel();
           const p = press.current;
           p.fired = false;
@@ -84,6 +94,7 @@ export function useCommentPress({ onLongPress, onTap }: CommentPressOptions): Co
         onPointerLeave: cancel,
         onContextMenu: (e) => {
           e.preventDefault();
+          latest.current.onPressStart?.();
           const p = press.current;
           const alreadyOpen = p.fired;
           cancel();
@@ -110,6 +121,7 @@ export function useCommentPress({ onLongPress, onTap }: CommentPressOptions): Co
           if (e.target !== e.currentTarget || !latest.current.onTap) return;
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
+            latest.current.onPressStart?.();
             latest.current.onTap(actions);
           }
         },
