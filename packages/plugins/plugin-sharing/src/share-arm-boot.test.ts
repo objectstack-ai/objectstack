@@ -204,6 +204,27 @@ describe('[ADR-0155 ② ruled R2] a driver beside sys_record_share that does not
     expect(sharing.shareGrantsInertReason('doc')).toMatch(/stored by driver 'mongo-like', which does not evaluate a share grant/);
   });
 
+  it('is asked last: a shipped refusal keeps its attribution, and on a public object the external floor lifts nothing there', () => {
+    const publicDoc = { name: 'doc', sharingModel: 'public_read_write', fields: { owner_id: { type: 'lookup' } } };
+    const sharing = engineWith({
+      getSchema: () => publicDoc,
+      getDriverForObject: () => ({ name: 'mongo-like', supports: {} }),
+      fixedReadLeafClassOf: () => null,
+    });
+    // For every recipient: the public arm's shipped reason and remedy, not the storage arm's.
+    expect(sharing.sharingRuleObjectRefusal('doc'))
+      .toMatch(/is not under record-sharing enforcement .*give the object a private or read-only sharing model/);
+    // An external member, whom the owner-only floor lets a share admit (#25549): the storage arm refuses.
+    expect((sharing as any).inertGrantReason('doc', 'external')).toMatch(/stored by driver 'mongo-like'/);
+    // CONTROL: on a driver that evaluates the leaf, the floor lifts as it shipped.
+    const declaring = engineWith({
+      getSchema: () => publicDoc,
+      getDriverForObject: () => ({ name: 'sql', supports: { fixedReadLeaves: ['SharedRecordIds'] } }),
+      fixedReadLeafClassOf: () => null,
+    });
+    expect((declaring as any).inertGrantReason('doc', 'external')).toBeNull();
+  });
+
   it('an engine that cannot say writes the leaf, and the seam stands behind it', () => {
     expect(engineWith({}).shareGrantsInertReason('doc')).toBeNull();
     expect(engineWith({ getDriverForObject: () => { throw new Error('boom'); } }).shareGrantsInertReason('doc')).toBeNull();

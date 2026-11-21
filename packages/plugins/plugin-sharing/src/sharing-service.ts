@@ -1863,20 +1863,14 @@ export class SharingService implements ISharingService {
     if (declared === 'controlled_by_parent') {
       return `'${object}' is controlled by its parent (master-detail); share the master record instead`;
     }
-    // [ADR-0155 ② ruled R2] ADR-0111 D7's arm for the storage rows: no gate
-    // consults a share row on an object whose storage cannot evaluate the share
-    // arm. Asked before the model and the anchor, because it holds whatever
-    // they are: neither a private model nor a declared remote owner column
-    // makes such a row count, and for the external population on a public
-    // model it is the one reason that applies.
-    const shareArm = this.shareGrantsInertReason(object);
-    if (shareArm) return shareArm;
     const isPublic = effectiveSharingModel(schema) === 'public';
     if (isPublic || !hasOwnerField(schema)) {
       // [#25549] The external floor composes over `owner_id`, so the arm can lift
       // only where that column is real: present, and not a phantom anchor.
       if (recipient !== undefined && isPublic && hasOwnerField(schema) && !hasPhantomOwnerAnchor(schema)) {
-        if (recipient === 'external') return null;
+        // [ADR-0155 ② ruled R2] …and only where the storage evaluates the
+        // share arm: the floor's grant would be read through it.
+        if (recipient === 'external') return this.shareGrantsInertReason(object);
         return recipient === 'internal'
           ? `'${object}' has a public sharing model, so a share row on it is consulted only for an `
             + `external member of the record's organization, and the recipient is not one`
@@ -1932,7 +1926,12 @@ export class SharingService implements ISharingService {
         + `platform's injected anchor, not a remote column — the record-level gates read it off a `
         + `table that does not have it, so a share row on it would never be consulted`;
     }
-    return null;
+    // [ADR-0155 ② ruled R2] ADR-0111 D7's arm for the storage rows: no gate
+    // consults a share row on an object whose storage cannot evaluate the share
+    // arm. Asked LAST, so every arm above keeps the attribution it shipped
+    // with (a new branch above the public check would re-attribute a shipped
+    // object's refusal); it answers only where nothing above already refuses.
+    return this.shareGrantsInertReason(object);
   }
 
   /**
@@ -1983,18 +1982,22 @@ export class SharingService implements ISharingService {
     if (declared === 'controlled_by_parent') {
       return 'Author the rule on its master object instead.';
     }
-    if (this.shareGrantsInertReason(object)) {
-      return `To use sharing rules on it, store '${object}' on the datasource of 'sys_record_share', on a driver `
-        + 'that evaluates share grants (the SQL drivers do).';
-    }
     // Asked before the model: a federated object whose `owner_id` is the
     // injected anchor already HAS that field, public or not, and a private
     // model would still meet the phantom-anchor refusal.
     if (schema && hasOwnerField(schema) && hasPhantomOwnerAnchor(schema)) {
       return `To use sharing rules on it, declare a real remote '${OWNER_FIELD}' column on the federated object.`;
     }
-    return `To use sharing rules on it, give the object a private or read-only sharing model `
+    const modelRemedy = `To use sharing rules on it, give the object a private or read-only sharing model `
       + `(sharingModel: 'private' or 'read') and an '${OWNER_FIELD}' field.`;
+    // [ADR-0155 ② ruled R2] In the verdict's own order: the storage arm is the
+    // reason only where the model and the owner column already allow sharing.
+    if (schema && (effectiveSharingModel(schema) === 'public' || !hasOwnerField(schema))) return modelRemedy;
+    if (this.shareGrantsInertReason(object)) {
+      return `To use sharing rules on it, store '${object}' on the datasource of 'sys_record_share', on a driver `
+        + 'that evaluates share grants (the SQL drivers do).';
+    }
+    return modelRemedy;
   }
 
   /**
