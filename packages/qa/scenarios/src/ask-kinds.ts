@@ -111,14 +111,16 @@ function questionKindProblem(card: ScenarioCard, q: Question, personaTruths: Rea
 }
 
 /**
- * Hold every declared kind to what the card states, and require one on every
- * question and dataset question of a card that asks dataset questions (the
- * cards an ask round runs over). `personaTruths` are the loader's, so a
- * `forbidden` declaration is judged against the very truths the round grades.
+ * Hold every declared kind to what the card states, and hold a card to all or
+ * none: once one question or dataset question names a kind, every question and
+ * dataset question of the card names one. A card that names no kind loads as
+ * it did before kinds existed, dataset questions or not. `personaTruths` are
+ * the loader's, so a `forbidden` declaration is judged against the very truths
+ * the round grades.
  */
 export function checkAskKinds(card: ScenarioCard, personaTruths: Readonly<Record<string, Record<string, Truth>>>, refuse: Refuse): void {
-  const required = card.run.datasetQuestions !== undefined;
-  const missing = 'a card that asks dataset questions names the kind of every question it asks (`askKind`): one of ' + ASK_KINDS.map((k) => `\`${k}\``).join(', ');
+  const required = [...card.run.questions, ...(card.run.datasetQuestions ?? [])].some((q) => q.askKind !== undefined);
+  const missing = 'a card that names one ask kind names the kind of every question it asks (`askKind`): one of ' + ASK_KINDS.map((k) => `\`${k}\``).join(', ');
   card.run.questions.forEach((q, i) => {
     const at: IssuePath = ['run', 'questions', i, 'askKind'];
     if (q.askKind === undefined) {
@@ -131,7 +133,7 @@ export function checkAskKinds(card: ScenarioCard, personaTruths: Readonly<Record
   (card.run.datasetQuestions ?? []).forEach((q, i) => {
     const at: IssuePath = ['run', 'datasetQuestions', i, 'askKind'];
     if (q.askKind === undefined) {
-      refuse(at, missing);
+      if (required) refuse(at, missing);
       return;
     }
     const problem = datasetKindProblem(q);

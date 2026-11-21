@@ -170,6 +170,14 @@ describe('the Build half checks each declared dataset on a built artifact', () =
 // ── Ask kinds: every question of a dataset card names the kind it asks, as many times as the README table states ──
 
 const question = (c: RawCard, id: string) => c.run.questions.find((x: { id: string }) => x.id === id);
+/** Strip the kind from every question and dataset question of the card but `keep`: the card then names exactly one kind. */
+const onlyKind = (c: RawCard, keep: { askKind?: string }) => {
+  for (const q of [...c.run.questions, ...c.run.datasetQuestions]) if (q !== keep) delete q.askKind;
+};
+/** Strip every kind from the card: a card written before ask kinds existed. */
+const noKinds = (c: RawCard) => {
+  for (const q of [...c.run.questions, ...(c.run.datasetQuestions ?? [])]) delete q.askKind;
+};
 
 describe('the dataset cards name the kind of every question they ask, and ask every kind at least twice', () => {
   const counts = (id: (typeof DATASET_CARDS)[number]) => {
@@ -224,8 +232,8 @@ describe('the dataset cards name the kind of every question they ask, and ask ev
 
 /** [case, card, mutation, the refusal's path, its message]. */
 const KIND_REFUSALS: Array<[string, (typeof DATASET_CARDS)[number], (c: RawCard) => void, string, RegExp]> = [
-  ['a question with no kind on a card that asks dataset questions', 'order_to_cash', (c) => delete question(c, 'open_receivables').askKind, 'run.questions[0].askKind', /names the kind of every question it asks/],
-  ['a dataset question with no kind', 'order_to_cash', (c) => delete dq(c, 'dq_bookings').askKind, 'run.datasetQuestions[0].askKind', /names the kind of every question it asks/],
+  ['a question with no kind on a card that names one kind, on a dataset question', 'order_to_cash', (c) => onlyKind(c, dq(c, 'dq_bookings')), 'run.questions[0].askKind', /a card that names one ask kind names the kind of every question it asks/],
+  ['a dataset question with no kind on a card that names one kind, on a question', 'order_to_cash', (c) => onlyKind(c, question(c, 'open_receivables')), 'run.datasetQuestions[0].askKind', /a card that names one ask kind names the kind of every question it asks/],
   ['a kind outside the closed set', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'trend'), 'run.questions[0].askKind', /Invalid option|expected one of/],
   ['`top_n` on a truth that does not rank', 'order_to_cash', (c) => (question(c, 'open_receivables').askKind = 'top_n'), 'run.questions[0].askKind', /its truth is a `topN`/],
   ['`count` on a grouped truth', 'order_to_cash', (c) => (question(c, 'receivables_aging').askKind = 'count'), 'run.questions[1].askKind', /with no `groupBy`/],
@@ -265,8 +273,15 @@ describe('the loader refuses an ask kind that does not fit its question, at `ask
   it('a card that asks no dataset question may leave its questions unnamed', () => {
     const { refusals } = load('order_to_cash', (c) => {
       delete c.run.datasetQuestions;
-      for (const q of c.run.questions) delete q.askKind;
+      noKinds(c);
     });
     expect(refusals).toEqual([]);
+  });
+
+  it('a card that asks dataset questions and names no kind loads, as a card written before ask kinds did', () => {
+    const { card, refusals } = load('order_to_cash', noKinds);
+    expect(refusals).toEqual([]);
+    expect(card!.card.run.datasetQuestions!.length).toBeGreaterThan(0);
+    expect([...card!.card.run.questions, ...card!.card.run.datasetQuestions!].filter((q) => q.askKind !== undefined)).toEqual([]);
   });
 });

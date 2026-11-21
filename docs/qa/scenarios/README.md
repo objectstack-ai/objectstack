@@ -35,7 +35,7 @@ question's computed truth; a card that does not load is red in CI.
 | 1 | `prompt` | `{ short, detailed }`, each `{ zh?, en? }` with at least one language. |
 | 2 | `expect` | The structural expectation the deterministic scorer reads, field for field: `objects`, `minFieldsPerObject?`, `selectFields?` (`{ object, field, minOptions }`), `lookups?` (`{ object, field, to }`), `dashboards?`, `appNavTargets?`, `datasets?` (`{ name, label, description, object, measures, dimensions? }`, each member `{ name, label, synonyms?, description? }`; see [Dataset questions](#dataset-questions)). The runner's build prompt states every row by name ([Build checks trace to the prompt](#build-checks-trace-to-the-prompt)). |
 | 3 | `capabilities`, `businessFunctions` | Tags `<area>.<name>`, where `<area>` is a closed set: the basenames of `docs/qa/platform-checklist/areas/*.json`, read from the tree. `businessFunctions` is the marketplace taxonomy's business-function facet, read from `@objectstack/spec/marketplace` (`MarketplaceBusinessFunctionsSchema`, defined once in `packages/spec/src/marketplace/taxonomy.zod.ts`): 1-3 distinct values, the primary one first — the card is classified the way the template it graduates into will be listed. |
-| 4 | `run.seed`, `run.userHandleFields?`, `run.questions`, `run.personas` | Seed rows per object, and which seed fields hold a user handle; at least five read-only questions, each with a **declarative** truth spec and, on a card that asks dataset questions, its [ask kind](#ask-kinds) (`askKind`); at least two personas, each a role, the objects or fields it must NOT see, and optionally a row `scope` and the person `record` it is. |
+| 4 | `run.seed`, `run.userHandleFields?`, `run.questions`, `run.personas` | Seed rows per object, and which seed fields hold a user handle; at least five read-only questions, each with a **declarative** truth spec and optionally its [ask kind](#ask-kinds) (`askKind`: a card that names one names it on every question and dataset question); at least two personas, each a role, the objects or fields it must NOT see, and optionally a row `scope` and the person `record` it is. |
 | 5 | `run.operations`, `run.guardrails`, `run.agentActions?`, `run.datasetQuestions?` | At least two writes, each acting as a persona and declaring its `outcome`; the five guardrail checks; optionally the agent-callable business actions and the dataset questions. |
 | 6 | `iterate` | A one-sentence change request plus the `expectDelta` it should add to `expect`. |
 
@@ -365,10 +365,11 @@ them (`dataset:NAME`, `dataset-measure:NAME.MEMBER`, `dataset-dimension:NAME.MEM
 
 ## Ask kinds
 
-Every question and dataset question of a card that asks dataset questions names its **ask kind**
-(`askKind`), one of ten: the kinds of question an ask round asks, borrowed from the hosted ask
-set's categories (D6 = A on #34659: the kinds, never its fixture). ⛔ No question here is copied
-from the hosted set: its held-out questions stay private so they keep measuring. A round counts
+A question or dataset question may name its **ask kind** (`askKind`), and a card that names one
+names it on every question and dataset question, all or none. There are ten: the kinds of question
+an ask round asks, borrowed from the hosted ask set's categories (D6 = A on #34659: the kinds,
+never its fixture). ⛔ No question here is copied from the hosted set: its held-out questions stay
+private so they keep measuring. A round counts
 **turns** as the runner asks them: a question once per persona it lists (once as the admin when
 it lists none), a dataset question once as the admin. A turn whose persona truth is `withheld`
 is a `forbidden` ask whatever kind its question names: the same question asked as a persona who
@@ -391,8 +392,8 @@ at the question's `askKind`:
 | `unanswerable` | what the data cannot answer | exactly the questions whose truth is `unanswerable` |
 
 A `fallback_labelled` dataset question names the figure kind it asks (`count`, `group_sum`,
-`top_n`, `time_range`, `join` or `owner_latest`). A card without dataset questions may name kinds
-and need not.
+`top_n`, `time_range`, `join` or `owner_latest`). A card that names no kind loads as it did before
+kinds existed, with dataset questions or without; the open dataset cards name every one.
 
 **What the open dataset cards ask, per kind** (turns of one round, each asked once;
 `packages/qa/scenarios/test/dataset-cards.test.ts` holds the cards to these figures, so a card edit

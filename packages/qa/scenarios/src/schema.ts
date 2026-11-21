@@ -339,7 +339,7 @@ export const AskKindSchema = z.enum(ASK_KINDS);
 export const QuestionSchema = z.strictObject({
   id: MachineNameSchema,
   ask: LocalizedTextSchema,
-  /** What kind of question this is ({@link ASK_KINDS}); every question of a card that asks dataset questions names one. */
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
   askKind: AskKindSchema.optional(),
   object: MachineNameSchema,
   truth: TruthSpecSchema,
@@ -387,7 +387,7 @@ export const DatasetQuestionSchema = z.strictObject({
    * `expect` declares against what the word matches.
    */
   words: z.array(z.string().min(1)).min(1),
-  /** What kind of question this is ({@link ASK_KINDS}); every dataset question names one. */
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
   askKind: AskKindSchema.optional(),
   expect: DatasetExpectedRouteSchema,
 });

@@ -538,16 +538,16 @@ npx @objectstack/scenarios help                                      # the comma
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
-- **Ask kinds** (`ask-kinds.ts`, `orchestrate.ts`, `scorecard.ts`, `summary.ts`): every question and dataset question
-  of a card that asks dataset questions names its kind (`askKind`, one of ten:
-  [the card README](../../../docs/qa/scenarios/README.md#ask-kinds)). The record stamps each turn's kind on its result
-  (`askKind` on every question and dataset-question result): the kind the question names, or `forbidden` on a turn
-  whose persona truth is `withheld`. The scorecard counts the half's asks kind by kind (`HalfScores.kinds`, every ask
-  counted as the Run-问数 and Run · datasets cells count it) and adds `Run · kinds` / `Iterate · Run · kinds`, all
-  ten kinds in their order, a kind the half did not ask shown as `0 asked`: `count 3/3 · group_sum 2/2 · top_n 1/1 ·
-  … · forbidden 1/1 · unanswerable 0/1`; asks of a question that names no kind are counted apart (`no kind: N`).
-  `summary` sums the row over a table's runs. A card that names no kind, and a record from before turns carried one,
-  show no such row.
+- **Ask kinds** (`ask-kinds.ts`, `orchestrate.ts`, `scorecard.ts`, `summary.ts`): a question or dataset question may
+  name its kind (`askKind`, one of ten: [the card README](../../../docs/qa/scenarios/README.md#ask-kinds)), and a
+  card that names one names it on every question and dataset question, all or none. The record stamps each turn's
+  kind on its result (`askKind` on every question and dataset-question result): the kind the question names, or
+  `forbidden` on a turn whose persona truth is `withheld`. The scorecard counts the half's asks kind by kind
+  (`HalfScores.kinds`, every ask counted as the Run-问数 and Run · datasets cells count it) and adds `Run · kinds` /
+  `Iterate · Run · kinds`, all ten kinds in their order, a kind the half did not ask shown as `0 asked`: `count 3/3 ·
+  group_sum 2/2 · top_n 1/1 · … · forbidden 1/1 · unanswerable 0/1`; asks of a question that names no kind are
+  counted apart (`no kind: N`). `summary` sums the row over a table's runs. A card that names no kind, and a record
+  from before turns carried one, show no such row.
 - **Ask, then confirm** (`orchestrate.ts`, `prompts.ts`, `driver.ts`, `scorecard.ts`): a `pending_confirmation`
   operation whose first turn asked first and wrote nothing gets a second turn as the same persona over the same MCP
   door. No driver resumes a session, so it is a fresh turn whose prompt (`confirmPrompt`) quotes the operation's ask
