@@ -181,7 +181,7 @@ function mountLeads(viewName: keyof typeof LIST_VIEWS) {
 
 /** The page header, once its schema-driven toolbar has drawn the plain action. */
 async function headerWithToolbar(): Promise<HTMLElement> {
-  const header = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+  const header = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
   await within(header).findByRole('button', { name: /Refresh Scores/ }, { timeout: 5000 });
   return header;
 }
@@ -294,7 +294,7 @@ describe('objectui#12462 — the deep link arms only what the header draws', () 
     // The header has drawn its toolbar and the grid its rows, so an armed link
     // would have run by now. `hidden: true`: an open param dialog takes the
     // page out of the accessibility tree, and this wait must not be what fails.
-    const header = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+    const header = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
     await within(header).findByRole('button', { name: /Refresh Scores/, hidden: true }, { timeout: 5000 });
     await rowBoxes();
 

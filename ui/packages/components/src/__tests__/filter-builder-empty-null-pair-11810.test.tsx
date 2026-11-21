@@ -96,12 +96,21 @@ describe('objectui#11810 — the dropdown offers one empty-check pair unless the
     });
   }
 
+  // A list column takes the JSON-column offer (`jsonColumnFilterOperators`):
+  // the empty pair, whose expansion counts `[]`, and no null pair to a fresh
+  // choice. A stored null check still loads, with the empty-list hint.
   for (const type of ['multiselect', 'tags'] as const) {
-    it(`a ${type} column offers both pairs and the empty-list hint`, async () => {
-      renderRow({ field: `f_${type}`, operator: 'equals' });
-      const { options, hint } = await openOperatorList();
-      expect(options).toEqual(expect.arrayContaining([...EMPTY_PAIR, ...NULL_PAIR]));
-      expect(hint).toBe(LIST_HINT);
+    it(`a ${type} column offers the empty pair and no null pair; a stored "Is null" keeps the empty-list hint`, async () => {
+      renderRow({ field: `f_${type}`, operator: 'contains' });
+      const offered = await openOperatorList();
+      expect(offered.options).toEqual(expect.arrayContaining(EMPTY_PAIR));
+      for (const label of NULL_PAIR) expect(offered.options).not.toContain(label);
+      expect(offered.hint).toBeNull();
+      cleanup();
+      renderRow({ field: `f_${type}`, operator: 'is_null' });
+      const held = await openOperatorList();
+      expect(held.options).toEqual(expect.arrayContaining([...EMPTY_PAIR, 'Is null']));
+      expect(held.hint).toBe(LIST_HINT);
     });
   }
 });

@@ -133,7 +133,7 @@ const OBJECT_NAME = 'duly_task';
 
 /**
  * The view under test is always `all`. `ListView`'s own toolbar Filter control
- * (`toolbar-filter-trigger`) is the node whose identity (a) reads (the host's
+ * (`condition-add-filter`) is the node whose identity (a) reads (the host's
  * tab strip in `list-toolbar-leading` was, until objectstack#27594 moved view
  * switching to the page title; the view description's own row was, until
  * objectui#12528).
@@ -260,7 +260,7 @@ function GanttStandIn({ schema }: any) {
 const ganttInstance = () => screen.getByTestId('gantt-stand-in').dataset.instance;
 
 /** A node rendered inside `ListView` — replaced wholesale by a key remount. */
-const listNode = () => screen.getByTestId('toolbar-filter-trigger');
+const listNode = () => screen.getByTestId('condition-add-filter');
 
 beforeEach(() => {
   cleanup();

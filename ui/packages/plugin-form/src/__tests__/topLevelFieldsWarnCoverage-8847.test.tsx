@@ -248,8 +248,9 @@ describe('object-master-detail-form `fields` — the member shape (objectui#8071
   it('a name the parent does not declare is dropped — a DETAIL column name included — while the line grid keeps its column', async () => {
     const { container } = await mountMembers({ fields: ['qty', 'status', 'nowhere'] });
     expect(parentFields(container), 'no untyped stub for either name').toEqual(['status']);
+    // The column header, read on an empty grid (the grid draws no trailing entry row, objectstack#35507).
     expect(
-      screen.getAllByLabelText('Qty').length,
+      screen.getAllByRole('columnheader', { name: 'Qty' }).length,
       'the detail vocabulary is untouched by the parent key',
     ).toBeGreaterThan(0);
   });

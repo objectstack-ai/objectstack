@@ -347,6 +347,18 @@ export interface ScimBearerVerification {
 }
 
 /**
+ * Is credential `row`'s `active` flag on, as the verifier reads it: anything
+ * but `false`, the `0` sqlite hands back for it, or no value. The flag half of
+ * {@link scimCredentialIsLive}, and the one reading a password reset uses to
+ * choose the credentials it revokes (`password-reset-ends-added-access.ts`),
+ * so the two never disagree on which credential is on.
+ */
+export function scimCredentialIsActive(row: Record<string, unknown>): boolean {
+  const active = row.active;
+  return !(active === false || active === 0 || active == null);
+}
+
+/**
  * Is credential `row` live — affirmatively `active` and not expired? The one
  * reading of a credential row's liveness: the bearer verifier below refuses a
  * row this answers `false` for, and the IdP group mapping door reads a
@@ -354,9 +366,7 @@ export interface ScimBearerVerification {
  * never decides anything.
  */
 export function scimCredentialIsLive(row: Record<string, unknown>, now: number = Date.now()): boolean {
-  // sqlite hands booleans back as 0/1 — refuse anything not affirmatively active.
-  const active = row.active;
-  if (active === false || active === 0 || active == null) return false;
+  if (!scimCredentialIsActive(row)) return false;
   const rawExpiry = row.expires_at;
   if (rawExpiry == null) return true;
   const parsed = new Date(rawExpiry as string);
@@ -543,6 +553,45 @@ export async function verifyScimBearerToken(
   };
 }
 
+/**
+ * What a credential audit row's `metadata` may carry: the event and the
+ * connection, and nothing else. Closed on purpose — there is no key a bearer,
+ * a digest or a field value of the credential could ride in.
+ */
+export interface ScimCredentialAuditDecisions {
+  event: 'scim_credential_minted' | 'scim_credential_revoked';
+  connectionId: string;
+  /**
+   * The administrator at the keyboard when the mint ran on an impersonation
+   * session, under the key the audit writers record it with
+   * (`sys_audit_log.metadata.impersonated_by`). Absent otherwise.
+   */
+  impersonated_by?: string;
+}
+
+/**
+ * The `sys_audit_log` row a credential event writes, naming the actor and the
+ * credential (never the bearer, never its digest). One shape for every writer:
+ * the administrator's mint and revoke doors (`scim-connection-admin.ts`) and a
+ * password reset that revokes the credentials its account minted
+ * (`password-reset-ends-added-access.ts`).
+ */
+export function scimCredentialAuditRow(entry: {
+  action: 'create' | 'update';
+  actorId: string;
+  credentialId: string;
+  metadata: ScimCredentialAuditDecisions;
+}): Record<string, unknown> {
+  return {
+    action: entry.action,
+    user_id: entry.actorId,
+    actor: entry.actorId,
+    object_name: SCIM_CREDENTIAL_OBJECT,
+    record_id: entry.credentialId,
+    metadata: JSON.stringify(entry.metadata),
+  };
+}
+
 /** Minimal engine surface {@link revokeScimConnectionCredential} needs. */
 interface RevocationEngine {
   findOne(
@@ -580,8 +629,7 @@ export async function revokeScimConnectionCredential(
   const connectionId = String((row as { connection_id?: unknown }).connection_id ?? '');
   const id = String((row as { id?: unknown }).id);
   // Read `active` the way the verifier does: anything not affirmatively active is off.
-  const active = (row as { active?: unknown }).active;
-  if (active === false || active === 0 || active == null) return { outcome: 'already_revoked', credentialId: id, connectionId };
+  if (!scimCredentialIsActive(row as Record<string, unknown>)) return { outcome: 'already_revoked', credentialId: id, connectionId };
   // The system context is spelled at the call, not only inherited from the
   // caller's wrapped engine, so the write says what it is wherever it is read.
   await engine.update(SCIM_CREDENTIAL_OBJECT, { id, active: false }, { context: { isSystem: true } });

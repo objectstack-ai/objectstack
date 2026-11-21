@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { registerAllFields } from '@object-ui/fields';
 import { MePermissionsProvider } from '@object-ui/permissions';
@@ -188,7 +188,9 @@ describe('MasterDetailForm — non-atomic fallback (emulation via runBatchTransa
       return el;
     });
     fireEvent.change(input, { target: { value: 'PO-1' } });
-    // Fill the first (ghost) line so it persists as a real child row.
+    // Add and fill a first line so it persists as a real child row (the grid
+    // draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     const qty = await waitFor(() => screen.getAllByLabelText('Qty')[0] as HTMLInputElement);
     fireEvent.change(qty, { target: { value: '5' } });
   }
@@ -275,6 +277,8 @@ describe('MasterDetailForm — parent-scoped line rules ("paid invoice → lock 
       return el;
     });
     const qty = () => screen.getAllByLabelText('Qty')[0] as HTMLInputElement;
+    // A line to lock: the grid draws no trailing entry row (objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
 
     // Header not paid → the Qty cell is editable.
     await waitFor(() => expect(qty().disabled).toBe(false));
@@ -299,6 +303,8 @@ describe('MasterDetailForm — parent-scoped line rules ("paid invoice → lock 
       return el;
     });
 
+    // A line to lock: the grid draws no trailing entry row (objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     fireEvent.change(status, { target: { value: 'paid' } });
     // The scrape-driven lock must NOT wipe the value the user just typed.
     await waitFor(() => expect((screen.getAllByLabelText('Qty')[0] as HTMLInputElement).disabled).toBe(true));
@@ -388,11 +394,14 @@ describe('MasterDetailForm — a new line starts on the child\'s defaults and wa
     }) as any;
   const cell = (container: HTMLElement, row: number, col: number) =>
     container.querySelector(`[data-cell="${row}-${col}"]`) as HTMLInputElement | null;
-  /** Add a line once the child schema (and so its defaults) has answered. */
-  const addSeededLine = async (container: HTMLElement) => {
-    await waitFor(() => expect(cell(container, 0, 1)?.value).toBe('Pending')); // the entry line
+  const lineCount = (container: HTMLElement) => container.querySelectorAll('[data-testid="line-items"] tbody tr').length;
+  /** Add a line once the child schema (and so its defaults) has answered, and see it start on them. */
+  const addSeededLine = async (container: HTMLElement, linesBefore = 0) => {
+    await screen.findByTestId('line-items-add');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     fireEvent.click(screen.getByTestId('line-items-add'));
-    await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(2));
+    await waitFor(() => expect(lineCount(container)).toBe(linesBefore + 1));
+    await waitFor(() => expect(cell(container, linesBefore, 1)?.value).toBe('Pending'));
   };
   const createOps = (batch: ReturnType<typeof vi.fn>) =>
     (batch.mock.calls[0][0] as Array<{ object: string; action: string; data?: Record<string, unknown> }>).filter(
@@ -488,7 +497,7 @@ describe('MasterDetailForm — a new line starts on the child\'s defaults and wa
       const { container } = render(<MasterDetailForm schema={schemaWith()} dataSource={lineDataSource({ batchTransaction })} />);
       await addSeededLine(container);
       fireEvent.click(screen.getByTestId('line-items-add'));
-      await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(3));
+      await waitFor(() => expect(lineCount(container)).toBe(2));
       fireEvent.change(cell(container, 1, 1)!, { target: { value: 'Later' } });
       fireEvent.click(screen.getByTestId('md-form-submit'));
       await waitFor(() => expect(screen.getByTestId('line-items-invalid-1-name')).toBeInTheDocument());
@@ -505,14 +514,59 @@ describe('MasterDetailForm — a new line starts on the child\'s defaults and wa
       });
       const { container } = render(<MasterDetailForm schema={schemaWith({}, { mode: 'edit', recordId: 'p1' })} dataSource={ds} />);
       await waitFor(() => expect(cell(container, 0, 0)?.value).toBe('Nuts'));
-      await waitFor(() => expect(cell(container, 1, 1)?.value).toBe('Pending')); // the entry line
-      fireEvent.click(screen.getByTestId('line-items-add'));
-      await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(3));
+      await addSeededLine(container, 1);
       fireEvent.click(screen.getByTestId('md-form-submit'));
       await waitFor(() => expect(toastInfo).toHaveBeenCalledTimes(1));
       expect(createOps(batchTransaction)).toEqual([]);
-      await waitFor(() => expect(container.querySelectorAll('[data-testid="line-items"] tbody tr').length).toBe(2));
+      await waitFor(() => expect(lineCount(container)).toBe(1));
       expect(cell(container, 0, 0)!.value).toBe('Nuts');
     });
+  });
+});
+
+/**
+ * objectstack#35804 — the line grid's column headers show each child field's
+ * help, read from the child object's definition as `getObjectSchema` serves
+ * it: the definition the record form reads too, so a help another package
+ * wrote through `objectExtensions.fieldPatches` (applied by the server before
+ * it serves the object) and the reader's language both arrive here.
+ */
+describe('MasterDetailForm — line column headers show the child fields\' help (objectstack#35804)', () => {
+  const lineSchema = {
+    name: 'po_line',
+    fields: {
+      po: { type: 'lookup', label: 'PO', reference: 'po' },
+      // The served definition: `description` carries what a patch or a
+      // translation put there, and `inlineHelpText` wins over it.
+      qty: { type: 'number', label: 'Qty', description: 'Whole units only.' },
+      price: { type: 'number', label: 'Price', inlineHelpText: 'Tax-inclusive.', description: 'Not this.' },
+      note: { type: 'text', label: 'Note' },
+    },
+  };
+  const ds = () =>
+    makeDataSource({
+      getObjectSchema: vi.fn(async (name: string) => (name === 'po_line' ? lineSchema : parentSchema)),
+    });
+  const schema = (detail: Record<string, unknown>) =>
+    ({ objectName: 'po', mode: 'create', fields: ['ref'], details: [detail] }) as any;
+
+  it.each([
+    ['derived columns', { childObject: 'po_line' }],
+    // The console's shape for a child field's `inlineColumns`: names the
+    // form hydrates from the child schema (a column declaring its `type`
+    // opts out of that hydration, and an entry whose every column does loads
+    // no child schema, so it has no help to show, as it has no lookup
+    // autofill pairs).
+    [
+      'authored columns',
+      { childObject: 'po_line', relationshipField: 'po', columns: [{ name: 'qty' }, { name: 'price' }, { name: 'note' }] },
+    ],
+  ])('%s: each header carries its field\'s help, the form\'s own read of it', async (_label, detail) => {
+    render(<MasterDetailForm schema={schema(detail)} dataSource={ds()} />);
+    const qtyHelp = await screen.findByRole('button', { name: 'Whole units only.' });
+    expect(qtyHelp.closest('th')!.textContent).toContain('Qty');
+    expect(screen.getByRole('button', { name: 'Tax-inclusive.' }).closest('th')!.textContent).toContain('Price');
+    // CONTROL: a field with no help draws no info button on its header.
+    expect(screen.getByRole('columnheader', { name: 'Note' }).querySelector('button')).toBeNull();
   });
 });

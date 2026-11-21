@@ -345,8 +345,8 @@ function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlac
 /**
  * The fields the highlight strip of a synthesized record page draws: the
  * `fields` of the `record:highlights` blocks among the page's top-level blocks,
- * where the synthesizer places the strip (a phone's cut-short one included)
- * and where a slotted page's own `highlights` slot lands. A field is read in
+ * where a slotted page's own `highlights` slot lands. The default page places
+ * no strip, so the list is empty there. A field is read in
  * either form the block accepts, a bare name or a `{ name }` entry, from the
  * block's `properties` bag over its own keys.
  */
@@ -5129,8 +5129,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // name so authored business actions still win on collision.
   //
   // objectstack#27058, Target 4 — on a phone the default page's header reads
-  // the first two declared text highlights as its subtitle and shows at most
-  // four highlights after them.
+  // the first two declared text highlights as its subtitle. The page draws no
+  // highlight strip, so no highlight list is handed to the synthesizer.
   const phoneHeader = phonePage && !assignedPage
     ? phoneRecordHeader(objectDef, synthParts.highlightFields, readablePageRecord)
     : null;
@@ -5138,7 +5138,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     ? effectivePage
     : buildDefaultPageSchema(objectDef as any, {
         sections: synthParts.sections,
-        highlightFields: phoneHeader ? phoneHeader.highlightFields : synthParts.highlightFields,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
         approvals: synthParts.approvals,

@@ -13,15 +13,17 @@
  * (`onSave`): the list on screen becomes the view's stored body. Edits not
  * saved stay the reader's temporary list state, never written to the view.
  *
- * Below `sm` the trigger is an icon alone (named by its `aria-label`), so on a
- * narrow row it never pushes the view name out.
+ * objectstack#35878 — it ends the condition row under the view bar:
+ * 「Personalized」 (the trigger, naming what differs) and 「Reset」 beside it,
+ * one click back to the view. As the list narrows the words 「Personalized」
+ * go first, then 「Reset」 folds to its icon.
  */
 
 import { useState } from 'react';
 import { Button, Popover, PopoverContent, PopoverTrigger, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import type { ListViewProps } from '@object-ui/plugin-list';
-import { RotateCcw, Save, UserPen } from 'lucide-react';
+import { RotateCcw, Save } from 'lucide-react';
 
 /** One part of a list that can differ from its view (`ListView`'s vocabulary). */
 export type ListPersonalizationPart = Parameters<NonNullable<ListViewProps['onPersonalizationChange']>>[0][number];
@@ -70,23 +72,22 @@ export function ListPersonalizedMarker({
     inlineEdit: t('console.objectView.personalizedParts.inlineEdit'),
   };
   const label = t('console.objectView.personalized');
+  // The short 「Reset」 of the condition row (the popover keeps its longer one).
+  const resetLabel = t('listConditions.chips.reset');
   return (
+    <span className={cn('flex shrink-0 items-center gap-0.5', className)} data-testid="list-personalized">
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
           aria-label={label}
           title={label}
           data-testid="list-personalized-marker"
-          className={cn(
-            'h-6 shrink-0 gap-1 rounded-full px-1.5 sm:px-2 text-xs font-normal text-muted-foreground shadow-none',
-            className,
-          )}
+          className="hidden h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[48rem]/list:inline-flex"
         >
-          <UserPen className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="hidden sm:inline">{label}</span>
+          {label}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-3" data-testid="list-personalized-popover">
@@ -134,5 +135,19 @@ export function ListPersonalizedMarker({
         </Button>
       </PopoverContent>
     </Popover>
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-label={resetLabel}
+      title={t('console.objectView.resetViewTitle')}
+      data-testid="list-personalized-reset-direct"
+      className="h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none"
+      onClick={onReset}
+    >
+      <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+      <span className="hidden @[40rem]/list:inline">{resetLabel}</span>
+    </Button>
+    </span>
   );
 }

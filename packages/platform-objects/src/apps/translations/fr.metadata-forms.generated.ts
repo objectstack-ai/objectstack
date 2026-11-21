@@ -70,7 +70,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       highlightFields: {
         label: "Champs mis en avant",
-        helpText: "Noms des champs de cet objet, du plus important au moins important — la première entrée l’emporte là où une seule peut figurer (ADR-0085). Détermine les colonnes de liste par défaut, les cartes, les aperçus d’enregistrements enfants et la bande de mise en avant du détail. Un nom qui n’est pas un champ de cet objet est refusé à la publication."
+        helpText: "Noms des champs de cet objet, du plus important au moins important — la première entrée l’emporte là où une seule peut figurer (ADR-0085). Détermine les colonnes par défaut des listes et des listes associées, les cartes, les aperçus d’enregistrements enfants, la carte de survol de l’enregistrement et le sélecteur d’enregistrements. Un nom qui n’est pas un champ de cet objet est refusé à la publication."
       },
       relatedLists: {
         label: "Listes associées",

@@ -95,7 +95,7 @@ describe('objectui#12440 — ListView draws a host node first in its toolbar row
     const node = screen.getByTestId('host-tabs');
     const wrapper = screen.getByTestId('list-toolbar-leading');
     expect(wrapper.contains(node)).toBe(true);
-    expect(wrapper.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'flex-1']));
+    expect(wrapper.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'shrink']));
 
     // Same left group as the chips, and first in it.
     const leftGroup = wrapper.parentElement!;
@@ -118,7 +118,8 @@ describe('objectui#12440 — ListView draws a host node first in its toolbar row
     expect(screen.queryByTestId('list-toolbar-leading')).toBeNull();
     const leftGroup = chips().parentElement!;
     expect(leftGroup.className).toBe(LEFT_GROUP_TODAY);
-    expect(leftGroup.firstElementChild).toBe(chips());
+    // 视图设置 leads a group with no host node (objectstack#35878), then the chips.
+    expect(leftGroup.firstElementChild).toBe(screen.queryByTestId('toolbar-display-trigger') ?? chips());
   });
 
   it('a `null` node draws no wrapper either', async () => {

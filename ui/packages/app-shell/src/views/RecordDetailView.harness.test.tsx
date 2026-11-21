@@ -3043,6 +3043,8 @@ describe('RecordDetailView.recordEditState-35599', () => {
     const lines = editor(container, 'showcase_line.quote')!;
     fireEvent.change(cells(lines, 'Quantity')[0], { target: { value: '5' } });
     fireEvent.click(lines.querySelectorAll('button[aria-label="Remove row"]')[1] as HTMLElement);
+    // The new line comes from Add: the grid draws no blank entry line beside it (objectstack#35507).
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
     const products = cells(lines, 'Product');
     fireEvent.change(products[products.length - 1], { target: { value: 'Crate' } });
     const tasks = editor(container, 'showcase_task.quote')!;
@@ -3207,8 +3209,9 @@ describe('RecordDetailView.recordEditState-35599', () => {
     vi.mocked(toast.info).mockClear();
     fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
     const lines = editor(view.container, 'showcase_line.quote')!;
+    const before = cells(lines, 'Product').length;
     fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
-    await waitFor(() => expect(cells(lines, 'Product').length).toBeGreaterThanOrEqual(4), { timeout: 5000 });
+    await waitFor(() => expect(cells(lines, 'Product').length).toBe(before + 1), { timeout: 5000 });
     await act(async () => { fireEvent.click(headerButton('Save')!); });
     await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
     // The record's update alone: the untouched line is not created.

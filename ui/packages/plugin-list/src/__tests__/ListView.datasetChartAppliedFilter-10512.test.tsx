@@ -153,7 +153,7 @@ const names = (filter: unknown, field: string) => JSON.stringify(filter ?? null)
 const countBar = () => screen.getByTestId('record-count-bar');
 // The toolbar trigger by its test id: the condition row's 「Add filter」 is a
 // second button named for filters (objectstack#35549).
-const filterButton = () => screen.queryByTestId('toolbar-filter-trigger');
+const filterButton = () => screen.queryByTestId('condition-add-filter');
 const settle = () => new Promise((r) => setTimeout(r, 50));
 
 const pick = (name: string) => {
@@ -239,7 +239,8 @@ describe('objectui#10512 — a held user filter does not narrow ListView\'s fetc
     // on/off state lives inside `UserFilters`, which is not mounted while the
     // dataset chart is on screen, so what it draws on the way back is that
     // component's answer, not this derivation's.
-    expect(filterButton()).toHaveTextContent('1');
+    // A held filter: the row's 「+」, not the dashed 「Filter」 (objectstack#35878).
+    expect(filterButton()).not.toHaveAttribute('data-empty');
     expect(onFilterChange).not.toHaveBeenCalled();
   });
 

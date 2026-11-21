@@ -102,12 +102,12 @@ test('record page polish (#35745, #35816) — showcase Expense Report', async ({
     // ── 4. A new line starts on its defaults, unflagged; left as it came, it is not stored. ──
     const editor = page.locator('[data-body-table-editor]').first();
     await editor.scrollIntoViewIfNeeded();
-    const lines = editor.locator('tbody tr');
+    // A line row, not the empty state's row (an empty grid draws one).
+    const lines = editor.locator('tbody tr').filter({ hasNot: page.getByTestId('line-items-empty') });
     const before = await lines.count();
     await editor.getByTestId('line-items-add').click();
     await expect(lines).toHaveCount(before + 1);
-    // The grid keeps a trailing entry line, so the added line is the one before it.
-    const added = lines.nth(before - 1);
+    const added = lines.nth(before);
     await expect(added).toContainText('Other');
     await expect(added).toContainText('Submitted');
     await expect(editor.locator('[data-testid^="line-items-invalid"]')).toHaveCount(0);
