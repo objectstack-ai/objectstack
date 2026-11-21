@@ -49,6 +49,7 @@ import { ConsoleLayout } from '../layout/ConsoleLayout.js';
 import { CommandPalette } from '../chrome/CommandPalette.js';
 import { ErrorBoundary } from '../chrome/ErrorBoundary.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
+import { ConsoleBootShell, RouteMetadataSkeleton } from './ConsoleBootShell.js';
 import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
 // `ObjectNotFoundState` from its own module, not through `ObjectView`: the
@@ -67,7 +68,7 @@ import {
   navEntriesShownOncePendingReadsShow,
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
-import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
+import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute } from './appRouteMetadataReads.js';
 import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import {
@@ -77,7 +78,7 @@ import {
   setupMetadataStudioPath,
 } from '../views/studio-design/setupMetadataRedirect.js';
 import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
-import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
+import { SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
 //
@@ -604,10 +605,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     if (!viewReadObject || !viewReadReady || !bundleAppName || previewDrafts) return;
     prefetchObjectViewRows(dataSource, viewReadObject);
   }, [dataSource, viewReadObject, viewReadReady, bundleAppName, previewDrafts]);
-  // Set once the first frame past the splash has rendered. After it, a route
-  // waiting on its buckets draws its skeleton inside the console chrome rather
-  // than taking the whole console back to the splash.
-  const firstPaintDone = useRef(false);
+  // objectstack#35981 — set once this page load's first route has drawn. Until
+  // then the route slot's skeleton is the boot wait (`RouteMetadataSkeleton`'s
+  // `boot`), so what waits for the first paint past the splash still waits for
+  // the route (objectui#12980), while the chrome is already on screen.
+  const firstRouteDrawn = useRef(false);
 
   // A normal app was requested but isn't present in the loaded metadata — the
   // post-publish readiness lag, or a genuinely-missing app. Applies in BOTH
@@ -1200,17 +1202,18 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // `positions[]` leg, which is every admin on a session minted with an active
   // organization stamped) waits exactly zero extra frames. What does wait is
   // the viewer whose verdict genuinely is not known yet — and for them a
-  // LoadingScreen is the honest frame, not a screen built on a guess.
+  // frame that decides nothing is the honest one, not a screen built on a guess.
   //
-  // objectui#12809 — of the lazy metadata, the splash waits only for what the
-  // current route reads (`routeReadsSettled`), and only until the first paint.
-  if (
-    !dataSource ||
-    metadataLoading ||
-    !isWorkspaceAdminResolved ||
-    (!firstPaintDone.current && !routeReadsSettled)
-  ) return <LoadingScreen />;
-  firstPaintDone.current = true;
+  // objectui#12809 — the lazy metadata the current route reads does not hold
+  // the gate at all (objectstack#35981): the chrome decides nothing from it,
+  // so it mounts once the inputs above are in, and the route slot draws the
+  // route's skeleton until its reads land (`routeReadsSettled`, below).
+  //
+  // objectstack#35981 — while the gate holds, the console chrome's empty frame
+  // (`ConsoleBootShell`), not the full-screen splash: it names no app and draws
+  // no navigation entry, which is exactly what the inputs above decide.
+  if (!dataSource || metadataLoading || !isWorkspaceAdminResolved) return <ConsoleBootShell />;
+  if (routeReadsSettled) firstRouteDrawn.current = true;
 
   // ADR-0037 — preview mode renders its OWN empty/error states and never
   // falls through to the generic "No Apps Configured" guard below: inside a
@@ -1282,7 +1285,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // page; `denied` is the screen above, and every other verdict falls through
   // to the pseudo-route rendering below, unchanged.
   if (appSurfaceAwaitsVerdict && !previewDrafts) {
-    if (accessVerdict === null) return <LoadingScreen />;
+    if (accessVerdict === null) return <ConsoleBootShell />;
     if (accessVerdict === 'denied') return renderAppAccessDenied();
   }
 
@@ -1291,7 +1294,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // different app, and don't show the misleading "no apps configured" screen
   // below (there ARE apps). requestedAppMissing already excludes pseudo-routes.
   if (requestedAppMissing) {
-    if (missingRecheck !== 'done' || accessVerdict === null) return <LoadingScreen />;
+    if (missingRecheck !== 'done' || accessVerdict === null) return <ConsoleBootShell />;
     if (accessVerdict === 'denied') return renderAppAccessDenied();
     // objectui#9262 — the remaining verdicts, each saying only what the probe
     // obtained. The screen this replaced asserted ONE transient deploy state
@@ -1402,7 +1405,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // guard reads only the per-user-filtered list that ships today.
   if (!activeApp && !isCreateAppRoute && !isSystemRoute && !isMetadataRoute && !isWorkspaceAdmin) {
     // `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378 / #6507).
-    // Every readiness gate above this branch renders `LoadingScreen`, and the
+    // Every readiness gate above this branch renders a boot frame, and the
     // branch returns ABOVE the single `ConsoleLayout` mount — so a bare
     // redirect, which renders null, hands the WHOLE viewport back to the page
     // background while `/home` renders at transition priority. Measured on the
@@ -1557,11 +1560,15 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         <OnboardingWalkthrough />
         <DraftReviewNavigator appName={appName} />
           <ErrorBoundary>
-            <Suspense fallback={<LoadingScreen />}>
+            {/* objectstack#35981 — a route element whose chunk is still loading
+                draws the route's skeleton in the slot, not the full-screen
+                splash inside the chrome. It is the boot wait as that splash
+                was (`data-boot-splash`), whenever it shows. */}
+            <Suspense fallback={<RouteMetadataSkeleton reads={routeReadsKey || 'object'} boot />}>
               <RouteFader className="h-full">
                 {/* objectui#12809 — the route's metadata has not landed: its
                     skeleton, never its empty or "not found" state. */}
-                {!routeReadsSettled ? <RouteMetadataSkeleton reads={routeReadsKey || 'object'} /> : objectScope && routeObjectReadsFailed.length > 0 ? (
+                {!routeReadsSettled ? <RouteMetadataSkeleton reads={routeReadsKey || 'object'} boot={!firstRouteDrawn.current} /> : objectScope && routeObjectReadsFailed.length > 0 ? (
                   // objectui#13052 — the route's object read failed (a 5xx, a
                   // network drop, a code this build does not know): say so in
                   // the shell, and let Retry ask those names once more.
@@ -2309,12 +2316,3 @@ function useLazyMetadataSettled(
   return settled;
 }
 
-/** The route slot while its metadata loads, shaped like what will land there. */
-function RouteMetadataSkeleton({ reads }: { reads: string }) {
-  const types = reads.split(',') as LazyMetadataType[];
-  return (
-    <div data-testid="route-metadata-skeleton" className="h-full">
-      {types[0] === 'dashboard' ? <SkeletonDashboard /> : types.includes('page') ? <SkeletonDetail /> : <SkeletonGrid />}
-    </div>
-  );
-}

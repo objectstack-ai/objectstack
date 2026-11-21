@@ -19,6 +19,12 @@
  * `apps/console`), mounted above `AppContent`; it stays on the critical path
  * and is outside this harness.
  *
+ * objectstack#35981 — the route's own bucket no longer holds the chrome: while
+ * the session's gates are out the console draws its empty frame
+ * (`data-boot-shell`), then the chrome with the route's skeleton in its slot.
+ * That skeleton is still the boot wait (`data-boot-splash`) until the route
+ * draws, so `splashUp()` below reads the same steps as before.
+ *
  * CONTROL: after the first paint, a route whose buckets have not landed draws
  * its skeleton inside the console chrome, then its content; and a bucket that
  * refetches keeps the route mounted.
@@ -183,6 +189,7 @@ function boot(client: AuthClient, url: string) {
 }
 
 const splashUp = () => document.querySelector('[data-boot-splash]') !== null;
+const bootShellUp = () => document.querySelector('[data-boot-shell]') !== null;
 const askedTypes = () => new Set(meta.ensureType.mock.calls.map((c) => c[0] as string));
 
 beforeEach(() => {
@@ -214,8 +221,16 @@ describe('the console splash waits for the critical path only (objectui#12809)',
 
     await answerList();
     expect(splashUp()).toBe(true); // the member row has not answered
+    // objectstack#35981 — the chrome's empty frame, not the chrome: the admin
+    // verdict decides which navigation exists.
+    expect(bootShellUp()).toBe(true);
+    expect(screen.queryByTestId('console-layout')).not.toBeInTheDocument();
     await answerMember();
     expect(splashUp()).toBe(true); // the route's `object` bucket has not answered
+    // objectstack#35981 — the chrome is up, the route's skeleton in its slot.
+    expect(bootShellUp()).toBe(false);
+    expect(screen.getByTestId('console-layout')).toBeInTheDocument();
+    expect(screen.getByTestId('route-metadata-skeleton')).toHaveAttribute('data-boot-splash');
 
     await settle('object', [{ name: 'account' }]);
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('account'));
