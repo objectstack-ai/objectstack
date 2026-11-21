@@ -76,9 +76,14 @@
  *
  * Admission by an invitation alone grants the account and nothing more
  * ({@link isAdmittedByInvitationAlone}): under `invite_only`, and under
- * `email_domain` for an address off the list, the sign-up is not bound into
- * the deployment's organization while its address is unverified, and joins by
- * accepting the invitation.
+ * `email_domain` for an address off the list, the sign-up receives no
+ * self-registration permission set, is not bound into the deployment's
+ * organization while its address is unverified, and joins by accepting the
+ * invitation. A sign-up the posture's own rule admits — any address under
+ * `open`, an address on the list under `email_domain` — is admitted by that
+ * rule, invitation or not ({@link isAdmittedByPostureRule}): it receives the
+ * declared set and binds as an uninvited one does, and the invitation still
+ * places it as the invitation names once it accepts.
  *
  * ## A social provider's word on the address
  *
@@ -603,7 +608,8 @@ export function invitationProofFor(input: {
  *   unexpired and addressed to it ({@link invitationProofFor} `presented`).
  * - `email_domain`: the sign-up's address is off the allowlist, and a pending
  *   invitation addressed to it admitted it. An address on the list is admitted
- *   by the domain rule, invitation or not, and binds as before.
+ *   by the domain rule, invitation or not ({@link isAdmittedByPostureRule}),
+ *   binds as before and receives the declared self-registration set.
  * - `open`, an off-vocabulary posture, and every creation that is not
  *   self-serve: never.
  */
@@ -616,8 +622,26 @@ export function isAdmittedByInvitationAlone(input: {
 }): boolean {
   const { audience, creationClass, email, proof, hasPendingInvitation } = input;
   if (!hasPendingInvitation || audience.invalid || creationClass !== 'self-serve') return false;
+  // `open`, and `email_domain` on the allowlist: admitted by the posture's rule.
+  if (isAdmittedByPostureRule(audience, email)) return false;
   if (audience.posture === 'invite_only') return proof === 'presented';
-  if (audience.posture === 'email_domain') return !emailDomainAllowed(email, audience.allowedEmailDomains);
+  return audience.posture === 'email_domain';
+}
+
+/**
+ * Whether a valid posture's own rule admits a self-serve creation by its
+ * address, with no invitation: `open` admits every address, `email_domain` an
+ * address on the allowlist ({@link emailDomainAllowed}), and `invite_only`
+ * none. The one classification both readers of an invitation share: a
+ * sign-up the rule admits is admitted by that rule, invitation or not, so the
+ * admission verdict grants it the declared self-registration set
+ * ({@link decideAudienceAdmission}) and the membership settle binds it at
+ * creation ({@link isAdmittedByInvitationAlone}).
+ */
+function isAdmittedByPostureRule(audience: ResolvedAudience, email: string | undefined): boolean {
+  if (audience.invalid) return false;
+  if (audience.posture === 'open') return true;
+  if (audience.posture === 'email_domain') return emailDomainAllowed(email, audience.allowedEmailDomains);
   return false;
 }
 
@@ -636,7 +660,9 @@ const socialAddressUnverifiedMessage = (posture: AudiencePosture): string =>
 /**
  * THE admission decision — pure, so the posture × method matrix is a table of
  * direct calls. Order: creation-class exemptions → bootstrap → vocabulary
- * guard (fail closed) → the social-provider address rule → posture semantics.
+ * guard (fail closed) → the social-provider address rule → the posture's own
+ * rule ({@link isAdmittedByPostureRule}, with the self-registration grant) →
+ * the invitation carve-out (no grant) → the posture's refusal.
  *
  * The social-provider address rule: under a posture whose admission rests on
  * the address ({@link admissionRestsOnAddress}: `email_domain` always, `open`
@@ -682,10 +708,20 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
   ) {
     return { admit: false, code: SELF_REGISTRATION_CLOSED, message: socialAddressUnverifiedMessage(audience.posture) };
   }
+  if (isAdmittedByPostureRule(audience, email)) {
+    // The posture's own rule first: `open`, and `email_domain` for an address
+    // on the allowlist, admit the sign-up by that rule, invitation or not, so
+    // it receives the declared self-registration set. A pending invitation
+    // still places it as the invitation names once it accepts. The membership
+    // settle reads the same classification (`isAdmittedByInvitationAlone`).
+    return { admit: true, grantPermissionSet: true };
+  }
   if (hasPendingInvitation) {
     // An explicit invitation is a stronger operator act than any posture —
     // it admits the invitee's own account creation under invite_only AND
     // trumps the email_domain allowlist (module doc: the invite dead-end).
+    // Admitted by the invitation alone, the sign-up gets the account and no
+    // self-registration grant.
     return { admit: true, grantPermissionSet: false };
   }
   switch (audience.posture) {
@@ -698,9 +734,7 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
           'Ask an administrator for an invitation.',
       };
     case 'email_domain':
-      if (emailDomainAllowed(email, audience.allowedEmailDomains)) {
-        return { admit: true, grantPermissionSet: true };
-      }
+      // An address on the allowlist was admitted by the posture's rule above.
       return {
         admit: false,
         code: EMAIL_DOMAIN_NOT_ALLOWED,
@@ -708,10 +742,9 @@ export function decideAudienceAdmission(input: AudienceAdmissionInput): Audience
           'Self-registration is limited to approved email domains, and this address ' +
           'is not on the list. Use your organization email, or ask an administrator for an invitation.',
       };
-    case 'open':
-      return { admit: true, grantPermissionSet: true };
     default: {
-      // Unreachable for a well-typed posture; keep the fail-closed floor.
+      // `open` was admitted by the posture's rule above, so this is
+      // unreachable for a well-typed posture; keep the fail-closed floor.
       return {
         admit: false,
         code: AUDIENCE_CONFIG_ERROR,

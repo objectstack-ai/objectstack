@@ -24,6 +24,9 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import { AuthManager } from './auth-manager';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit.js';
 import {
   assertAudienceConfig,
@@ -337,6 +340,31 @@ describe('admission decision matrix (#11739): posture × creation class', () => 
       creationClass: 'self-serve',
     });
     expect(verdict).toEqual({ admit: true, grantPermissionSet: false });
+  });
+
+  // A sign-up the posture's own rule admits is admitted by that rule,
+  // invitation or not, and receives the declared set; one admitted by its
+  // invitation alone gets the account and no grant.
+  it.each([
+    ['email_domain', 'on the allowlist', 'colleague@acme.com', true, { admit: true, grantPermissionSet: true }],
+    ['email_domain', 'on the allowlist', 'colleague@acme.com', false, { admit: true, grantPermissionSet: true }],
+    ['email_domain', 'off the allowlist', 'contractor@external.com', true, { admit: true, grantPermissionSet: false }],
+    ['open', 'any address', 'anyone@external.com', true, { admit: true, grantPermissionSet: true }],
+    ['open', 'any address', 'anyone@external.com', false, { admit: true, grantPermissionSet: true }],
+    ['invite_only', 'any address', 'anyone@external.com', true, { admit: true, grantPermissionSet: false }],
+  ] as const)('%s, an address %s (%s), invited %s: %o', (posture, _where, email, invited, expected) => {
+    const verdict = decideAudienceAdmission({
+      ...base,
+      email,
+      hasPendingInvitation: invited,
+      audience: audience({
+        posture,
+        allowedEmailDomains: posture === 'email_domain' ? ['acme.com'] : [],
+        selfRegistrationPermissionSet: posture === 'invite_only' ? undefined : 'portal_user',
+      }),
+      creationClass: 'self-serve',
+    });
+    expect(verdict).toEqual(expected);
   });
 
   it('open admits self-serve with the grant', () => {
@@ -1165,6 +1193,8 @@ describe('a self-serve social creation under an address-based posture is admitte
       admit: true,
       grantPermissionSet: false,
     });
+    // On the allowlist, the verified creation is admitted by its domain, invitation or not.
+    expect(decide({ hasPendingInvitation: true, emailVerified: true })).toEqual({ admit: true, grantPermissionSet: true });
   });
 
   it('open: refused while email verification is in force (undeclared or declared true), an invitation included', () => {
