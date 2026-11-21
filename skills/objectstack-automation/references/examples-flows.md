@@ -1,6 +1,6 @@
 # Automation — flows, triggers and assignment rules
 
-A section titled `the rest` holds what its `SKILL.md` section does not say.
+A `the rest` section holds what its `SKILL.md` section does not say.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL

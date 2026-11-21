@@ -1,4 +1,4 @@
-# Data — object authoring: keys, examples, search, extensions
+# Data — object keys, examples, search, extensions
 
 ## Object keys
 

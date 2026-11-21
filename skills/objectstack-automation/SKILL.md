@@ -40,7 +40,7 @@ Open the file for what you are writing before you write it.
 
 | Authoring | Open first |
 |:--|:--|
-| A flow's `type` and variables, control-flow nodes, an installed package's flow | [examples-flows.md](./references/examples-flows.md) |
+| A flow's `type` and variables, control-flow nodes, an installed package's flow, and the rest of each section below | [examples-flows.md](./references/examples-flows.md) |
 | Triggers (record change, schedule, date sweep, inbound webhook), `requires` capabilities | [Triggers](./references/examples-flows.md#triggers--event-driven-automation) |
 | Routing a new record to a queue or a person | [Assignment rules](./references/examples-flows.md#assignment-rules) |
 | An approval, a send-back, an escalation, a state machine | [state-machines-and-approvals.md](./references/state-machines-and-approvals.md) — its state-introspection route is `GET /api/v1/meta/object/:name/state/:field?from=:state` |
@@ -57,7 +57,7 @@ lists `automation` and `triggers`.
 
 ### Flow Node Types
 
-Control flow, `approval` and every node's `config`:
+Control flow, `approval`, every node's `config`:
 [Flow Node Types](./references/examples-flows.md#flow-node-types).
 
 #### Data Operations
@@ -111,8 +111,8 @@ The node as JSON (TypeScript: the same literal, a `FlowNode`):
 - **Writing a `readonly` field? Set `runAs: 'system'`.** Under the default
   `runAs: 'user'` the engine **strips** it and the step succeeds. A button
   cannot start a `runAs: 'system'` `autolaunched`, `record_change` or
-  `schedule` flow (403): elevate the write, not the flow, through a
-  `subflow` node.
+  `schedule` flow: elevate the write, not the flow, through a `subflow`
+  node.
 - **Elevation stops at identity assignment**: a `runAs: 'system'` write of
   `sys_user_position`, `sys_user_permission_set`, `sys_invitation` or
   `sys_member` is refused `PERMISSION_DENIED`: grant from a `runAs: 'user'`
@@ -125,7 +125,7 @@ The node as JSON (TypeScript: the same literal, a `FlowNode`):
 ### Filter operands (`config.filter`)
 
 Each operand is a value slot, evaluated before the query; a whole-string query
-placeholder (`{current_user_id}`, `{today}`) passes through verbatim. **An
+placeholder (`{today}`) passes through verbatim. **An
 operand that evaluates to `null` refuses the node** (a dropped condition
 widens a query). Route around the node with a `decision`; to match an empty
 field, write the literal `null`. A computed operand is a value, never a query

@@ -335,7 +335,7 @@ switched off, or a disabled claimant.
 
 ## Access depth — `readScope` / `writeScope`
 
-The five values and the open-source boundary: SKILL.md § Access depth. A scope
+Beyond `SKILL.md` § Access depth: a scope
 widens the owner match declaratively instead of a hand-written RLS policy
 (ADR-0057 D1): it resolves at request time into an `owner_id IN (…)` set and
 AND-injects like RLS. The hierarchy-relative three are the open-core boundary

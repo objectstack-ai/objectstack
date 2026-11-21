@@ -660,7 +660,7 @@ export const CEILINGS = new Map([
   // went with it. The file is 27988 -> 28199 bytes (27968 -> 28179 priced); the row
   // moves +53, the measured remainder, pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(28179 / 4)
-  // 7045 -> 2241 (#34770, the entry file becomes a router; decision record 6943107981,
+  // 7045 -> 2243 (#34770, the entry file becomes a router; decision record 6943107981,
   // S3 = A, "a router-sized `SKILL.md` (6–9 KB, at most 500 lines)"): LOWERED. The entry
   // keeps four first checks, the routing table, the trigger-on-the-start-node rule, and the
   // seven sections the hosted door serves by exact heading, each cut to what fails silently:
@@ -672,10 +672,10 @@ export const CEILINGS = new Map([
   // remainder of each served section, Flow Variables, Triggers and Assignment rules ->
   // `references/examples-flows.md`; the inbound-webhook section and the platform-code list
   // of § Integrations -> `references/integration-recipes.md`. 28167 bytes (28147 priced) ->
-  // 8984 (8964 priced) -> 2241 tokens; the ceiling follows the file down to the measurement,
+  // 8990 (8970 priced) -> 2243 tokens; the ceiling follows the file down to the measurement,
   // the ratchet's ordinary direction, which also pins the 9 KB budget from here on.
-  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(8964 / 4)
-  ['skills/objectstack-automation/SKILL.md', 2241],
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(8970 / 4)
+  ['skills/objectstack-automation/SKILL.md', 2243],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -1402,16 +1402,16 @@ export const CEILINGS = new Map([
   // measurement. Same authority as the three rows above: cloud#3659 letter A
   // (ruling comment 6682024726); raise path 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068).
-  // 2761 -> 3429 (#34770): RECEIVES SKILL.md § Conditional Field Rules (the checked example
+  // 2761 -> 3439 (#34770): RECEIVES SKILL.md § Conditional Field Rules (the checked example
   // and its bullets) and the run-time half of § Verify your work (what a bare field ref does
   // in each predicate), no new teaching. PAID DOWN FIRST by restatement cut on the way in:
   // the invariant-or-transition-gate bullet is one line pointing at this file's own Script
   // Validation, Tool choice, which says the same; the `readonly: true` bullet keeps only
   // what the entry's bullet does not; the `visibleWhen` one-liner is gone. The file is 11031
-  // -> 13715 bytes (+2684) -> 3429 tokens, the row's 3 tokens of headroom absorbed, ceiling
-  // +668, pinned AT the measurement. Authority as the `references/examples-objects.md` row.
-  //   ceil($(wc -c < skills/objectstack-data/rules/validation.md) / 4) == ceil(13715 / 4)
-  ['skills/objectstack-data/rules/validation.md', 3429],
+  // -> 13754 bytes (+2723) -> 3439 tokens, the row's 3 tokens of headroom absorbed, ceiling
+  // +678, pinned AT the measurement. Authority as the `references/examples-objects.md` row.
+  //   ceil($(wc -c < skills/objectstack-data/rules/validation.md) / 4) == ceil(13754 / 4)
+  ['skills/objectstack-data/rules/validation.md', 3439],
 
   // objectstack-platform
   ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
@@ -1737,7 +1737,7 @@ export const CEILINGS = new Map([
   // each bound being a CEL envelope). 5957 -> 6170 bytes; the row moves +49, the
   // measured remainder, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(6170 / 4)
-  // 1543 -> 6640 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
+  // 1543 -> 6638 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
   // teaching: the CEL-envelope note, `## Flow Types`, `## A flow an installed package
   // ships`, `## Flow Node Types` (the Control Flow table whole; of the External Integration
   // rows only what the entry's rows no longer say), the remainder of § notify, § Failure
@@ -1748,16 +1748,16 @@ export const CEILINGS = new Map([
   // `### Time-relative triggers — scheduled per-record date sweep` among them. PAID DOWN
   // FIRST: each moved section was cut to the complement of its SKILL.md section before it
   // landed, so nothing is stated twice (the full-section copies measured 29784 bytes). The
-  // file is 6170 -> 26559 bytes (+20389) -> 6640 tokens, ceiling +5097, pinned AT the
-  // measurement; the three objectstack-automation files this change touches are 3027 bytes
-  // larger together (44699 -> 47726), the cost of the entry's first checks and routing
-  // table, and the nine files of both skills 34 bytes smaller.
+  // file is 6170 -> 26552 bytes (+20382) -> 6638 tokens, ceiling +5095, pinned AT the
+  // measurement; the three objectstack-automation files this change touches are 3026 bytes
+  // larger together (44699 -> 47725), the cost of the entry's first checks and routing
+  // table, and the nine files of both skills 7 bytes smaller.
   // Authority: the ruling of record that orders the entry file down to router size, decision
   // record 6943107981 S3 = A (this header: a ruling of record that orders text into a file
   // authorises its own measured delta), quoted in the PR body beside the standing 2026-10-27
   // ruling 「A:先削重复,余额按实测提高」 (record 6513306068); as the objectstack-ui rows of part 1.
-  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26559 / 4)
-  ['skills/objectstack-automation/references/examples-flows.md', 6640],
+  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26552 / 4)
+  ['skills/objectstack-automation/references/examples-flows.md', 6638],
   // NEW FILE (card #27223): one recipe per integration archetype — OpenAPI with
   // a static key, remote MCP with a static header, plain REST, the vendor
   // callback, a hand-written document for a spec-less vendor — plus the two
@@ -1911,7 +1911,7 @@ export const CEILINGS = new Map([
   // rename that dropped its intro line (-14) and left headroom, then the
   // review's module pointer paid by the custom-Page aside (the ui skill's
   // rule); the row follows the measurement down, zero headroom.
-  // 1728 -> 3344 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
+  // 1728 -> 3341 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
   // teaching: `## Object keys` (of the optional-properties table the rows the entry's
   // Object Definition no longer carries: `highlightFields`, `nameField`, `ownership`; of
   // the `enable` table `apiMethods`, `feeds`, `activities`, `aiReadable`),
@@ -1919,16 +1919,16 @@ export const CEILINGS = new Map([
   // carried over, each a row the contract `data/object.zod.ts` states and the section now
   // points at: `label`, `datasource`, `displayNameField`, `enable`, `fieldGroups`,
   // `lifecycle`, `trackHistory`, `searchable`, `apiEnabled`, `files`, `clone`; and
-  // `titleFormat`, which a save and `os validate` refuse by name. The file is 6894 -> 13373
-  // bytes (+6479) -> 3344 tokens, the row's 4 tokens of headroom absorbed, ceiling +1616,
-  // pinned AT the measurement; the six objectstack-data files this change touches are 3061
-  // bytes smaller together (91758 -> 88697).
+  // `titleFormat`, which a save and `os validate` refuse by name. The file is 6894 -> 13362
+  // bytes (+6468) -> 3341 tokens, the row's 4 tokens of headroom absorbed, ceiling +1613,
+  // pinned AT the measurement; the six objectstack-data files this change touches are 3033
+  // bytes smaller together (91758 -> 88725).
   // Authority: the ruling of record that orders the entry file down to router size, decision
   // record 6943107981 S3 = A (this header: a ruling of record that orders text into a file
   // authorises its own measured delta), quoted in the PR body beside the standing 2026-10-27
   // ruling 「A:先削重复,余额按实测提高」 (record 6513306068); as the objectstack-ui rows of part 1.
-  //   ceil($(wc -c < skills/objectstack-data/references/examples-objects.md) / 4) == ceil(13373 / 4)
-  ['skills/objectstack-data/references/examples-objects.md', 3344],
+  //   ceil($(wc -c < skills/objectstack-data/references/examples-objects.md) / 4) == ceil(13362 / 4)
+  ['skills/objectstack-data/references/examples-objects.md', 3341],
   // 970 -> 934: one row for `relationship/inline-edit-needs-bulk`, and the closing "target a
   // lint-clean model" paragraph cut — it restated the table's rows one by one. 3829 -> 3735
   // bytes -> ceil(3735 / 4) = 934; the row follows the measurement down, zero headroom.
