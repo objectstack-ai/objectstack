@@ -13,7 +13,7 @@ An OAuth token makes the request an agent acting on behalf of the person who con
 Now, on such a connection:
 
 - The token's scope still decides whether the docs tools are reached at all (`data:read`). A token without it is served neither tool, whatever the person holds.
-- The audience reads the person's own permission sets, resolved by the same grant resolution a request uses, in the organization the token's consent bound. A person who does not exist, or who holds no current membership in that organization, holds no set here, and permission-set manuals stay closed to them.
+- The audience reads the person's own permission sets, resolved by the same grant resolution a request uses, in the organization the request runs in: the one the token's consent bound, while the person's membership there is current. A person with no user row holds no set here. A person whose membership there has ended is read with no active organization, as their own session is, so no grant stored in an organization applies.
 - The token's own permission sets are never added to the person's: a manual whose audience is one of the token's scope sets stays closed unless the person holds it.
 - Manuals with the default audience answer as before. API keys, signed-in sessions and AI service accounts keep their own permission sets.
 
