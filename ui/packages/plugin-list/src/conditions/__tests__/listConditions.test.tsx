@@ -32,17 +32,26 @@ import {
 import { LIST_CONDITION_DEFAULT_TRANSLATIONS } from '../conditionTranslations';
 
 import { defaultQuickOperator, quickFilterOperators } from '../conditionModel';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { operatorsForField } from '@object-ui/components';
 import { en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
 import { parseFilterAST } from '@objectstack/spec/data';
 import { convertFilterGroupToAST } from '../../ListView';
 
-// The server's JSON-column refusal set, read from the module the server's
-// faces import it from. That module imports nothing, so it loads on its own.
-const REFUSAL_MODULE = new URL('../../../../../../packages/core/src/utils/json-column-operator-refusal.ts', import.meta.url);
-const { JSON_COLUMN_INCOMPATIBLE_OPERATORS } = (await import(REFUSAL_MODULE.href)) as {
-  JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string>;
-};
+// The server's JSON-column refusal set, read from the module every server face
+// imports it from (`@objectstack/core`, which no UI package depends on): the
+// string members of its `JSON_COLUMN_INCOMPATIBLE_OPERATORS` literal.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REFUSAL_SOURCE = readFileSync(
+  resolve(HERE, '../../../../../../packages/core/src/utils/json-column-operator-refusal.ts'),
+  'utf8',
+);
+const REFUSAL_LITERAL = /JSON_COLUMN_INCOMPATIBLE_OPERATORS[^=]*=\s*new Set\(\[([^\]]*)\]/.exec(REFUSAL_SOURCE)?.[1] ?? '';
+const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set(
+  [...REFUSAL_LITERAL.matchAll(/'([^']+)'/g)].map((m) => m[1]),
+);
 
 const STAGE: ConditionField = {
   value: 'stage',
@@ -444,6 +453,11 @@ describe('multi-value fields — the quick filter and the advanced panel offer o
     return ops;
   }
   const sample = (op: string) => (op === 'in' || op === 'not_in' ? ['quality_lead'] : 'quality_lead');
+
+  it('reads the refusal set it checks against (lit control: equals and in are in it, contains and the empty test are not)', () => {
+    for (const op of ['$eq', '$ne', '$in', '$nin', '$startsWith']) expect(JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op), op).toBe(true);
+    for (const op of ['$contains', '$notContains', '$empty', '$null']) expect(JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op), op).toBe(false);
+  });
 
   it('offers contains / not contains / is empty / is not empty on every multi-value field, contains first', () => {
     for (const field of MULTI_VALUE) {

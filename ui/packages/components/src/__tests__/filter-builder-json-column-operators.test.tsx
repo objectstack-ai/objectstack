@@ -121,7 +121,7 @@ describe('FilterBuilder — a multi-value row offers only what the server accept
   it('a single-value select keeps equals / in (CONTROL)', async () => {
     renderRow({ field: 'stage', operator: 'equals' });
     expect(await openOperatorList()).toEqual(
-      expect.arrayContaining(['Equals', 'Not equals', 'In', 'Not in', 'Is empty', 'Is not empty']),
+      ['Equals', 'Does not equal', 'Is empty', 'Is not empty', 'In', 'Not in'],
     );
   });
 
