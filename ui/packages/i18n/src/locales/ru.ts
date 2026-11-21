@@ -547,6 +547,9 @@ const ru = {
     cancelChanges: "Отменить изменения",
     saveRow: "Сохранить строку",
     cellReadOnly: "Эту ячейку нельзя изменить здесь.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "Введите число.",
+    cellInvalid: "Это значение недопустимо.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Сохранение…",
     cellSaved: "Сохранено",
@@ -685,7 +688,7 @@ const ru = {
       earliest: "Самая ранняя",
       latest: "Самая поздняя",
       pageName: "{{label}} (эта страница)",
-      calculate: "Вычислить",
+      calculate: "Добавить расчёт",
       none: "Нет",
       menuPercentEmpty: "Доля пустых",
       menuPercentFilled: "Доля заполненных",
@@ -2804,11 +2807,25 @@ const ru = {
       viewNameInvalid: "Используйте строчные латинские буквы, цифры и подчёркивания; начните с буквы или подчёркивания.",
       systemViewReadonly: "Системное представление определено в коде — только для чтения.",
       cannotEditMetaView: "Это встроенное представление, определённое в коде, — изменить его нельзя.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: "Вернуть настройки представления",
       resetViewTitle: "Возвращает собственные фильтры, поиск, сортировку, группировку, расположение столбцов, скрытые поля, плотность, макет, цвет строк, номера строк и встроенное редактирование этого представления. Закреплённые представления, избранное и способ открытия записей не меняются. Меняется только ваш список.",
-      linkFilterRefused: 'Фильтр из этой ссылки не применён: в нём есть поле, по которому здесь нельзя фильтровать, поэтому список показан по представлению без него.',
       personalized: "Настроено",
       personalizedHeading: "Ваш список отличается от представления",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "Отменить",
+        discardTitle: "Возвращает список к виду, заданному представлением: фильтры, сортировка, группировка, столбцы и макет. Ширина столбцов и высота строк сохраняются.",
+        save: "Сохранить",
+        heading: "Несохранённые изменения",
+        partSeparator: ", ",
+        saveToView: "Сохранить в это представление",
+        saveAsMyView: "Сохранить как моё представление",
+        copyName: "{{name}} (копия)",
+        saved: "Сохранено",
+      },
+      linkFilterRefused: 'Фильтр из этой ссылки не применён: в нём есть поле, по которому здесь нельзя фильтровать, поэтому список показан по представлению без него.',
       personalizedParts: {
         filters: "Фильтры",
         search: "Поиск",

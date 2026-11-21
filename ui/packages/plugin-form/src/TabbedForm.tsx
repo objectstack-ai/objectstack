@@ -13,7 +13,7 @@
  * Aligns with @objectstack/spec FormView type: 'tabbed'
  */
 
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { FormField, FormSchema, DataSource, ObjectFormSchema, ObjectFormSection } from '@object-ui/types';
 import { cn, toast } from '@object-ui/components';
 import { useLocalization } from '@object-ui/i18n';
@@ -270,6 +270,10 @@ export interface TabbedFormProps {
   dataSource?: DataSource;
   className?: string;
 }
+
+/** The refusal snapshot of a form no host places collections in. */
+const noSlotHostSubscribe = (): (() => void) => () => {};
+const noSlotRefusal = (): string => '';
 
 /**
  * TabbedForm Component
@@ -608,6 +612,14 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
     if (slotClaim === null || !slotHost) return;
     slotHost.claim(slotClaim ? slotClaim.split('\n') : []);
   }, [slotClaim, slotHost]);
+  // A save refused on a placed collection marks the tab that holds it, as a
+  // refused field marks its own tab: the slot rows are rebuilt when the
+  // host's refusal moves.
+  useSyncExternalStore(
+    slotHost ? slotHost.subscribe : noSlotHostSubscribe,
+    slotHost ? slotHost.refusedKey : noSlotRefusal,
+    slotHost ? slotHost.refusedKey : noSlotRefusal,
+  );
 
   // Generate tab value
   const getTabValue = (section: FormSectionConfig, index: number): string => {
