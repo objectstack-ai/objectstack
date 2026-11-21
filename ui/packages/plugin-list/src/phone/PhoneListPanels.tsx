@@ -335,11 +335,13 @@ function PhoneSortLevels({ fields, value, onChange, onChangeField }: {
   const { t } = useListConditionTranslation();
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = React.useState<{ from: number; over: number } | null>(null);
+  const handles = React.useRef(new Map<string, HTMLElement>());
   const move = (from: number, to: number) => {
     if (from === to || to < 0 || to >= value.length) return;
     const next = value.slice();
     next.splice(to, 0, ...next.splice(from, 1));
     onChange(next);
+    return value[from].id;
   };
   // The level under the finger: the first whose middle is below it.
   const indexAt = (clientY: number) => {
@@ -365,6 +367,10 @@ function PhoneSortLevels({ fields, value, onChange, onChangeField }: {
             data-testid="sort-builder-row"
           >
             <span
+              ref={(node) => {
+                if (node) handles.current.set(item.id, node);
+                else handles.current.delete(item.id);
+              }}
               role="button"
               tabIndex={value.length > 1 ? 0 : -1}
               aria-disabled={value.length < 2 || undefined}
@@ -397,7 +403,9 @@ function PhoneSortLevels({ fields, value, onChange, onChangeField }: {
                 const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null;
                 if (to === null) return;
                 event.preventDefault();
-                move(index, to);
+                const moved = move(index, to);
+                // The handle keeps focus at the level's new place.
+                if (moved) requestAnimationFrame(() => handles.current.get(moved)?.focus());
               }}
               data-testid="sort-builder-handle"
             >

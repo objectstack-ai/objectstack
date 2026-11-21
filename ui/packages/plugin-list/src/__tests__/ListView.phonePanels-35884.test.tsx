@@ -299,4 +299,30 @@ describe('the phone sort levels (objectstack#35884)', () => {
     await waitFor(() => expect(onSortChange).toHaveBeenCalledTimes(1));
     expect(onSortChange.mock.calls[0][0].map((level: { field: string }) => level.field)).toEqual(['stage', 'name']);
   });
+
+  it('ArrowDown on a handle moves its level and the handle keeps focus, so ArrowUp from it moves it back', async () => {
+    mount();
+    await screen.findByTestId('grid-stub');
+    await addSortLevel('name');
+    fireEvent.click(screen.getByTestId('sort-builder-add'));
+    fireEvent.click(await screen.findByTestId('phone-sort-add-fields-item-stage'));
+    await waitFor(() => expect(screen.getAllByTestId('sort-builder-row')).toHaveLength(2));
+    const fields = () => screen.getAllByTestId('sort-builder-row-field').map((el) => el.textContent);
+    const handleOf = (i: number) => within(screen.getAllByTestId('sort-builder-row')[i]).getByTestId('sort-builder-handle');
+
+    // A browser drops focus from a node React moves; jsdom keeps it, so the
+    // test drops it by hand, as the browser would, right after the move.
+    const pressOn = (handle: HTMLElement, key: string) => {
+      fireEvent.keyDown(handle, { key });
+      handle.blur();
+    };
+    handleOf(0).focus();
+    pressOn(handleOf(0), 'ArrowDown');
+    expect(fields()).toEqual(['Stage', 'Name']);
+    await waitFor(() => expect(handleOf(1)).toHaveFocus());
+
+    pressOn(document.activeElement as HTMLElement, 'ArrowUp');
+    expect(fields()).toEqual(['Name', 'Stage']);
+    await waitFor(() => expect(handleOf(0)).toHaveFocus());
+  });
 });
