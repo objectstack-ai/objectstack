@@ -108,18 +108,17 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   before.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
-  **Temporary, until objectstack-ai/cloud#3826 item 6 (real human confirmation):** a
-  `pending_confirmation` operation is also met when the agent applied it through the action's
-  confirmation gate on the person's explicit instruction — the ask names the target row, read
-  off the card (`askNamesTarget`); the write went through `run_action`, never a raw data door;
-  the build declares `ai.requiresConfirmation: true` on that action; the call carried
-  `confirm: true`; and the rows written on the object are exactly the target, holding the
-  declared `values` (gone, for a `delete`). The grade says which way it went
-  (`OperationGrade.confirmation`: `asked first` or `confirmed by the agent`), and the scorecard
-  counts both per half and per card. The switch is `AGENT_CONFIRMATION_MEETS_PENDING` and the
-  rule is `agentConfirmationChecks`: set the switch to `false` to grade strictly again, or delete
-  both when the platform confirms for real. It stays as it is beside the confirmed write below:
-  an agent that wrote on the first turn gets no second one.
+  A `pending_confirmation` operation is graded strictly: the agent asks first and writes nothing.
+  The temporary relaxation that also met it by a write the agent applied through the action's
+  confirmation gate on an ask naming the target (`agentConfirmationChecks`) is off: real human
+  confirmation is on the platform (objectstack-ai/cloud#3826 item 6), so its switch
+  `AGENT_CONFIRMATION_MEETS_PENDING` is `false`. Its names (`AGENT_CONFIRMATION_MEETS_PENDING`,
+  `confirmedByAgent`, `AgentConfirmedObservation`, `AgentConfirmationRule`,
+  `OperationObservation.agentConfirmed`, `GradeOperationOptions.agentConfirmation` and
+  `acceptAgentConfirmation`, `actionGatesOf`, `ConfirmationTally.confirmedByAgent`) are deprecated
+  and deleted in the next major; until then a grade opts back in with `acceptAgentConfirmation:
+  true`, and its `confirmed by the agent` count reads 0 otherwise. `askNamesTarget` and
+  `asked first` stay: the confirmation turn below reads them.
   **The confirmed write** (`gradeConfirmedWrite`): a `pending_confirmation` operation the agent
   met by asking first gets a second turn in which the person confirms, and that turn is graded on
   its own against the operation's declared write — `confirmed-write:applied` (the door applied a
