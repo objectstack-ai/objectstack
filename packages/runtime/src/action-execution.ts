@@ -121,7 +121,7 @@ import {
     type PackageScopedRefusal,
     type PackageScopedRegistry,
 } from '@objectstack/objectql';
-import { earnedAnswerOf, resolveQueryReadLimits, staleSummaryRefusalOrThrow, withEarnedAnswer, type QueryReadLimits, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [#28861] A landed write answers its success to the action handler's code.
 import { answerLandedWritesDespiteStaleSummary, landedWriteAnswer } from './landed-write-answer.js';
 
@@ -205,6 +205,17 @@ export function systemObjectActionExposureError(_deps: ActionExecutionDeps, acti
 }
 
 /**
+ * Is `key` one leading underscore away from a built-in action param
+ * (`ACTION_PARAM_BUILTIN_KEYS`) without being one: `selectedIds`, `__selectedIds`,
+ * `_recordId`, `_objectName`? The same one-byte distance the contract's rejection message
+ * names the built-in at (`validateActionParams`).
+ */
+function isBuiltinParamNearMiss(key: string): boolean {
+    if (ACTION_PARAM_BUILTIN_KEYS.includes(key)) return false;
+    return ACTION_PARAM_BUILTIN_KEYS.includes(`_${key}`) || ACTION_PARAM_BUILTIN_KEYS.includes(key.replace(/^_/, ''));
+}
+
+/**
  * Escape hatch: accept param bags that violate the declared contract, the way
  * the pre-17 dispatcher did (ADR-0104 D2, 2026-07-30 addendum).
  *
@@ -216,17 +227,6 @@ export function systemObjectActionExposureError(_deps: ActionExecutionDeps, acti
  * Spelled `OS_ALLOW_*` per Prime Directive #9 and ADR-0110 D6: an opt-OUT of a
  * check that ships on, never an opt-IN to a check that ships off.
  */
-/**
- * Is `key` one leading underscore away from a built-in action param
- * (`ACTION_PARAM_BUILTIN_KEYS`) without being one: `selectedIds`, `_recordId`,
- * `_objectName`? The same one-byte distance the contract's rejection message
- * names the built-in at (`validateActionParams`).
- */
-function isBuiltinParamNearMiss(key: string): boolean {
-    if (ACTION_PARAM_BUILTIN_KEYS.includes(key)) return false;
-    return ACTION_PARAM_BUILTIN_KEYS.includes(`_${key}`) || ACTION_PARAM_BUILTIN_KEYS.includes(key.replace(/^_/, ''));
-}
-
 function laxActionParams(): boolean {
     return typeof process !== 'undefined' && process.env?.OS_ALLOW_LAX_ACTION_PARAMS === '1';
 }
@@ -4711,8 +4711,8 @@ export const ACTION_SELECTION_PARAM = '_selectedIds';
  */
 export const ACTION_SELECTION_CAP = 5000;
 
-/** How many ids one read of a selection asks for, before the deployment's read limits. */
-const ACTION_SELECTION_READ_CHUNK = 500;
+/** How many ids of a selection are read at once. */
+const ACTION_SELECTION_READ_WINDOW = 16;
 
 /**
  * What {@link loadActionSelectionRecords} answers: whether the caller's own
@@ -4764,44 +4764,29 @@ export function actionSelectionIdsOrRefuse(objectName: string, params: Record<st
 }
 
 /**
- * Read a selection IN THE CALLER'S OWN SCOPE, as {@link loadActionSubjectRecord}
- * reads a `recordId`: the distinct ids, in chunks, through `find` (the door's
- * caller-scope read), each chunk asking for `id` only and naming its own
- * `limit`. The chunk is the smaller of {@link ACTION_SELECTION_READ_CHUNK} and
- * the deployment's maximum page size and row budget, so the read itself is
- * never refused for its size.
+ * Read a selection IN THE CALLER'S OWN SCOPE, with the per-record door's own
+ * read: every distinct id through {@link loadActionSubjectRecord} and
+ * `readRecord` (the door's caller-scope `get` of one row of `objectName`), a
+ * few at a time. So an id is delivered here exactly when the per-record door
+ * would deliver it as its subject: a selection is never refused where each of
+ * its rows would be read one by one, and never admitted where one would not.
  *
  * One id the read does not deliver denies the whole selection — ⛔ ids are
- * never dropped. A read that throws, or answers no row list, delivered
- * nothing: a hidden row, an id that names nothing and a read the caller is
- * refused are one answer here, as they are at the per-record door.
+ * never dropped. A hidden row, an id that names nothing and a read the caller
+ * is refused are one answer here, as they are at the per-record door; the
+ * verdict names the first such id in the order the call sent them.
  */
 export async function loadActionSelectionRecords(
+    objectName: string,
     ids: readonly string[],
-    find: (chunk: string[]) => Promise<unknown>,
-    limits?: QueryReadLimits,
+    readRecord: (recordId: string) => Promise<unknown>,
 ): Promise<ActionSelectionLoad> {
     const distinct = [...new Set(ids)];
-    if (distinct.length === 0) return { selectionLoadDenied: false };
-    let size = ACTION_SELECTION_READ_CHUNK;
-    try {
-        const read = limits ?? resolveQueryReadLimits();
-        size = Math.min(size, read.maxPageSize ?? size, read.rowBudget ?? size);
-    } catch {
-        return { selectionLoadDenied: true, undelivered: distinct[0] };
-    }
-    for (let i = 0; i < distinct.length; i += size) {
-        const chunk = distinct.slice(i, i + size);
-        let rows: unknown;
-        try {
-            const got: any = await find(chunk);
-            rows = Array.isArray(got) ? got : got?.records;
-        } catch {
-            return { selectionLoadDenied: true, undelivered: chunk[0] };
-        }
-        if (!Array.isArray(rows)) return { selectionLoadDenied: true, undelivered: chunk[0] };
-        const delivered = new Set(rows.map((row: any) => String(row?.id)));
-        const missing = chunk.find((id) => !delivered.has(id));
+    for (let i = 0; i < distinct.length; i += ACTION_SELECTION_READ_WINDOW) {
+        const window = distinct.slice(i, i + ACTION_SELECTION_READ_WINDOW);
+        const loads = await Promise.all(window.map((recordId) =>
+            loadActionSubjectRecord(objectName, recordId, () => readRecord(recordId))));
+        const missing = window.find((_, at) => loads[at].recordLoadDenied);
         if (missing !== undefined) return { selectionLoadDenied: true, undelivered: missing };
     }
     return { selectionLoadDenied: false };

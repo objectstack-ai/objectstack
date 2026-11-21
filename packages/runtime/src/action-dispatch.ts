@@ -691,13 +691,11 @@ async function admitResolvedAction(
     // CALLER's own scope delivered the row (commit f19475c0a).
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         wiring.callData('get', { object: objectName, id: recordId }, wiring.driver, wiring.envId, wiring.ec));
-    // …and its selection the same way, in the caller's own scope: one batched
-    // read, whose verdict the dispatch consumes as the subject load's.
+    // …and each id of its selection the same way, with the same read, in the
+    // caller's own scope; the dispatch consumes the verdict as the subject load's.
     const selection = selectionIds !== undefined && selectionIds.length > 0
-        ? await actionExec.loadActionSelectionRecords(selectionIds, (chunk) => wiring.callData('find', {
-            object: objectName,
-            query: { where: { id: { $in: chunk } }, fields: ['id'], limit: chunk.length },
-        }, wiring.driver, wiring.envId, wiring.ec))
+        ? await actionExec.loadActionSelectionRecords(objectName, selectionIds, (id) =>
+            wiring.callData('get', { object: objectName, id }, wiring.driver, wiring.envId, wiring.ec))
         : undefined;
     return {
         actionDef, actionType, recordId, params, subject, handOff,

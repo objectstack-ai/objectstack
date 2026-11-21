@@ -152,9 +152,7 @@ function makeQl() {
             if (object !== OBJECT) return [];
             const caller = options?.context?.userId;
             const wanted = options?.filters?.[0]?.[2] ?? options?.where?.id;
-            // A selection's batched read asks `{ id: { $in: [...] } }`.
-            const among: unknown[] | undefined = Array.isArray(wanted?.$in) ? wanted.$in : undefined;
-            if (among ? !among.includes(RECORD_ID) : wanted !== undefined && wanted !== RECORD_ID) return [];
+            if (wanted !== undefined && wanted !== RECORD_ID) return [];
             return caller === OWNER ? [{ id: RECORD_ID, status: 'open', owner_id: OWNER }] : [];
         }),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
@@ -552,8 +550,8 @@ describe('a selection is read in the caller\'s scope, on the flow arm and the sc
     it('an empty selection reads nothing and refuses nothing', async () => {
         const { response, ql } = await rest(STRANGER, `/${OBJECT}/close_case`, { params: { _selectedIds: [] } });
         expect(response.status).toBe(200);
-        const selectionReads = ql.find.mock.calls.filter(([, options]: any[]) => options?.where?.id?.$in !== undefined);
-        expect(selectionReads).toEqual([]);
+        const reads = ql.find.mock.calls.filter(([object]: any[]) => object === OBJECT);
+        expect(reads).toEqual([]);
     });
 });
 
@@ -570,31 +568,29 @@ describe('which arms read a selection', () => {
 });
 
 describe('the selection read', () => {
-    const rowsOf = (delivered: ReadonlySet<string>) => vi.fn(async (chunk: string[]) => ({ records: chunk.filter((id) => delivered.has(id)).map((id) => ({ id })) }));
+    /** The per-record door's read of one row: delivered for the ids in `readable`, `{ record: undefined }` otherwise. */
+    const readOf = (readable: ReadonlySet<string>) => vi.fn(async (id: string) => ({ record: readable.has(id) ? { id } : undefined }));
 
-    it('reads each distinct id once, in chunks no larger than the deployment allows, and delivers when every id is read', async () => {
-        const ids = Array.from({ length: 25 }, (_, i) => `r${i}`);
-        const find = rowsOf(new Set(ids));
-        const load = await loadActionSelectionRecords([...ids, ...ids], find, { maxPageSize: 10, rowBudget: 8 });
-        expect(load).toEqual({ selectionLoadDenied: false });
-        expect(find.mock.calls.map(([chunk]) => chunk.length)).toEqual([8, 8, 8, 1]);
+    it('reads each distinct id once, with the per-record door\'s read, and delivers when every id is read', async () => {
+        const ids = Array.from({ length: 40 }, (_, i) => `r${i}`);
+        const read = readOf(new Set(ids));
+        expect(await loadActionSelectionRecords(OBJECT, [...ids, ...ids], read)).toEqual({ selectionLoadDenied: false });
+        expect(read.mock.calls.map(([id]) => id).sort()).toEqual([...ids].sort());
     });
 
-    it('one id the read does not deliver denies the whole selection, naming it', async () => {
-        const find = rowsOf(new Set(['a', 'c']));
-        expect(await loadActionSelectionRecords(['a', 'b', 'c'], find, {})).toEqual({ selectionLoadDenied: true, undelivered: 'b' });
+    it('one id the read does not deliver denies the whole selection, naming the first in the order sent', async () => {
+        const read = readOf(new Set(['a', 'd']));
+        expect(await loadActionSelectionRecords(OBJECT, ['a', 'c', 'b', 'd'], read)).toEqual({ selectionLoadDenied: true, undelivered: 'c' });
     });
 
-    it('a read that throws, or answers no row list, delivered nothing', async () => {
+    it('a read that throws delivered nothing', async () => {
         const thrown = vi.fn(async () => { throw Object.assign(new Error('no access'), { status: 403 }); });
-        expect(await loadActionSelectionRecords(['a'], thrown, {})).toEqual({ selectionLoadDenied: true, undelivered: 'a' });
-        const shapeless = vi.fn(async () => ({ total: 1 }));
-        expect(await loadActionSelectionRecords(['a'], shapeless, {})).toEqual({ selectionLoadDenied: true, undelivered: 'a' });
+        expect(await loadActionSelectionRecords(OBJECT, ['a'], thrown)).toEqual({ selectionLoadDenied: true, undelivered: 'a' });
     });
 
     it('an empty selection asks nothing', async () => {
-        const find = rowsOf(new Set());
-        expect(await loadActionSelectionRecords([], find, {})).toEqual({ selectionLoadDenied: false });
-        expect(find).not.toHaveBeenCalled();
+        const read = readOf(new Set());
+        expect(await loadActionSelectionRecords(OBJECT, [], read)).toEqual({ selectionLoadDenied: false });
+        expect(read).not.toHaveBeenCalled();
     });
 });

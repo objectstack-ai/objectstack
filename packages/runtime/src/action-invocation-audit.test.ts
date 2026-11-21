@@ -467,13 +467,13 @@ describe('[#34292] an aggregate bulk call\'s row records the per-row counts its 
     const PARTIAL = { succeeded: ['l1'], failed: [{ id: 'l2', message: 'Locked.' }] };
 
     /**
-     * The selected rows exist and the caller reads them: the door reads a
-     * selection in the caller's scope before it runs (`{ id: { $in } }`).
+     * The selected rows exist and the caller reads them: the door reads each
+     * id of a selection in the caller's scope before it runs.
      */
     function deliverSelection(rig: ReturnType<typeof makeRig>): void {
         const byId = rig.ql.find.getMockImplementation();
-        rig.ql.find.mockImplementation(async (object: string, q: any) => (Array.isArray(q?.where?.id?.$in)
-            ? q.where.id.$in.filter((id: string) => SELECTED.includes(id)).map((id: string) => ({ id }))
+        rig.ql.find.mockImplementation(async (object: string, q: any) => (SELECTED.includes(q?.where?.id)
+            ? [{ id: q.where.id }]
             : byId?.(object, q)));
     }
 

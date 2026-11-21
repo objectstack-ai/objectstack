@@ -21,11 +21,12 @@
  *
  *  1. a row the caller's sharing scope hides (same organization) → `404`, and
  *     the row is left as it was;
- *  2. a row of another organization, asked by a caller WITH an active
- *     organization → `404`, row untouched;
- *  3. a row of another organization, asked by a signed-in caller with NO
- *     active organization → `404`, row untouched;
- *  4. the readable control: the caller's own rows are written, `200`;
+ *  2. a row of another organization, and another member's row, for each of
+ *     the file's callers → `404`, rows untouched;
+ *  3. the readable control: the caller's own rows are written, `200`;
+ *  4. the read is the per-record door's own: rows the caller reads one by one
+ *     are not refused as a selection, on an object whose list operation is
+ *     not exposed;
  *  5. the selection's shape: not a list of ids, or more than the cap → `400`;
  *  6. a near-miss spelling of a built-in on a param-less action → `400`.
  *
@@ -56,6 +57,8 @@ const ORIGIN = 'http://localhost:3000';
 const API = '/api/v1';
 const OBJECT = 'pin_ticket';
 const ACTION = 'pin_close_selected';
+/** The same action on an object whose API exposes `get` but not `list`. */
+const GET_ONLY_OBJECT = 'pin_ticket_get_only';
 const ORG_A = 'org_pin_sel_a';
 const ORG_B = 'org_pin_sel_b';
 
@@ -66,9 +69,30 @@ const CALLERS: Record<Caller, { email: string; password: string }> = {
   dave: { email: 'pin-sel-dave@example.invalid', password: 'Davey-Pass-123' },
 };
 
+const SELECTION_ACTION = {
+  name: ACTION,
+  label: 'Close selected',
+  type: 'script',
+  target: ACTION,
+  locations: ['list_toolbar'],
+  execution: 'aggregate',
+  ai: { exposed: true, description: 'Close every selected ticket in one call.' },
+};
+
 const PIN_APP: any = {
   manifest: { id: 'com.pin.actionSelectionCallerScope', name: 'Action selection caller-scope pins', version: '1.0.0' },
   objects: [
+    {
+      name: GET_ONLY_OBJECT,
+      label: 'Pin ticket (get only)',
+      sharingModel: 'private',
+      enable: { apiMethods: ['get', 'create', 'update', 'delete'] },
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        status: { type: 'text', label: 'Status' },
+      },
+      actions: [{ ...SELECTION_ACTION }],
+    },
     {
       name: OBJECT,
       label: 'Pin ticket',
@@ -78,17 +102,7 @@ const PIN_APP: any = {
         name: { type: 'text', label: 'Name' },
         status: { type: 'text', label: 'Status' },
       },
-      actions: [
-        {
-          name: ACTION,
-          label: 'Close selected',
-          type: 'script',
-          target: ACTION,
-          locations: ['list_toolbar'],
-          execution: 'aggregate',
-          ai: { exposed: true, description: 'Close every selected ticket in one call.' },
-        },
-      ],
+      actions: [{ ...SELECTION_ACTION }],
     },
   ],
   permissions: [
@@ -96,7 +110,10 @@ const PIN_APP: any = {
       name: 'pin_sel_member_default',
       label: 'Pin member default',
       isDefault: true,
-      objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true } },
+      objects: {
+        [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true },
+        [GET_ONLY_OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true },
+      },
     },
   ],
 };
@@ -129,10 +146,10 @@ function bridgeProbeMcpPlugin(): Plugin {
     init: async (ctx: PluginContext) => {
       ctx.registerService('mcp', {
         handleHttpRequest: async (_req: Request, opts: { bridge: any; parsedBody: any }) => {
-          const { params } = opts.parsedBody ?? {};
+          const { params, object } = opts.parsedBody ?? {};
           let answer: Record<string, unknown>;
           try {
-            await opts.bridge.runAction(ACTION, { objectName: OBJECT, params });
+            await opts.bridge.runAction(ACTION, { objectName: object ?? OBJECT, params });
             answer = { status: 200 };
           } catch (err: any) {
             answer = { status: err?.status ?? err?.statusCode, code: err?.code, message: err?.message };
@@ -151,10 +168,13 @@ let app: any;
 let engine: any;
 let prevNodeEnv: string | undefined;
 const tokens: Record<Caller, string> = { alice: '', bob: '', dave: '' };
+/** The organization each caller's session holds, as the fixture sets it. */
+const ACTIVE: Record<Caller, string | null> = { alice: ORG_A, bob: ORG_A, dave: null };
 const userIds: Record<Caller, string> = { alice: '', bob: '', dave: '' };
 /** Every id the handler was handed, per call, in order. */
 const handed: unknown[][] = [];
 
+const getOnlyRows = ['tkt_pin_sel_get_only_1', 'tkt_pin_sel_get_only_2'] as const;
 const row = { aliceA: 'tkt_pin_sel_alice_a', bobA: 'tkt_pin_sel_bob_a', bobA2: 'tkt_pin_sel_bob_a2', otherB: 'tkt_pin_sel_other_b' } as const;
 
 type Door = 'REST' | 'MCP';
@@ -186,14 +206,14 @@ async function readJson(res: Response): Promise<any> {
 const codeOf = (payload: any): unknown => payload?.error?.code ?? payload?.code;
 
 /** Knock on `door` once as `caller` with this params bag. */
-async function knock(door: Door, caller: Caller, params: Record<string, unknown>): Promise<Answer> {
+async function knock(door: Door, caller: Caller, params: Record<string, unknown>, object = OBJECT): Promise<Answer> {
   const token = tokens[caller];
   if (door === 'REST') {
-    const res = await as(token, 'POST', `/actions/${OBJECT}/${ACTION}`, { params });
+    const res = await as(token, 'POST', `/actions/${object}/${ACTION}`, { params });
     const body = await readJson(res);
     return { status: res.status, ...(res.status >= 400 ? { code: codeOf(body) } : {}), body };
   }
-  const res = await as(token, 'POST', '/mcp', { params });
+  const res = await as(token, 'POST', '/mcp', { params, object });
   const body = await readJson(res);
   expect(res.status, `the /mcp route itself answered ${res.status}: ${JSON.stringify(body)}`).toBe(200);
   return { status: body.status, ...(body.status >= 400 ? { code: body.code } : {}), body };
@@ -253,12 +273,14 @@ beforeAll(async () => {
   app = httpServer.getRawApp();
   engine = await kernel.getServiceAsync('objectql');
 
-  engine.registerAction(OBJECT, ACTION, async (ctx: any) => {
-    const ids = Array.isArray(ctx.params?._selectedIds) ? ctx.params._selectedIds : [];
-    handed.push([...ids]);
-    for (const id of ids) await ctx.engine.update(OBJECT, String(id), { status: 'closed' });
-    return { closed: ids.length };
-  });
+  for (const object of [OBJECT, GET_ONLY_OBJECT]) {
+    engine.registerAction(object, ACTION, async (ctx: any) => {
+      const ids = Array.isArray(ctx.params?._selectedIds) ? ctx.params._selectedIds : [];
+      handed.push([...ids]);
+      for (const id of ids) await ctx.engine.update(object, String(id), { status: 'closed' });
+      return { closed: ids.length };
+    });
+  }
 
   for (const org of [ORG_A, ORG_B]) await engine.insert('sys_organization', { id: org, name: org, slug: org }, sys);
 
@@ -269,8 +291,7 @@ beforeAll(async () => {
     if (!user?.id) throw new Error(`pin precondition: ${caller} was not provisioned`);
     userIds[caller] = String(user.id);
     await engine.insert('sys_member', { organization_id: ORG_A, user_id: user.id, role: 'member' }, sys);
-    // alice and bob hold ORG_A active; dave is signed in with no active organization.
-    const active = caller === 'dave' ? null : ORG_A;
+    const active = ACTIVE[caller];
     const sessions = await engine.find('sys_session', { where: { user_id: user.id }, ...sys });
     for (const s of sessions ?? []) {
       await engine.update('sys_session', { active_organization_id: active }, { where: { id: s.id }, ...sys });
@@ -284,6 +305,9 @@ beforeAll(async () => {
     { id: row.otherB, name: 'someone in B', owner_id: userIds.alice, organization_id: ORG_B },
   ];
   for (const r of seed) await engine.insert(OBJECT, { ...r, status: 'open' }, sys);
+  for (const id of getOnlyRows) {
+    await engine.insert(GET_ONLY_OBJECT, { id, name: id, status: 'open', owner_id: userIds.bob, organization_id: ORG_A }, sys);
+  }
 }, BOOT_TIMEOUT);
 
 afterAll(async () => {
@@ -303,7 +327,7 @@ describe('preconditions: the read door draws the three walls this file relies on
     }
   });
 
-  it('dave, signed in with no active organization, reads none of the rows', async () => {
+  it('dave reads none of the rows', async () => {
     for (const id of Object.values(row)) {
       const res = await as(tokens.dave, 'GET', `/data/${OBJECT}/${id}`);
       expect(res.status, id).toBe(404);
@@ -318,8 +342,8 @@ describe('a selection is read in the caller\'s scope before the action runs', ()
     { title: 'a row the caller\'s sharing scope hides', caller: 'bob', ids: [row.aliceA], untouched: [row.aliceA] },
     { title: 'a hidden row beside the caller\'s own: the whole call, never a partial one', caller: 'bob', ids: [row.bobA, row.aliceA], untouched: [row.bobA, row.aliceA] },
     { title: 'a row of another organization', caller: 'bob', ids: [row.otherB], untouched: [row.otherB] },
-    { title: 'a row of another organization, asked with no active organization', caller: 'dave', ids: [row.otherB], untouched: [row.otherB] },
-    { title: 'a row of the caller\'s organization, asked with no active organization', caller: 'dave', ids: [row.bobA], untouched: [row.bobA] },
+    { title: 'a row of another organization (second caller)', caller: 'dave', ids: [row.otherB], untouched: [row.otherB] },
+    { title: 'another member\'s row (second caller)', caller: 'dave', ids: [row.bobA], untouched: [row.bobA] },
     { title: 'an id that names nothing', caller: 'bob', ids: ['tkt_pin_sel_no_such_row'], untouched: [] },
   ];
   for (const door of DOORS) {
@@ -353,6 +377,22 @@ describe('a selection is read in the caller\'s scope before the action runs', ()
   }
 });
 
+describe('the selection read is the per-record door\'s own read', () => {
+  for (const door of DOORS) {
+    it(`${door}: rows the caller reads one by one are not refused as a selection where the list operation is not exposed`, async () => {
+      for (const id of getOnlyRows) {
+        await engine.update(GET_ONLY_OBJECT, { status: 'open' }, { where: { id }, ...sys });
+        expect((await as(tokens.bob, 'GET', `/data/${GET_ONLY_OBJECT}/${id}`)).status, `bob reads ${id} by id`).toBe(200);
+      }
+      const a = await knock(door, 'bob', { _selectedIds: [...getOnlyRows] }, GET_ONLY_OBJECT);
+      expect(a.status, JSON.stringify(a.body)).toBe(200);
+      for (const id of getOnlyRows) {
+        expect((await engine.findOne(GET_ONLY_OBJECT, { where: { id }, ...sys }))?.status).toBe('closed');
+      }
+    });
+  }
+});
+
 describe('the selection\'s shape', () => {
   const shapes: ReadonlyArray<{ title: string; value: unknown }> = [
     { title: 'one id, not a list', value: row.bobA },
@@ -381,7 +421,7 @@ describe('the selection\'s shape', () => {
 
 describe('a near-miss spelling of a built-in on a param-less action', () => {
   for (const door of DOORS) {
-    for (const key of ['selectedIds', '_recordId', '_objectName']) {
+    for (const key of ['selectedIds', '__selectedIds', '_recordId', '_objectName']) {
       it(`${door}: \`${key}\` → 400, nothing runs`, async () => {
         await resetRows();
         const before = handed.length;

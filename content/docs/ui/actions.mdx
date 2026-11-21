@@ -661,14 +661,17 @@ default for a row-scoped action on a `private` object is to refuse.
 
 **A selection is read the same way.** A record-less call that carries
 `params._selectedIds` (an aggregate bulk dispatch) has every id in it read in
-the caller's own scope before the action runs — one batched read of `id` only.
+the caller's own scope before the action runs, as a row of the object the
+action is called on, with the same read the per-record door makes for its
+`recordId`.
 If any id does not come back, the **whole call** is refused with
 `404 RECORD_NOT_FOUND`, the per-record door's own answer; no id is dropped, the
 body or flow never starts, and nothing is written. The selection must be a list
 of record ids (strings or numbers), at most 5000 of them, on an action called on
 an object; anything else is refused `400 VALIDATION_FAILED`. So
-`ctx.params._selectedIds` only ever holds rows this caller can read — your body
-still decides what it may *do* to them.
+`ctx.params._selectedIds` only ever holds ids of rows **of the action's object**
+that this caller can read. Nothing is said about those ids as rows of any other
+object, and your body still decides what it may *do* to them.
 
 Three kinds of call are not read, because none of them builds an elevated
 context on the ids: a declarative `operation: 'update'` action (it writes as the
@@ -676,7 +679,8 @@ caller), a `type: 'api'` action (its target authorizes the caller itself), and a
 call made as the system principal.
 
 A param-less action keeps passing its custom keys through to the handler, except
-a near-miss spelling of a built-in — `selectedIds`, `_recordId`, `_objectName` —
+a near-miss spelling of a built-in — `selectedIds`, `__selectedIds`, `_recordId`,
+`_objectName` —
 which is refused `400` naming the built-in it meant, so a selection only ever
 arrives under the key the platform reads.
 

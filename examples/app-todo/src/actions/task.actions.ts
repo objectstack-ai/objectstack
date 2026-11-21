@@ -131,7 +131,7 @@ export const MassCompleteTasksAction = defineAction({
   refreshAfter: true,
   ai: {
     exposed: true,
-    description: 'Mark all currently selected todo tasks as complete in one bulk operation.',
+    description: 'Mark a todo task as complete; a list selection runs it once for each selected task.',
   },
 });
 
