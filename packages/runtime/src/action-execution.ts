@@ -15,7 +15,7 @@
  * here; that stays with the route handlers.
  */
 
-import { validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { ACTION_PARAM_BUILTIN_KEYS, validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
 import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
@@ -121,7 +121,7 @@ import {
     type PackageScopedRefusal,
     type PackageScopedRegistry,
 } from '@objectstack/objectql';
-import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, resolveQueryReadLimits, staleSummaryRefusalOrThrow, withEarnedAnswer, type QueryReadLimits, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [#28861] A landed write answers its success to the action handler's code.
 import { answerLandedWritesDespiteStaleSummary, landedWriteAnswer } from './landed-write-answer.js';
 
@@ -216,6 +216,17 @@ export function systemObjectActionExposureError(_deps: ActionExecutionDeps, acti
  * Spelled `OS_ALLOW_*` per Prime Directive #9 and ADR-0110 D6: an opt-OUT of a
  * check that ships on, never an opt-IN to a check that ships off.
  */
+/**
+ * Is `key` one leading underscore away from a built-in action param
+ * (`ACTION_PARAM_BUILTIN_KEYS`) without being one: `selectedIds`, `_recordId`,
+ * `_objectName`? The same one-byte distance the contract's rejection message
+ * names the built-in at (`validateActionParams`).
+ */
+function isBuiltinParamNearMiss(key: string): boolean {
+    if (ACTION_PARAM_BUILTIN_KEYS.includes(key)) return false;
+    return ACTION_PARAM_BUILTIN_KEYS.includes(`_${key}`) || ACTION_PARAM_BUILTIN_KEYS.includes(key.replace(/^_/, ''));
+}
+
 function laxActionParams(): boolean {
     return typeof process !== 'undefined' && process.env?.OS_ALLOW_LAX_ACTION_PARAMS === '1';
 }
@@ -3442,7 +3453,11 @@ export async function refuseDeniedSubjectBeforeHandOff(
     deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: any,
-    wiring: { objectName: string; recordId: string | undefined; subject: ActionSubjectRecordLoad; ec: any; envId?: string },
+    wiring: {
+        objectName: string; recordId: string | undefined; subject: ActionSubjectRecordLoad; ec: any; envId?: string;
+        /** The caller-scope read of the call's selection, when it was read ({@link loadActionSelectionRecords}). */
+        selection?: ActionSelectionLoad;
+    },
 ): Promise<void> {
     const { objectName, recordId, subject, ec, envId } = wiring;
     if (isDeclarativeUpdateAction(action)) {
@@ -3451,6 +3466,7 @@ export async function refuseDeniedSubjectBeforeHandOff(
         return;
     }
     refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject, ec);
+    refuseUndeliveredActionSelection(objectName, wiring.selection, ec);
 }
 
 export function summarizeAction(
@@ -3778,9 +3794,20 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     where: { objectName?: string; actionName?: string },
 ): string | null {
     const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
-    if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
-    const resolved = resolveDeclaredActionParams(deps, action, obj);
-    const issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
+    let issues: ReturnType<typeof validateActionParams>;
+    if (!declaresParams && !isDeclarativeUpdateAction(action)) {
+        // A param-less handler action keeps the ADR-0104 D2 pass-through for
+        // its custom keys, except a near-miss spelling of a built-in
+        // (`selectedIds` for `_selectedIds`): that key reaches the handler
+        // unread by every door rule the built-in is read by, so it is refused,
+        // in the contract's own words.
+        const nearMisses = Object.keys(bag).filter(isBuiltinParamNearMiss);
+        if (nearMisses.length === 0) return null;
+        issues = validateActionParams([], Object.fromEntries(nearMisses.map((key) => [key, bag[key]])));
+    } else {
+        const resolved = resolveDeclaredActionParams(deps, action, obj);
+        issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
+    }
     if (issues.length === 0) return null;
     const summary = issues.map((i) => i.message).join('; ');
     if (!laxActionParams()) {
@@ -4674,6 +4701,126 @@ function recordIdListOrRefuse(key: string, value: unknown): string[] {
     }
     const message = `The record key \`${key}\` must name a list of records by their ids.`;
     throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
+}
+
+/** The built-in params key a record-less call carries its selection under. */
+export const ACTION_SELECTION_PARAM = '_selectedIds';
+
+/**
+ * The most record ids one call's selection may name: the console's own
+ * select-all-matching cap (`BULK_SELECT_ALL_MATCHING_CAP`, `@object-ui/plugin-grid`).
+ */
+export const ACTION_SELECTION_CAP = 5000;
+
+/** How many ids one read of a selection asks for, before the deployment's read limits. */
+const ACTION_SELECTION_READ_CHUNK = 500;
+
+/**
+ * What {@link loadActionSelectionRecords} answers: whether the caller's own
+ * scope delivered EVERY id of the selection, and the first one it did not.
+ */
+export interface ActionSelectionLoad {
+    selectionLoadDenied: boolean;
+    /** The first id the caller's scope did not deliver, named in the refusal. */
+    undelivered?: string;
+}
+
+/**
+ * Does this call carry a selection the door must read before it runs? A call
+ * that writes as the caller, or whose target authorizes the caller itself,
+ * builds nothing elevated on the ids and is not read here:
+ *
+ *  - the declarative update, which writes the caller's own edit;
+ *  - a `type: 'api'` action, forwarded with the caller's own credentials;
+ *  - the system principal, which reads every row anyway.
+ *
+ * Every other arm (a script body, a flow) is.
+ */
+export function actionSelectionIsRead(action: any, ec: { isSystem?: boolean } | null | undefined): boolean {
+    if (ec?.isSystem === true) return false;
+    if (isDeclarativeUpdateAction(action)) return false;
+    return (typeof action?.type === 'string' ? action.type : 'script') !== 'api';
+}
+
+/**
+ * The record ids a call's `params._selectedIds` names, or the `400` its shape
+ * earns: a list of ids (strings or numbers), at most {@link ACTION_SELECTION_CAP}
+ * of them. `undefined` when the call carries none (absent, `null` or `''`, as
+ * for `recordId`). A call addressed to no object (an object-less action key)
+ * names no object its ids could be read from, and is refused for carrying one.
+ */
+export function actionSelectionIdsOrRefuse(objectName: string, params: Record<string, unknown>): string[] | undefined {
+    const value = params[ACTION_SELECTION_PARAM];
+    if (value === undefined || value === null || value === '') return undefined;
+    const ids = recordIdListOrRefuse(ACTION_SELECTION_PARAM, value);
+    if (ids.length > ACTION_SELECTION_CAP) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` names ${ids.length} records; one call may name at most ${ACTION_SELECTION_CAP}.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'max_items', message }]);
+    }
+    if (ids.length > 0 && isObjectLessActionKey(objectName)) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` names records, so the action must be called on their object.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'invalid_value', message }]);
+    }
+    return ids;
+}
+
+/**
+ * Read a selection IN THE CALLER'S OWN SCOPE, as {@link loadActionSubjectRecord}
+ * reads a `recordId`: the distinct ids, in chunks, through `find` (the door's
+ * caller-scope read), each chunk asking for `id` only and naming its own
+ * `limit`. The chunk is the smaller of {@link ACTION_SELECTION_READ_CHUNK} and
+ * the deployment's maximum page size and row budget, so the read itself is
+ * never refused for its size.
+ *
+ * One id the read does not deliver denies the whole selection — ⛔ ids are
+ * never dropped. A read that throws, or answers no row list, delivered
+ * nothing: a hidden row, an id that names nothing and a read the caller is
+ * refused are one answer here, as they are at the per-record door.
+ */
+export async function loadActionSelectionRecords(
+    ids: readonly string[],
+    find: (chunk: string[]) => Promise<unknown>,
+    limits?: QueryReadLimits,
+): Promise<ActionSelectionLoad> {
+    const distinct = [...new Set(ids)];
+    if (distinct.length === 0) return { selectionLoadDenied: false };
+    let size = ACTION_SELECTION_READ_CHUNK;
+    try {
+        const read = limits ?? resolveQueryReadLimits();
+        size = Math.min(size, read.maxPageSize ?? size, read.rowBudget ?? size);
+    } catch {
+        return { selectionLoadDenied: true, undelivered: distinct[0] };
+    }
+    for (let i = 0; i < distinct.length; i += size) {
+        const chunk = distinct.slice(i, i + size);
+        let rows: unknown;
+        try {
+            const got: any = await find(chunk);
+            rows = Array.isArray(got) ? got : got?.records;
+        } catch {
+            return { selectionLoadDenied: true, undelivered: chunk[0] };
+        }
+        if (!Array.isArray(rows)) return { selectionLoadDenied: true, undelivered: chunk[0] };
+        const delivered = new Set(rows.map((row: any) => String(row?.id)));
+        const missing = chunk.find((id) => !delivered.has(id));
+        if (missing !== undefined) return { selectionLoadDenied: true, undelivered: missing };
+    }
+    return { selectionLoadDenied: false };
+}
+
+/**
+ * The selection's verdict, consumed: a selection the caller's scope did not
+ * deliver whole is refused with the per-record door's own
+ * `404 RECORD_NOT_FOUND`, before anything that builds an elevated context.
+ * `undefined` (the call was not read) refuses nothing.
+ */
+export function refuseUndeliveredActionSelection(
+    objectName: string,
+    selection: ActionSelectionLoad | undefined,
+    caller?: UserMessageCaller | null,
+): void {
+    if (!selection?.selectionLoadDenied) return;
+    throw recordNotFoundError(objectName, selection.undelivered ?? '', caller);
 }
 
 /**

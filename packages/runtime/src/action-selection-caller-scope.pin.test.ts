@@ -31,8 +31,8 @@
  *
  * The boot follows `declarative-update-refusal-order.pin.test.ts` (it mirrors
  * `objectstack dev` / `serve`), with the posture set the way a walled
- * deployment sets it: `OS_TENANCY_POSTURE=isolated` and a `tenancy` service
- * reporting it. The boot is paid in `beforeAll`, never inside a case.
+ * deployment sets it: `OS_TENANCY_POSTURE=isolated`, its platform owner, and an
+ * `org-scoping` slot so the posture is enforced rather than degraded. The boot is paid in `beforeAll`, never inside a case.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -101,13 +101,18 @@ const PIN_APP: any = {
   ],
 };
 
-/** The walled posture, as the organizations runtime reports it. */
-function isolatedTenancyPlugin(): Plugin {
+/**
+ * The multi-organization runtime's `org-scoping` slot, held so the requested
+ * `isolated` posture is ENFORCED rather than degraded to `single` (plugin-auth's
+ * tenancy service probes it). The wall itself is the security plugin's Layer 0;
+ * rows are seeded with their organization explicitly, so no auto-stamp is needed.
+ */
+function orgScopingSlotPlugin(): Plugin {
   return {
-    name: 'com.objectstack.test.pin-sel-tenancy',
+    name: 'com.objectstack.test.pin-sel-org-scoping',
     version: '1.0.0',
     init: async (ctx: PluginContext) => {
-      ctx.registerService('tenancy', { posture: 'isolated' });
+      ctx.registerService('org-scoping', { supportedPostures: ['isolated'] });
     },
   };
 }
@@ -226,9 +231,11 @@ beforeAll(async () => {
   prevNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'development';
   vi.stubEnv('OS_TENANCY_POSTURE', 'isolated');
+  // A walled posture boots only with its declared platform owner (plugin-auth).
+  vi.stubEnv('OS_PLATFORM_OWNER_EMAIL', 'pin-sel-owner@example.invalid');
 
   kernel = new ObjectKernel();
-  await kernel.use(isolatedTenancyPlugin());
+  await kernel.use(orgScopingSlotPlugin());
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(new DefaultDatasourcePlugin({ driver: 'sqlite-wasm', config: { filename: ':memory:' } }));
   await kernel.use(new HonoServerPlugin({ port: 0 }));
@@ -379,7 +386,8 @@ describe('a near-miss spelling of a built-in on a param-less action', () => {
         await resetRows();
         const before = handed.length;
         const a = await knock(door, 'bob', { [key]: [row.aliceA] });
-        expect(a.status, JSON.stringify(a.body)).toBe(400);
+        // The param contract's own refusal, as a declared-param action answers an unknown key.
+        expect({ status: a.status, code: a.code }, JSON.stringify(a.body)).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
         expect(handed.length).toBe(before);
         expect(await statusOf(row.aliceA)).toBe('open');
       });
