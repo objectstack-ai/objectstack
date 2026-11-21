@@ -1659,6 +1659,7 @@ const en = {
     deleteCommentConfirm: 'Are you sure you want to delete this comment?',
     commentEditFailed: 'Your edit was not saved. The comment keeps its previous text.',
     commentDeleteFailed: 'The comment was not deleted. Please try again.',
+    commentDeleted: 'Comment deleted',
     // objectstack#28218 — a comment write whose answer names mentioned users the
     // server will not notify (`withheldMentions`): one sentence naming them, no reason.
     mentionsWithheld: '{{names}} will not be notified of this comment.',
@@ -3293,6 +3294,7 @@ const en = {
       new: 'New',
       import: 'Import',
       importTitle: 'Import from CSV',
+      select: 'Select',
       importedToast: 'Imported {{count}} row(s).',
       importedToast_one: 'Imported {{count}} row.',
       importedToast_other: 'Imported {{count}} rows.',
@@ -5768,6 +5770,24 @@ const en = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'List tools',
+      sortCount: 'Sort, {{count}} levels',
+      sortCount_one: 'Sort, {{count}} level',
+      sortCount_other: 'Sort, {{count}} levels',
+      filterCount: 'Filter, {{count}} in use',
+      filterCount_one: 'Filter, {{count}} in use',
+      filterCount_other: 'Filter, {{count}} in use',
+      back: 'Back',
+      discard: 'Discard changes',
+      close: 'Close',
+      apply: 'Apply',
+      advancedNotice: 'This view uses an advanced filter. Change it on a computer.',
+      filterEmpty: 'No filter yet. Add one to show only the records that match.',
+      itemOptions: 'Options for {{label}}',
+      edit: 'Edit',
+      remove: 'Remove',
+    },
     fieldList: {
       search: 'Search fields',
       shown: 'In this view',
@@ -5850,6 +5870,8 @@ const en = {
     addSort: 'Add sort',
     removeSort: 'Remove sort',
     reorder: 'Drag to reorder',
+    levelOptions: 'Options for {{label}}',
+    changeField: 'Change field',
   },
   // `@object-ui/collaboration` — the comment thread's copy (objectstack#5506,
   // objectui#3424). The package used to carry every one of these as an English

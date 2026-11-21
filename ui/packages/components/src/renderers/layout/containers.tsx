@@ -61,6 +61,7 @@ import {
 import { RecordTitleChip } from '../../custom/RecordTitleChip';
 import { resolveFieldReadFace } from '../../lib/field-face';
 import { PageDescriptionContext } from './page-description-context';
+import { PageTitleDemotedContext } from './page-title-host-context';
 import { PageHeaderTrailingContext } from './page-header-trailing-context';
 import { PageHeaderPhoneContext } from './page-header-phone-context';
 import { RecordHeaderBarContext, RecordHeaderStateContext, type RecordHeaderState } from './record-header-bar-context';
@@ -3157,6 +3158,9 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
   // title (objectui#12624): drawn under the title and subtitle, the order the
   // console page header uses, instead of above the title by the page.
   const pageDescription = React.useContext(PageDescriptionContext);
+  // objectstack#36111 — the host's page header holds the page's `h1`, so this
+  // header's title is drawn one level down, looking the same.
+  const titleDemoted = React.useContext(PageTitleDemotedContext);
   // The host's trailing chrome for the action row (objectstack#27241).
   const headerTrailing = React.useContext(PageHeaderTrailingContext);
   // A phone host's face (objectstack#27058): the actions go to its bottom bar,
@@ -3657,9 +3661,11 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col">
-          {explicitTitle && (
+          {explicitTitle && (titleDemoted ? (
+            <h2 className="text-2xl font-semibold tracking-tight">{explicitTitle}</h2>
+          ) : (
             <h1 className="text-2xl font-semibold tracking-tight">{explicitTitle}</h1>
-          )}
+          ))}
           {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
           {explicitTitle && pageDescription && (
             <p className="text-sm text-muted-foreground" data-page-description="">{pageDescription}</p>

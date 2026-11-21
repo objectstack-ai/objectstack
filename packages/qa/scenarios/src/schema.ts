@@ -298,9 +298,49 @@ export const TruthSpecSchema = z.discriminatedUnion('kind', [
 ]);
 export type TruthSpec = z.infer<typeof TruthSpecSchema>;
 
+// ── Ask kinds: what kind of question an ask is ──
+//
+// The ten kinds of question an ask round asks, borrowed from the hosted ask
+// set's categories (D6 = A on #34659: the kinds, never its fixture). A
+// question names its kind (`askKind`), so a round reports what it asked kind
+// by kind, and the open cards can show that every kind is asked. The loader
+// holds each declaration to what the card states (`checkAskKinds` in
+// `ask-kinds.ts`, called from `loader.ts`); `forbidden` is also read per turn: a question asked as a
+// persona whose truth is `withheld` is a `forbidden` ask, whatever kind it
+// declares (`questionTurnKind` in `ask-kinds.ts`).
+//
+//   count          one figure over the matching rows (how many, how much), no grouping
+//   group_sum      a figure per value of a field (a count or a total per group)
+//   top_n          a ranking: the first N rows or groups by a measure
+//   time_range     a figure over a time window (`in_window`)
+//   join           a figure that reads across a lookup (a relation path)
+//   owner_latest   who holds a row or acted on it, grouped by a person field: an owner, an approver
+//   business_term  a business word that names exactly one governed metric (`metric_selected`)
+//   ambiguous      a word that names more than one metric, or none exactly (`asked_back`)
+//   forbidden      asked as a persona who may not see what the question reads
+//   unanswerable   the data cannot answer it (`truth.kind: unanswerable`)
+
+export const ASK_KINDS = [
+  'count',
+  'group_sum',
+  'top_n',
+  'time_range',
+  'join',
+  'owner_latest',
+  'business_term',
+  'ambiguous',
+  'forbidden',
+  'unanswerable',
+] as const;
+export type AskKind = (typeof ASK_KINDS)[number];
+
+export const AskKindSchema = z.enum(ASK_KINDS);
+
 export const QuestionSchema = z.strictObject({
   id: MachineNameSchema,
   ask: LocalizedTextSchema,
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
+  askKind: AskKindSchema.optional(),
   object: MachineNameSchema,
   truth: TruthSpecSchema,
   /** Also compute the truth AS each of these personas (their row scope and hidden fields applied). */
@@ -347,6 +387,8 @@ export const DatasetQuestionSchema = z.strictObject({
    * `expect` declares against what the word matches.
    */
   words: z.array(z.string().min(1)).min(1),
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
+  askKind: AskKindSchema.optional(),
   expect: DatasetExpectedRouteSchema,
 });
 export type DatasetQuestion = z.infer<typeof DatasetQuestionSchema>;

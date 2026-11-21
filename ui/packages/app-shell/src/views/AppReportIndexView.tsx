@@ -38,6 +38,7 @@ import { BarChart3, ChevronDown, ChevronRight, Loader2, Search } from 'lucide-re
 import { Empty, EmptyTitle, EmptyDescription, Input, cn } from '@object-ui/components';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
+import { PageHeader } from '../layout/PageHeader.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
 import { appAddressSegment } from '../utils/appRoute.js';
@@ -169,9 +170,9 @@ export function AppReportIndexView() {
 
   return (
     <div className="flex flex-col h-full overflow-auto bg-background" data-testid="report-index">
-      <div className="p-4 sm:p-6 border-b shrink-0">
-        <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight">{title}</h1>
-      </div>
+      {/* objectstack#36111 — the console page header, as every list and
+          dashboard draws it; the shell's top-right group sits at its right. */}
+      <PageHeader title={title} icon={<BarChart3 className="h-4 w-4" />} />
       {entries.length === 0 ? (
         <div className="flex-1 flex items-center justify-center p-8">
           <Empty>

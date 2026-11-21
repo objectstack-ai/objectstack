@@ -2621,7 +2621,7 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
             onChange={(next) => setPicked({ key: dateRangeKey, period: next })}
           />
         ) : null}
-        <ReportExportControl exportOptions={report.exportOptions} label={report.label} name={report.name} snapshot={tableSnapshot} />
+        <ReportExportControl exportOptions={report.exportOptions} label={report.label} name={report.name} snapshot={tableSnapshot} dataSource={dataSource} />
       </div>
       {periodError ? (
         <FetchStates status="error" error={periodError} />

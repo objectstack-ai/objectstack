@@ -17,10 +17,22 @@ import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './Lis
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
 import {
   ViewSettingsPopover,
+  ViewSettingsContent,
   groupFieldOptions,
   type ViewSettingsField,
   PHONE_TOUCH_TARGET,
+  useBelowSm,
 } from './components/ViewSettingsPopover';
+import {
+  ListPhonePanelsContext,
+  PhoneFilterSheet,
+  PhoneListToolbar,
+  PhonePanelSheet,
+  PhoneSortSheet,
+  PHONE_CHIP,
+  PHONE_CHIP_ACTIVE,
+  type ListPhonePanels,
+} from './phone/PhoneListPanels';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
 import { ConditionChipRow, SortPanel } from './conditions/ListConditionControls';
 import {
@@ -49,7 +61,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -2434,6 +2446,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [showSearchPopover, setShowSearchPopover] = React.useState(false);
   // Below `sm` the list search is an icon that expands into a field in place.
   const [phoneSearchOpen, setPhoneSearchOpen] = React.useState(false);
+  // objectstack#35883 / #35884 — below `sm` the list draws the phone's one
+  // toolbar row and opens its sort, filter and view-settings panels as
+  // bottom sheets (`./phone/PhoneListPanels.tsx`); which one is open.
+  const belowSm = useBelowSm();
+  const [phonePanel, setPhonePanel] = React.useState<'sort' | 'filter' | 'settings' | null>(null);
 
   // Sort State
   const [currentSort, setCurrentSort] = React.useState<SortItem[]>(() =>
@@ -3059,19 +3076,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [exportError, setExportError] = React.useState<string | null>(null);
 
   // Object-level export permission gate. Default-allow: export stays enabled
-  // unless `allowExport === false` or `operations.export === false`, AND — when
-  // the server hands down an effective API operation set for this object
-  // (/me/permissions `apiOperations`, objectstack#3391) — unless it excludes `export`.
-  // Missing effective set (unrestricted object / old backend / no provider)
-  // keeps the current behavior. The frontend consumes the effective set the
-  // server resolved; it never reads the raw `apiMethods`.
+  // unless `allowExport === false` or `operations.export === false`, AND unless
+  // the object's resolved export verdict closes it. That verdict is
+  // `isObjectExportOffered` from `@object-ui/core`:
+  // the object's `userActions.exportCsv` over its `managedBy` default
+  // (objectstack#35619 — `exportCsv: false` hides the whole entry, every
+  // format) ANDed with the server's effective API operation set
+  // (/me/permissions `apiOperations`, objectstack#3391) when one is handed
+  // down. A missing set (unrestricted object / old backend / no provider) and
+  // an object definition still in flight keep the default, which offers
+  // export in every bucket. The frontend consumes the effective set the server
+  // resolved; it never reads the raw `apiMethods`. Every export door below —
+  // the wide toolbar, the Display panel's footer and `handleExport` — reads
+  // this one name.
   const affordancePerms = usePermissions();
   const { getObjectApiOperations } = affordancePerms;
   const effectiveApiOps = schema.objectName ? getObjectApiOperations(schema.objectName) : undefined;
   const exportPermitted =
     schema.allowExport !== false &&
     schema.operations?.export !== false &&
-    (effectiveApiOps ? effectiveApiOps.includes('export') : true);
+    isObjectExportOffered(objectDef as SchemaLike | null, effectiveApiOps);
 
   // [objectstack#3720] Bulk-action gate for the NON-grid views (kanban / calendar /
   // gallery / …), whose bulk bar this component renders itself — the grid path
@@ -6982,6 +7006,143 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     </div>
   );
 
+  // Search, phone form: the icon expands into a field in place, with the
+  // bar's touch size. Enter or Escape folds it back to the icon, which then
+  // carries the active keyword as the desktop trigger does; the clear button
+  // empties the term and folds it. Below `sm` it is a chip of the phone
+  // toolbar (objectstack#35883), which draws the list's one search.
+  const phoneSearch = toolbarFlags.showSearch ? (phoneSearchOpen ? (
+              <div className="relative flex items-center sm:hidden" data-testid="phone-search">
+                <Search
+                  className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  type="search"
+                  placeholder={t('table.search')}
+                  aria-label={t('list.search')}
+                  value={searchTerm}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
+                  }}
+                  onBlur={() => {
+                    if (!searchTerm) setPhoneSearchOpen(false);
+                  }}
+                  // 16px text: a smaller font makes iOS Safari zoom on focus.
+                  className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
+                  autoFocus
+                  data-testid="phone-search-input"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
+                  aria-label={t('list.clearSearch')}
+                  title={t('list.clearSearch')}
+                  onClick={() => {
+                    handleSearchChange('');
+                    setPhoneSearchOpen(false);
+                  }}
+                  data-testid="phone-search-clear"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  PHONE_CHIP,
+                  'sm:hidden',
+                  searchTerm ? PHONE_CHIP_ACTIVE : 'text-muted-foreground',
+                )}
+                aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+                onClick={() => setPhoneSearchOpen(true)}
+                data-testid="phone-search-trigger"
+              >
+                <Search className="h-4 w-4" />
+                {searchTerm && (
+                  <span className="max-w-[5rem] truncate text-xs" data-testid="phone-search-active-keyword">
+                    {searchTerm}
+                  </span>
+                )}
+              </Button>
+            )) : null;
+
+  // 视图设置's props, once: the desktop draws them as the popover beside the
+  // view's name, the phone as the content of its bottom sheet
+  // (objectstack#35883: a row of the view panel opens it there).
+  const viewSettingsElement = (
+    <ViewSettingsPopover
+      t={t as any}
+      allFields={allFields as any}
+      fieldType={(name) => {
+        const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
+        return typeof type === 'string' ? type : undefined;
+      }}
+      layout={viewSwitcherOffered ? (closeMenu) => (
+        <ViewSwitcherDropdown
+          currentView={currentView}
+          availableViews={availableViews}
+          onViewChange={(view) => {
+            // Choosing a layout completes the choice: Display closes
+            // (objectui#12621).
+            closeMenu();
+            handleViewChange(view);
+          }}
+        />
+      ) : undefined}
+      showGroup={toolbarFlags.showGroup}
+      groupingConfig={chosenGroupingConfig}
+      setGroupingConfig={changeGrouping}
+      showColor={toolbarFlags.showColor}
+      rowColorConfig={offeredRowColorConfig}
+      setRowColorConfig={setRowColorConfig}
+      showDensity={toolbarFlags.showDensity}
+      density={currentView === 'gallery'
+        ? {
+            mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
+            cycle: cycleGalleryDensity,
+            setMode: setGalleryDensityMode,
+          }
+        : density as any}
+      showHideFields={toolbarFlags.showHideFields}
+      hiddenFields={offeredHiddenFields}
+      updateHiddenFields={updateListedFields}
+      addableFields={addableFields}
+      onAddField={addListedField}
+      changedCount={displayChangedCount}
+      // objectstack#35551 — the view's name and its rename head the
+      // menu; the field order is the grid's column order, the state
+      // the header's column drag writes.
+      viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
+        ? { label: schema.label, onRename: onRenameView }
+        : undefined}
+      fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
+      onFieldOrderChange={currentView === 'grid' && onColumnStateChange
+        ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
+        : undefined}
+      // objectstack#28950 — a host that marks a personalized list owns
+      // the one reset. It hands it over while there is something to
+      // restore, and the menu draws it as 恢复默认, dimmed between
+      // times (objectstack#35551); the list offers none of its own.
+      onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
+      resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
+      onSave={onSaveView}
+      exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
+      onExport={(format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf')}
+      exportBusy={exportBusy}
+      exportError={exportError}
+    />
+  );
+  const phonePanels: ListPhonePanels | null = React.useMemo(
+    () => ({ openViewSettings: displayOffered ? () => setPhonePanel('settings') : undefined }),
+    [displayOffered],
+  );
+
   return (
     <OwnWritesContext.Provider value={ownWrites}>
     <div
@@ -7018,7 +7179,91 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           read as one segmented control rather than a loose bag of icons.
           Not in the compact posture (objectui#12703), nor in the capped one
           (objectstack#26613). */}
-      {listChromeShown && (
+      {/* objectstack#35883 — below `sm`, one row of pills: the view, Sort,
+          Filter and Search, and the host's end (its Save) at the right. The
+          counts on Sort and Filter say what is in force, so there is no
+          condition row. Authored quick filters keep a line of their own. */}
+      {listChromeShown && belowSm && (
+        <ListPhonePanelsContext.Provider value={phonePanels}>
+          <PhoneListToolbar
+            lead={hasToolbarLeading ? drawnToolbarLeading : undefined}
+            sortCount={toolbarFlags.showSort ? currentSort.length : null}
+            filterCount={toolbarFlags.showFilters ? (appliedPanelFilters.conditions ?? []).length : null}
+            onOpenSort={() => setPhonePanel('sort')}
+            onOpenFilter={() => setPhonePanel('filter')}
+            trailing={toolbarTrailing ? toolbarTrailing(phoneSearch) : phoneSearch}
+            end={conditionRowEnd}
+          />
+          {((filterElements && userFilterBarShown) || (queueFilterOffered && !datasetChartOnScreen)) && (
+            <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto border-b px-3 py-1.5" data-testid="phone-list-quick-filters">
+              {filterElements && userFilterBarShown && (
+                <div className={TOOLBAR_USER_FILTERS} data-testid="user-filters">
+                  <UserFilters
+                    ref={userFiltersRef}
+                    config={filterElements}
+                    objectDef={objectDef}
+                    objectDefPending={!objectDefLoaded}
+                    data={data}
+                    onFilterChange={setUserFilterConditions}
+                    maxVisible={3}
+                    initialSelections={userFilterSelections}
+                    onSelectionsChange={onUserFilterSelectionsChange}
+                  />
+                </div>
+              )}
+              {queueFilterOffered && !datasetChartOnScreen && (
+                <Button
+                  type="button"
+                  variant={sittingInQueueOnly ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-10 shrink-0 gap-1 rounded-full px-3 text-xs"
+                  aria-pressed={sittingInQueueOnly}
+                  title={t('list.sittingInQueueHint')}
+                  data-testid="queue-sitting-filter"
+                  onClick={() => setSittingInQueueOnly((on) => !on)}
+                >
+                  <Inbox className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t('list.sittingInQueue')}
+                </Button>
+              )}
+            </div>
+          )}
+          {toolbarFlags.showSort && (
+            <PhoneSortSheet
+              open={phonePanel === 'sort'}
+              onOpenChange={(open) => setPhonePanel(open ? 'sort' : null)}
+              fields={sortFields}
+              shownFields={shownFieldNames}
+              value={currentSort}
+              onApply={applySort}
+              note={sortPanelNote}
+            />
+          )}
+          {toolbarFlags.showFilters && (
+            <PhoneFilterSheet
+              open={phonePanel === 'filter'}
+              onOpenChange={(open) => setPhonePanel(open ? 'filter' : null)}
+              fields={filterFields}
+              shownFields={shownFieldNames}
+              value={currentFilters}
+              onApply={applyPanelFilters}
+              dataSource={dataSource}
+            />
+          )}
+          {displayOffered && (
+            <PhonePanelSheet
+              open={phonePanel === 'settings'}
+              onOpenChange={(open) => setPhonePanel(open ? 'settings' : null)}
+              title={t('list.viewSettings')}
+              testId="phone-view-settings-panel"
+            >
+              <ViewSettingsContent {...viewSettingsElement.props} closeMenu={() => setPhonePanel(null)} />
+            </PhonePanelSheet>
+          )}
+        </ListPhonePanelsContext.Provider>
+      )}
+
+      {listChromeShown && !belowSm && (
       <div className={cn(TOOLBAR_ROW, hasToolbarLeading && TOOLBAR_ROW_LEADING_PHONE)}>
         {/* With a host's leading node the left group grows (`flex-1`) so that
             node's `flex-1` wrapper has the width the tool cluster leaves —
@@ -7050,69 +7295,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               columns, then Group, Row height and the rest. Every control
               writes through the same door as its wide-form button; the panel
               adds no storage of its own. */}
-          {displayOffered && (
-            <ViewSettingsPopover
-              t={t as any}
-              allFields={allFields as any}
-              fieldType={(name) => {
-                const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[name]?.type;
-                return typeof type === 'string' ? type : undefined;
-              }}
-              layout={viewSwitcherOffered ? (closeMenu) => (
-                <ViewSwitcherDropdown
-                  currentView={currentView}
-                  availableViews={availableViews}
-                  onViewChange={(view) => {
-                    // Choosing a layout completes the choice: Display closes
-                    // (objectui#12621).
-                    closeMenu();
-                    handleViewChange(view);
-                  }}
-                />
-              ) : undefined}
-              showGroup={toolbarFlags.showGroup}
-              groupingConfig={chosenGroupingConfig}
-              setGroupingConfig={changeGrouping}
-              showColor={toolbarFlags.showColor}
-              rowColorConfig={offeredRowColorConfig}
-              setRowColorConfig={setRowColorConfig}
-              showDensity={toolbarFlags.showDensity}
-              density={currentView === 'gallery'
-                ? {
-                    mode: galleryCardSize === 'small' ? 'compact' : galleryCardSize === 'medium' ? 'comfortable' : 'spacious',
-                    cycle: cycleGalleryDensity,
-                    setMode: setGalleryDensityMode,
-                  }
-                : density as any}
-              showHideFields={toolbarFlags.showHideFields}
-              hiddenFields={offeredHiddenFields}
-              updateHiddenFields={updateListedFields}
-              addableFields={addableFields}
-              onAddField={addListedField}
-              changedCount={displayChangedCount}
-              // objectstack#35551 — the view's name and its rename head the
-              // menu; the field order is the grid's column order, the state
-              // the header's column drag writes.
-              viewName={typeof schema.label === 'string' && schema.label && (onRenameView || onPersonalizationChange)
-                ? { label: schema.label, onRename: onRenameView }
-                : undefined}
-              fieldOrder={currentView === 'grid' ? (schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined)?.order : undefined}
-              onFieldOrderChange={currentView === 'grid' && onColumnStateChange
-                ? (order) => onColumnStateChange({ ...(schema.columnState as { order?: string[]; widths?: Record<string, number> } | undefined), order })
-                : undefined}
-              // objectstack#28950 — a host that marks a personalized list owns
-              // the one reset. It hands it over while there is something to
-              // restore, and the menu draws it as 恢复默认, dimmed between
-              // times (objectstack#35551); the list offers none of its own.
-              onReset={onResetView ?? (onPersonalizationChange ? () => {} : resetDisplayToViewDefault)}
-              resetDisabled={onResetView ? false : onPersonalizationChange ? true : undefined}
-              onSave={onSaveView}
-              exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
-              onExport={(format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf')}
-              exportBusy={exportBusy}
-              exportError={exportError}
-            />
-          )}
+          {displayOffered && viewSettingsElement}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
               toggles). Mutually exclusive with view tabs above, so at most
               one filter element group ever renders here. On mobile we keep
@@ -7642,70 +7825,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               </Popover>
             )}
 
-            {/* Search, phone form: the icon expands into a field in place, with
-                the bar's touch size. Enter or Escape folds it back to the icon,
-                which then carries the active keyword as the desktop trigger
-                does; the clear button empties the term and folds it. */}
-            {toolbarFlags.showSearch && (phoneSearchOpen ? (
-              <div className="relative flex items-center sm:hidden" data-testid="phone-search">
-                <Search
-                  className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <Input
-                  type="search"
-                  placeholder={t('table.search')}
-                  aria-label={t('list.search')}
-                  value={searchTerm}
-                  onChange={(e) => handleSearchChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
-                  }}
-                  onBlur={() => {
-                    if (!searchTerm) setPhoneSearchOpen(false);
-                  }}
-                  // 16px text: a smaller font makes iOS Safari zoom on focus.
-                  className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
-                  autoFocus
-                  data-testid="phone-search-input"
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
-                  aria-label={t('list.clearSearch')}
-                  title={t('list.clearSearch')}
-                  onClick={() => {
-                    handleSearchChange('');
-                    setPhoneSearchOpen(false);
-                  }}
-                  data-testid="phone-search-clear"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                  PHONE_TOUCH_TARGET,
-                  searchTerm && "text-foreground font-medium",
-                )}
-                aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-                title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
-                onClick={() => setPhoneSearchOpen(true)}
-                data-testid="phone-search-trigger"
-              >
-                <Search className="h-3.5 w-3.5" />
-                {searchTerm && (
-                  <span className="max-w-[5rem] truncate text-[11px]" data-testid="phone-search-active-keyword">
-                    {searchTerm}
-                  </span>
-                )}
-              </Button>
-            ))}
+            {phoneSearch}
               </>
             );
             return toolbarTrailing ? toolbarTrailing(searchTools) : searchTools;
@@ -7719,7 +7839,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           (objectstack#35878): with nothing set it holds the dashed 「Sort」
           and 「Filter」 buttons, so the first condition does not push the
           table down a row. One line; what does not fit scrolls sideways. */}
-      {listChromeShown && (
+      {listChromeShown && !belowSm && (
         <div
           data-slot="list-condition-row"
           data-testid="list-condition-row"

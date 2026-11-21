@@ -65,6 +65,7 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
+import { useShellPageActionsSlot } from '../layout/shellPageActionsSlot.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -969,6 +970,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [pageReturn.stepper, pageReturn.toList, originFromState?.label],
   );
   useRecordStepKeys(!embedded && !!pageStepper, pageStepper, { arrows: false });
+  // objectstack#36111 — whether the shell draws its top-right button group on
+  // this page (off while the top bar stands); the page face draws it in its
+  // navigation row, before ✕. A pane or drawer never does: the page under it
+  // has the group already.
+  const renderShellGroup = useShellPageActionsSlot();
+  const shellActions = renderShellGroup !== null && !embedded;
   // `language` is also the language a flow launch reads a refused write's
   // permission line in.
   const { t, language } = useObjectTranslation();
@@ -3978,8 +3985,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    * It asks first, through the console's ordinary destructive-action confirm:
    * this page's own `confirmHandler`, the `ActionConfirmDialog` the record's
    * Delete opens, painted destructive. A cancel settles `false` and nothing is
-   * sent. The row leaves the panel only once the server has deleted it; a
-   * refused delete raises a localized error and leaves the row where it was.
+   * sent. The row leaves the panel only once the server has deleted it, with a
+   * "Comment deleted" toast (objectstack#36070); a refused delete raises a localized error and leaves the row where it was.
    * A deleted reply takes one off its parent's `replyCount`, the count
    * `handleAddReply` adds one to.
    */
@@ -4023,6 +4030,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               : item,
           ),
       }));
+      // The row is gone; say so, so the reader knows the delete went through
+      // and the comment did not just scroll away (objectstack#36070).
+      toast.success(t('detail.commentDeleted', { defaultValue: 'Comment deleted' }));
     },
     [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t],
   );
@@ -5393,10 +5403,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // desktop face: back to the list the page came from as it was left
   // (objectstack#35854), else the object's default list.
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
-  const pageFrame = closePage ? (
-    <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
-      <X className="h-3.5 w-3.5" />
-    </RecordTopBarButton>
+  const pageFrame = closePage || shellActions ? (
+    <>
+      {shellActions && renderShellGroup?.({})}
+      {closePage && (
+        <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
+          <X className="h-3.5 w-3.5" />
+        </RecordTopBarButton>
+      )}
+    </>
   ) : undefined;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the

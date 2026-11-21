@@ -266,6 +266,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "Editado el"
       },
+      is_resolved: {
+        label: "Resuelto",
+        help: "Indica si el hilo que inicia este comentario de primer nivel está resuelto; no se admite en una respuesta"
+      },
+      resolved_by: {
+        label: "Resuelto por",
+        help: "Quién resolvió el hilo: lo registra la plataforma, nunca los autores"
+      },
+      resolved_at: {
+        label: "Resuelto el",
+        help: "Cuándo se resolvió el hilo: lo registra la plataforma, nunca los autores"
+      },
       created_at: {
         label: "Creado el"
       },

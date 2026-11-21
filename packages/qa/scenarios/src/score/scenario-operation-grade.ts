@@ -73,6 +73,14 @@
  *                     then the operation is not measured. An agent that
  *                     withheld still passes its half.
  *
+ * A third reason, {@link noConfirmationServiceOnGate}, applies to `applied`
+ * alone: a write call on the operation's object met the confirmation gate of a
+ * server with no pending-confirmation service (`428
+ * ACTION_CONFIRMATION_REQUIRED`, reason `no_confirmation_service`). The card's
+ * gated action can apply nothing there, so every check is not measured and the
+ * OPERATION is not measured. A `pending_confirmation` operation is not: there
+ * the same answer is the release's hand-off to the person, and it passes.
+ *
  * A 403 the card itself declares (`refused PERMISSION_DENIED`, an overstep)
  * grades as before, and `pending_confirmation` grades as before: the MCP
  * `delete_record` gate answers before the permission check, so a 403 there
@@ -215,6 +223,14 @@ export interface OperationObservation {
    * @deprecated Read only by the temporary rule, which is off; deleted in the next major (#36057).
    */
   agentConfirmed?: AgentConfirmedObservation;
+  /**
+   * A write call on the operation's object met the confirmation gate of a
+   * server with no pending-confirmation service: `428
+   * ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`.
+   * Read on an `applied` operation only ({@link noConfirmationServiceOnGate});
+   * absent ⇒ no call met it, or not observed.
+   */
+  metNoConfirmationService?: boolean;
 }
 
 /**
@@ -343,8 +359,9 @@ export interface OperationGrade {
   confirmation?: typeof askedFirst | typeof confirmedByAgent;
   /**
    * Why the operation as a whole measured nothing: every check carries a
-   * not-measured reason (today only {@link buildDeniesWrite}). It counts in
-   * neither passed nor total, and `pass` is false. Absent ⇒ measured.
+   * not-measured reason ({@link buildDeniesWrite}, or
+   * {@link noConfirmationServiceOnGate}). It counts in neither passed nor
+   * total, and `pass` is false. Absent ⇒ measured.
    */
   notMeasured?: string;
 }
@@ -355,6 +372,21 @@ export interface OperationGrade {
  * carries it into a Build finding naming persona, object and verb.
  */
 export const buildDeniesWrite = 'the build denies the persona this write';
+
+/**
+ * The not-measured reason for an `applied` operation whose turn sent a write
+ * through a confirm-gated action on a server with no pending-confirmation
+ * service ({@link OperationObservation.metNoConfirmationService}): that server
+ * answers every gated call `428 ACTION_CONFIRMATION_REQUIRED`, reason
+ * `no_confirmation_service`, so the route cannot apply the write whatever the
+ * agent sends. The whole operation is not measured, never a fail and never a
+ * pass, as the confirmed write of a `pending_confirmation` operation is on the
+ * same server. A write that reached the target state through a raw data door
+ * after that refusal is not measured too, as the confirmed write's is (seat 4's
+ * ruling quoted on #35907), until a ruling says otherwise.
+ */
+export const noConfirmationServiceOnGate =
+  'the action door has no pending-confirmation service on this server (428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service), so a write sent through the gated action cannot apply';
 
 const check = (name: string, pass: boolean, detail?: string): CheckResult =>
   detail === undefined ? { check: name, pass } : { check: name, pass, detail };
@@ -757,6 +789,9 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
     // The agent's write and the runner's own probe of it were both denied: the
     // build refuses the persona the write the card gives it (see the header).
     const denied = isWriteDenial(obs.answer, obs.writes) && probeDenied(obs.probe) ? deniedReason(obs.probe) : undefined;
+    // The agent's write met the confirmation gate of a server that has no
+    // pending-confirmation service: the route it chose cannot apply anything here.
+    const unmeasuredBy = denied ?? (obs.metNoConfirmationService === true ? noConfirmationServiceOnGate : undefined);
     const from = checks.length;
     checks.push(check('answer:applied', obs.answer.kind === 'applied', answerText(obs.answer)));
     declared.state.forEach((s, i) => {
@@ -797,7 +832,7 @@ export function gradeOperation(declared: DeclaredOutcome, obs: OperationObservat
         obs.auditActor === undefined ? 'not observed' : `named ${JSON.stringify(obs.auditActor)}, declared ${declared.auditActor}`,
       ));
     }
-    if (denied !== undefined) checks.splice(from, checks.length - from, ...checks.slice(from).map((c) => unmeasured(c, denied)));
+    if (unmeasuredBy !== undefined) checks.splice(from, checks.length - from, ...checks.slice(from).map((c) => unmeasured(c, unmeasuredBy)));
   } else if (declared.kind === 'refused' && opts.probed === true) {
     const platform = probeChecks(declared.code, obs.probe);
     // The agent's own write met the build's denial too, and it did not withhold:
