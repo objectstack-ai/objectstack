@@ -1,7 +1,7 @@
 ---
 '@objectstack/spec': patch
-'@object-ui/components': minor
-'@object-ui/app-shell': minor
+'@object-ui/components': patch
+'@object-ui/app-shell': patch
 ---
 
 feat(record-page): the record's header is two rows — navigation over the record — and shows up to three actions again
