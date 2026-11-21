@@ -42,6 +42,7 @@ import {
   isSharedRecordIds,
   lowerFilterCondition,
   type FilterCondition,
+  type DriverOptions,
   type FixedReadLeafRow,
 } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
@@ -653,6 +654,7 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
     describe('no reading is refused, never compiled uncast (ADR-0155 D2)', () => {
       const charCase = () => PG_KEY_CASES.find((c) => c.ddl === 'character(4)')!;
       const leafOf = (object: string) => seamed({ id: { $in: SharedRecordIds.read(object, 'u9') } });
+      const inTrx = (transaction: Knex.Transaction): DriverOptions => ({ transaction });
       const refused = (err: unknown) => {
         expect(err, 'refused').toBeInstanceOf(Error);
         expect(err).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
@@ -673,9 +675,9 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
           // The caller's transaction holds the pool's one connection.
           const trx = await fresh.beginTransaction();
           try {
-            refused(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }, { transaction: trx } as any).catch((e) => e));
-            refused(await fresh.count(EXT(c), { where: leafOf(EXT(c)) }, { transaction: trx } as any).catch((e) => e));
-            refused(await fresh.updateMany(EXT(c), { where: leafOf(EXT(c)) }, { label: 'touched' }, { transaction: trx } as any).catch((e) => e));
+            refused(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)).catch((e) => e));
+            refused(await fresh.count(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)).catch((e) => e));
+            refused(await fresh.updateMany(EXT(c), { where: leafOf(EXT(c)) }, { label: 'touched' }, inTrx(trx)).catch((e) => e));
           } finally {
             await trx.rollback();
           }
@@ -701,9 +703,9 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
           await trx(TXN).insert([{ id: 'k1', label: 'x' }, { id: 'k2', label: 'x' }]);
           await trx(GRANTS).insert({ id: 'srid_pk_txn_g0', object_name: TXN, recipient_type: 'user', recipient_id: 'u9', record_id: 'k1  ', access_level: 'lvl_edit', organization_id: 'org_a' });
           // Today's list, in the same transaction, answers k1: the leaf must not answer anything else.
-          expect(sortedIds(await fresh.find(TXN, { where: seamed({ id: { $in: ['k1  '] } }) }, { transaction: trx } as any))).toEqual(['k1  ']);
-          refused(await fresh.find(TXN, { where: leafOf(TXN) }, { transaction: trx } as any).catch((e) => e));
-          refused(await fresh.count(TXN, { where: leafOf(TXN) }, { transaction: trx } as any).catch((e) => e));
+          expect(sortedIds(await fresh.find(TXN, { where: seamed({ id: { $in: ['k1  '] } }) }, inTrx(trx)))).toEqual(['k1  ']);
+          refused(await fresh.find(TXN, { where: leafOf(TXN) }, inTrx(trx)).catch((e) => e));
+          refused(await fresh.count(TXN, { where: leafOf(TXN) }, inTrx(trx)).catch((e) => e));
         } finally {
           await trx.rollback();
           await fresh.disconnect?.();
