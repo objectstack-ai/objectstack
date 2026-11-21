@@ -328,6 +328,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "Retirer le responsable",
+        confirmText: "Retirer le responsable de cet utilisateur ? Il ne rendra compte à personne tant qu’un responsable n’est pas de nouveau défini ; le routage des approbations et la portée d’enregistrements own_and_reports suivent ce changement.",
+        successMessage: "Responsable retiré"
+      },
       list_platform_admins: {
         label: "Administrateurs de la plateforme",
         resultDialog: {

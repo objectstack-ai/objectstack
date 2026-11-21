@@ -42,9 +42,10 @@
  *     runner, not a second action shape. The copy affordance is the
  *     `navigator.clipboard` pattern of `ConnectAgentWidget`'s `CopyButton`.
  *   - `usage-bar` draws the `Progress` primitive (`@object-ui/components`).
- *   - `tile-grid` draws the apps strip's tile (`../home/launcherTile.ts`, moved
- *     out of `HomeAppsStrip` string for string), and leads with a router
- *     `Link`, as the strip does.
+ *   - `tile-grid` draws the apps strip's tile (`../home/launcherTile.ts`: its
+ *     box, its icon square, and the solid palette colour keyed by the tile's
+ *     `href`, objectstack#36157), and leads with a router `Link`, as the strip
+ *     does.
  *   - `row-table` draws the `Table` primitives (`@object-ui/components`), reads
  *     each column's `path` with the binding's own path reader
  *     (`selectElementApiPath`), formats `datetime` through the one date-display
@@ -78,7 +79,7 @@ import {
 import { formatDisplayNumber, pickLocalized, useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import type { DeclaredNode } from '@object-ui/types';
 import { getIcon } from '../../utils/getIcon.js';
-import { ICON_BOX_CLASSES, TILE_CLASSES, launcherIconGradient } from '../home/launcherTile.js';
+import { ICON_BOX_CLASSES, TILE_CLASSES, launcherTileColorClasses } from '../home/launcherTile.js';
 
 /** The renderer props every block receives from `SchemaRenderer`. */
 interface BlockRendererProps {
@@ -329,8 +330,8 @@ export function TileGridBlock({ schema, className }: BlockRendererProps) {
             <span
               className={cn(
                 ICON_BOX_CLASSES,
-                'bg-gradient-to-br text-white shadow-sm transition-transform group-hover:scale-105',
-                launcherIconGradient(href || label),
+                'shadow-sm transition-transform group-hover:scale-105',
+                launcherTileColorClasses(href || label),
               )}
             >
               <Icon className="size-[26px]" />

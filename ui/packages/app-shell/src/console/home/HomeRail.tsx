@@ -18,7 +18,7 @@ import {
   FileText, Database, LayoutDashboard, File, List, CircleAlert, Rocket, Lock,
 } from 'lucide-react';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { Button, cn, ObjectIconTile } from '@object-ui/components';
+import { Button, cn, NeutralIconTile, ObjectIconTile } from '@object-ui/components';
 import type { ActivityFeedReading } from '../../hooks/sharedUserFeeds.js';
 import type { HomeInboxStatus, HomeNotification, PendingApprovalRequest } from '../../hooks/useHomeInbox.js';
 import type { RecentItem } from '../../hooks/useRecentItems.js';
@@ -482,13 +482,19 @@ export interface RecentItemContext {
   context: string;
   /** The label of the app the entry was opened in, or `undefined` when no app on Home is it. */
   app?: string;
-  /** A record's object icon (a Lucide name), or `undefined` to draw the kind's icon. */
+  /** The row's object's icon (a Lucide name), or `undefined` to draw the kind's icon. */
   icon?: string;
   /**
-   * A record's object palette colour (`ObjectSchema.color`): with `icon`, the
-   * row draws the object's tile in that colour (objectstack#35985).
+   * The row's object's palette colour (`ObjectSchema.color`), drawn as the
+   * object's tile (objectstack#35985).
    */
   color?: string;
+  /**
+   * The row is about an object (the object, one of its views or records) whose
+   * metadata was read: it draws that object's tile; otherwise the neutral tile
+   * with the kind's icon (objectstack#36141).
+   */
+  object?: boolean;
 }
 
 /**
@@ -529,7 +535,7 @@ export function HomeContinue({
       ) : (
         <ul className="overflow-hidden rounded-lg border border-border bg-card">
           {items.map((it) => {
-            const { context, app, icon, color } = describe(it);
+            const { context, app, icon, color, object } = describe(it);
             const Icon = icon ? getIcon(icon) : RECENT_ICON[it.type] || FileText;
             const trail = [context, app, timeAgo(it.visitedAt, displayLocale)].filter(Boolean).join(' · ');
             return (
@@ -541,19 +547,15 @@ export function HomeContinue({
                   data-recent-type={it.type}
                   className="flex h-10 w-full items-center gap-2.5 px-3 text-left text-sm transition-colors hover:bg-muted/60 max-sm:h-11"
                 >
-                  {icon ? (
-                    <span className="inline-flex shrink-0" data-testid="home-recent-icon" data-icon={icon}>
+                  {/* objectstack#36141 — the menu's rule: an object row is its
+                      object's tile, every other row the neutral tile. */}
+                  <span className="inline-flex shrink-0" data-testid="home-recent-icon" data-icon={icon ?? it.type}>
+                    {object || icon ? (
                       <ObjectIconTile glyph={Icon} color={color} size="md" />
-                    </span>
-                  ) : (
-                    <span
-                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-                      data-testid="home-recent-icon"
-                      data-icon={it.type}
-                    >
-                      <Icon className="h-[13px] w-[13px]" />
-                    </span>
-                  )}
+                    ) : (
+                      <NeutralIconTile glyph={Icon} size="md" />
+                    )}
+                  </span>
                   <span className="min-w-0 flex-1 truncate">{labelOf(it)}</span>
                   <span className="shrink-0 text-xs text-muted-foreground" data-testid="home-recent-trail">
                     {trail}
