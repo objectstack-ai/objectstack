@@ -351,3 +351,50 @@ describe('MasterDetailForm — showSubmit gate (Studio screen preview)', () => {
     expect(cancelBtn).toHaveTextContent('取消');
   });
 });
+
+/**
+ * objectstack#35804 — the line grid's column headers show each child field's
+ * help, read from the child object's definition as `getObjectSchema` serves
+ * it: the definition the record form reads too, so a help another package
+ * wrote through `objectExtensions.fieldPatches` (applied by the server before
+ * it serves the object) and the reader's language both arrive here.
+ */
+describe('MasterDetailForm — line column headers show the child fields\' help (objectstack#35804)', () => {
+  const lineSchema = {
+    name: 'po_line',
+    fields: {
+      po: { type: 'lookup', label: 'PO', reference: 'po' },
+      // The served definition: `description` carries what a patch or a
+      // translation put there, and `inlineHelpText` wins over it.
+      qty: { type: 'number', label: 'Qty', description: 'Whole units only.' },
+      price: { type: 'number', label: 'Price', inlineHelpText: 'Tax-inclusive.', description: 'Not this.' },
+      note: { type: 'text', label: 'Note' },
+    },
+  };
+  const ds = () =>
+    makeDataSource({
+      getObjectSchema: vi.fn(async (name: string) => (name === 'po_line' ? lineSchema : parentSchema)),
+    });
+  const schema = (detail: Record<string, unknown>) =>
+    ({ objectName: 'po', mode: 'create', fields: ['ref'], details: [detail] }) as any;
+
+  it.each([
+    ['derived columns', { childObject: 'po_line' }],
+    // The console's shape for a child field's `inlineColumns`: names the
+    // form hydrates from the child schema (a column declaring its `type`
+    // opts out of that hydration, and an entry whose every column does loads
+    // no child schema, so it has no help to show, as it has no lookup
+    // autofill pairs).
+    [
+      'authored columns',
+      { childObject: 'po_line', relationshipField: 'po', columns: [{ name: 'qty' }, { name: 'price' }, { name: 'note' }] },
+    ],
+  ])('%s: each header carries its field\'s help, the form\'s own read of it', async (_label, detail) => {
+    render(<MasterDetailForm schema={schema(detail)} dataSource={ds()} />);
+    const qtyHelp = await screen.findByRole('button', { name: 'Whole units only.' });
+    expect(qtyHelp.closest('th')!.textContent).toContain('Qty');
+    expect(screen.getByRole('button', { name: 'Tax-inclusive.' }).closest('th')!.textContent).toContain('Price');
+    // CONTROL: a field with no help draws no info button on its header.
+    expect(screen.getByRole('columnheader', { name: 'Note' }).querySelector('button')).toBeNull();
+  });
+});
