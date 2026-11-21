@@ -293,7 +293,7 @@ export class BulkOperationsFacet {
     await primeFixedReadLeafKeyTypes(this, object, query.where, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, query.where);
     this.auditMissingTenant(object, 'updateMany', options);
 
     // `data ?? {}` keeps the nullish tolerance this door already had on the
@@ -342,7 +342,7 @@ export class BulkOperationsFacet {
     await primeFixedReadLeafKeyTypes(this, object, query.where, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, query.where);
     this.auditMissingTenant(object, 'deleteMany', options);
     let total = 0;
     for (const target of this.rotationShardsOf(object) ?? [object]) {
@@ -392,7 +392,7 @@ export class BulkOperationsFacet {
     await primeFixedReadLeafKeyTypes(this, object, query?.where, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, query?.where);
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
 

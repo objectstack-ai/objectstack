@@ -146,7 +146,7 @@ const SUMMARY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.summary.earliest': 'Earliest',
   'grid.summary.latest': 'Latest',
   'grid.summary.pageName': '{{label}} (this page)',
-  'grid.summary.calculate': 'Calculate',
+  'grid.summary.calculate': 'Add calculation',
   'grid.summary.none': 'None',
   'grid.summary.menuPercentEmpty': 'Percent empty',
   'grid.summary.menuPercentFilled': 'Percent filled',

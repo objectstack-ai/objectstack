@@ -1030,8 +1030,9 @@ export function buildLockOf(built: unknown, card: Card, op: Operation): string |
  * The build's confirmation gate per action on an operation's object, read from
  * the built artifact: each action name declared there, `true` when it carries
  * `ai.requiresConfirmation: true`. `undefined` when the artifact cannot be
- * read. The grader's temporary rule reads it (`AGENT_CONFIRMATION_MEETS_PENDING`,
- * until objectstack-ai/cloud#3826 item 6).
+ * read. The grader's temporary rule reads it (`AGENT_CONFIRMATION_MEETS_PENDING`).
+ *
+ * @deprecated Read only by the temporary rule, which is off since #33691; deleted in the next major (#36057).
  */
 export function actionGatesOf(built: unknown, op: Operation): Record<string, boolean> | undefined {
   if (built === undefined) return undefined;

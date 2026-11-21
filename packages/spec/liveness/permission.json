@@ -126,6 +126,13 @@
           "evidence": "packages/plugins/plugin-security/src/permission-evaluator.ts#MODIFY_ALL_WRITE_KEYS (the bypass key set over edit/delete plus the destructive class); packages/plugins/plugin-security/src/permission-evaluator.ts#PermissionEvaluator (`MODIFY_ALL_WRITE_KEYS.has(permKey) && objPerm.modifyAllRecords` in `checkObjectPermission`); packages/plugins/plugin-security/src/permission-evaluator.ts#getEffectiveScope (write → 'org')",
           "note": "2026-08-28: RE-ANCHORED (commit 9ee2dcfbd) — path-only citation upgraded to anchors; the two consumers its prose already named are now separately falsifiable. Re-closed by hand against c459da6bc."
         },
+        "viewAllFields": {
+          "status": "live",
+          "verifiedAt": "2026-11-21",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/core/src/security/effective-object-permissions.ts#holdsViewAllFields (the set's own entry for the object, else its '*' entry); packages/core/src/security/effective-object-permissions.ts#superuserFieldVote (the one field vote: a read vote, never an edit vote, skipped on a field the set's own row declares `readable: false`); packages/plugins/plugin-security/src/permission-evaluator.ts#getFieldPermissions and packages/core/src/security/effective-object-permissions.ts#buildEffectiveFieldPermissions (both merges apply that vote per field)",
+          "note": "The field-axis split, step 2 (decision card ruling of record 6912661484, letter A): the read-only object-permission bit that votes `readable: true` on every field of the object, fields added later included. Optional, no default. LIVE on landing through the shared vote both field merges apply; on a set that also holds `viewAllRecords` / `modifyAllRecords` it duplicates the vote those bits cast today, so the built-in organization administrator set carries it with no change in behaviour. Also read by the agent ceiling (cleared), the organization boundary (condition (a)), the anchor high-privilege predicate and the access-matrix snapshot."
+        },
         "readScope": {
           "status": "live",
           "verifiedAt": "2026-08-28",

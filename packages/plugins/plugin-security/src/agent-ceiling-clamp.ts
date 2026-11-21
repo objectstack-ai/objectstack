@@ -22,12 +22,14 @@
  * ## What it clears
  *
  * On every `objects` entry, the wildcard `'*'` included: `viewAllRecords`,
- * `modifyAllRecords` and the destructive class's grant keys
+ * `modifyAllRecords`, `viewAllFields` and the destructive class's grant keys
  * ({@link DESTRUCTIVE_CLASS_KEYS}, `permission-evaluator.ts`). With the two
  * bypass bits gone a `'*'` entry is no longer a superuser wildcard: the
  * evaluator applies it to a private object only when it carries them
- * (ADR-0066 D2), and the field merge's superuser vote reads the same two
- * bits. On the set: `systemPermissions` (emptied) and `adminScope` (removed),
+ * (ADR-0066 D2). The field merge's vote reads those two bits and
+ * `viewAllFields` (the field-axis split, ruling of record 6912661484): left
+ * standing, `viewAllFields` would keep the field half of View All under the
+ * ceiling, re-opening every field another of the agent's sets hides. On the set: `systemPermissions` (emptied) and `adminScope` (removed),
  * in both the definition and the row spellings the delegated-administration
  * gate reads.
  *
@@ -44,10 +46,11 @@
 import type { PermissionSet } from '@objectstack/spec/security';
 import { DESTRUCTIVE_CLASS_KEYS } from './permission-evaluator.js';
 
-/** The object-entry bits the ceiling clears: the two bypass bits, then the destructive class. */
+/** The object-entry bits the ceiling clears: the two bypass bits, the field read-all bit, then the destructive class. */
 export const AGENT_CEILING_OBJECT_KEYS: readonly string[] = Object.freeze([
   'viewAllRecords',
   'modifyAllRecords',
+  'viewAllFields',
   ...DESTRUCTIVE_CLASS_KEYS,
 ]);
 

@@ -402,12 +402,20 @@
  * ============================================================ */
 @layer base {
   :root {
-    /* iOS uses larger, concentric corner radii */
+    /* Large surfaces (cards, `rounded-lg`) keep the larger iOS corner. */
     --radius: 0.875rem;
 
-    /* iOS "grouped" canvas: soft system gray (≈ #F2F2F7) instead of pure
-       white, so white cards/popovers float above it with real depth. */
-    --background: 240 24% 97%;
+    /* Controls share one 8px corner: buttons, inputs, selects, toolbar
+       controls, menus and chips are `rounded-md`. What sits inside one (a tab
+       trigger in its list, a menu row) is `rounded-sm`, 6px, so the corners
+       stay concentric. Set here rather than derived from `--radius`, which
+       would move the cards with them. */
+    --radius-md: 0.5rem;
+    --radius-sm: 0.375rem;
+
+    /* The content area is white; the sidebar is the one grey surface beside
+       it (see `--sidebar` below), and cards are told apart by their border. */
+    --background: 0 0% 100%;
     --secondary: 240 18% 94%;
     --muted: 240 18% 94%;
     --accent: 240 18% 94%;
@@ -415,7 +423,8 @@
   }
 
   .dark {
-    /* iOS dark uses near-black, not blue-black; cards sit slightly above. */
+    /* iOS dark uses near-black, not blue-black; the content area is the
+       darkest step and cards and the sidebar sit one step above it. */
     --background: 240 6% 6%;
     --card: 240 6% 10%;
     --popover: 240 6% 11%;
@@ -490,8 +499,9 @@ header.sticky {
     --ring: 211 100% 50%;
     --sidebar-primary: 211 100% 50%;
     --sidebar-ring: 211 100% 50%;
-    /* iOS sidebar is a translucent vibrancy material → near-white base. */
-    --sidebar: 240 24% 98%;
+    /* The sidebar is a light grey beside the white content area, drawn at
+       70% over it (the frosted rule below), so it reads as ≈ #F7F7F8. */
+    --sidebar: 240 12% 96%;
   }
   .dark {
     /* iOS dark blue (#0A84FF) is a touch brighter for contrast. */
@@ -499,7 +509,8 @@ header.sticky {
     --ring: 211 100% 60%;
     --sidebar-primary: 211 100% 60%;
     --sidebar-ring: 211 100% 60%;
-    --sidebar: 240 6% 8%;
+    /* One step lighter than the content area's 6%. */
+    --sidebar: 240 6% 11%;
   }
 }
 

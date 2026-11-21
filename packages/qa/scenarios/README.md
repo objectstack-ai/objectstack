@@ -108,18 +108,18 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   before.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
-  **Temporary, until objectstack-ai/cloud#3826 item 6 (real human confirmation):** a
-  `pending_confirmation` operation is also met when the agent applied it through the action's
-  confirmation gate on the person's explicit instruction — the ask names the target row, read
-  off the card (`askNamesTarget`); the write went through `run_action`, never a raw data door;
-  the build declares `ai.requiresConfirmation: true` on that action; the call carried
-  `confirm: true`; and the rows written on the object are exactly the target, holding the
-  declared `values` (gone, for a `delete`). The grade says which way it went
-  (`OperationGrade.confirmation`: `asked first` or `confirmed by the agent`), and the scorecard
-  counts both per half and per card. The switch is `AGENT_CONFIRMATION_MEETS_PENDING` and the
-  rule is `agentConfirmationChecks`: set the switch to `false` to grade strictly again, or delete
-  both when the platform confirms for real. It stays as it is beside the confirmed write below:
-  an agent that wrote on the first turn gets no second one.
+  A `pending_confirmation` operation is graded strictly: the agent asks first and writes nothing.
+  The temporary relaxation that also met it by a write the agent applied through the action's
+  confirmation gate on an ask naming the target (`agentConfirmationChecks`) is off: real human
+  confirmation is on the platform (objectstack-ai/cloud#3826 item 6), so its switch
+  `AGENT_CONFIRMATION_MEETS_PENDING` is `false`. Its names (`AGENT_CONFIRMATION_MEETS_PENDING`,
+  `confirmedByAgent`, `AgentConfirmedObservation`, `AgentConfirmationRule`,
+  `OperationObservation.agentConfirmed`, `GradeOperationOptions.agentConfirmation` and
+  `acceptAgentConfirmation`, `actionGatesOf`, `ConfirmationTally.confirmedByAgent`) are deprecated
+  and deleted in the next major; until then a direct `gradeOperation` call opts back in with
+  `acceptAgentConfirmation: true` (`gradeCardOperation`, and so the runner, takes no options),
+  and the `confirmed by the agent` count reads 0 otherwise. `askNamesTarget` and
+  `asked first` stay: the confirmation turn below reads them.
   **The confirmed write** (`gradeConfirmedWrite`): a `pending_confirmation` operation the agent
   met by asking first gets a second turn in which the person confirms, and that turn is graded on
   its own against the operation's declared write — `confirmed-write:applied` (the door applied a
@@ -682,7 +682,10 @@ npx @objectstack/scenarios help                                      # the comma
   it may not see. Each charge is a failed Build check (in total, never in passed; `rollup-source-unreadable:<persona>:<parent.field>`
   in the record's evidence) and a Build finding naming the persona, the roll-up and the withheld child, so such a build
   is never `pass` and is never installed as a verified build. A finding on a set no persona holds, on a child the card
-  lets the persona read, or the rule's `info` row-scope arm is not charged. The remedy is the rule's own: mask the
+  lets the persona read, or the rule's `info` row-scope arm is not charged. A finding the build acknowledged
+  (`rollupSourceUnreadableReason` on the set's entry for the roll-up, which turns the rule's finding to `info` and
+  suffixes its message with the reason) is still charged, in the same check: a written reason does not change what
+  the persona sees, and a total the card withholds is masked, never explained. The remedy is the rule's own: mask the
   parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
   charged.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner

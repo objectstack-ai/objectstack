@@ -564,6 +564,9 @@ const ar = {
     cancelChanges: "إلغاء التغييرات",
     saveRow: "حفظ الصف",
     cellReadOnly: "لا يمكن تحرير هذه الخلية هنا.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "أدخل رقمًا.",
+    cellInvalid: "هذه القيمة غير صالحة.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "جارٍ الحفظ…",
     cellSaved: "تم الحفظ",
@@ -714,7 +717,7 @@ const ar = {
       earliest: "الأقدم",
       latest: "الأحدث",
       pageName: "{{label}} (هذه الصفحة)",
-      calculate: "حساب",
+      calculate: "إضافة حساب",
       none: "لا شيء",
       menuPercentEmpty: "نسبة الفارغ",
       menuPercentFilled: "نسبة المعبأ",
@@ -2939,11 +2942,25 @@ const ar = {
       viewNameInvalid: "استخدم أحرفًا إنجليزية صغيرة وأرقامًا وشرطات سفلية؛ وابدأ بحرف أو شرطة سفلية.",
       systemViewReadonly: "عرض النظام معرَّف في الكود — للقراءة فقط.",
       cannotEditMetaView: "هذا عرض مدمج معرَّف في الكود — لا يمكن تعديله.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: "الرجوع إلى إعدادات العرض",
       resetViewTitle: "يعيد عوامل التصفية والبحث والترتيب والتجميع وترتيب الأعمدة والحقول المخفية والكثافة والتخطيط ولون الصف وأرقام الصفوف والتحرير المضمّن الخاصة بهذا العرض. تبقى طرق العرض المثبتة والمفضلة وطريقة فتح السجلات كما هي. تتغير قائمتك فقط.",
-      linkFilterRefused: 'لم يُطبَّق عامل التصفية في هذا الرابط، لأنه يذكر حقلًا لا يمكنك التصفية حسبه هنا، لذا تعرض القائمة طريقة العرض دونه.',
       personalized: "مخصّصة",
       personalizedHeading: "تختلف قائمتك عن هذا العرض في",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "تجاهل",
+        discardTitle: "يعيد القائمة كما يحددها العرض: عوامل التصفية والفرز والتجميع والأعمدة والتخطيط. يبقى عرض الأعمدة وارتفاع الصفوف كما هما.",
+        save: "حفظ",
+        heading: "تغييرات غير محفوظة",
+        partSeparator: "، ",
+        saveToView: "حفظ في هذا العرض",
+        saveAsMyView: "حفظ كعرض خاص بي",
+        copyName: "نسخة من {{name}}",
+        saved: "تم الحفظ",
+      },
+      linkFilterRefused: 'لم يُطبَّق عامل التصفية في هذا الرابط، لأنه يذكر حقلًا لا يمكنك التصفية حسبه هنا، لذا تعرض القائمة طريقة العرض دونه.',
       personalizedParts: {
         filters: "عوامل التصفية",
         search: "البحث",
