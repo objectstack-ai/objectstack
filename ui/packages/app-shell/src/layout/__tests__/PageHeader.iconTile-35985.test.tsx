@@ -15,21 +15,38 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as React from 'react';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ObjectIconTile } from '@object-ui/components';
 import { PageHeader } from '../PageHeader';
 
-const postures = [undefined, 'list', 'setup'] as const;
+// The row and list postures come from the `posture` prop; Setup's is read off
+// the route (`/apps/setup/...`), so that case mounts the header under it.
+const postures = [
+  { reached: 'row', posture: undefined, app: 'crm' },
+  { reached: 'list', posture: 'list', app: 'crm' },
+  { reached: 'setup', posture: undefined, app: 'setup' },
+] as const;
 
 describe('PageHeader draws an object tile as given (objectstack#35985)', () => {
-  it.each(postures)('posture %s: the tile sits directly in the title row, and `icon` is not drawn', (posture) => {
-    render(
-      <PageHeader
-        title="Accounts"
-        posture={posture}
-        icon={<svg data-testid="line-icon" />}
-        iconTile={<ObjectIconTile icon="building" color="orange" />}
-      />,
+  it.each(postures)('posture $reached: the tile sits directly in the title row, and `icon` is not drawn', ({ reached, posture, app }) => {
+    const { container } = render(
+      <MemoryRouter initialEntries={[`/apps/${app}/x`]}>
+        <Routes>
+          <Route
+            path="/apps/:appName/*"
+            element={
+              <PageHeader
+                title="Accounts"
+                posture={posture}
+                icon={<svg data-testid="line-icon" />}
+                iconTile={<ObjectIconTile icon="building" color="orange" />}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
     );
+    expect(container.querySelector('[data-posture]')).toHaveAttribute('data-posture', reached);
     const tile = document.querySelector('[data-object-icon-tile]') as HTMLElement;
     expect(tile).toHaveAttribute('data-object-icon-tile', 'orange');
     expect(screen.queryByTestId('line-icon')).toBeNull();
