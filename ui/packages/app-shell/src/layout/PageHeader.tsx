@@ -48,12 +48,18 @@
  * draws `foldedActions` whatever the text needs, so a main area narrowed by a
  * docked panel, a small window or the record drawer gets a short header row:
  *   [icon] Title [kind]                            [refresh] [primary] [⋯]
+ *
+ * The shell's group — where the shell turns it on (objectstack#36111), the
+ * top-right button group (`ShellPageActions`: comments, Edit app, AI, help)
+ * ends the action cluster in every posture, behind a hairline:
+ *   [icon] Title [kind] | crumb › subtitle…   [actions...] | [group]
  */
 
 import * as React from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import { useInSetupApp } from '../console/setupApp.js';
+import { useShellPageActionsSlot } from './shellPageActionsSlot.js';
 
 /**
  * Props of the app-shell `<PageHeader>` React component.
@@ -262,7 +268,12 @@ export function PageHeader({
     </Button>
   ) : null;
 
-  const trailing = (refreshButton || drawnActions) && (
+  // objectstack#36111 — the shell's top-right button group, after the page's
+  // own actions, where the shell turned it on (`ShellPageActions`); a hairline
+  // sets it apart from them.
+  const renderShellGroup = useShellPageActionsSlot();
+  const pageActions = refreshButton || drawnActions;
+  const trailing = (pageActions || renderShellGroup) && (
     <div
       ref={clusterRef}
       className="flex items-center gap-1.5 sm:gap-2 shrink-0"
@@ -271,6 +282,10 @@ export function PageHeader({
     >
       {refreshButton}
       {drawnActions}
+      {renderShellGroup && pageActions && (
+        <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" data-testid="page-header-shell-divider" />
+      )}
+      {renderShellGroup?.({})}
     </div>
   );
 
