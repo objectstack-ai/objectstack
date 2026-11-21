@@ -328,6 +328,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "Remove Manager",
+        confirmText: "Remove this user's manager? They will report to no one until a manager is set again; approval routing and the own_and_reports record scope follow the change.",
+        successMessage: "Manager removed"
+      },
       list_platform_admins: {
         label: "Platform Administrators",
         resultDialog: {

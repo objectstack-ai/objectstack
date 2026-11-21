@@ -774,26 +774,27 @@ export const SysUser = ObjectSchema.create({
       description: "Set this user's manager. The reporting chain drives approval routing and the own_and_reports record scope.",
       params: [
         {
-          // INLINE, not field-backed. A field-backed `{ field: 'manager_id' }`
-          // param inherits the referenced field's metadata, and that field is
-          // `readonly: true` (ADR-0092 D4 — it must stay non-editable in the
-          // standard edit form), so inheriting it here is a picker that may
-          // render read-only. `name` is the request-body key, and it is the
-          // camelCase spelling the endpoint reads first (`readId(body,
-          // 'managerId', 'manager_id')`).
+          // FIELD-BACKED on `manager_id` and seeded from the row
+          // (`defaultFromRow`), so the dialog opens on the CURRENT manager and
+          // an admin sees what a re-point would replace. Both doors that draw
+          // this dialog pass the row: the record header stamps its record and a
+          // list row is projected with every field a `defaultFromRow` param
+          // seeds from. The field's `readonly: true` (ADR-0092 D4) is not
+          // inherited: the console's param resolver carries the field's type,
+          // target and label onto the param and never its `readonly`, so the
+          // picker stays editable while the edit form keeps the column locked.
+          // `name` is the request-body key, the camelCase spelling the endpoint
+          // reads first (`readId(body, 'managerId', 'manager_id')`).
           name: 'managerId',
+          field: 'manager_id',
+          defaultFromRow: true,
           label: 'Manager',
-          type: 'lookup',
-          reference: 'sys_user',
           // Required, because the endpoint refuses an ABSENT or empty key by
           // design — "managerId is required — send null to clear the link,
           // never omit the key" — so a dialog that could submit nothing would
           // turn a normal click into a 400 about a key the user never saw.
-          // Required means a value is collected before anything is POSTed.
-          // ⚠️ Clearing the link (`managerId: null`) is a real endpoint
-          // capability that this action therefore does not reach; it is
-          // recorded in the PR's acceptance notes rather than half-declared
-          // here.
+          // Required means a value is collected before anything is POSTed;
+          // clearing is `remove_user_manager` below.
           required: true,
           helpText: 'The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain.',
         },
@@ -806,6 +807,42 @@ export const SysUser = ObjectSchema.create({
           'Set the manager a user (the record) reports to (param: managerId, a user in the same organization). The reporting chain drives approval routing and the own_and_reports record scope. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
+    },
+    {
+      // The clear half of the same endpoint: `managerId: null` unsets the
+      // link ("send null to clear the link, never omit the key"), which the
+      // required picker above cannot send. The null rides `bodyExtra`, the
+      // action's static request body, merged last at both doors
+      // (`buildApiActionRequest`), so the action collects nothing and asks a
+      // confirm question instead. Same door, same gate, same refusals as
+      // `set_user_manager` — the SCIM-held one included, which the endpoint
+      // applies to the clear as well — and ⛔ no client-side copy of any of
+      // them (maintainer ruling record 6895645364, option A).
+      //
+      // `visible` is `set_user_manager`'s standing term, then the row's state,
+      // in the form of Ban / Unban above: it is offered only while the row
+      // HAS a manager, so it never reports success for removing nothing. The
+      // `has()` guard because a CEL read of an absent key faults; a list row
+      // carries `manager_id` because the console projects every column an
+      // action predicate reads.
+      //
+      // No `ai` block: this action postdates the ADR-0011 identity-actions
+      // assessment, and an unassessed action stays human-only.
+      name: 'remove_user_manager',
+      label: 'Remove Manager',
+      icon: 'user-minus',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/admin/set-user-manager',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: 'current_user.isPlatformAdmin == true && has(record.manager_id) && record.manager_id != null',
+      recordIdParam: 'userId',
+      bodyExtra: { managerId: null },
+      confirmText: "Remove this user's manager? They will report to no one until a manager is set again; approval routing and the own_and_reports record scope follow the change.",
+      successMessage: 'Manager removed',
+      refreshAfter: true,
     },
     {
       // ADR-0095 D3 — who holds platform-admin standing. Standing is derived

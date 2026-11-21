@@ -225,3 +225,19 @@ export function filterPlatformSortableSort<T extends { field?: string }>(
   if (!Array.isArray(sort)) return [];
   return sort.filter((item) => isPlatformSortableField(sortability, item?.field));
 }
+
+/**
+ * A column-header sort pick laid over the sort in force (objectstack#35876):
+ * the header menu hands back the ONE column the reader picked. With no sort
+ * or a single level, that column replaces the sort. With two levels or more it
+ * becomes the first level and every other level keeps its place after it; a
+ * column already in the sort moves up and takes the picked direction. No level
+ * is dropped. Shared by every host that draws the header menu over its own
+ * sort (the list page, a record page's related tab), so one click means one
+ * thing on both.
+ */
+export function withHeaderSortPick<T extends { field: string }>(current: readonly T[], picked: readonly T[]): T[] {
+  return picked.length === 1 && current.length >= 2
+    ? [picked[0], ...current.filter((s) => s.field !== picked[0].field)]
+    : [...picked];
+}

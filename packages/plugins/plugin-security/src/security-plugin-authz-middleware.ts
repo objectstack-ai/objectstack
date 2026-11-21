@@ -1394,6 +1394,13 @@ export function registerAuthzMiddleware(
     // The platform's own floor defers to the platform's own ownership
     // authority; app-authored policies keep refusing exactly as before.
     //
+    // [#35917] Replacing is not deleting. Where an authored write policy
+    // stands beside the floor in Layer 1's OR, the floor stays a term of it,
+    // so a row the floor alone admits (the caller's own closed row beside an
+    // authored widener) is still admitted; the floor is dropped only where it
+    // is the OR's last term (`computeLayeredRlsFilter`), which is the
+    // predicate write's composition too (`predicateWriteFloorRelief`).
+    //
     // The verb boundary is INHERITED, not restated (ADR-0111 D3): the same
     // `rlsOperation` mapping picks `checkEdit` for the update class and
     // `checkDelete` for the delete class, so an `edit` share widens update and
@@ -3008,10 +3015,10 @@ export function idsOfReadableScope(scope: Record<string, unknown>): (string | nu
  *    replaced: `computeLayeredRlsFilter` with `dropPlatformOwnershipFloor`.
  *    If that is not `null`, an authored write-class policy remains, and
  *    `null` is answered with no verdict asked. Policies compose by `$or` only
- *    (`rls-compiler.ts`), so `floored` is that policy set OR the floor: a
- *    row `floored` refuses fails every authored policy too, and the by-id
- *    write of it, held to those policies alone, is refused as well. Replacing
- *    the floor can add no row there, so nothing is asked.
+ *    (`rls-compiler.ts`), and a replacement keeps the floor's term in an OR
+ *    an authored term stands in ([#35917]), so the by-id write of every
+ *    matched row is held to `floored` itself: replacing the floor adds no
+ *    row there and removes none, so nothing is asked.
  * 3. The rows `floored` already admits are read once, under the caller's
  *    context, and set aside: they are matched today whatever any verdict says,
  *    so nothing is asked about them and the check they are held to does not

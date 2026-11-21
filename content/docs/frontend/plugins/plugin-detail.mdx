@@ -23,6 +23,7 @@ The Feed & Chatter system provides Airtable-style record-level collaboration. It
 | `FieldChangeItem` | Field change history display (old → new values) |
 | `ReactionPicker` | Emoji reaction selector |
 | `ThreadedReplies` | Collapsible reply threading |
+| `CommentAuthorAvatar` | 20 px author avatar in front of a comment or reply: the image, or the person chips' initials disc |
 | `SubscriptionToggle` | Bell notification toggle |
 
 ## Usage
@@ -193,6 +194,41 @@ declare const handleAddComment: (text: string) => void;
 - **Pagination**: Load more items with `hasMore` / `onLoadMore` pattern
 - **Positioning**: Panel can be placed at `bottom`, `right`, or `left` of the record view
 - **Collapsible**: Optional collapse/expand with configurable default state
+
+## The record's comment panel
+
+On the desktop console, a record's comments live in a panel of their own,
+opened from the comments icon in the record header (on the record page and in
+the record drawer), and no longer inside the 动态 (Activity) tab
+(objectstack#36075):
+
+- **The icon** shows how many top-level comments the record holds. A press
+  opens the panel, the next one closes it, and the browser remembers whether it
+  was left open, once for the record page and once for the drawer.
+- **The panel** is 380 px wide: 「评论」 and ✕ at the top, the threads oldest
+  first, the comment box at the foot. A thread's replies fold to 「N 条回复」
+  and open in place. A comment's actions (Reply, an emoji, and More with Edit
+  and Delete on your own comments) appear at its top right while the pointer is
+  over it.
+- **Where it sits**: beside the record from a 1280 px window, the record giving
+  way; over the record's right edge in a narrower window. In a drawer narrower
+  than 760 px (the default drawer is 720) it covers the drawer's body, and ✕ or
+  Esc returns to the record.
+- **The 动态 tab** then holds the system entries only: activity and field
+  changes, with no comment box and no All / Activity / Discussion chips. The
+  Changes chip stays where the record shows its field history; pressed again,
+  it goes back to every entry. The tab's count leaves the comments out.
+
+The panel and the icon come with the default record page and with a page that
+only fills its slots. A record page you author in full keeps the feed blocks it
+places (`record:discussion`, `record:activity`) exactly as before, and an object
+with `enable.feeds: false` shows no icon. On a phone the comments stay in the
+动态 tab.
+
+The components are exported from `@object-ui/plugin-detail` (`CommentsPanel`,
+`CommentsButton`, `CommentThread`, `CommentItem`, `CommentComposer`,
+`useRecordComments`); each reads the discussion off the host's
+`DiscussionContext`, as the feed blocks do.
 
 ## The `record:activity` block
 
@@ -569,10 +605,21 @@ decision as a defect is how a warning channel gets ignored:
 | `parentItem` | `FeedItem` | required | Parent comment item |
 | `replies` | `FeedItem[]` | required | Reply items |
 | `onAddReply` | `(parentId, text) => void` | — | Add reply callback |
-| `showReplyInput` | `boolean` | `false` | Show reply input |
+| `showReplyInput` | `boolean` | `true` | Show reply input |
+| `focusReplyOnOpen` | `boolean` | `false` | Each time the input opens, expand the replies and put the caret in the input. Pass it when the input opens behind your own Reply button; leave it off when the input always shows, or every thread takes focus on mount |
 | `onEditComment` | `(itemId, text) => void \| Promise<void>` | — | Edit on a reply whose `authoredByViewer` is `true` |
 | `onDeleteComment` | `(itemId) => void \| Promise<void>` | — | Delete on the same replies |
 | `className` | `string` | `''` | Additional CSS classes |
+
+### CommentAuthorAvatar
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `name` | `string` | required | Author display name; the initials come from it (`getPersonInitials` of `@object-ui/fields`) |
+| `avatarUrl` | `string` | — | Author image; without one, or when it fails to load, the initials disc shows |
+| `className` | `string` | — | Additional CSS classes |
+
+`RecordActivityTimeline` draws it in front of every comment and every reply. In `RichTextCommentInput`, typing `@` opens the mention menu under the caret, or above it when the window has no room below.
 
 ### SubscriptionToggle
 

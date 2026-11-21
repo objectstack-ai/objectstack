@@ -25,7 +25,8 @@ export const ProjectWorkspacePage = definePage({
         {
           type: 'page:header',
           properties: {
-            title: 'New Project + Tasks',
+            // No `title`: the console's page header names the page from its
+            // `label` (objectstack#36111), so a title here said it twice.
             subtitle:
               'Master-detail entry — fill the project, add its tasks inline, and save them together.',
             // `icon` removed here (#6946): `page:header` never drew one — retired from the spec.

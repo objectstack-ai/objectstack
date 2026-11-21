@@ -253,6 +253,16 @@ afterEach(() => {
 });
 
 describe('RecordDetailView — the feed does not follow the user to the next record (#3268)', () => {
+  // objectstack#36075 — on the synthesized page the record's comments are the
+  // comment panel's: these open the drawer with it open (the reader left it
+  // so), and it stays open across the record→record navigation.
+  beforeEach(() => {
+    window.localStorage.setItem('os:record-comments-panel:drawer', 'open');
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
   it('drops record A’s comment when the view navigates to record B', async () => {
     // The defect, verbatim from the issue: A’s comment stayed on B’s panel.
     const dataSource = makeDataSource({
@@ -330,6 +340,8 @@ describe('RecordDetailView — the feed does not follow the user to the next rec
     rerender(tree(dataSource, REC_B));
 
     expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+    // The comment panel settles on B's own empty state too.
+    await waitFor(() => expect(document.querySelector('[data-comments-panel] [data-comments-empty]')).not.toBeNull());
     expect(screen.queryByText(commentFor(REC_A))).toBeNull();
     await waitFor(() => expect(screen.queryByTestId('activity-loading')).toBeNull());
   });
