@@ -33,7 +33,9 @@ import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptCho
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, doorHarnessGap, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
-import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, kindCell, kindTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { askKindCounts } from '../../src/ask-kinds.js';
+import { ASK_KINDS } from '../../src/schema.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, doorBuildPrompt, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -3932,6 +3934,87 @@ describe('runCard — dataset questions', () => {
     expect(renderScorecard(sc)).not.toContain('datasets');
     const record = runRecord({ run: 'r', date: '2026-11-17', packages: PUBLISHED, driver: driver.info(), runner: 'scenario-runner', evidenceDir: '/tmp' }, run) as { results: Array<{ id: string }> };
     expect(record.results.map((r) => r.id.split('.').pop())).toEqual(['build', 'run-ask', 'run-operations', 'iterate-build', 'iterate-run-ask', 'iterate-run-operations']);
+  });
+});
+
+// ── Ask kinds (`askKind`): each turn's result carries its kind, and the scorecard counts the round kind by kind ──
+
+describe('runHalf — an ask round over the dataset cards reports every ask kind', () => {
+  const DATASET_CARDS = ['order_to_cash', 'travel_expense'] as const;
+  const cardFile = (id: string) => resolve(HERE, `../../../../../docs/qa/scenarios/${id}.json`);
+  /** Answers each question from its computed truth, and each dataset question with no route at all. */
+  const answers = (scenario: LoadedScenario): AgentDriver => ({
+    info: () => ({ driver: 'kinds-fixture' }) as DriverInfo,
+    author: async () => {
+      throw new Error('an ask round authors nothing');
+    },
+    ask: async (task) =>
+      scenario.card.run.questions.some((q) => q.id === task.step) ? turn(truthfulAnswer(scenario, task.step, task.persona)) : turn('I could not find that.'),
+  });
+
+  it('each question and dataset-question result carries its turn’s kind, and `Run · kinds` counts every kind the cards ask, none at zero', async () => {
+    const asked = Object.fromEntries(ASK_KINDS.map((k) => [k, 0])) as Record<(typeof ASK_KINDS)[number], number>;
+    const rows: string[] = [];
+    for (const id of DATASET_CARDS) {
+      const scenario = load(cardFile(id));
+      const card = { ...scenario, card: { ...scenario.card, run: { ...scenario.card.run, operations: [] } } };
+      const half = await runHalf(namespacedScenario(card), new FakeApp(), answers(scenario), { card: id, mode: 'ask', phase: 'run' }, citationLabels(card));
+      // Every turn names a kind, and a persona the question is withheld from asks a `forbidden` one.
+      expect([...half.questions, ...half.datasetQuestions!].filter((q) => q.askKind === undefined)).toEqual([]);
+      for (const q of half.questions) {
+        const withheld = q.persona !== null && scenario.personaTruths[q.question]?.[q.persona]?.kind === 'withheld';
+        expect(q.askKind === 'forbidden', `${q.question} as ${q.persona}`).toBe(withheld);
+      }
+      const tally = kindTally(half)!;
+      const counts = askKindCounts(scenario.card, scenario.personaTruths);
+      for (const k of ASK_KINDS) {
+        const t = tally.byKind[k];
+        expect((t?.total ?? 0) + (t?.notMeasured ?? 0), `${id} ${k}`).toBe(counts[k]);
+        asked[k] += counts[k];
+      }
+      expect(tally.unkinded).toBeUndefined();
+      // The truthful answers pass where the figure is the reading; a dataset turn that took no route fails its grader.
+      expect(tally.byKind.business_term).toMatchObject({ passed: 0, total: 2 });
+      rows.push(kindCell(tally));
+    }
+    expect(ASK_KINDS.filter((k) => asked[k] < 2)).toEqual([]);
+    for (const row of rows) for (const k of ASK_KINDS) expect(row).toMatch(new RegExp(`(^| · )${k} \\d+/\\d+`));
+  });
+
+  it('the scorecard and the record: a `Run · kinds` row naming all ten kinds, a kind not asked shown as `0 asked`, the tally in the record’s scorecard', () => {
+    const q = (question: string, askKind: string | undefined, pass: boolean, notMeasured?: string) => ({
+      question,
+      persona: null,
+      ...(askKind ? { askKind } : {}),
+      ...(notMeasured ? { notMeasured } : { grade: { correct: pass, cited: true, leaks: [], problems: [], declined: false } }),
+    });
+    const half = {
+      personas: [],
+      seed: { inserted: 0, refused: [] },
+      questions: [q('a', 'count', true), q('b', 'count', false), q('c', 'forbidden', true), q('d', 'top_n', true, 'not asked: seed'), q('e', undefined, true)],
+      operations: [],
+      datasetQuestions: [{ question: 'dq', askKind: 'business_term', grade: { grader: 'metric-selected', pass: true, checks: [], notes: [] } }],
+    } as unknown as NonNullable<CardRun['modes'][number]['run']>;
+    expect(kindTally(half)).toEqual({
+      byKind: { count: { passed: 1, total: 2, notMeasured: 0 }, forbidden: { passed: 1, total: 1, notMeasured: 0 }, top_n: { passed: 0, total: 0, notMeasured: 1 }, business_term: { passed: 1, total: 1, notMeasured: 0 } },
+      unkinded: 1,
+    });
+    const run = { card: 'c', title: 'c', capabilities: [], counts: { questions: 5, questionTurns: 5, operations: 0, personas: 0 }, modes: [{ mode: 'ask', run: half, findings: [] }] } as unknown as CardRun;
+    const table = renderScorecard(cardScorecard(run));
+    expect(table).toContain(
+      '| Run · kinds | count 1/2 · group_sum 0 asked · top_n 0/0 · 1 not measured · time_range 0 asked · join 0 asked · owner_latest 0 asked · business_term 1/1 · ambiguous 0 asked · forbidden 1/1 · unanswerable 0 asked · no kind: 1 |',
+    );
+    const record = runRecord({ run: 'r', date: '2026-11-21', packages: PUBLISHED, driver: { driver: 'x' } as DriverInfo, runner: 'scenario-runner', evidenceDir: '/tmp' }, run) as { scorecard: ReturnType<typeof cardScorecard> };
+    expect(record.scorecard.modes[0]!.first.kinds!.byKind.count).toEqual({ passed: 1, total: 2, notMeasured: 0 });
+  });
+
+  it('a record whose turns carry no kind (a card that names none, a record from before turns did) has no kinds tally and no `Run · kinds` row', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect(run.modes[0]!.run!.questions.every((q) => !('askKind' in q))).toBe(true);
+    const sc = cardScorecard(run);
+    expect('kinds' in sc.modes[0]!.first).toBe(false);
+    expect(renderScorecard(sc)).not.toContain('Run · kinds');
   });
 });
 
