@@ -151,6 +151,7 @@ const FRAME: Record<AppHeaderVariant, string> = {
   orgs: '/organizations',
   studio: '/studio',
   app: '/apps/crm',
+  docs: '/docs',
 };
 
 function header(variant: AppHeaderVariant) {
@@ -166,11 +167,12 @@ afterEach(() => {
 });
 
 describe('the header search trigger renders only where a command palette is mounted (objectui#11912)', () => {
-  // `home` is /home and /ai; `orgs` is /organizations and /organizations/SLUG.
+  // `home` is /home and /ai; `orgs` is /organizations and /organizations/SLUG;
+  // `docs` is /docs and its books and articles (objectstack#35424).
   // `studio` (the /studio front door, which mounts a palette since
   // objectui#11863) and `app` without a provider are not console frames, but
   // they pin that the gate is the palette's presence, not the variant name.
-  it.each<AppHeaderVariant>(['home', 'orgs', 'studio', 'app'])(
+  it.each<AppHeaderVariant>(['home', 'orgs', 'studio', 'app', 'docs'])(
     'the `%s` variant with no CommandPaletteProvider draws neither trigger',
     (variant) => {
       render(<MemoryRouter initialEntries={[FRAME[variant]]}>{header(variant)}</MemoryRouter>);
@@ -184,7 +186,7 @@ describe('the header search trigger renders only where a command palette is moun
 
   // `studio` is the /studio front door's own frame: `StudioLanding` mounts the
   // provider with the palette's `studio` scope (objectui#11863).
-  it.each<AppHeaderVariant>(['app', 'home', 'studio'])(
+  it.each<AppHeaderVariant>(['app', 'home', 'studio', 'docs'])(
     'CONTROL — the `%s` variant under a CommandPaletteProvider draws both triggers, and each opens the palette',
     (variant) => {
       for (const testId of [DESKTOP, MOBILE]) {

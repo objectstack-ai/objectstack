@@ -5,30 +5,33 @@ import { test, expect } from '@playwright/test';
  * real-backend browser verification that closed objectui#2546 (PR4: legacy
  * monolith detail renderer + `renderViaSchema` kill-switch removed).
  *
- * Four shapes, one invariant each, all through the single SchemaRenderer /
- * `buildDefaultPageSchema` path the console now has:
- *   - grouped        → fieldGroup sections render; `collapse: 'collapsed'`
- *                      actually collapses (Money hides `budget` until opened)
- *   - ungrouped      → flat details body, no section cards
- *   - stageField:false → NO `record:path` stepper despite a `status` field
- *                      named to bait the heuristic
+ * Three shapes, all through the single SchemaRenderer /
+ * `buildDefaultPageSchema` path the console now has. The default record page
+ * draws no stage bar (`record:path`) and no key-field strip
+ * (`record:highlights`) — objectstack#35891 — so every case asserts both
+ * absent: the stage is the status tag beside the record's name, and
+ * `highlightFields` leaves every field in its group.
+ *   - grouped        → fieldGroup sections render, highlighted members
+ *                      included; `collapse: 'collapsed'` actually collapses
+ *                      (Money hides `amount` and `budget` until opened); the
+ *                      header's stage tag reads `stageField: 'status'`
+ *   - stageField:false → NO stage tag despite a `status` field named to bait
+ *                      the heuristic
  *   - related-heavy  → related lists surface by prominence (ADR-0085), in the
  *                      one-column stack tier (objectstack#27524): a
  *                      `relatedList: 'primary'` list is a body table in the
- *                      details (objectstack#27055, Target 8), the rest are
- *                      panels of the right column below them and read their
- *                      rows when they come into view
+ *                      details (objectstack#27055, Target 8) and takes no tab;
+ *                      the rest are tabs of the tab row (objectstack#35595),
+ *                      and one with records is a card of the 概览 tab's rail
+ *                      below the details (objectstack#35596)
  *
  * Runs against the console the backend serves at /_console (baseURL from
  * playwright.config.ts; storageState carries the admin session). The
  * semantic-zoo fixtures are objects but not seeded records — each run
  * creates its own rows via the REST API.
  *
- * Assertions are scoped to what the *pinned* console build supports
- * (.objectui-sha). The fb35e48 bump brought in objectui#2577, so the grouped
- * case also pins the follow-up UX contract: highlight strip drops the record
- * title, group icon/description render, and currencyConfig money shows its
- * symbol.
+ * The grouped case also pins objectui#2577's UX contract: group
+ * icon/description render, and currencyConfig money shows its symbol.
  */
 
 // Ambient `process` for the env reads below — the showcase tsconfig doesn't pull
@@ -44,6 +47,9 @@ const recordUrl = (object: string, id: string) =>
   `/_console/apps/${APP}/${object}/record/${encodeURIComponent(id)}`;
 
 const PATH_STEPPER = '[aria-label="Record path"]';
+const HIGHLIGHT_STRIP = 'section[aria-label="Record highlights"]';
+/** The header's stage tag, plain or as its menu, carries the field it reads. */
+const stageTag = (field: string) => `[data-record-stage-tag="${field}"]:visible`;
 
 let zooId = '';
 let zooLegacyId = '';
@@ -95,24 +101,20 @@ async function openRecord(page: import('@playwright/test').Page, url: string) {
 test('grouped: fieldGroup sections render and Money starts collapsed', async ({ page }) => {
   const errors = await openRecord(page, recordUrl('showcase_semantic_zoo', zooId));
 
-  // Stepper from stageField: 'status'.
-  // record:path renders a desktop + a mobile variant — assert the visible one.
-  await expect(page.locator(PATH_STEPPER).first()).toBeVisible();
+  // objectstack#35891: no stage bar and no key-field strip. The stage
+  // (stageField: 'status') is the header's tag beside the record's name.
+  await expect(page.locator(PATH_STEPPER)).toHaveCount(0);
+  await expect(page.locator(HIGHLIGHT_STRIP)).toHaveCount(0);
+  await expect(page.locator(stageTag('status')).first()).toHaveText(/Active/);
 
-  // objectui#2577: the record title is the page H1 — it must NOT repeat as a
-  // (truncated) chip in the highlight strip; status/amount still do.
-  const strip = page.locator('section[aria-label="Record highlights"]');
-  await expect(strip).toBeVisible();
-  const stripText = (await strip.innerText()).replace(/\s+/g, ' ');
-  expect(stripText, 'strip repeats the record title').not.toContain('E2E Zoo');
-  expect(stripText).toContain('4,200');
-
-  // Declared groups render as titled sections. Their highlighted members
-  // (status/amount) are hoisted to the strip; the non-highlighted members
-  // (code/budget) keep the groups visible in the body.
-  await expect(page.getByText('Basics', { exact: true })).toBeVisible();
-  await expect(page.getByText('Money', { exact: true })).toBeVisible();
-  await expect(page.getByText('ZG-1')).toBeVisible();
+  // Declared groups render as titled sections, every member in its own
+  // group: the highlighted ones (status in Basics, amount in Money) are not
+  // taken out of them.
+  const details = page.locator('[data-record-column="details"]');
+  await expect(details.getByText('Basics', { exact: true })).toBeVisible();
+  await expect(details.getByText('Money', { exact: true })).toBeVisible();
+  await expect(details.getByText('ZG-1')).toBeVisible();
+  await expect(details.getByText('Status', { exact: true })).toBeVisible();
 
   // objectui#2577: fieldGroups[].icon renders as a real (Lucide svg) icon in
   // the section header — not as literal icon-name text.
@@ -130,10 +132,13 @@ test('grouped: fieldGroup sections render and Money starts collapsed', async ({ 
   ).toBeVisible();
   await expect(page.getByText('banknote', { exact: true })).toHaveCount(0);
 
-  // collapse: 'collapsed' — Budget stays hidden until the header is opened.
-  await expect(page.getByText('Budget', { exact: true })).toHaveCount(0);
+  // collapse: 'collapsed' — Amount and Budget stay hidden until the header is
+  // opened; then both are in the Money group.
+  await expect(details.getByText('Budget', { exact: true })).toHaveCount(0);
+  await expect(details.getByText('4,200')).toHaveCount(0);
   await page.getByText('Money', { exact: true }).click();
-  await expect(page.getByText('Budget', { exact: true })).toBeVisible();
+  await expect(details.getByText('Budget', { exact: true })).toBeVisible();
+  await expect(details.getByText('4,200')).toBeVisible();
   // objectui#2577: fieldGroups[].description renders under the expanded
   // header, and the fixed-mode currencyConfig.defaultCurrency (USD) drives a
   // real $ symbol.
@@ -143,30 +148,33 @@ test('grouped: fieldGroup sections render and Money starts collapsed', async ({ 
   expect(errors, 'uncaught page errors on grouped detail').toEqual([]);
 });
 
-test('stageField:false: status renders as a plain field, no stepper', async ({ page }) => {
+test('stageField:false: status renders as a plain field, no stage tag', async ({ page }) => {
   const errors = await openRecord(
     page,
     recordUrl('showcase_semantic_zoo_legacy', zooLegacyId),
   );
 
   // The whole point of `stageField: false`: the status-named select must NOT
-  // become a chevron path. (objectui#2168 pinned strict-false handling.)
+  // become the header's stage tag. (objectui#2168 pinned strict-false
+  // handling.) No stage bar or strip either, as on every default page.
+  await expect(page.locator('[data-record-stage-tag]')).toHaveCount(0);
   await expect(page.locator(PATH_STEPPER)).toHaveCount(0);
+  await expect(page.locator(HIGHLIGHT_STRIP)).toHaveCount(0);
   // …but the field itself still renders (as a value, not a lifecycle).
   await expect(page.getByText('Green').first()).toBeVisible();
 
   expect(errors, 'uncaught page errors on stageField:false detail').toEqual([]);
 });
 
-test('ungrouped + related-heavy: flat details and the related panels on Contoso', async ({ page }) => {
+test('related-heavy: body tables, the tab row and the rail on Contoso', async ({ page }) => {
   // The synthesized record page lays itself out by the width of the view it
   // occupies, by one rule (objectstack#26678, objectstack#27524): details |
   // the right column from `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` (760 px,
   // `@object-ui/plugin-detail`), and ONE column below it — the details, then
-  // the right column's panels in their order. No tier draws a tab strip. The
-  // case stays in that stack tier on purpose: the column tiers are what every
-  // other page of this smoke draws at the Desktop Chrome viewport, and the
-  // stack is also what the split pane (720 px) and a phone draw.
+  // the 概览 tab's rail. The tab row (objectstack#35595) is drawn in every
+  // tier. The case stays in that stack tier on purpose: the column tiers are
+  // what every other page of this smoke draws at the Desktop Chrome viewport,
+  // and the stack is also what the split pane (720 px) and a phone draw.
   //
   // The window and the sidebar are derived, not picked. A collapsed console
   // sidebar draws no icon rail from 768 px up — ruling 6973617688 on
@@ -195,21 +203,27 @@ test('ungrouped + related-heavy: flat details and the related panels on Contoso'
   await page.getByTestId('sidebar-keep-open').click();
   await expect(page.getByTestId('sidebar-keep-open')).toHaveAttribute('aria-pressed', 'true');
 
-  // Heuristic stepper (account.status is a select named "status").
-  // record:path renders a desktop + a mobile variant — assert the visible one.
-  await expect(page.locator(PATH_STEPPER).first()).toBeVisible();
+  // objectstack#35891: no stage bar, no key-field strip; the heuristic stage
+  // (account.status is a select named "status") is the header's tag.
+  await expect(page.locator(PATH_STEPPER)).toHaveCount(0);
+  await expect(page.locator(HIGHLIGHT_STRIP)).toHaveCount(0);
+  await expect(page.locator(stageTag('status')).first()).toBeVisible();
 
-  // One column and no tab strip: the details, then the right column.
+  // One column: the details, then the rail. The tab row opens on 概览.
   await expect(page.locator('[data-record-page-tier]')).toHaveAttribute('data-record-page-tier', 'stack');
   await expect(page.locator('[data-record-columns]')).toHaveAttribute('data-record-columns-shown', 'details');
-  await expect(page.getByRole('tab', { name: /Details|Related|Invoices|Projects/i })).toHaveCount(0);
+  await expect(page.locator('[data-record-tab="overview"]')).toHaveAttribute('aria-selected', 'true');
 
   // Related lists surface by prominence (ADR-0085), as record page v3 draws
   // them (objectstack#27055, Target 8): Invoices and Projects are
   // `relatedList: 'primary'` (CORE relationships), so each is a body table in
-  // the details, with its rows read at open; the rest of Contoso's lists
-  // (Contacts and the Field Zoo lookups) are panels of the right column,
-  // before its last panel, 动态 (objectstack#34590).
+  // the details, with its rows read at open, and takes no tab of its own; the
+  // rest of Contoso's lists (Contacts and the Field Zoo lookups) are tabs, and
+  // one with records is a card of the rail (objectstack#35596).
+  // CONTROL for the absence below: an ordinary list's tab is drawn under the
+  // same `OBJECT.FIELD` id, so a renamed id scheme reds here, not silently.
+  await expect(page.locator('[data-record-tab="showcase_contact.account"]')).toHaveCount(1);
+  await expect(page.locator('[data-record-tab^="showcase_invoice."], [data-record-tab^="showcase_project."]')).toHaveCount(0);
   const details = page.locator('[data-record-column="details"]');
   const invoicesTable = details
     .getByRole('table')
@@ -220,29 +234,27 @@ test('ungrouped + related-heavy: flat details and the related panels on Contoso'
   await expect(invoicesTable.getByRole('cell', { name: 'INV-1002', exact: true })).toBeVisible();
   await expect(projectsTable.getByRole('cell', { name: 'Data Platform', exact: true })).toBeVisible();
   const rightColumn = page.locator('[data-record-column="right"]');
-  // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
-  await expect(rightColumn.locator(':scope > *').last()).toHaveAttribute('data-record-timeline-panel', '');
   await expect(rightColumn.getByRole('region', { name: /^(Invoices|Projects)$/ })).toHaveCount(0);
 
-  // Ungrouped shape: the details body is flat — no fieldGroup section cards.
-  // (Contoso declares no fieldGroups; spot-check a body field label.)
-  await expect(page.getByText('Basics', { exact: true })).toHaveCount(0);
+  // Contoso's own groups render in the details (ADR-0085 §5), its highlighted
+  // fields among their members.
+  await expect(details.getByText('Profile', { exact: true })).toBeVisible();
 
-  // objectui#2577 + currencyConfig: annual revenue renders with its symbol
-  // in the strip, and the meta footer doesn't dangle "Created by" on the
-  // actor-less seeded row.
-  await expect(page.getByText('$25,000,000', { exact: false }).first()).toBeVisible();
+  // objectui#2577 + currencyConfig: annual revenue (a highlighted field, left
+  // in its Profile group) renders with its symbol in the details, and the
+  // meta footer doesn't dangle "Created by" on the actor-less seeded row.
+  await expect(details.getByText('$25,000,000', { exact: false }).first()).toBeVisible();
   const footer = page.locator('[data-testid="record-meta-footer"]');
   await expect(footer).toBeVisible();
   const footerText = (await footer.innerText()).replace(/\s+/g, ' ');
   expect(footerText, 'footer dangles "Created by" without an actor').not.toMatch(/Created by/);
   expect(footerText).toMatch(/Created/);
 
-  // A panel reads its rows once it is in view: below the details here, so
-  // the Contacts panel reads Contoso's seeded contacts when scrolled to.
-  const contactsPanel = rightColumn.getByRole('region', { name: 'Contacts', exact: true });
-  await contactsPanel.scrollIntoViewIfNeeded();
-  await expect(contactsPanel.locator('[data-related-card-row]').filter({ hasText: 'Carl Fox' })).toBeVisible();
+  // The rail's Contacts card summarizes the Contacts tab: its first rows,
+  // Contoso's seeded contacts among them.
+  const contactsCard = rightColumn.getByRole('region', { name: 'Contacts', exact: true });
+  await contactsCard.scrollIntoViewIfNeeded();
+  await expect(contactsCard.locator('[data-record-summary-row]').filter({ hasText: 'Carl Fox' })).toBeVisible();
 
   expect(errors, 'uncaught page errors on related-heavy detail').toEqual([]);
 });

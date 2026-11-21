@@ -35,7 +35,7 @@ import type { useObjectViewToolbarAffordances } from './objectViewToolbarAfforda
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
-import { useListPageBarHost } from '@object-ui/plugin-grid';
+import { useListPageScope } from '@object-ui/plugin-grid';
 
 /**
  * objectstack#35446 — the list header's width under which it takes
@@ -167,39 +167,18 @@ export function ObjectViewPageHeader(props: ObjectViewPageBarProps) {
     const { objectDef, objectPluralLabel, foldedHeaderActions } = props;
     const actionProps = props;
     const pluralLabel = objectPluralLabel(objectDef);
-    // objectstack#35554 — the page bar's selection slot (`useListPageBarHost`,
-    // `@object-ui/plugin-grid`). The list in this page column fills it while
-    // rows are selected — 「已选 N 条」, Cancel and the actions for what is
-    // selected — and this bar shows it in place of its title and actions.
-    const [selectionSlot, setSelectionSlot] = useState<HTMLDivElement | null>(null);
+    // objectstack#35554 — this page column is a list page's scope
+    // (`useListPageScope`, `@object-ui/plugin-grid`): the list in it draws no
+    // row-end controls. A selection changes nothing up here: the list floats
+    // its own selection bar at its bottom (objectstack#35678).
     const [pageColumn, setPageColumn] = useState<HTMLElement | null>(null);
     const headerRootRef = useCallback((el: HTMLDivElement | null) => {
         setPageColumn(el?.parentElement ?? null);
     }, []);
-    const pageBar = useListPageBarHost(selectionSlot, pageColumn);
+    useListPageScope(pageColumn);
     return (
              <div className="hidden sm:block" ref={headerRootRef}>
-             {/* objectstack#35554 — the selection face: the object's name, then
-                 what the list draws into the slot. Always mounted, so the slot
-                 is there the moment a row is ticked; shown only while one is. */}
-             <div
-                 className={pageBar.selecting
-                     ? 'relative shrink-0 border-b bg-background z-10'
-                     : 'hidden'}
-                 data-testid="list-selection-page-bar"
-                 aria-hidden={pageBar.selecting ? undefined : true}
-             >
-                 {/* The list bar's measure (objectstack#35548): 44px, 13px type. */}
-                 <div className="flex h-11 items-center gap-2 px-4">
-                     <span className="shrink-0 text-[13px] font-semibold leading-5 text-muted-foreground">
-                         {pluralLabel}
-                     </span>
-                     <span aria-hidden="true" className="shrink-0 text-muted-foreground/60">/</span>
-                     <div ref={setSelectionSlot} className="flex min-w-0 flex-1 items-center" />
-                 </div>
-             </div>
              <PageHeader
-                 className={pageBar.selecting ? 'hidden' : undefined}
                  posture="list"
                  // The object's plural: the page lists its records (objectui#11696).
                  // The view is named in the view bar below, by its switcher.
@@ -268,11 +247,11 @@ export function ObjectViewBarObjectName({
 /**
  * objectstack#35878 — the right end of the view bar: the list's own tools (its
  * search), then the page's acts (`ObjectViewPageBarActions`: create, then ⋮
- * More at the edge, objectstack#35678). While rows are selected the end shows
- * what the selection offers instead (objectstack#35554's slot,
- * `useListPageBarHost`), and ⋮ More stays the last control with the same
- * icon. The page's acts are drawn from `sm` up; a phone keeps its floating
- * create button.
+ * More at the edge, objectstack#35678). A selection changes nothing here: the
+ * list floats its own selection bar at its bottom (objectstack#35678). The
+ * page column is registered as a list page's scope (`useListPageScope`), so
+ * its list draws no row-end controls. The page's acts are drawn from `sm` up;
+ * a phone keeps its floating create button.
  */
 export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProps & { tools: ReactNode }) {
     const setHosted = useContext(ListViewBarHostContext);
@@ -281,28 +260,18 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
         setHosted(true);
         return () => setHosted(false);
     }, [setHosted]);
-    const [selectionSlot, setSelectionSlot] = useState<HTMLDivElement | null>(null);
     const [pageColumn, setPageColumn] = useState<HTMLElement | null>(null);
     const rootRef = useCallback((el: HTMLDivElement | null) => {
         setPageColumn(el?.closest<HTMLElement>(`[${OBJECT_VIEW_PAGE_COLUMN_ATTR}]`) ?? null);
     }, []);
-    const pageBar = useListPageBarHost(selectionSlot, pageColumn);
+    useListPageScope(pageColumn);
     return (
         <div
             ref={rootRef}
-            className={cn(VIEW_BAR_END_INSET, pageBar.selecting ? 'flex min-w-0 flex-1 items-center' : 'flex shrink-0 items-center gap-0.5')}
+            className={cn(VIEW_BAR_END_INSET, 'flex shrink-0 items-center gap-0.5')}
             data-testid="list-view-bar-end"
         >
-            {/* Always mounted, so the slot is there the moment a row is ticked. */}
-            <div
-                ref={setSelectionSlot}
-                className={pageBar.selecting ? 'flex min-w-0 flex-1 items-center' : 'hidden'}
-                data-testid="list-selection-page-bar"
-                aria-hidden={pageBar.selecting ? undefined : true}
-            />
-            {/* Hidden, not unmounted, while rows are selected: the search keeps
-                its term and the header acts keep following the selection. */}
-            <div className={pageBar.selecting ? 'hidden' : 'flex items-center gap-0.5'} data-testid="list-view-bar-tools">
+            <div className="flex items-center gap-0.5" data-testid="list-view-bar-tools">
                 {tools}
                 <span className="hidden items-center gap-1 pl-1 sm:flex" data-testid="list-view-bar-actions">
                     <ObjectViewPageBarActions {...props} />

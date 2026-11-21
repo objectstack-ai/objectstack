@@ -49,6 +49,11 @@ export function articleNeighbours(
   return { previous: articles[at - 1] ?? null, next: articles[at + 1] ?? null };
 }
 
+/** Is `doc` one of the book's articles? A reader URL may name a book that does not hold its doc. */
+export function bookHoldsArticle(book: ResolvedBook, doc: string | undefined): boolean {
+  return !!doc && bookArticles(book).some((a) => a.doc === doc);
+}
+
 /** Does `entry` match the docs column's filter (its title or summary, case-insensitive)? */
 function entryMatches(entry: ResolvedEntry, needle: string): boolean {
   if (!entry.doc || entry.separator) return false;

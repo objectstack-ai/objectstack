@@ -36,11 +36,10 @@ export { useRowColor } from './useRowColor';
 export { useGroupedData } from './useGroupedData';
 export { GroupRow } from './GroupRow';
 export { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
-export { BulkActionBar } from './components/BulkActionBar';
-// objectstack#35554 — the list page bar's selection slot, read by the Console
-// page header, and the kept scroll position a list host loads back to.
-export { useListPageBarHost } from './listPageBarSlot';
-export type { ListPageBarState } from './listPageBarSlot';
+export { BulkActionBar } from './components/SelectionBar';
+// objectstack#35678 — the list page's scope, registered by the Console's page
+// bars, and the kept scroll position a list host loads back to.
+export { useListPageScope } from './listPageScope';
 export { readListScrollState } from './objectGridInfiniteLoad';
 export type { ListScrollState } from './objectGridInfiniteLoad';
 // The bare-name fold, its development warning and the bar's own gate (the
@@ -72,7 +71,8 @@ export type { ImportWizardProps, ImportResult } from './ImportWizard';
 export type { GroupEntry, UseGroupedDataResult, AggregationType, GroupAggregationConfig, AggregationResult } from './useGroupedData';
 export type { GroupRowProps } from './GroupRow';
 export type { RowActionMenuProps } from './components/RowActionMenu';
-export type { BulkActionBarProps, BulkActionItems, LegacyBulkActionItem } from './components/BulkActionBar';
+export type { BulkActionBarProps } from './components/SelectionBar';
+export type { BulkActionItems, LegacyBulkActionItem } from './components/BulkActionBar';
 export type { ActionLabelResolver, NamedActionDef } from './resolveBulkActions';
 export type {
   UndeclaredActionNameKey,
