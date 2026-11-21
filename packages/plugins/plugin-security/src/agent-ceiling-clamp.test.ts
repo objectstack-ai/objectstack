@@ -18,6 +18,7 @@ import {
   clampPermissionSetToAgentCeiling,
   clampPermissionSetsToAgentCeiling,
 } from './agent-ceiling-clamp.js';
+import { buildEffectiveFieldPermissions } from '@objectstack/core';
 import { DESTRUCTIVE_CLASS_KEYS } from './permission-evaluator.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { SecurityPlugin } from './security-plugin.js';
@@ -48,8 +49,8 @@ const CLEAN = {
 } as unknown as PermissionSet;
 
 describe('agentCeilingBreaches / clampPermissionSetToAgentCeiling', () => {
-  it('the object bits it clears are the two bypass bits and the destructive class, derived from the evaluator', () => {
-    expect([...AGENT_CEILING_OBJECT_KEYS]).toEqual(['viewAllRecords', 'modifyAllRecords', ...DESTRUCTIVE_CLASS_KEYS]);
+  it('the object bits it clears are the two bypass bits, viewAllFields and the destructive class, derived from the evaluator', () => {
+    expect([...AGENT_CEILING_OBJECT_KEYS]).toEqual(['viewAllRecords', 'modifyAllRecords', 'viewAllFields', ...DESTRUCTIVE_CLASS_KEYS]);
     expect([...DESTRUCTIVE_CLASS_KEYS].sort()).toEqual(['allowRestoreOwnDeleted', 'allowTransfer', 'manageRecycleBin']);
   });
 
@@ -66,6 +67,22 @@ describe('agentCeilingBreaches / clampPermissionSetToAgentCeiling', () => {
       'adminScope',
     ]);
     expect(agentCeilingBreaches(CLEAN)).toEqual([]);
+  });
+
+  it('[field-axis split, ruling 6912661484] strips viewAllFields, so an agent\'s set re-opens no field another set hides', () => {
+    const reader = {
+      name: 'field_reader',
+      objects: { crm_lead: { allowRead: true, viewAllFields: true }, '*': { allowRead: true, viewAllFields: true } },
+    } as unknown as PermissionSet;
+    expect(agentCeilingBreaches(reader)).toEqual(['objects.crm_lead.viewAllFields', 'objects.*.viewAllFields']);
+    const clamped = clampPermissionSetToAgentCeiling(reader) as any;
+    expect(clamped.objects.crm_lead).toEqual({ allowRead: true, viewAllFields: false });
+    expect(clamped.objects['*']).toEqual({ allowRead: true, viewAllFields: false });
+    expect(agentCeilingBreaches(clamped)).toEqual([]);
+    // The field merge reads the clamped set as casting no vote at all.
+    const hider = { name: 'hider', objects: { crm_lead: { allowRead: true } }, fields: { 'crm_lead.ssn': { readable: false, editable: false } } } as unknown as PermissionSet;
+    expect(buildEffectiveFieldPermissions([clamped, hider])).toEqual({ 'crm_lead.ssn': { readable: false, editable: false } });
+    expect(buildEffectiveFieldPermissions([reader, hider])).toEqual({ 'crm_lead.ssn': { readable: true, editable: false } });
   });
 
   it('reads the row spelling too: JSON-string columns, system_permissions and admin_scope', () => {

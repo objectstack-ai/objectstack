@@ -248,6 +248,32 @@ sites it found with no row yet formed a frozen backlog, which the pin now holds
 empty: a new one cannot be added, so a write affordance gets its row when it
 lands.
 
+### The Export verdict (`isObjectExportOffered`)
+
+Every Export entry that downloads an object's data as CSV, XLSX or JSON (a
+grid's Export menu and its table's own CSV button, a list view's Export, a
+dataset report's Export control) reads one verdict,
+`isObjectExportOffered(objectSchema, effectiveApiOperations)`. It
+is the resolved `exportCsv` bit: the object's `userActions.exportCsv` over its
+`managedBy` default, ANDed with the server's effective `export` operation when a
+set is handed down. Every bucket defaults the bit on, so an object closes its
+data Export entry only by setting `userActions.exportCsv: false`. A view's
+export of the picture it draws, such as the Gantt chart's PNG and PDF buttons,
+does not read this verdict.
+
+Export is a read, not a write, so it has no row in `AFFORDANCE_GRANTS` and asks
+no `can(object, verb)`. The caller's export grant, the permission set's
+`allowExport`, reaches the client through the effective `export` operation,
+which the server derives from `list` and that grant.
+
+```typescript
+import { isObjectExportOffered } from '@object-ui/core'
+
+isObjectExportOffered({ managedBy: 'append-only' })                          // true
+isObjectExportOffered({ userActions: { exportCsv: false } })                 // false
+isObjectExportOffered({ managedBy: 'platform' }, ['get', 'list'])            // false: no `export` served
+```
+
 ### Undo snapshot for an update (`captureUpdateUndoData`)
 
 An `undoable` update restores exactly the fields it wrote, from their values

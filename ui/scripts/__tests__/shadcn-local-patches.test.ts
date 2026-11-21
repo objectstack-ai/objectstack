@@ -231,6 +231,17 @@ const REGISTRY_FIXTURES: Record<string, RegistryFixture> = {
     sha256: '0a16955983c96c27e2a315ac3c930f624ff28f41a2815aa17151aa3bc574ebba',
     roundTrip: true,
   },
+  badge: {
+    url: 'https://ui.shadcn.com/r/styles/default/badge.json',
+    repoPath: 'apps/v4/public/r/styles/default/badge.json',
+    // Captured for objectstack#36047 at the same commit as the families above,
+    // from `raw.githubusercontent.com`.
+    headSha: '8a7701ec27eb9cb8e0377db769fbe6d744113c52',
+    sha256: 'db977d821af56ae3fb7952182d9c0a076a10c75c38bc2d2b000827e720423d32',
+    // `badge.tsx` carries the undeclared `whitespace-nowrap` edit and its
+    // comment (objectui#2762), so byte-equality is not available.
+    roundTrip: 'ships the undeclared `whitespace-nowrap` edit and its comment (objectui#2762)',
+  },
 };
 
 /** The captured registry bytes for `name`, exactly as served (pre-rewrite). */
@@ -677,11 +688,12 @@ describe('phone touch targets on menu rows and tabs (objectstack#29215)', () => 
   const UPSTREAM_DROPDOWN_MENU = upstreamFor('dropdown-menu');
   const UPSTREAM_TABS = upstreamFor('tabs');
 
-  it('dropdown-menu declares the three row patches', () => {
+  it('dropdown-menu declares the three row patches and the label weight patch', () => {
     expect(LOCAL_PATCHES['dropdown-menu'].map((p: { id: string }) => p.id)).toEqual([
       'dropdown-menu-sub-trigger-phone-touch-target',
       'dropdown-menu-item-phone-touch-target',
       'dropdown-menu-choice-item-phone-touch-target',
+      'dropdown-menu-label-medium-weight',
     ]);
   });
 
@@ -701,7 +713,11 @@ describe('phone touch targets on menu rows and tabs (objectstack#29215)', () => 
       const result = applyLocalPatches(name, upstream());
       expect(result.failed).toEqual([]);
 
-      const before = classStrings(upstream());
+      // The menu label's weight is the one desktop class a dropdown-menu patch
+      // changes (`dropdown-menu-label-medium-weight`, pinned on its own below).
+      const before = classStrings(
+        upstream().replace('"px-2 py-1.5 text-sm font-semibold",', '"px-2 py-1.5 text-sm font-medium",'),
+      );
       const after = classStrings(result.content);
       expect(after).toHaveLength(before.length);
       after.forEach((tokens, i) => {
@@ -741,6 +757,18 @@ describe('phone touch targets on menu rows and tabs (objectstack#29215)', () => 
     }
   });
 
+  it('sets the dropdown-menu label to weight 500 and changes nothing else about it (objectstack#36047)', () => {
+    const result = applyLocalPatches('dropdown-menu', UPSTREAM_DROPDOWN_MENU);
+    expect(result.failed).toEqual([]);
+    const label = result.content.slice(
+      result.content.indexOf('const DropdownMenuLabel = '),
+      result.content.indexOf('displayName', result.content.indexOf('const DropdownMenuLabel = ')),
+    );
+    expect(label).toContain('"px-2 py-1.5 text-sm font-medium",');
+    expect(label).not.toContain('font-semibold');
+    expect(UPSTREAM_DROPDOWN_MENU).toContain('"px-2 py-1.5 text-sm font-semibold",');
+  });
+
   it('gives the tab trigger the floor and lets the list grow with it on a phone', () => {
     const { content } = applyLocalPatches('tabs', UPSTREAM_TABS);
 
@@ -765,7 +793,7 @@ describe('phone touch targets on menu rows and tabs (objectstack#29215)', () => 
     expect(result.failed.map((p: { id: string; found: number }) => `${p.id} (found ${p.found}x)`)).toEqual([
       'dropdown-menu-item-phone-touch-target (found 0x)',
     ]);
-    expect(result.applied).toHaveLength(2);
+    expect(result.applied).toHaveLength(3);
   });
 
   it('refuses when the checkbox and radio items stop sharing their class string', () => {

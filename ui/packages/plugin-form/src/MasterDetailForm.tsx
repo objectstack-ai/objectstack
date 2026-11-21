@@ -45,7 +45,7 @@ import {
   useObjectTranslation,
 } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
-import { dataChangeMatches, subscribeDataChanges } from '@object-ui/react';
+import { dataChangeMatches, extractFieldErrors, subscribeDataChanges } from '@object-ui/react';
 import { ObjectForm } from './ObjectForm';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
@@ -913,18 +913,49 @@ interface MasterDetailLinesProps {
  * never blocks Save with a browser bubble), a line button without a `type`
  * submits only the wrapper, which does nothing, and Enter in a cell finds the
  * wrapper's disabled default button and submits nothing.
+ *
+ * `ownsForm` says `children` already are a form of their own (an expanded row
+ * editor is an `ObjectForm`, its only other control a `type="button"`), so no
+ * wrapper is drawn: a form inside a form is a nesting React refuses.
  */
 const preventSubmit = (event: React.FormEvent) => event.preventDefault();
 
-const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: React.ReactNode }> = ({
-  store,
-  id,
-  children,
-}) => {
+/**
+ * The child objects a refused batch was refused on, presented from the
+ * refusal and never re-derived (the record page's `attributeRecordEditRefusal`
+ * reads the same evidence): the operation the server names as the failed one,
+ * else each field it names that only line operations write (a field the
+ * parent's own operation carries is the header form's to mark). The parent is
+ * operation 0 in both batch builders. A refusal that names neither, a lock or
+ * a permission denial, is on no collection.
+ */
+function refusedChildObjects(err: unknown, ops: readonly BatchTransactionOperation[]): Set<string> {
+  const out = new Set<string>();
+  const failed = (err as { details?: { failedOperation?: { index?: unknown } } } | null)?.details?.failedOperation?.index;
+  if (typeof failed === 'number') {
+    if (failed > 0 && ops[failed]?.object) out.add(ops[failed].object);
+    return out;
+  }
+  const carries = (op: BatchTransactionOperation | undefined, field: string) =>
+    !!op && op.action !== 'delete' && !!op.data && Object.prototype.hasOwnProperty.call(op.data, field);
+  for (const { field } of extractFieldErrors(err) ?? []) {
+    if (carries(ops[0], field)) continue;
+    for (const op of ops.slice(1)) if (carries(op, field)) out.add(op.object);
+  }
+  return out;
+}
+
+const FormSlotPlacement: React.FC<{
+  store: FormSlotStore;
+  id: string;
+  ownsForm?: boolean;
+  children: React.ReactNode;
+}> = ({ store, id, ownsForm = false, children }) => {
   useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
   const at = store.placement(id);
   if (at === 'inline') return <>{children}</>;
   if (!at) return null;
+  if (ownsForm) return createPortal(children, at);
   return createPortal(
     <form noValidate onSubmit={preventSubmit} data-form-slot-owner="">
       <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
@@ -1266,7 +1297,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               <dt className="text-muted-foreground">{t('form.masterDetail.tax', { rate: taxPct })}</dt>
               <dd className="tabular-nums" data-testid="md-tax">{money(taxAmount)}</dd>
             </div>
-            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-semibold">
+            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-medium">
               <dt>{t('form.masterDetail.total')}</dt>
               <dd className="tabular-nums" data-testid="md-grand-total">{money(grandTotal)}</dd>
             </div>
@@ -2136,7 +2167,15 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               childSchema: childSchemasRef.current[e.config.childObject],
             })),
           );
-      const res = await runBatchTransaction(dataSource, ops);
+      let res: Awaited<ReturnType<typeof runBatchTransaction>>;
+      try {
+        res = await runBatchTransaction(dataSource, ops);
+      } catch (err) {
+        // A refusal on a placed collection marks the tab that holds it.
+        const refused = refusedChildObjects(err, ops);
+        slotStore.refuse(entries.filter((e) => refused.has(e.config.childObject)).map((e) => e.id));
+        throw err;
+      }
       // The batch COMMITTED: advance the child rows' baseline from it, so a
       // form that stays mounted diffs its next save against what this one
       // wrote (objectui#10564). The parent's baseline advances in the header
@@ -2178,7 +2217,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       // create → parent is op 0; edit → echo the parent values back.
       return res?.results?.[0] ?? { ...parentData, id: schema.recordId };
     },
-    [dataSource, entries, schema.objectName, schema.recordId, isEdit],
+    [dataSource, entries, schema.objectName, schema.recordId, isEdit, slotStore],
   );
 
   /**
@@ -2200,6 +2239,8 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       }
       batchInFlightRef.current = true;
       setSaveTried(true);
+      // Past validation: the last refusal's marks retire, as the form's own do.
+      slotStore.refuse([]);
       holdSaveForBatch();
       try {
         return await sendBatch(parentValues);
@@ -2209,7 +2250,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         batchInFlightRef.current = false;
       }
     },
-    [sendBatch, holdSaveForBatch],
+    [sendBatch, holdSaveForBatch, slotStore],
   );
 
   // The parent form renders WITHOUT its own submit button — the master-detail
@@ -2384,7 +2425,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           everything on the parent Save. */}
       {expanded && expandedDetail && (
         // Beside its collection: where the header placed that collection, there.
-        <FormSlotPlacement store={slotStore} id={expanded.entryId}>
+        <FormSlotPlacement store={slotStore} id={expanded.entryId} ownsForm>
         <Card className="border-primary/40 shadow-none ring-1 ring-primary/10" data-testid="md-row-form">
           <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-sm font-medium">

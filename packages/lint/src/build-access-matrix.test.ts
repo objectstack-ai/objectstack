@@ -206,3 +206,25 @@ describe('buildAccessMatrix CRUD columns — the spec fold, asked (#18785)', () 
     expect(row.read).toBe(true);
   });
 });
+
+describe('[field-axis split, ruling 6912661484] the viewAllFields column', () => {
+  it('is written only when true, so a stack that does not author the bit keeps byte-identical rows', () => {
+    const plain = buildAccessMatrix(STACK);
+    for (const e of plain.entries) expect('viewAllFields' in e, `${e.permissionSet}/${e.object}`).toBe(false);
+    const explicitFalse = JSON.parse(JSON.stringify(STACK));
+    explicitFalse.permissions[0].objects.crm_account.viewAllFields = false;
+    expect(JSON.stringify(buildAccessMatrix(explicitFalse))).toBe(JSON.stringify(plain));
+  });
+
+  it('is a raw bit beside the super-user columns, and the diff names it gained or lost', () => {
+    const withBit = JSON.parse(JSON.stringify(STACK));
+    withBit.permissions[0].objects.crm_account.viewAllFields = true;
+    const after = buildAccessMatrix(withBit);
+    const row = after.entries.find((e) => e.permissionSet === 'sales_user' && e.object === 'crm_account')!;
+    expect(row.viewAllFields).toBe(true);
+    expect(row.viewAllRecords).toBe(false);
+    const before = buildAccessMatrix(STACK);
+    expect(diffAccessMatrix(before, after)).toEqual(["'sales_user' gains View All Fields on 'crm_account'"]);
+    expect(diffAccessMatrix(after, before)).toEqual(["'sales_user' loses View All Fields on 'crm_account'"]);
+  });
+});

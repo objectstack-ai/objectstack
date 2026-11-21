@@ -21,22 +21,30 @@ import {
     applyListStateParams,
     parseListPageParam,
     userFilterParamsKey,
+    acceptGroupingConfig,
     type ListStatePatch,
     type ListUrlFieldGate,
     type ListUrlState,
     type ListSortRule,
 } from './userFilterUrlState.js';
-import { buildListFilterKey, readListFilterState, clearListFilterState } from './listFilterStorage.js';
 import type {
     useObjectListPreferences,
     ListFilterGroupPreference,
     ListSortPreference,
 } from '../context/ListPreferencesProvider.js';
+import {
+    claimListDraft,
+    discardListDraft,
+    listDraftScope,
+    readListDraft,
+    takeDocumentReload,
+    type ListDraft,
+} from './listDraftStore.js';
 import { parseUrlEqualityFilterTriples } from './drillUrlFilters.js';
 import { selectFilterParams } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
-import type { ListPersonalizationPart } from './ListPersonalizedMarker.js';
+import type { ListPersonalizationPart } from './ListDraftActions.js';
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     !!v && typeof v === 'object' && !Array.isArray(v);
@@ -120,12 +128,20 @@ function linkFilterConditionCount(searchParams: URLSearchParams): number {
     return Array.isArray(parsed.conditions) ? parsed.conditions.length : 0;
 }
 
+/**
+ * objectstack#35955 — parts the list reports that are no unsaved change to
+ * the view: the row height is remembered for the reader, and a search term
+ * alone is not something a view stores.
+ */
+const NOT_DRAFT_PARTS: ReadonlySet<ListPersonalizationPart> = new Set<ListPersonalizationPart>(['density', 'search']);
+
 export function useObjectViewListUrlState({
     objectName,
     objectDef,
     activeView,
     viewResolving,
     listPrefs,
+    listDraft,
     perms,
     user,
     searchParams,
@@ -141,6 +157,8 @@ export function useObjectViewListUrlState({
      */
     viewResolving: boolean;
     listPrefs: ReturnType<typeof useObjectListPreferences>;
+    /** objectstack#35955 — the open list's unsaved changes (`./listDraftStore.ts`). */
+    listDraft: ListDraft;
     perms: ReturnType<typeof usePermissions>;
     user: ReturnType<typeof useAuth>['user'];
     searchParams: URLSearchParams;
@@ -161,12 +179,19 @@ export function useObjectViewListUrlState({
      *    the per-browser cache is not consulted, so a shared link opens the
      *    same list for everyone who may read it. A piece the URL lacks is
      *    absent, not filled from storage.
-     * 2. Otherwise the user's own state (objectui#12418, `listPrefs`): the
-     *    Filter panel's conditions and the sort they left this view with, and
-     *    the search term from the per-user cache (`listFilterStorage`); the
-     *    view's own sort when they stored none, and its own grouping. The
-     *    seed waits until that state has been read (`listPrefs.ready`), so a
-     *    second browser opens on it rather than on an empty cache.
+     * 2. Otherwise the list's DRAFT (objectstack#35955, `./listDraftStore.ts`):
+     *    the Filter panel's conditions, the search term, the sort and the
+     *    grouping the reader changed and has not saved, kept while they open
+     *    a record and come back; the view's own for every part the draft
+     *    lacks. Nothing the reader stored earlier is read: their stored sort
+     *    and filters (objectui#12418) no longer apply. The seed still waits
+     *    for the stored state to be read (`listPrefs.ready`): the column
+     *    widths and the row height are kept there.
+     *
+     * A RELOAD is neither (objectstack#35955): the first list a reloaded page
+     * seeds opens as its view declares it, and the write-back strips the
+     * `uf_*` params a reload carried. A link opened in a new tab is not a
+     * reload, and still opens the list it names.
      *
      * Neither seed is taken, and nothing is written, while the view the
      * address names is still being resolved (`viewResolving`, objectstack#30034):
@@ -232,11 +257,17 @@ export function useObjectViewListUrlState({
     } | undefined>(undefined);
     const { t } = useObjectTranslation();
     const ownListParamsRef = useRef<string | undefined>(undefined);
-    // objectstack#28950 — set by "Reset to view" and taken by the next seed:
-    // that list opens from the (just cleared) stored state, never from the
-    // `uf_*` params, whoever wrote them, and its write-back strips them all.
+    // objectstack#28950 — set by Discard ("Reset to view" before
+    // objectstack#35955) and taken by the next seed: that list opens from the
+    // (just dropped) draft, never from the `uf_*` params, whoever wrote them,
+    // and its write-back strips them all.
     const resetPendingRef = useRef(false);
     if (listIdentityKey && listPrefs.ready && !viewResolving && listSeedRef.current?.key !== listIdentityKey) {
+        // objectstack#35955 — this list is the one on screen: a draft held
+        // for another view or object goes.
+        const draftScope = listDraftScope(user?.id, objectName ?? '', String(activeView.id));
+        claimListDraft(draftScope);
+        const seedDraft = readListDraft(draftScope);
         // A field the object does not declare (a stale link, or a stored state
         // older than the field's deletion) or one this user cannot read is
         // dropped. Field-level permissions gate only once loaded — the same
@@ -245,7 +276,7 @@ export function useObjectViewListUrlState({
             !!objectDef.fields?.[field]
             && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
         const carried = userFilterParamsKey(searchParams);
-        const reset = resetPendingRef.current;
+        const reset = resetPendingRef.current || takeDocumentReload();
         resetPendingRef.current = false;
         if (carried && carried !== ownListParamsRef.current && !reset) {
             const state = parseListStateParams(searchParams, acceptField);
@@ -260,15 +291,14 @@ export function useObjectViewListUrlState({
                 refusedLinkFilter,
             };
         } else {
-            const stored = readListFilterState(buildListFilterKey(user?.id, objectName, activeView.id));
-            const viewPref = listPrefs.preference.perView?.[activeView.id];
             listSeedRef.current = {
                 key: listIdentityKey,
                 source: 'storage',
                 state: {
-                    filters: acceptStoredFilters(viewPref?.filters, acceptField) as ListUrlState['filters'],
-                    search: stored?.search || undefined,
-                    sort: acceptStoredSort(viewPref?.sort, acceptField),
+                    filters: acceptStoredFilters(seedDraft.filters, acceptField) as ListUrlState['filters'],
+                    search: seedDraft.search || undefined,
+                    sort: acceptStoredSort(seedDraft.sort, acceptField),
+                    grouping: acceptGroupingConfig(seedDraft.grouping, acceptField),
                 },
                 reset,
             };
@@ -326,12 +356,15 @@ export function useObjectViewListUrlState({
     );
 
     /**
-     * objectstack#28950 — what of the reader's list differs from the view, as
-     * the list reports it (`ListView`'s `onPersonalizationChange`), held with
-     * the list identity it came from so a report never outlives its list. The
-     * column layout is the one part only this page knows: a stored column
-     * state is the reader's own, and so are the fields they added as columns
-     * (objectstack#30077), which the list draws as columns of the view.
+     * objectstack#35955 — what of the reader's list is an unsaved change (its
+     * DRAFT parts: Discard and Save are drawn while there is one), as the list
+     * reports it (`ListView`'s `onPersonalizationChange`, objectstack#28950),
+     * held with the list identity it came from so a report never outlives its
+     * list. Two parts the list reports are not a change to the view: the row
+     * height (`density`), which is remembered for the reader, and the search
+     * term alone, which a view does not store. The column order and the added
+     * fields (objectstack#30077) are the one part only this page knows: they
+     * are the draft's.
      */
     const [reportedPersonalization, setReportedPersonalization] = useState<{
         key: string;
@@ -344,48 +377,44 @@ export function useObjectViewListUrlState({
         },
         [],
     );
-    const listPersonalizedParts: ListPersonalizationPart[] = [
-        ...(reportedPersonalization && reportedPersonalization.key === listIdentityKey
+    const listDraftParts: ListPersonalizationPart[] = (
+        reportedPersonalization && reportedPersonalization.key === listIdentityKey
             ? reportedPersonalization.parts
-            : []),
-    ];
-    const storedViewPreference = activeView?.id ? listPrefs.preference.perView?.[activeView.id] : undefined;
-    if ((storedViewPreference?.columnState || storedViewPreference?.addedFields?.length)
-        && !listPersonalizedParts.includes('columns')) {
-        listPersonalizedParts.push('columns');
+            : []
+    ).filter((part) => !NOT_DRAFT_PARTS.has(part));
+    if ((listDraft.columnOrder || listDraft.addedFields?.length) && !listDraftParts.includes('columns')) {
+        listDraftParts.push('columns');
     }
 
     /**
-     * objectstack#28950 — "Reset to view", the marker's one way back: the
-     * reader's whole list for the active view returns to the view's own. Their
-     * stored entry goes (sort, filters, column layout, density, hidden fields,
-     * objectui#12418; added fields, objectstack#30077), the cached search term with it, and the list opens
-     * again from that cleared state (the identity moves, so it remounts and
-     * re-seeds; a reset is the one case that WANTS the list's own state thrown
-     * away). The new seed ignores the `uf_*` params and its write-back strips
-     * them, chips included, so neither a reload nor Back brings the old list
-     * back. The remount puts the grouping, layout, row color, row numbers,
-     * inline edit and the "In a queue" toggle back to the view's.
+     * objectstack#35955 — Discard (objectstack#28950's "Reset to view" before
+     * it): the list returns to the view's own. Its draft goes (sort, filters,
+     * grouping, search, columns shown and their order, layout, row colour),
+     * and the list opens again from the view (the identity moves, so it
+     * remounts and re-seeds; a discard is the one case that WANTS the list's
+     * own state thrown away). The new seed ignores the `uf_*` params and its
+     * write-back strips them, chips included, so neither a reload nor Back
+     * brings the old list back. The remount puts row numbers, inline edit and
+     * the "In a queue" toggle back to the view's too.
      *
-     * Not this view's list state, so untouched: the record-open preference,
-     * the tab order (pinned views), favorites and a `filter[...]` scope a
-     * "View all" link opened the list with.
+     * Not a change to the view, so untouched: the column widths and the row
+     * height (remembered for the reader), the record-open preference, the tab
+     * order (pinned views), favorites and a `filter[...]` scope a "View all"
+     * link opened the list with.
      */
     const handleResetView = useCallback(() => {
         if (!activeView?.id) return;
-        listPrefs.resetView(activeView.id);
-        clearListFilterState(buildListFilterKey(user?.id, objectName, activeView.id));
+        discardListDraft(listDraftScope(user?.id, objectName ?? '', String(activeView.id)));
         resetPendingRef.current = true;
         setListResetGeneration(g => g + 1);
-    }, [activeView?.id, listPrefs.resetView, user?.id, objectName]);
+    }, [activeView?.id, user?.id, objectName]);
     /**
      * objectstack#30073 — the list the reader just saved as a view of its own
-     * leaves the view it came from: that view's stored list state (sort,
-     * filters, column layout, density, hidden fields, every part the saved
-     * body carries) and its cached search term go, and the address the page
-     * is leaving loses its `uf_*` params, so neither Back nor the next open
-     * of that view brings the conditions back, nor marks it personalized.
-     * The caller navigates to the saved view next.
+     * leaves the view it came from: that view's draft (objectstack#35955)
+     * goes, and the address the page is leaving loses its `uf_*` params, so
+     * neither Back nor the next open of that view brings the conditions back,
+     * nor draws Discard and Save on it. The caller navigates to the saved view
+     * next.
      */
     /**
      * objectstack#30073 — the Filter panel's group on screen: the list's last
@@ -402,17 +431,16 @@ export function useObjectViewListUrlState({
         return seed && seed.key === listIdentityKeyRef.current ? seed.state.filters : undefined;
     }, []);
     const clearSourceListState = useCallback((viewId: string) => {
-        listPrefs.resetView(viewId);
-        clearListFilterState(buildListFilterKey(user?.id, objectName, viewId));
+        discardListDraft(listDraftScope(user?.id, objectName ?? '', viewId));
         setSearchParams(prev => withoutListStateParams(prev), { replace: true });
-    }, [listPrefs.resetView, user?.id, objectName, setSearchParams]);
+    }, [user?.id, objectName, setSearchParams]);
     /**
      * objectstack#30850 — the page the list shows, read from the address on
      * every render: `ListView` takes it as a controlled `page`, and its every
      * move comes back through `writeListUrlState({ page })`, replacing the
      * entry. So Back from a record opened as a full page, a reload and a copied
      * link land on the page the reader left; the list's own reset to page 1
-     * deletes the param, and "Reset to view" strips it with the rest.
+     * deletes the param, and Discard strips it with the rest.
      */
     const listPage = parseListPageParam(searchParams);
     return {
@@ -424,7 +452,7 @@ export function useObjectViewListUrlState({
         ownListParamsRef,
         writeListUrlState,
         handleListPersonalizationChange,
-        listPersonalizedParts,
+        listDraftParts,
         handleResetView,
     };
 }
@@ -499,7 +527,7 @@ export function useObjectViewUrlFilters({
      */
     const ufSelectionsRef = useRef<{ key: string; selections: Record<string, string[]> | undefined } | undefined>(undefined);
     if (listIdentityKey && ufSelectionsRef.current?.key !== listIdentityKey) {
-        // objectstack#28950 — the list "Reset to view" opened starts with no
+        // objectstack#28950 — the list Discard opened starts with no
         // chip selected: its seed strips their params from the address bar.
         const reset = listSeedRef?.current?.key === listIdentityKey && !!listSeedRef.current.reset;
         ufSelectionsRef.current = { key: listIdentityKey, selections: reset ? undefined : parseUserFilterParams(searchParams) };

@@ -532,6 +532,34 @@ type ObjectCatalog = {
 };
 
 /**
+ * The field and action catalogs of one served object document, as the
+ * pickers read them. A field's declared `multiple: true` rides along: the
+ * `filter-builder` widget reads it to offer a list-valued column membership
+ * and the empty checks only (`operatorsForField`).
+ *
+ * @internal exported for tests
+ */
+export function objectCatalogOf(obj: { fields?: Record<string, any> | Array<any> } | null | undefined): ObjectCatalog {
+  const fieldOf = (name: unknown, f: any): ObjectFieldOption => ({
+    name: name as string,
+    label: f?.label,
+    type: f?.type,
+    ...(f?.multiple === true ? { multiple: true } : {}),
+  });
+  const raw = obj?.fields;
+  const list = Array.isArray(raw)
+    ? raw.map((f: any) => fieldOf(f?.name, f))
+    : raw && typeof raw === 'object'
+      ? Object.entries(raw).map(([name, f]: [string, any]) => fieldOf(name, f))
+      : [];
+  const rawActions = (obj as any)?.actions;
+  const acts = Array.isArray(rawActions)
+    ? rawActions.map((a: any) => ({ name: a?.name, label: a?.label, locations: a?.locations })).filter((a: any) => !!a.name)
+    : [];
+  return { fields: list.filter((f) => !!f.name), actions: acts };
+}
+
+/**
  * A refusal the SERVER returned for this document, held against the draft
  * slices its issue paths named (`9073cf018`).
  *
@@ -1302,17 +1330,7 @@ function MetadataResourceEditPageImpl({
         sourceObjectName
           ? async () => {
               const obj = (await client.get('object', sourceObjectName)) as { fields?: Record<string, any> | Array<any> } | null;
-              const raw = obj?.fields;
-              const list = Array.isArray(raw)
-                ? raw.map((f: any) => ({ name: f?.name, label: f?.label, type: f?.type }))
-                : raw && typeof raw === 'object'
-                  ? Object.entries(raw).map(([name, f]: [string, any]) => ({ name, label: f?.label, type: f?.type }))
-                  : [];
-              const rawActions = (obj as any)?.actions;
-              const acts = Array.isArray(rawActions)
-                ? rawActions.map((a: any) => ({ name: a?.name, label: a?.label, locations: a?.locations })).filter((a: any) => !!a.name)
-                : [];
-              return { fields: list.filter((f) => !!f.name), actions: acts };
+              return objectCatalogOf(obj);
             }
           : null,
       [client, sourceObjectName],

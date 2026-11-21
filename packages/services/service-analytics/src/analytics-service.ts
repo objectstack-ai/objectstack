@@ -90,6 +90,7 @@ import { measureResultType } from './measure-result-type.js';
 // compile.
 import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
 import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
+import { assertRecordUnitAggregatesGrouped } from './cube-record-unit-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, FixedReadLeafClassAnswer, ReadScopeFilterJudge } from './strategies/types.js';
 import { fixedReadLeafRefusalSinkOf } from './read-scope-sql.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
@@ -1260,6 +1261,12 @@ export interface AnalyticsServiceConfig {
     defaultCurrency?: string;
     currencyField?: string;
     homeAmountField?: string;
+    /**
+     * [ADR-0158 U7 R1] A `number` field's `unitConfig.unitField`, relayed
+     * ONLY under `unitMode: 'record'`: the unit field the cube door's
+     * record-unit judgment requires a grouping by (`cube-record-unit-door.ts`).
+     */
+    unitField?: string;
     max?: number;
   } | undefined;
   /**
@@ -3233,6 +3240,8 @@ export class AnalyticsService implements IAnalyticsService {
             // must not serve the sum across currencies that the published
             // dataset refuses.
             this.assertRecordCurrencyGrouped(q, cube);
+            // [ADR-0158 U7 R1] …and its twin over a record-mode quantity.
+            this.assertRecordUnitGrouped(q, cube);
             // [#28257] …and the `where` field gate (#5669), last in
             // `ensureCube`: a filter member whose field the object does not
             // have (a `runtimeFilter` typo) is refused `INVALID_FIELD` / 400
@@ -4149,6 +4158,9 @@ export class AnalyticsService implements IAnalyticsService {
       // must group by its code field: this ad-hoc exit is the one
       // `ObjectStackDataSource.aggregate()` reaches (`${field}_${fn}`).
       this.assertRecordCurrencyGrouped(query, cube);
+      // [ADR-0158 U7 R1] …and a quantity aggregate over a record-unit field
+      // must group by its unit field, on the same ad-hoc exit.
+      this.assertRecordUnitGrouped(query, cube);
       // [#5669] …and the `where`'s, third and last of the three request keys that
       // carry a field name. Its members are read from the filter TREE, not from
       // `cube.dimensions` — which on this path was minted from this very query,
@@ -4226,6 +4238,7 @@ export class AnalyticsService implements IAnalyticsService {
       // authored one are one population for the aggregate × field-type table.
       this.assertMeasureFieldTypes(query, augmented);
       this.assertRecordCurrencyGrouped(query, augmented);
+      this.assertRecordUnitGrouped(query, augmented);
       // [#5669] The `where` gate resolves a filter member through dimensions AND
       // measures (that is what the strategies do for a filter member), so it is
       // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
@@ -4243,6 +4256,7 @@ export class AnalyticsService implements IAnalyticsService {
       this.assertDimensionsGroupScalarColumns(query, cube);
       this.assertMeasureFieldTypes(query, cube);
       this.assertRecordCurrencyGrouped(query, cube);
+      this.assertRecordUnitGrouped(query, cube);
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
   }
@@ -4310,22 +4324,54 @@ export class AnalyticsService implements IAnalyticsService {
       query,
       cube.name,
       (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
-      (member) => {
-        const entry = declaredMemberEntry(cube, member, 'dimension');
-        const sql = (entry ? (typeof entry.sql === 'string' ? entry.sql : '') : member).trim();
-        if (BARE_IDENTIFIER.test(sql)) return { object, column: sql, path: sql };
-        if (!IDENTIFIER_PATH.test(sql)) return null;
-        return {
-          object: columnObjectOf(cube, object, sql, this.hopReference),
-          column: sql.slice(sql.lastIndexOf('.') + 1),
-          path: sql,
-        };
-      },
+      (member) => this.groupedColumnOf(cube, object, member),
       (o, field) => {
         const meta = fieldMeta(o, field);
         if (meta?.currencyField === undefined) return undefined;
         return { codeField: meta.currencyField, homeField: meta.homeAmountField };
       },
+    );
+  }
+
+  /**
+   * The column a `dimensions` entry groups by, for the record-currency and
+   * record-unit doors: located by the same {@link declaredMemberEntry} lookup
+   * and hop resolver {@link declaredMeasureColumn} reads, or `null` when no
+   * column can be pinned.
+   */
+  private groupedColumnOf(cube: Cube, object: string, member: string): MeasureColumn | null {
+    const entry = declaredMemberEntry(cube, member, 'dimension');
+    const sql = (entry ? (typeof entry.sql === 'string' ? entry.sql : '') : member).trim();
+    if (BARE_IDENTIFIER.test(sql)) return { object, column: sql, path: sql };
+    if (!IDENTIFIER_PATH.test(sql)) return null;
+    return {
+      object: columnObjectOf(cube, object, sql, this.hopReference),
+      column: sql.slice(sql.lastIndexOf('.') + 1),
+      path: sql,
+    };
+  }
+
+  /**
+   * [ADR-0158 U7 R1] Refuse a `sum` / `avg` / `min` / `max` measure over a
+   * `record`-mode quantity whose query does not group by the quantity's unit
+   * field: `INVALID_FIELD` / 400, naming the member the caller wrote, before
+   * either strategy reads anything. The rule and the envelope are
+   * {@link assertRecordUnitAggregatesGrouped}'s (`cube-record-unit-door.ts`);
+   * the resolvers and stand-downs are {@link assertRecordCurrencyGrouped}'s,
+   * after which it runs, and the unit field is
+   * {@link AnalyticsServiceConfig.sourceFieldMeta}'s `unitField`.
+   */
+  private assertRecordUnitGrouped(query: AnalyticsQuery, cube: Cube): void {
+    const fieldMeta = this.sourceFieldMeta;
+    if (!fieldMeta) return;
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    assertRecordUnitAggregatesGrouped(
+      query,
+      cube.name,
+      (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
+      (member) => this.groupedColumnOf(cube, object, member),
+      (o, field) => fieldMeta(o, field)?.unitField,
     );
   }
 

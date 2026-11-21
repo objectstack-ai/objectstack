@@ -192,9 +192,9 @@ function columnName(column: unknown): string | undefined {
  *   the panel alone is the filter: the reader may have edited or removed one.
  * - **sort** and **grouping**: the ones the address carries; absent there,
  *   the view's own.
- * - **columns**: the view's, in the reader's dragged order, without the
- *   columns they hid (so `hiddenFields` and `fieldOrder` are applied, not
- *   carried). **rowHeight**: the reader's density, else the view's.
+ * - **columns**: the view's and the ones the reader added, in the reader's
+ *   dragged order, without the columns they hid (so `hiddenFields` and
+ *   `fieldOrder` are applied, not carried). **rowHeight**: the reader's density, else the view's.
  *
  * The body is narrowed to the keys spec's closed `ListViewSchema` declares and
  * bound to this object (`config.data.object`) by `buildViewConfigSaveBody`,
@@ -222,6 +222,15 @@ export function buildPersonalViewConfig(
   const hidden = new Set<string>(pref?.hiddenFields ?? (Array.isArray(view.hiddenFields) ? view.hiddenFields : []));
   const order = pref?.columnState?.order ?? (Array.isArray(view.fieldOrder) ? view.fieldOrder : undefined);
   let columns: unknown[] | undefined = Array.isArray(view.columns) ? [...view.columns] : undefined;
+  // objectstack#35955 — the fields the reader added as columns (objectstack#30077)
+  // are columns of the saved view, after the view's own, in the same spelling.
+  if (columns && pref?.addedFields?.length) {
+    const names = new Set(columns.map(columnName).filter((n): n is string => !!n));
+    const asObjects = columns.some((c) => typeof c !== 'string');
+    for (const field of pref.addedFields) {
+      if (!names.has(field)) columns.push(asObjects ? { field } : field);
+    }
+  }
   if (columns) {
     if (order && order.length > 0) {
       const rank = new Map(order.map((name: string, i: number) => [name, i]));

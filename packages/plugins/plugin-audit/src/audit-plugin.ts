@@ -42,7 +42,7 @@ import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditActorSnapshot, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
-import { MENTION_EMAIL_TEMPLATES } from './mention-email.js';
+import { MENTION_EMAIL_TEMPLATES, REPLY_EMAIL_TEMPLATES } from './mention-email.js';
 import { createAppActivityWriter } from './app-activity-door.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
@@ -650,6 +650,17 @@ export class AuditPlugin implements Plugin {
           messagingAtReady.registerBuiltinTemplates(MENTION_EMAIL_TEMPLATES);
         } catch (err: any) {
           ctx.logger.warn('AuditPlugin: the @mention e-mail templates were NOT registered — mention e-mails carry the notification title and comment preview with no link to the record', {
+            error: err?.message ?? String(err),
+          });
+        }
+      }
+      // [#36074] The reply e-mail's text: the mention e-mail's shape under the
+      // reply topic, registered on its own so one refusal leaves the other.
+      if (messagingAtReady && typeof messagingAtReady.registerBuiltinTemplates === 'function') {
+        try {
+          messagingAtReady.registerBuiltinTemplates(REPLY_EMAIL_TEMPLATES);
+        } catch (err: any) {
+          ctx.logger.warn('AuditPlugin: the comment reply e-mail templates were NOT registered — reply e-mails carry the notification title and comment preview with no link to the record', {
             error: err?.message ?? String(err),
           });
         }

@@ -784,6 +784,31 @@ const dropdownMenuRowTouchTargetPatches = [
 ];
 
 /**
+ * The dropdown-menu label weight patch (objectstack#36047).
+ *
+ * The console sets text in two weights, 400 and 500. Upstream's
+ * `DropdownMenuLabel` is `font-semibold` (600), the one menu face outside
+ * them; it is `font-medium` (500), size and spacing upstream's. Anchored on
+ * the label's whole class run, written from
+ * `scripts/__tests__/fixtures/shadcn-registry/dropdown-menu.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const dropdownMenuLabelWeightPatches = [
+  {
+    id: 'dropdown-menu-label-medium-weight',
+    issue: 'objectstack#36047',
+    reason:
+      'The console uses two text weights, 400 and 500. Upstream DropdownMenuLabel is ' +
+      '`font-semibold` (600); it is `font-medium` (500), everything else upstream.',
+    find: '"px-2 py-1.5 text-sm font-semibold",',
+    replace: '"px-2 py-1.5 text-sm font-medium",',
+    marker: '"px-2 py-1.5 text-sm font-medium",',
+    occurrences: 1,
+  },
+];
+
+/**
  * The tabs touch-target patch (objectstack#29215).
  *
  * `TabsTrigger` is `py-1.5 text-sm` upstream, 38 px tall inside the fixed
@@ -889,6 +914,32 @@ function dialogSurfacePatches(primitive, importAnchor) {
 }
 
 /**
+ * The badge weight patch (objectstack#36047).
+ *
+ * The console sets text in two weights, 400 and 500; upstream's `Badge` is
+ * `font-semibold` (600), the one weight that sits outside them on every list
+ * cell and record field that shows a status or a choice. The badge keeps its
+ * size, shape and colours; only the weight is 500. Anchored on the class run
+ * that ends in the weight, written from
+ * `scripts/__tests__/fixtures/shadcn-registry/badge.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const badgeWeightPatches = [
+  {
+    id: 'badge-medium-weight',
+    issue: 'objectstack#36047',
+    reason:
+      'The console uses two text weights, 400 and 500. Upstream Badge is `font-semibold` ' +
+      '(600); it is `font-medium` (500), everything else upstream.',
+    find: 'rounded-full border px-2.5 py-0.5 text-xs font-semibold',
+    replace: 'rounded-full border px-2.5 py-0.5 text-xs font-medium',
+    marker: 'py-0.5 text-xs font-medium',
+    occurrences: 1,
+  },
+];
+
+/**
  * Component name (as tracked in `shadcn-components.json`) → patches it needs.
  *
  * @type {Record<string, LocalPatch[]>}
@@ -911,8 +962,9 @@ export const LOCAL_PATCHES = {
   ],
   slider: sliderThumbPassThroughPatches,
   calendar: calendarDisplayLocalePatches,
-  'dropdown-menu': dropdownMenuRowTouchTargetPatches,
+  'dropdown-menu': [...dropdownMenuRowTouchTargetPatches, ...dropdownMenuLabelWeightPatches],
   tabs: tabsTouchTargetPatches,
+  badge: badgeWeightPatches,
 };
 
 /** Components that carry at least one declared patch. */

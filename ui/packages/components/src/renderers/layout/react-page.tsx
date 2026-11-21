@@ -226,7 +226,7 @@ function CapabilityDisabledNotice(): React.ReactElement {
   const { t } = useObjectTranslation();
   return (
     <div className="m-4 rounded-md border border-amber-400/40 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-      <div className="font-semibold">
+      <div className="font-medium">
         {t('reactPage.disabledTitle', { defaultValue: 'React pages are disabled on this deployment' })}
       </div>
       <p className="mt-1 leading-relaxed">
@@ -317,7 +317,7 @@ export const ReactKindPage: React.FC<{ schema: any }> = ({ schema }) => {
   if (loadError) {
     return (
       <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-        <div className="font-semibold">
+        <div className="font-medium">
           {t('reactPage.loadFailed', { defaultValue: 'Failed to load the react runtime' })}
         </div>
         <pre className="mt-1 whitespace-pre-wrap">{String(loadError)}</pre>
@@ -354,7 +354,7 @@ export const ReactKindPage: React.FC<{ schema: any }> = ({ schema }) => {
         scope={scope}
         fallback={(error) => (
           <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-            <div className="font-semibold">{t('reactPage.error', { defaultValue: 'React page error' })}</div>
+            <div className="font-medium">{t('reactPage.error', { defaultValue: 'React page error' })}</div>
             <pre className="mt-1 whitespace-pre-wrap">{String(error)}</pre>
           </div>
         )}

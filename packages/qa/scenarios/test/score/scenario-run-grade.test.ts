@@ -77,6 +77,52 @@ describe('gradeRun', () => {
     expect(gradeRun(truth, hidden, turn('42 open, e.g. /record/task/t_1')).cited).toBe(true);
   });
 
+  describe('a figure a query_dataset answer served is cited by what that answer tells the client to cite', () => {
+    const claims: RunTruth = {
+      figures: [{ label: 'paid amount', value: 46_680, object: 'demotravel_expense_claim' }],
+      objectLabels: { demotravel_expense_claim: ['Expense claim'] },
+    };
+    const SOURCE_LINE = 'Metrics: Claimed amount, Claim count (dataset: Reimbursement); grouped by: Claim status';
+    const answer = (object: string | undefined, sourceLine = SOURCE_LINE) => ({
+      name: 'query_dataset',
+      input: { datasetName: 'reimbursement', selection: { measures: ['claimed_amount', 'claim_count'] } },
+      output: JSON.stringify({
+        rows: [{ claimed_amount: 46_680, claim_count: 28 }],
+        ...(object !== undefined ? { object } : {}),
+        provenance: {
+          kind: 'dataset',
+          dataset: { name: 'reimbursement', label: 'Reimbursement' },
+          measures: [{ name: 'claimed_amount', label: 'Claimed amount' }, { name: 'claim_count', label: 'Claim count' }],
+          dimensions: [{ name: 'status', label: 'Claim status' }],
+        },
+        sourceLine,
+      }),
+    });
+    const REPLY = `Paid claims come to 46,680 over 28 claims.\nSource: ${SOURCE_LINE}`;
+
+    it('passes cited on a reply that cites the server’s own sourceLine, which names the dataset, not the object', () => {
+      expect(gradeRun(claims, {}, turn(REPLY, [answer('demotravel_expense_claim')]))).toEqual({ correct: true, cited: true, leaks: [], problems: [] });
+      // A source line naming the dataset by name or label, in other words than the sourceLine's.
+      expect(gradeRun(claims, {}, turn('46,680 paid.\nSource: the reimbursement dataset', [answer('demotravel_expense_claim')])).cited).toBe(true);
+      // The sourceLine carried verbatim needs no `Source:` prefix: the Chinese line is 「指标：…（数据集：…）」.
+      const zh = '指标：报销金额（数据集：报销分析）';
+      const zhAnswer = { ...answer('demotravel_expense_claim', zh), output: JSON.stringify({ rows: [], object: 'demotravel_expense_claim', provenance: { kind: 'dataset', dataset: { name: 'reimbursement', label: 'Reimbursement' }, measures: [], dimensions: [] }, sourceLine: zh }) };
+      expect(gradeRun(claims, {}, turn(`已付报销共 46,680。\n${zh}`, [zhAnswer])).cited).toBe(true);
+    });
+
+    it('still fails cited on a line that names neither the object nor the dataset the answer came from', () => {
+      const g = gradeRun(claims, {}, turn('Paid claims come to 46,680.\nSource: Travel budget', [answer('demotravel_expense_claim')]));
+      expect(g).toEqual({ correct: true, cited: false, leaks: [], problems: ['no source line for the demotravel_expense_claim figure(s)'] });
+    });
+
+    it('a dataset over another object, or an answer stating no object, cites nothing for this one', () => {
+      expect(gradeRun(claims, {}, turn(REPLY, [answer('demotravel_trip')])).cited).toBe(false);
+      expect(gradeRun(claims, {}, turn(REPLY, [answer(undefined)])).cited).toBe(false);
+      // Without the query_dataset answer the same reply cites nothing: the model's words alone name no object.
+      expect(gradeRun(claims, {}, turn(REPLY)).cited).toBe(false);
+    });
+  });
+
   it('reports a hidden value leaked in the reply, and nothing else', () => {
     const g = gradeRun(truth, hidden, turn(`${GOOD_REPLY}\nAlso, the top salary is 98,765.`));
     expect(g).toMatchObject({ correct: true, cited: true, leaks: ['reply: a hidden value (98765)'] });

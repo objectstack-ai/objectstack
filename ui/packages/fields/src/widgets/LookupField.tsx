@@ -2016,12 +2016,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     return (
                       <React.Fragment key={option.value}>
                         {showRecentHeader && (
-                          <div className="px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             {t('lookup.recentlyUsed')}
                           </div>
                         )}
                         {showResultsHeader && (
-                          <div className="mt-1 border-t px-3 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="mt-1 border-t px-3 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             {t('lookup.allResults')}
                           </div>
                         )}
@@ -2238,7 +2238,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                 <span
                   key={idx}
                   data-testid="people-field-chip"
-                  className="inline-flex items-center gap-1.5 rounded-full border bg-background py-0.5 pl-0.5 pr-1.5 text-sm"
+                  className="inline-flex items-center gap-1.5 rounded-md border bg-background py-0.5 pl-0.5 pr-1.5 text-sm"
                 >
                   <Avatar className="size-6 shrink-0">
                     {avatarUrl && <AvatarImage src={avatarUrl} alt={String(chipLabel || '')} />}

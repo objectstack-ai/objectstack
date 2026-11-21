@@ -676,7 +676,26 @@ export {
   type UserWorkTransferFailure,
   type UserWorkTransferOutcome,
   type UserWorkTransferReport,
+  assertAssignableUser,
 } from './user-assigned-work.js';
+
+// #35402 — the Change Owner action's server half (rulings 7000556646 and
+// 7000907189 on #35315): one record or a list of them handed to a person or an
+// ownership queue, as the caller, on an object that offers the action.
+export {
+  CHANGE_OWNER_DISABLED,
+  CHANGE_OWNER_NOTIFICATION_TEXT,
+  CHANGE_OWNER_NOTIFICATION_TOPIC,
+  changeOwnerOffReason,
+  changeOwnerOffRefusal,
+  changeRecordOwner,
+  changeRecordsOwner,
+  type ChangeOwnerEngine,
+  type ChangeOwnerMessaging,
+  type ChangeOwnerReport,
+  type ChangeOwnerResult,
+  type ChangeOwnerTarget,
+} from './change-record-owner.js';
 
 // Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
 // stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.

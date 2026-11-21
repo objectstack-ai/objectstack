@@ -54,7 +54,9 @@ export function buildAccessMatrix(stack: AnyRec): AccessMatrixParsed {
       // the snapshot diff — the artefact a human signs off — would say nothing.
       // The two super-user columns below are RAW BITS, not folds: they report
       // what the set declares, which is the context the reviewer reads the CRUD
-      // columns against.
+      // columns against. So is `viewAllFields` (the field-axis split, ruling of
+      // record 6912661484), written only when `true`: a stack that does not
+      // author the bit keeps a byte-identical snapshot.
       const effective = p as EffectiveObjectPermission;
       const entry: AccessMatrixEntry = {
         permissionSet: psName,
@@ -66,6 +68,7 @@ export function buildAccessMatrix(stack: AnyRec): AccessMatrixParsed {
         viewAllRecords: p.viewAllRecords === true,
         modifyAllRecords: p.modifyAllRecords === true,
       };
+      if (p.viewAllFields === true) entry.viewAllFields = true;
       if (typeof p.readScope === 'string') entry.readScope = p.readScope;
       if (typeof p.writeScope === 'string') entry.writeScope = p.writeScope;
       const owd = owdByObject.get(objName);
@@ -89,6 +92,8 @@ const BIT_LABELS: Array<[keyof AccessMatrixEntry, string]> = [
   ['delete', 'delete'],
   ['viewAllRecords', 'View All Data'],
   ['modifyAllRecords', 'Modify All Data'],
+  // Written only when true (see above); the diff reads an absent bit as `false`.
+  ['viewAllFields', 'View All Fields'],
 ];
 
 /**
@@ -114,7 +119,7 @@ export function diffAccessMatrix(before: AccessMatrixParsed, after: AccessMatrix
       continue;
     }
     for (const [bit, label] of BIT_LABELS) {
-      if (b[bit] !== a[bit]) {
+      if ((b[bit] === true) !== (a[bit] === true)) {
         lines.push(`'${a.permissionSet}' ${a[bit] ? 'gains' : 'loses'} ${label} on '${a.object}'`);
       }
     }

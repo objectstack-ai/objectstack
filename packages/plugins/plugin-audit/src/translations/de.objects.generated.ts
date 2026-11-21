@@ -266,6 +266,18 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "Bearbeitet am"
       },
+      is_resolved: {
+        label: "Gelöst",
+        help: "Ob der von diesem Kommentar der obersten Ebene begonnene Thread gelöst ist; bei einer Antwort abgelehnt"
+      },
+      resolved_by: {
+        label: "Gelöst von",
+        help: "Wer den Thread gelöst hat – von der Plattform erfasst, nie von Autoren geschrieben"
+      },
+      resolved_at: {
+        label: "Gelöst am",
+        help: "Wann der Thread gelöst wurde – von der Plattform erfasst, nie von Autoren geschrieben"
+      },
       created_at: {
         label: "Erstellt am"
       },

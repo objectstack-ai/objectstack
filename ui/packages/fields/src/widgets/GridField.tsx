@@ -4,11 +4,6 @@ import {
   cn,
   Button,
   Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Popover,
   PopoverTrigger,
   PopoverContent,
@@ -32,6 +27,8 @@ import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
 import { fieldHelpText } from '../fieldHelpText.js';
+import { GRID_CELL_CONTROL_CLASS, GridDateCell, GridSelectCell, GrowingCellInput } from './gridCellPanels.js';
+import { isImeKey } from './imeKey.js';
 import type { InlineGridColumn } from '@objectstack/spec/data';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 
@@ -1150,9 +1147,13 @@ function GridFieldBody({
     }
   }, [rows.length, focusCell]);
 
+  /** The Esc snapshot of the cell being visited; see the Esc block below. */
+  const cellVisit = useRef<{ key: string; rowIdx: number; row: Row; count: number } | null>(null);
+
   const addRow = useCallback((focusColIdx: number | null = null) => {
     if (maxRows != null && rows.length >= maxRows) return;
     pendingFocus.current = { rowIdx: rows.length, colIdx: focusColIdx };
+    cellVisit.current = null;
     // objectstack#35816 — a line Add starts on the host's defaults is marked
     // untouched until its first edit (`UNTOUCHED_NEW_ROW`).
     emit([...rows, newRowValues ? { ...blankRow(), [UNTOUCHED_NEW_ROW]: true } : blankRow()]);
@@ -1160,6 +1161,10 @@ function GridFieldBody({
 
   const onCellKeyDown = useCallback(
     (e: React.KeyboardEvent, rowIdx: number, colIdx: number) => {
+      // objectstack#35996 — Enter and the arrows pressed while an input
+      // method composes pick or move its candidate: the grid neither moves
+      // nor appends a line on them.
+      if (isImeKey(e)) return;
       if (e.key === 'Enter' && rowIdx === rows.length - 1 && allowAdd && !isList) {
         e.preventDefault();
         addRow(colIdx);
@@ -1174,9 +1179,74 @@ function GridFieldBody({
     [focusCell, rows.length, allowAdd, isList, addRow],
   );
 
+  /**
+   * Esc in a cell takes back what this visit to the cell changed
+   * (objectstack#36023): the line returns to what it held when the cell was
+   * entered, its other cells included (a lookup pick's autofill), and the
+   * untouched mark of a new line with it. The key stops at the grid, so a
+   * form open in a dialog keeps its dialog and every other line: Esc in a
+   * cell never closes it. A cell whose panel is open hands Esc to the panel,
+   * which closes and writes nothing.
+   *
+   * Read on the window's capture phase, ahead of the dialog's own document
+   * listener, which would close the dialog before any handler in the table
+   * ran.
+   *
+   * The snapshot is held by line index, so a change to the lines themselves
+   * (add, remove, duplicate, move) ends the visit: after it the same index
+   * can draw another line, and putting the snapshot back would overwrite
+   * that line with a removed or moved one. The line count is kept with the
+   * snapshot as a second guard, for a host that replaces the lines itself.
+   * (`cellVisit` is declared above `addRow`, which ends the visit too.)
+   */
+  const rowsRef = useRef(rows);
+  const emitRef = useRef(emit);
+  React.useLayoutEffect(() => {
+    rowsRef.current = rows;
+    emitRef.current = emit;
+  });
+  const cellKeyOf = (el: EventTarget | null): { key: string; rowIdx: number } | null => {
+    const cell = el instanceof Element ? el.closest('[data-grid-cell]') : null;
+    const key = cell?.getAttribute('data-grid-cell');
+    if (!cell || !key || !gridRef.current?.contains(cell)) return null;
+    return { key, rowIdx: Number(key.slice(0, key.indexOf(':'))) };
+  };
+  const onGridFocus = (e: React.FocusEvent) => {
+    const at = cellKeyOf(e.target);
+    if (!at || cellVisit.current?.key === at.key) return;
+    const row = rowsRef.current[at.rowIdx];
+    cellVisit.current = row ? { key: at.key, rowIdx: at.rowIdx, row, count: rowsRef.current.length } : null;
+  };
+  const onGridBlur = (e: React.FocusEvent) => {
+    const to = e.relatedTarget as Element | null;
+    // Into a cell's own panel (portaled out of the table) is still the visit.
+    if (to && (gridRef.current?.contains(to) || to.closest('[data-radix-popper-content-wrapper]'))) return;
+    cellVisit.current = null;
+  };
+  const editable = !readonly && !isList;
+  React.useEffect(() => {
+    if (!editable) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || isImeKey({ nativeEvent: e, keyCode: e.keyCode })) return;
+      const at = cellKeyOf(e.target);
+      if (!at) return;
+      const cell = (e.target as Element).closest('[data-grid-cell]');
+      if (cell?.querySelector('[aria-expanded="true"]')) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const visit = cellVisit.current;
+      const current = rowsRef.current;
+      if (!visit || visit.key !== at.key || visit.count !== current.length || current[visit.rowIdx] === visit.row) return;
+      emitRef.current(current.map((r, i) => (i === visit.rowIdx ? visit.row : r)), false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [editable]);
+
   const removeRow = useCallback(
     (rowIdx: number) => {
       if (rows.length <= minRows) return;
+      cellVisit.current = null;
       emit(rows.filter((_, i) => i !== rowIdx));
     },
     [rows, minRows, emit],
@@ -1193,6 +1263,7 @@ function GridFieldBody({
       const next = [...rows];
       // A copy is a line the user made, so it is not an untouched one.
       next.splice(rowIdx + 1, 0, touched({ ...copy }));
+      cellVisit.current = null;
       emit(next);
     },
     [rows, maxRows, emit],
@@ -1205,6 +1276,7 @@ function GridFieldBody({
       const next = [...rows];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
+      cellVisit.current = null;
       emit(next);
     },
     [rows, emit],
@@ -1235,7 +1307,7 @@ function GridFieldBody({
           <SlidersHorizontal className="h-3.5 w-3.5" />
           {t('table.columns', { defaultValue: 'Columns' })}
           {extraShown.size > 0 && (
-            <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-medium text-primary">
+            <span className="rounded-full bg-primary/10 px-1.5 text-xs font-medium text-primary">
               +{extraShown.size}
             </span>
           )}
@@ -1350,7 +1422,7 @@ function GridFieldBody({
                 >
                   {totalLabel}
                 </td>
-                <td className="px-3 py-2 text-right font-semibold text-foreground tabular-nums">
+                <td className="px-3 py-2 text-right font-medium text-foreground tabular-nums">
                   {total.toLocaleString(displayLocale)}
                 </td>
                 {columns.length - totalColIndex - 1 > 0 && (
@@ -1488,22 +1560,20 @@ function GridFieldBody({
         />
       );
     }
+    // objectstack#36023 — the option list opens under the cell, searchable,
+    // and a pick writes the value; the cell keeps showing the label meanwhile.
     if (c.type === 'select') {
       return (
-        <Select value={val != null ? String(val) : ''} onValueChange={(v) => setCell(rowIdx, c, v)} disabled={locked}>
-          <SelectTrigger
-            className={cn('h-8 rounded-none border-0 bg-transparent px-2 shadow-none focus:ring-1 focus:ring-ring/60', PHONE_TOUCH_HEIGHT)}
-            aria-label={c.label || c.name}
-            aria-invalid={invalid || undefined}
-          >
-            <SelectValue placeholder="—" />
-          </SelectTrigger>
-          <SelectContent>
-            {(c.options || []).map((o) => (
-              <SelectItem key={o.value} value={o.value} className={PHONE_TOUCH_HEIGHT}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <GridSelectCell
+          options={(c.options || []).map((o) => ({ value: String(o.value), label: o.label }))}
+          value={val}
+          onPick={(v) => setCell(rowIdx, c, v)}
+          disabled={locked}
+          invalid={invalid}
+          label={c.label || c.name}
+          onNavKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+          data-cell={`${rowIdx}-${colIdx}`}
+        />
       );
     }
     // The editable currency cell shows the SAME symbol its display face does
@@ -1513,68 +1583,71 @@ function GridFieldBody({
     // not exist (objectui#10474, objectui#10567): its control can paint that
     // only blank — the `date` control sanitises the verbatim day
     // `toDateInputValue` keeps, so it is handed `""` below, as the `datetime`
-    // adapter already does — so the stored string is named under it and the
-    // control is marked invalid. Nothing is written until the user picks a new
-    // value — the same face `DateField` / `DateTimeField` give it.
+    // adapter already does — so the
+    // control is marked invalid, its description naming the stored string.
+    // Nothing is written until the user picks a new value — the same face
+    // `DateField` / `DateTimeField` give it.
     const impossibleDay = (c.type === 'date' || c.type === 'datetime') && isImpossibleStoredDay(val);
     const noticeId = impossibleDay ? `${cellIdBase}-impossible-${rowIdx}-${colIdx}` : undefined;
+    const impossibleText = impossibleDay
+      ? t(c.type === 'date' ? 'fields.date.impossibleDay' : 'fields.dateTime.impossibleDay', { value: String(val) })
+      : null;
+    // objectstack#36023 — a date or date-time cell is still typed into, and
+    // its calendar opens under the cell on arrival. The stored-day notice
+    // reads at the top of that calendar, and stays the control's description
+    // (out of sight in the cell, so the row keeps its height).
+    if (c.type === 'date' || c.type === 'datetime') {
+      return (
+        <>
+          <GridDateCell
+            kind={c.type}
+            data-cell={`${rowIdx}-${colIdx}`}
+            aria-label={c.label || c.name}
+            aria-invalid={invalid || impossibleDay || undefined}
+            aria-describedby={noticeId}
+            title={impossibleText ?? undefined}
+            onKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
+            className={cn(GRID_CELL_CONTROL_CLASS, PHONE_TOUCH_HEIGHT)}
+            nativeValue={c.type === 'date' ? (impossibleDay ? '' : toDateInputValue(val)) : toDateTimeInputValue(val)}
+            onNativeChange={(next) => setCell(rowIdx, c, next)}
+            notice={impossibleText}
+            disabled={locked}
+          />
+          {impossibleDay && (
+            <span id={noticeId} className="sr-only" data-testid={`line-items-impossible-day-${rowIdx}-${c.name}`}>
+              {impossibleText}
+            </span>
+          )}
+        </>
+      );
+    }
+    // A text cell floats right over its neighbours while its text is longer
+    // than the column (objectstack#36023); numbers and times keep their box.
+    const CellInput = !c.type || c.type === 'text' ? GrowingCellInput : Input;
     return (
       <div className="relative">
         {adornment && (
           <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{adornment}</span>
         )}
-        <Input
+        <CellInput
           data-cell={`${rowIdx}-${colIdx}`}
-          aria-invalid={invalid || impossibleDay || undefined}
-          aria-describedby={noticeId}
+          aria-invalid={invalid || undefined}
           onKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
           className={cn(
-            'h-8 rounded-none border-0 bg-transparent px-2 shadow-none focus-visible:ring-1 focus-visible:ring-ring/60',
+            GRID_CELL_CONTROL_CLASS,
             PHONE_TOUCH_HEIGHT,
             adornment && 'pl-6',
             isNumeric(c.type) && 'text-right tabular-nums',
           )}
-          type={
-            c.type === 'date'
-              ? 'date'
-              : c.type === 'datetime'
-                ? 'datetime-local'
-                : c.type === 'time'
-                  ? 'time'
-                  : isNumeric(c.type)
-                    ? 'number'
-                    : 'text'
-          }
+          type={c.type === 'time' ? 'time' : isNumeric(c.type) ? 'number' : 'text'}
           step={isNumeric(c.type) ? c.step ?? 'any' : undefined}
           aria-label={c.label || c.name}
-          // A temporal cell holding the API's ISO shape (`2026-06-17T14:30:00.000Z`)
-          // is SILENTLY rejected by the native control — the attribute lands in
-          // the DOM but `input.value` reads back `''` and the cell paints empty
-          // (objectui#3566, the sub-grid face of #3127). So each type reads
-          // through its own adapter:
-          //   date     → `YYYY-MM-DD`; the control writes that shape back
-          //              verbatim, so no paired conversion on `onChange`.
-          //   datetime → `YYYY-MM-DDTHH:mm` local; PAIRED with
-          //              `fromDateTimeInputValue` in `coerce` so read and write
-          //              share one basis (objectui#3569).
-          //   time     → `HH:mm[:ss]` is already the stored shape, both ways.
-          value={
-            c.type === 'date'
-              ? (impossibleDay ? '' : toDateInputValue(val))
-              : c.type === 'datetime'
-                ? toDateTimeInputValue(val)
-                : val != null
-                  ? String(val)
-                  : ''
-          }
+          // `time` reads and writes `HH:mm[:ss]`, the stored shape, both ways;
+          // the date types read through their adapters above (objectui#3566).
+          value={val != null ? String(val) : ''}
           onChange={(e) => setCell(rowIdx, c, e.target.value)}
           disabled={locked}
         />
-        {impossibleDay && (
-          <p id={noticeId} className="px-2 pb-1 text-xs text-destructive" data-testid={`line-items-impossible-day-${rowIdx}-${c.name}`}>
-            {t(c.type === 'date' ? 'fields.date.impossibleDay' : 'fields.dateTime.impossibleDay', { value: String(val) })}
-          </p>
-        )}
       </div>
     );
   };
@@ -1602,8 +1675,8 @@ function GridFieldBody({
       data-testid="line-items"
     >
       {columnChooser && <div className="flex justify-end">{columnChooser}</div>}
-      <div className="border border-border rounded-lg overflow-x-auto">
-        <table ref={gridRef} className="w-full text-sm">
+      <div className="border border-border rounded-lg overflow-x-auto" data-line-items-scroll="">
+        <table ref={gridRef} className="w-full text-sm" onFocus={onGridFocus} onBlur={onGridBlur}>
           <thead className="bg-muted/60 border-b border-border">
             <tr>
               <th className={cn('px-2 py-2 text-right text-xs font-medium text-muted-foreground', allowReorder ? 'w-14' : 'w-10')}>#</th>
@@ -1725,6 +1798,7 @@ function GridFieldBody({
                           // travels with `invalid` into `renderCellInput`.
                           title={invalid ? requiredCellText(c) : undefined}
                           data-testid={invalid ? `line-items-invalid-${rowIdx}-${c.name}` : undefined}
+                          data-grid-cell={`${rowIdx}:${c.name}`}
                           className={cn(
                             'border-r border-border/40 px-1 py-0.5 align-middle last:border-r-0',
                             isList && 'px-2 py-1.5',
@@ -1803,7 +1877,7 @@ function GridFieldBody({
                 >
                   {totalLabel}
                 </td>
-                <td className="px-3 py-2 text-right font-semibold text-foreground tabular-nums" data-testid="line-items-total">
+                <td className="px-3 py-2 text-right font-medium text-foreground tabular-nums" data-testid="line-items-total">
                   {total.toLocaleString(displayLocale)}
                 </td>
                 {(columns.length - totalColIndex - 1 + (hasRowActions ? 1 : 0)) > 0 && (

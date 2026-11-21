@@ -1587,7 +1587,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   if (error) {
     return (
       <div className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md">
-        <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{error.message}</p>
       </div>
     );

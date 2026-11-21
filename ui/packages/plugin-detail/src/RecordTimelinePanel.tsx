@@ -57,7 +57,7 @@ export const RecordTimelinePanel: React.FC<RecordTimelinePanelProps> = ({
   const title = t('detail.timeline', { defaultValue: 'Activity' });
   const countChip = count !== null && (
     <span
-      className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal text-foreground"
+      className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-xs font-normal text-foreground"
       data-record-timeline-count=""
     >
       {count}
@@ -66,7 +66,7 @@ export const RecordTimelinePanel: React.FC<RecordTimelinePanelProps> = ({
   return (
     <section className="rounded-[10px] border border-border bg-card" aria-label={title} data-record-timeline-panel="">
       <div
-        className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
+        className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-sm font-medium"
         data-record-timeline-panel-head=""
       >
         {onViewAll ? (
