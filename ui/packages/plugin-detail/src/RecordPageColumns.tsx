@@ -28,6 +28,7 @@ import {
   useRecordAttachmentCount,
 } from './RecordSummaryRail';
 import { RecordTimelineCountContext } from './recordTimelineStream';
+import { createRecordBodyFields, RecordBodyFieldsContext } from './recordBodyFields';
 import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
   editRelatedArrangement,
@@ -359,6 +360,10 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const { t } = useDetailTranslation();
   const ctx = useRecordContext();
   const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
+  // objectstack#35941 — the details sections report the rows they draw, and
+  // the meta line closing the details column reads them: the owner is left
+  // off that line when a section already draws `owner_id`.
+  const [bodyFields] = React.useState(createRecordBodyFields);
   const hasTimeline = columns.timeline.length > 0;
   const wide = tier === 'wide';
   const besideDetails = tier !== 'stack';
@@ -607,6 +612,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   const template = sideBySide ? (wide ? GRID_TEMPLATE.wide : GRID_TEMPLATE.twoColumn) : GRID_TEMPLATE.oneColumn;
 
   return (
+    <RecordBodyFieldsContext.Provider value={bodyFields}>
     <DefaultRecordPageContext.Provider value>
     <RecordBodyTablesContext.Provider value={bodyTableIds}>
     <RelatedEnlargeContext.Provider value={onEnlargeRelated ?? null}>
@@ -652,5 +658,6 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     </RelatedEnlargeContext.Provider>
     </RecordBodyTablesContext.Provider>
     </DefaultRecordPageContext.Provider>
+    </RecordBodyFieldsContext.Provider>
   );
 };

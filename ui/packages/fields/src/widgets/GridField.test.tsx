@@ -847,6 +847,46 @@ describe('GridField — a new line starts on its defaults and waits to read red 
   });
 });
 
+describe('GridField — a line Add started on its defaults and nobody edited never reads red (objectstack#35940)', () => {
+  const taskColumns = {
+    columns: [
+      { name: 'name', label: 'Name', type: 'text' as const, required: true },
+      { name: 'status', label: 'Status', type: 'text' as const, required: true },
+    ],
+  } as any;
+
+  it('stays unflagged after the host says a save was refused, while an edited new line is flagged', () => {
+    const rows = [
+      { name: null, status: 'pending', [UNTOUCHED_NEW_ROW]: true },
+      { name: null, status: 'done' },
+    ];
+    render(<GridField value={rows} onChange={() => {}} field={taskColumns} newRowValues={{ status: 'pending' }} newRowRequiredShown />);
+    expect(screen.queryByTestId('line-items-invalid-0-name')).toBeNull();
+    expect(screen.getByTestId('line-items-invalid-1-name')).toBeTruthy();
+  });
+
+  it('a line Enter appends on the last line starts on the defaults and is marked untouched, as Add\'s is', () => {
+    const onChange = vi.fn();
+    render(<GridField value={[{ name: 'A', status: 'done' }]} onChange={onChange} field={taskColumns} newRowValues={{ status: 'pending' }} />);
+    fireEvent.keyDown(screen.getByDisplayValue('done'), { key: 'Enter' });
+    const appended = onChange.mock.lastCall![0][1];
+    expect(appended).toMatchObject({ status: 'pending' });
+    expect(isUntouchedNewRow(appended)).toBe(true);
+  });
+
+  it('its first edit makes it input, and from then on it is flagged like any new line', () => {
+    const onChange = vi.fn();
+    const field = { columns: [...taskColumns.columns, { name: 'note', label: 'Note', type: 'text' as const }] } as any;
+    const rows = [{ name: null, status: 'pending', note: null, [UNTOUCHED_NEW_ROW]: true }];
+    const { rerender } = render(
+      <GridField value={rows} onChange={onChange} field={field} newRowValues={{ status: 'pending' }} newRowRequiredShown />,
+    );
+    fireEvent.change(screen.getAllByDisplayValue('pending')[0], { target: { value: 'done' } });
+    rerender(<GridField value={onChange.mock.lastCall![0]} onChange={onChange} field={field} newRowValues={{ status: 'pending' }} newRowRequiredShown />);
+    expect(screen.getByTestId('line-items-invalid-0-name')).toBeTruthy();
+  });
+});
+
 /**
  * objectstack#35507 — no blank entry row beside "Add line". The grid used to
  * append an always-present empty "ghost" line under the data rows; it carried
