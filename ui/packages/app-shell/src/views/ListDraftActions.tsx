@@ -14,7 +14,8 @@
  *
  * As the list narrows (the phone list draws this same control in its chip
  * row, objectstack#35883), the two faces fold into ONE Save whose menu also
- * holds Discard: one control, one save path, at every width.
+ * holds Discard: one control, one save path, at every width. Where no save
+ * is offered, both faces are Discard alone.
  *
  * Nothing here is configurable: no metadata key or option reaches it.
  */
@@ -142,29 +143,45 @@ export function ListDraftActions({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      {/* The narrow face: one Save, whose menu also holds Discard. */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            data-testid="list-draft-compact"
-            className="inline-flex h-6 shrink-0 gap-1 px-2 text-[13px] @[40rem]/list:hidden"
-          >
-            {saveLabel}
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64" data-testid="list-draft-compact-menu">
-          {offersSave ? saveItems : null}
-          {offersSave ? <DropdownMenuSeparator /> : null}
-          <DropdownMenuItem onSelect={() => onDiscard()} data-testid="list-draft-compact-discard">
-            <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-            {discardLabel}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/* The narrow face: one Save, whose menu also holds Discard. With no
+          save offered, a Save would hold nothing to save: Discard alone. */}
+      {offersSave ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              data-testid="list-draft-compact"
+              className="inline-flex h-6 shrink-0 gap-1 px-2 text-[13px] @[40rem]/list:hidden"
+            >
+              {saveLabel}
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64" data-testid="list-draft-compact-menu">
+            {saveItems}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => onDiscard()} data-testid="list-draft-compact-discard">
+              <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+              {discardLabel}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          title={discardTitle}
+          data-testid="list-draft-compact-discard"
+          className="inline-flex h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none @[40rem]/list:hidden"
+          onClick={onDiscard}
+        >
+          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+          {discardLabel}
+        </Button>
+      )}
     </span>
   );
 }

@@ -8,7 +8,7 @@
  *
  * What a draft holds: the sort, the Filter panel's group, the grouping, the
  * search term, the columns shown (hidden ones, added ones), the column order
- * and the Display panel's layout and row colour. What it never holds: the
+ * and (from PR 2) the Display panel's layout and row colour. What it never holds: the
  * column widths and the row height, which are remembered for the reader
  * (`ListPreferencesProvider`), and the view tab order.
  *
@@ -21,10 +21,11 @@
  *   it: the record page draws no list of this store, so nothing replaces it;
  * - opening another view or another object replaces it (`claimListDraft` with
  *   another scope), with no prompt;
- * - a reload loses it, the module's memory with it. The address's `uf_*`
- *   copy of the toolbar state is dropped on a reload too
- *   (`isDocumentReload`, read by the list's seed), so the list opens as its
- *   view declares it.
+ * - a reload loses it, the module's memory with it. When the reloaded page
+ *   is the list itself, the address's `uf_*` copy of the toolbar state is
+ *   dropped too (`takeDocumentReload`, read by the list's seed), so the list
+ *   opens as its view declares it. A reload of another page does not touch a
+ *   list an in-app link opens later.
  *
  * Not React state: the list page unmounts while a record is open as a page,
  * and the draft must outlive it. Readers subscribe through
@@ -53,9 +54,16 @@ export interface ListDraft {
   hiddenFields?: string[];
   /** The object's fields the reader added as columns. */
   addedFields?: string[];
-  /** The visualization the reader switched to (`ListView`'s layout control). */
+  /**
+   * The visualization the reader switched to (`ListView`'s layout control).
+   * Nothing writes it yet: the list hands its layout out from PR 2 of
+   * objectstack#35955, and Save keeps it from then.
+   */
   viewType?: string;
-  /** The row colour the reader picked, or `null` for "none" over a view that colours its rows. */
+  /**
+   * The row colour the reader picked, or `null` for "none" over a view that
+   * colours its rows. Written from PR 2 of objectstack#35955, as `viewType`.
+   */
   rowColor?: { field: string; colors?: Record<string, string> } | null;
 }
 
@@ -173,19 +181,35 @@ export function useListDraft(scope: string): {
 }
 
 /**
- * Was this document opened by a reload? Read once per document: only the
- * first list this page seeds is the one the reload asked for again; every
- * later one was navigated to inside the app.
+ * Was THIS list's address the one a reload opened? Read once per document:
+ * only the first list this page seeds can be the one the reload asked for
+ * again, and only when the reloaded address is the address that list opens
+ * on (path and query; the hash is ignored). A reload of another page (the AI
+ * chat page, say) followed by an in-app link to a list with `uf_*` state is
+ * NOT a reload of that list: the link's state applies.
  */
 let reloadConsumed = false;
-export function takeDocumentReload(): boolean {
+export function takeDocumentReload(currentHref?: string): boolean {
   if (reloadConsumed) return false;
   reloadConsumed = true;
   try {
     const entry = typeof performance !== 'undefined' && typeof performance.getEntriesByType === 'function'
       ? (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)
       : undefined;
-    return entry?.type === 'reload';
+    if (entry?.type !== 'reload') return false;
+    const here = currentHref ?? (typeof window !== 'undefined' ? window.location.href : '');
+    return sameAddress(entry.name, here);
+  } catch {
+    return false;
+  }
+}
+
+/** Two absolute addresses name the same page: origin, path and query alike. */
+function sameAddress(a: string, b: string): boolean {
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    return x.origin === y.origin && x.pathname === y.pathname && x.search === y.search;
   } catch {
     return false;
   }

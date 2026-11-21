@@ -632,11 +632,12 @@ whose menu also holds Discard on a narrow list or a phone).
 - **Discard** puts the list back as its view declares it, the Display panel's layout and row
   color included, and removes the list's `uf_*` parameters from the address bar.
 - The draft survives opening a record and coming back. Opening another view or object,
-  or reloading the page, drops it, so a reload opens the view as it is declared.
+  or reloading the list's page, drops it, so that reload opens the view as it is declared.
 - Column widths, the row height (density) and the views' order are not a draft: they are
   remembered for the user (`sys_user_preference`, key `ui.list.<object>`). A sort, filter,
   column order or hidden column an earlier Console stored there no longer applies.
-- A link carrying list state (`uf_*` parameters) opened in a new tab applies it as a draft.
+- A link carrying list state (`uf_*` parameters) applies it as a draft, whether it opens in a
+  new tab or in-app (an AI answer's list link, after a reload of the chat page too).
 - When a session ends, the sign-in page's return link keeps the list's path but never its
   `uf_*` state, so whoever signs in next opens the view's default.
 - A user's hidden fields only subtract from the columns the view shows, never add one.

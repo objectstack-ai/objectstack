@@ -3582,7 +3582,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3608,17 +3608,17 @@
       "steps": [
         "open showcase_task grid; screenshot",
         "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery's Row height level picks its card size the same way) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
-        "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored — they now persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState / rowHeight, objectui#12418), with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
+        "reload; confirm the column widths and row-height restored — they persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState.widths / rowHeight, objectui#12418). A column ORDER is not: since objectstack#35955 it is the list's unsaved draft, so a reload reopens on the view's own order unless it was saved into a view, with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
         "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
         "read the row-color rule the stock Grid view declares — rowColor on priority with the colors map low slate / medium blue / high amber / urgent red (examples/app-showcase/src/ui/views/task.view.ts); there is no runtime row-color authoring control — and confirm rows paint by it (useRowColor, the -100 tint of each name)",
-        "reload once more; confirm every personalization survives; capture a screenshot per variant"
+        "reload once more; confirm every personalization this item stores survives (column widths, row height); capture a screenshot per variant"
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: column RESIZE persists across a reload — the widths restore from the column-state store (localStorage grid-columns-<object>[-<view>], or a persisted view override). Column REORDER and PIN are not stock list-view personalizations, and the clause does not assert them there. ObjectGrid enables drag-reorder only from `reorderableColumns` (default false), which is an object-grid component prop (packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema), not a ListView key. Pinning is AUTHOR-declared per column (`pinned`, packages/spec/src/ui/view.zod.ts#ListColumnSchema), with no runtime pin control, and the persisted column state carries widths and order, never pins. So: reorder persists across a reload only on a grid that enables it (score it there, or record n/a on the stock showcase_task list view); a column the view declares `pinned` renders pinned after the reload (n/a when the view declares none, as the stock task views do)",
+          "clause": "PER-VARIANT: column RESIZE persists across a reload — the widths restore from the column-state store (localStorage grid-columns-<object>[-<view>], or a persisted view override). Column REORDER and PIN are not stock list-view personalizations, and the clause does not assert them there. ObjectGrid enables drag-reorder only from `reorderableColumns` (default false), which is an object-grid component prop (packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema), not a ListView key. Pinning is AUTHOR-declared per column (`pinned`, packages/spec/src/ui/view.zod.ts#ListColumnSchema), with no runtime pin control, and the persisted column state carries widths and order, never pins. So: a column order is the list's unsaved draft since objectstack#35955 and does NOT persist across a reload (it is kept only by Save into a view); on a grid that enables reorder, score that the reload reopens on the view's order, or record n/a on the stock showcase_task list view; a column the view declares `pinned` renders pinned after the reload (n/a when the view declares none, as the stock task views do)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState persists widths and order only). The reorder and pin variants are judged as the clause scopes them",
+          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState persists widths and order, and the console hands the grid the reader's widths alone (objectViewListRenderer.tsx persistListColumnState), so the props override carries no order after a reload). The reorder and pin variants are judged as the clause scopes them",
           "evidence": "before/after-reload screenshots + the storage value"
         },
         {
@@ -3709,6 +3709,12 @@
           "date": "2026-11-19",
           "change": "steps[1] and acceptance[1].clause re-pointed to the options menu's Row height level: three named choices (紧凑 / 标准 / 宽松, Compact / Standard / Spacious) replace the cycling density button, on a grid and on a gallery (its card size). Stored values unchanged (rowHeight compact / medium / tall). No clause's meaning changed.",
           "ref": "#35551"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-21",
+          "change": "steps[2], steps[6] and acceptance[0] (clause, verify) re-pointed to the list draft (objectstack#35955): a column order is the list's unsaved draft, kept only by Save into a view, so it no longer comes back after a reload; the widths and the row height still persist in the user's ui.list.<object> row. Not loosened: widths and row height must still survive a reload and follow the user to a fresh browser",
+          "ref": "#35955"
         }
       ]
     },

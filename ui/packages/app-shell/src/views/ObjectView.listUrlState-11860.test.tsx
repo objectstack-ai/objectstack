@@ -356,6 +356,48 @@ describe('a list is a link (objectui#11860)', () => {
   });
 });
 
+describe('objectstack#35955 — a reload drops a list\'s address state only when the reload was of that list', () => {
+  /** The document's navigation entry, as `performance` reports it. */
+  function stubNavigation(type: string, name: string) {
+    vi.spyOn(performance, 'getEntriesByType').mockImplementation(((kind: string) =>
+      kind === 'navigation' ? [{ type, name } as unknown as PerformanceEntry] : []) as typeof performance.getEntriesByType);
+  }
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('a reload of the list itself opens the view\'s own state and strips the `uf_*` params', async () => {
+    const address = link(`${VIEW}/all`, { filter: URGENT, search: 'acme' });
+    window.history.replaceState(null, '', address);
+    stubNavigation('reload', new URL(address, window.location.origin).href);
+    const host = await mountHost([address]);
+    const q = lastQuery();
+    expect(filterOf(q)).not.toContain('urgent');
+    expect(q.$search).toBeUndefined();
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(false);
+  });
+
+  it('a reload of ANOTHER page, then an in-app link to a list with a filter: the link\'s filter applies', async () => {
+    // The reader reloaded the AI chat page; the answer's list link then navigates in-app.
+    window.history.replaceState(null, '', '/apps/crm/ai-chat');
+    stubNavigation('reload', new URL('/apps/crm/ai-chat', window.location.origin).href);
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    const host = await mountHost(['/elsewhere']);
+    window.history.replaceState(null, '', address);
+    await host.go(address);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(true);
+  });
+
+  it('CONTROL: a first load (not a reload) of a list link applies its filter', async () => {
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    window.history.replaceState(null, '', address);
+    stubNavigation('navigate', new URL(address, window.location.origin).href);
+    await mountHost([address]);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
+  });
+});
+
 describe('a malformed or stale param is dropped — the list opens and nothing throws (objectui#11860)', () => {
   it('a filter that is not JSON and a sort that is not the spec shape', async () => {
     const host = await mountHost([

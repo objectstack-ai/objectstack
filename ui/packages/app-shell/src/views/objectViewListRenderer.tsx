@@ -161,7 +161,7 @@ export function useObjectViewListRenderer({
      * of the page, read through a store like the lead.
      */
     viewBarTrailing: ((tools: ReactNode) => ReactNode) | null;
-    /** objectstack#35878 — the condition row's right end: the 「Personalized · Reset」 marker, or `null`. */
+    /** objectstack#35878 — the condition row's right end: Discard and Save while the list holds a draft (objectstack#35955), or `null`. */
     conditionRowEnd: ReactNode;
     /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
     handleListPersonalizationChange: ReturnType<typeof useObjectViewListUrlState>['handleListPersonalizationChange'];
@@ -172,7 +172,7 @@ export function useObjectViewListRenderer({
      * objectstack#30073 — the active view's own conditions when the Filter
      * panel holds them as rows (a personal view, `personalViewPanelFilters`):
      * the panel opens on them, they are not applied under the list a second
-     * time, and the list judges its 「Personalized」 filters against them.
+     * time, and the list judges its draft filters against them.
      */
     viewPanelFilters?: FilterBuilderRowGroup;
     /**
@@ -536,9 +536,10 @@ export function useObjectViewListRenderer({
 
         /**
          * objectstack#30077 (ruling 6631126993, option A) — the object's fields
-         * this user ADDED to their list as columns with the same popover, stored
-         * beside their hidden fields (`addedFields`) and dropped with the rest of
-         * the entry by "Reset to view". The `columns` rung below appends them to
+         * this user ADDED to their list as columns with the same popover, held
+         * in the list's draft beside their hidden fields (`addedFields`,
+         * objectstack#35955): Save keeps them in a view, Discard drops them with
+         * the rest of the draft. The `columns` rung below appends them to
          * the view's columns, so the list fetches, expands and draws them as it
          * does a declared column; `ListView` offers only fields the caller may
          * read. Offered where a Hide Fields choice is stored, never on the
@@ -1083,8 +1084,8 @@ export function useObjectViewListRenderer({
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
                 // objectstack#28950 — what of the list differs from the view,
-                // for the 「Personalized」 marker, which then owns the one reset
-                // (the Display control draws none of its own).
+                // for Discard and Save (objectstack#35955), which then own the
+                // one reset (the Display control draws none of its own).
                 onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
                 // objectstack#35551 — the view's rename, 保存 and full reset in the options menu.
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}

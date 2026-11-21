@@ -758,9 +758,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         searchParams,
         setSearchParams,
     });
-    // objectstack#28950 — the 「Personalized」 marker beside the list title (the
-    // page header's badge slot, and the phone title): drawn only while the
-    // reader's list differs from the view, and the one way back to it.
+    // objectstack#35955 — Discard and Save at the condition row's end (the
+    // 「Personalized」 marker of objectstack#28950 before them): drawn only while
+    // the reader's list holds a draft, and the one way back to the view.
     // objectstack#30073 — 保存: the list on screen written back into the open
     // personal view, through the body Save as my view builds (so the stored
     // shape is the same), then the reader's list state for it is cleared and
@@ -803,13 +803,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // the end of the condition row (the phone draws the same slot). 「Save to
     // this view」 writes one of the reader's own views here; a shared view's
     // save is not offered on the list yet. 「Save as my view」 asks a name.
-    const canSaveAsMyView = personalViewsReady && personalGrant('create') && !!activeView;
+    // objectstack#29635 — the one test for creating one of the reader's own
+    // views, shared by Save as my view here and the view switcher's create
+    // card: a reader who cannot read the list's own object has no list to keep.
+    const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
+    const canCreatePersonalView = personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal;
     const draftActions = !isEnvironmentList && listDraftParts.length > 0 ? (
         <ListDraftActions
             parts={listDraftParts}
             onDiscard={handleResetView}
             onSaveToView={canUpdatePersonalView ? () => { void handleSaveToPersonalView(); } : undefined}
-            onSaveAsMyView={canSaveAsMyView ? () => setPersonalViewDialog({ mode: 'saveAs' }) : undefined}
+            onSaveAsMyView={canCreatePersonalView ? () => setPersonalViewDialog({ mode: 'saveAs' }) : undefined}
         />
     ) : null;
 
@@ -896,8 +900,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // the view switcher's in-place create card (objectstack#35553, which
     // folded Save as my view into it); a rename's name is asked in
     // `PersonalViewNameDialog`. A reader who cannot read the list's own object
-    // is offered no create: there is no list to keep.
-    const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
+    // is offered no create: there is no list to keep (`listReadable`, above).
     const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'rename'; viewId: string } | { mode: 'saveAs' } | null>(null);
     const openPersonalView = (id: string) => {
         if (viewId) navigate(`../${id}`, { relative: 'path' });
@@ -1109,7 +1112,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             openPersonal: openPersonalView,
             createShared: handleViewCreate,
             clearSourceListState,
-            canCreatePersonal: personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal,
+            canCreatePersonal: canCreatePersonalView,
             canCreateShared: isAdmin,
             hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
         },

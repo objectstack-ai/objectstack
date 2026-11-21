@@ -257,9 +257,10 @@ export function useObjectViewListUrlState({
     } | undefined>(undefined);
     const { t } = useObjectTranslation();
     const ownListParamsRef = useRef<string | undefined>(undefined);
-    // objectstack#28950 — set by "Reset to view" and taken by the next seed:
-    // that list opens from the (just cleared) stored state, never from the
-    // `uf_*` params, whoever wrote them, and its write-back strips them all.
+    // objectstack#28950 — set by Discard ("Reset to view" before
+    // objectstack#35955) and taken by the next seed: that list opens from the
+    // (just dropped) draft, never from the `uf_*` params, whoever wrote them,
+    // and its write-back strips them all.
     const resetPendingRef = useRef(false);
     if (listIdentityKey && listPrefs.ready && !viewResolving && listSeedRef.current?.key !== listIdentityKey) {
         // objectstack#35955 — this list is the one on screen: a draft held
@@ -439,7 +440,7 @@ export function useObjectViewListUrlState({
      * move comes back through `writeListUrlState({ page })`, replacing the
      * entry. So Back from a record opened as a full page, a reload and a copied
      * link land on the page the reader left; the list's own reset to page 1
-     * deletes the param, and "Reset to view" strips it with the rest.
+     * deletes the param, and Discard strips it with the rest.
      */
     const listPage = parseListPageParam(searchParams);
     return {
@@ -526,7 +527,7 @@ export function useObjectViewUrlFilters({
      */
     const ufSelectionsRef = useRef<{ key: string; selections: Record<string, string[]> | undefined } | undefined>(undefined);
     if (listIdentityKey && ufSelectionsRef.current?.key !== listIdentityKey) {
-        // objectstack#28950 — the list "Reset to view" opened starts with no
+        // objectstack#28950 — the list Discard opened starts with no
         // chip selected: its seed strips their params from the address bar.
         const reset = listSeedRef?.current?.key === listIdentityKey && !!listSeedRef.current.reset;
         ufSelectionsRef.current = { key: listIdentityKey, selections: reset ? undefined : parseUserFilterParams(searchParams) };
