@@ -20,6 +20,13 @@
  * Where the get serves no subject title (one it could not resolve), or serves
  * the bare record id, the page keeps the request's own title: the header never
  * names the subject by a raw id.
+ *
+ * The name links only where the page itself read the record, the rule the "As
+ * submitted" card's link and the record pointer card's title follow
+ * (objectui#12557, objectui#11878): the page's own reads report what they
+ * learned (`recordReadReport.ts`), and the title reads nothing itself. A
+ * refused or unresolvable subject, and one the platform asserted deleted (which
+ * the page never reads), is named as plain text.
  */
 
 import * as React from 'react';
@@ -40,9 +47,9 @@ function textOf(row: Record<string, unknown>, key: string): string | undefined {
  * A plain left click is the host's in-app navigation; a modifier or middle
  * click keeps the anchor's own new-tab behaviour.
  */
-function ApprovalSubjectLink({ objectName, recordId, title }: { objectName: string; recordId: string; title: string }) {
+function ApprovalSubjectLink({ objectName, recordId, title, readable }: { objectName: string; recordId: string; title: string; readable: boolean }) {
   const recordLinks = useRelatedRecordActions();
-  const href = recordLinks?.recordHref ? recordLinks.recordHref(objectName, recordId) : null;
+  const href = readable && recordLinks?.recordHref ? recordLinks.recordHref(objectName, recordId) : null;
   if (!href) return <>{title}</>;
   return (
     <a
@@ -62,9 +69,13 @@ function ApprovalSubjectLink({ objectName, recordId, title }: { objectName: stri
 
 /**
  * The header title for an approval request row, or `undefined` to keep the
- * request's own title.
+ * request's own title. `isReadable` answers whether the page's own reads
+ * returned that record; only then is the name a link.
  */
-export function approvalSubjectTitle(request: unknown): RecordHeaderTitle | undefined {
+export function approvalSubjectTitle(
+  request: unknown,
+  isReadable: (objectName: string, recordId: string) => boolean,
+): RecordHeaderTitle | undefined {
   if (!request || typeof request !== 'object') return undefined;
   const row = request as Record<string, unknown>;
   const title = textOf(row, 'record_title');
@@ -73,6 +84,8 @@ export function approvalSubjectTitle(request: unknown): RecordHeaderTitle | unde
   if (!title || !objectName || !recordId || title === recordId) return undefined;
   return {
     text: title,
-    node: <ApprovalSubjectLink objectName={objectName} recordId={recordId} title={title} />,
+    node: (
+      <ApprovalSubjectLink objectName={objectName} recordId={recordId} title={title} readable={isReadable(objectName, recordId)} />
+    ),
   };
 }

@@ -47,7 +47,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, BrowserRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RelatedCountStore } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
@@ -3271,14 +3271,20 @@ describe('RecordDetailView.recordEditState-35599', () => {
  *
  * The request's own declared title is its flow's label (`process_label`, the
  * object's `nameField`), which lists and search keep. On the request's page
- * the H1 reads the subject's title the approvals get serves (`record_title`),
- * as a link through the host's record route. Where the get serves none, or
- * serves the bare record id, the H1 keeps the flow's label: the subject is
- * never named by a raw id.
+ * the H1 reads the subject's title the approvals get serves (`record_title`).
+ * Where the get serves none, or serves the bare record id, the H1 keeps the
+ * flow's label: the subject is never named by a raw id.
+ *
+ * The name links to the subject only once one of the page's own reads of it
+ * returned the record (`recordReadReport.ts`). This synthesized page draws no
+ * reader of the subject, so here the name is plain text; the link and its
+ * click are pinned on the served page, where the record card reads it
+ * (`approvalRequestsDataSource.servedPageRecordLink-12557.test.tsx`), and on
+ * the title itself (`approvalSubjectTitle.test.tsx`).
  *
  * Measured on the real `RecordDetailView` and the real `page:header` of the
  * synthesized page, in the desktop top bar. Direction, written before the run:
- * with the host's title not handed to the header, the two subject cases RED
+ * with the host's title not handed to the header, the subject case REDs
  * (`Invoice Sign-off`), every other case GREEN.
  */
 describe('RecordDetailView.approvalSubjectTitle-35415', () => {
@@ -3330,14 +3336,6 @@ describe('RecordDetailView.approvalSubjectTitle-35415', () => {
     fields: { id: { label: 'Id', type: 'text' }, name: { label: 'Name', type: 'text' } },
   };
 
-  /** The address the router is at, read after a navigation. */
-  let location = '';
-  function LocationProbe() {
-    const here = useLocation();
-    location = `${here.pathname}${here.search}`;
-    return null;
-  }
-
   function renderRequestPage(row: Record<string, unknown>, objectDef: Record<string, unknown> = REQUEST_DEF) {
     const objectName = objectDef.name as string;
     const ds = {
@@ -3352,7 +3350,6 @@ describe('RecordDetailView.approvalSubjectTitle-35415', () => {
       <MemoryRouter initialEntries={[`/apps/demo/${objectName}/record/${REQ}`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
           <NavigationProvider>
-            <LocationProbe />
             <Routes>
               <Route
                 path="/apps/:appName/:objectName/record/:recordId"
@@ -3393,27 +3390,12 @@ describe('RecordDetailView.approvalSubjectTitle-35415', () => {
   });
 
   describe('RecordDetailView — the approval request page is named by its record, which the name opens (objectstack#35415)', () => {
-    it('the H1 reads the served subject title, not the flow label, and links to the subject record', async () => {
-      renderRequestPage({ ...SERVED, record_title: SUBJECT });
-      await waitFor(() => expect(h1()?.textContent).toBe(SUBJECT));
-      const link = h1()!.querySelector('a[data-testid="approval-subject-title-link"]');
-      expect(link?.getAttribute('href')).toMatch(/^\/apps\/demo\/purchase_request\/record\/PR-2549(\?|$)/);
-    });
-
-    it('a plain click on the name opens the subject record in the app, through the page\'s own record route', async () => {
-      // The page's `openRecord` decides how: a full-page navigation, or the
-      // record drawer one level down where the page hosts one. Either way the
-      // subject record is what gets opened, and the anchor's own navigation
-      // is not followed.
+    it('the H1 reads the served subject title, not the flow label; unread by the page, it links nowhere', async () => {
       const { ds } = renderRequestPage({ ...SERVED, record_title: SUBJECT });
-      await waitFor(() => expect(h1()?.querySelector('a')).not.toBeNull());
-      const notFollowed = fireEvent.click(h1()!.querySelector('a')!, { button: 0 });
-      expect(notFollowed).toBe(false);
-      await waitFor(() => {
-        const opened = /^\/apps\/demo\/purchase_request\/record\/PR-2549(\?|$)/.test(location)
-          || ds.findOne.mock.calls.some((call: unknown[]) => call[0] === 'purchase_request' && call[1] === 'PR-2549');
-        expect(opened, `at ${location}; reads ${JSON.stringify(ds.findOne.mock.calls)}`).toBe(true);
-      });
+      await waitFor(() => expect(h1()?.textContent).toBe(SUBJECT));
+      expect(h1()!.querySelector('a')).toBeNull();
+      // The title reads nothing itself.
+      expect(ds.findOne.mock.calls.some((call: unknown[]) => call[0] === 'purchase_request')).toBe(false);
     });
 
     it('no subject title served: the H1 keeps the flow label, with no link', async () => {
