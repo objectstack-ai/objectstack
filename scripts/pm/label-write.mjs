@@ -3478,11 +3478,12 @@ export async function selfTest() {
     t('⭐ the gate on a cloud pull carrying both markers: not judged, `noBattery`, and ZERO reads', [cloudGate, gateCalls.length], [{ judged: false, noBattery: true }, 0]);
     const NARROW_NA = { title: 'fix(service-cloud): a narrowing fixture', body: 'Fixes #8\n\nClause-②: no (narrowing)\nMetadata-protocol: none\n', cards: { 8: [report(NA)] } };
     const cloudArgv = ['--repo', 'objectstack-ai/cloud', ...landArgv.slice(2)];
-    const cloud = await driveOffline(cloudArgv, pull(NARROW_NA), { route, relay: 'success', files, now: NOW });
+    const CLOUD_NA = { ...NARROW_NA, cards: { 8: [report(NA, { pr: 'https://github.com/objectstack-ai/cloud/pull/7' })] } };
+    const cloud = await driveOffline(cloudArgv, pull(CLOUD_NA), { route, relay: 'success', files, now: NOW });
     t('⭐ NOT JUDGED: a cloud pull with a `(narrowing)` arm over an `n/a` report lands — ONE dispatch, comment → pr_ready → automerge_enable, exit 0, no gate read, and the ✓ line names the repository',
       [cloud.exit, cloud.sent[0]?.actions.map((a) => a.op), cloud.fake.board.draft, cloud.text.includes('② dogfood gate ✓ — not judged: objectstack-ai/cloud has no dogfood battery (only objectstack-ai/objectstack carries one)'), cloud.text.includes('REFUSED'), cloud.fake.calls.map((c) => c.op)],
       [EXIT_OK, ['comment', 'pr_ready', 'automerge_enable'], false, true, false, ['card-read', 'card-read', 'comments-list', 'pull-read']], cloud.text.slice(-700));
-    const cloudBang = await driveOffline(cloudArgv, pull({ ...NARROW_NA, title: 'fix(service-cloud)!: a breaking fixture' }), { route, relay: 'success', files, now: NOW });
+    const cloudBang = await driveOffline(cloudArgv, pull({ ...CLOUD_NA, title: 'fix(service-cloud)!: a breaking fixture' }), { route, relay: 'success', files, now: NOW });
     t('…and a cloud `!` title with the same arm lands the same way', [cloudBang.exit, cloudBang.text.includes('not judged: objectstack-ai/cloud has no dogfood battery')], [EXIT_OK, true], cloudBang.text.slice(-600));
     const osNarrow = await land(pull(NARROW_NA));
     t('⭐ REFUSED: the SAME `(narrowing)` pull over an `n/a` report in objectstack still refuses — exit 2, zero sends, nothing written', [...refused(osNarrow), osNarrow.text.includes('why: the battery was not run'), osNarrow.text.includes('has no dogfood battery')], [...REFUSED, true, false], osNarrow.text.slice(-600));
