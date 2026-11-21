@@ -34,7 +34,8 @@
  *   - Columns: the models the question and operation turns were served
  *     (`Run · model`), the asked-for name and effort beside them likewise.
  *   - Cells: the first build and Run half — Build, Run-问数 (with the k/N
- *     spread when the run asked each turn more than once), Run-operations —
+ *     spread when the run asked each turn more than once), Run-operations,
+ *     the asks per kind when a run's turns carry one (`Run · kinds`) —
  *     and, when any run of the table iterated, the Iterate halves; then ask
  *     cost and ask time, the scorecard's per-mode rows (every persona turn of
  *     the mode, the iterate's included). Counts are summed; a cost or time is
@@ -51,7 +52,7 @@ import { askSkillsText, type AskSkillsInfo } from './ask-skills.js';
 import { doorArmText, type DoorArm } from './door.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { promptChoiceText, type PromptChoice } from './prompts.js';
-import { askCostText, askTimeText, cardStampText, MODEL_NOT_REPORTED, type AskSpend, type CardStamp, type HalfScores, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
+import { askCostText, askTimeText, cardStampText, kindCell, MODEL_NOT_REPORTED, type AskSpend, type CardStamp, type HalfScores, type KindTally, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
 
 // ── The supplied template, as `run` records it ──────────────────────────────
 
@@ -345,6 +346,23 @@ function countCell(tallies: ReadonlyArray<CountTally | undefined>): string {
   );
 }
 
+/** The runs' asks kind by kind, summed ({@link kindCell}); a run that states no kinds is counted apart, never as 0 asked. */
+function kindsCell(kinds: ReadonlyArray<KindTally | undefined>): string {
+  const present = kinds.filter((k): k is KindTally => k !== undefined);
+  if (!present.length) return '—';
+  const sum: KindTally = { byKind: {} };
+  for (const k of present) {
+    for (const [kind, t] of Object.entries(k.byKind) as Array<[keyof KindTally['byKind'], NonNullable<KindTally['byKind'][keyof KindTally['byKind']]>]>) {
+      const s = (sum.byKind[kind] ??= { passed: 0, total: 0, notMeasured: 0 });
+      s.passed += t.passed;
+      s.total += t.total;
+      s.notMeasured += t.notMeasured;
+    }
+    if (k.unkinded) sum.unkinded = (sum.unkinded ?? 0) + k.unkinded;
+  }
+  return kindCell(sum) + missingText(kinds.length - present.length, kinds.length);
+}
+
 function buildCell(builds: ReadonlyArray<HalfScores['build'] | undefined>): string {
   // A build whose authoring turn did not finish is not measured: counted apart, never as 0 of N.
   const notMeasured = builds.filter((b) => b?.notMeasuredReason !== undefined).length;
@@ -466,12 +484,14 @@ function halfRows(t: SummaryTable): Array<[string, (es: readonly ModeEntry[]) =>
   ];
   if (t.entries.some((e) => e.sc.first?.repeats)) rows.push(['Run-问数 · k/N per turn', (es) => repeatSpreadCell(es.map((e) => e.sc.first?.repeats))]);
   rows.push(['Run-operations', (es) => countCell(es.map((e) => e.sc.first?.operations))]);
+  if (t.entries.some((e) => e.sc.first?.kinds)) rows.push(['Run · kinds', (es) => kindsCell(es.map((e) => e.sc.first?.kinds))]);
   if (t.entries.some((e) => e.sc.iterate !== undefined)) {
     rows.push(
       ['Iterate · Build', (es) => buildCell(es.map((e) => e.sc.iterate?.build))],
       ['Iterate · Run-问数', (es) => countCell(es.map((e) => e.sc.iterate?.ask))],
       ['Iterate · Run-operations', (es) => countCell(es.map((e) => e.sc.iterate?.operations))],
     );
+    if (t.entries.some((e) => e.sc.iterate?.kinds)) rows.push(['Iterate · Run · kinds', (es) => kindsCell(es.map((e) => e.sc.iterate?.kinds))]);
   }
   rows.push(['Ask cost', (es) => spendCell(es, askCostText)], ['Ask time', (es) => spendCell(es, askTimeText)]);
   return rows;

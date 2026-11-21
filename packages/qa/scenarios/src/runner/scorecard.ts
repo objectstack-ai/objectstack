@@ -105,6 +105,7 @@
 
 import { createHash } from 'node:crypto';
 
+import { ASK_KINDS, type AskKind } from '../schema.js';
 import { askedFirst, confirmedByAgent, DATASET_GRADERS, type CheckResult, type DatasetGrader } from '../score/index.js';
 import type { CardRun, DoorSteps, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, RollupSourceCharge, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
@@ -148,6 +149,14 @@ export interface HalfScores {
    * graded under an older rule reads apart. Absent when the card declares none.
    */
   datasets?: Tally & { notMeasured: number; byGrader: Partial<Record<DatasetGrader, Tally & { revision?: number }>> };
+  /**
+   * The half's question and dataset-question turns kind by kind ({@link kindTally}): every
+   * ask counts under the kind its result carries (`QuestionResult.askKind`,
+   * `DatasetQuestionResult.askKind`), passing as the Run-问数 and Run · datasets cells
+   * count it; a not-measured ask is in neither passed nor total. Absent when no turn of
+   * the half carries a kind (a card that names none, a record from before turns did).
+   */
+  kinds?: KindTally;
   /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
   /** The half's confirmation turns, the write after the person confirmed ({@link confirmedWriteTally}); absent ⇒ none ran. */
@@ -173,6 +182,16 @@ export interface QuestionRepeats extends Tally {
   notMeasured: number;
   /** Measured asks whose answer leaked a hidden value. */
   leaks: number;
+}
+
+/**
+ * A half's turns per ask kind ({@link kindTally}). `unkinded` counts the asks whose
+ * result carries no kind beside ones that do (a question of a card that names none);
+ * absent ⇒ every ask carries one.
+ */
+export interface KindTally {
+  byKind: Partial<Record<AskKind, Tally & { notMeasured: number }>>;
+  unkinded?: number;
 }
 
 /** A Run half's guardrail check as the scorecard states it ({@link guardrailTally}). */
@@ -387,6 +406,34 @@ export function datasetTally(r: RunHalf | undefined): HalfScores['datasets'] | u
     if (q.grade.revision !== undefined && q.grade.revision > (t.revision ?? 1)) t.revision = q.grade.revision;
   }
   return { passed: measured.filter((q) => q.grade?.pass === true).length, total: measured.length, notMeasured: r.datasetQuestions.length - measured.length, byGrader };
+}
+
+/**
+ * The half's question and dataset-question asks counted kind by kind ({@link HalfScores.kinds});
+ * `undefined` when no ask carries a kind.
+ */
+export function kindTally(r: RunHalf | undefined): KindTally | undefined {
+  if (!r) return undefined;
+  const asks: Array<{ askKind?: AskKind; notMeasured?: string; passed: boolean }> = [
+    ...r.questions.map((q) => ({ askKind: q.askKind, notMeasured: q.notMeasured, passed: answerPassed(q) })),
+    ...(r.datasetQuestions ?? []).map((q) => ({ askKind: q.askKind, notMeasured: q.notMeasured, passed: q.grade?.pass === true })),
+  ];
+  if (!asks.some((a) => a.askKind !== undefined)) return undefined;
+  const byKind: KindTally['byKind'] = {};
+  let unkinded = 0;
+  for (const a of asks) {
+    if (a.askKind === undefined) {
+      unkinded++;
+      continue;
+    }
+    const t = (byKind[a.askKind] ??= { passed: 0, total: 0, notMeasured: 0 });
+    if (a.notMeasured) t.notMeasured++;
+    else {
+      t.total++;
+      if (a.passed) t.passed++;
+    }
+  }
+  return { byKind, ...(unkinded ? { unkinded } : {}) };
 }
 
 /**
@@ -699,6 +746,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (rp) first.repeats = rp;
   const ds = datasetTally(m.run);
   if (ds) first.datasets = ds;
+  const kd = kindTally(m.run);
+  if (kd) first.kinds = kd;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
@@ -745,6 +794,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (irp) it.repeats = irp;
     const ids = datasetTally(m.iterate.run);
     if (ids) it.datasets = ids;
+    const ikd = kindTally(m.iterate.run);
+    if (ikd) it.kinds = ikd;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -885,6 +936,21 @@ const datasetCell = (t: HalfScores['datasets']): string =>
     ? `${cell(t)}${Object.keys(t.byGrader).length ? ` (${(Object.values(DATASET_GRADERS) as DatasetGrader[]).flatMap((g) => { const b = t.byGrader[g]; return b ? [`${g}${b.revision !== undefined ? ` rev ${b.revision}` : ''} ${b.passed}/${b.total}`] : []; }).join(' · ')})` : ''}`
     : '—';
 
+/**
+ * `count 3/4 · group_sum 2/2 · … · forbidden 0 asked · unanswerable 1/2 · 1 not measured`: a half's asks per kind,
+ * every kind of {@link ASK_KINDS} in its order, so a kind the half did not ask shows as `0 asked`, never as missing.
+ */
+export const kindCell = (t: KindTally | undefined): string =>
+  t
+    ? [
+        ...ASK_KINDS.map((k) => {
+          const b = t.byKind[k];
+          return b ? `${k} ${cell(b)}` : `${k} 0 asked`;
+        }),
+        ...(t.unkinded ? [`no kind: ${t.unkinded}`] : []),
+      ].join(' · ')
+    : '—';
+
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
   const noAuthoring = suppliedOnly(sc);
@@ -913,6 +979,7 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Run · model', (m) => modelCell(m.first.models));
   if (sc.modes.some((m) => !m.skipped && m.first.guardrails)) row('Run · guardrails', (m) => guardrailCell(m.first.guardrails));
   if (sc.modes.some((m) => !m.skipped && m.first.datasets)) row('Run · datasets', (m) => datasetCell(m.first.datasets));
+  if (sc.modes.some((m) => !m.skipped && m.first.kinds)) row('Run · kinds', (m) => kindCell(m.first.kinds));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
@@ -921,6 +988,7 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   if (sc.modes.some((m) => !m.skipped && m.iterate?.guardrails)) row('Iterate · Run · guardrails', (m) => guardrailCell(m.iterate?.guardrails));
   if (sc.modes.some((m) => !m.skipped && m.iterate?.datasets)) row('Iterate · Run · datasets', (m) => datasetCell(m.iterate?.datasets));
+  if (sc.modes.some((m) => !m.skipped && m.iterate?.kinds)) row('Iterate · Run · kinds', (m) => kindCell(m.iterate?.kinds));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   row('Author cost', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
   row('Author time', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
