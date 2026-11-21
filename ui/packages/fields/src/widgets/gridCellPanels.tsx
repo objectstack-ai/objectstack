@@ -145,6 +145,8 @@ export function GridSelectCell({
           className={cn(
             GRID_CELL_CONTROL_CLASS,
             PHONE_TOUCH_HEIGHT,
+            // The ring on any focus, mouse included, as the Select trigger this replaces drew it.
+            'focus:ring-1 focus:ring-ring/60',
             'flex w-full items-center text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50',
           )}
         >
