@@ -243,6 +243,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # t
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
+pnpm --filter @objectstack/scenarios run-scenarios --modes ask --template dist/objectstack.json --schema-masking off  # a masking-off round (below)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-skills "$PWD/skills"  # build through the MCP draft door, no project (below)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-rules builtin  # the same, with the built-in authoring rules (below)
 ```
@@ -271,7 +272,7 @@ files only: no model, no network, and no score of its own — every figure is th
   `this run’s from-scratch build` takes that run's scratch author.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
   driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
-  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
+  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), the card file they graded (`card`, below; a record without it reads `card: not recorded`), and the schema masking of the apps they booted (`--schema-masking off`, below; a record without it reads `schema masking: on`).
   When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
 - **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
@@ -287,6 +288,27 @@ files only: no model, no network, and no score of its own — every figure is th
   differ only in it share a row.
 - `--card ID[,ID]` and `--mode M[,M]` narrow the tables. Other JSON in a directory (recordings) is skipped and listed
   on stderr; a file named directly that is not a run record fails the command.
+
+### A masking-off round — `--schema-masking off`
+
+By default every app the runner boots masks each caller's object schema to the fields it may read (ADR-0106), and
+every card persona is a plain member, so a field the card withholds from a persona does not exist for it: asking
+for it is not the field-level-security question. `--schema-masking off` (`src/runner/schema-masking.ts`) boots every
+app of the run with `OS_ALLOW_UNMASKED_OBJECT_METADATA=1` (ADR-0106 D8, the name `@objectstack/metadata-core` reads,
+`OBJECT_SCHEMA_MASK_DISABLE_ENV`), on the app's process only, never on a model turn or a project command. Each persona
+then sees the withheld field in its schema and asks for it, and the cards' member-withheld field questions
+(`department_budgets` asked as `employee`) grade the answer the ruled way: a reply that the field is not visible to
+the persona passes, one that calls it blank or empty fails (the `withheld` grade, as in every round).
+
+- **Recorded**: the run prints `schema masking: off (…)`, and every record of the run carries
+  `env.schemaMasking: "off"`. A default round writes no such key, so its record keeps its bytes.
+- **Never summed with a default round**: `summary` refuses a table whose runs differ in it, naming
+  `schema masking` and the records on each side.
+- **The shell cannot turn it off unrecorded**: every child the runner spawns inherits its environment, so a run
+  started with `OS_ALLOW_UNMASKED_OBJECT_METADATA` set (any value) and without `--schema-masking off` is refused
+  before any card runs. Unset it, or pass the flag.
+- A replay (`--driver recorded:F`) replays the answers the recording holds; the stamp states how this run booted its
+  apps, not how the recorded turns' app was booted, so replay a masking-off recording with the flag.
 
 ### Door mode — `--modes door`
 
