@@ -863,7 +863,7 @@ export class FilterHelpersFacet {
           // with type the inner read on PostgreSQL (ADR-0155 O2).
           if (rawOp === '$in' && isFixedReadLeaf(opValue)) {
             const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
-            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue, { object: table, column: field, evaluator: this.readableIdsDriverName }));
+            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue, { object: table, column: field, evaluator: this.readableIdsDriverName, transaction: options?.transaction }));
             continue;
           }
           // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar

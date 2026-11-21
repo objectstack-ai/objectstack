@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { Knex } from 'knex';
-import { ReadableIds, SharedRecordIds, type FilterCondition } from '@objectstack/spec/data';
+import { ReadableIds, SharedRecordIds, type DriverOptions, type FilterCondition } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 
@@ -20,12 +20,12 @@ const CHILD = 'srid_child';
 
 class Probe extends SqlDriver {
   /** The prime, through this driver's own `getBuilder`, as a door calls it. */
-  prime(object: string, where: unknown): Promise<void> {
-    return primeFixedReadLeafKeyTypes({ getBuilder: (o) => this.getBuilder(o) }, object, where);
+  prime(object: string, where: unknown, options?: DriverOptions): Promise<void> {
+    return primeFixedReadLeafKeyTypes({ getBuilder: (o) => this.getBuilder(o) }, object, where, options);
   }
-  compile(object: string, where: unknown): { sql: string; bindings: readonly unknown[] } {
+  compile(object: string, where: unknown, options?: DriverOptions): { sql: string; bindings: readonly unknown[] } {
     const builder: Knex.QueryBuilder = this.getBuilder(object);
-    this.applyFilters(builder, where);
+    this.applyFilters(builder, where, options);
     const native = builder.toSQL().toNative();
     return { sql: native.sql, bindings: native.bindings };
   }
@@ -122,6 +122,30 @@ describe('[ADR-0155 O2] the catalog prime and the cast it puts on the inner read
     await probe.prime(EXT, leafWhere());
     expect(raw).toHaveBeenCalledTimes(3);
     expect(probe.compile(EXT, leafWhere()).sql).toContain('AS "pg_catalog"."int8"');
+  });
+
+  it('in a transaction the catalog is read in a savepoint on it, and the reading is kept for that transaction only', async () => {
+    const { probe, raw } = pgProbe(() => ({ rows: [row('id', 'pg_catalog', 'int4')] }));
+    const savepointRaw = vi.fn(async (..._args: unknown[]) => ({ rows: [row('id', 'pg_catalog', 'int8')] }));
+    // A stand-in for the caller's knex transaction: `transaction(handler)` opens the savepoint.
+    const savepoints = vi.fn(async (handler: (sp: { raw: typeof savepointRaw }) => unknown) => handler({ raw: savepointRaw }));
+    const trx = Object.assign(() => undefined, { transaction: savepoints });
+    const inTrx: DriverOptions = { transaction: trx };
+    await probe.prime(EXT, leafWhere(), inTrx);
+    expect(raw).not.toHaveBeenCalled();
+    expect(savepoints).toHaveBeenCalledTimes(1);
+    expect(savepointRaw.mock.calls[0][1]).toEqual([EXT]);
+    // Read once per table for this transaction.
+    await probe.prime(EXT, leafWhere(), inTrx);
+    expect(savepoints).toHaveBeenCalledTimes(1);
+    expect(probe.compile(EXT, leafWhere(), inTrx).sql).toContain('AS "pg_catalog"."int8"');
+    // Outside that transaction there is no reading: refused, never the transaction's.
+    expectRefused(() => probe.compile(EXT, leafWhere()), 'holds no reading');
+    // A failed savepoint read records nothing for the transaction either.
+    const failing = Object.assign(() => undefined, { transaction: vi.fn(async () => { throw new Error('savepoint rolled back'); }) });
+    const inFailing: DriverOptions = { transaction: failing };
+    await probe.prime(EXT, leafWhere(), inFailing);
+    expectRefused(() => probe.compile(EXT, leafWhere(), inFailing), 'holds no reading');
   });
 
   it('a column the read table does not have takes no cast: the database names the missing column itself', async () => {

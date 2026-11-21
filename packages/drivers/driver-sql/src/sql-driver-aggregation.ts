@@ -126,6 +126,7 @@ export class AggregationFacet {
       this,
       object,
       measureFilters.length > 0 ? { $and: [...(query.where ? [query.where] : []), ...measureFilters] } : query.where,
+      options,
     );
     // …and the same primes for each joined related object, whose scope
     // compiles against its own table.
@@ -133,7 +134,7 @@ export class AggregationFacet {
       if (join.parent === null) continue;
       if (this.isMssql) await this.primeMssqlGuidColumns(join.parent.object, join.parent.scope);
       if (this.isOracle) await this.primeOracleRawUuidColumns(join.parent.object);
-      await primeFixedReadLeafKeyTypes(this, join.parent.object, join.parent.scope);
+      await primeFixedReadLeafKeyTypes(this, join.parent.object, join.parent.scope, options);
     }
     const builder = this.getBuilder(object, options);
     // The column a FIELD names in this statement: its `external.columnMap`

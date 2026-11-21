@@ -39,14 +39,20 @@
  *   (`INTERNAL_ERROR` / 500, logged at `error` once per knex client), never
  *   compiled uncast. Uncast, `record_id` meets the key as text: an integer or
  *   uuid key fails (42883), but a `character(n)` key silently misses a padded
- *   grant, which ADR-0155 D2 forbids. "No reading" is kept apart from "read:
+  *   grant, which ADR-0155 D2 forbids. "No reading" is kept apart from "read:
  *   a text key" (which takes no cast). A table has no reading when no door
- *   primed it, when the catalog read failed (it runs on a pooled connection,
- *   so a saturated pool's acquire timeout is a failure), or when the relation
- *   is not visible to that connection (created in the caller's uncommitted
- *   transaction). A failed or empty read records nothing, so the next
- *   statement asks again. A type knex cannot spell as one identifier is
- *   refused the same way.
+ *   primed it, or when the catalog read failed or found no relation. A failed
+ *   or empty read records nothing, so the next statement asks again. A type
+ *   knex cannot spell as one identifier is refused the same way.
+ * - **Read where the statement runs (ADR-0155 D-0).** A door running in the
+ *   caller's transaction reads the catalog ON that transaction's connection,
+ *   inside a savepoint (a knex nested transaction): it sees a table the
+ *   transaction created, it needs no second pooled connection (a pool the
+ *   transaction holds cannot time it out), and a failed read rolls back the
+ *   savepoint alone, never the caller's transaction. That reading is kept
+ *   for that transaction only (it may describe a table that never commits).
+ *   A door with no transaction reads on the pool and keeps the reading for
+ *   the knex client's life.
  *
  * ## When the catalog is read
  *
@@ -87,14 +93,24 @@ export interface FixedReadLeafKeySource {
   getBuilder(object: string): Knex.QueryBuilder;
 }
 
+/** The caller's knex transaction, when a door's options carry one this module can open a savepoint on. */
+function savepointHost(transaction: unknown): Knex.Transaction | undefined {
+  // A knex transaction is a function object (it builds queries when called).
+  if (transaction === null || (typeof transaction !== 'object' && typeof transaction !== 'function')) return undefined;
+  return typeof (transaction as { transaction?: unknown }).transaction === 'function' ? (transaction as Knex.Transaction) : undefined;
+}
+
 /** A column whose base type knex cannot spell as one identifier: refused, never cast or left uncast. */
 const UNSPELLABLE = Object.freeze({ unspellable: true as const });
 
 /** One column's reading: the cast, `null` for a text key (no cast), or {@link UNSPELLABLE}. */
 type ColumnReading = FixedReadLeafKeyCast | null | typeof UNSPELLABLE;
 
-/** Per knex client: the physical table's key → each column's reading. A table with no entry has NO reading. */
+/** Per knex client: the physical table's key → each column's reading, read on the pool. A table with no entry has NO reading. */
 const castsByClient = new WeakMap<object, Map<string, ReadonlyMap<string, ColumnReading>>>();
+
+/** Per caller transaction: the readings taken on its own connection, which may describe tables it has not committed. */
+const castsByTransaction = new WeakMap<object, Map<string, ReadonlyMap<string, ColumnReading>>>();
 
 /** Per knex client: whether a no-reading refusal was logged (once per client, its own flag). */
 const refusalLogByClient = new WeakMap<object, { logged: boolean }>();
@@ -127,11 +143,11 @@ function tableKey(schema: string | undefined, table: string): string {
   return JSON.stringify([schema ?? null, table]);
 }
 
-function cacheOf(client: object): Map<string, ReadonlyMap<string, ColumnReading>> {
-  let cache = castsByClient.get(client);
+function cacheOf(owner: object, caches: WeakMap<object, Map<string, ReadonlyMap<string, ColumnReading>>> = castsByClient): Map<string, ReadonlyMap<string, ColumnReading>> {
+  let cache = caches.get(owner);
   if (cache === undefined) {
     cache = new Map();
-    castsByClient.set(client, cache);
+    caches.set(owner, cache);
   }
   return cache;
 }
@@ -177,32 +193,45 @@ function collectLeafKeyObjects(node: unknown, object: string, out: Set<string>, 
  * fixed-read leaf in `where` is compared with, so the filter compiler can
  * cast `record_id` to the key's base type (see the module docblock). A no-op
  * on every dialect but PostgreSQL, and for a `where` holding no leaf.
+ * `options.transaction`, when present, is where the catalog is read: on the
+ * caller's connection, inside a savepoint.
  */
-export async function primeFixedReadLeafKeyTypes(source: FixedReadLeafKeySource, object: string, where: unknown): Promise<void> {
+export async function primeFixedReadLeafKeyTypes(
+  source: FixedReadLeafKeySource,
+  object: string,
+  where: unknown,
+  options?: { readonly transaction?: unknown },
+): Promise<void> {
   const objects = new Set<string>();
   collectLeafKeyObjects(where, object, objects, new Set());
+  const trx = savepointHost(options?.transaction);
   for (const target of objects) {
+    // No options: the root client is the cache's key, as the compile site reads it.
     const builder = source.getBuilder(target) as Knex.QueryBuilder & { _single?: { table?: unknown; schema?: unknown } };
     const client = builder.client;
     if (client.dialect !== 'postgresql') return;
     const table = builder._single?.table;
     if (typeof table !== 'string') continue;
     const schema = typeof builder._single?.schema === 'string' ? builder._single.schema : undefined;
-    const cache = cacheOf(client);
     const key = tableKey(schema, table);
-    if (cache.has(key)) continue;
+    if (cacheOf(client).has(key)) continue;
+    if (trx !== undefined && castsByTransaction.get(trx)?.has(key)) continue;
     let rows: { column_name: string; type_schema: string; type_name: string }[];
     try {
       const relation = schema === undefined ? `format('%I', ?::text)` : `format('%I.%I', ?::text, ?::text)`;
       const bindings = schema === undefined ? [table] : [schema, table];
-      const result = await client.raw(COLUMN_BASE_TYPES_SQL.replace('%RELATION%', relation), bindings);
+      const sql = COLUMN_BASE_TYPES_SQL.replace('%RELATION%', relation);
+      const result = trx === undefined
+        ? await client.raw(sql, bindings)
+        : await trx.transaction((savepoint) => savepoint.raw(sql, bindings));
       rows = result.rows;
     } catch {
       // A catalog that cannot be read records nothing: the leaf is refused
-      // at compile (no reading), and the next door asks again.
+      // at compile (no reading), and the next door asks again. In a
+      // transaction the savepoint, not the caller's transaction, rolled back.
       continue;
     }
-    // No row: the relation is not visible to this session (yet). Nothing is recorded.
+    // No row: the relation is not visible to this session. Nothing is recorded.
     if (!Array.isArray(rows) || rows.length === 0) continue;
     const columns = new Map<string, ColumnReading>();
     for (const row of rows) {
@@ -212,7 +241,7 @@ export async function primeFixedReadLeafKeyTypes(source: FixedReadLeafKeySource,
       else reading = Object.freeze({ schema: row.type_schema, type: row.type_name });
       columns.set(row.column_name, reading);
     }
-    cache.set(key, columns);
+    (trx === undefined ? cacheOf(client) : cacheOf(trx, castsByTransaction)).set(key, columns);
   }
 }
 
@@ -225,7 +254,8 @@ export type FixedReadLeafKeyReading =
 
 /**
  * What {@link primeFixedReadLeafKeyTypes} recorded for `column` of the
- * physical table `schema.table` on this knex client:
+ * physical table `schema.table` on this knex client, or on `transaction`
+ * (the caller's, when the door ran in one):
  *
  * - `cast`: a base type that is not text;
  * - `uncast`: a text or varchar key, or a column the read table does not
@@ -240,8 +270,11 @@ export function fixedReadLeafKeyReading(
   schema: string | undefined,
   table: string,
   column: string,
+  transaction?: unknown,
 ): FixedReadLeafKeyReading {
-  const columns = castsByClient.get(client)?.get(tableKey(schema, table));
+  const key = tableKey(schema, table);
+  const trx = savepointHost(transaction);
+  const columns = castsByClient.get(client)?.get(key) ?? (trx === undefined ? undefined : castsByTransaction.get(trx)?.get(key));
   if (columns === undefined) return { kind: 'unread' };
   const reading = columns.get(column);
   if (reading === undefined || reading === null) return { kind: 'uncast' };
@@ -272,14 +305,14 @@ export function refuseFixedReadLeafKey(
   }
   const at = `the $in of column '${column}' of '${object ?? '(no object)'}'`;
   const why = kind === 'unread'
-    ? 'whose type this driver holds no reading of from the PostgreSQL catalog: the catalog read failed, '
-      + 'or the table is not visible to the pooled connection that reads it (created inside a transaction '
-      + 'that has not committed)'
+    ? 'whose type this driver holds no reading of from the PostgreSQL catalog: the catalog read failed '
+      + '(on the pool, or in a savepoint on the caller\'s transaction, which stays usable), or found no such '
+      + 'relation from the connection that read it'
     : 'whose type the PostgreSQL catalog names with a spelling this driver cannot bind as one identifier';
   const message = `${describeFixedReadLeaf(at, leaf)}, compared with a column ${why}. Uncast, record_id would `
     + 'meet the key as text, which fails on an integer or uuid key and silently misses a padded id on a '
     + 'character(n) key (ADR-0155 D2, O2). The statement was NOT run. The next statement reads the catalog '
-    + 'again; a table created inside a transaction is read once that transaction commits.';
+    + 'again.';
   return refuseFixedReadLeafOnce(evaluator, message, logger, state, object ?? undefined);
 }
 

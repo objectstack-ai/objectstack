@@ -644,56 +644,58 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
     });
 
     /**
-     * F1: a table this driver holds no reading of is REFUSED on PostgreSQL
-     * (ADR-0139 D3's envelope, `INTERNAL_ERROR` / 500, logged once), never
-     * compiled uncast: uncast, a `character(n)` key misses a padded grant
-     * silently. The catalog read runs on a pooled connection, so (a) a pool
-     * the caller's own transaction holds times the read out, and (b) a table
-     * created in the caller's uncommitted transaction is not visible to it.
+     * In the caller's transaction the catalog is read ON that transaction's
+     * connection, inside a savepoint (ADR-0155 D-0: the leaf answers the
+     * list's rows wherever the list does). So (a) a pool the transaction
+     * holds cannot time the read out, (b) a table the transaction created is
+     * read, and (c) a catalog read that fails there is refused
+     * (`INTERNAL_ERROR` / 500, logged once, F1) while the caller's
+     * transaction stays usable: the savepoint, not the transaction, rolled back.
      */
-    describe('no reading is refused, never compiled uncast (ADR-0155 D2)', () => {
+    describe('in the caller\'s transaction the catalog is read on its connection, under a savepoint', () => {
       const charCase = () => PG_KEY_CASES.find((c) => c.ddl === 'character(4)')!;
       const leafOf = (object: string) => seamed({ id: { $in: SharedRecordIds.read(object, 'u9') } });
       const inTrx = (transaction: Knex.Transaction): DriverOptions => ({ transaction });
-      const refused = (err: unknown) => {
-        expect(err, 'refused').toBeInstanceOf(Error);
-        expect(err).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
-        expect((err as Error).message).toContain('holds no reading');
+      const CAST = `CAST(NULLIF("record_id", '') AS "pg_catalog"."bpchar")`;
+      /** Every statement `trx` runs that reads the grants. */
+      const grantStatementsOf = (trx: Knex.Transaction): string[] => {
+        const statements: string[] = [];
+        trx.on('query', (q: { sql: string }) => { if (q.sql.includes(GRANTS)) statements.push(q.sql); });
+        return statements;
+      };
+      const castIn = (statements: string[], n: number) => {
+        expect(statements).toHaveLength(n);
+        for (const sql of statements) expect(sql).toContain(CAST);
       };
 
-      it('(a) the catalog read times out on a saturated pool: find, count and updateMany refuse, nothing is written, logged once; the next statement asks again', async () => {
+      it('(a) a single-connection pool the transaction holds: find, count and updateMany answer the list\'s rows, cast', async () => {
         const c = charCase();
         const fresh = new SqlDriver({ ...PG_CELL.config(), pool: { min: 0, max: 1 }, acquireConnectionTimeout: 1000 } as SqlDriverConfig);
         const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
         (fresh as any).logger = logger;
         fresh.registerExternalObject({ name: EXT(c), fields: { label: { type: 'text' } } } as any);
-        const knex: Knex = (fresh as any).knex;
-        const statements: string[] = [];
-        const onQuery = (q: { sql: string }) => { if (q.sql.includes(GRANTS)) statements.push(q.sql); };
-        knex.on('query', onQuery);
         try {
-          // The caller's transaction holds the pool's one connection.
+          // The caller's transaction holds the pool's one connection: a pooled catalog read would time out.
           const trx = await fresh.beginTransaction();
           try {
-            refused(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)).catch((e) => e));
-            refused(await fresh.count(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)).catch((e) => e));
-            refused(await fresh.updateMany(EXT(c), { where: leafOf(EXT(c)) }, { label: 'touched' }, inTrx(trx)).catch((e) => e));
+            const statements = grantStatementsOf(trx);
+            const viaList = sortedIds(await fresh.find(EXT(c), { where: seamed({ id: { $in: [...c.grants] } }) }, inTrx(trx)));
+            expect(viaList).toEqual([...c.expected]);
+            expect(sortedIds(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)))).toEqual(viaList);
+            expect(await fresh.count(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx))).toBe(viaList.length);
+            expect(await fresh.updateMany(EXT(c), { where: leafOf(EXT(c)) }, { label: 'touched' }, inTrx(trx))).toBe(viaList.length);
+            expect(sortedIds(await trx(EXT(c)).where('label', 'touched').select('id'))).toEqual(viaList);
+            castIn(statements, 3);
           } finally {
             await trx.rollback();
           }
-          expect(statements).toEqual([]);
-          expect(await knexOf()(EXT(c)).where('label', 'touched').count({ n: '*' })).toEqual([{ n: '0' }]);
-          expect(logger.error).toHaveBeenCalledTimes(1);
-          // Nothing was cached: with the connection back, the next statement reads the catalog and answers the list's rows.
-          expect(sortedIds(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }))).toEqual([...c.expected]);
-          for (const sql of statements) expect(sql).toContain(`CAST(NULLIF("record_id", '') AS "pg_catalog"."bpchar")`);
+          expect(logger.error).not.toHaveBeenCalled();
         } finally {
-          knex.removeListener('query', onQuery);
           await fresh.disconnect?.();
         }
       });
 
-      it('(b) a table created in the caller\'s uncommitted transaction: refused, then rolled back', async () => {
+      it('(b) a character(4) table created in the caller\'s uncommitted transaction: the leaf answers [k1], cast', async () => {
         const TXN = 'srid_pk_txn';
         const fresh = new SqlDriver(PG_CELL.config());
         fresh.registerExternalObject({ name: TXN, fields: { label: { type: 'text' } } } as any);
@@ -702,10 +704,54 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
           await trx.raw(`create table ${TXN} (id character(4) primary key, label text)`);
           await trx(TXN).insert([{ id: 'k1', label: 'x' }, { id: 'k2', label: 'x' }]);
           await trx(GRANTS).insert({ id: 'srid_pk_txn_g0', object_name: TXN, recipient_type: 'user', recipient_id: 'u9', record_id: 'k1  ', access_level: 'lvl_edit', organization_id: 'org_a' });
-          // Today's list, in the same transaction, answers k1: the leaf must not answer anything else.
+          const statements = grantStatementsOf(trx);
           expect(sortedIds(await fresh.find(TXN, { where: seamed({ id: { $in: ['k1  '] } }) }, inTrx(trx)))).toEqual(['k1  ']);
-          refused(await fresh.find(TXN, { where: leafOf(TXN) }, inTrx(trx)).catch((e) => e));
-          refused(await fresh.count(TXN, { where: leafOf(TXN) }, inTrx(trx)).catch((e) => e));
+          expect(sortedIds(await fresh.find(TXN, { where: leafOf(TXN) }, inTrx(trx)))).toEqual(['k1  ']);
+          expect(await fresh.count(TXN, { where: leafOf(TXN) }, inTrx(trx))).toBe(1);
+          castIn(statements, 2);
+        } finally {
+          await trx.rollback();
+          await fresh.disconnect?.();
+        }
+      });
+
+      it('(c) a catalog read that fails in the transaction is refused (500, logged once), and the caller\'s transaction stays usable', async () => {
+        const c = charCase();
+        const fresh = new SqlDriver(PG_CELL.config());
+        const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        (fresh as any).logger = logger;
+        fresh.registerExternalObject({ name: EXT(c), fields: { label: { type: 'text' } } } as any);
+        const trx = await fresh.beginTransaction();
+        try {
+          // Test seam: inside the savepoint the catalog read becomes a statement PostgreSQL fails (22012),
+          // which aborts that savepoint on the caller's connection.
+          const ownTransaction = trx.transaction;
+          const openSavepoint = trx.transaction.bind(trx) as (handler: (sp: Knex.Transaction) => unknown) => Promise<unknown>;
+          let failed = 0;
+          // knex defines both methods as configurable, non-writable properties.
+          const swap = (target: object, name: string, value: unknown) => Object.defineProperty(target, name, { value, configurable: true });
+          swap(trx, 'transaction', (handler: (sp: Knex.Transaction) => unknown) => openSavepoint((sp) => {
+            const raw = sp.raw.bind(sp) as (...args: unknown[]) => unknown;
+            swap(sp, 'raw', (sql: unknown, bindings?: unknown) => {
+              if (!String(sql).includes('pg_attribute')) return raw(sql, bindings);
+              failed++;
+              return raw('select 1/0');
+            });
+            return handler(sp);
+          }));
+          const refusedFind = await fresh.find(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)).catch((e) => e);
+          expect(refusedFind).toBeInstanceOf(Error);
+          expect(refusedFind).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+          const refusedCount = await fresh.count(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)).catch((e) => e);
+          expect(refusedCount).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+          expect(failed).toBe(2);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          // The caller's transaction is not aborted: its next statements run.
+          expect((await trx.raw('select 1 as one')).rows).toEqual([{ one: 1 }]);
+          expect(sortedIds(await fresh.find(EXT(c), { where: seamed({ id: { $in: [...c.grants] } }) }, inTrx(trx)))).toEqual([...c.expected]);
+          // Nothing was cached: with the seam gone, the next leaf statement reads the catalog and answers the list's rows.
+          swap(trx, 'transaction', ownTransaction);
+          expect(sortedIds(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }, inTrx(trx)))).toEqual([...c.expected]);
         } finally {
           await trx.rollback();
           await fresh.disconnect?.();

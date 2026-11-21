@@ -180,12 +180,13 @@ export class InternalHelpersFacet {
    *   catalog read primed it (`fixed-read-leaf-key-type.ts`), so an integer or
    *   uuid key answers the rows today's list answers. A text key or any
    *   other dialect projects `record_id` as before. On PostgreSQL a table
-   *   with NO reading (no door primed it, the catalog read failed, the table
-   *   is not visible to the pooled connection) is refused, ADR-0139 D3's
+   *   with NO reading (no door primed it, the catalog read failed or found
+   *   no relation; in a transaction it is read on that transaction's
+   *   connection, `outer.transaction`) is refused, ADR-0139 D3's
    *   envelope (`INTERNAL_ERROR` / 500, logged once), ⛔ never compiled
    *   uncast: a `character(n)` key would miss a padded grant silently (D2).
    */
-  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle' | 'knex' | 'logger' | 'physicalSchemaByObject' | 'physicalTableByObject'>, leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string; readonly evaluator?: string }): Knex.QueryBuilder {
+  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle' | 'knex' | 'logger' | 'physicalSchemaByObject' | 'physicalTableByObject'>, leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string; readonly evaluator?: string; readonly transaction?: unknown }): Knex.QueryBuilder {
     const read = fixedInnerReadPredicates(leaf, { emptyStringIsNull: this.isOracle });
     let projection: string | Knex.Raw = read.column;
     // [ADR-0155 O2] PostgreSQL only: the physical table as `getBuilder`
@@ -196,7 +197,7 @@ export class InternalHelpersFacet {
       const column = outer?.column ?? read.column;
       const reading = object === null
         ? { kind: 'unread' as const }
-        : fixedReadLeafKeyReading(this.knex.client, this.physicalSchemaByObject[object], this.physicalTableByObject[object] ?? object, column);
+        : fixedReadLeafKeyReading(this.knex.client, this.physicalSchemaByObject[object], this.physicalTableByObject[object] ?? object, column, outer?.transaction);
       if (reading.kind === 'unread' || reading.kind === 'unspellable') {
         throw refuseFixedReadLeafKey(outer?.evaluator ?? 'driver-sql', leaf, object, column, reading.kind, this.logger, this.knex.client);
       }
