@@ -58,7 +58,7 @@ import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 import { ssoGroupProjectionReason } from './scim-group-projection.js';
 import { createEngineSsoProviderConfigReader } from './register-sso-provider.js';
-import { providerDomains } from './sso-provider-lifecycle.js';
+import { providerDomains, sweepDeletedSsoProviderAccess } from './sso-provider-lifecycle.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -482,6 +482,34 @@ describe('deleting an SSO provider names what it removes, and removes what the p
   }, 30_000);
 });
 
+describe('deleting an SSO provider ends the live sessions signed in through it', () => {
+  it("revokes them; an ended one keeps its own reason, and another provider's and a password session stay", async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await link(s, mia, PROVIDER, 'idp-sub-mia');
+    const later = new Date(Date.now() + 3_600_000);
+    const session = (id: string, provider: string | null, extra: Record<string, unknown> = {}) =>
+      residue(s.engine, 'sys_session', { id, user_id: mia, token: `tok_${id}`, expires_at: later, sso_provider_id: provider, ...extra });
+    await session('ses_acme_1', PROVIDER);
+    await session('ses_acme_2', PROVIDER);
+    await session('ses_acme_ended', PROVIDER, { revoked_at: new Date(0), revoke_reason: 'user_revoked' });
+    await session('ses_globex', OTHER);
+    await session('ses_password', null);
+
+    const res = await postJson(s, '/sso/delete-provider', { providerId: PROVIDER });
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ revokedSessions: 2, dependentsRemoved: true });
+
+    const byId = new Map((await rows(s, 'sys_session', { user_id: mia })).map((r) => [r.id, r]));
+    for (const id of ['ses_acme_1', 'ses_acme_2']) expect(byId.get(id)?.revoke_reason, id).toBe('sso_provider_deleted');
+    expect(byId.get('ses_acme_ended')?.revoke_reason).toBe('user_revoked');
+    for (const id of ['ses_globex', 'ses_password']) expect(byId.get(id)?.revoked_at ?? null, id).toBeNull();
+  });
+});
+
 // ── 1b. A projected grant whose provider no longer exists ──────────────────
 
 describe('a projected grant whose provider no longer exists is removed at boot', () => {
@@ -545,6 +573,29 @@ describe('a projected grant whose provider no longer exists is removed at boot',
     expect(byId.get('ses_gone')?.revoked_at).toBeTruthy();
     for (const id of ['ses_live_globex', 'ses_password']) expect(byId.get(id)?.revoked_at ?? null, id).toBeNull();
     expect(byId.get('ses_gone_ended')?.revoke_reason).toBe('user_revoked');
+  });
+
+  it('a provider registered while the sweep runs keeps what its sign-ins wrote', async () => {
+    const s = await stage();
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_late', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    // The provider row lands between the sweep's first provider read and its candidate read.
+    const engine = s.engine as any;
+    const realFind = engine.find.bind(engine);
+    const spy = vi.spyOn(engine, 'find').mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+      const answer = await realFind(object, ...rest);
+      if (object === 'sys_user_permission_set') {
+        spy.mockImplementation(realFind);
+        await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+      }
+      return answer;
+    });
+    try {
+      expect(await sweepDeletedSsoProviderAccess(s.engine as never)).toEqual({ removedGrants: 0, revokedSessions: 0 });
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await rows(s, 'sys_user_permission_set', { id: 'ups_late' })).length).toBe(1);
   });
 
   it('what a delete whose cleanup failed left behind is removed at the next boot', async () => {
