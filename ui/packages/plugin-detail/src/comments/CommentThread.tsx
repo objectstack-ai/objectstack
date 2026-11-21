@@ -185,7 +185,10 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
         ownDeletesOnly,
         (item.replyCount ?? 0) > 0 || replies.some((reply) => reply.parentId != null && String(reply.parentId) === String(item.id)),
       )
-        ? () => void onDeleteComment(item.id)
+        ? () => {
+            // A refused delete kept the row, and the host has said so.
+            void Promise.resolve(onDeleteComment(item.id)).catch(() => undefined);
+          }
         : undefined,
   });
 

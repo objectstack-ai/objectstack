@@ -525,7 +525,7 @@ describe('each control is handed over under its own grant on sys_comment (object
     });
     expect(dataSource.delete).not.toHaveBeenCalled();
     expect(
-      (doorFetch.mock.calls as Array<[unknown, { method?: string }?]>).filter(([, init]) => init?.method === 'DELETE').map(([url]) => String(url)),
+      (doorFetch.mock.calls as unknown as Array<[unknown, { method?: string }?]>).filter(([, init]) => init?.method === 'DELETE').map(([url]) => String(url)),
     ).toEqual([expect.stringMatching(/\/api\/v1\/comments\/c-ada$/)]);
   });
 
