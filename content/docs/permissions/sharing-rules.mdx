@@ -171,8 +171,11 @@ organization, every other recipient is refused with `SHARING_NOT_ENABLED`
 A sharing rule on an object that no sharing gate consults for any recipient is
 refused when it is saved: an object with no real `owner_id` (a system object
 without one, such as `sys_session`, or a federated object whose `owner_id` is
-the platform's injected anchor), a `controlled_by_parent` detail, or a bypass
-object. It is refused with `SHARING_NOT_ENABLED` (422) and a sentence that
+the platform's injected anchor), a `controlled_by_parent` detail, a bypass
+object, or an object whose share grants cannot count where it is stored (it
+sits on another datasource than `sys_record_share`, even a SQL one, or on a
+driver that does not evaluate the share-grant subquery: today MongoDB,
+in-memory and OData; ADR-0155 R2). It is refused with `SHARING_NOT_ENABLED` (422) and a sentence that
 names the object and how to turn record sharing on for it. This holds for Setup's form and the
 `/data` door as well as `POST /api/v1/sharing/rules`, and for an edit that moves
 a rule onto such an object. A rule saved before this check keeps its row and
