@@ -120,6 +120,16 @@
  *                        `workspace` — this checkout, built and packed as the
  *                        release would publish it (unreleased; never exported;
  *                        refused when run from the published package, which has no checkout)
+ *   --schema-masking off boot every app of the run with object-schema masking
+ *                        off (ADR-0106 D8, `schema-masking.ts`), so a persona
+ *                        is served its whole schema and a field the card
+ *                        withholds from it is the field-level-security
+ *                        question; every record of the run says so
+ *                        (`env.schemaMasking`), and `summary` never sums it
+ *                        with a default run (default `on`: masked, nothing
+ *                        stamped). The masking variable set in the
+ *                        environment without this flag is refused before any
+ *                        card runs
  *
  * `run-scenarios summary <record|dir>…` (`objectstack-scenarios summary`) reads
  * run records back instead and prints one author-model × ask-model table per
@@ -148,6 +158,7 @@ import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleW
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { PROMPT_LANGS, PROMPT_LENGTHS, promptChoiceText, promptLanguageRefusal, statedPromptChoice, type PromptChoice, type PromptLang, type PromptLength } from './prompts.js';
 import { rebaseScenario } from './run-date.js';
+import { SCHEMA_MASKING_SETTINGS, schemaMaskingHostEnv, schemaMaskingRefusal, schemaMaskingText, type SchemaMasking } from './schema-masking.js';
 import { cardScorecard, renderScorecard, runRecord, type CardStamp } from './scorecard.js';
 import { SUPPLIED_TEMPLATE_SOURCE, summaryMain, suppliedTemplateOf, type SuppliedTemplate } from './summary.js';
 
@@ -214,6 +225,8 @@ export interface CliArgs {
   lang?: PromptLang;
   /** `--prompt`: the card prompt the build turn is given ({@link PromptChoice.prompt}); absent ⇒ `detailed`. */
   prompt?: PromptLength;
+  /** `--schema-masking`: `off` boots every app of the run with object-schema masking off and stamps its records ({@link SchemaMasking}); absent or `on` ⇒ the default, masked. */
+  schemaMasking?: SchemaMasking;
 }
 
 export function parseArgs(argv: readonly string[]): CliArgs {
@@ -292,6 +305,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       const p = val();
       if (!(PROMPT_LENGTHS as readonly string[]).includes(p)) throw new Error(`unknown --prompt \`${p}\` (${PROMPT_LENGTHS.join(', ')})`);
       a.prompt = p as PromptLength;
+    }
+    else if (flag === '--schema-masking') {
+      const m = val();
+      if (!(SCHEMA_MASKING_SETTINGS as readonly string[]).includes(m)) throw new Error(`unknown --schema-masking \`${m}\` (${SCHEMA_MASKING_SETTINGS.join(', ')})`);
+      a.schemaMasking = m as SchemaMasking;
     }
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
@@ -445,6 +463,9 @@ export async function main(argv: readonly string[]): Promise<number> {
   // `summary` reads records back; it runs nothing (`summary.ts`).
   if (argv[0] === 'summary') return summaryMain(argv.slice(1));
   const args = parseArgs(argv);
+  // The masking variable inherited from the shell would reach every booted app unrecorded: refused before anything runs.
+  const maskingRefusal = schemaMaskingRefusal(args.schemaMasking);
+  if (maskingRefusal) throw new Error(maskingRefusal);
   const here = dirname(fileURLToPath(import.meta.url));
   // The checkout, or the library root the published package carries (`library.ts`).
   const { root: repo, checkout } = locateLibraryRoot(here);
@@ -507,6 +528,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   );
   if (args.askRepeats !== undefined && args.askRepeats > 1) console.log(`ask repeats: each question turn asked ${args.askRepeats} times, operations once`);
   if (promptChoice) console.log(`prompts: ${promptChoiceText(promptChoice)}`);
+  if (args.schemaMasking === 'off') console.log(schemaMaskingText('off'));
 
   // Built and packed once, before the first card: every scaffold of this run installs the same tarballs.
   const workspace = args.packages === 'workspace' ? await prepareWorkspacePackages(repo, join(work, 'workspace-packages')) : undefined;
@@ -532,7 +554,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     readArtifact,
     namespace: readNamespace,
     // Door mode's host serves the OAuth authorization server its client's token comes from.
-    boot: (dir, o) => bootDev(dir, undefined, o?.authoringDoor ? { OS_OIDC_PROVIDER_ENABLED: 'true' } : {}),
+    // A masking-off round sets the D8 opt-out on the app's process alone (`schema-masking.ts`).
+    boot: (dir, o) => bootDev(dir, undefined, { ...(o?.authoringDoor ? { OS_OIDC_PROVIDER_ENABLED: 'true' } : {}), ...schemaMaskingHostEnv(args.schemaMasking) }),
     harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }),
   };
   const templateBytes = args.template ? readFileSync(args.template) : undefined;
@@ -562,7 +585,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
     // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
     const card = loadedCardStamp(loaded);
-    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card }, cardRun), cardRun, supplied);
+    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card, ...(args.schemaMasking === 'off' ? { schemaMasking: 'off' as const } : {}) }, cardRun), cardRun, supplied);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));
     console.log(renderScorecard(cardScorecard(cardRun, packages, card)));

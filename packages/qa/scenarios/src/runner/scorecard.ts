@@ -959,6 +959,12 @@ export interface RunRecordMeta {
   evidenceDir: string;
   /** The card file the run graded: stamped at the record's top level (`card`) and on its scorecard. */
   card?: CardStamp;
+  /**
+   * `off` on a masking-off round (`--schema-masking off`, `schema-masking.ts`): every app the run booted served
+   * each caller its whole object schema (ADR-0106 D8). Stamped as `env.schemaMasking`; absent ⇒ the default,
+   * masked, and the record keeps its bytes.
+   */
+  schemaMasking?: 'off';
 }
 
 export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string, unknown> {
@@ -999,7 +1005,7 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     scope: `scenario card ${cardRun.card}`,
     app: cardRun.card,
     ...(meta.card ? { card: meta.card } : {}),
-    env: { framework: meta.framework ?? 'unknown', packages: meta.packages, packagesLine: packagesLine(meta.packages), driver: meta.driver },
+    env: { framework: meta.framework ?? 'unknown', packages: meta.packages, packagesLine: packagesLine(meta.packages), driver: meta.driver, ...(meta.schemaMasking ? { schemaMasking: meta.schemaMasking } : {}) },
     runner: meta.runner,
     evidenceDir: meta.evidenceDir,
     results,
