@@ -9,7 +9,7 @@
 import { useMemo } from 'react';
 import type { ListColumn } from '@object-ui/types';
 import type { ColumnSummary, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
-import { deriveColumnSummary } from '@objectstack/spec/ui';
+import { deriveColumnSummary, isColumnSummaryCompatibleWithFieldType } from '@objectstack/spec/ui';
 import type { CurrencyConfig } from '@objectstack/spec/data';
 import { resolveFieldScale, isAggregateCompatibleWithFieldType } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyField, createSafeTranslation } from '@object-ui/i18n';
@@ -79,6 +79,8 @@ const NON_NUMERIC_TYPES = new Set<string>([
   'count_unique',
   'percent_empty',
   'percent_filled',
+  'count_true',
+  'count_false',
 ]);
 
 /** Aggregations whose result is a percentage (0-100), not a value in the column's unit. */
@@ -110,6 +112,9 @@ const TYPE_LABEL_KEYS: Record<ColumnSummaryType, string> = {
   // which is why the two families deliberately share a word in every pack.
   percent_empty: 'grid.summary.percentEmpty',
   percent_filled: 'grid.summary.percentFilled',
+  // A boolean column's yes / no counts read as the cell's own words.
+  count_true: 'grid.summary.countTrue',
+  count_false: 'grid.summary.countFalse',
   sum: 'grid.summary.sum',
   avg: 'grid.summary.avg',
   min: 'grid.summary.min',
@@ -145,6 +150,10 @@ const SUMMARY_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.summary.none': 'None',
   'grid.summary.menuPercentEmpty': 'Percent empty',
   'grid.summary.menuPercentFilled': 'Percent filled',
+  'grid.summary.countTrue': 'Yes',
+  'grid.summary.countFalse': 'No',
+  'grid.summary.menuCountTrue': 'Count of Yes',
+  'grid.summary.menuCountFalse': 'Count of No',
 };
 
 export const useSummaryTranslation = createSafeTranslation(
@@ -157,8 +166,11 @@ export const useSummaryTranslation = createSafeTranslation(
  * Each one the footer can draw for that type: an aggregate the spec allows on
  * the type (`isAggregateCompatibleWithFieldType`), and the count family on
  * any. ⛔ No `count`: the row's first cell already carries the record count.
- * Booleans get the count family only, and a record-currency amount (whose sum
- * the footer withholds) likewise.
+ * Booleans get their yes / no counts first, then the count family — never
+ * the arithmetic, which reads a boolean as 0 / 1 — and a record-currency
+ * amount (whose sum the footer withholds) gets the count family only. The
+ * yes / no counts are offered exactly where the spec's member table allows
+ * them (`isColumnSummaryCompatibleWithFieldType`).
  */
 const MENU_AGGREGATES: ReadonlyArray<ColumnSummaryType> = ['sum', 'avg', 'min', 'max'];
 /** The spec's boolean class (`BOOLEAN_AGGREGATE_FIELD_TYPES`): `toggle` is a boolean too. */
@@ -166,12 +178,14 @@ const BOOLEAN_FIELD_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
 const MENU_COUNTS: ReadonlyArray<ColumnSummaryType> = [
   'count_unique', 'count_filled', 'count_empty', 'percent_filled', 'percent_empty',
 ];
+const MENU_BOOLEAN_COUNTS: ReadonlyArray<ColumnSummaryType> = ['count_true', 'count_false'];
 export function offeredColumnSummaries(
   field: ({ type?: string } & NonNullable<Parameters<typeof recordCurrencyField>[0]>) | undefined,
 ): ColumnSummaryType[] {
   const type = field?.type;
   const numeric = !!type && !BOOLEAN_FIELD_TYPES.has(type) && !recordCurrencyField(field);
   return [
+    ...(type ? MENU_BOOLEAN_COUNTS.filter((m) => isColumnSummaryCompatibleWithFieldType(m, type)) : []),
     ...(numeric ? MENU_AGGREGATES.filter((m) => isAggregateCompatibleWithFieldType(m, type!)) : []),
     ...MENU_COUNTS.filter((m) => m !== 'count_unique' || (!!type && isAggregateCompatibleWithFieldType('count_distinct', type))),
   ];
@@ -188,6 +202,8 @@ export function summaryMenuLabel(type: ColumnSummaryType, temporal: boolean, t: 
   if (temporal && type === 'max') return t('grid.summary.latest');
   if (type === 'percent_empty') return t('grid.summary.menuPercentEmpty');
   if (type === 'percent_filled') return t('grid.summary.menuPercentFilled');
+  if (type === 'count_true') return t('grid.summary.menuCountTrue');
+  if (type === 'count_false') return t('grid.summary.menuCountFalse');
   return type === 'none' ? t('grid.summary.none') : t(TYPE_LABEL_KEYS[type]);
 }
 
@@ -320,6 +336,13 @@ function computeAggregation(type: string, rows: SummaryRow[], field: string): nu
         return (rows.filter((r) => !isEmptyValue(r[field])).length / total) * 100;
       case 'percent_empty':
         return (rows.filter((r) => isEmptyValue(r[field])).length / total) * 100;
+      // A boolean column's yes / no counts: only a real boolean is a value of
+      // the column (the cell's own reading), so a null cell is neither — it is
+      // `count_empty`'s, as on the server (`deriveColumnSummary`).
+      case 'count_true':
+        return rows.filter((r) => r[field] === true).length;
+      case 'count_false':
+        return rows.filter((r) => r[field] === false).length;
       default:
         return null;
     }

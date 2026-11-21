@@ -25,7 +25,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { BODY_TABLE_PAGE_SIZE, buildDefaultPageSchema, buildDefaultTabs } from '../buildDefaultPageSchema';
+import { BODY_TABLE_PAGE_SIZE, buildDefaultHighlights, buildDefaultPageSchema, buildDefaultTabs } from '../buildDefaultPageSchema';
 import { bodyTableIdsOf, buildDefaultPageColumns } from '../recordPageColumns';
 
 const quoteDef = {
@@ -208,13 +208,13 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
     expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
   });
 
-  it('with a key-fields strip the order is strip, then the field groups, then the body table', () => {
+  it('declared key fields draw no strip (objectstack#35891): the field groups, then the body table', () => {
     const columns = columnsOf({ ...meetingDef, highlightFields: ['owner', 'meeting_date'] }, { related: [TODOS] });
-    expect(stripShape(columns.strip)).toEqual(['record:highlights']);
+    expect(stripShape(columns.strip)).toEqual([]);
     expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
   });
 
-  it('with a stage bar and key fields the order is the strip (key fields, stage), the field groups, the body table', () => {
+  it('a slotted strip (key fields, stage) still leads: the strip, the field groups, the body table', () => {
     const staged = {
       ...meetingDef,
       highlightFields: ['owner'],
@@ -228,7 +228,10 @@ describe("the record's own fields lead the Overview, its master-detail tables fo
         },
       },
     };
-    const columns = columnsOf(staged, { statusField: 'status', related: [TODOS] });
+    const columns = columnsOf(staged, {
+      related: [TODOS],
+      slots: { highlights: buildDefaultHighlights(staged, { statusField: 'status' }) },
+    });
     expect(stripShape(columns.strip)).toEqual(['record:highlights', 'record:path']);
     expect(shape(columns.details)).toEqual(['details(basic)', 'table(meeting_todo)']);
   });

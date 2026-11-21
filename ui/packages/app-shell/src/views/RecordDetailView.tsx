@@ -84,7 +84,7 @@ import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
 import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
-import { ApprovalBandOnceScope } from '@object-ui/plugin-detail';
+import { ApprovalBandOnceScope, RecordStageMenu } from '@object-ui/plugin-detail';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
@@ -5545,6 +5545,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         </>
       )
       : undefined,
+    // objectstack#35891 — the stage tag is the stage's menu: the default
+    // page draws no stage bar, so the header is where the stage moves.
+    stage: (parts) => <RecordStageMenu {...parts} />,
   };
   const sharedChrome = (
     <>

@@ -27,6 +27,12 @@
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ErrorCode } from '../api/error-code-ledger.zod.js';
 import type { FlowInnerRefusal, ResumeFailureDetails } from '../api/automation-api.zod.js';
+import type {
+  WORK_CALENDAR_INVALID_CODE,
+  WORK_CALENDAR_NOT_MAINTAINED_CODE,
+  WORK_CALENDAR_UNRESOLVED_CODE,
+  WorkCalendarUnresolvedReason,
+} from '../data/work-calendar.js';
 
 /**
  * Lifecycle states of an approval request, in the order the
@@ -299,11 +305,33 @@ export interface ApprovalRequestRow {
    */
   payload_labels?: Record<string, string>;
   /**
-   * SLA deadline, when the node config carries `escalation.timeoutHours`:
-   * `created_at + timeoutHours`. Display-only for now — automatic escalation
-   * needs a scheduler pass and is not yet wired.
+   * SLA deadline, when the node config carries `escalation.timeoutHours`: the
+   * instant the escalation sweep acts on, computed by the same function the
+   * sweep uses. Under `escalation.clock: 'wall_clock'` it is `created_at +
+   * timeoutHours` elapsed hours; under `'working_time'` it is `timeoutHours`
+   * working hours after `created_at` on the escalation's working calendar,
+   * recomputed on every read (ADR-0157 D12). Absent when the calendar cannot
+   * count it; {@link ApprovalRequestRow.sla_due_refusal} then says why.
    */
   sla_due_at?: string;
+  /**
+   * [ADR-0157 D9] Why a `working_time` escalation has no `sla_due_at`: its
+   * working calendar cannot count the deadline. The sweep does not escalate the
+   * request and tries again on its next pass, so once an administrator fixes
+   * the calendar the deadline returns with no other step. `code` is the
+   * calendar refusal's ledger code; `reason` (on `ERR_WORK_CALENDAR_UNRESOLVED`)
+   * says which resolution step failed; `date` (on
+   * `ERR_WORK_CALENDAR_NOT_MAINTAINED`) is the day the calendar is not
+   * maintained for; `message` is the refusal's own English sentence. Absent
+   * whenever `sla_due_at` is present, and on every `wall_clock` escalation.
+   */
+  sla_due_refusal?: {
+    code: typeof WORK_CALENDAR_UNRESOLVED_CODE | typeof WORK_CALENDAR_NOT_MAINTAINED_CODE | typeof WORK_CALENDAR_INVALID_CODE;
+    reason?: WorkCalendarUnresolvedReason;
+    calendar?: string;
+    date?: string;
+    message: string;
+  };
   /**
    * The owning flow's approval steps in graph order, for progress display
    * (resolved on single-request reads when the automation engine is

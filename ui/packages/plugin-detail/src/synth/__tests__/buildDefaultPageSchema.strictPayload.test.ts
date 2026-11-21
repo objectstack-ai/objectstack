@@ -138,8 +138,9 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       ],
       approvals: { node: { currentUserId: 'u_1' } },
     };
-    // A declared strip, so the `record:highlights` node is among them (the
-    // strip is the declared list only, objectstack#28868).
+    // Declared highlights and a stage field: since objectstack#35891 the page
+    // still emits neither `record:highlights` nor `record:path` (the strip
+    // sub-builder that emits them is parsed in the next case).
     const filesDef = { ...leadDef, highlightFields: ['email'], enable: { files: true } };
     // One page: the synthesizer emits no reference rail any more
     // (objectstack#27055), so every branch it has co-occurs here.
@@ -161,8 +162,6 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       'record:approvals',
       'record:attachments',
       'record:details',
-      'record:highlights',
-      'record:path',
       'record:related_list',
     ]);
     for (const node of nodes) {
