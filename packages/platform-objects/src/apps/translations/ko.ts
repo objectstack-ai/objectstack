@@ -126,6 +126,7 @@ export const ko: TranslationData = {
         nav_datasources: { label: '데이터 소스' },
         nav_connector_credentials: { label: '커넥터 자격 증명' },
         nav_connector_connections: { label: '커넥터 연결' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth 애플리케이션' },
       },

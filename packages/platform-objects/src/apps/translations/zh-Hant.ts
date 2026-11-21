@@ -125,6 +125,7 @@ export const zhHant: TranslationData = {
         nav_datasources: { label: '資料來源' },
         nav_connector_credentials: { label: '連接器憑證' },
         nav_connector_connections: { label: '連接器連線' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth 應用程式' },
       },

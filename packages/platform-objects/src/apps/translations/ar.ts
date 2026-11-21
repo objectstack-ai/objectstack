@@ -125,6 +125,7 @@ export const ar: TranslationData = {
         nav_datasources: { label: 'مصادر البيانات' },
         nav_connector_credentials: { label: 'بيانات اعتماد الموصلات' },
         nav_connector_connections: { label: 'اتصالات الموصلات' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'تطبيقات OAuth' },
       },
