@@ -59,8 +59,10 @@ export function InCellOptionList({
   const rowCount = lead + shown.length;
 
   // The active row starts on the current value (a single select) and on the
-  // first row once the user types; -1 is "none".
-  const initialActive = multiple ? -1 : shown.findIndex((o) => selected.includes(o.value));
+  // first row once the user types; -1 is "none". It is an index into the FULL
+  // list, which is the list shown again when the search box is cleared (an
+  // index into the filtered list would land on another option then).
+  const initialActive = multiple ? -1 : options.findIndex((o) => selected.includes(o.value));
   const [active, setActive] = React.useState(initialActive);
   const listRef = React.useRef<HTMLUListElement | null>(null);
 

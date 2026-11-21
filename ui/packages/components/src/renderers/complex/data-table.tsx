@@ -4981,6 +4981,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 if (wasSelected && togglesCell(row, col)) toggleCell(rowIndex, colIndex);
                                 return;
                               }
+                              // objectstack#35688 — a click inside the open editor (an
+                              // option of the in-cell list, still in the DOM when its click
+                              // lands) is the editor's own. When that pick has just
+                              // committed, `startEdit`'s same-cell guard has already been
+                              // cleared, so the click would open the editor again; this
+                              // render still says the cell is editing, so stop here.
+                              if (isEditing) {
+                                e.stopPropagation();
+                                return;
+                              }
                               if (isEditable && singleClickEdit && !hasTextSelectionIn(e.currentTarget)) {
                                 e.stopPropagation();
                                 startEdit(row, col.accessorKey);

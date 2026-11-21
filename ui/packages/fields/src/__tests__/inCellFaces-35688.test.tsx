@@ -96,6 +96,20 @@ describe('in-cell single select (objectstack#35688)', () => {
     expect(onGridKey).toHaveBeenCalledWith('Escape');
   });
 
+  it('clearing the search puts the active row back on the current value, not on its filtered index', () => {
+    const onChange = vi.fn();
+    render(<SelectField field={SELECT} value="lost" onChange={onChange} inCell />);
+    const box = screen.getByRole('combobox');
+    const current = screen.getByTestId('in-cell-option-lost');
+    expect(box.getAttribute('aria-activedescendant')).toBe(current.id);
+    // "lost" is row 1 of the filtered list and row 3 of the full one.
+    fireEvent.change(box, { target: { value: 'closed' } });
+    fireEvent.change(box, { target: { value: '' } });
+    expect(box.getAttribute('aria-activedescendant')).toBe(screen.getByTestId('in-cell-option-lost').id);
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('lost');
+  });
+
   it('with nothing active, Enter goes on to the grid (it commits and moves)', () => {
     const onChange = vi.fn();
     const onGridKey = vi.fn();

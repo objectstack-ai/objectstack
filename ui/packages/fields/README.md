@@ -127,11 +127,13 @@ param support ⊇ form support.
 
 `FieldEditWidget` forwards two optional host keys of `FieldWidgetComponentProps`
 to the widget it draws. `inCell` asks for the face a list grid's cell editor
-needs: a single select, multi-select or tags field draws a searchable list that
-is open from the start, a date opens its calendar (with today, tomorrow, next
+needs: a single select or multi-select field draws a searchable list of its
+options that is open from the start, a tags field the same list of this
+record's tags (plus an "Add" row for new text), a date opens its calendar (with today, tomorrow, next
 week and clear picks) while its text stays typeable, a time opens the browser
 picker, and a colour offers swatches. `onCommit` is the host's "write the last
-`onChange` value and close", which the date and colour faces call after a pick.
+`onChange` value and close", which the date picker calls after a day or a quick
+pick and the in-cell colour face after a swatch.
 A host that passes neither gets the form faces unchanged; `ObjectGrid` passes
 both.
 

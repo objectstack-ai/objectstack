@@ -256,11 +256,13 @@ export type FieldWidgetComponentProps<T = any> = {
   /**
    * The user has finished: the host writes the value last handed to
    * `onChange` and closes the editor. A widget calls it after the gesture
-   * that ends a choice (a day or a quick pick in the calendar, a swatch), and
-   * never instead of `onChange`.
+   * that ends a choice, and never instead of `onChange`.
    *
    * **Producer**: `ObjectGrid`'s `renderCellEditor` (the grid's commit).
-   * **Consumer**: the `inCell` faces of the date and colour widgets. A host
+   * **Consumer**: the `date` picker calls it on a calendar day or a quick
+   * pick (Today, Tomorrow; the `inCell` face adds Next week and Clear),
+   * whether or not `inCell` is set; the `datetime` picker only on the in-cell
+   * Clear; the colour widget on a swatch of its `inCell` face. A host
    * that passes nothing keeps the editor open until it commits on its own
    * terms (Enter, a click elsewhere).
    */

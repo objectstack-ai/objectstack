@@ -63,10 +63,12 @@ export function ColorField({ value, onChange, field, readonly, error, inCell, on
                 onCommit?.();
               }}
               className={cn(
-                'h-4 w-4 rounded-sm border border-input',
+                'h-4 w-4 rounded-sm border border-input bg-(--swatch)',
                 current === hex && 'ring-2 ring-ring ring-offset-1 ring-offset-background',
               )}
-              style={{ backgroundColor: hex }}
+              // The swatch's colour is the value it writes, carried as a custom
+              // property read by a static utility (ui/AGENTS.md, Styling).
+              style={{ '--swatch': hex } as React.CSSProperties}
             />
           ))}
           <input
