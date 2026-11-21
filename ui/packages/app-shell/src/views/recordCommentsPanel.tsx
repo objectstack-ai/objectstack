@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@object-ui/components';
 import { CommentsPanel } from '@object-ui/plugin-detail';
 
@@ -121,9 +121,23 @@ export function RecordCommentsAside({
   placement: CommentsPanelPlacement;
   onClose: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Closed from inside (✕, Esc), the focus goes back to the record: to the
+  // comments icon that opened the panel, the nearest one round it (the page's
+  // header, or the drawer's record row).
+  const close = useCallback(() => {
+    const el = ref.current;
+    const hadFocus = !!el && el.contains(document.activeElement);
+    let button: HTMLElement | null = null;
+    for (let node = el?.parentElement; node && !button; node = node.parentElement) {
+      button = node.querySelector<HTMLElement>('[data-comments-button]');
+    }
+    onClose();
+    if (hadFocus) button?.focus();
+  }, [onClose]);
   return (
-    <div className={cn('min-h-0', PLACEMENT_CLASS[placement])} data-comments-placement={placement}>
-      <CommentsPanel onClose={onClose} />
+    <div ref={ref} className={cn('min-h-0', PLACEMENT_CLASS[placement])} data-comments-placement={placement}>
+      <CommentsPanel onClose={close} />
     </div>
   );
 }

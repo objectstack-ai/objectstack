@@ -256,6 +256,10 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           return;
         }
         if (e.key === 'Escape') {
+          // The key closes the list and nothing else: a panel or drawer
+          // round the box must not close on it too (objectstack#36075).
+          e.preventDefault();
+          e.stopPropagation();
           setShowMentions(false);
           return;
         }

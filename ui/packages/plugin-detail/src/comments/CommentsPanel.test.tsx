@@ -160,6 +160,30 @@ describe('CommentsPanel', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it('Esc in the @ list closes the list only: the panel stays open and the draft is kept', () => {
+    const { onClose } = renderPanel({ mentionSuggestions: [{ id: 'u-zoe', label: 'Zoe' }] });
+    const box = within(document.querySelector('[data-comments-composer]') as HTMLElement).getByRole('textbox');
+    fireEvent.change(box, { target: { value: 'ask @', selectionStart: 5 } });
+    expect(screen.getByRole('button', { name: /Zoe/ })).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: /Zoe/ })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(box).toHaveValue('ask @');
+    // CONTROL: with the list closed, the next Esc is the panel's.
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Esc in the More menu closes the menu only: the menu is portaled out of the panel', async () => {
+    const { onClose } = renderPanel();
+    fireEvent.pointerDown(actionIn('c1', 'more')!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const item = await screen.findByRole('menuitem', { name: 'Delete' });
+    expect(document.querySelector('[data-comments-panel]')!.contains(item)).toBe(false);
+    fireEvent.keyDown(item, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('says when there are no comments yet, and invites the first', () => {
     renderPanel({ items: [] });
     expect(screen.getByText('No comments yet')).toBeInTheDocument();

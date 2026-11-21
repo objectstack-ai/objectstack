@@ -354,6 +354,17 @@ function escapeOwnedByTarget(target: EventTarget | null, pane?: Element | null):
 }
 
 /**
+ * Whether an `Esc` was pressed inside a region of the record that owns its
+ * own `Esc` (`[data-owns-escape]`, such as the record's comment panel), which
+ * then acts on it itself. Only a region inside the pane counts.
+ */
+function escapeOwnedByRegion(target: EventTarget | null, pane?: Element | null): boolean {
+  if (!target || !(target instanceof Element)) return false;
+  const region = target.closest('[data-owns-escape]');
+  return !!region && (!pane || pane.contains(region));
+}
+
+/**
  * Pane resize state — drag handle on the left edge, value persisted to
  * localStorage so the same user gets a consistent width across sessions /
  * objects. Returns `null` when storageKey is absent (resize disabled).
@@ -527,8 +538,17 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
   // or a menu owns it, is not. It still holds the sheet open — left
   // unprevented, the layer would dismiss the whole drawer on it.
   const sheetRef = React.useRef<HTMLDivElement>(null);
+  //
+  // A region inside the record that owns its `Esc` (`[data-owns-escape]`: the
+  // record's comment panel, objectstack#36075) gets the key at every level,
+  // the root too: the drawer holds itself open and leaves the region to act.
   const handleDrawerEscape = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
+    if (escapeOwnedByRegion(e.target, sheetRef.current)) {
+      e.preventDefault();
+      return;
+    }
+    if (!onBack) return;
     e.preventDefault();
     if (escapeOwnedByTarget(e.target, sheetRef.current)) return;
     handleEscape();
@@ -641,7 +661,9 @@ export const NavigationOverlay: React.FC<NavigationOverlayProps> = ({
         // objectstack#26679 — below the root of an in-place stack, `Esc` goes
         // back one level. Only the root's `Esc` closes. objectstack#28156 — a
         // field's `Esc` stays the field's ({@link escapeOwnedByTarget}).
-        onEscapeKeyDown={onBack ? handleDrawerEscape : undefined}
+        // objectstack#36075 — at every level, a region's `Esc` stays the
+        // region's ({@link escapeOwnedByRegion}).
+        onEscapeKeyDown={handleDrawerEscape}
         ref={sheetRef}
         className={cn(
           // Mobile: full width (no inline cap, no max-w from base sheet).

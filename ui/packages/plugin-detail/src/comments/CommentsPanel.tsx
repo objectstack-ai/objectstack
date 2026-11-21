@@ -97,12 +97,19 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, className
       aria-label={title}
       className={cn('flex h-full min-h-0 w-full flex-col bg-background', className)}
       onKeyDown={(e) => {
-        if (e.key === 'Escape' && onClose && !e.defaultPrevented) {
-          e.stopPropagation();
-          onClose();
-        }
+        if (e.key !== 'Escape' || !onClose) return;
+        // A layer the panel opened (the More menu, the emoji picker) is
+        // portaled out of it and closes itself on its own Esc. A field that
+        // takes the key inside the panel (the mention list, the inline
+        // editor) stops it before it gets here. `defaultPrevented` says
+        // nothing: a drawer round the panel marks the key to hold itself open.
+        if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target)) return;
+        e.stopPropagation();
+        onClose();
       }}
       data-comments-panel=""
+      // An Esc pressed in here is the panel's: a pane round it leaves it be.
+      data-owns-escape=""
     >
       <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
