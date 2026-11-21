@@ -8,6 +8,7 @@
 
 import * as React from "react"
 import { Dialog, DialogContent, DialogTitle } from "@object-ui/components"
+import { MermaidEnlargeContext } from "./MermaidEnlargeContext"
 
 /**
  * Mermaid diagram renderer for ```mermaid fenced code blocks (ADR-0046).
@@ -23,20 +24,6 @@ import { Dialog, DialogContent, DialogTitle } from "@object-ui/components"
  * text, never this output), so the two sanitizers do not fight. A render
  * failure degrades to the raw source in a <pre>, never a thrown error.
  */
-
-/**
- * The words of a diagram's enlarge control, in the host's language. A host
- * that wants every rendered diagram to open full size (the docs reader)
- * provides them; with no provider a diagram draws no control, as before.
- */
-export interface MermaidEnlargeText {
-  /** The control's text, e.g. "Enlarge". */
-  enlarge: string
-  /** The enlarged view's accessible title, e.g. "Diagram". */
-  title: string
-}
-
-export const MermaidEnlargeContext = React.createContext<MermaidEnlargeText | null>(null)
 
 let mermaidPromise: Promise<typeof import("mermaid").default> | null = null
 function loadMermaid() {

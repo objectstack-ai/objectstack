@@ -270,7 +270,7 @@ export default function DocPage() {
   const { appLabel } = useServedAppLabel();
   const backTo = useMemo(() => {
     if (!appName) return undefined;
-    const app = matchAppBySegment(apps as any[] | undefined, appName);
+    const app = matchAppBySegment(apps as Array<{ name: string; _packageId?: string; label?: unknown } & Record<string, unknown>> | undefined, appName);
     return { to: `/apps/${appName}`, label: app ? appLabel(app) : appName };
   }, [apps, appName, appLabel]);
   const tocIds = useMemo(() => toc.map((item) => item.id), [toc]);

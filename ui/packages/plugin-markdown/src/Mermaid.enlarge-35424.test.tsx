@@ -23,7 +23,8 @@ vi.mock('mermaid', () => ({
   },
 }));
 
-import { Mermaid, MermaidEnlargeContext } from './Mermaid';
+import { Mermaid } from './Mermaid';
+import { MermaidEnlargeContext } from './MermaidEnlargeContext';
 
 afterEach(cleanup);
 

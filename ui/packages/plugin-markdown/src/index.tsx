@@ -13,7 +13,8 @@ import { Skeleton } from '@object-ui/components';
 // Export types for external use
 export type { MarkdownSchema } from './types';
 export { extractToc, type TocItem } from './toc';
-export { Mermaid, MermaidEnlargeContext, type MermaidEnlargeText } from './Mermaid';
+export { Mermaid } from './Mermaid';
+export { MermaidEnlargeContext, type MermaidEnlargeText } from './MermaidEnlargeContext';
 
 // 🚀 Lazy load the implementation file
 // This ensures react-markdown is only loaded when the component is actually rendered

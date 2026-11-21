@@ -54,10 +54,7 @@ export function useActiveHeading(ids: readonly string[]): string | null {
 
   useEffect(() => {
     const list = key ? key.split('\u0000') : [];
-    if (list.length === 0) {
-      setActive(null);
-      return;
-    }
+    if (list.length === 0) return;
     let frame = 0;
     // The box the last scroll came from: the page's scrolling element for a
     // scroll of the document itself.
@@ -91,5 +88,6 @@ export function useActiveHeading(ids: readonly string[]): string | null {
     };
   }, [key]);
 
-  return active;
+  // With no headings to watch nothing is current, whatever was measured last.
+  return key ? active : null;
 }
