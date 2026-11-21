@@ -76,13 +76,15 @@ objectstack#33549).
 
 The list's Export entry (the wide toolbar's button and the Display panel's
 footer) follows the object as well as the view. An object that sets
-`userActions.exportCsv: false` gets no Export entry, in any format; the object
-grid and a dataset report on that object hide theirs too. All three read one
+`userActions.exportCsv: false` gets no Export entry for downloading its data,
+in any of the list's formats (CSV, XLSX, JSON); the object grid and a dataset
+report on that object hide theirs too. All three read one
 verdict, `isObjectExportOffered(objectDef, effectiveApiOperations)` from
 `@object-ui/core`: the authored switch over the object's `managedBy`
 default, ANDed with the caller's effective `export` API operation. Unset, the
 switch is on in every bucket. It hides the entry and is not a permission: who
-may export is the permission set's `allowExport`.
+may export is the permission set's `allowExport`. A Gantt view's PNG and PDF
+export of the chart it draws is not covered by the switch.
 
 ## Status
 

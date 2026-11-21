@@ -250,13 +250,16 @@ lands.
 
 ### The Export verdict (`isObjectExportOffered`)
 
-Every Export entry on an object's records (a grid's Export menu and its table's
-own CSV button, a list view's Export, a dataset report's Export control) reads
-one verdict, `isObjectExportOffered(objectSchema, effectiveApiOperations)`. It
+Every Export entry that downloads an object's data as CSV, XLSX or JSON (a
+grid's Export menu and its table's own CSV button, a list view's Export, a
+dataset report's Export control) reads one verdict,
+`isObjectExportOffered(objectSchema, effectiveApiOperations)`. It
 is the resolved `exportCsv` bit: the object's `userActions.exportCsv` over its
 `managedBy` default, ANDed with the server's effective `export` operation when a
 set is handed down. Every bucket defaults the bit on, so an object closes its
-Export entry, in every format, only by setting `userActions.exportCsv: false`.
+data Export entry only by setting `userActions.exportCsv: false`. A view's
+export of the picture it draws, such as the Gantt chart's PNG and PDF buttons,
+does not read this verdict.
 
 Export is a read, not a write, so it has no row in `AFFORDANCE_GRANTS` and asks
 no `can(object, verb)`. The caller's export grant, the permission set's

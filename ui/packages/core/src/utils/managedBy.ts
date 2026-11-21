@@ -203,9 +203,12 @@ export function resolveEffectiveCrudAffordances(
 }
 
 /**
- * Whether the console offers an object's Export entry: every format, on its
- * grids, list views and dataset reports (objectstack#35619). Every Export entry
- * reads this one verdict.
+ * Whether the console offers an object's data Export entry, the CSV, XLSX or
+ * JSON download of its data (objectstack#35619). The entries that read this
+ * one verdict are the grid's Export menu and its table CSV button, the list
+ * view's Export (the wide toolbar and the Display panel) and a dataset
+ * report's Export. A view's export of the picture it draws, such as the Gantt
+ * chart's PNG / PDF, does not read it.
  *
  * It is the resolved `exportCsv` bit: the object's `userActions.exportCsv` over
  * its `managedBy` default (ADR-0103 offers export in every bucket, so `false`

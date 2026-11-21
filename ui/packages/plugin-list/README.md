@@ -691,9 +691,11 @@ resolved export verdict is open. That verdict is
 `@object-ui/core`: the object's `userActions.exportCsv` over its
 `managedBy` default, ANDed with the caller's effective `export` API operation.
 An object that sets `userActions.exportCsv: false` therefore gets no Export
-entry in any format; one that does not set it keeps the entry, since every
-`managedBy` bucket defaults it on. The setting hides the entry and is not a
-permission: who may export is the permission set's `allowExport`.
+entry in any of its formats (CSV, XLSX, JSON); one that does not set it keeps
+the entry, since every `managedBy` bucket defaults it on. The setting hides the
+entry and is not a permission: who may export is the permission set's
+`allowExport`. It covers the download of the object's data only: a Gantt view's
+PNG and PDF export of the chart it draws is not gated by it.
 
 ## Sorting (and why relational columns are not offered)
 

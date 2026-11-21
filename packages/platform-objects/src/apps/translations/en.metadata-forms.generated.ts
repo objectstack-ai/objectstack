@@ -455,7 +455,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "userActions.exportCsv": {
         label: "Export CSV",
-        helpText: "The Export entry, every format, on this object's grids, list views and reports: on shows it, off hides it. Unset: shown, since every managedBy bucket offers export. It is not a permission: who may export is the permission set's allowExport."
+        helpText: "The Export entry that downloads this object's data (CSV, XLSX or JSON) on its grids, list views and dataset reports: on shows it, off hides it. A Gantt chart's PNG / PDF export is not covered. Unset: shown, since every managedBy bucket offers export. It is not a permission: who may export is the permission set's allowExport."
       },
       "userActions.transfer": {
         label: "Change Owner",
