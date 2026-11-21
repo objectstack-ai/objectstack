@@ -3230,11 +3230,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // grid, floated at the bottom centre of the face's scroller. The flat table
   // floats it itself (`floatingBar`), above its summary row and with room after
   // its last row; every other face floats it in `FloatingSelectionBarAnchor`.
+  // On the list page, where rows draw no actions of their own (#35554), one
+  // selected record offers that record's actions; elsewhere the row keeps its
+  // own menu and the bar offers the bulk actions at any count.
   const selecting = selectedRows.length > 0;
   const selectionBar = selecting ? (
     <BulkActionBar
       selectedRows={selectedRows}
-      singleRowMenu={selectedRows.length === 1 ? rowActionMenuProps(selectedRows[0]) : undefined}
+      singleRowMenu={listPageGrid && selectedRows.length === 1 ? rowActionMenuProps(selectedRows[0]) : undefined}
       actions={effectiveBulkActions ?? []}
       actionDefs={bulkActionDefs}
       objectFields={objectSchema?.fields}
