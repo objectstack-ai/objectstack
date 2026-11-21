@@ -1274,9 +1274,7 @@ export function createObjectQLAdapterFactory(
       // `where` is both selector AND guard, `field = field + delta` for each
       // `increment` entry (negative deltas decrement) and the absolute `set`
       // values land in ONE atomic step, and the answer is the updated row, or
-      // `null` once the guard matches no row. Its callers lean on that under
-      // concurrency — a backup code is redeemed by guarding on the code list
-      // as read, a team seat by guarding on the member count.
+      // `null` once the guard matches no row, under concurrent invocation too.
       //
       // ObjectQL has no native `SET n = n + $delta ... RETURNING`, so each
       // attempt reads the guarded row, computes the new values from it, and
