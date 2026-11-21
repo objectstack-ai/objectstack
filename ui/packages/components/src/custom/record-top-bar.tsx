@@ -11,19 +11,24 @@
  * record on every face — the page, the split pane, the drawer over a list or a
  * page, the maximized pane, the phone.
  *
- * Since objectstack#35593 it is the record's ONE header row, 44 px: a host
- * hands `actionSlotRef` for the element the record header draws its button
- * group into (hidden while empty), and puts a slot for the record's name and tags in `leading`, so the name, the
- * tags, the buttons and the frame controls share one row. A host with no
- * record header to draw there keeps the bar's breadcrumb.
+ * Two rows when the host hands the record row (`record`, objectstack#35853,
+ * figure 40), the page and the drawer alike:
  *
- * Left: what the host hands as `leading` — the breadcrumb 「对象 › 记录名」 (or
- * 「对象 / 记录名 + 标签」 once the header holds the bar), or one level down in a
- * pane 「← 路径」. Right, in a fixed order, each drawn only when the host hands
- * it: the counter 「3 / 21」 and ↓ ↑ (`stepper`, a list context), a hairline,
- * the record's button group (`actionSlotRef`), a hairline, the panel switches
- * (`toggles`, the right column's ⊟), then the frame controls (`frame`: ⤢ / ⤡,
- * 「收为抽屉」, ✕).
+ * 1. The navigation row, 40 px (`data-record-top-bar-nav`). Left: what the
+ *    host hands as `leading` (one level down in a pane 「← 路径」, or the
+ *    object's name when the record came from no list), then ↑ ↓ and
+ *    「第 N 条，共 M 条 · 视图名」 (`stepper`, a list context; the view's name
+ *    returns to that list). Right: the frame controls (`frame`: ⤢ in a
+ *    drawer, then ✕ — at the far right on every face). No record name, no
+ *    actions.
+ * 2. The record row, 48 px (`data-record-top-bar-record`): the record's icon,
+ *    name and tags (`record`, where the record header portals its title), and
+ *    at the right the record's button group (`actionSlotRef`, hidden while
+ *    empty) and the panel switches (`toggles`, the right column's ⊟).
+ *
+ * Without `record` it is the one-row bar it was (objectstack#35593), 44 px —
+ * the phone's: left `leading`, right the counter 「3 / 21」 and ↓ ↑, the
+ * button group, the panel switches, the frame controls.
  *
  * Pure presentation: every control's handler, and whether it applies, belong to
  * the host — `NavigationOverlay` draws it as the pane's bar, the console's
@@ -69,8 +74,13 @@ export interface RecordTopBarStepper {
    * 「3 / 21」. Absent, or outside the set: no counter, the pair alone.
    */
   position?: { index: number; total: number };
-  /** The set's name (the list view it came from), which the counter's tooltip says. */
+  /** The set's name (the list view it came from), which the counter says. */
   scope?: string;
+  /**
+   * Return to the list the set came from (objectstack#35853): the two-row
+   * bar draws `scope` as a link that calls it. Absent, the name is text.
+   */
+  onScope?: () => void;
 }
 
 export interface RecordTopBarProps {
@@ -88,8 +98,14 @@ export interface RecordTopBarProps {
   actionSlotRef?: React.Ref<HTMLSpanElement>;
   /** The panel switches (the right column's ⊟), after the step group. */
   toggles?: React.ReactNode;
-  /** The frame controls — ⤢ / ⤡, 「收为抽屉」, ✕ — at the right end. */
+  /** The frame controls — ⤢ (a drawer), ✕ — at the right end. */
   frame?: React.ReactNode;
+  /**
+   * The record row (objectstack#35853): the record's icon, name and tags, or
+   * the slot the record header portals them into. Handed, the bar is two
+   * rows; absent, one.
+   */
+  record?: React.ReactNode;
   className?: string;
 }
 
@@ -179,7 +195,7 @@ export function useRecordStepKeys(
  * The record's top bar (objectstack#27524, Target 7). See the module doc for
  * the anatomy; `data-record-top-bar` marks it on every face.
  */
-export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, toggles, frame, className }: RecordTopBarProps) {
+export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, toggles, frame, record, className }: RecordTopBarProps) {
   const { t } = useTopBarTranslation();
   const position =
     stepper?.position && stepper.position.total > 0 && stepper.position.index >= 0 && stepper.position.index < stepper.position.total
@@ -192,6 +208,107 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
     : undefined;
   const previousLabel = t('detail.previousRecord');
   const nextLabel = t('detail.nextRecord');
+  const previousButton = stepper ? (
+    <RecordTopBarButton
+      label={previousLabel}
+      title={`${previousLabel} · K`}
+      aria-keyshortcuts="K"
+      onClick={stepper.onPrevious}
+      disabled={!stepper.onPrevious}
+      data-record-top-bar-step="previous"
+    >
+      <ChevronUp className="h-3.5 w-3.5" />
+    </RecordTopBarButton>
+  ) : null;
+  const nextButton = stepper ? (
+    <RecordTopBarButton
+      label={nextLabel}
+      title={`${nextLabel} · J`}
+      aria-keyshortcuts="J"
+      onClick={stepper.onNext}
+      disabled={!stepper.onNext}
+      data-record-top-bar-step="next"
+    >
+      <ChevronDown className="h-3.5 w-3.5" />
+    </RecordTopBarButton>
+  ) : null;
+  if (record !== undefined) {
+    const scope = stepper?.scope;
+    return (
+      <div className={cn('flex min-w-0 shrink-0 flex-col border-b', className)} data-record-top-bar="" data-record-top-bar-rows="2">
+        <div
+          className="flex min-h-10 sm:h-10 sm:min-h-0 min-w-0 items-center justify-between gap-2 px-2 text-xs text-muted-foreground"
+          data-record-top-bar-nav=""
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-1" data-record-top-bar-leading="" data-testid={leadingTestId}>
+            {leading}
+            {stepper && (
+              <span className="flex min-w-0 items-center gap-0.5" data-record-top-bar-stepper="">
+                {previousButton}
+                {nextButton}
+                {position && (
+                  <span className="ml-1 flex min-w-0 items-center gap-1 whitespace-nowrap">
+                    <span className="tabular-nums" title={positionLabel} aria-label={positionLabel} data-record-top-bar-position="">
+                      {t('detail.recordOf', position)}
+                    </span>
+                    {scope && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        {stepper.onScope ? (
+                          <button
+                            type="button"
+                            onClick={stepper.onScope}
+                            className="min-w-0 truncate rounded px-0.5 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            data-record-top-bar-scope=""
+                          >
+                            {scope}
+                          </button>
+                        ) : (
+                          <span className="min-w-0 truncate" data-record-top-bar-scope="">{scope}</span>
+                        )}
+                      </>
+                    )}
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5" data-record-top-bar-frame="">
+            {frame}
+          </div>
+        </div>
+        <div
+          className="flex min-h-12 min-w-0 items-center justify-between gap-3 px-3 pb-1"
+          data-record-top-bar-record=""
+        >
+          <div className="flex min-w-32 flex-1 items-center gap-2 overflow-hidden" data-record-top-bar-title="">
+            {record}
+          </div>
+          <div className="flex min-w-0 shrink items-center justify-end gap-0.5" data-record-top-bar-controls="">
+            {actionSlotRef && (
+              <>
+                <span
+                  ref={actionSlotRef}
+                  className="peer/actions flex min-w-0 items-center justify-end gap-2 text-sm text-foreground empty:hidden"
+                  data-record-top-bar-actions=""
+                />
+                {/* Hidden beside no actions, and beside a host's toggle slot
+                    that holds nothing (a drawer with no panel switch). */}
+                {toggles && (
+                  <span
+                    aria-hidden="true"
+                    className="mx-1.5 h-4 w-px shrink-0 bg-border peer-empty/actions:hidden [&:has(+:empty)]:hidden"
+                    data-record-top-bar-divider="actions"
+                  />
+                )}
+              </>
+            )}
+            {toggles}
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       className={cn(
@@ -216,26 +333,8 @@ export function RecordTopBar({ leading, leadingTestId, stepper, actionSlotRef, t
                 {position.current} / {position.total}
               </span>
             )}
-            <RecordTopBarButton
-              label={nextLabel}
-              title={`${nextLabel} · J`}
-              aria-keyshortcuts="J"
-              onClick={stepper.onNext}
-              disabled={!stepper.onNext}
-              data-record-top-bar-step="next"
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-            </RecordTopBarButton>
-            <RecordTopBarButton
-              label={previousLabel}
-              title={`${previousLabel} · K`}
-              aria-keyshortcuts="K"
-              onClick={stepper.onPrevious}
-              disabled={!stepper.onPrevious}
-              data-record-top-bar-step="previous"
-            >
-              <ChevronUp className="h-3.5 w-3.5" />
-            </RecordTopBarButton>
+            {nextButton}
+            {previousButton}
             {(actionSlotRef || toggles || frame) && (
               <span aria-hidden="true" className="mx-1.5 h-4 w-px bg-border" data-record-top-bar-divider="" />
             )}

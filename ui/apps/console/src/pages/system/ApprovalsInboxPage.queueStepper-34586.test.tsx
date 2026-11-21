@@ -241,8 +241,8 @@ describe('the approvals queue steps from request to request (objectstack#34586)'
     await waitFor(() => expect(counter()).not.toBeNull());
     expect(counter()).toHaveAttribute('aria-label', '1 of 3 in Approvals Inbox');
     expect(screen.getByTestId('approval-queue-open-next')).toBeInTheDocument();
-    // The crumb leads back to the inbox, by its name.
-    expect(document.querySelector('[data-record-crumb-object]')).toHaveTextContent('Approvals Inbox');
+    // The navigation row leads back to the inbox, by its name (objectstack#35853).
+    expect(document.querySelector('[data-record-top-bar-scope]')).toHaveTextContent('Approvals Inbox');
 
     fireEvent.click(document.querySelector('[data-record-top-bar-step="next"]') as HTMLElement);
     await waitFor(() => expect(where()).toBe(pageOf('req_b')));
