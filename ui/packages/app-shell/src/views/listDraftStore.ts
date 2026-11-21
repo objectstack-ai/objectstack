@@ -99,12 +99,31 @@ function isEmptyPart(value: unknown): boolean {
   return value === undefined;
 }
 
+/**
+ * A part as the draft keeps it: a sort is its fields and directions (a grid
+ * reports row ids beside them), and a filter group with no condition is no
+ * filter (the Filter panel's "Clear all" reports an empty group).
+ */
+function normalizePart(key: string, value: unknown): unknown {
+  if (key === 'sort' && Array.isArray(value)) {
+    return value
+      .filter((item): item is { field: string; order?: string } => !!item && typeof item.field === 'string' && !!item.field)
+      .map((item) => ({ field: item.field, order: item.order === 'desc' ? 'desc' : 'asc' }));
+  }
+  if (key === 'filters') {
+    const conditions = (value as { conditions?: unknown } | null | undefined)?.conditions;
+    return Array.isArray(conditions) && conditions.length > 0 ? value : undefined;
+  }
+  return value;
+}
+
 /** Lay `patch` over the draft of `scope`, claiming the scope when it is not held. */
 export function patchListDraft(scope: string, patch: ListDraftPatch): void {
   const base = slot.scope === scope ? slot.draft : EMPTY_DRAFT;
   const next: Record<string, unknown> = { ...base };
   let changed = slot.scope !== scope;
-  for (const [key, value] of Object.entries(patch)) {
+  for (const [key, raw] of Object.entries(patch)) {
+    const value = normalizePart(key, raw);
     const before = (base as Record<string, unknown>)[key];
     if (isEmptyPart(value)) {
       if (key in next) {

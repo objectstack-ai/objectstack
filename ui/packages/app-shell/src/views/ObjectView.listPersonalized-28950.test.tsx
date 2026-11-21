@@ -1,6 +1,6 @@
 /**
- * objectstack#28950 — the 「Personalized」 marker beside the list title and its
- * one reset, at the host seam: the real object page, the real
+ * objectstack#35955 — Discard and Save on a list that holds a draft (the
+ * 「Personalized」 marker of objectstack#28950 before it), at the host seam: the real object page, the real
  * `ListPreferencesProvider` and the real router, with `ListView` captured (its
  * own half, what of the list differs from the view, is pinned in plugin-list's
  * `ListView.personalization-28950.test.tsx`).
@@ -11,15 +11,16 @@
  *      Filter panel, search, sort, grouping and every chip) and keeps every
  *      other param: a `filter[...]` scope a "View all" link opened the list
  *      with, the open record.
- *   2. The marker is drawn only while the list reports a part (or a column
- *      layout is stored), names the parts, and is the header's one reset: the
- *      ⋯ menu carries none.
- *   3. After a reload (the list seeded from the URL), the reset opens the list
+ *   2. Discard and Save are drawn only while the list reports a draft part
+ *      (or holds a column order or an added column): the row height and a
+ *      search alone draw nothing. Save's menu names the parts; the compact
+ *      face holds Discard in it; the ⋯ menu carries no reset.
+ *   3. After a reload (the list seeded from the URL), Discard opens the list
  *      as the view declares it: the address bar has no `uf_*` param left, a
  *      reload would not bring the old list back, and the chips start empty.
- *      This is the case the header's old "Reset view" re-seeded from the URL.
- *   4. In session, the reset also drops the cached search term, which the old
- *      "Reset view" wrote back into the address bar.
+ *   4. In session, the search term is the draft's, kept in no storage, and
+ *      Discard drops it.
+ *   5. Column widths are the reader's: never a draft, and Discard keeps them.
  */
 
 import * as React from 'react';
@@ -27,7 +28,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
-import { render, cleanup, act, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, cleanup, act, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -112,6 +113,7 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 }));
 
 import { ObjectView, type ConsoleObjectViewProps } from './ObjectView';
+import { listDraftScope, readListDraft, resetListDraftStoreForTests } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
 import { ListPreferencesProvider } from '../context/ListPreferencesProvider';
@@ -233,6 +235,7 @@ beforeEach(() => {
   listProps = null;
   currentSearch = '';
   localStorage.clear();
+  resetListDraftStoreForTests();
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: vi.fn(async () => json({ data: [] }, 200)) as unknown as typeof fetch });
   vi.stubGlobal('fetch', vi.fn(async () => json({ data: [] }, 200)));
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -261,31 +264,40 @@ describe('withoutListStateParams (objectstack#28950)', () => {
   });
 });
 
-describe('the 「Personalized」 marker and its one reset (objectstack#28950)', () => {
-  it('is drawn only while the list reports a part, names the parts, and the header ⋯ carries no reset', async () => {
+/** Open a Radix menu the way a pointer does (jsdom sends no click-open). */
+function openMenu(trigger: HTMLElement) {
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+}
+
+describe('Discard and Save, while the list holds a draft (objectstack#35955; the marker of objectstack#28950 before it)', () => {
+  it('is drawn only while the list reports a draft part, names the parts in the Save menu, and the header ⋯ carries no reset', async () => {
     mount(makeFamily({}));
     await listReady();
-    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    expect(screen.queryByTestId('list-draft')).toBeNull();
+
+    // The row height is the reader's, and a search alone is not a change to the view.
+    act(() => listProps.onPersonalizationChange(['search', 'density']));
+    await wait(50);
+    expect(screen.queryByTestId('list-draft')).toBeNull();
 
     act(() => listProps.onPersonalizationChange(['sort', 'search', 'rowColor']));
-    const marker = await screen.findByTestId('list-personalized-marker');
-    // Named by its label, which the icon-only phone face keeps as `aria-label`.
-    expect(marker.getAttribute('aria-label')).toBe('console.objectView.personalized');
-    fireEvent.click(marker);
-    const parts = await screen.findByTestId('list-personalized-parts');
-    expect([...parts.querySelectorAll('li')].map((li) => li.getAttribute('data-part'))).toEqual(['search', 'sort', 'rowColor']);
-    expect([...parts.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
-      'console.objectView.personalizedParts.search',
-      'console.objectView.personalizedParts.sort',
-      'console.objectView.personalizedParts.rowColor',
-    ]);
+    expect(await screen.findByTestId('list-draft-discard')).toBeTruthy();
+    // The compact face (a phone, a narrow list) holds Discard in Save's menu.
+    openMenu(screen.getByTestId('list-draft-compact'));
+    const menu = await screen.findByTestId('list-draft-compact-menu');
+    expect(within(menu).getByTestId('list-draft-parts').textContent).toBe(
+      'console.objectView.draft.heading: console.objectView.personalizedParts.sort'
+      + 'console.objectView.draft.partSeparator'
+      + 'console.objectView.personalizedParts.rowColor',
+    );
+    expect(within(menu).getByTestId('list-draft-compact-discard')).toBeTruthy();
     expect(screen.queryByTestId('object-view-reset-view-button')).toBeNull();
 
     act(() => listProps.onPersonalizationChange([]));
-    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
   });
 
-  it('after a reload, the reset opens the list as the view declares it and leaves no `uf_*` param behind', async () => {
+  it('after a reload, Discard opens the list as the view declares it and leaves no `uf_*` param behind', async () => {
     const family = makeFamily({});
     mount(family, personalizedQuery());
     await listReady();
@@ -297,9 +309,8 @@ describe('the 「Personalized」 marker and its one reset (objectstack#28950)', 
     const before = listProps;
 
     act(() => listProps.onPersonalizationChange(['filters', 'search', 'sort', 'grouping']));
-    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
     await act(async () => {
-      fireEvent.click(await screen.findByTestId('list-personalized-reset'));
+      fireEvent.click(await screen.findByTestId('list-draft-discard'));
     });
     await wait(400);
 
@@ -312,46 +323,51 @@ describe('the 「Personalized」 marker and its one reset (objectstack#28950)', 
     expect(ufParams()).toEqual([]);
     // The drill scope is not the reader's list state: it stays.
     expect(new URLSearchParams(currentSearch).get('filter[owner]')).toBe('u1');
-    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    expect(screen.queryByTestId('list-draft')).toBeNull();
   });
 
-  it('in session, the reset drops the cached search term, which would otherwise seed the list again', async () => {
+  it('in session, the search is the draft\'s: kept nowhere durable, and Discard drops it', async () => {
     mount(makeFamily({}));
     await listReady();
     const cacheKey = buildListFilterKey(session.userId, OBJECT_NAME, SYSTEM_ID);
 
     act(() => listProps.onSearchChange('Alan'));
     await wait(400);
-    expect(JSON.parse(localStorage.getItem(cacheKey!) ?? '{}').search).toBe('Alan');
+    expect(localStorage.getItem(cacheKey!)).toBeNull();
+    expect(readListDraft(listDraftScope(session.userId, OBJECT_NAME, SYSTEM_ID)).search).toBe('Alan');
     expect(new URLSearchParams(currentSearch).get('uf__search')).toBe('Alan');
 
-    act(() => listProps.onPersonalizationChange(['search']));
-    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
+    act(() => listProps.onPersonalizationChange(['search', 'sort']));
     await act(async () => {
-      fireEvent.click(await screen.findByTestId('list-personalized-reset'));
+      fireEvent.click(await screen.findByTestId('list-draft-discard'));
     });
     await wait(400);
 
-    expect(localStorage.getItem(cacheKey!)).toBeNull();
+    expect(readListDraft(listDraftScope(session.userId, OBJECT_NAME, SYSTEM_ID))).toEqual({});
     expect(listProps.initialSearchTerm).toBeUndefined();
     expect(ufParams()).toEqual([]);
   });
 
-  it('CONTROL: a stored column layout alone draws the marker, and the reset drops it with the rest of the entry', async () => {
+  it('column widths are the reader\'s, never a draft: a stored width draws nothing, and Discard keeps it', async () => {
     const family = makeFamily({ [`ui.list.${OBJECT_NAME}`]: { perView: { [SYSTEM_ID]: { columnState: { widths: { name: 280 } } } } } });
     mount(family);
     await listReady();
+    expect(screen.queryByTestId('list-draft')).toBeNull();
+    expect(listProps.schema.columnState).toEqual({ widths: { name: 280 } });
 
-    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
-    const parts = await screen.findByTestId('list-personalized-parts');
-    expect([...parts.querySelectorAll('li')].map((li) => li.getAttribute('data-part'))).toEqual(['columns']);
+    // A drag of the column order is a draft; the width rides on the same report.
+    act(() => listProps.schema.onColumnStateChange({ order: ['amount', 'name'], widths: { name: 280 } }));
+    expect(await screen.findByTestId('list-draft-discard')).toBeTruthy();
     await act(async () => {
-      fireEvent.click(screen.getByTestId('list-personalized-reset'));
+      fireEvent.click(screen.getByTestId('list-draft-discard'));
     });
     await wait(700);
 
-    expect(family.save).toHaveBeenCalledWith(`ui.list.${OBJECT_NAME}`, {});
-    expect(listProps.schema.columnState).toEqual({});
-    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    expect(listProps.schema.columnState).toEqual({ widths: { name: 280 } });
+    expect(screen.queryByTestId('list-draft')).toBeNull();
+    // Nothing of the order reached the reader's stored row.
+    for (const [, value] of family.save.mock.calls) {
+      expect(JSON.stringify(value)).not.toContain('order');
+    }
   });
 });

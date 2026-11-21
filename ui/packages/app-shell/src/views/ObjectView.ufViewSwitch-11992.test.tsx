@@ -92,6 +92,7 @@ vi.mock('./MetadataInspector', () => ({
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
+import { resetListDraftStoreForTests } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { buildListFilterKey } from './listFilterStorage';
 import { LIST_FILTER_PARAM } from './userFilterUrlState';
@@ -213,6 +214,7 @@ async function mountHost(entry: string): Promise<Host> {
 beforeEach(() => {
   cleanup();
   localStorage.clear();
+  resetListDraftStoreForTests();
   listQueries = [];
   window.history.replaceState(null, '', '/');
   vi.stubGlobal(
@@ -270,17 +272,19 @@ describe('a view switch reads the next view\'s own URL for its quick filters (ob
     expect(chipCount()).toBe(1);
   });
 
-  it('the view switched to still opens on its per-user cache — objectui#11915\'s precedence is untouched', async () => {
+  it('the view switched to opens as its view declares it: no other list\'s draft and no older per-browser filter ride along (objectstack#35955)', async () => {
+    // A Filter panel group an earlier console kept for this browser: since
+    // objectstack#35955 a list opens on its draft only, never on stored state.
     localStorage.setItem(
       buildListFilterKey('u1', OBJ, 'qb')!,
       JSON.stringify({ filters: { id: 'root', logic: 'and', conditions: [{ id: 'r', field: 'status', operator: 'equals', value: 'open' }] } }),
     );
     const host = await mountHost(`${VIEW}/qa?uf_priority=urgent`);
     await host.clickTab('qb');
-    expect(filterOf(lastQuery())).toContain('"status","=","open"');
+    expect(filterOf(lastQuery())).not.toContain('status');
     expect(filterOf(lastQuery())).not.toContain('priority');
     const params = new URLSearchParams(host.search());
-    expect(params.has(LIST_FILTER_PARAM)).toBe(true);
+    expect(params.has(LIST_FILTER_PARAM)).toBe(false);
     expect(params.has('uf_priority')).toBe(false);
   });
 

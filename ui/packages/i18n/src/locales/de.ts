@@ -2636,6 +2636,12 @@ const de = {
       viewNameInvalid: "Verwenden Sie Kleinbuchstaben, Ziffern und Unterstriche; beginnen Sie mit einem Buchstaben oder Unterstrich.",
       systemViewReadonly: "Systemansicht — im Code definiert, schreibgeschützt.",
       cannotEditMetaView: "Diese Ansicht ist integriert und im Code definiert – sie kann nicht geändert werden.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
+      resetView: "Auf Ansicht zurücksetzen",
+      resetViewTitle: "Stellt die eigenen Filter, Suche, Sortierung, Gruppierung, Spaltenanordnung, ausgeblendeten Felder, Dichte, Layout, Zeilenfarbe, Zeilennummern und Inline-Bearbeitung dieser Ansicht wieder her. Angeheftete Ansichten, Favoriten und die Art, wie Datensätze geöffnet werden, bleiben unverändert. Nur Ihre Liste ändert sich.",
+      personalized: "Personalisiert",
+      personalizedHeading: "Ihre Liste weicht von dieser Ansicht ab bei",
       // objectstack#35955 — a list's unsaved changes: Discard and Save.
       draft: {
         discard: "Verwerfen",

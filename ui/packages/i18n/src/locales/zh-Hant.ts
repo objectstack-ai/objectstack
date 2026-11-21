@@ -2723,6 +2723,12 @@ const zhHant = {
       },
       systemViewReadonly: '系統檢視由程式碼定義，只讀。',
       cannotEditMetaView: '該檢視為內建檢視，由程式碼定義，無法修改。',
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
+      resetView: '恢復為檢視設定',
+      resetViewTitle: '恢復此檢視自身的篩選、搜尋、排序、分組、列布局、隱藏欄位、密度、佈局、行顏色、行號和行內編輯。固定的檢視、收藏和記錄的開啟方式保持不變。只影響你自己的列表。',
+      personalized: '已個性化',
+      personalizedHeading: '你的列表與此檢視不同之處',
       // objectstack#35955 — a list's unsaved changes: Discard and Save.
       draft: {
         discard: '放棄',

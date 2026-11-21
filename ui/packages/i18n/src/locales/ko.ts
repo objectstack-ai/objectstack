@@ -2636,6 +2636,12 @@ const ko = {
       viewNameInvalid: "소문자, 숫자, 밑줄을 사용하고 문자 또는 밑줄로 시작하세요.",
       systemViewReadonly: "시스템 보기는 코드에 정의되어 있어 읽기 전용입니다.",
       cannotEditMetaView: "이 보기는 코드에 정의된 기본 제공 보기이므로 변경할 수 없습니다.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
+      resetView: "보기 설정으로 되돌리기",
+      resetViewTitle: "이 보기 자체의 필터, 검색, 정렬, 그룹, 열 배치, 숨긴 필드, 밀도, 레이아웃, 행 색상, 행 번호, 인라인 편집으로 되돌립니다. 고정한 보기, 즐겨찾기, 레코드 열기 방식은 그대로 유지됩니다. 본인의 목록만 변경됩니다.",
+      personalized: "개인 설정됨",
+      personalizedHeading: "이 보기와 다른 항목",
       // objectstack#35955 — a list's unsaved changes: Discard and Save.
       draft: {
         discard: "변경 취소",

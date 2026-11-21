@@ -2704,6 +2704,12 @@ const fr = {
       viewNameInvalid: "Utilisez des minuscules, des chiffres et des tirets bas ; commencez par une lettre ou un tiret bas.",
       systemViewReadonly: "Vue système définie dans le code — en lecture seule.",
       cannotEditMetaView: "Cette vue est intégrée et définie dans le code — elle ne peut pas être modifiée.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
+      resetView: "Revenir à la vue",
+      resetViewTitle: "Rétablit les filtres, la recherche, le tri, le regroupement, la disposition des colonnes, les champs masqués, la densité, la disposition, la couleur de ligne, les numéros de ligne et l’édition en ligne propres à cette vue. Les vues épinglées, les favoris et le mode d’ouverture des enregistrements ne changent pas. Seule votre liste change.",
+      personalized: "Personnalisée",
+      personalizedHeading: "Votre liste diffère de cette vue par",
       // objectstack#35955 — a list's unsaved changes: Discard and Save.
       draft: {
         discard: "Abandonner",

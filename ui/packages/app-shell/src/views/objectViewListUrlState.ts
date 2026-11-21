@@ -44,7 +44,7 @@ import { parseUrlEqualityFilterTriples } from './drillUrlFilters.js';
 import { selectFilterParams } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
-import type { ListPersonalizationPart } from './ListPersonalizedMarker.js';
+import type { ListPersonalizationPart } from './ListDraftActions.js';
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     !!v && typeof v === 'object' && !Array.isArray(v);

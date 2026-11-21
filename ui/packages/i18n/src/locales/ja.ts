@@ -2638,6 +2638,12 @@ const ja = {
       viewNameInvalid: "英小文字、数字、アンダースコアを使用し、先頭は文字かアンダースコアにしてください。",
       systemViewReadonly: "システムビューはコードで定義されており、読み取り専用です。",
       cannotEditMetaView: "このビューはコードで定義された組み込みビューのため、変更できません。",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
+      resetView: "ビューの設定に戻す",
+      resetViewTitle: "このビュー本来のフィルター、検索、並べ替え、グループ、列の配置、非表示フィールド、密度、レイアウト、行の色、行番号、インライン編集に戻します。ピン留めしたビュー、お気に入り、レコードの開き方は変わりません。変わるのはあなたのリストだけです。",
+      personalized: "個人設定あり",
+      personalizedHeading: "このビューと異なる項目",
       // objectstack#35955 — a list's unsaved changes: Discard and Save.
       draft: {
         discard: "破棄",

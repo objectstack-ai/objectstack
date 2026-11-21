@@ -2916,6 +2916,12 @@ const ar = {
       viewNameInvalid: "استخدم أحرفًا إنجليزية صغيرة وأرقامًا وشرطات سفلية؛ وابدأ بحرف أو شرطة سفلية.",
       systemViewReadonly: "عرض النظام معرَّف في الكود — للقراءة فقط.",
       cannotEditMetaView: "هذا عرض مدمج معرَّف في الكود — لا يمكن تعديله.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
+      resetView: "الرجوع إلى إعدادات العرض",
+      resetViewTitle: "يعيد عوامل التصفية والبحث والترتيب والتجميع وترتيب الأعمدة والحقول المخفية والكثافة والتخطيط ولون الصف وأرقام الصفوف والتحرير المضمّن الخاصة بهذا العرض. تبقى طرق العرض المثبتة والمفضلة وطريقة فتح السجلات كما هي. تتغير قائمتك فقط.",
+      personalized: "مخصّصة",
+      personalizedHeading: "تختلف قائمتك عن هذا العرض في",
       // objectstack#35955 — a list's unsaved changes: Discard and Save.
       draft: {
         discard: "تجاهل",

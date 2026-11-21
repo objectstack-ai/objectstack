@@ -2782,6 +2782,12 @@ const ru = {
       viewNameInvalid: "Используйте строчные латинские буквы, цифры и подчёркивания; начните с буквы или подчёркивания.",
       systemViewReadonly: "Системное представление определено в коде — только для чтения.",
       cannotEditMetaView: "Это встроенное представление, определённое в коде, — изменить его нельзя.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
+      resetView: "Вернуть настройки представления",
+      resetViewTitle: "Возвращает собственные фильтры, поиск, сортировку, группировку, расположение столбцов, скрытые поля, плотность, макет, цвет строк, номера строк и встроенное редактирование этого представления. Закреплённые представления, избранное и способ открытия записей не меняются. Меняется только ваш список.",
+      personalized: "Настроено",
+      personalizedHeading: "Ваш список отличается от представления",
       // objectstack#35955 — a list's unsaved changes: Discard and Save.
       draft: {
         discard: "Отменить",
