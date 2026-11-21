@@ -5,7 +5,7 @@
 
 fix(console): the first-run checklist on Home counts its done rows the way its progress line does, names the Setup app in the reader's language, and folds to one line when two rows or fewer are left
 
-Clause-②: no
+Clause-②: yes (widening) — @object-ui/i18n adds console.firstRunChecklist.showDoneSplit; nothing removed
 Metadata-protocol: none
 
 The progress line counts the required rows alone, while the control that unfolds the done rows counted every done row, optional ones included, so a managed environment could read "6 of 7 done" above "Show completed (8)". Once an optional row is done the control now names the two counts apart ("Show completed (6 required · 2 optional)"); with no optional row done it reads as before.
