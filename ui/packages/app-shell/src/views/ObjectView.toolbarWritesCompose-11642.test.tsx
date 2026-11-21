@@ -121,6 +121,9 @@ vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
 }));
 
 import { toast } from 'sonner';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 
