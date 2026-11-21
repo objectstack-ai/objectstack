@@ -1,5 +1,5 @@
 ---
-'@object-ui/components': minor
+'@object-ui/components': patch
 '@object-ui/fields': patch
 ---
 
