@@ -41,6 +41,13 @@ export * from './input-group';
 export * from './item';
 export { Kbd } from './kbd';
 export {
+  ObjectIconTile,
+  OBJECT_COLOR_TILE_CLASS,
+  objectColorOrDefault,
+  type ObjectIconTileProps,
+  type ObjectIconTileSize,
+} from './object-icon-tile';
+export {
   recordOverlayWidthStorageKey,
   legacyRecordDrawerWidthKey,
   type NavigationOverlayMode,

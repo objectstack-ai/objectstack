@@ -226,6 +226,11 @@ const ru = {
       notLoaded: "Позиции этой записи не загружены.",
       loadFailed: "Не удалось загрузить позиции",
       saveFailed: "Не удалось сохранить позиции",
+      untouchedNotSaved: "{{count}} пустая строка не сохранена",
+      untouchedNotSaved_one: "{{count}} пустая строка не сохранена",
+      untouchedNotSaved_few: "{{count}} пустые строки не сохранены",
+      untouchedNotSaved_many: "{{count}} пустых строк не сохранено",
+      untouchedNotSaved_other: "{{count}} пустой строки не сохранено",
       noChildObject: "Для этой панели не настроен дочерний объект: укажите в {{property}} объект, строки которого она выводит.",
     },
     keepEditing: "Продолжить редактирование",
@@ -264,6 +269,10 @@ const ru = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Заполните обязательные поля',
+    requiredPromptDescription: 'Это изменение делает поля ниже обязательными. Заполните их, чтобы сохранить его.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Открыть {{name}}',
@@ -337,6 +346,8 @@ const ru = {
     options: {
       empty: "Нет доступных вариантов",
       selectFirst: "Сначала выберите {{fields}}",
+      search: "Поиск…",
+      noMatches: "Нет подходящих вариантов",
     },
     objectRef: {
       loading: "Загрузка объектов…",
@@ -421,6 +432,8 @@ const ru = {
     datePicker: {
       today: "Сегодня",
       tomorrow: "Завтра",
+      nextWeek: "Через неделю",
+      clearPick: "Очистить",
       clear: "Очистить дату",
       openCalendar: "Открыть календарь",
       time: "Время",
@@ -435,6 +448,11 @@ const ru = {
     },
     tags: {
       placeholder: "Введите и нажмите Enter, чтобы добавить…",
+      add: "Добавить «{{value}}»",
+    },
+    color: {
+      swatches: "Цвета",
+      custom: "Свой цвет",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2568,10 +2586,11 @@ const ru = {
     },
     firstRunChecklist: {
       title: "Подготовьте систему",
-      description: "Что стоит настроить до того, как начнут работать коллеги. Любой пункт можно позже изменить в Setup.",
+      description: "Что стоит настроить до того, как начнут работать коллеги. Любой пункт можно позже изменить в разделе «Настройка».",
       progress: "Выполнено {{done}} из {{total}}",
       dismiss: "Скрыть список",
       showDone: "Показать выполненные ({{done}})",
+      showDoneSplit: "Показать выполненные (обязательных: {{required}} · необязательных: {{optional}})",
       hideDone: "Скрыть выполненные",
       optional: "Необязательно",
       set: "Задать",
@@ -2616,13 +2635,13 @@ const ru = {
       aiProvider: {
         title: 'Настроить встроенный ИИ',
         todo: 'Поставщик ИИ пока не используется. Выберите поставщика и добавьте его ключ.',
-        doneSettings: '{{provider}}, задан в Setup.',
+        doneSettings: '{{provider}}, задан в разделе «Настройка».',
         doneEnvironment: '{{provider}}, обнаружен в окружении сервера.',
         action: 'Настроить',
       },
       connectAssistant: {
         title: 'Подключить внешнего ИИ-ассистента',
-        todo: 'Работайте в этой системе от своего имени из Claude, Doubao и похожих ассистентов через MCP. Встроенный ИИ настраивается отдельно: Setup → ИИ и Embedder.',
+        todo: 'Работайте в этой системе от своего имени из Claude, Doubao и похожих ассистентов через MCP. Встроенный ИИ настраивается отдельно: Настройка → ИИ и Embedder.',
         done: 'Ваш ИИ-ассистент или API-ключ подключён.',
         action: 'Подключить',
       },
@@ -3452,6 +3471,18 @@ const ru = {
     docConflictCandidates: 'Пакеты, в которых есть этот документ',
     documentation: 'Документация',
     uncategorized: 'Без категории',
+    backToApp: 'Назад в {{app}}',
+    searchDocs: 'Поиск по документации',
+    noDocsMatch: 'Нет подходящих статей.',
+    docsNavigation: 'Навигация по документации',
+    docsBreadcrumb: 'Путь в документации',
+    articlePager: 'Предыдущая и следующая статья',
+    previousArticle: 'Назад',
+    nextArticle: 'Далее',
+    firstInBook: 'Это первая статья руководства',
+    lastInBook: 'Это последняя статья руководства',
+    enlargeDiagram: 'Увеличить',
+    diagram: 'Схема',
     about: 'О программе',
     aboutTitle: 'Об этой консоли',
     aboutDescription: 'Сборка, из которой скомпилирована эта консоль.',

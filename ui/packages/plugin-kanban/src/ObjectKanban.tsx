@@ -22,14 +22,17 @@ import {
   useFilterScope,
   useResolvedFilter,
   usePredicateScope,
+  classifyLoadError,
 } from '@object-ui/react';
 import {
   NavigationOverlay,
+  DataEmptyState,
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
   toast,
 } from '@object-ui/components';
 import { createSafeTranslation } from '@object-ui/i18n';
+import { Lock } from 'lucide-react';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
   RecordDetailPanel,
@@ -47,16 +50,22 @@ import {
   stateMachineNextValues,
   type SchemaLike,
 } from '@object-ui/core';
-import { getBadgeColorClasses, getBadgeHexAppearance, getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
+import {
+  getBadgeColorClasses,
+  getBadgeHexAppearance,
+  getCellRenderer,
+  resolveCellRendererType,
+  // objectstack#35956 — the in-place fill-in, shared with the list cell and
+  // the record page (it used to live in this package).
+  collectRequiredWhenPromptFields,
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredWhenPromptField,
+} from '@object-ui/fields';
 import { usePermissions } from '@object-ui/permissions';
 import { KANBAN_UNCOLUMNED_ID } from './index';
 import { KanbanBoardCore } from './KanbanBoardCore';
 import type { KanbanBoardProps, KanbanLaneRows } from './KanbanImpl';
-import {
-  collectRequiredWhenPromptFields,
-  type RequiredWhenPromptField,
-} from './requiredWhenPrompt';
-import { RequiredFieldsDialog } from './RequiredFieldsDialog';
 import { KanbanRecordsSettledContext } from './KanbanRecordsSettled';
 import { KanbanColumnSummaryContext, type KanbanColumnSummary } from './KanbanColumnSummary';
 import {
@@ -91,6 +100,12 @@ import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle'
 const KANBAN_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.recordDetail': 'Record Detail',
   'detail.recordDetailWithLabel': '{{label}} Detail',
+  // The refused-read state reuses the shared no-access sentence the list page
+  // and the related list draw, so a host pack that translates them translates
+  // this board too; these rows are the provider-less fallback and say exactly
+  // what the `en` pack says.
+  'list.loadErrorForbiddenTitle': 'You don’t have access',
+  'list.loadErrorForbiddenMessage': 'You don’t have permission to view these records. Contact your administrator if you think you should have access.',
 };
 
 /**
@@ -1821,6 +1836,8 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     fromColumnId: string;
     toColumnId: string;
     fields: RequiredWhenPromptField[];
+    /** The record as stored when the card was dropped. */
+    record: Record<string, unknown>;
   } | null>(null);
   const [pendingSubmitting, setPendingSubmitting] = useState(false);
 
@@ -1913,14 +1930,13 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       const fields = collectRequiredWhenPromptFields(
         objectDef?.fields,
         record,
-        groupBy,
-        toColumnId,
+        { [groupBy]: toColumnId },
       );
       if (fields.length > 0) {
         // No optimistic write and no PATCH: the card sits in its source column
         // behind the modal until the user commits, so Cancel needs no rollback
         // and a refusal that never happens cannot need one either.
-        setPendingMove({ cardId, fromColumnId, toColumnId, fields });
+        setPendingMove({ cardId, fromColumnId, toColumnId, fields, record: record ?? {} });
         // Nothing was written yet: the board announces nothing at settle. The
         // dialog, and the toast of the write it submits, speak for this move.
         return { kind: 'deferred' };
@@ -1933,26 +1949,68 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
 
   // Label + localized options for each prompted field, resolved with the same
   // helpers the cards use so the dialog names a field exactly as the board does.
-  const pendingFields = useMemo(() => {
-    if (!pendingMove) return [];
+  const labelPromptField = (f: RequiredWhenPromptField): RequiredFieldsDialogField => {
     const objectKey = objectDef?.name || schema.objectName || '';
-    return pendingMove.fields.map((f) => {
-      const options = f.def.options;
-      const localized =
-        objectKey && Array.isArray(options)
-          ? translateOptions(objectKey, f.name, options)
-          : options;
-      const declaredLabel = typeof f.def.label === 'string' ? f.def.label : '';
-      return {
-        ...f,
-        def: { ...f.def, ...(localized ? { options: localized } : {}) },
-        label: fieldLabel(objectKey, f.name, declaredLabel || f.name),
-      };
-    });
-  }, [pendingMove, objectDef, schema.objectName, translateOptions, fieldLabel]);
+    const options = f.def.options;
+    const localized =
+      objectKey && Array.isArray(options)
+        ? translateOptions(objectKey, f.name, options)
+        : options;
+    const declaredLabel = typeof f.def.label === 'string' ? f.def.label : '';
+    return {
+      ...f,
+      def: { ...f.def, ...(localized ? { options: localized } : {}) },
+      label: fieldLabel(objectKey, f.name, declaredLabel || f.name),
+    };
+  };
+  const pendingFields = pendingMove ? pendingMove.fields.map(labelPromptField) : [];
+  // objectstack#35956 — the dialog names the record and the move that set it
+  // off, and a value typed into it can make one more field required.
+  const pendingChange = (() => {
+    if (!pendingMove || !schema.groupBy) return null;
+    const objectKey = objectDef?.name || schema.objectName || '';
+    const declared = objectDef?.fields?.[schema.groupBy]?.label;
+    const column = (effectiveColumns as Array<{ id: unknown; title?: unknown }>)
+      .find((c) => String(c.id) === String(pendingMove.toColumnId));
+    const record = pendingMove.record;
+    const name = getRecordDisplayName(objectDef, record);
+    return {
+      recordName: typeof name === 'string' && name.length > 0 ? name : undefined,
+      changes: [{
+        name: schema.groupBy,
+        label: fieldLabel(objectKey, schema.groupBy, typeof declared === 'string' && declared ? declared : schema.groupBy),
+        value: typeof column?.title === 'string' && column.title ? column.title : String(pendingMove.toColumnId),
+      }],
+      moreFields: (values: Record<string, unknown>) => collectRequiredWhenPromptFields(
+        objectDef?.fields,
+        record,
+        { [schema.groupBy!]: pendingMove.toColumnId, ...values },
+        { exclude: [schema.groupBy!] },
+      ).map(labelPromptField),
+    };
+  })();
 
   // Error branch renders only after every hook above has run, so hook order
   // stays stable across renders (no early return before the hooks).
+  // A refused read (403 / PERMISSION_DENIED, by the shared `classifyLoadError`
+  // verdict the list page, the related list and the gantt use) is not a
+  // failure of anything the reader did: they may open the page without being
+  // granted the records this board reads. It is drawn as the calm no-access
+  // state (`role="status"`, the shared `list.loadErrorForbidden*` sentence in
+  // the reader's language), never the server's text. Every other failure
+  // keeps the error screen below.
+  if (error && classifyLoadError(error) === 'forbidden') {
+    return (
+      <DataEmptyState
+        data-testid="kanban-no-access"
+        className="h-96"
+        icon={<Lock className="size-5 text-muted-foreground" aria-hidden />}
+        title={t('list.loadErrorForbiddenTitle')}
+        description={t('list.loadErrorForbiddenMessage')}
+      />
+    );
+  }
+
   if (error) {
     return (
       <div className="p-4 border border-destructive/50 rounded bg-destructive/10 text-destructive">
@@ -2123,6 +2181,15 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         <RequiredFieldsDialog
           open
           fields={pendingFields}
+          recordName={pendingChange?.recordName}
+          changes={pendingChange?.changes}
+          moreFields={pendingChange?.moreFields}
+          title={tt('kanban.requiredFieldsTitle', 'Complete required fields')}
+          description={tt(
+            'kanban.requiredFieldsDescription',
+            'This move makes the fields below required. Fill them in to continue.',
+          )}
+          submitLabel={tt('kanban.moveCard', 'Move card')}
           submitting={pendingSubmitting}
           onCancel={() => setPendingMove(null)}
           onSubmit={async (values) => {

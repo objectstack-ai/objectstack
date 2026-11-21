@@ -219,6 +219,9 @@ const ja = {
       notLoaded: "このレコードの明細行は読み込まれていません。",
       loadFailed: "明細行の読み込みに失敗しました",
       saveFailed: "明細行の保存に失敗しました",
+      untouchedNotSaved: "空白の明細行 {{count}} 行は保存されませんでした",
+      untouchedNotSaved_one: "空白の明細行 {{count}} 行は保存されませんでした",
+      untouchedNotSaved_other: "空白の明細行 {{count}} 行は保存されませんでした",
       noChildObject: "このパネルには子オブジェクトが設定されていません。{{property}} に、行を一覧表示するオブジェクトを設定してください。",
     },
     keepEditing: "編集を続ける",
@@ -257,6 +260,10 @@ const ja = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '必須項目を入力',
+    requiredPromptDescription: 'この変更により、以下の項目が必須になります。入力すると変更と一緒に保存されます。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} を開く',
@@ -328,6 +335,8 @@ const ja = {
     options: {
       empty: "選択できる項目がありません",
       selectFirst: "まず {{fields}} を選択してください",
+      search: "検索…",
+      noMatches: "一致する項目がありません",
     },
     objectRef: {
       loading: "オブジェクトを読み込み中…",
@@ -412,6 +421,8 @@ const ja = {
     datePicker: {
       today: "今日",
       tomorrow: "明日",
+      nextWeek: "来週",
+      clearPick: "クリア",
       clear: "日付をクリア",
       openCalendar: "カレンダーを開く",
       time: "時刻",
@@ -426,6 +437,11 @@ const ja = {
     },
     tags: {
       placeholder: "入力してEnterキーで追加…",
+      add: "「{{value}}」を追加",
+    },
+    color: {
+      swatches: "色",
+      custom: "カスタムカラー",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2424,10 +2440,11 @@ const ja = {
     },
     firstRunChecklist: {
       title: "システムの準備",
-      description: "同僚が使い始める前に設定しておく項目です。どの項目も後から Setup で変更できます。",
+      description: "同僚が使い始める前に設定しておく項目です。どの項目も後から「セットアップ」で変更できます。",
       progress: "{{total}} 件中 {{done}} 件完了",
       dismiss: "チェックリストを非表示",
       showDone: "完了した項目を表示（{{done}}）",
+      showDoneSplit: "完了した項目を表示（必須 {{required}} · 任意 {{optional}}）",
       hideDone: "完了した項目を折りたたむ",
       optional: "任意",
       set: "設定",
@@ -2472,13 +2489,13 @@ const ja = {
       aiProvider: {
         title: '内蔵 AI を設定',
         todo: '使用中の AI プロバイダーはまだありません。プロバイダーを選び、キーを追加してください。',
-        doneSettings: '{{provider}}（Setup で設定）。',
+        doneSettings: '{{provider}}（セットアップで設定）。',
         doneEnvironment: '{{provider}}（サーバー環境から検出）。',
         action: '設定する',
       },
       connectAssistant: {
         title: '外部の AI アシスタントを接続',
-        todo: 'MCP 経由で、Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。内蔵 AI は別途 Setup → AI と Embedder で設定します。',
+        todo: 'MCP 経由で、Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。内蔵 AI は別途「セットアップ → AI と Embedder」で設定します。',
         done: 'あなたの AI アシスタントまたは API キーが接続されています。',
         action: '接続',
       },
@@ -3297,6 +3314,18 @@ const ja = {
     docConflictCandidates: 'このドキュメントを提供するパッケージ',
     documentation: 'ドキュメント',
     uncategorized: '未分類',
+    backToApp: '{{app}}に戻る',
+    searchDocs: 'ドキュメントを検索',
+    noDocsMatch: '一致する記事はありません。',
+    docsNavigation: 'ドキュメントのナビゲーション',
+    docsBreadcrumb: 'ドキュメントの階層',
+    articlePager: '前後の記事',
+    previousArticle: '前の記事',
+    nextArticle: '次の記事',
+    firstInBook: 'このブックの最初の記事です',
+    lastInBook: 'このブックの最後の記事です',
+    enlargeDiagram: '拡大',
+    diagram: '図',
     about: 'バージョン情報',
     aboutTitle: 'このコンソールについて',
     aboutDescription: 'このコンソールのコンパイル元となったビルドです。',

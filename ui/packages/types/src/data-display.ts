@@ -1704,6 +1704,18 @@ export interface DataTableSchema extends BaseSchema {
    */
   summaryRow?: DataTableSummaryRow;
   /**
+   * The selection bar (objectstack#35678): host-built content the table floats
+   * at the bottom centre of its scroll box, over the rows and above the summary
+   * row. While it is present the table keeps room after its last row, so the
+   * last row scrolls clear of it.
+   *
+   * RUNTIME SLOT — host-built React content, NOT authorable metadata: JSON has
+   * no React node, so the zod twin refuses this key by name. Supplied by
+   * `ObjectGrid` (`@object-ui/plugin-grid`) while rows are selected. Absent ⇒
+   * nothing floats and no room is kept.
+   */
+  floatingBar?: React.ReactNode;
+  /**
    * Cell value change handler
    * Called when a cell value is edited
    *

@@ -52,6 +52,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "圖示",
         helpText: "Lucide 圖示名稱（如：\"building\"、\"users\"）"
       },
+      color: {
+        label: "顏色",
+        helpText: "圖示所在圓角方塊的顏色，從固定色板中選擇。未設定時為灰色。"
+      },
       description: {
         label: "描述",
         helpText: "開發文件說明"
@@ -106,7 +110,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.relatedList": {
         label: "相關清單",
-        helpText: "讓該條目代表一個相關清單的表格，而不是一組欄位：填寫子物件（或 object.field），其清單就顯示在記錄詳細資料欄的這個位置。這樣的分組不包含欄位；把它填為自身分組的欄位會被拒絕，不對應任何指向本物件的關係的名稱也會被拒絕。記錄頁目前還不會繪製這種位置。"
+        helpText: "讓該條目代表一個相關清單的表格，而不是一組欄位：填寫子物件（或 object.field），其清單就顯示在記錄詳細資料欄的這個位置。這樣的分組不包含欄位；把它填為自身分組的欄位會被拒絕，不對應任何指向本物件的關係的名稱也會被拒絕。父記錄的新增和編輯表單也會內嵌這張表，在記錄頁點「編輯」時主記錄和這些列一起儲存。"
       },
       "fieldGroups.collapse": {
         label: "摺疊",
@@ -791,7 +795,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       inlineColumns: {
         label: "內嵌表格欄",
-        helpText: "父記錄表單上內嵌表格的欄，依顯示順序排列；僅當本欄位設定了 inlineEdit（在原始碼中編寫）時才使用。未設定：從本物件的可編輯欄位推導，超過六欄時其餘欄起初收在表格的欄選擇器中。只寫欄位名的條目會從該欄位取得類型、選項和規則；其他欄設定（首先是 type）在原始碼中編寫。"
+        helpText: "父記錄表單上內嵌表格的欄，依顯示順序排列；僅當父物件的某個欄位分組指向這張子表（fieldGroups[].relatedList）時才使用。未設定：從本物件的可編輯欄位推導，超過六欄時其餘欄起初收在表格的欄選擇器中。只寫欄位名的條目會從該欄位取得類型、選項和規則；其他欄設定（首先是 type）在原始碼中編寫。"
       },
       "inlineColumns.name": {
         label: "名稱",

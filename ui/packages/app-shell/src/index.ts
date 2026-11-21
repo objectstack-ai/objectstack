@@ -94,6 +94,11 @@ export {
 // (objectui#4109 / PR #4279), which is the "two readers of one prose contract"
 // shape #3367 / #3842 record. `./utils/appRoute` is the contract.
 export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './utils/index.js';
+// objectstack#35424 — the docs reader names the app it returns to (「← Back to
+// APP」) the way the app bar does: the app its route segment addresses, by its
+// served label.
+export { matchAppBySegment } from './utils/index.js';
+export { useServedAppLabel } from './hooks/useServedAppLabel.js';
 // objectstack#32667 — which app OWNS a record of an object (the app a link to
 // the record, or to a page about it, opens under), as opposed to which app
 // hosts an app-independent page. `./utils/objectHostApp` is the contract.

@@ -71,11 +71,24 @@ import { Button, cn } from '@object-ui/components';
 import { Check, X, Loader2 } from 'lucide-react';
 import {
   useInlineEdit,
+  useRecordContext,
+  useSafeFieldLabel,
   extractFieldErrors,
   extractWriteErrorMessage,
   isExternalWriteRefusal,
   type WriteFieldError,
 } from '@object-ui/react';
+import { getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
+import { usePermissions } from '@object-ui/permissions';
+import {
+  collectRequiredWhenPromptFields,
+  hasFieldEditWidget,
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredWhenPromptField,
+} from '@object-ui/fields';
+import { isComputedDetailField } from './fieldEnrichment';
+import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { useDetailTranslation } from './useDetailTranslation';
 import {
   ConcurrentUpdateDialog,
@@ -302,6 +315,37 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
 
   const canAtomic = !!dataSource && !!objectName && recordId != null;
 
+  // objectstack#35956 — a draft that makes other fields required asks for
+  // them before the write, in the dialog the list cell and the kanban drop
+  // open, and Save writes the draft and those values in ONE update. Only on
+  // the atomic path: the drawer's per-field callback has no one write to put
+  // them in. The fields come from the page's record context, which describes
+  // this record only when it names the same object.
+  const recordCtx = useRecordContext();
+  const perms = usePermissions();
+  const { fieldLabel, translateOptions, fieldOptionLabel } = useSafeFieldLabel();
+  const objectSchema = recordCtx?.objectName === objectName ? recordCtx?.objectSchema : undefined;
+  const objectFields = (objectSchema as { fields?: Record<string, unknown> } | undefined)?.fields;
+  const [requiredAsk, setRequiredAsk] = React.useState<{
+    draft: Record<string, unknown>;
+    fields: RequiredWhenPromptField[];
+  } | null>(null);
+  // The write a conflict raised from that dialog was making (the draft AND the
+  // typed values), so the conflict dialog's overwrite sends all of it rather
+  // than the draft alone, which the server would refuse again. `null` for a
+  // conflict of the plain Save, whose write is the draft.
+  const conflictWriteRef = React.useRef<Record<string, unknown> | null>(null);
+  /** A field this reader may fill on this page: the question the inline editors ask. */
+  const fillable = React.useCallback(
+    (name: string, def: Record<string, unknown>) =>
+      def.readonly !== true
+      && !isComputedDetailField(undefined, def as never)
+      && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
+      && !!objectName
+      && resolveFieldAffordance('recordEdit', perms, objectName, name),
+    [objectName, perms],
+  );
+
   /**
    * Record-level lines of the last refusal, held beside the banner text they
    * were rendered into (objectui#13292). Shown only while the session's
@@ -436,6 +480,15 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
       inline.reset();
       return;
     }
+    if (!onFieldSave && canAtomic && data && typeof data === 'object') {
+      const fields = collectRequiredWhenPromptFields(objectFields, data, draft, { fillable });
+      if (fields.length > 0) {
+        inline.setError(null);
+        inline.setFieldErrors(null);
+        setRequiredAsk({ draft, fields });
+        return;
+      }
+    }
     inline.setSaving(true);
     inline.setError(null);
     inline.setFieldErrors(null);
@@ -474,9 +527,10 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     } finally {
       inline.setSaving(false);
     }
-  }, [inline, onFieldSave, canAtomic, data, dataSource, objectName, recordId, refresh, buildConflict, presentRefusal]);
+  }, [inline, onFieldSave, canAtomic, data, dataSource, objectName, recordId, refresh, buildConflict, presentRefusal, objectFields, fillable]);
 
   const closeConflict = React.useCallback(() => {
+    conflictWriteRef.current = null;
     setConflict(null);
     setConflictBusy(false);
   }, []);
@@ -487,6 +541,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
       await refresh?.();
     } finally {
       // Discard the pending draft — the user chose the server's version.
+      setRequiredAsk(null);
       inline?.reset();
       closeConflict();
     }
@@ -501,14 +556,17 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     try {
       // Re-key the write against the version the server reported in the 409 —
       // "I've seen the newer record, apply my whole draft on top of it."
-      const draft = inline?.draft ?? {};
+      const draft = conflictWriteRef.current ?? inline?.draft ?? {};
       const opts = conflict.currentVersion ? { ifMatch: conflict.currentVersion } : undefined;
       await updateVia(dataSource, objectName!, recordId!, draft, opts);
+      setRequiredAsk(null);
       await refresh?.();
       inline?.reset();
     } catch (err) {
       // Same presentation contract as the first save — an overwrite the server
       // refuses on validation grounds gets per-field reasons, not a raw string.
+      // They are drawn by the save bar, so a fill-in dialog above it closes.
+      setRequiredAsk(null);
       presentRefusal(err);
     } finally {
       closeConflict();
@@ -569,6 +627,83 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   }, [editing, dataVersion]);
   const changedWhileEditing =
     !saving && editBase !== null && editBase.version !== undefined && dataVersion !== undefined && dataVersion !== editBase.version;
+
+  /** The fill-in dialog for a draft that needs fields filled (objectstack#35956). */
+  const renderRequiredAsk = (ask: { draft: Record<string, unknown>; fields: RequiredWhenPromptField[] }) => {
+    const objectKey = objectName ?? '';
+    const labelOf = (name: string): string => {
+      const declared = (objectFields?.[name] as { label?: unknown } | undefined)?.label;
+      const fallback = typeof declared === 'string' && declared.length > 0 ? declared : name;
+      return fieldLabelFor?.(name) || (objectKey ? fieldLabel(objectKey, name, fallback) : fallback);
+    };
+    const label = (f: RequiredWhenPromptField): RequiredFieldsDialogField => {
+      const options = f.def.options;
+      const localized = objectKey && Array.isArray(options) ? translateOptions(objectKey, f.name, options) : options;
+      return { ...f, def: { ...f.def, ...(localized ? { options: localized } : {}) }, label: labelOf(f.name) };
+    };
+    const shownValue = (name: string, value: unknown): string => {
+      if (value === undefined || value === null || value === '') return '—';
+      const options = (objectFields?.[name] as { options?: unknown } | undefined)?.options;
+      const one = (v: unknown): string => {
+        const code = String(v);
+        const option = Array.isArray(options)
+          ? (options as Array<{ value?: unknown; label?: unknown }>).find((o) => o && String(o.value) === code)
+          : undefined;
+        const declared = typeof option?.label === 'string' && option.label ? option.label : code;
+        return objectKey && option ? fieldOptionLabel(objectKey, name, code, declared) : declared;
+      };
+      return Array.isArray(value) ? value.map(one).join(', ') : one(value);
+    };
+    const exclude = Object.keys(ask.draft);
+    return (
+      <RequiredFieldsDialog
+        open
+        fields={ask.fields.map(label)}
+        recordName={data ? getRecordDisplayName(objectSchema, data) : undefined}
+        changes={exclude.map((name) => ({ name, label: labelOf(name), value: shownValue(name, ask.draft[name]) }))}
+        moreFields={(values) => collectRequiredWhenPromptFields(
+          objectFields,
+          data,
+          { ...ask.draft, ...values },
+          { exclude, fillable },
+        ).map(label)}
+        refusalField={(name) => {
+          const def = objectFields?.[name] as Record<string, unknown> | undefined;
+          if (!def || typeof def !== 'object' || exclude.includes(name)) return null;
+          if (!hasFieldEditWidget(def.type as string | undefined) || !fillable(name, def)) return null;
+          return label({ name, def: { name, ...def } });
+        }}
+        labelOf={(name) => (objectFields?.[name] ? labelOf(name) : undefined)}
+        // Cancel writes nothing and leaves the edit session as it was: the
+        // draft is still the reader's to change or cancel.
+        onCancel={() => setRequiredAsk(null)}
+        onSubmit={async (values) => {
+          const ifMatch = typeof data?.updated_at === 'string' ? (data.updated_at as string) : undefined;
+          inline?.setSaving(true);
+          const write = { ...ask.draft, ...values };
+          try {
+            await updateVia(dataSource, objectName!, recordId!, write, ifMatch ? { ifMatch } : undefined);
+          } catch (err) {
+            // Someone else saved the record meanwhile: the same conflict
+            // dialog a plain Save opens (L1 7057894230 S1), over this one.
+            // Its overwrite sends the draft and the typed values; its Cancel
+            // comes back here with them still typed; Reload drops the edit.
+            if (isConcurrentUpdateError(err)) {
+              conflictWriteRef.current = write;
+              setConflict(buildConflict(write, err));
+              return;
+            }
+            throw err;
+          } finally {
+            inline?.setSaving(false);
+          }
+          setRequiredAsk(null);
+          await refresh?.();
+          inline?.reset();
+        }}
+      />
+    );
+  };
 
   // Render nothing unless a provider is present and the record is being edited.
   if (!inline || !inline.editing) return null;
@@ -662,6 +797,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
           <span>{inline.saving ? t('detail.saving') : t('detail.save')}</span>
         </Button>
       </div>
+      {requiredAsk && renderRequiredAsk(requiredAsk)}
       <ConcurrentUpdateDialog
         open={!!conflict}
         conflict={conflict}

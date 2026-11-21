@@ -231,6 +231,9 @@ const zh = {
       notLoaded: '此记录的明细行尚未加载。',
       loadFailed: '明细行加载失败',
       saveFailed: '明细行保存失败',
+      untouchedNotSaved: '{{count}} 行空白明细未保存',
+      untouchedNotSaved_one: '{{count}} 行空白明细未保存',
+      untouchedNotSaved_other: '{{count}} 行空白明细未保存',
       noChildObject: '此面板未配置子对象：请将 {{property}} 设为其所列行所属的对象。',
     },
     keepEditing: '继续编辑',
@@ -267,6 +270,10 @@ const zh = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '补填必填字段',
+    requiredPromptDescription: '这次改动让下面的字段变成必填，填好后和改动一起保存。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '打开 {{name}}',
@@ -338,6 +345,8 @@ const zh = {
     options: {
       empty: '暂无可选项',
       selectFirst: '请先选择{{fields}}',
+      search: '搜索…',
+      noMatches: '没有匹配的选项',
     },
     objectRef: {
       loading: '正在加载对象…',
@@ -422,6 +431,8 @@ const zh = {
     datePicker: {
       today: '今天',
       tomorrow: '明天',
+      nextWeek: '下周',
+      clearPick: '清空',
       clear: '清除日期',
       openCalendar: '打开日历',
       time: '时间',
@@ -436,6 +447,11 @@ const zh = {
     },
     tags: {
       placeholder: '输入后回车添加…',
+      add: '添加“{{value}}”',
+    },
+    color: {
+      swatches: '颜色',
+      custom: '自定义颜色',
     },
     // objectui#4028 — `AddressField`'s five sub-labels. These were English
     // string literals with no key, and this pack is the one the issue was
@@ -2162,10 +2178,11 @@ const zh = {
     },
     firstRunChecklist: {
       title: '完成初始设置',
-      description: '同事开始使用之前，先设置好这几项。每一项之后都可以在 Setup 中修改。',
+      description: '同事开始使用之前，先设置好这几项。每一项之后都可以在系统设置中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隐藏清单',
       showDone: '显示已完成的项（{{done}}）',
+      showDoneSplit: '显示已完成的项（必做 {{required}} · 可选 {{optional}}）',
       hideDone: '收起已完成的项',
       optional: '可选',
       set: '设置',
@@ -2210,13 +2227,13 @@ const zh = {
       aiProvider: {
         title: '设置内置 AI',
         todo: '尚未启用 AI 服务商。请选择一个并填写其密钥。',
-        doneSettings: '{{provider}}，在 Setup 中设置。',
+        doneSettings: '{{provider}}，已在系统设置中配置。',
         doneEnvironment: '{{provider}}，从服务器环境中检测到。',
         action: '去设置',
       },
       connectAssistant: {
         title: '连接外部 AI 助手',
-        todo: '通过 MCP，在 Claude、豆包等助手里以你自己的身份使用本系统。内置 AI 需另行在 Setup → AI 与向量化 中设置。',
+        todo: '通过 MCP，在 Claude、豆包等助手里以你自己的身份使用本系统。内置 AI 需另行在「系统设置 → AI 与向量化」中设置。',
         done: '你已连接了 AI 助手或 API 密钥。',
         action: '连接',
       },
@@ -3376,6 +3393,18 @@ const zh = {
     docConflictCandidates: '提供此文档的包',
     documentation: '文档',
     uncategorized: '未分类',
+    backToApp: '返回{{app}}',
+    searchDocs: '搜索文档',
+    noDocsMatch: '没有匹配的篇目。',
+    docsNavigation: '文档导航',
+    docsBreadcrumb: '文档路径',
+    articlePager: '上一篇和下一篇',
+    previousArticle: '上一篇',
+    nextArticle: '下一篇',
+    firstInBook: '这是本手册第一篇',
+    lastInBook: '这是本手册最后一篇',
+    enlargeDiagram: '放大',
+    diagram: '图示',
     about: '关于',
     aboutTitle: '关于此控制台',
     aboutDescription: '此控制台编译所用的构建。',

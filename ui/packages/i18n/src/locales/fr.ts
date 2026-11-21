@@ -221,6 +221,10 @@ const fr = {
       notLoaded: "Les lignes de cet enregistrement n'ont pas été chargées.",
       loadFailed: "Échec du chargement des lignes",
       saveFailed: "Échec de l'enregistrement des lignes",
+      untouchedNotSaved: "{{count}} ligne vide n’a pas été enregistrée",
+      untouchedNotSaved_one: "{{count}} ligne vide n’a pas été enregistrée",
+      untouchedNotSaved_many: "{{count}} de lignes vides n’ont pas été enregistrées",
+      untouchedNotSaved_other: "{{count}} lignes vides n’ont pas été enregistrées",
       noChildObject: "Aucun objet enfant n'est configuré pour ce panneau : définissez {{property}} sur l'objet dont il liste les lignes.",
     },
     keepEditing: "Continuer l'édition",
@@ -259,6 +263,10 @@ const fr = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Compléter les champs obligatoires',
+    requiredPromptDescription: 'Cette modification rend les champs ci-dessous obligatoires. Remplissez-les pour l’enregistrer.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Ouvrir {{name}}',
@@ -331,6 +339,8 @@ const fr = {
     options: {
       empty: "Aucune option disponible",
       selectFirst: "Sélectionnez d’abord {{fields}}",
+      search: "Rechercher…",
+      noMatches: "Aucune option correspondante",
     },
     objectRef: {
       loading: "Chargement des objets…",
@@ -415,6 +425,8 @@ const fr = {
     datePicker: {
       today: "Aujourd’hui",
       tomorrow: "Demain",
+      nextWeek: "Semaine prochaine",
+      clearPick: "Effacer",
       clear: "Effacer la date",
       openCalendar: "Ouvrir le calendrier",
       time: "Heure",
@@ -429,6 +441,11 @@ const fr = {
     },
     tags: {
       placeholder: "Saisissez puis appuyez sur Entrée pour ajouter…",
+      add: "Ajouter « {{value}} »",
+    },
+    color: {
+      swatches: "Couleurs",
+      custom: "Couleur personnalisée",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2490,10 +2507,11 @@ const fr = {
     },
     firstRunChecklist: {
       title: "Préparez votre système",
-      description: "Ce qu’il faut configurer avant que vos collègues commencent. Chaque élément peut être modifié plus tard dans Setup.",
+      description: "Ce qu’il faut configurer avant que vos collègues commencent. Chaque élément peut être modifié plus tard dans Configuration.",
       progress: "{{done}} sur {{total}} terminés",
       dismiss: "Masquer la liste",
       showDone: "Afficher les étapes terminées ({{done}})",
+      showDoneSplit: "Afficher les étapes terminées ({{required}} obligatoires · {{optional}} facultatives)",
       hideDone: "Masquer les étapes terminées",
       optional: "Facultatif",
       set: "Définir",
@@ -2538,13 +2556,13 @@ const fr = {
       aiProvider: {
         title: 'Configurer l’IA intégrée',
         todo: 'Aucun fournisseur d’IA n’est encore utilisé. Choisissez-en un et ajoutez sa clé.',
-        doneSettings: '{{provider}}, défini dans Setup.',
+        doneSettings: '{{provider}}, défini dans Configuration.',
         doneEnvironment: '{{provider}}, détecté dans l’environnement du serveur.',
         action: 'Configurer',
       },
       connectAssistant: {
         title: 'Connecter un assistant IA externe',
-        todo: 'Travaillez dans ce système en votre nom depuis Claude, Doubao et d’autres assistants, via MCP. L’IA intégrée se configure à part, dans Setup → IA et Embedder.',
+        todo: 'Travaillez dans ce système en votre nom depuis Claude, Doubao et d’autres assistants, via MCP. L’IA intégrée se configure à part, dans Configuration → IA et Embedder.',
         done: "Un assistant IA ou une clé d'API à vous est connecté.",
         action: 'Connecter',
       },
@@ -3367,6 +3385,18 @@ const fr = {
     docConflictCandidates: 'Packages qui fournissent ce document',
     documentation: 'Documentation',
     uncategorized: 'Non classé',
+    backToApp: 'Retour à {{app}}',
+    searchDocs: 'Rechercher dans la documentation',
+    noDocsMatch: 'Aucun article ne correspond.',
+    docsNavigation: 'Navigation de la documentation',
+    docsBreadcrumb: 'Chemin de la documentation',
+    articlePager: 'Article précédent et suivant',
+    previousArticle: 'Précédent',
+    nextArticle: 'Suivant',
+    firstInBook: 'C’est le premier article de ce manuel',
+    lastInBook: 'C’est le dernier article de ce manuel',
+    enlargeDiagram: 'Agrandir',
+    diagram: 'Diagramme',
     about: 'À propos',
     aboutTitle: 'À propos de cette console',
     aboutDescription: 'Le build à partir duquel cette console a été compilée.',

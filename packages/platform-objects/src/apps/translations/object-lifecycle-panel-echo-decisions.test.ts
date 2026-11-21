@@ -1300,7 +1300,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 755 since #35900: the object form's `fieldGroups` repeater offers
       // `fields` (the group's own member list) — one row label, authored in
       // all three locales.
-      expect(translated.length, `${locale} positive control`).toBe(755);
+      // 756 since #35985: the object form's `basics` offers a `color` row,
+      // whose label zh-CN translates.
+      expect(translated.length, `${locale} positive control`).toBe(756);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

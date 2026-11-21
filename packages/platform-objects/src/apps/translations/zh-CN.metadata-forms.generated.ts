@@ -52,6 +52,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "图标",
         helpText: "Lucide 图标名称（如：\"building\"、\"users\"）"
       },
+      color: {
+        label: "颜色",
+        helpText: "图标所在圆角方块的颜色，从固定色板中选择。未设置时为灰色。"
+      },
       description: {
         label: "描述",
         helpText: "开发文档说明"

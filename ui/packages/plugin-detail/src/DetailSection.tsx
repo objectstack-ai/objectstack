@@ -61,6 +61,8 @@ import { InlineFieldInput } from './InlineFieldInput';
 import { headerColorClass } from './headerColor';
 import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
 import { hasCellValue } from './emptiness';
+import { RecordPageProvenanceContext } from './recordPageProvenance';
+import { useReportBodyFields } from './recordBodyFields';
 import {
   enrichDetailField,
   isComputedDetailField,
@@ -139,6 +141,9 @@ export function framelessSpanClass(span: number | undefined, columns: 1 | 2 | 3)
  * requires the slot.
  */
 const ignoreReadOnlyChange = (): void => {};
+
+/** What a section reports while it draws no row of the page's record. */
+const NO_REPORTED_FIELDS: readonly string[] = [];
 
 /**
  * Whether a key pressed on a copy-on-activate row is the ROW's own activation
@@ -481,6 +486,17 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     section.columns,
     undefined,
     objectSchema?.fields,
+  );
+  // objectstack#35941 — the page's meta line leaves the owner out when the
+  // body draws `owner_id`, so the body says which rows it draws: the rows of
+  // the grid below, none while its content is collapsed away (the faces
+  // below mount it only open: the frameless face and the card disclosure;
+  // the card that cannot collapse always draws it), and only for the page's
+  // own record.
+  const drawsPageRecord = React.useContext(RecordPageProvenanceContext);
+  const drawsContent = !isCollapsed || (!frameless && !section.collapsible);
+  useReportBodyFields(
+    drawsPageRecord && drawsContent ? layoutFields.map((field) => field.name) : NO_REPORTED_FIELDS,
   );
   // Never render more columns than there are visible fields — the object-wide
   // column count (objectui#2578) can exceed a section's visible count when

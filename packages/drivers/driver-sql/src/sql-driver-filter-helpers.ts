@@ -860,10 +860,12 @@ export class FilterHelpersFacet {
           // `field IN (SELECT …)` (`SqlDriver#fixedReadLeafSubquery`), under the
           // outer statement's own wall and nothing else. `applyFilters` refused
           // it at every other position. The object and column it is compared
-          // with type the inner read on PostgreSQL (ADR-0155 O2).
+          // with type the inner read on PostgreSQL (ADR-0155 O2); on Oracle a
+          // RAW(16) uuid column, read as the list's `HEXTORAW` binding reads it.
           if (rawOp === '$in' && isFixedReadLeaf(opValue)) {
             const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
-            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue, { object: table, column: field, evaluator: this.readableIdsDriverName, transaction: options?.transaction }));
+            const oracleRawUuid = this.isOracle && this.oracleRawUuidFieldsByObject.get(table ?? '')?.has(localField) === true;
+            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue, { object: table, column: field, evaluator: this.readableIdsDriverName, oracleRawUuid, transaction: options?.transaction }));
             continue;
           }
           // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar
