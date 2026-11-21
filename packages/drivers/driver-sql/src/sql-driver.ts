@@ -414,8 +414,8 @@ export class SqlDriver implements IDataDriver {
       // (Turso's remote transport compiles the leaf with its own compiler).
       readableIdsLeaf: true,
       // [ADR-0155 D4] One subquery per `SharedRecordIds` leaf (`applyFilterCondition`)
-      // on every dialect; same rows as the id list measured on SQLite, PostgreSQL and
-      // Oracle (O2: `fixed-read-leaf-key-type.ts`, `oracleUuidRawProjection`). Turso: its own.
+      // on every dialect; same rows as the id list measured on SQLite, PostgreSQL, Oracle
+      // (RAW(16), NUMBER) (O2: `fixed-read-leaf-key-type.ts`, `oracleUuidRawProjection`). Turso: its own.
       fixedReadLeaves: ['SharedRecordIds' as const],
     };
   }

@@ -28,8 +28,9 @@
  *   (`fixed-read-leaf-key-type.ts`); a text key keeps step 3's statement;
  * - **O2 on Oracle (ruling A carried to Oracle)**: a federated table keyed by
  *   `RAW(16)` uuid answers the list's rows, because the inner read converts
- *   `record_id` as the list binds a member (`HEXTORAW` over the undashed hex,
- *   `oracleUuidRawProjection`); a `NUMBER` key keeps step 3's statement. Its
+ *   `record_id` as the list binds a member, behind the list's own `UUID_TEXT`
+ *   gate (`oracleUuidRawProjection`), and every grant the list refuses fails
+ *   the statement; a `NUMBER` key keeps step 3's statement. Its
  *   own cell (`ORACLE_CELL`, federation-only: raw DDL, no `initObjects`);
  * - the declaration, the absence of a tenant scope in the statement, the
  *   bindings, and the refusals with `code` and `status`.
@@ -52,6 +53,7 @@ import {
   type FixedReadLeafRow,
 } from '@objectstack/spec/data';
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
+import { ORACLE_UUID_TEXT_MATCH, ORACLE_UUID_TEXT_PATTERN, isOracleUuidText } from './sql-driver-oracle-dialect.js';
 import { DIALECT_CELLS, ORACLE_CELL, PG_CELL, currentLiveSchema, declareDialectCell, type DialectCell, type FederationDialectCell } from './live-dialect-matrix.testkit.js';
 import { RELATION_GROUP_JOINS, type RelationGroupJoin } from './sql-driver-aggregation.js';
 import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
@@ -862,19 +864,27 @@ for (const cell of DIALECT_CELLS) declareDialectCell(cell, 'SharedRecordIds conf
  * `sql-driver-oracle-federation-conformance.test.ts` does.
  *
  * Where the outer key is a `RAW(16)` uuid column (the catalog prime the list's
- * `HEXTORAW(?)` binding reads), the inner read projects
- * `HEXTORAW(REPLACE(record_id, '-', ''))` (`oracleUuidRawProjection`). Before
+ * `HEXTORAW(?)` binding reads), the inner read projects the list's
+ * conversion behind the list's own gate (`oracleUuidRawProjection`): uuid text
+ * as `UUID_TEXT` admits it converts as `HEXTORAW` over the undashed hex, and
+ * any other grant projects `'not-a-uuid'`, which fails the statement. Before
  * it, Oracle compared the column as its upper-case hex text: the leaf answered
  * no row and its negation every row, with no error (measured on Oracle Free
  * 23ai). Each pin holds the leaf to the rows TODAY'S LIST of the same grants
  * answers (D-0); a `NUMBER` key keeps step 3's statement and converts the
  * grants as it converts the list's text binds.
  *
- * The grants the list refuses before any statement (not uuid text) have no
- * refusal in the leaf, which reads stored rows: those pins state both
- * envelopes as measured, the difference reported for the maintainer's word.
+ * Every grant the list refuses before any statement (`INVALID_FILTER` / 400)
+ * fails the leaf's statement instead (`DATABASE_ERROR` / 500, ORA-01465): the
+ * same refusal, moved into the statement (ADR-0155 Consequences, ruling A's
+ * "a malformed grant id fails the statement"), on `find` and on the negation,
+ * never rows and never a silently empty negation.
  */
 const ORA_GRANTS = 'sys_record_share';
+/** The RAW(16) projection as Oracle receives it: `UUID_TEXT` spelled for `REGEXP_LIKE`, written out so a drift in either is a red pin. */
+const ORA_RAW_PROJECTION_SQL =
+  `HEXTORAW(CASE WHEN REGEXP_LIKE("record_id", '^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$', 'i') ` +
+  `THEN REPLACE("record_id", '-', '') ELSE 'not-a-uuid' END)`;
 const ORA_RAW = { table: 'SRIDO_RAW', object: 'srido_raw' };
 const ORA_NUM = { table: 'SRIDO_NUM', object: 'srido_num' };
 const ORA_CHILD = { table: 'SRIDO_CHILD', object: 'srido_child' };
@@ -905,7 +915,7 @@ const ORACLE_KEY_CASES: readonly OracleKeyCase[] = [
     grants: [ORA_U1.toUpperCase(), ORA_U2, ORA_U3.replace(/-/g, '')],
     expected: [ORA_U2, ORA_U3, ORA_U1].sort(),
     complement: [ORA_U4],
-    projection: `HEXTORAW(REPLACE("record_id", '-', ''))`,
+    projection: ORA_RAW_PROJECTION_SQL,
   },
   {
     name: 'NUMBER(10)',
@@ -1055,29 +1065,73 @@ function declareOracleKeyTypePins(cell: FederationDialectCell): void {
       expect(Number((out[0] as any).n ?? (out[0] as any).N)).toBe(raw.expected.length);
     });
 
-    describe('a grant the list refuses: both envelopes, as measured (the D-0 difference reported, never a new refusal)', () => {
-      /** Each malformed grant sits beside a valid one, as one recipient's grants. */
-      const MALFORMED: readonly { name: string; recipient: string; grant: string; leaf: { rows: string[] } | { code: string; status: number; ora: string } }[] = [
-        { name: 'not hex (`not-a-uuid`)', recipient: 'u_bad', grant: 'not-a-uuid', leaf: { code: 'DATABASE_ERROR', status: 500, ora: 'ORA-01465' } },
-        { name: 'braced uuid text', recipient: 'u_brace', grant: `{${ORA_U2}}`, leaf: { code: 'DATABASE_ERROR', status: 500, ora: 'ORA-01465' } },
-        // Valid hex of another length converts to bytes no RAW(16) key holds: it names no row.
-        { name: 'hex of another length (`0123`)', recipient: 'u_short', grant: '0123', leaf: { rows: [ORA_U1] } },
-      ];
+    describe('a grant the list refuses fails the leaf\'s statement; every form the list admits answers its rows', () => {
       const raw = ORACLE_KEY_CASES[0];
+      const hex1 = ORA_U1.replace(/-/g, '');
+      /**
+       * Each grant sits beside a valid one (U2), as one recipient's grants, so
+       * a projection that answered rows for it would show them. Measured on
+       * Oracle Free 23ai before the gate: 31 digits left-padded to 16 bytes
+       * and matched U3, misplaced dashes matched U1, a dash-only grant
+       * projected NULL and the negation answered no row; the short hex forms
+       * answered the sibling's row.
+       */
+      const REFUSED: readonly { name: string; grant: string }[] = [
+        { name: '31 hex digits (left-padded by HEXTORAW to a key)', grant: '0000000000000000000000000000002' },
+        { name: '31 hex digits', grant: hex1.slice(1) },
+        { name: '33 hex digits', grant: `${hex1}0` },
+        { name: '32 hex digits with misplaced dashes', grant: '8a1f0c3e1b2c-4d5e8f90123456789abc' },
+        { name: 'a dash-only grant', grant: '-' },
+        { name: 'a padded blank', grant: ' ' },
+        { name: 'uuid text with a leading blank', grant: ` ${ORA_U1}` },
+        { name: 'hex of another length (`0123`)', grant: '0123' },
+        { name: 'an odd number of hex digits (`abc`)', grant: 'abc' },
+        { name: 'not hex (`not-a-uuid`)', grant: 'not-a-uuid' },
+        { name: 'braced uuid text', grant: `{${ORA_U1}}` },
+      ];
+      /** Every form `UUID_TEXT` admits: the leaf answers exactly the list's rows, on find and the negation. */
+      const ADMITTED: readonly { name: string; grant: string }[] = [
+        { name: 'lower-case dashed', grant: ORA_U1 },
+        { name: 'upper-case dashed', grant: ORA_U1.toUpperCase() },
+        { name: 'mixed-case dashed', grant: '8A1f0C3e-1B2c-4D5e-8F90-123456789AbC' },
+        { name: 'lower-case undashed', grant: hex1 },
+        { name: 'upper-case undashed', grant: hex1.toUpperCase() },
+      ];
+      const recipient = (kind: string, i: number) => `u_${kind}${i}`;
+      const LOUD = { code: 'DATABASE_ERROR', status: 500, ora: 'ORA-01465' };
+      const REFUSED_BY_LIST = { code: 'INVALID_FILTER', status: 400, ora: null };
 
       beforeAll(async () => {
-        for (const m of MALFORMED) await knex(ORA_GRANTS).insert(grantRows(raw, m.recipient, [m.grant, ORA_U1]));
+        for (const [i, m] of REFUSED.entries()) await knex(ORA_GRANTS).insert(grantRows(raw, recipient('bad', i), [m.grant, ORA_U2]));
+        for (const [i, m] of ADMITTED.entries()) await knex(ORA_GRANTS).insert(grantRows(raw, recipient('ok', i), [m.grant, ORA_U2]));
       });
       afterAll(async () => {
-        for (const m of MALFORMED) await knex(ORA_GRANTS).where('recipient_id', m.recipient).del();
+        await knex(ORA_GRANTS)
+          .whereIn('recipient_id', [...REFUSED.map((_, i) => recipient('bad', i)), ...ADMITTED.map((_, i) => recipient('ok', i))])
+          .del();
       });
 
-      for (const m of MALFORMED) {
-        it(`${m.name}: the list answers INVALID_FILTER / 400 before any statement; the leaf answers ${'rows' in m.leaf ? 'the other grant\'s rows' : `${m.leaf.code} / ${m.leaf.status} (${m.leaf.ora})`}`, async () => {
-          const viaList = await oracleAnswer(driver.find(raw.object, { where: seamed({ id: { $in: [m.grant, ORA_U1] } }) }, ORA_BYPASS));
-          expect(viaList).toEqual({ code: 'INVALID_FILTER', status: 400, ora: null });
-          const viaLeaf = await oracleAnswer(driver.find(raw.object, { where: seamed({ id: { $in: SharedRecordIds.read(raw.object, m.recipient) } }) }, ORA_BYPASS));
-          expect(viaLeaf).toEqual(m.leaf);
+      for (const [i, m] of REFUSED.entries()) {
+        it(`${m.name}: the list refuses it (INVALID_FILTER / 400); the leaf fails its statement (DATABASE_ERROR / 500, ORA-01465), on find and on the negation`, async () => {
+          const leaf = () => ({ id: { $in: SharedRecordIds.read(raw.object, recipient('bad', i)) } });
+          const list = () => ({ id: { $in: [m.grant, ORA_U2] } });
+          expect(await oracleAnswer(driver.find(raw.object, { where: seamed(list()) }, ORA_BYPASS))).toEqual(REFUSED_BY_LIST);
+          expect(await oracleAnswer(driver.find(raw.object, { where: seamed({ $not: list() }) }, ORA_BYPASS))).toEqual(REFUSED_BY_LIST);
+          expect(await oracleAnswer(driver.find(raw.object, { where: seamed(leaf()) }, ORA_BYPASS))).toEqual(LOUD);
+          expect(await oracleAnswer(driver.find(raw.object, { where: seamed({ $not: leaf() }) }, ORA_BYPASS))).toEqual(LOUD);
+        });
+      }
+
+      for (const [i, m] of ADMITTED.entries()) {
+        it(`${m.name}: the leaf answers the list's rows, on find and on the negation`, async () => {
+          const leaf = () => ({ id: { $in: SharedRecordIds.read(raw.object, recipient('ok', i)) } });
+          const list = () => ({ id: { $in: [m.grant, ORA_U2] } });
+          const viaList = await oracleAnswer(driver.find(raw.object, { where: seamed(list()) }, ORA_BYPASS));
+          expect(viaList).toEqual({ rows: [ORA_U2, ORA_U1].sort() });
+          expect(await oracleAnswer(driver.find(raw.object, { where: seamed(leaf()) }, ORA_BYPASS))).toEqual(viaList);
+          const notList = await oracleAnswer(driver.find(raw.object, { where: seamed({ $not: list() }) }, ORA_BYPASS));
+          expect(notList).toEqual({ rows: [ORA_U3, ORA_U4].sort() });
+          expect(await oracleAnswer(driver.find(raw.object, { where: seamed({ $not: leaf() }) }, ORA_BYPASS))).toEqual(notList);
         });
       }
 
@@ -1200,9 +1254,22 @@ describe('[ADR-0155 step 3] the compiled fixed inner read, per dialect (no serve
     return probe;
   };
 
-  it('oracle, a RAW(16) uuid key: the inner read projects the list\'s conversion, HEXTORAW over the undashed text', () => {
+  it('oracle: the REGEXP_LIKE spelling of UUID_TEXT admits exactly the uuid text the list admits', () => {
+    const oracleGate = new RegExp(ORACLE_UUID_TEXT_PATTERN, ORACLE_UUID_TEXT_MATCH);
+    const corpus = [
+      '8a1f0c3e-1b2c-4d5e-8f90-123456789abc', '8A1F0C3E-1B2C-4D5E-8F90-123456789ABC', '8a1f0c3e1b2c4d5e8f90123456789abc',
+      '8a1f0c3e1b2c4d5e8f90123456789ab', '8a1f0c3e1b2c4d5e8f90123456789abc0', '8a1f0c3e1b2c-4d5e8f90123456789abc', '-', ' ', '',
+      ' 8a1f0c3e-1b2c-4d5e-8f90-123456789abc', '{8a1f0c3e-1b2c-4d5e-8f90-123456789abc}', '0123', 'abc', 'not-a-uuid',
+      'g a1f0c3e-1b2c-4d5e-8f90-123456789abc', '8a1f0c3e-1b2c-4d5e-8f90-123456789abc\n',
+    ];
+    for (const text of corpus) expect(oracleGate.test(text), JSON.stringify(text)).toBe(isOracleUuidText(text));
+    expect(corpus.filter((t) => isOracleUuidText(t))).toHaveLength(3);
+  });
+
+  it('oracle, a RAW(16) uuid key: the inner read projects the list\'s conversion behind the list\'s gate', () => {
     const probe = withRawId(COMPILE_CONFIGS.oracle);
-    const projected = (sql: string) => sql.replace('select "record_id" from', `select HEXTORAW(REPLACE("record_id", '-', '')) from`);
+    // A function replacer: the pattern's `$'` would read as a replacement token in a string.
+    const projected = (sql: string) => sql.replace('select "record_id" from', () => `select ${ORA_RAW_PROJECTION_SQL} from`);
     const read = probe.compileWhere({ id: { $in: SharedRecordIds.read(DOC, 'u1') } } as unknown as FilterCondition);
     expect(read.sql).toBe(projected(COMPILED.oracle.read));
     // The guard and the predicates still read the stored text; no binding is added.

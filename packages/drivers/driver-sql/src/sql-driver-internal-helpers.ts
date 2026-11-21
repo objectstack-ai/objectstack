@@ -206,8 +206,10 @@ export class InternalHelpersFacet {
    *   uncast: a `character(n)` key would miss a padded grant silently (D2).
    * - **Oracle, a `RAW(16)` uuid key (O2, ruling A carried to Oracle).** Where
    *   `outer.oracleRawUuid` says the list binds its members as `HEXTORAW(?)`,
-   *   the projection is the same conversion over the column,
-   *   `HEXTORAW(REPLACE(record_id, '-', ''))` (`oracleUuidRawProjection`).
+   *   the projection is the same conversion over the column, behind the
+   *   list's own gate (`oracleUuidRawProjection`): a grant `UUID_TEXT` admits
+   *   is the 16 bytes the list binds; any other grant fails the statement
+   *   (ORA-01465), as the list refuses it before SQL.
    *   Any other Oracle key projects `record_id` as before (a `NUMBER` key
    *   converts it the way it converts the list's text binds). Oracle has no
    *   no-reading refusal: an unprimed key compiles as the list's text binds do.
