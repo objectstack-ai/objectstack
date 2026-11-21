@@ -555,9 +555,18 @@ export interface ListViewProps {
    * finished conditions are then judged against these, so the view's own
    * rows are not a personalization and an edit, a removal or a "Clear all"
    * is. Absent ⇒ any finished panel condition is the reader's own, as before.
+   *
+   * `viewType` and `rowColor` (objectstack#35955) are the view's own layout
+   * and row colour, for a host that lays the reader's unsaved choice of
+   * either into `schema` (`onViewChange`, `onRowColorChange`): the Display
+   * control's count and the `layout` / `rowColor` parts are judged against
+   * these. Like `grouping`, each is read only when its key is present;
+   * without it `schema` holds the view's own.
    */
   viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort' | 'grouping'> & {
     filters?: FilterBuilderRowGroup;
+    viewType?: ListViewSchema['viewType'];
+    rowColor?: ListViewSchema['rowColor'];
   };
   /**
    * A reset to the view's own, told apart from a choice (objectstack#28948).
@@ -603,6 +612,15 @@ export interface ListViewProps {
    * keeps its reset, exactly as before.
    */
   onPersonalizationChange?: (parts: ReadonlyArray<ListPersonalizationPart>) => void;
+  /**
+   * The reader's pick in the toolbar's row colour panel (objectstack#35955):
+   * the colour rule now in force, or `null` for "none" (Clear, or the None
+   * entry). Told for a pick only, never for a reset or a prop change, so a
+   * host can keep the reader's choice as an unsaved change and lay it back
+   * into `schema.rowColor` when the list mounts again. A HOST prop, never a
+   * schema key. Absent ⇒ the pick stays the list's own, as before.
+   */
+  onRowColorChange?: (rowColor: NonNullable<ListViewSchema['rowColor']> | null) => void;
   /**
    * Rename the open view from the options menu's first row, its name
    * (`schema.label`, objectstack#35551). Wired only for a reader who may
@@ -2144,6 +2162,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   viewDefaults,
   onRestoreViewDefaults,
   onPersonalizationChange,
+  onRowColorChange,
   onRenameView,
   onSaveView,
   onResetView,
@@ -6494,12 +6513,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const viewDefaultDensity = viewDefaults
     ? rowHeightToDensityMode(viewDefaults.rowHeight) ?? 'compact'
     : resolvedDensity;
+  // objectstack#35955 — the view's own layout and row colour, when the host
+  // lays the reader's unsaved choice into `schema` (see `viewDefaults`).
+  const viewDefaultViewType = viewDefaults && 'viewType' in viewDefaults ? viewDefaults.viewType : schema.viewType;
+  const viewDefaultRowColor = viewDefaults && 'rowColor' in viewDefaults ? viewDefaults.rowColor : schema.rowColor;
   const sortedNames = (names: Iterable<string> | undefined) => JSON.stringify([...(names ?? [])].sort());
   const displayDeviation = {
-    layout: viewSwitcherOffered && !!schema.viewType && currentView !== schema.viewType,
+    layout: viewSwitcherOffered && !!viewDefaultViewType && currentView !== viewDefaultViewType,
     group: toolbarFlags.showGroup
       && JSON.stringify(chosenGroupingConfig?.fields ?? []) !== JSON.stringify(initialGroupingConfig?.fields ?? []),
-    color: toolbarFlags.showColor && (rowColorConfig?.field ?? '') !== (schema.rowColor?.field ?? ''),
+    color: toolbarFlags.showColor && (rowColorConfig?.field ?? '') !== (viewDefaultRowColor?.field ?? ''),
     hiddenFields: toolbarFlags.showHideFields && sortedNames(hiddenFields) !== sortedNames(viewDefaultHiddenFields),
     density: toolbarFlags.showDensity && (currentView === 'gallery'
       ? galleryCardSize !== authoredGalleryCardSize
@@ -6555,9 +6578,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    */
   const resetDisplayToViewDefault = () => {
     const restoredParts: Array<'hiddenFields' | 'rowHeight'> = [];
-    if (displayDeviation.layout) handleViewChange(schema.viewType as ListViewVisualization);
+    if (displayDeviation.layout) handleViewChange(viewDefaultViewType as ListViewVisualization);
     if (displayDeviation.group) changeGrouping(initialGroupingConfig);
-    if (displayDeviation.color) setRowColorConfig(schema.rowColor);
+    if (displayDeviation.color) setRowColorConfig(viewDefaultRowColor);
     if (displayDeviation.hiddenFields) {
       if (onRestoreViewDefaults) {
         setHiddenFields(new Set(viewDefaultHiddenFields || []));
@@ -7336,7 +7359,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 <div className="flex items-center justify-between border-b pb-2">
                   <h4 className="font-medium text-sm">{t('list.rowColor')}</h4>
                   {offeredRowColorConfig && (
-                    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setRowColorConfig(undefined)} data-testid="clear-row-color">
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => { setRowColorConfig(undefined); onRowColorChange?.(null); }} data-testid="clear-row-color">
                       {t('list.clear')}
                     </Button>
                   )}
@@ -7358,8 +7381,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                     onPick={(field) => {
                       if (!field) {
                         setRowColorConfig(undefined);
+                        onRowColorChange?.(null);
                       } else {
-                        setRowColorConfig({ field, colors: offeredRowColorConfig?.colors || {} });
+                        const picked = { field, colors: offeredRowColorConfig?.colors || {} };
+                        setRowColorConfig(picked);
+                        onRowColorChange?.(picked);
                       }
                     }}
                   />

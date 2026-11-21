@@ -3272,6 +3272,11 @@ const en = {
         saveAsMyView: 'Save as my view',
         copyName: '{{name}} copy',
         saved: 'Saved',
+        saveToViewConfirmTitle: 'Save to this view?',
+        saveToViewConfirm: 'Everyone who uses “{{name}}” will see these changes.',
+        saveToViewConfirmButton: 'Save for everyone',
+        savedForEveryone: 'Saved, visible to everyone',
+        pendingDraft: 'This view has unpublished changes. Publish or discard them in the view settings first.',
       },
       linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {

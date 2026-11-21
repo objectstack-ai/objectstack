@@ -2675,6 +2675,11 @@ const ko = {
         saveAsMyView: "내 보기로 저장",
         copyName: "{{name}} 사본",
         saved: "저장했습니다",
+        saveToViewConfirmTitle: "이 보기에 저장할까요?",
+        saveToViewConfirm: "“{{name}}” 보기를 사용하는 모든 사람에게 이 변경 사항이 표시됩니다.",
+        saveToViewConfirmButton: "모두에게 저장",
+        savedForEveryone: "저장했습니다. 모두에게 표시됩니다",
+        pendingDraft: "이 보기에 게시되지 않은 변경 사항이 있습니다. 먼저 보기 설정에서 게시하거나 취소하세요.",
       },
       linkFilterRefused: '이 링크의 필터가 적용되지 않았습니다. 여기서 필터링할 수 없는 필드가 포함되어 있어 뷰를 그대로 표시합니다.',
       personalizedParts: {

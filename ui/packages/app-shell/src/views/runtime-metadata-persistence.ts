@@ -39,6 +39,7 @@
  */
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { errorCodeIs } from '@object-ui/types';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
 import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
@@ -510,4 +511,55 @@ export async function publishRuntimeMetadata(
   await ctx.metadataClient.publish(type, name);
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
+}
+
+/** What {@link saveAndPublishRuntimeMetadata} did. */
+export type SaveAndPublishOutcome = 'published' | 'pending-draft';
+
+/**
+ * objectstack#35955 — a confirmed save that everyone sees at once (ruling
+ * record 7058616478 on that card): the body is staged as the item's draft and
+ * published in the same act.
+ *
+ * Only over NO pending draft. The draft write carries the first-write pin
+ * (`ifNoneMatch: '*'`), so the server refuses it `409 METADATA_CONFLICT` when
+ * a draft is already pending — whoever saved it, the reader included: the
+ * door does not say who did — and nothing is written: resolves
+ * `'pending-draft'`. That draft is never published on its saver's behalf.
+ *
+ * A publish the server refuses leaves no draft of this call behind: the draft
+ * it wrote is discarded (it was the only one, by the pin) and the refusal is
+ * rethrown. Any other refusal is rethrown as it came.
+ */
+export async function saveAndPublishRuntimeMetadata(
+  type: RuntimeArtifactType,
+  name: string,
+  body: any,
+  ctx: RuntimePersistCtx,
+): Promise<SaveAndPublishOutcome> {
+  try {
+    await ctx.metadataClient.save(type, name, body, { mode: 'draft', ifNoneMatch: '*' });
+  } catch (err) {
+    if ((err as { status?: unknown } | null)?.status === 409 && errorCodeIs(err, 'METADATA_CONFLICT')) {
+      return 'pending-draft';
+    }
+    throw err;
+  }
+  try {
+    await ctx.metadataClient.publish(type, name);
+  } catch (err) {
+    try {
+      await ctx.metadataClient.reset(type, name, { state: 'draft' });
+    } catch (discardErr) {
+      // The draft this call wrote stays pending: the view settings' draft
+      // bar shows it, and its Discard removes it.
+      console.error('[runtime-metadata] a refused publish left its draft pending:', discardErr);
+    }
+    invalidateViewCaches(type, name, ctx);
+    announceDraftLedgerWrite();
+    throw err;
+  }
+  invalidateViewCaches(type, name, ctx);
+  announceDraftLedgerWrite();
+  return 'published';
 }

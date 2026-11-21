@@ -2743,6 +2743,11 @@ const pt = {
         saveAsMyView: "Salvar como minha exibição",
         copyName: "{{name}} (cópia)",
         saved: "Salvo",
+        saveToViewConfirmTitle: "Salvar nesta exibição?",
+        saveToViewConfirm: "Todos que usam “{{name}}” verão estas alterações.",
+        saveToViewConfirmButton: "Salvar para todos",
+        savedForEveryone: "Salvo, visível para todos",
+        pendingDraft: "Esta exibição tem alterações não publicadas. Publique ou descarte-as primeiro nas configurações da exibição.",
       },
       linkFilterRefused: 'O filtro deste link não foi aplicado. Ele cita um campo pelo qual você não pode filtrar aqui, então a lista mostra a visualização sem ele.',
       personalizedParts: {

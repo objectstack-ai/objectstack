@@ -2762,6 +2762,11 @@ const zh = {
         saveAsMyView: '另存为我的视图',
         copyName: '{{name}} 副本',
         saved: '已保存',
+        saveToViewConfirmTitle: '保存到这个视图？',
+        saveToViewConfirm: '所有用「{{name}}」的人都会看到这些改动。',
+        saveToViewConfirmButton: '保存，所有人可见',
+        savedForEveryone: '已保存，所有人可见',
+        pendingDraft: '这个视图有未发布的修改，请先在视图设置里发布或放弃。',
       },
       linkFilterRefused: '此链接的筛选条件未应用：其中包含你在此处无法筛选的字段，因此列表按视图本身显示。',
       personalizedParts: {
