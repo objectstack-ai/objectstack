@@ -57,6 +57,8 @@ import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
 import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { usePackageRefusesSaves } from '../hooks/useStudioDesignGate.js';
+import { studioPackageId } from '../utils/appRoute.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
 import type { ListViewProps } from '@object-ui/plugin-list';
 import { defaultListViewId, isSavedViewId, viewRowId } from '../utils/viewIdentity.js';
@@ -830,6 +832,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // along, and a column the view does not declare is not offered. Each
     // resolves whether the pick was saved; on `false` the grid takes it back.
     const personalViewRow = activeView ? personalViews.views.find((v) => v.id === activeView.id) : undefined;
+    // objectstack#35933 — the open saved shared view's own package (its row's
+    // served `_packageId`), and whether the server refuses saves into it: a
+    // view a read-only package ships is offered no save of its own. Read for
+    // an admin only, the one reader offered such a save; unknown offers it.
+    const activeSavedViewRow = activeView && isAdmin
+        ? savedViews.find((sv: any) => viewRowId(sv) === activeView.id)
+        : undefined;
+    const activeViewPackageRefusesSaves = usePackageRefusesSaves(studioPackageId(activeSavedViewRow));
     const handlePickPersonalViewSummary = async (field: string, summary: ColumnSummary | null): Promise<boolean> => {
         if (!personalViewRow) return false;
         const columns = columnsWithSummary(personalViewRow.config.columns as ListColumn[] | string[] | undefined, field, summary);
@@ -1122,7 +1132,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listViewActions: {
             rename: activeView && activeIsPersonal && personalViewsReady && personalGrant('update')
                 ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
-                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                : activeView && isAdmin && !activeViewPackageRefusesSaves && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
             save: !isEnvironmentList && canUpdatePersonalView && listPersonalizedParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
@@ -1140,10 +1150,13 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                     // views is drawn with. Every stored view has a qualified,
                     // dotted name, the console's own saved views included
                     // (`object.key` in the custom package), so the name cannot
-                    // tell a view a read-only package ships; the door refuses
-                    // that save by design (it goes to the custom package) and
-                    // the refused pick is taken back, as the panel's save is.
-                    : isAdmin && isSavedViewId(savedViews, String(activeView.id))
+                    // tell a view a read-only package ships: its row's package
+                    // does (objectstack#35933), and such a view is offered no
+                    // menu. While that is unknown the menu stays; the door
+                    // refuses that save by design (it goes to the custom
+                    // package) and the refused pick is taken back, as the
+                    // panel's save is.
+                    : isAdmin && !activeViewPackageRefusesSaves && isSavedViewId(savedViews, String(activeView.id))
                         ? handlePickSharedViewSummary
                         : undefined,
             summaryPickFields: declaredColumnFields(
