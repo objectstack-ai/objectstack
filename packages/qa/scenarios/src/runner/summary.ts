@@ -16,8 +16,11 @@
  *   - One table per card and mode (`scratch`, `template`, `ask`, `door`). Its runs
  *     must share the prompt choice, the package source, the ask repeats, the
  *     driver, the ask client's skills, the door arm (`door.ts`: one arm per
- *     table, so an arm's runs are summed and two arms never are) and the card file they graded (its
- *     sha256, `CardStamp`) ({@link TABLE_DIMENSIONS}); when they do not, the table is
+ *     table, so an arm's runs are summed and two arms never are), the card file they graded (its
+ *     sha256, `CardStamp`) and the schema masking of the apps they booted
+ *     (`env.schemaMasking`, `schema-masking.ts`: a masking-off round asks
+ *     another question of a withheld field than a default one)
+ *     ({@link TABLE_DIMENSIONS}); when they do not, the table is
  *     refused with a line naming each difference and the files on each side,
  *     never summed. The other tables still print. A record from before the
  *     card stamp reads `card: not recorded`, so it is never summed with a
@@ -50,6 +53,7 @@ import { basename, join, resolve } from 'node:path';
 
 import { askSkillsText, type AskSkillsInfo } from './ask-skills.js';
 import { doorArmText, type DoorArm } from './door.js';
+import { schemaMaskingText } from './schema-masking.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { promptChoiceText, type PromptChoice } from './prompts.js';
 import { askCostText, askTimeText, cardStampText, kindCell, MODEL_NOT_REPORTED, type AskSpend, type CardStamp, type HalfScores, type KindTally, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
@@ -95,7 +99,7 @@ interface LooseModeScorecard {
 
 interface LooseRecord {
   app?: string;
-  env?: { packages?: PackageSource; driver?: { driver?: string; replayOf?: { driver?: string }; askSkills?: AskSkillsInfo; door?: DoorArm } };
+  env?: { packages?: PackageSource; driver?: { driver?: string; replayOf?: { driver?: string }; askSkills?: AskSkillsInfo; door?: DoorArm }; schemaMasking?: string };
   template?: SuppliedTemplate;
   /** The card file the run graded (`runRecord`); absent on a record written before the runner stamped it. */
   card?: CardStamp;
@@ -190,7 +194,7 @@ export function readSummaryRecords(paths: readonly string[]): ReadSummaryResult 
 // ── Grouping: tables, rows, columns ─────────────────────────────────────────
 
 /** The dimensions a table does not show, which every run of one table must share. */
-export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills', 'door arm', 'card'] as const;
+export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills', 'door arm', 'card', 'schema masking'] as const;
 export type TableDimension = (typeof TABLE_DIMENSIONS)[number];
 
 /** One mode of one record: the unit a cell sums. */
@@ -225,8 +229,16 @@ function dimensionsOf(r: LooseRecord): Record<TableDimension, string> {
     'ask skills': r.env?.driver?.askSkills ? `ask skills: ${askSkillsText(r.env.driver.askSkills)}` : NO_ASK_SKILLS,
     'door arm': r.env?.driver?.door ? `door arm: ${doorArmText(r.env.driver.door)}` : NO_DOOR_ARM,
     card: r.card ? cardStampText(r.card) : NO_CARD_STAMP,
+    'schema masking': schemaMaskingText(r.env?.schemaMasking),
   };
 }
+
+/**
+ * The `schema masking` value of a record whose apps were booted masked (no
+ * `--schema-masking off`, and every record made before it): a table of such
+ * runs prints its dimensions line as before.
+ */
+const MASKED = schemaMaskingText(undefined);
 
 /**
  * The `card` value of a record written before the runner stamped the card
@@ -506,7 +518,7 @@ export function renderSummaryTable(t: SummaryTable): string {
     lines.push('No run of this mode ran: every one was skipped.');
   } else {
     const dims = t.dims!;
-    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS) && !(d === 'door arm' && dims[d] === NO_DOOR_ARM) && !(d === 'card' && dims[d] === NO_CARD_STAMP)).map((d) => dims[d]).join(' · ')}`, '');
+    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS) && !(d === 'door arm' && dims[d] === NO_DOOR_ARM) && !(d === 'card' && dims[d] === NO_CARD_STAMP) && !(d === 'schema masking' && dims[d] === MASKED)).map((d) => dims[d]).join(' · ')}`, '');
     lines.push(`| ${t.mode === 'scratch' || t.mode === 'door' ? 'Author model' : 'Supplied build'} | Half | ${t.cols.map((c) => esc(c.label)).join(' | ')} |`);
     lines.push(`|:---|:---|${t.cols.map(() => ':---').join('|')}|`);
     const halves = halfRows(t);
