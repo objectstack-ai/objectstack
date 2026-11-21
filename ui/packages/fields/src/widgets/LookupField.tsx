@@ -2160,10 +2160,27 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         {t('lookup.clear')}
       </button>
     ) : null;
+    // The full record picker, as the "Browse All" button beside the form's
+    // trigger opens it — classic lookups only, gated like the list (#2215).
+    const browseAll = hasDataSource && pickerVariant !== 'search' ? (
+      <button
+        type="button"
+        className="flex w-full shrink-0 items-center gap-1.5 border-t px-3 py-2 text-left text-sm text-muted-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        onPointerDown={(e) => e.preventDefault()}
+        disabled={dependenciesMissing}
+        onClick={() => setIsPickerOpen(true)}
+        data-testid="browse-all-records"
+      >
+        <TableProperties className="size-3.5" />
+        {t('lookup.browseAll')}
+      </button>
+    ) : null;
     return (
       <div data-in-cell-face="panel" className="flex max-h-80 w-full flex-col" data-testid="lookup-in-cell">
         {dependenciesMissing ? (
-          <p className="px-3 py-2 text-sm text-muted-foreground">{t('lookup.selectFirst', { fields: dependsOnFieldsText })}</p>
+          <p className="px-3 py-2 text-sm text-muted-foreground" data-testid="lookup-in-cell-gated">
+            {t('lookup.selectFirst', { fields: dependsOnFieldsText })}
+          </p>
         ) : searchVariant ? (
           <PeoplePicker
             inline
@@ -2191,6 +2208,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         ) : (
           lookupPanelBody
         )}
+        {browseAll}
         {clear}
         {recordPickerDialog}
       </div>
