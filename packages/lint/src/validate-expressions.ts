@@ -502,11 +502,11 @@ function buildMultiValueFieldIndex(objects: AnyRec[]): Map<string, string[]> {
   for (const obj of objects) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;
     if (!name) continue;
-    const multi: string[] = [];
+    const out: string[] = [];
     for (const [fn, def] of fieldEntries(obj)) {
-      if (typeof def.type === 'string' && isMultiValueField({ type: def.type, multiple: def.multiple === true })) multi.push(fn);
+      if (typeof def.type === 'string' && isMultiValueField({ type: def.type, multiple: def.multiple === true })) out.push(fn);
     }
-    idx.set(name, multi);
+    idx.set(name, out);
   }
   return idx;
 }
