@@ -568,7 +568,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // undeclared grid is at least `DIALOG_DEFAULT_COLUMNS` wide whatever the
   // size, so the size reads that floor and never the count it then bounds
   // (objectstack-ai/objectstack#34607).
-  // objectstack-ai/objectstack#35980 — at most eight fields and no declared
+  // objectstack-ai/objectstack#35980 — at most six fields (ruling 7061696632) and no declared
   // `columns` anywhere: one per row, in the narrow `lg` dialog. Maximized,
   // the user asked for the room, and the form spreads as it did before.
   const singleColumn = !maximized && dialogDrawsSingleColumn(

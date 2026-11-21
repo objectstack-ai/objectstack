@@ -593,11 +593,12 @@ export function inferModalSize(columns: number): 'sm' | 'default' | 'lg' | 'xl' 
 
 /**
  * The most fields a dialog lays out in ONE column (objectstack-ai/objectstack#35980).
- * See {@link dialogDrawsSingleColumn}. The number is the card's proposal, not a
- * maintainer's ruling; it waits on the maintainer's answer, and this constant
- * is the one place to change it.
+ * See {@link dialogDrawsSingleColumn}. Six is the maintainer's choice (ruling
+ * of record 7061696632 on #35980, over the card's proposed eight): measured at
+ * 1366×768, six fields fit the dialog with nothing to scroll, and eight run
+ * past its height cap. This constant is the one place the number lives.
  */
-export const DIALOG_SINGLE_COLUMN_MAX_FIELDS = 8;
+export const DIALOG_SINGLE_COLUMN_MAX_FIELDS = 6;
 
 /**
  * Whether a dialog draws its fields one per row in the narrow `lg` size
@@ -641,7 +642,7 @@ export function dialogDrawsSingleColumn(
  * never thinned out — with two bounds:
  *
  * - FLOOR two: the dialog's earlier fixed default (objectui#12521). A dialog
- *   that declares nothing and lays out at most eight fields never reaches
+ *   that declares nothing and lays out at most six fields never reaches
  *   this count: it draws one column ({@link dialogDrawsSingleColumn},
  *   objectstack-ai/objectstack#35980).
  * - CAP by the dialog's size: three in a bounded dialog, four only in a

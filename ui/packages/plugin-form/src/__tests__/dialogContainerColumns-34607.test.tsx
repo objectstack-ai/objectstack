@@ -258,51 +258,52 @@ describe('#34607 dialogUndeclaredColumns', () => {
 
 /**
  * objectstack-ai/objectstack#35980 — a short dialog that declares nothing is
- * one column in the narrow `lg` size; past eight fields, or with any declared
+ * one column in the narrow `lg` size; past six fields (the maintainer's
+ * choice, ruling of record 7061696632 on #35980), or with any declared
  * `columns`, the dialog is as #34607 left it.
  */
-describe('#35980 — up to eight fields and nothing declared: one column, lg', () => {
-  const EIGHT = {
+describe('#35980 — up to six fields and nothing declared: one column, lg', () => {
+  const SIX = {
     name: 'thing',
-    fields: Object.fromEntries(PLAIN.slice(0, 8).map((n) => [n, { type: 'text', label: `Field ${n}` }])),
+    fields: Object.fromEntries(PLAIN.slice(0, 6).map((n) => [n, { type: 'text', label: `Field ${n}` }])),
   };
-  const NINE = {
+  const SEVEN = {
     name: 'thing',
-    fields: Object.fromEntries(PLAIN.slice(0, 9).map((n) => [n, { type: 'text', label: `Field ${n}` }])),
+    fields: Object.fromEntries(PLAIN.slice(0, 7).map((n) => [n, { type: 'text', label: `Field ${n}` }])),
   };
 
   it('the predicate: count, form columns and every section columns', () => {
-    expect(DIALOG_SINGLE_COLUMN_MAX_FIELDS).toBe(8);
-    expect([0, 1, 5, 8].map((n) => dialogDrawsSingleColumn(n, undefined))).toEqual([true, true, true, true]);
-    expect(dialogDrawsSingleColumn(9, undefined)).toBe(false);
+    expect(DIALOG_SINGLE_COLUMN_MAX_FIELDS).toBe(6);
+    expect([0, 1, 5, 6].map((n) => dialogDrawsSingleColumn(n, undefined))).toEqual([true, true, true, true]);
+    expect([7, 8, 9].map((n) => dialogDrawsSingleColumn(n, undefined))).toEqual([false, false, false]);
     expect(dialogDrawsSingleColumn(5, 2)).toBe(false);
     expect(dialogDrawsSingleColumn(5, 1)).toBe(false);
     expect(dialogDrawsSingleColumn(5, undefined, [undefined, undefined])).toBe(true);
     expect(dialogDrawsSingleColumn(5, undefined, [undefined, 3])).toBe(false);
   });
 
-  it('eight flat fields: one per row in the lg dialog', async () => {
-    const dialog = await openDialog(EIGHT);
+  it('six flat fields: one per row in the lg dialog', async () => {
+    const dialog = await openDialog(SIX);
     expect(dialog.className).toContain('sm:max-w-2xl');
     expect(ladder('f0')).toEqual([1, 1, 1]);
   });
 
-  it('nine flat fields: the wide dialog and its grid, as before', async () => {
-    const dialog = await openDialog(NINE);
+  it('seven flat fields: the wide dialog and its grid, as before', async () => {
+    const dialog = await openDialog(SEVEN);
     expect(dialog.className).toContain('sm:max-w-5xl');
-    expect(ladder('f0')).toEqual([2, 3, 3]);
+    expect(ladder('f0')).toEqual([2, 2, 2]);
   });
 
-  it('undeclared sections of eight fields in all: one per row too', async () => {
-    const dialog = await openDialog(EIGHT, {
+  it('undeclared sections of six fields in all: one per row too', async () => {
+    const dialog = await openDialog(SIX, {
       sections: [
-        { name: 'a', label: 'A', fields: PLAIN.slice(0, 4) },
-        { name: 'b', label: 'B', fields: PLAIN.slice(4, 8) },
+        { name: 'a', label: 'A', fields: PLAIN.slice(0, 3) },
+        { name: 'b', label: 'B', fields: PLAIN.slice(3, 6) },
       ],
     });
     expect(dialog.className).toContain('sm:max-w-2xl');
     expect(ladder('f0')).toEqual([1, 1, 1]);
-    expect(ladder('f4')).toEqual([1, 1, 1]);
+    expect(ladder('f3')).toEqual([1, 1, 1]);
   });
 
   it('a declared form columns is drawn as written, in the size it drew before', async () => {
@@ -312,10 +313,10 @@ describe('#35980 — up to eight fields and nothing declared: one column, lg', (
   });
 
   it('one declared section keeps the dialog as it was: its neighbour draws two', async () => {
-    const dialog = await openDialog(EIGHT, {
+    const dialog = await openDialog(SIX, {
       sections: [
-        { name: 'a', label: 'A', fields: PLAIN.slice(0, 5) },
-        { name: 'b', label: 'B', columns: 3, fields: PLAIN.slice(5, 8) },
+        { name: 'a', label: 'A', fields: PLAIN.slice(0, 4) },
+        { name: 'b', label: 'B', columns: 3, fields: PLAIN.slice(4, 6) },
       ],
     });
     expect(dialog.className).toContain('sm:max-w-5xl');
