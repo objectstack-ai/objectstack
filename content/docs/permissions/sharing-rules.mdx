@@ -77,7 +77,10 @@ Two things the bits do **not** override, regardless of the OWD:
   unless an app-authored `using` policy for the write applies to the caller.
   Then the write keeps the floor beside that policy: a row the floor admits
   (one the caller created) stays writable, and the policy still bounds every
-  other row. A write made on
+  other row. To hold the creator's own rows to a limit as well, give the
+  update policy a `check` (it judges the new image of every row); a delete
+  has no new image, so that limit goes in a `beforeDelete` lifecycle hook.
+  A write made on
   another user's behalf keeps the floor. Under
   `public_read_write` the sharing service abstains on a delete, so the
   delete floor stays; on an object with no `owner_id` it abstains on both,
