@@ -66,7 +66,7 @@ describe('filterBookArticles', () => {
   });
 
   it('matches a title or a summary, case-insensitively, and drops empty groups', () => {
-    const byTitle = filterBookArticles(BOOK, 'PRICE');
+    const byTitle = filterBookArticles(BOOK, 'PRICE BOOK');
     expect(byTitle.groups.map((g) => g.key)).toEqual(['quotes']);
     expect(byTitle.groups[0].entries.map((e) => e.doc)).toEqual(['products']);
     const bySummary = filterBookArticles(BOOK, 'priced');

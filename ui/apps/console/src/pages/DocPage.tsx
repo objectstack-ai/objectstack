@@ -245,6 +245,7 @@ export default function DocPage() {
       ? labelUncategorized(resolveBookTree(book, allDocs, undefined, authoredBooks), uncategorizedLabel)
       : null;
   }, [books, authoredBooks, allDocs, slug, uncategorizedLabel]);
+  const docHref = useCallback((docName: string) => `${base}/${slug}/${docName}`, [base, slug]);
   // objectstack#35424 — the docs column lists every book of the package the
   // reader is in: the current book's package, else the route's app package.
   const packageBooks = useMemo<DocsNavBook[]>(() => {

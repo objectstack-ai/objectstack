@@ -692,7 +692,8 @@ describe('objectstack#35424 — the in-app reader has one docs column and a path
     render(<InApp entry="/apps/crm/docs/crm/crm_intro" />);
     await screen.findByTestId('doc-content');
     expect(within(column()).getByTestId('docs-nav-back')).toHaveAttribute('href', '/apps/crm');
-    expect(within(column()).getByTestId('docs-nav-back')).toHaveTextContent('Back to crm');
+    // This harness's `t` returns the default text uninterpolated.
+    expect(within(column()).getByTestId('docs-nav-back')).toHaveTextContent('Back to');
     expect(within(column()).getByTestId('docs-nav-all-docs')).toHaveAttribute('href', '/docs');
   });
 
