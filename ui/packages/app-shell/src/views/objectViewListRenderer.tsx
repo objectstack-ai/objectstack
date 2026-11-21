@@ -335,6 +335,7 @@ export function useObjectViewListRenderer({
         // its columns and their order here. The column widths and the row
         // height are the reader's layout in this browser (`listLayout`), never
         // a draft.
+        const viewOwnRowColor = viewDef.rowColor ?? listSchema.rowColor;
         const viewPref: ListViewPreference | undefined = listDraftPreference(
             listDraft.draft,
             listLayout.layout.perView?.[viewDef.id],
@@ -849,7 +850,14 @@ export function useObjectViewListRenderer({
              * a different nesting level ('may the user open the colour panel'
              * versus 'what the colours are').
              */
-            rowColor: viewDef.rowColor ?? listSchema.rowColor,
+            // objectstack#35955 — the reader's unsaved row colour (the list's
+            // draft, `null` for "none") over the view's own; the view's own
+            // goes to `viewDefaults` below, for Discard and Save.
+            rowColor: listDraft.draft.rowColor !== undefined
+                ? (listDraft.draft.rowColor ?? undefined)
+                : viewOwnRowColor,
+            // objectstack#35955 — and the reader's unsaved layout.
+            viewType: listDraft.draft.viewType ?? listSchema.viewType,
             // objectui#11013 — the seven renderer flags this relay used to read
             // off the active view (`wrapHeaders`, `clickIntoRecordDetails`,
             // `addRecordViaForm`, `addDeleteRecordsInline`,
@@ -1073,13 +1081,22 @@ export function useObjectViewListRenderer({
                 // objectstack#28950 — and the view's own grouping, under a
                 // grouping the URL carries (the `grouping` rung above), so the
                 // list can tell the reader's from the view's.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters }}
+                // objectstack#35955 — and the view's own layout and row colour,
+                // under the draft's (`viewType` / `rowColor` above).
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters, viewType: listSchema.viewType, rowColor: viewOwnRowColor }}
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
                 // objectstack#28950 — what of the list differs from the view,
                 // for Discard and Save (objectstack#35955), which then own the
                 // one reset (the Display control draws none of its own).
                 onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
+                // objectstack#35955 — the layout and the row colour the reader
+                // picks are the list's draft; picking the view's own again
+                // drops that part.
+                onViewChange={(view: string) => listDraft.patch({ viewType: view === listSchema.viewType ? undefined : view })}
+                onRowColorChange={(rowColor: { field: string; colors?: Record<string, string> } | null) => listDraft.patch({
+                    rowColor: (rowColor?.field ?? '') === (viewOwnRowColor?.field ?? '') ? undefined : rowColor,
+                })}
                 // objectstack#35551 — the view's rename, 保存 and full reset in the options menu.
                 onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
                 onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}

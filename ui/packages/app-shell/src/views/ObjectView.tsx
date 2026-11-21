@@ -107,6 +107,7 @@ import {
     PERSONAL_VIEW_OBJECT,
     buildInPlaceViewConfig,
     buildPersonalViewConfig,
+    layListStateOverView,
     personalViewEntry,
     personalViewPanelFilters,
     usePersonalViews,
@@ -735,6 +736,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     /** The list on screen in the reader-state shape the view builders read (draft + kept widths and row height). */
     const draftPreferenceOf = (id: string | undefined) =>
         id ? listDraftPreference(listDraft.draft, listLayout.layout.perView?.[id]) : undefined;
+    /** The Display panel's layout and row colour the draft holds, for the view builders. */
+    const draftDisplay = {
+        ...(listDraft.draft.viewType ? { viewType: listDraft.draft.viewType } : {}),
+        ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+    };
     // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
     // "Reset view") moved to `./objectViewListUrlState.ts`.
     const {
@@ -780,6 +786,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
             preference: draftPreferenceOf(activeView.id),
             panelFilters: viewPanelFilters,
+            display: draftDisplay,
         });
         if (!built.ok) {
             toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
@@ -800,23 +807,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             });
         }
     };
-    // objectstack#35955 — Discard and Save while the list holds a draft, at
-    // the end of the condition row (the phone draws the same slot). 「Save to
-    // this view」 writes one of the reader's own views here; a shared view's
-    // save is not offered on the list yet. 「Save as my view」 asks a name.
     // objectstack#29635 — the one test for creating one of the reader's own
     // views, shared by Save as my view here and the view switcher's create
     // card: a reader who cannot read the list's own object has no list to keep.
     const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
     const canCreatePersonalView = personalViewsReady && personalGrant('create') && listReadable && !!activeView && !viewAccess.refusal;
-    const draftActions = !isEnvironmentList && listDraftParts.length > 0 ? (
-        <ListDraftActions
-            parts={listDraftParts}
-            onDiscard={handleResetView}
-            onSaveToView={canUpdatePersonalView ? () => { void handleSaveToPersonalView(); } : undefined}
-            onSaveAsMyView={canCreatePersonalView ? () => setPersonalViewDialog({ mode: 'saveAs' }) : undefined}
-        />
-    ) : null;
 
     // objectstack#25992 slice 11b: the view-config save and create handlers, view switching
     // and the view-tab CRUD callbacks moved to `./objectViewViewCrud.tsx` (the mobile view
@@ -824,6 +819,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const {
         handleViewConfigSave,
         handleDraftBarChange,
+        handleViewSaveAndPublish,
         handleViewCreate,
         handleViewUpdate,
         handleViewChange,
@@ -896,6 +892,69 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         return saved;
     };
 
+    // objectstack#35955 — 「Save to this view」 on a shared view: offered to
+    // the reader who may edit it (the footer pick's test above: an admin, on a
+    // view the metadata door stores, whose package takes saves). One confirm
+    // (everyone using the view sees it), then the list on screen is saved and
+    // published at once (ruling record 7058616478). A view with a pending
+    // draft is not saved: that draft is never published on its saver's
+    // behalf, and the reader is sent to the view settings. The reader's row
+    // height is theirs, never the view's: the view keeps its own.
+    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && isAdmin
+        && !activeViewPackageRefusesSaves && isSavedViewId(savedViews, String(activeView.id));
+    const handleSaveToSharedView = async () => {
+        if (!activeView || !canSaveToSharedView) return;
+        const confirmed = await confirmHandler(
+            // The view's name as its tab draws it (objectstack#35955 L1-b S1): a
+            // label is an I18nLabel with no default, so never the raw value.
+            t('console.objectView.draft.saveToViewConfirm', { name: listLabel }),
+            {
+                title: t('console.objectView.draft.saveToViewConfirmTitle'),
+                confirmText: t('console.objectView.draft.saveToViewConfirmButton'),
+                cancelText: t('console.objectView.cancel'),
+            },
+        );
+        if (!confirmed) return;
+        const pref = draftPreferenceOf(activeView.id);
+        const laid = layListStateOverView(activeView, {
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
+            preference: pref ? { ...pref, rowHeight: undefined } : undefined,
+            panelFilters: viewPanelFilters,
+            display: draftDisplay,
+        });
+        if (!laid.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[laid.reason]) });
+            return;
+        }
+        const outcome = await handleViewSaveAndPublish(laid.view);
+        if (outcome === 'pending-draft') {
+            toast.error(t('console.objectView.draft.pendingDraft'));
+            return;
+        }
+        if (outcome !== 'published') return;
+        // The draft is the view now, for everyone: Discard and Save go, and
+        // the list opens again on the saved view (its chips stay).
+        handleResetView();
+        toast.success(t('console.objectView.draft.savedForEveryone'));
+    };
+    // objectstack#35955 — Discard and Save while the list holds a draft, at
+    // the end of the condition row (the phone draws the same slot). 「Save to
+    // this view」 writes one of the reader's own views, or the shared view
+    // for a reader who may edit it; 「Save as my view」 asks a name.
+    const saveToThisView = canUpdatePersonalView
+        ? () => { void handleSaveToPersonalView(); }
+        : canSaveToSharedView
+            ? () => { void handleSaveToSharedView(); }
+            : undefined;
+    const draftActions = !isEnvironmentList && listDraftParts.length > 0 ? (
+        <ListDraftActions
+            parts={listDraftParts}
+            onDiscard={handleResetView}
+            onSaveToView={saveToThisView}
+            onSaveAsMyView={canCreatePersonalView ? () => setPersonalViewDialog({ mode: 'saveAs' }) : undefined}
+        />
+    ) : null;
+
     // objectstack#29635 — creating one of the reader's own views, and Rename
     // and Delete on them. Creating is offered to any reader the server lets
     // save one (`sys_personal_view` read and create), not to admins only, in
@@ -960,14 +1019,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
      */
     const handleSaveAsMyView = async (label: string): Promise<boolean> => {
         if (!activeView) return false;
+        // objectstack#35955 — the draft's layout is the new view's type (so
+        // the type's own field list is filled as the create card fills it),
+        // and its row colour is laid over the body.
         const built = buildInPlaceViewConfig(
             objectDef.name,
             activeView,
-            { type: String((activeView as any).type ?? 'grid') },
+            { type: listDraft.draft.viewType ?? String((activeView as any).type ?? 'grid') },
             {
                 url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
                 preference: draftPreferenceOf(activeView.id),
                 panelFilters: viewPanelFilters,
+                ...(listDraft.draft.rowColor !== undefined ? { display: { rowColor: listDraft.draft.rowColor } } : {}),
             },
         );
         if (!built.ok) {
@@ -1228,7 +1291,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
-            save: !isEnvironmentList && canUpdatePersonalView && listDraftParts.length > 0 ? () => { void handleSaveToPersonalView(); } : undefined,
+            save: !isEnvironmentList && listDraftParts.length > 0 ? saveToThisView : undefined,
             reset: !isEnvironmentList && listDraftParts.length > 0 ? handleResetView : undefined,
             // objectstack#35702 — the footer's calculation, saved on the open
             // view (ruling 7045525672): a personal view at once; a shared one,
@@ -1596,7 +1659,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                         ? t('console.objectView.draft.saveAsMyView')
                         : t('view.rename', { defaultValue: 'Rename' })}
                     initialName={personalViewDialog?.mode === 'saveAs'
-                        ? t('console.objectView.draft.copyName', { name: activeView?.label ?? '' })
+                        ? t('console.objectView.draft.copyName', { name: listLabel })
                         : renamingPersonalView?.label ?? ''}
                     onSubmit={(name) => (personalViewDialog?.mode === 'rename'
                         ? handleRenamePersonalView(personalViewDialog.viewId, name)

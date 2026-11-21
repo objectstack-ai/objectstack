@@ -733,7 +733,7 @@ describe('the list is handed the view\'s own density and hidden fields beside th
 
     expect(listProps.schema.rowHeight).toBe('compact');
     expect(listProps.schema.hiddenFields).toEqual(['name']);
-    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT, sort: AUTHORED_SORT });
+    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT, sort: AUTHORED_SORT, viewType: 'grid' });
   });
 
   it('a choice equal to the view\'s own, made through the controls\' doors, is still the reader\'s choice', async () => {
@@ -753,7 +753,7 @@ describe('the list is handed the view\'s own density and hidden fields beside th
     expect(draftOf().hiddenFields).toEqual(AUTHORED_HIDDEN);
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
-    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT, sort: AUTHORED_SORT });
+    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT, sort: AUTHORED_SORT, viewType: 'grid' });
   });
 
   it('CONTROL: another user, with no state of their own, is handed the same value twice', async () => {
@@ -767,6 +767,8 @@ describe('the list is handed the view\'s own density and hidden fields beside th
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
     expect(listProps.viewDefaults).toEqual({
       hiddenFields: listProps.schema.hiddenFields, rowHeight: listProps.schema.rowHeight, sort: listProps.schema.sort,
+      // objectstack#35955 — the layout too: no draft, so the same value twice.
+      viewType: listProps.schema.viewType,
     });
   });
 

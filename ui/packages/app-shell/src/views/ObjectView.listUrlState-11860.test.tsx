@@ -394,6 +394,32 @@ describe('objectstack#35955 — a reload drops a list\'s address state only when
     await mountHost([address]);
     expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
   });
+
+  // The two edges of the address match (objectstack#35955, PR 2's known
+  // edges): each is pinned as it behaves, not changed.
+  it('edge: a reload whose address is rewritten before the list seeds counts as no reload of the list, so the address state applies', async () => {
+    // The reload asked for one address; the list opens on another (a landing
+    // redirect, a view segment filled in) that carries the same `uf_*` state.
+    const reloaded = link(VIEW, { filter: URGENT });
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    stubNavigation('reload', new URL(reloaded, window.location.origin).href);
+    window.history.replaceState(null, '', address);
+    const host = await mountHost([address]);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(true);
+  });
+
+  it('edge: a reload of a record page, then Back to the list: the list\'s history entry applies its `uf_*` state', async () => {
+    const record = `${VIEW}/all/record/1`;
+    const address = link(`${VIEW}/all`, { filter: URGENT });
+    window.history.replaceState(null, '', record);
+    stubNavigation('reload', new URL(record, window.location.origin).href);
+    const host = await mountHost([record]);
+    window.history.replaceState(null, '', address);
+    await host.go(address);
+    expect(filterOf(lastQuery())).toContain('"priority","=","urgent"');
+    expect(new URLSearchParams(host.search()).has(LIST_FILTER_PARAM)).toBe(true);
+  });
 });
 
 describe('a malformed or stale param is dropped — the list opens and nothing throws (objectui#11860)', () => {

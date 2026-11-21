@@ -2771,6 +2771,11 @@ const es = {
         saveAsMyView: "Guardar como mi vista",
         copyName: "{{name}} (copia)",
         saved: "Guardado",
+        saveToViewConfirmTitle: "¿Guardar en esta vista?",
+        saveToViewConfirm: "Todas las personas que usan «{{name}}» verán estos cambios.",
+        saveToViewConfirmButton: "Guardar para todos",
+        savedForEveryone: "Guardado, visible para todos",
+        pendingDraft: "Esta vista tiene cambios sin publicar. Publícalos o descártalos primero en la configuración de la vista.",
       },
       linkFilterRefused: 'No se aplicó el filtro de este enlace. Incluye un campo por el que no puede filtrar aquí, así que la lista muestra la vista sin él.',
       personalizedParts: {

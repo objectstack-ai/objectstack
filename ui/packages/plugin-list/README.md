@@ -287,6 +287,32 @@ import { ListView } from '@object-ui/plugin-list';
 />
 ```
 
+### Host props: the unsaved layout and row colour (`onRowColorChange`)
+
+A host that keeps the reader's layout and row colour as an unsaved change
+(the console's list draft) wires `onViewChange` and `onRowColorChange`.
+`onRowColorChange` is called with the colour rule a pick in the toolbar's row
+colour panel puts in force, or `null` for "none" (Clear, or the None entry);
+it is called for a pick only, never at mount, for a reset or for a prop
+change. The host lays the reader's choice into `schema.viewType` /
+`schema.rowColor` when the list mounts again, and passes the view's own in
+`viewDefaults.viewType` / `viewDefaults.rowColor`, so the Display control's
+count and the `layout` / `rowColor` parts of `onPersonalizationChange` are
+judged against the view. Like `viewDefaults.grouping`, each is read only when
+its key is present. These are React props for the host app, not schema keys.
+
+```tsx
+import { ListView } from '@object-ui/plugin-list';
+
+// The view colours nothing; the reader picked a colour by `stage`.
+<ListView
+  schema={{ type: 'list-view', objectName: 'deals', viewType: 'grid', rowColor: { field: 'stage' } }}
+  viewDefaults={{ viewType: 'grid', rowColor: undefined }}
+  onViewChange={(view) => console.log('Layout:', view)}
+  onRowColorChange={(rowColor) => console.log('Row colour:', rowColor)}
+/>
+```
+
 ### Host props: `addedFields` and `onAddedFieldsChange`
 
 A host that lets a reader add fields to their own list wires
