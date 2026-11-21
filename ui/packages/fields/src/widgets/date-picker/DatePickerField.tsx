@@ -291,12 +291,7 @@ function TemporalPicker({
         selected={selected}
         onSelect={pickDay}
         autoFocus={!inCell}
-        className={cn(
-          '[--cell-size:2.75rem] sm:[--cell-size:2rem]',
-          // Under a cell the calendar takes the panel's own surface, centred
-          // over the wider row of quick picks.
-          inCell && 'mx-auto bg-transparent',
-        )}
+        className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
       />
       {withTime ? (
         <div
@@ -377,7 +372,14 @@ function TemporalPicker({
     // The grid's cell editor (objectstack#36023): one panel under the cell,
     // the typeable box on top and the calendar always showing beneath it.
     return (
-      <div ref={rootRef} className="w-max space-y-1" data-slot="date-picker" data-in-cell-face="panel">
+      <div
+        ref={rootRef}
+        // The calendar takes the panel's own surface, centred over the wider
+        // row of quick picks.
+        className="w-max space-y-1 [&_[data-slot=calendar]]:mx-auto [&_[data-slot=calendar]]:bg-transparent"
+        data-slot="date-picker"
+        data-in-cell-face="panel"
+      >
         <div className="p-2 pb-0">{textBox('h-8')}</div>
         {panel}
         {noticeLine ? <div className="px-2 pb-2">{noticeLine}</div> : null}
