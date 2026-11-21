@@ -44,6 +44,16 @@ function pgProbe(answer: () => unknown): { probe: Probe; raw: ReturnType<typeof 
   return { probe, raw };
 }
 
+/** The refusal envelope ADR-0139 D3 names: `INTERNAL_ERROR` / 500, the statement never compiled. */
+function expectRefused(run: () => unknown, why: string): void {
+  let caught: unknown;
+  try { run(); } catch (err) { caught = err; }
+  expect(caught, 'refused').toBeInstanceOf(Error);
+  expect((caught as { code?: unknown }).code).toBe('INTERNAL_ERROR');
+  expect((caught as { status?: unknown }).status).toBe(500);
+  expect((caught as Error).message).toContain(why);
+}
+
 const row = (column_name: string, type_schema: string, type_name: string) => ({ column_name, type_schema, type_name });
 const leafWhere = (object = EXT) => ({ id: { $in: SharedRecordIds.read(object, 'u9') } });
 
@@ -84,24 +94,40 @@ describe('[ADR-0155 O2] the catalog prime and the cast it puts on the inner read
     }
   });
 
-  it('a type name knex cannot bind as one identifier is not cast (the statement compiles as before)', async () => {
+  it('a type name knex cannot bind as one identifier is refused, never cast or left uncast', async () => {
     const { probe } = pgProbe(() => ({ rows: [row('id', 'odd.schema', 'int4')] }));
     await probe.prime(EXT, leafWhere());
-    expect(probe.compile(EXT, leafWhere()).sql).toContain('"id" in (select "record_id" from');
+    expectRefused(() => probe.compile(EXT, leafWhere()), 'cannot bind as one identifier');
   });
 
-  it('a failed or empty catalog read records nothing, and the next door asks again', async () => {
+  it('no reading is refused (INTERNAL_ERROR / 500, logged once), never compiled uncast; a failed or empty read records nothing and the next door asks again', async () => {
     let answer: () => unknown = () => { throw new Error('catalog unavailable'); };
     const { probe, raw } = pgProbe(() => answer());
+    const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    (probe as any).logger = logger;
+    // Never primed: no reading at all.
+    expectRefused(() => probe.compile(EXT, leafWhere()), 'holds no reading');
+    // The catalog read failed (a pooled connection's acquire timeout is one).
     await probe.prime(EXT, leafWhere());
-    expect(probe.compile(EXT, leafWhere()).sql).not.toMatch(/CAST\(/);
-    answer = () => ({ rows: [] }); // the relation is not visible to this session yet
+    expectRefused(() => probe.compile(EXT, leafWhere()), 'holds no reading');
+    // The relation is not visible to the pooled connection (an uncommitted CREATE).
+    answer = () => ({ rows: [] });
     await probe.prime(EXT, leafWhere());
-    expect(probe.compile(EXT, leafWhere()).sql).not.toMatch(/CAST\(/);
+    expectRefused(() => probe.compile(EXT, leafWhere()), 'holds no reading');
+    // Logged at error once for this client; the caller saw all three.
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(String(logger.error.mock.calls[0][0])).toContain("[driver-sql] the $in of column 'id' of 'srid_ext' holds a SharedRecordIds leaf");
+    expect(String(logger.error.mock.calls[0][0])).not.toContain('u9');
     answer = () => ({ rows: [row('id', 'pg_catalog', 'int8')] });
     await probe.prime(EXT, leafWhere());
     expect(raw).toHaveBeenCalledTimes(3);
     expect(probe.compile(EXT, leafWhere()).sql).toContain('AS "pg_catalog"."int8"');
+  });
+
+  it('a column the read table does not have takes no cast: the database names the missing column itself', async () => {
+    const { probe } = pgProbe(() => ({ rows: [row('label', 'pg_catalog', 'text')] }));
+    await probe.prime(EXT, leafWhere());
+    expect(probe.compile(EXT, leafWhere()).sql).toContain('"id" in (select "record_id" from "sys_record_share"');
   });
 
   it('a where with no leaf reads nothing', async () => {

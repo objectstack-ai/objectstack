@@ -34,12 +34,19 @@
  * - **Text keys keep step 3's statement.** A `text` or `varchar` key (every
  *   table the platform manages) is cast to nothing: `record_id` already
  *   compares as the list's members do.
- * - **No cast without a reading.** A table the catalog has not answered for
- *   (no door primed it, the read failed, the relation is not visible yet) is
- *   compiled as before: an integer or uuid key fails loudly (42883), but a
- *   `character(n)` key compares as text and misses a padded grant silently,
- *   which is why every door primes. A failed or empty read records nothing,
- *   so the next door asks again.
+ * - **No reading, no statement.** On PostgreSQL a leaf compared with a table
+ *   the catalog has not answered for is REFUSED, in ADR-0139 D3's envelope
+ *   (`INTERNAL_ERROR` / 500, logged at `error` once per knex client), never
+ *   compiled uncast. Uncast, `record_id` meets the key as text: an integer or
+ *   uuid key fails (42883), but a `character(n)` key silently misses a padded
+ *   grant, which ADR-0155 D2 forbids. "No reading" is kept apart from "read:
+ *   a text key" (which takes no cast). A table has no reading when no door
+ *   primed it, when the catalog read failed (it runs on a pooled connection,
+ *   so a saturated pool's acquire timeout is a failure), or when the relation
+ *   is not visible to that connection (created in the caller's uncommitted
+ *   transaction). A failed or empty read records nothing, so the next
+ *   statement asks again. A type knex cannot spell as one identifier is
+ *   refused the same way.
  *
  * ## When the catalog is read
  *
@@ -63,6 +70,8 @@
  */
 
 import type { Knex } from 'knex';
+import { describeFixedReadLeaf, refuseFixedReadLeafOnce } from '@objectstack/core';
+import type { ReadableIdsRefusalLog } from '@objectstack/core';
 import { isComposedReadableIds, isFixedReadLeaf } from '@objectstack/spec/data';
 
 /** The PostgreSQL type a leaf's inner read casts `record_id` to: the outer key's base type. */
@@ -78,8 +87,17 @@ export interface FixedReadLeafKeySource {
   getBuilder(object: string): Knex.QueryBuilder;
 }
 
-/** Per knex client: the physical table's key → each column's cast, `null` for none. */
-const castsByClient = new WeakMap<object, Map<string, ReadonlyMap<string, FixedReadLeafKeyCast | null>>>();
+/** A column whose base type knex cannot spell as one identifier: refused, never cast or left uncast. */
+const UNSPELLABLE = Object.freeze({ unspellable: true as const });
+
+/** One column's reading: the cast, `null` for a text key (no cast), or {@link UNSPELLABLE}. */
+type ColumnReading = FixedReadLeafKeyCast | null | typeof UNSPELLABLE;
+
+/** Per knex client: the physical table's key → each column's reading. A table with no entry has NO reading. */
+const castsByClient = new WeakMap<object, Map<string, ReadonlyMap<string, ColumnReading>>>();
+
+/** Per knex client: whether a no-reading refusal was logged (once per client, its own flag). */
+const refusalLogByClient = new WeakMap<object, { logged: boolean }>();
 
 /** Base types `record_id` (text) already compares as today's list members do. */
 const UNCAST_BASE_TYPES = new Set(['pg_catalog.text', 'pg_catalog.varchar']);
@@ -109,7 +127,7 @@ function tableKey(schema: string | undefined, table: string): string {
   return JSON.stringify([schema ?? null, table]);
 }
 
-function cacheOf(client: object): Map<string, ReadonlyMap<string, FixedReadLeafKeyCast | null>> {
+function cacheOf(client: object): Map<string, ReadonlyMap<string, ColumnReading>> {
   let cache = castsByClient.get(client);
   if (cache === undefined) {
     cache = new Map();
@@ -120,8 +138,8 @@ function cacheOf(client: object): Map<string, ReadonlyMap<string, FixedReadLeafK
 
 /**
  * Whether a catalog name can be spelled as one `??` identifier binding: knex
- * splits an identifier on `.` and on ` as `, so a name holding either is not
- * cast (the statement then compiles as before and fails loudly).
+ * splits an identifier on `.` and on ` as `, so a name holding either cannot
+ * be cast to, and a leaf compared with such a column is refused.
  */
 function bindableIdentifier(name: string): boolean {
   return name.length > 0 && !name.includes('.') && !/\sas\s/i.test(name);
@@ -180,35 +198,89 @@ export async function primeFixedReadLeafKeyTypes(source: FixedReadLeafKeySource,
       const result = await client.raw(COLUMN_BASE_TYPES_SQL.replace('%RELATION%', relation), bindings);
       rows = result.rows;
     } catch {
-      // A catalog that cannot be read records nothing: the statement compiles
-      // as before, and the next door asks again.
+      // A catalog that cannot be read records nothing: the leaf is refused
+      // at compile (no reading), and the next door asks again.
       continue;
     }
     // No row: the relation is not visible to this session (yet). Nothing is recorded.
     if (!Array.isArray(rows) || rows.length === 0) continue;
-    const columns = new Map<string, FixedReadLeafKeyCast | null>();
+    const columns = new Map<string, ColumnReading>();
     for (const row of rows) {
-      const uncast = UNCAST_BASE_TYPES.has(`${row.type_schema}.${row.type_name}`)
-        || !bindableIdentifier(row.type_schema)
-        || !bindableIdentifier(row.type_name);
-      columns.set(row.column_name, uncast ? null : Object.freeze({ schema: row.type_schema, type: row.type_name }));
+      let reading: ColumnReading;
+      if (UNCAST_BASE_TYPES.has(`${row.type_schema}.${row.type_name}`)) reading = null;
+      else if (!bindableIdentifier(row.type_schema) || !bindableIdentifier(row.type_name)) reading = UNSPELLABLE;
+      else reading = Object.freeze({ schema: row.type_schema, type: row.type_name });
+      columns.set(row.column_name, reading);
     }
     cache.set(key, columns);
   }
 }
 
+/** What the compile does with `record_id` for one outer column, per {@link fixedReadLeafKeyReading}. */
+export type FixedReadLeafKeyReading =
+  | { readonly kind: 'cast'; readonly cast: FixedReadLeafKeyCast }
+  | { readonly kind: 'uncast' }
+  | { readonly kind: 'unread' }
+  | { readonly kind: 'unspellable' };
+
 /**
- * The cast {@link primeFixedReadLeafKeyTypes} recorded for `column` of the
- * physical table `schema.table` on this knex client, or `null`: no reading,
- * or a text key, which takes no cast.
+ * What {@link primeFixedReadLeafKeyTypes} recorded for `column` of the
+ * physical table `schema.table` on this knex client:
+ *
+ * - `cast`: a base type that is not text;
+ * - `uncast`: a text or varchar key, or a column the read table does not
+ *   have (the database then names the missing column itself);
+ * - `unread`: no reading of the table at all;
+ * - `unspellable`: a type knex cannot spell as one identifier.
+ *
+ * On PostgreSQL the last two are refused ({@link refuseFixedReadLeafKey}).
  */
-export function fixedReadLeafKeyCast(
+export function fixedReadLeafKeyReading(
   client: object,
   schema: string | undefined,
   table: string,
   column: string,
-): FixedReadLeafKeyCast | null {
-  return castsByClient.get(client)?.get(tableKey(schema, table))?.get(column) ?? null;
+): FixedReadLeafKeyReading {
+  const columns = castsByClient.get(client)?.get(tableKey(schema, table));
+  if (columns === undefined) return { kind: 'unread' };
+  const reading = columns.get(column);
+  if (reading === undefined || reading === null) return { kind: 'uncast' };
+  if (reading === UNSPELLABLE) return { kind: 'unspellable' };
+  return { kind: 'cast', cast: reading as FixedReadLeafKeyCast };
+}
+
+/**
+ * [ADR-0155 D2, O2] The refusal of a leaf compared with a column this driver
+ * cannot type on PostgreSQL: ADR-0139 D3's envelope, `INTERNAL_ERROR` / 500,
+ * logged at `error` once per knex client. The message names the leaf (by
+ * name and table, never its recipient), the object and column, why, and the
+ * remedy.
+ */
+export function refuseFixedReadLeafKey(
+  evaluator: string,
+  leaf: unknown,
+  object: string | null,
+  column: string,
+  kind: 'unread' | 'unspellable',
+  logger: ReadableIdsRefusalLog | undefined,
+  client: object,
+): Error {
+  let state = refusalLogByClient.get(client);
+  if (state === undefined) {
+    state = { logged: false };
+    refusalLogByClient.set(client, state);
+  }
+  const at = `the $in of column '${column}' of '${object ?? '(no object)'}'`;
+  const why = kind === 'unread'
+    ? 'whose type this driver holds no reading of from the PostgreSQL catalog: the catalog read failed, '
+      + 'or the table is not visible to the pooled connection that reads it (created inside a transaction '
+      + 'that has not committed)'
+    : 'whose type the PostgreSQL catalog names with a spelling this driver cannot bind as one identifier';
+  const message = `${describeFixedReadLeaf(at, leaf)}, compared with a column ${why}. Uncast, record_id would `
+    + 'meet the key as text, which fails on an integer or uuid key and silently misses a padded id on a '
+    + 'character(n) key (ADR-0155 D2, O2). The statement was NOT run. The next statement reads the catalog '
+    + 'again; a table created inside a transaction is read once that transaction commits.';
+  return refuseFixedReadLeafOnce(evaluator, message, logger, state, object ?? undefined);
 }
 
 /** The inner read's projection under a cast: `CAST(NULLIF(record_id, '') AS "schema"."type")`. */

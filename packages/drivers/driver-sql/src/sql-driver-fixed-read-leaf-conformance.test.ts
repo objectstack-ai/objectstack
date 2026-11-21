@@ -47,6 +47,7 @@ import {
 import { SqlDriver, type SqlDriverConfig } from './sql-driver.js';
 import { DIALECT_CELLS, PG_CELL, currentLiveSchema, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 import { RELATION_GROUP_JOINS, type RelationGroupJoin } from './sql-driver-aggregation.js';
+import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 
 const set = SHARED_RECORD_IDS_CASE_SET;
@@ -641,6 +642,75 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
       });
     });
 
+    /**
+     * F1: a table this driver holds no reading of is REFUSED on PostgreSQL
+     * (ADR-0139 D3's envelope, `INTERNAL_ERROR` / 500, logged once), never
+     * compiled uncast: uncast, a `character(n)` key misses a padded grant
+     * silently. The catalog read runs on a pooled connection, so (a) a pool
+     * the caller's own transaction holds times the read out, and (b) a table
+     * created in the caller's uncommitted transaction is not visible to it.
+     */
+    describe('no reading is refused, never compiled uncast (ADR-0155 D2)', () => {
+      const charCase = () => PG_KEY_CASES.find((c) => c.ddl === 'character(4)')!;
+      const leafOf = (object: string) => seamed({ id: { $in: SharedRecordIds.read(object, 'u9') } });
+      const refused = (err: unknown) => {
+        expect(err, 'refused').toBeInstanceOf(Error);
+        expect(err).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+        expect((err as Error).message).toContain('holds no reading');
+      };
+
+      it('(a) the catalog read times out on a saturated pool: find, count and updateMany refuse, nothing is written, logged once; the next statement asks again', async () => {
+        const c = charCase();
+        const fresh = new SqlDriver({ ...PG_CELL.config(), pool: { min: 0, max: 1 }, acquireConnectionTimeout: 1000 } as SqlDriverConfig);
+        const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        (fresh as any).logger = logger;
+        fresh.registerExternalObject({ name: EXT(c), fields: { label: { type: 'text' } } } as any);
+        const knex: Knex = (fresh as any).knex;
+        const statements: string[] = [];
+        const onQuery = (q: { sql: string }) => { if (q.sql.includes(GRANTS)) statements.push(q.sql); };
+        knex.on('query', onQuery);
+        try {
+          // The caller's transaction holds the pool's one connection.
+          const trx = await fresh.beginTransaction();
+          try {
+            refused(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }, { transaction: trx } as any).catch((e) => e));
+            refused(await fresh.count(EXT(c), { where: leafOf(EXT(c)) }, { transaction: trx } as any).catch((e) => e));
+            refused(await fresh.updateMany(EXT(c), { where: leafOf(EXT(c)) }, { label: 'touched' }, { transaction: trx } as any).catch((e) => e));
+          } finally {
+            await trx.rollback();
+          }
+          expect(statements).toEqual([]);
+          expect(await knexOf()(EXT(c)).where('label', 'touched').count({ n: '*' })).toEqual([{ n: '0' }]);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          // Nothing was cached: with the connection back, the next statement reads the catalog and answers the list's rows.
+          expect(sortedIds(await fresh.find(EXT(c), { where: leafOf(EXT(c)) }))).toEqual([...c.expected]);
+          for (const sql of statements) expect(sql).toContain(`CAST(NULLIF("record_id", '') AS "pg_catalog"."bpchar")`);
+        } finally {
+          knex.removeListener('query', onQuery);
+          await fresh.disconnect?.();
+        }
+      });
+
+      it('(b) a table created in the caller\'s uncommitted transaction: refused, then rolled back', async () => {
+        const TXN = 'srid_pk_txn';
+        const fresh = new SqlDriver(PG_CELL.config());
+        fresh.registerExternalObject({ name: TXN, fields: { label: { type: 'text' } } } as any);
+        const trx = await fresh.beginTransaction();
+        try {
+          await trx.raw(`create table ${TXN} (id character(4) primary key, label text)`);
+          await trx(TXN).insert([{ id: 'k1', label: 'x' }, { id: 'k2', label: 'x' }]);
+          await trx(GRANTS).insert({ id: 'srid_pk_txn_g0', object_name: TXN, recipient_type: 'user', recipient_id: 'u9', record_id: 'k1  ', access_level: 'lvl_edit', organization_id: 'org_a' });
+          // Today's list, in the same transaction, answers k1: the leaf must not answer anything else.
+          expect(sortedIds(await fresh.find(TXN, { where: seamed({ id: { $in: ['k1  '] } }) }, { transaction: trx } as any))).toEqual(['k1  ']);
+          refused(await fresh.find(TXN, { where: leafOf(TXN) }, { transaction: trx } as any).catch((e) => e));
+          refused(await fresh.count(TXN, { where: leafOf(TXN) }, { transaction: trx } as any).catch((e) => e));
+        } finally {
+          await trx.rollback();
+          await fresh.disconnect?.();
+        }
+      });
+    });
+
     it('reads the catalog once per table: a second statement and another verb ask it nothing', async () => {
       const fresh = new SqlDriver(PG_CELL.config());
       const knex: Knex = (fresh as any).knex;
@@ -672,6 +742,22 @@ for (const cell of DIALECT_CELLS) declareDialectCell(cell, 'SharedRecordIds conf
 // ── The compiled statement, on every dialect driver-sql ships ───────────────
 
 class CompileProbe extends SqlDriver {
+  /**
+   * The door's catalog prime (ADR-0155 O2). On PostgreSQL the read is
+   * answered by a stub (a text key, which takes no cast): a leaf compiled
+   * with no reading is refused, so the statement needs one. Every other
+   * dialect reads nothing.
+   */
+  async prime(where: FilterCondition): Promise<void> {
+    const client = (this as any).knex.client as { dialect?: string; raw: (...args: unknown[]) => unknown };
+    if (client.dialect === 'postgresql') {
+      const original = client.raw.bind(client);
+      client.raw = (...args: unknown[]) => (String(args[0]).includes('pg_attribute')
+        ? Promise.resolve({ rows: [{ column_name: 'id', type_schema: 'pg_catalog', type_name: 'text' }] })
+        : original(...args));
+    }
+    await primeFixedReadLeafKeyTypes({ getBuilder: (o) => this.getBuilder(o) }, DOC, where);
+  }
   compileWhere(where: FilterCondition): { sql: string; bindings: readonly unknown[] } {
     const builder: Knex.QueryBuilder = this.getKnex()(DOC);
     this.applyFilters(builder, where);
@@ -719,9 +805,10 @@ const COMPILED: Record<string, { read: string; write: string }> = {
 
 describe('[ADR-0155 step 3] the compiled fixed inner read, per dialect (no server)', () => {
   for (const [dialect, config] of Object.entries(COMPILE_CONFIGS)) {
-    it(`${dialect}: one subquery in the list's position, every value bound, no tenant scope inside it`, () => {
+    it(`${dialect}: one subquery in the list's position, every value bound, no tenant scope inside it`, async () => {
       const probe = new CompileProbe(config);
       expect(probe.supports.fixedReadLeaves).toEqual(['SharedRecordIds']);
+      await probe.prime({ id: { $in: SharedRecordIds.read(DOC, 'u1') } } as unknown as FilterCondition);
       const read = probe.compileWhere({ id: { $in: SharedRecordIds.read(DOC, 'u1') } } as unknown as FilterCondition);
       expect(read.sql).toBe(COMPILED[dialect].read);
       expect(read.bindings).toEqual(dialect === 'oracle' ? [DOC, 'user', 'u1'] : [DOC, 'user', 'u1', '']);
@@ -732,4 +819,16 @@ describe('[ADR-0155 step 3] the compiled fixed inner read, per dialect (no serve
       );
     });
   }
+
+  it('pg: a leaf compared with a table the catalog has not answered for is refused (INTERNAL_ERROR / 500), never compiled uncast', () => {
+    const probe = new CompileProbe(COMPILE_CONFIGS.pg);
+    let caught: unknown;
+    try {
+      probe.compileWhere({ id: { $in: SharedRecordIds.read(DOC, 'u1') } } as unknown as FilterCondition);
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as { code?: unknown }).code).toBe('INTERNAL_ERROR');
+    expect((caught as { status?: unknown }).status).toBe(500);
+  });
 });

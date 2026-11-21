@@ -6525,7 +6525,7 @@ export class SqlDriver implements IDataDriver {
     return InternalHelpersFacet.readableIdsSubquery.call(internalHelpersHost.of(this), leaf, options);
   }
 
-  private fixedReadLeafSubquery(leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string }): Knex.QueryBuilder {
+  private fixedReadLeafSubquery(leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string; readonly evaluator?: string }): Knex.QueryBuilder {
     // [ADR-0155 D2, O2] The body lives in `sql-driver-internal-helpers.ts`, its docblock with it.
     return InternalHelpersFacet.fixedReadLeafSubquery.call(internalHelpersHost.of(this), leaf, outer);
   }

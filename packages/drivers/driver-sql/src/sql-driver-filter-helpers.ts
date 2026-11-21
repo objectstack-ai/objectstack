@@ -707,7 +707,7 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
-  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'oracleRawUuidFieldsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog' | 'fixedReadLeafSubquery'>,
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'oracleRawUuidFieldsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog' | 'fixedReadLeafSubquery' | 'readableIdsDriverName'>,
     builder: Knex.QueryBuilder,
     condition: any,
     logicalOp: 'and' | 'or' = 'and',
@@ -863,7 +863,7 @@ export class FilterHelpersFacet {
           // with type the inner read on PostgreSQL (ADR-0155 O2).
           if (rawOp === '$in' && isFixedReadLeaf(opValue)) {
             const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
-            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue, { object: table, column: field }));
+            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue, { object: table, column: field, evaluator: this.readableIdsDriverName }));
             continue;
           }
           // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar
