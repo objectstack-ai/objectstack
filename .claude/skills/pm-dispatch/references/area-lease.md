@@ -10,8 +10,9 @@
 - 边界按卡触及的文件与包聚类,让两区极少改同一函数;⛔ 不按卡标题或词汇分。
 - 排空的区并入邻区,积压即再拆(「比如增加分区」),⛔ 不抬一容器 dev 上限(住项目记忆)。
 - 租约表(区→路径→线程会话)住座位贴,任一列变或线程轮换即重写,为唯一记录。
-- L1 线程每 3 活跃区一条,新开名 `L1-a`、`L1-b`…,在跑留原名;`lanes/l2-review.md` 席规不及它。
-- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head;信箱只留跨账号或跨项目。
+- L1 线程每 3 活跃区一条,新开名 `L1-a`、`L1-b`…,在跑留原名。
+- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head。
+- p1 卡线程卡交回且欠 L2 ⇒ L1 线程并行起隔离 L2 子代理(`contract-review.md`)。
 - ⛔ 不入区:大卡(`dispatch-runbook.md` 卡线程节)与队列值守(只照 `lanes/queue.md`,含其无席兜底)。
 
 ## 开席
@@ -35,7 +36,7 @@
   - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin
     测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
 - 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
-- 认领照 `execution-duties.md` 派发原子对,`Claim:` 带 `Area: <区>` 行;`Branch:` 照 AGENTS.md 命名。
+- 认领照 `execution-duties.md` 派发原子对,`Claim:` 带 `Area: <区>` 行。
 - 认领后回读(SKILL.md 标签写四步)只查 `pm:dispatched` 与 assignee,缺即重挂;首推即开 draft PR。
 - 认领前照 `dispatch-runbook.md` 派发前置核前提;开线程请求交席位攒批(`coordinator.md` 三)。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
