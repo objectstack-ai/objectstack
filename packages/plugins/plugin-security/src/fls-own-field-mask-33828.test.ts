@@ -290,18 +290,17 @@ describe('[ruling 6912661484, step 2] no behaviour change: the built-in admin se
   const withBit = (s: PermissionSet): PermissionSet =>
     ({ ...s, objects: { ...(s.objects ?? {}), '*': { ...((s.objects ?? {})['*'] ?? {}), viewAllFields: true } } }) as PermissionSet;
 
-  it('organization_admin carries it on its wildcard; the wall-less variant does not', () => {
+  it('admin_full_access and organization_admin carry it on their wildcard; the wall-less variant does not', () => {
+    expect((shipped(ADMIN_FULL_ACCESS).objects?.['*'] as Record<string, unknown>).viewAllFields).toBe(true);
     expect((shipped('organization_admin').objects?.['*'] as Record<string, unknown>).viewAllFields).toBe(true);
     expect('viewAllFields' in (shipped('organization_admin_no_bypass').objects?.['*'] as Record<string, unknown>)).toBe(false);
   });
 
-  // Each admin set as it would answer WITHOUT the bit, beside the same set WITH
-  // it: organization_admin as shipped, admin_full_access with the bit added (the
-  // same wildcard shape), and the wall-less variant with the bit added to show
-  // why the derivation drops it.
+  // Each shipped admin set as it would answer WITHOUT the bit, beside the same
+  // set as shipped, WITH it. (The wall-less variant's control is below.)
   const pairs: Array<[string, PermissionSet, PermissionSet]> = [
     ['organization_admin', withoutBit(shipped('organization_admin')), shipped('organization_admin')],
-    ['admin_full_access', shipped(ADMIN_FULL_ACCESS), withBit(shipped(ADMIN_FULL_ACCESS))],
+    ['admin_full_access', withoutBit(shipped(ADMIN_FULL_ACCESS)), shipped(ADMIN_FULL_ACCESS)],
   ];
   const companions: Array<[string, PermissionSet[]]> = [
     ['alone', []],
