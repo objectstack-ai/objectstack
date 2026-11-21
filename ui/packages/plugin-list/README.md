@@ -344,6 +344,50 @@ function TaskList() {
 }
 ```
 
+### The condition row for another host: `ListConditionsBlock`
+
+A host that draws a child object's rows itself gets the list page's condition
+row as `ListConditionsBlock` (objectstack#35892). The record page's related tab
+is one: `@object-ui/plugin-detail` sits below this package, so it cannot import
+the block, and the record page hands it in through `plugin-detail`'s
+`RelatedListConditionsSlotContext`. It is the same `ConditionChipRow`,
+`SortPanel` and `FilterPanel` with the same field lists, and no view switch,
+view settings or search. It is a host element, not a registered node type: it is
+controlled, and every input is a React prop.
+
+```tsx
+import { useState } from 'react';
+import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
+import { ListConditionsBlock } from '@object-ui/plugin-list';
+
+const NO_FILTER: FilterBuilderRowGroup = { id: 'root', logic: 'and', conditions: [] };
+
+export function QuoteConditions({ quoteDefinition }: { quoteDefinition: { fields?: Record<string, unknown> } }) {
+  const [sort, setSort] = useState<SortItem[]>([]);
+  const [filterGroup, setFilterGroup] = useState<FilterBuilderRowGroup>(NO_FILTER);
+  const [, setFilter] = useState<unknown[] | undefined>(undefined);
+  const changed = sort.length > 0 || filterGroup.conditions.length > 0;
+  const discard = () => { setSort([]); setFilterGroup(NO_FILTER); setFilter(undefined); };
+  return (
+    <ListConditionsBlock
+      objectName="quote"
+      objectDef={quoteDefinition}
+      shownFields={['name', 'amount', 'status']}
+      sort={sort}
+      onSortChange={setSort}
+      filters={filterGroup}
+      onFiltersChange={(group, filterNode) => { setFilterGroup(group); setFilter(filterNode); }}
+      onDiscard={changed ? discard : undefined}
+    />
+  );
+}
+```
+
+`onFiltersChange` hands back the group the panels edit and the query node the
+list page would send for it (`undefined` = no filter). **Discard**
+(`ConditionDiscardButton`, the list page's own) is drawn at the row's end while
+`onDiscard` is passed. Labels fold to icons when the row is narrow.
+
 ## Schema
 
 The ListView component accepts a `ListViewSchema`, exported from
