@@ -1715,6 +1715,14 @@ const ru = {
     history: "История",
     historyEmpty: "Истории пока нет",
     deleteRowTitle: "Удалить запись",
+    // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
+    relatedNoMatches: "Нет записей, соответствующих фильтру",
+    deleteRowsTitle: "Удалить выбранные записи",
+    deleteRowsConfirmation: "{{count}} записи будут удалены. Это действие нельзя отменить.",
+    deleteRowsConfirmation_one: "{{count}} запись будет удалена. Это действие нельзя отменить.",
+    deleteRowsConfirmation_few: "{{count}} записи будут удалены. Это действие нельзя отменить.",
+    deleteRowsConfirmation_many: "{{count}} записей будут удалены. Это действие нельзя отменить.",
+    deleteRowsConfirmation_other: "{{count}} записи будут удалены. Это действие нельзя отменить.",
     createdBy: "Создано",
     updatedBy: "Обновлено",
     // objectui#3863 — base key, answering only a call made without a count: since
@@ -5397,6 +5405,8 @@ const ru = {
       sortedBy: "Сортировка: {{field}}",
       reset: 'Сбросить',
       resetHint: 'Вернуться к сохранённому представлению',
+      discard: 'Отменить',
+      discardHint: 'Вернуться к сортировке и фильтру по умолчанию',
       remove: 'Удалить {{label}}',
       toggleSort: 'Обратить {{label}}',
       dragSort: 'Перетащите, чтобы изменить приоритет сортировки',

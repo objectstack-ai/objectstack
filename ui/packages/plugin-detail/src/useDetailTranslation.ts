@@ -121,6 +121,17 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.deleteRow': 'Delete',
   // objectui#13333 — the related list's row delete names the row by its title.
   'detail.deleteRowConfirmation': 'Are you sure you want to delete "{{name}}"?',
+  // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
+  'detail.relatedNoMatches': 'No records match the filter',
+  'detail.deleteRowsTitle': 'Delete selected records',
+  'detail.deleteRowsConfirmation': '{{count}} records will be deleted. This cannot be undone.',
+  'detail.deleteRowsConfirmation_one': '{{count}} record will be deleted. This cannot be undone.',
+  'detail.deleteRowsConfirmation_other': '{{count}} records will be deleted. This cannot be undone.',
+  // The bulk delete's outcome, in the list page's own words (`objectActions`).
+  'objectActions.bulkDeleteSuccess': 'Deleted {{count}} {{label}} records',
+  'objectActions.bulkDeleteSuccess_one': 'Deleted {{count}} {{label}} record',
+  'objectActions.bulkDeleteSuccess_other': 'Deleted {{count}} {{label}} records',
+  'objectActions.bulkDeletePartial': '{{succeeded}} deleted, {{failed}} failed',
   'detail.actions': 'Actions',
   'detail.previousPage': 'Previous',
   'detail.nextPage': 'Next',

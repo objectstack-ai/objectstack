@@ -720,6 +720,26 @@ declared filter is refused with a console explanation rather than dropped —
 answering with more rows than the metadata asked for is the failure this key's
 wiring exists to remove.
 
+On the record page, a related list opened as its own **tab** is the child
+object's full list (objectstack#35892). Its first row is the list's tile and
+name on the left and **+ Add** on the right; its second row is the list page's
+own condition row (`plugin-list`'s `ListConditionsBlock`, which the record page
+hands in through `RelatedListConditionsSlotContext`, since that package depends
+on this one; a host that supplies none gets no condition row): **Sort** and **Filter**, with no view switch, no
+view settings and no search. The table is the list page's grid: the column
+menu, cell editing where the reader may edit the child object, row selection
+with the floating bulk bar, and the footer row, whose calculations cover every
+matching row. Rows load as the page scrolls; there is no pager and no "Open in
+list". The tab title counts every child; the footer counts the rows the filter
+keeps. Whatever the reader changes there (sort, filter, footer calculations)
+lasts while they stay on the record, across its tabs and its drawer, and is
+gone after a reload or on another record. **Discard** appears once something
+changed and puts the tab back; nothing is saved. Column widths and order are
+kept by the grid in the reader's browser, as on the list page. A header sort,
+column widths or order that an earlier version remembered in the reader's
+record-page preference no longer apply. A tab whose child object is grouped
+by status draws no footer row.
+
 The **Add** affordance renders only where every link in its chain is available:
 a spec-valid `add.picker.object` *and* a `dataSource`. The picker dialog and the
 add callback both required the adapter already, so without it the button used to

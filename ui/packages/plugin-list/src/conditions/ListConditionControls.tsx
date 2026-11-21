@@ -509,6 +509,13 @@ export interface ConditionChipRowProps {
   end?: React.ReactNode;
   /** The reader may add a filter (`userActions.filter`); `false` ⇒ no 「Filter」 and no 「+」. */
   filterOffered?: boolean;
+  /**
+   * objectstack#35892 — where the row may be narrow (a record page's related
+   * tab, in a drawer too): below 28rem of the row's own width the 「Sort」 and
+   * 「Filter」 buttons and the sort chip keep their icon alone, named by their
+   * `aria-label` and `title`.
+   */
+  collapsibleLabels?: boolean;
   className?: string;
 }
 
@@ -543,6 +550,7 @@ export function ConditionChipRow({
   renderSortPanel,
   end,
   filterOffered = true,
+  collapsibleLabels = false,
   className,
 }: ConditionChipRowProps) {
   const { t } = useListConditionTranslation();
@@ -567,6 +575,12 @@ export function ConditionChipRow({
   }
 
   const fieldOf = (list: ReadonlyArray<ConditionField>, name: string) => list.find((f) => f.value === name);
+  // objectstack#35892 — under `collapsibleLabels`, a button's words go below
+  // 28rem of the row's width (the row is its own container, `@container/conditions`).
+  const collapsingLabel = collapsibleLabels ? 'hidden @[28rem]/conditions:inline' : undefined;
+  const sortChipName = sort.length > 0
+    ? t('listConditions.chips.sortedBy', { field: fieldOf(sortFields, sort[0].field)?.label ?? sort[0].field })
+    : t('listConditions.chips.sort');
 
   const filterPopover = (key: string, trigger: React.ReactNode, conditionId?: string) => (
     <Popover key={key} open={openChip === key} onOpenChange={(open) => setOpenChip(open ? key : null)}>
@@ -593,7 +607,11 @@ export function ConditionChipRow({
       aria-label={t('listConditions.chips.region')}
       // One line at every width: what does not fit scrolls sideways
       // (objectstack#35878).
-      className={cn('flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto', className)}
+      className={cn(
+        'flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto',
+        collapsibleLabels && '@container/conditions',
+        className,
+      )}
       data-testid="condition-chips"
     >
       {/* objectstack#35878 — the sort, at any number of levels, is ONE chip:
@@ -609,12 +627,11 @@ export function ConditionChipRow({
                 className={cn(CHIP_CLASS, ROW_TOUCH_TARGET, 'border-primary/30 bg-primary/5 text-foreground hover:bg-primary/10')}
                 data-testid="condition-sort"
                 data-levels={sort.length}
+                {...(collapsibleLabels ? { 'aria-label': sortChipName, title: sortChipName } : {})}
               >
                 <ArrowUpDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span className="truncate">
-                  {t('listConditions.chips.sortedBy', {
-                    field: fieldOf(sortFields, sort[0].field)?.label ?? sort[0].field,
-                  })}
+                <span className={cn('truncate', collapsingLabel)}>
+                  {sortChipName}
                 </span>
                 {sort.length > 1 && (
                   <span className="rounded bg-muted px-1 text-[11px] tabular-nums text-muted-foreground" data-testid="sort-chip-more">
@@ -623,9 +640,15 @@ export function ConditionChipRow({
                 )}
               </button>
             ) : (
-              <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-sort" data-levels={0}>
+              <button
+                type="button"
+                className={EMPTY_BUTTON_CLASS}
+                data-testid="condition-sort"
+                data-levels={0}
+                {...(collapsibleLabels ? { 'aria-label': sortChipName, title: sortChipName } : {})}
+              >
                 <ArrowUpDown className="h-3 w-3 shrink-0" aria-hidden="true" />
-                {t('listConditions.chips.sort')}
+                <span className={collapsingLabel}>{t('listConditions.chips.sort')}</span>
               </button>
             )}
           </PopoverTrigger>
@@ -719,9 +742,15 @@ export function ConditionChipRow({
       {filterOffered && filterPopover(
         'add',
         appliedRows.length === 0 ? (
-          <button type="button" className={EMPTY_BUTTON_CLASS} data-testid="condition-add-filter" data-empty="true">
+          <button
+            type="button"
+            className={EMPTY_BUTTON_CLASS}
+            data-testid="condition-add-filter"
+            data-empty="true"
+            {...(collapsibleLabels ? { 'aria-label': t('listConditions.chips.filter'), title: t('listConditions.chips.filter') } : {})}
+          >
             <ListFilter className="h-3 w-3 shrink-0" aria-hidden="true" />
-            {t('listConditions.chips.filter')}
+            <span className={collapsingLabel}>{t('listConditions.chips.filter')}</span>
           </button>
         ) : (
           <button
@@ -753,5 +782,50 @@ export function ConditionChipRow({
         </Button>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ConditionDiscardButton
+// ---------------------------------------------------------------------------
+
+export interface ConditionDiscardButtonProps {
+  onDiscard: () => void;
+  /** The button's text; defaults to 「Discard」. */
+  label?: string;
+  /** The button's tooltip; defaults to 「Back to the default sort and filter」. */
+  title?: string;
+  'data-testid'?: string;
+  className?: string;
+}
+
+/**
+ * 「Discard」 (objectstack#35892): the list page's, beside its Save
+ * (objectstack#35955), and a record page's related tab's, at its condition
+ * row's end, where there is no Save. One ghost button in the row's size, so
+ * both read as one control; a host draws it only while there is something to
+ * discard.
+ */
+export function ConditionDiscardButton({
+  onDiscard,
+  label,
+  title,
+  'data-testid': testId = 'condition-discard',
+  className,
+}: ConditionDiscardButtonProps) {
+  const { t } = useListConditionTranslation();
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className={cn('h-6 shrink-0 gap-1 px-1.5 text-[13px] font-normal text-muted-foreground shadow-none', className)}
+      onClick={onDiscard}
+      title={title ?? t('listConditions.chips.discardHint')}
+      data-testid={testId}
+    >
+      <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+      {label ?? t('listConditions.chips.discard')}
+    </Button>
   );
 }
