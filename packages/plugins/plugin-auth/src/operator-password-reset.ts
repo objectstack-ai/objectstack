@@ -27,15 +27,20 @@
  *   so it ends the token rows, as the raw adapter (handed no secondary storage)
  *   does.
  * - **Ends every session, revokes every API key, unlinks every sign-in
- *   account other than the password and ends every authorized app and approved
- *   device sign-in** of the account, as an administrator's forced reset with
+ *   account other than the password, ends every authorized app and approved
+ *   device sign-in, disables every OAuth application it registered and
+ *   revokes every SCIM credential it minted** of the account, as an
+ *   administrator's forced reset with
  *   revocation does (`forced-reset-revocation.ts`, `admin_password_reset`),
  *   and as a self-service reset does (`password-reset-ends-added-access.ts`):
- *   the sessions, keys, links and grants the account held under the old
- *   password do not outlive it. The grants are read where the project
- *   database keeps them (`storedOAuthGrants`): the command runs with no auth
- *   server, so there is no plugin registry to ask, and a store the database
- *   does not hold has nothing to end.
+ *   the sessions, keys, links, grants, apps and credentials the account held
+ *   under the old password do not outlive it. The grants are read where the
+ *   project database keeps them (`storedOAuthGrants`): the command runs with
+ *   no auth server, so there is no plugin registry to ask, and a store the
+ *   database does not hold has nothing to end. The registered apps and the
+ *   minted credentials are read there too, by their own `user_id`. It sends
+ *   the account no notice: it runs with no mail service, and the operator is
+ *   told what it ended.
  *
  * It asks for no password change at the next sign-in: the operator chose the
  * password.
@@ -72,12 +77,22 @@ export type OperatorPasswordResetOutcome =
   | {
       outcome: 'set';
       userId: string;
-      /** Sessions ended, API keys revoked, linked sign-in accounts unlinked and authorized apps ended. */
+      /**
+       * Sessions ended, API keys revoked, linked sign-in accounts unlinked,
+       * authorized apps ended, registered OAuth applications disabled and
+       * minted SCIM credentials revoked.
+       */
       sessionsEnded: number;
       apiKeysRevoked: number;
       signInAccountsUnlinked: number;
       authorizedAppsEnded: number;
-      /** `false` when a session, key, sign-in account or grant could not be read or ended; the password is set either way. */
+      ownedAppsDisabled: number;
+      scimCredentialsRevoked: number;
+      /**
+       * `false` when a session, key, sign-in account, grant, registered app or
+       * minted credential could not be read or ended; the password is set
+       * either way.
+       */
       revocationComplete: boolean;
     }
   | { outcome: 'refused'; reason: OperatorPasswordResetRefusalReason; message: string };
@@ -195,6 +210,8 @@ export async function setOperatorPassword(
     apiKeysRevoked: revocation.apiKeys,
     signInAccountsUnlinked: revocation.signInAccounts,
     authorizedAppsEnded: revocation.authorizedApps,
+    ownedAppsDisabled: revocation.ownedApps,
+    scimCredentialsRevoked: revocation.scimCredentials,
     revocationComplete: revocation.complete,
   };
 }

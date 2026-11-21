@@ -93,6 +93,8 @@ export interface FieldListProps {
   onAdd?: (name: string) => void;
   /** Overrides the search box's placeholder and accessible name. */
   searchPlaceholder?: string;
+  /** `false` ⇒ no search box: a short list drawn in place (the 视图设置 panel's columns, objectstack#35878). */
+  searchable?: boolean;
   /** A row above the search box (the sort direction). */
   header?: React.ReactNode;
   /** A row below the list (the advanced filter). */
@@ -205,6 +207,7 @@ export function FieldList({
   addable,
   onAdd,
   searchPlaceholder,
+  searchable = true,
   header,
   footer,
   testId = 'field-list',
@@ -443,6 +446,7 @@ export function FieldList({
   return (
     <div ref={root} className={cn('flex w-72 max-w-full flex-col', className)} data-testid={testId}>
       {header}
+      {searchable && (
       <div className="relative border-b p-1.5">
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <Input
@@ -457,6 +461,7 @@ export function FieldList({
           data-testid={`${testId}-search`}
         />
       </div>
+      )}
       <div id={`${testId}-options`} role={managing ? undefined : 'listbox'} className="max-h-72 overflow-y-auto p-1">
         {section(shownMatches, t('listConditions.fieldList.shown'), 'shown')}
         {section(hiddenMatches, t('listConditions.fieldList.hidden'), 'hidden')}

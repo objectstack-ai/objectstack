@@ -1806,8 +1806,9 @@ export interface PageNodeSchema extends BaseSchema, Omit<SpecPage, (typeof PAGE_
    * Slot menu (v1):
    * - `header` — replaces the `page:header` node.
    * - `actions` — replaces the `record:quick_actions` action bar.
-   * - `highlights` — replaces the highlight strip (chips + chevron
-   *   path).
+   * - `highlights` — places a highlight strip (chips + chevron path)
+   *   between the header and the tabs; the synthesized default draws
+   *   none.
    * - `details` — replaces the body of the Details tab (a.k.a. the
    *   `record:details` sections). Use this to customize the Details
    *   layout while keeping Related / Activity / History tabs as

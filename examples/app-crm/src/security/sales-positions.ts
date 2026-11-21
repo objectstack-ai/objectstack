@@ -53,7 +53,7 @@ export const SalesUserPermissionSet = definePermissionSet({
     // scope always follows the parent (ADR-0055), but object-level CRUD is a
     // SEPARATE gate that is never derived (security-master-detail-ungranted).
     // Grant shape matches the master exactly: same set, same bits, so the
-    // line-item grid on the Opportunity form (inlineEdit: 'grid') opens for
+    // line-item grid on the Opportunity form (its `lines` field group) opens for
     // the same users who can already work the parent record.
     crm_opportunity_line_item: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     crm_lead: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },

@@ -336,9 +336,10 @@ describe('a list is a link (objectui#11860)', () => {
     await settle();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await settle();
-    // By name: the Filter trigger is an icon button with no label text
-    // (objectui#12695); with a filter applied its name is "Filter, N active".
-    const filterButton = screen.getByRole('button', { name: /^Filter, \d+ active$/ });
+    // The condition row's add-filter control (objectstack#35878): 「+」 once a
+    // filter is applied.
+    const filterButton = screen.getByTestId('condition-add-filter');
+    expect(filterButton).not.toHaveAttribute('data-empty');
     fireEvent.click(filterButton);
     await settle();
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });

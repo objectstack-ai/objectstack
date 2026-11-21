@@ -559,13 +559,12 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
   const normaliseList = (list: any[] | undefined): any[] | undefined =>
     Array.isArray(list) ? list.map(normaliseField) : list;
 
-  // Phase N.4: dedupe with the highlight strip — when authors include a
-  // field in `record:highlights` we drop it from the details grid so it
-  // isn't shown twice. The synth pipeline passes the highlight list via
-  // `hideFields`; authors can also set it directly on the schema. We also
-  // merge in any field names registered live via HighlightFieldsContext
-  // (see `liveHighlightNames` above) to cover hand-authored Lightning pages
-  // that don't go through the synth dedup path.
+  // Phase N.4: dedupe with the highlight strip — when a page places a
+  // `record:highlights` block we drop its fields from the details grid so
+  // they aren't shown twice. The default record page places no strip and
+  // sets no `hideFields`; authors can set it directly on the schema. The
+  // field names a mounted `record:highlights` registers live via
+  // HighlightFieldsContext (see `liveHighlightNames` above) are merged in.
   //
   // ⛔ Read UN-CAST (objectui#9965). `hideFields` is DECLARED on the mirror
   // (`RecordDetailsComponentProps.hideFields`, `string[]`, since objectui#9040,

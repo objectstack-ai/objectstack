@@ -42,6 +42,7 @@ import { PersonRow } from './PersonRow.js';
 import { SelectionTray } from './SelectionTray.js';
 import { getRecentLookupIds, pushRecentLookupId } from './recentLookups.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
+import { isImeKey } from './imeKey.js';
 
 /**
  * PeoplePicker — the Tier 0, search-first user picker (issue #2112).
@@ -505,6 +506,9 @@ export function PeoplePicker({
 
   const onSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // The input method owns a key pressed while it composes: Enter picks a
+      // candidate there, and the arrows move between candidates, not rows.
+      if (isImeKey(e)) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setActiveIndex(i => (navList.length ? Math.min(navList.length - 1, i + 1) : -1));

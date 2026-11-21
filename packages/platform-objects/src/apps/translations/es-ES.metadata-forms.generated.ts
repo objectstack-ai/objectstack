@@ -70,7 +70,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "Campos destacados",
-        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas de lista predeterminadas, las tarjetas, las vistas previas de registros hijos y la franja destacada del detalle. Un nombre que no sea un campo de este objeto se rechaza al publicar."
+        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas predeterminadas de las listas y de las listas relacionadas, las tarjetas, las vistas previas de registros hijos, la tarjeta flotante del registro y el selector de registros. Un nombre que no sea un campo de este objeto se rechaza al publicar."
       },
       relatedLists: {
         label: "Orden de listas relacionadas",

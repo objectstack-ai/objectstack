@@ -29,9 +29,9 @@ export const Account = ObjectSchema.create({
   searchableFields: ['name', 'industry', 'status', 'billing_email', 'tax_id'],
 
   // ADR-0085 semantic role: the record's most important fields. Drives the
-  // detail-page highlight strip (formerly the deleted account-detail page's
-  // `highlights` slot) plus default list columns / cards — one declaration,
-  // every surface, no per-page config.
+  // default list columns / cards, the record hover card and the record
+  // picker — one declaration, every surface, no per-page config. The default
+  // record page draws no key-field strip from it.
   highlightFields: ['status', 'industry', 'annual_revenue'],
 
   // Show the record's field-change history (audit-trail UI). The console reads
@@ -61,7 +61,7 @@ export const Account = ObjectSchema.create({
     // Explicit ISO code (spec channel: `currencyConfig.defaultCurrency`, read
     // only under `currencyMode: 'fixed'`): a currency field without a
     // resolvable code renders as a bare grouped number by design (no guessed
-    // symbol) — with it, the detail highlight strip and grids show
+    // symbol) — with it, the record page and grids show
     // "$25,000,000" instead of "25,000,000".
     annual_revenue: Field.currency({
       label: 'Annual Revenue',
