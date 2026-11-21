@@ -20,9 +20,10 @@
  *   `record:path`'s press asks (`useStageChange`).
  * - A stage the field's blocking `state_machine` cannot reach from the stored
  *   value is drawn disabled, with the reason under its name.
- * - Picking a stage opens the stage confirmation. A stage that needs other
- *   fields filled first asks for exactly those fields in the same dialog and
- *   writes them with the move; a refusal is shown in the dialog and the stage
+ * - Picking a stage opens the shared in-place fill-in dialog
+ *   (`RequiredFieldsDialog`, objectstack#35956): the record's name, the move,
+ *   and the fields the stage makes required, if any. The move and those
+ *   values go in one write; a refusal is shown in the dialog and the stage
  *   does not move (`collectFields`, see `recordPathStageChange.tsx`).
  * - The menu is Radix's: Enter or Space on the focused tag opens it, the arrow
  *   keys move, Enter picks, Esc closes without a change.

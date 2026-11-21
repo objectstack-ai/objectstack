@@ -238,7 +238,12 @@ describe('ObjectGrid — injected lookup editor exits edit mode', () => {
     { field: 'manager', label: 'Manager', type: 'lookup' },
   ];
 
-  it('picking an option keeps the editor open; click-outside then exits and retains the value', async () => {
+  // objectstack#35688 S3: the cell's lookup editor IS the candidate list (no
+  // trigger to press first), and a single pick is the whole edit. These two
+  // cases used to pin the popover era (pick stages, click-outside commits; Enter
+  // on the trigger opens the dropdown); they now pin the in-cell list and
+  // the click-outside guard around it.
+  it('a pick in the in-cell list is the whole edit: the value lands and the editor closes', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds, lookupCols);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
@@ -248,41 +253,22 @@ describe('ObjectGrid — injected lookup editor exits edit mode', () => {
       const tds = Array.from(row.querySelectorAll('td'));
       return tds[tds.length - 1] as HTMLElement; // manager is the last data column
     };
+    const panel = () => managerTd().querySelector('[data-testid="lookup-in-cell"]') as HTMLElement | null;
 
-    // Enter edit mode, open the popover.
+    // Enter edit mode: the list is open at once, inside the cell.
     fireEvent.click(managerTd());
-    const trigger = await waitFor(() => {
-      const btn = managerTd().querySelector('button');
-      expect(btn).toBeTruthy();
-      return btn as HTMLButtonElement;
-    });
-    fireEvent.click(trigger);
+    await waitFor(() => expect(panel()).toBeTruthy());
 
-    // Pick "Dev Admin" from the popover (rendered in a portal at <body>).
-    const option = await waitFor(() => {
-      const el = screen.getByText('Dev Admin');
-      expect(el).toBeInTheDocument();
-      return el;
-    });
-    // Clicking inside the widget's own popover must NOT prematurely exit the
-    // editor — the click-outside guard treats the portal as part of the editor.
+    const option = await waitFor(() => within(panel()!).getByText('Dev Admin'));
     fireEvent.pointerDown(option);
     fireEvent.click(option);
 
-    // The staged value shows and the editor (trigger button) is still mounted.
-    await waitFor(() =>
-      expect(within(managerTd()).getByText('Dev Admin')).toBeInTheDocument(),
-    );
-    expect(managerTd().querySelector('button')).toBeTruthy();
-
-    // Now click truly outside → commit + exit.
-    fireEvent.pointerDown(screen.getByTestId('outside'));
-    await waitFor(() => expect(managerTd().querySelector('button')).toBeNull());
-    // Value retained as a pending change.
+    // The editor closed on the pick, and the cell shows the picked record.
+    await waitFor(() => expect(panel()).toBeNull());
     expect(within(managerTd()).getByText('Dev Admin')).toBeInTheDocument();
   });
 
-  it('Enter on the picker trigger does not prematurely exit edit mode', async () => {
+  it('a press inside the open list does not exit edit mode; a press outside does', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds, lookupCols);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
@@ -292,17 +278,20 @@ describe('ObjectGrid — injected lookup editor exits edit mode', () => {
       const tds = Array.from(row.querySelectorAll('td'));
       return tds[tds.length - 1] as HTMLElement;
     };
+    const panel = () => managerTd().querySelector('[data-testid="lookup-in-cell"]') as HTMLElement | null;
 
     fireEvent.click(managerTd());
-    const trigger = await waitFor(() => {
-      const btn = managerTd().querySelector('button');
-      expect(btn).toBeTruthy();
-      return btn as HTMLButtonElement;
-    });
+    await waitFor(() => expect(panel()).toBeTruthy());
 
-    // Enter belongs to the picker (open its dropdown), NOT the cell — the editor
-    // must stay open. Only a single-line <input> commits on Enter.
-    fireEvent.keyDown(trigger, { key: 'Enter' });
-    expect(managerTd().querySelector('button')).toBeTruthy();
+    // The click-outside guard treats the editor's own content as inside: a
+    // press on the list's search box keeps the editor.
+    const search = panel()!.querySelector('input') as HTMLInputElement;
+    fireEvent.pointerDown(search);
+    fireEvent.click(search);
+    expect(panel()).toBeTruthy();
+
+    // CONTROL — a press truly outside exits.
+    fireEvent.pointerDown(screen.getByTestId('outside'));
+    await waitFor(() => expect(panel()).toBeNull());
   });
 });

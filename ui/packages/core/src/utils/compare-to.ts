@@ -213,13 +213,17 @@ function hasRollingWindow(value: unknown): boolean {
 }
 
 /**
- * Replace every `{token}` / `${token}` in `value` with what `replace` returns
- * for it, in ONE pass, so no replacement is replaced again.
+ * Replace every string in `value` that is one whole `{token}` / `${token}`
+ * with what `replace` returns for it, in ONE pass, so no replacement is
+ * replaced again. A string that merely contains a token is a literal
+ * (`resolveDateMacros` leaves it as written), so it is not renamed either:
+ * the comparison query filters on the same literal as the current one.
  */
 function substituteTokens<T>(value: T, replace: (token: string) => string | undefined): T {
   if (value == null) return value;
   if (typeof value === 'string') {
-    return value.replace(/\$?\{([a-zA-Z0-9_]+)\}/g, (m, tok) => replace(tok) ?? m) as any;
+    const tok = wholeToken(value);
+    return (tok === undefined ? value : replace(tok) ?? value) as any;
   }
   if (Array.isArray(value)) return value.map((v) => substituteTokens(v, replace)) as any;
   if (typeof value === 'object') {
