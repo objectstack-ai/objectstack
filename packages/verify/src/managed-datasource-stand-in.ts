@@ -10,19 +10,27 @@
 // schema ObjectStack manages: such a datasource is built as a fresh in-memory
 // store of the kind verify's own default store is, never as its real
 // connection, so a write verify derives for an object bound to it — or any
-// other write that reaches it during the run — lands in memory and dies with
-// the kernel.
+// other write that reaches it during the run, the app's seed, hooks and flows
+// included — lands in memory and dies with the kernel.
+//
+// Every engine the platform ships has a stand-in ({@link managedStandInEngine}):
+// `memory` gets a fresh memory store, and every other one — the SQL engines and
+// `mongodb` alike — gets the default store's engine. "Ships" is one reading,
+// `resolveDriverId` from `@objectstack/spec`: the ids the default driver
+// factory `objectstack dev` builds with answers `supports()` for.
+//
+// A managed datasource on a driver id the platform does NOT ship (a plugin's)
+// has no stand-in and cannot get one here: the plugin constructs its driver
+// itself and registers it as a `driver.NAME` service, which the engine adopts
+// and the datasource connection service then leaves alone as already
+// registered, so this factory is never asked to build it. Verify therefore
+// refuses to boot while one is declared ({@link unstandableManagedDatasources},
+// read by `bootStack` before it composes anything), naming the datasource and
+// the driver id. There is no switch around that refusal.
 //
 // A datasource ObjectStack does not own (`schemaMode` `external` or
 // `validate-only`) keeps its real driver: reads reach it, and `deriveCrudCases`
 // (`./derive.ts`) keeps every derived write off its objects.
-//
-// A managed datasource whose engine has no faithful in-memory stand-in (a
-// non-SQL kind such as `mongodb`, or a driver a plugin supplies, which this
-// factory never builds) keeps its real driver too, and `deriveCrudCases`
-// withholds its objects the way it withholds external ones, naming why. Only
-// verify's own derived writes are withheld: the app's seed, hooks and flows
-// still write to that real store during the run.
 //
 // ## One reading of "is this datasource managed"
 //
@@ -35,10 +43,12 @@
 // get its real connection here (the factory's reading) while derive (the
 // declared key alone, as the engine's write gate reads it) kept its objects in
 // every write family, so verify's rows would land in the real database. With
-// one reader, any datasource this factory keeps real is withheld by derive.
+// one reader, any datasource this factory keeps real is withheld by derive, and
+// the boot refusal judges "managed" on the same reader too.
 
 import { resolveDriverId } from '@objectstack/spec/data';
 import { resolveDatasourceSchemaMode } from '@objectstack/service-datasource';
+import { declaredCollection } from './artifact-collections.js';
 import type {
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
@@ -48,27 +58,23 @@ import type {
 /** The engine verify's own default store runs on (`BootOptions.databaseDriver`). */
 export type VerifyStoreEngine = 'sqlite-wasm' | 'memory';
 
-/** The SQL engines an in-memory SQLite store stands in for, as the default store does. */
-const SQL_ENGINES: ReadonlySet<string> = new Set(['sqlite', 'sqlite-wasm', 'postgres', 'mysql', 'turso']);
-
 /**
  * The in-memory engine verify builds in place of a MANAGED datasource on
- * `driver`, or `undefined` when it has none that is faithful.
+ * `driver`, or `undefined` when the platform does not ship that driver id.
  *
- * A SQL engine gets the default store's engine, as verify's own `default`
- * does. A `memory` datasource gets a fresh memory store with no persistence.
- * Everything else — `mongodb`, the federation-only SQL engines (which a managed
- * datasource cannot name), and a driver id the platform ships no contract for
- * (a plugin's) — has none.
+ * A `memory` datasource gets a fresh memory store with no persistence; every
+ * other shipped engine — the SQL engines and `mongodb` — gets the default
+ * store's engine, as verify's own `default` does. `undefined` is a driver id a
+ * plugin supplies: verify refuses to boot while a managed datasource names one
+ * ({@link unstandableManagedDatasources}).
  */
 export function managedStandInEngine(
   driver: unknown,
   defaultStore: VerifyStoreEngine,
 ): VerifyStoreEngine | undefined {
   const kind = resolveDriverId(driver);
-  if (kind === 'memory') return 'memory';
-  if (kind !== undefined && SQL_ENGINES.has(kind)) return defaultStore;
-  return undefined;
+  if (kind === undefined) return undefined;
+  return kind === 'memory' ? 'memory' : defaultStore;
 }
 
 /**
@@ -88,9 +94,53 @@ export function isManagedDatasource(ds: {
   return (resolveDatasourceSchemaMode(spec) ?? 'managed') === 'managed';
 }
 
-/** True when a managed datasource on `driver` is run on a verify stand-in rather than withheld. */
-export function hasManagedStandIn(driver: unknown): boolean {
-  return managedStandInEngine(driver, 'sqlite-wasm') !== undefined;
+/** A declared managed datasource verify cannot stand in: its driver id is a plugin's. */
+export interface UnstandableManagedDatasource {
+  /** The datasource's declared `name`. */
+  name: string;
+  /** The driver id it declares, as written. */
+  driver: unknown;
+}
+
+/** The app's declared datasources, from the array the spec declares or a name-keyed map. */
+function declaredDatasources(config: unknown): Array<Record<string, unknown>> {
+  const declared: unknown = declaredCollection(config, 'datasources');
+  if (Array.isArray(declared)) return declared.filter((ds) => !!ds && typeof ds === 'object');
+  if (!declared || typeof declared !== 'object') return [];
+  return Object.entries(declared as Record<string, unknown>)
+    .filter(([, ds]) => !!ds && typeof ds === 'object')
+    .map(([key, ds]) => ({ name: key, ...(ds as Record<string, unknown>) }));
+}
+
+/**
+ * Every datasource the app declares that is MANAGED ({@link isManagedDatasource})
+ * on a driver id the platform does not ship, other than `default` (which is
+ * verify's own store whatever the app declares under that name). `bootStack`
+ * refuses to boot when this is not empty.
+ */
+export function unstandableManagedDatasources(config: unknown): UnstandableManagedDatasource[] {
+  const found: UnstandableManagedDatasource[] = [];
+  for (const ds of declaredDatasources(config)) {
+    const name = typeof ds.name === 'string' ? ds.name : String(ds.name);
+    if (name === 'default' || !isManagedDatasource(ds)) continue;
+    if (managedStandInEngine(ds.driver, 'sqlite-wasm') !== undefined) continue;
+    found.push({ name, driver: ds.driver });
+  }
+  return found;
+}
+
+/** The sentence `os verify` exits non-zero with when it refuses such a boot. */
+export function unstandableManagedDatasourceRefusal(found: readonly UnstandableManagedDatasource[]): string {
+  const named = found.map((ds) => `datasource "${ds.name}" (driver ${JSON.stringify(ds.driver)})`).join(', ');
+  const one = found.length === 1;
+  return (
+    `verify: refusing to boot: ${named} ${one ? 'is' : 'are'} managed on a driver id the platform does not ` +
+    `ship, so ${one ? 'it is' : 'they are'} supplied by a plugin. Verify writes only to stores it creates: it ` +
+    'runs every managed datasource on an ephemeral in-memory stand-in, and it has none for a driver it does not ' +
+    "ship. Booted anyway, the plugin's own driver would take the app's seed, hooks and flows to the real " +
+    `database ${one ? 'that datasource names' : 'those datasources name'}. There is no switch around this ` +
+    'refusal: verify a configuration that does not declare ' + (one ? 'it' : 'them') + '.'
+  );
 }
 
 export interface VerifyDatasourceDriverFactoryOptions {
@@ -101,8 +151,8 @@ export interface VerifyDatasourceDriverFactoryOptions {
 }
 
 /**
- * Verify's driver factory: the real one, except that a managed datasource with
- * a stand-in is built as an ephemeral in-memory store (see this file's header).
+ * Verify's driver factory: the real one, except that a managed datasource is
+ * built as an ephemeral in-memory store (see this file's header).
  *
  * The stand-in is built by the real factory from a spec of verify's own — the
  * datasource's name, the stand-in engine and an in-memory config — so it goes
@@ -120,7 +170,15 @@ export function createVerifyDatasourceDriverFactory(
       // The one reader derive decides on too: what this keeps real, derive withholds.
       if (!isManagedDatasource(spec)) return opts.real.create(spec);
       const engine = managedStandInEngine(spec.driver, opts.defaultStore);
-      if (engine === undefined) return opts.real.create(spec);
+      // A plugin's driver id: `bootStack` refuses such a boot before composing,
+      // and the connection service never asks a factory whose `supports()` is
+      // false for it. Any other caller is refused the same way, never handed a
+      // real connection.
+      if (engine === undefined) {
+        throw new Error(
+          unstandableManagedDatasourceRefusal([{ name: spec.name ?? '(unnamed)', driver: spec.driver }]),
+        );
+      }
       return opts.real.create({
         ...(spec.name !== undefined ? { name: spec.name } : {}),
         driver: engine,

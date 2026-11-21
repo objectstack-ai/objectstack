@@ -34,16 +34,18 @@
 // A declared MANAGED datasource (or one that declares no `schemaMode`) is NOT
 // connected to the database it names. Ruling A of the composition rule
 // (`bootStack`, #22301) already swaps the app's own default store for an
-// ephemeral one; the same swap now covers every declared managed store:
-// verify's driver factory builds it as a fresh in-memory store of the default
-// store's engine (`managed-datasource-stand-in.ts`), so every write that
-// reaches it — verify's derived writes, a REST create, the app's seed — lands
-// in memory and dies with the kernel. A managed datasource whose engine has no
-// faithful stand-in (`mongodb`, or a driver a plugin supplies) keeps its real
-// driver, and every derived write family leaves its objects out and names
-// them, as for an external one; the app's seed, hooks and flows still write to
-// that real store. Only the local flow run refuses a write to any
-// object routed away from the default store (`flow-run.ts`).
+// ephemeral one; the same swap covers every declared managed store on an
+// engine the platform ships, `mongodb` included: verify's driver factory
+// builds it as a fresh in-memory store (`managed-datasource-stand-in.ts`), so
+// every write that reaches it — verify's derived writes, a REST create, the
+// app's seed, hooks and flows — lands in memory and dies with the kernel, and
+// its objects are exercised by every derived family. A managed datasource on a
+// driver id the platform does not ship (a plugin's) cannot be stood in: the
+// plugin registers its own driver, which the boot would then write through, so
+// `bootStack` refuses to boot while one is declared, naming the datasource and
+// the driver id, before it composes anything. There is no switch around that
+// refusal. Only the local flow run refuses a write to any object routed away
+// from the default store (`flow-run.ts`).
 // `verify.external-datasource-no-writes.test.ts` pins the external half and
 // `verify.managed-datasource-stand-in.test.ts` the managed one.
 
@@ -73,7 +75,11 @@ import { MetadataPlugin } from '@objectstack/metadata';
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
-import { createVerifyDatasourceDriverFactory } from './managed-datasource-stand-in.js';
+import {
+  createVerifyDatasourceDriverFactory,
+  unstandableManagedDatasourceRefusal,
+  unstandableManagedDatasources,
+} from './managed-datasource-stand-in.js';
 import { constructServedProviders } from './required-providers.js';
 import { registryLevelFor, resolveBootLogLevel, scopeRegistryLogLevel } from './boot-log-level.js';
 
@@ -987,6 +993,12 @@ async function bootClaimed(
   opts: BootOptions,
   claim: ConfigurationClaim,
 ): Promise<VerifyStack> {
+  // A declared managed datasource on a driver id the platform does not ship
+  // (a plugin's) cannot be stood in, so the boot is refused before anything is
+  // composed, naming each one (`./managed-datasource-stand-in.ts`). No switch.
+  const unstandable = unstandableManagedDatasources(config);
+  if (unstandable.length > 0) throw new Error(unstandableManagedDatasourceRefusal(unstandable));
+
   process.env.NODE_ENV = 'development';
 
   // [#7762] `orgContext` and `multiTenant` are two owners of one invariant —
