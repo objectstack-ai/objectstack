@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error -- plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
