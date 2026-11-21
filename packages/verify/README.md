@@ -88,11 +88,11 @@ don't exercise, silently breaks at runtime." Point this at *your* app.
 > included, stays in memory. A managed datasource on a driver id the platform
 > does not ship (a plugin's, or a misspelling) cannot be stood in: `objectstack
 > verify` refuses to boot while one is declared, naming the datasource and the
-> driver id, and exits non-zero. It refuses the same way, before any plugin
-> starts, when a plugin registers a driver of its own under a managed
-> datasource's name, whatever driver id the datasource declares, because the
-> boot would keep that driver instead of the stand-in. There is no switch
-> around either refusal. Only
+> driver id, and exits non-zero. It refuses the same way when a plugin
+> registers a driver of its own under a managed datasource's name, whatever
+> driver id the datasource declares, because the boot would keep that driver
+> instead of the stand-in: the driver is refused before the engine holds it,
+> so it receives no call. There is no switch around either refusal. Only
 > the `--flow` run refuses every write routed away from the in-memory default
 > database.
 
