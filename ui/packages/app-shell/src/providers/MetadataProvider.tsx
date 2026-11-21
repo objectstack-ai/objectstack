@@ -1096,8 +1096,17 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
    */
   const dropAdapterWorld = useCallback((): void => {
     adapterObjectNamesRef.current.clear();
+    answeredBundleRef.current = null;
     try { adapterRef.current?.clearCache?.(); } catch { /* adapter mid-swap */ }
   }, []);
+  /**
+   * objectstack#35932 — the items of the last app bundle that answered in this
+   * world. A refresh pulse drops the adapter's bundle, which then answers
+   * `pending` until its reload lands; the scope's views keep answering from
+   * these meanwhile (`viewsForObjects`), as a `/meta/view` list refetching in
+   * place does. A world switch forgets them (`dropAdapterWorld`).
+   */
+  const answeredBundleRef = useRef<AppBundleItems | null>(null);
 
   const [version, setVersion] = useState(0);
   // Defer state bumps so they never occur synchronously during a consumer's
@@ -1145,6 +1154,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       watchedBundleLoadsRef.current.add(peek.settled);
       void peek.settled.then(bump, bump);
     }
+    if (peek.status === 'ready') answeredBundleRef.current = peek.items;
     return peek;
   }, [bump]);
   useEffect(() => {
@@ -1914,16 +1924,27 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
    *     list already in hand, and asks for none: a reader of its views names it.
    *   - The bundle still loading, or the app about to be entered in this
    *     commit: a list already in hand answers, so a scope never unsettles
-   *     because an app was entered after it; otherwise the scope waits.
+   *     because an app was entered after it; so does the bundle that last
+   *     answered, when it holds every asked name (a reload after a refresh
+   *     pulse, objectstack#35932); otherwise the scope waits.
    *   - No bundle (no app entered, or a host without one): the list, as before.
    */
   const viewsForObjects = useCallback(
     (asked: readonly string[]): { views: unknown[]; settled: boolean } => {
       const listed = getEntry('view');
       const peek = peekBundle();
-      if (peek?.status === 'ready') {
-        const bundledObjects = peek.items.get('object');
-        const fromBundle = (bundledViews(peek.items) as { value: unknown[] }).value;
+      // objectstack#35932 — a bundle reloading after a refresh pulse still
+      // answers with the items it last answered (`answeredBundleRef`), so the
+      // pulse never sends a drawn route back to its skeleton (which remounts it).
+      // Only when those items hold every asked object: one outside them waits
+      // for the reload, as before, rather than asking the `/meta/view` list.
+      const answered = peek?.status === 'pending' ? answeredBundleRef.current : null;
+      const items = peek?.status === 'ready'
+        ? peek.items
+        : answered && asked.every((name) => answered.get('object')?.has(name)) ? answered : null;
+      if (items) {
+        const bundledObjects = items.get('object');
+        const fromBundle = (bundledViews(items) as { value: unknown[] }).value;
         const outside = asked.some((name) => !bundledObjects?.has(name));
         if (!outside) {
           const views = listed.status === 'ready' || (listed.status === 'loading' && listed.answered)
