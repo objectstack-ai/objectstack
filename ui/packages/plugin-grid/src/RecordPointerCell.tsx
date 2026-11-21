@@ -46,7 +46,7 @@
  */
 
 import React, { useEffect, useSyncExternalStore } from 'react';
-import { Skeleton, resolveIcon } from '@object-ui/components';
+import { ObjectIconTile, Skeleton, resolveIcon } from '@object-ui/components';
 import { buildExpandFields, extractRecords, getRecordDisplayName, resolveNameField, withoutDeniedFields } from '@object-ui/core';
 import type { RecordPointer } from '@object-ui/fields';
 import { createSafeTranslation } from '@object-ui/i18n';
@@ -73,6 +73,7 @@ interface ObjectDefLike {
   name?: string;
   label?: string;
   icon?: string;
+  color?: string;
   [key: string]: unknown;
 }
 
@@ -326,11 +327,9 @@ export function RecordPointerCell({ pointer, dataSource }: RecordPointerCellProp
   // bundle only when none is served (objectstack#30390).
   const typeLabel = def?.label || objectLabel({ name: objectName, label: objectName });
   const Icon = def?.icon ? resolveIcon(def.icon) : null;
-  // The annotation the other `resolveIcon` seam call sites carry: it returns a
-  // STABLE, cached component per icon name; it does not create one during
-  // render. The rule cannot see that through a call.
-  // eslint-disable-next-line react-hooks/static-components
-  const icon = Icon ? <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null;
+  // The target object's tile, in its colour, as the menu draws it
+  // (objectstack#35985).
+  const icon = Icon ? <ObjectIconTile glyph={Icon} color={def?.color} size="xs" /> : null;
 
   if (def && recordAnswer.state === 'readable') {
     const row = withoutDeniedFields(recordAnswer.record, perms, objectName);

@@ -8,11 +8,10 @@
  * (`buildDefaultPageSchema`).
  */
 
-import { createElement, useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
-import { getIcon } from '../utils/getIcon.js';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, ObjectIconTile, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
 import { isActingApprover } from '../utils/approvalDecisionFold.js';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -92,6 +91,8 @@ import {
   RECORD_APPROVAL_EXCLUDED_ACTIONS,
 } from './recordApprovalActions.js';
 import { useApprovalQueueAdvance } from './approval-decision/approvalQueueAdvance.js';
+import { approvalSubjectTitle } from './approval-decision/approvalSubjectTitle.js';
+import { RecordReadReportContext, recordReadKey, type RecordReadReport } from './approval-decision/recordReadReport.js';
 // Side-effect registration of `record:approvals` — synthesized record pages
 // reference the node whenever the record has approval requests (#3461), so
 // the type must resolve wherever this view renders, not only under hosts
@@ -1585,6 +1586,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the served row (`readableRow`), NOT on a `useMemo` (AGENTS.md #10), so a
   // re-render never republishes an equal row as a new object to the page.
   const readablePageRecord = readableRow(pageRecord, perms, objectName);
+
+  // objectstack#35415 — on an approval request's page, what the page's own
+  // reads of a record learned (`recordReadReport.ts`): the title links to the
+  // record the request is about only where one of them read it. Keyed by
+  // `object::id`; collected only on that page, so no other page re-renders on
+  // its cards' reads.
+  const [readRecords, setReadRecords] = useState<Readonly<Record<string, boolean>>>({});
+  const reportRecordRead = useCallback<RecordReadReport>((target, id, readable) => {
+    const key = recordReadKey(target, id);
+    setReadRecords((prev) => (prev[key] === readable ? prev : { ...prev, [key]: readable }));
+  }, []);
+  const isRecordRead = (target: string, id: string) => readRecords[recordReadKey(target, id)] === true;
 
   // Derive a human-readable record title from the loaded record so
   // favourites (record:*) and the breadcrumb show e.g. "Acme Corporation"
@@ -4877,10 +4890,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // same `icon` key the app's actions use, so every row draws one kind
         // of entry. `page:header` keeps this CTA a labelled button in the row
         // at every width: it takes none of the app's `maxVisible` slots and
-        // never folds into the `⋯` (objectui#12617). It is the filled primary
-        // button only when the record has no app action ahead of it; next to
-        // app actions it is an outline button, which `page:header` decides —
-        // no `variant` is declared here for it to read.
+        // never folds into the `⋯` (objectui#12617). It is an outline button
+        // in the header row whether or not the record has app actions
+        // (objectstack#36049; before, it drew filled when it had none);
+        // `page:header` decides that — no `variant` is declared here for it
+        // to read. The phone's bottom bar still draws it filled.
         icon: 'pencil',
         type: 'script',
         locations: ['record_header'],
@@ -5278,10 +5292,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       data-record-bar-title=""
     />
   );
+  // objectstack#35985 — the record row leads with the object's tile: white
+  // glyph on the object's colour, gray without one.
   const objectIconName = typeof (objectDef as any)?.icon === 'string' ? ((objectDef as any).icon as string) : undefined;
-  const objectIcon = objectIconName
-    ? createElement(getIcon(objectIconName), { className: 'h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
-    : null;
+  const objectColor = typeof (objectDef as any)?.color === 'string' ? ((objectDef as any).color as string) : undefined;
+  const objectIcon = objectIconName ? <ObjectIconTile icon={objectIconName} color={objectColor} /> : null;
   const pageLeading = embedded ? null : pageTrail.length > 0 ? (
     <>
       {originFrom?.pathname && (
@@ -5563,6 +5578,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
+    // objectstack#35415 — an approval request's page is named by the record
+    // it asks a decision on, linked to it; else by the request's own title.
+    title: objectName === SYS_APPROVAL_REQUEST_OBJECT ? approvalSubjectTitle(readablePageRecord, isRecordRead) : undefined,
   };
   const sharedChrome = (
     <>
@@ -5584,6 +5602,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const pageTree = (
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
+    <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
@@ -6078,6 +6097,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         onClose={() => setFlowRefusal(s => ({ ...s, open: false }))}
       />
     </div>
+    </RecordReadReportContext.Provider>
     </RecordHeaderStateContext.Provider>
     </RecordHeaderBarContext.Provider>
   );

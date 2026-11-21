@@ -530,6 +530,9 @@ const de = {
     cancelChanges: "Änderungen verwerfen",
     saveRow: "Zeile speichern",
     cellReadOnly: "Diese Zelle kann hier nicht bearbeitet werden.",
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: "Geben Sie eine Zahl ein.",
+    cellInvalid: "Dieser Wert ist ungültig.",
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: "Wird gespeichert…",
     cellSaved: "Gespeichert",
@@ -656,7 +659,7 @@ const de = {
       earliest: "Frühestes",
       latest: "Spätestes",
       pageName: "{{label}} (diese Seite)",
-      calculate: "Berechnen",
+      calculate: "Berechnung hinzufügen",
       none: "Keine",
       menuPercentEmpty: "Anteil leer",
       menuPercentFilled: "Anteil gefüllt",
@@ -1228,6 +1231,7 @@ const de = {
   },
   view: {
     editViewConfig: "Ansichtskonfiguration bearbeiten",
+    showViewConfig: "Ansichtskonfiguration anzeigen",
     rename: "Umbenennen",
     duplicateView: "Ansicht duplizieren",
     shareView: "Ansicht teilen",
@@ -2654,11 +2658,25 @@ const de = {
       viewNameInvalid: "Verwenden Sie Kleinbuchstaben, Ziffern und Unterstriche; beginnen Sie mit einem Buchstaben oder Unterstrich.",
       systemViewReadonly: "Systemansicht — im Code definiert, schreibgeschützt.",
       cannotEditMetaView: "Diese Ansicht ist integriert und im Code definiert – sie kann nicht geändert werden.",
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: "Auf Ansicht zurücksetzen",
       resetViewTitle: "Stellt die eigenen Filter, Suche, Sortierung, Gruppierung, Spaltenanordnung, ausgeblendeten Felder, Dichte, Layout, Zeilenfarbe, Zeilennummern und Inline-Bearbeitung dieser Ansicht wieder her. Angeheftete Ansichten, Favoriten und die Art, wie Datensätze geöffnet werden, bleiben unverändert. Nur Ihre Liste ändert sich.",
-      linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
       personalized: "Personalisiert",
       personalizedHeading: "Ihre Liste weicht von dieser Ansicht ab bei",
+      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      draft: {
+        discard: "Verwerfen",
+        discardTitle: "Setzt die Liste auf den Stand der Ansicht zurück: Filter, Sortierung, Gruppierung, Spalten und Layout. Spaltenbreiten und Zeilenhöhe bleiben.",
+        save: "Speichern",
+        heading: "Ungespeicherte Änderungen",
+        partSeparator: ", ",
+        saveToView: "In dieser Ansicht speichern",
+        saveAsMyView: "Als meine Ansicht speichern",
+        copyName: "{{name}} (Kopie)",
+        saved: "Gespeichert",
+      },
+      linkFilterRefused: 'Der Filter dieses Links wurde nicht angewendet. Er nennt ein Feld, nach dem Sie hier nicht filtern können, daher zeigt die Liste die Ansicht ohne ihn.',
       personalizedParts: {
         filters: "Filter",
         search: "Suche",

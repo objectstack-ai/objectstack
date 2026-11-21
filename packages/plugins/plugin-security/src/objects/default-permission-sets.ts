@@ -399,6 +399,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         allowDelete: true,
         viewAllRecords: true,
         modifyAllRecords: true,
+        // [Field-axis split, ruling of record 6912661484, letter A] The
+        // read-only "every field" vote, said explicitly. Today it duplicates
+        // the vote `viewAllRecords`/`modifyAllRecords` already cast on every
+        // field (`superuserFieldVote`, `@objectstack/core`), so nothing
+        // answers differently; it is what keeps an organization administrator
+        // reading every field once those two bits stop voting on fields. The
+        // explicit entries below carry no super-user bit and so no field vote
+        // either: an explicit entry is the set's whole answer for its object.
+        // `deriveWallLessOrgAdmin` drops it with the two bypass bits.
+        viewAllFields: true,
         // [#3544] The super-user bits do not imply export.
         //
         // [#8681] …and this set no longer GRANTS it either — read the twin
@@ -1734,14 +1744,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
 /**
  * [ADR-0105 D4] Derive the wall-less org-admin variant
  * ({@link ORGANIZATION_ADMIN_NO_BYPASS}) from `organization_admin` by dropping
- * the wildcard `viewAllRecords`/`modifyAllRecords` bits — everything else
+ * the wildcard `viewAllRecords`/`modifyAllRecords` bits, and with them the
+ * wildcard `viewAllFields` — everything else
  * (object grants, managed-write denies, the assignment-table overrides,
  * system permissions, the identity RLS carve-outs) is carried over verbatim.
  *
  * DERIVED, never a second literal: two hand-maintained copies of a
  * high-privilege set are a drift waiting to happen, and the drift would be a
- * silent privilege difference. The only intended delta is the superuser bits,
- * so the only thing this function may do is remove them.
+ * silent privilege difference. The only intended delta is the superuser bits
+ * (and the `viewAllFields` bit that rides with them on the wildcard), so the
+ * only thing this function may do is remove them.
  *
  * ⚠️ The copy is SHALLOW and taken at MODULE LOAD, so what it carries over is
  * the compile-time baseline only — the registry-driven managed-write denies
@@ -1764,8 +1776,15 @@ function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
   // superuser bits. Ownership, sharing and business RLS still apply; grant
   // `admin_full_access` (or an explicit set carrying the bits) when a
   // deployment-wide data superuser is genuinely intended.
+  //
+  // [Field-axis split, ruling of record 6912661484] `viewAllFields` leaves
+  // with the two bypass bits. The variant never held the field vote those
+  // bits cast, so keeping the parent's `viewAllFields` would hand its holders
+  // every field another set hides, a behaviour change the additive step must
+  // not make. It is a field vote, not a record bypass: dropping it is about
+  // keeping today's answer, not about the tenant wall.
   const objects: Record<string, any> = { ...(base.objects ?? {}) };
-  const { viewAllRecords: _v, modifyAllRecords: _m, ...wildcardWithoutBypass } =
+  const { viewAllRecords: _v, modifyAllRecords: _m, viewAllFields: _f, ...wildcardWithoutBypass } =
     (objects['*'] ?? {}) as Record<string, unknown>;
   objects['*'] = wildcardWithoutBypass;
   return PermissionSetSchema.parse({

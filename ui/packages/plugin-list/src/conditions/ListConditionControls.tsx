@@ -506,7 +506,7 @@ export interface ConditionChipRowProps {
 }
 
 const CHIP_CLASS =
-  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-full border px-2 text-[13px] leading-none';
+  'inline-flex h-6 max-w-[280px] shrink-0 items-center gap-1 rounded-md border px-2 text-[13px] leading-none';
 
 /**
  * A control of the condition row below `sm`: 44 px on both sides (WCAG 2.5.5),
@@ -517,7 +517,7 @@ const ROW_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
 
 /** 「Sort」, 「Filter」 and 「+」 before anything is set: dashed, so they do not read as a condition in force. */
 const EMPTY_BUTTON_CLASS =
-  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'max-sm:h-11 max-sm:min-w-11 inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-dashed px-2 text-[13px] leading-none text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 export function ConditionChipRow({
   sort,

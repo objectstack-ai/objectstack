@@ -18,8 +18,11 @@
  *   3. Space is typed like any key and opens the editor, never the record
  *      (the maintainer's correction on #35683); a two-state cell flips on
  *      Space or on a second click instead, and commits.
- *   4. A link the cell draws keeps its own click; a double-click on the cell
- *      around it edits.
+ *   4. A plain click on a link the cell draws selects the cell and follows
+ *      nothing; a Ctrl/Cmd-click follows it, and a double-click on it edits
+ *      (objectstack#36015). The title link (`data-opens-on-click`) keeps its
+ *      click. The selected cell's open button and Ctrl/Cmd+Enter open the
+ *      link; a copy button a value draws is not drawn.
  *   5. A cell that opens no editor says why on the cell: the host's sentence,
  *      else the table's own.
  *   6. A touch tap opens the record and edits nothing.
@@ -48,11 +51,23 @@ const ROWS = [
 function renderTable({
   selection = {},
   extra = {},
-}: { selection?: GridCellSelection | null; extra?: Record<string, unknown> } = {}) {
+  withTitle = false,
+}: { selection?: GridCellSelection | null; extra?: Record<string, unknown>; withTitle?: boolean } = {}) {
   const DataTable = ComponentRegistry.get('data-table')!;
   const onRowClick = vi.fn();
   const onCellChange = vi.fn();
   const onSiteClick = vi.fn();
+  const onTitleClick = vi.fn();
+  // The title link a host marks as the one a click follows (objectstack#36015).
+  const titleColumn = {
+    header: 'Title',
+    accessorKey: 'title',
+    cell: (_value: unknown, row: { id: string }) => (
+      <a href={`/record/${row.id}`} data-opens-on-click="" onClick={(e) => { e.preventDefault(); onTitleClick(row.id); }}>
+        Record {row.id}
+      </a>
+    ),
+  };
   const schema = {
     type: 'data-table',
     columns: [
@@ -63,9 +78,13 @@ function renderTable({
         header: 'Site',
         accessorKey: 'site',
         cell: (value: string) => (
-          <a href={`https://${value}`} onClick={(e) => { e.preventDefault(); onSiteClick(value); }}>{value}</a>
+          <span>
+            <a href={`https://${value}`} onClick={(e) => { e.preventDefault(); onSiteClick(value); }}>{value}</a>
+            <button type="button" data-cell-copy="">Copy site</button>
+          </span>
         ),
       },
+      ...(withTitle ? [titleColumn] : []),
     ],
     data: ROWS,
     editable: true,
@@ -85,7 +104,7 @@ function renderTable({
     utils.container.querySelectorAll('tbody tr')[row].querySelectorAll('td[data-grid-cell]')[col] as HTMLElement;
   const editor = () => utils.container.querySelector<HTMLInputElement>('td[data-editing-cell] input');
   const catcher = () => utils.container.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
-  return { ...utils, cell, editor, catcher, onRowClick, onCellChange, onSiteClick };
+  return { ...utils, cell, editor, catcher, onRowClick, onCellChange, onSiteClick, onTitleClick };
 }
 
 describe('data-table select-first — a click selects (objectstack#35684)', () => {
@@ -94,7 +113,7 @@ describe('data-table select-first — a click selects (objectstack#35684)', () =
     fireEvent.click(t.cell(0, 0));
     expect(t.cell(0, 0)).toHaveAttribute('data-selected-cell');
     expect(t.cell(0, 0)).toHaveAttribute('aria-selected', 'true');
-    expect(t.cell(0, 0).className).toContain('outline-primary');
+    expect(t.cell(0, 0).querySelector('[data-slot="cell-selection-frame"]')).not.toBeNull();
     expect(t.editor()).toBeNull();
     expect(t.onRowClick).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(t.catcher());
@@ -186,19 +205,77 @@ describe('data-table select-first — Space types; a two-state cell flips', () =
   });
 });
 
-describe('data-table select-first — a link in a cell keeps its click', () => {
-  it('a click on the link follows it and selects nothing; a double-click beside it edits', () => {
+describe('data-table select-first — a click on a link the cell draws only selects (objectstack#36015)', () => {
+  it('a plain click selects the cell and follows nothing; a Ctrl or Cmd click follows the link', () => {
+    const t = renderTable();
+    const link = screen.getByText('a.example');
+    const plain = fireEvent.click(link);
+    expect(t.onSiteClick).not.toHaveBeenCalled();
+    // The browser's own navigation was cancelled too.
+    expect(plain).toBe(false);
+    expect(t.cell(0, 3)).toHaveAttribute('data-selected-cell');
+    expect(t.onRowClick).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(t.catcher());
+    fireEvent.click(link, { ctrlKey: true });
+    expect(t.onSiteClick).toHaveBeenCalledTimes(1);
+    fireEvent.click(link, { metaKey: true });
+    expect(t.onSiteClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('a double-click on the link edits, as on any cell', () => {
     const t = renderTable();
     fireEvent.click(screen.getByText('a.example'));
-    expect(t.onSiteClick).toHaveBeenCalledWith('a.example');
-    expect(t.cell(0, 3)).not.toHaveAttribute('data-selected-cell');
     fireEvent.doubleClick(screen.getByText('a.example'));
-    expect(t.editor()).toBeNull();
-    // The cell around the link.
-    fireEvent.click(t.cell(0, 3));
-    expect(t.cell(0, 3)).toHaveAttribute('data-selected-cell');
-    fireEvent.doubleClick(t.cell(0, 3));
     expect(t.editor()).toHaveValue('a.example');
+    expect(t.onSiteClick).not.toHaveBeenCalled();
+  });
+
+  it('control: the title link (data-opens-on-click) keeps its click and selects nothing', () => {
+    const t = renderTable({ withTitle: true });
+    fireEvent.click(screen.getByText('Record 1'));
+    expect(t.onTitleClick).toHaveBeenCalledWith('1');
+    expect(t.cell(0, 4)).not.toHaveAttribute('data-selected-cell');
+  });
+
+  it('the selected cell draws an open button that follows the link; an unselected cell draws none', () => {
+    const t = renderTable();
+    expect(t.cell(0, 3).querySelector('[data-testid="cell-open-button"]')).toBeNull();
+    fireEvent.click(t.cell(0, 3));
+    const open = t.cell(0, 3).querySelector<HTMLButtonElement>('[data-testid="cell-open-button"]')!;
+    expect(open).toHaveAccessibleName('Open');
+    expect(open.className).toContain('flex');
+    fireEvent.click(open);
+    expect(t.onSiteClick).toHaveBeenCalledWith('a.example');
+    // The cell stays selected.
+    expect(t.cell(0, 3)).toHaveAttribute('data-selected-cell');
+  });
+
+  it('a selected cell with nothing to open hides its open button', () => {
+    const t = renderTable();
+    fireEvent.click(t.cell(0, 0));
+    const open = t.cell(0, 0).querySelector<HTMLButtonElement>('[data-testid="cell-open-button"]')!;
+    expect(open.className).toContain('hidden');
+    expect(open.className).not.toMatch(/(^|\s)flex(\s|$)/);
+  });
+
+  it('Ctrl or Cmd+Enter on the selected cell follows the link; plain Enter edits', () => {
+    const t = renderTable();
+    fireEvent.click(t.cell(0, 3));
+    fireEvent.keyDown(t.catcher()!, { key: 'Enter', ctrlKey: true });
+    expect(t.onSiteClick).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(t.catcher()!, { key: 'Enter', metaKey: true });
+    expect(t.onSiteClick).toHaveBeenCalledTimes(2);
+    expect(t.editor()).toBeNull();
+    fireEvent.keyDown(t.catcher()!, { key: 'Enter' });
+    expect(t.editor()).toHaveValue('a.example');
+  });
+
+  it('a copy button a value draws is hidden in the select-first table, and only there', () => {
+    const t = renderTable();
+    expect(t.cell(0, 3).className).toContain('[&_[data-cell-copy]]:hidden');
+    cleanup();
+    const control = renderTable({ selection: null, extra: { keyboardNavigation: true } });
+    expect(control.cell(0, 3).className).not.toContain('[data-cell-copy]');
   });
 });
 
