@@ -101,7 +101,7 @@ const result = ServerRateLimitConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **security** | `{ rateLimit?: object }` | optional | Server-level security configuration. Today: the global inbound rate limit. |
-| **trustProxy** | `boolean \| { networks: string[]; header?: Enum<'x-forwarded-for' \| 'x-real-ip'> }` | optional (default: `false`) | Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Prefer the trusted-network form, `{ networks: ['10.0.0.0/8'], header: 'x-forwarded-for' }`: the header is believed only from a connection inside `networks` (your proxies) and `X-Forwarded-For` is read from the right, past them, so it stays sound behind a proxy that appends to the header. `true` believes the header from any connection and is sound ONLY when a reverse proxy you control OVERWRITES those headers on every inbound request, never appends to them. Left `false` (the default) the caller IP is the transport's own peer address, which a client cannot forge. One client-address rule, three consumers: the inbound rate limiter when `server.security.rateLimit.enabled` is set; the per-endpoint rate limiter of every declared endpoint (`apis:`) whose own `rateLimit` is enabled, whether or not the server-level one is; and the authentication plugin, whose IP allow-list (`allowed_ip_ranges`) judges and whose login audit stamps (`last_login_ip`) the same address. |
+| **trustProxy** | `boolean \| { networks: string[]; header?: Enum<'x-forwarded-for' \| 'x-real-ip'> }` | optional (default: `false`) | Believe `X-Forwarded-For` / `X-Real-IP` when identifying a caller. Prefer the trusted-network form, `{ networks: ['10.20.0.0/28'], header: 'x-forwarded-for' }`: the header is believed only from a connection inside `networks` — your proxies' own addresses, never a range clients connect from, since every address inside it is taken for a proxy — and `X-Forwarded-For` is read from the right, past them, so it stays sound behind a proxy that appends to the header. `true` believes the header from any connection and is sound ONLY when a reverse proxy you control OVERWRITES those headers on every inbound request, never appends to them. Left `false` (the default) the caller IP is the transport's own peer address, which a client cannot forge. One client-address rule, three consumers: the inbound rate limiter when `server.security.rateLimit.enabled` is set; the per-endpoint rate limiter of every declared endpoint (`apis:`) whose own `rateLimit` is enabled, whether or not the server-level one is; and the authentication plugin, whose IP allow-list (`allowed_ip_ranges`) judges and whose login audit stamps (`last_login_ip`) the same address. |
 
 ### Nested Shape: `StackServerConfig.security`
 
@@ -113,7 +113,7 @@ const result = ServerRateLimitConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **networks** | `string[]` | ✅ | The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs. A forwarded header is believed only when the connection comes from inside these networks, and the walk of `X-Forwarded-For` skips every hop inside them. |
+| **networks** | `string[]` | ✅ | The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs, and nothing else. A forwarded header is believed only when the connection comes from inside these networks, and the walk of `X-Forwarded-For` skips every hop inside them: EVERY address inside them is taken for a proxy, so a range clients connect from does not belong here. A prefix length of 0 is refused. |
 | **header** | `Enum<'x-forwarded-for' \| 'x-real-ip'>` | optional (default: `"x-forwarded-for"`) | The one header those proxies set. `x-forwarded-for` (the default) is read right to left past the trusted hops; `x-real-ip` is read only when named here. The other header is never believed under this form. |
 
 
@@ -144,7 +144,7 @@ const result = ServerRateLimitConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **networks** | `string[]` | ✅ | The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs. A forwarded header is believed only when the connection comes from inside these networks, and the walk of `X-Forwarded-For` skips every hop inside them. |
+| **networks** | `string[]` | ✅ | The addresses or CIDR ranges (IPv4 or IPv6) of the reverse proxies this deployment runs, and nothing else. A forwarded header is believed only when the connection comes from inside these networks, and the walk of `X-Forwarded-For` skips every hop inside them: EVERY address inside them is taken for a proxy, so a range clients connect from does not belong here. A prefix length of 0 is refused. |
 | **header** | `Enum<'x-forwarded-for' \| 'x-real-ip'>` | optional (default: `"x-forwarded-for"`) | The one header those proxies set. `x-forwarded-for` (the default) is read right to left past the trusted hops; `x-real-ip` is read only when named here. The other header is never believed under this form. |
 
 
