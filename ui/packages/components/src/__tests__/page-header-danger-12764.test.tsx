@@ -119,11 +119,13 @@ describe("page:header reads the spec's variant 'danger' as destructive (objectui
     expect(buttons.filter(isFilled)).toHaveLength(1);
   });
 
-  it('with only a danger action, the host Edit is the primary and the danger action stays destructive', () => {
+  // objectstack#36049 — the host Edit still takes the pick (it leads the row)
+  // but draws outline: the row has no filled button.
+  it('with only a danger action, the host Edit leads as an outline button and the danger action stays destructive', () => {
     renderHeader([act('leave_organization', 'Leave Organization', { variant: 'danger' })]);
     const buttons = rowButtons();
     expect(buttons.map(nameOf)).toEqual(['Edit', 'Leave Organization']);
-    expect(isFilled(buttons[0])).toBe(true);
+    expect(isFilled(buttons[0])).toBe(false);
     expect(isFilled(buttons[1])).toBe(false);
     expect(isDestructiveButton(buttons[1])).toBe(true);
   });
