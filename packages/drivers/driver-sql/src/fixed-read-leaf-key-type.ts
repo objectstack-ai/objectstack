@@ -50,7 +50,8 @@
  *   transaction created, it needs no second pooled connection (a pool the
  *   transaction holds cannot time it out), and a failed read rolls back the
  *   savepoint alone, never the caller's transaction. That reading is kept
- *   for that transaction only (it may describe a table that never commits).
+ *   for that transaction, and the savepoints derived from it, only (it may
+ *   describe a table that never commits).
  *   A door with no transaction reads on the pool and keeps the reading for
  *   the knex client's life.
  *
@@ -111,6 +112,24 @@ const castsByClient = new WeakMap<object, Map<string, ReadonlyMap<string, Column
 
 /** Per caller transaction: the readings taken on its own connection, which may describe tables it has not committed. */
 const castsByTransaction = new WeakMap<object, Map<string, ReadonlyMap<string, ColumnReading>>>();
+
+/**
+ * A transaction's reading of a table, or one an ENCLOSING transaction took:
+ * a savepoint derived from the caller's transaction (knex's
+ * `parentTransaction`, as `attemptWithoutPoisoning` opens for the presumed
+ * `updated_at` write) runs on the same connection and sees what its parent
+ * sees, so the parent's reading holds there. Never the reverse: a reading a
+ * savepoint took may describe a table that rolls back with it.
+ */
+function transactionReading(trx: Knex.Transaction, key: string): ReadonlyMap<string, ColumnReading> | undefined {
+  const seen = new Set<object>();
+  for (let at: Knex.Transaction | undefined = trx; at !== undefined && !seen.has(at); at = at.parentTransaction) {
+    seen.add(at);
+    const columns = castsByTransaction.get(at)?.get(key);
+    if (columns !== undefined) return columns;
+  }
+  return undefined;
+}
 
 /** Per knex client: whether a no-reading refusal was logged (once per client, its own flag). */
 const refusalLogByClient = new WeakMap<object, { logged: boolean }>();
@@ -194,7 +213,10 @@ function collectLeafKeyObjects(node: unknown, object: string, out: Set<string>, 
  * cast `record_id` to the key's base type (see the module docblock). A no-op
  * on every dialect but PostgreSQL, and for a `where` holding no leaf.
  * `options.transaction`, when present, is where the catalog is read: on the
- * caller's connection, inside a savepoint.
+ * caller's connection, inside a savepoint. While that savepoint is open, knex
+ * runs the caller's other concurrent statements on the same transaction
+ * inside it, so a catalog read that fails rolls back a concurrent write the
+ * caller made on that transaction during the read.
  */
 export async function primeFixedReadLeafKeyTypes(
   source: FixedReadLeafKeySource,
@@ -215,7 +237,7 @@ export async function primeFixedReadLeafKeyTypes(
     const schema = typeof builder._single?.schema === 'string' ? builder._single.schema : undefined;
     const key = tableKey(schema, table);
     if (cacheOf(client).has(key)) continue;
-    if (trx !== undefined && castsByTransaction.get(trx)?.has(key)) continue;
+    if (trx !== undefined && transactionReading(trx, key) !== undefined) continue;
     let rows: { column_name: string; type_schema: string; type_name: string }[];
     try {
       const relation = schema === undefined ? `format('%I', ?::text)` : `format('%I.%I', ?::text, ?::text)`;
@@ -274,7 +296,7 @@ export function fixedReadLeafKeyReading(
 ): FixedReadLeafKeyReading {
   const key = tableKey(schema, table);
   const trx = savepointHost(transaction);
-  const columns = castsByClient.get(client)?.get(key) ?? (trx === undefined ? undefined : castsByTransaction.get(trx)?.get(key));
+  const columns = castsByClient.get(client)?.get(key) ?? (trx === undefined ? undefined : transactionReading(trx, key));
   if (columns === undefined) return { kind: 'unread' };
   const reading = columns.get(column);
   if (reading === undefined || reading === null) return { kind: 'uncast' };

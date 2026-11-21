@@ -757,6 +757,66 @@ function declarePgKeyTypePins(driverOf: () => SqlDriver, knexOf: () => Knex): vo
           await fresh.disconnect?.();
         }
       });
+
+      /**
+       * `updateMany` on a managed object whose `updated_at` is only presumed
+       * issues its stamped attempt inside a savepoint DERIVED from the
+       * caller's transaction (`updateWithPresumedTimestamp` →
+       * `attemptWithoutPoisoning`), so the leaf compiles under a transaction
+       * object the door did not prime under: the reading taken on the
+       * caller's transaction must reach it.
+       */
+      describe('(d) the presumed-updated_at write path compiles in a savepoint derived from the caller\'s transaction', () => {
+        const PRESUMED = [
+          { table: 'srid_pk_presumed_text', ddl: 'text', grants: ['k1', 'k2'], expected: ['k1', 'k2'], cast: false },
+          { table: 'srid_pk_presumed_char', ddl: 'character(4)', grants: ['k1  ', 'k2'], expected: ['k1  ', 'k2  '], cast: true },
+        ] as const;
+
+        beforeAll(async () => {
+          const driver = driverOf();
+          const knex = knexOf();
+          for (const p of PRESUMED) {
+            await driver.execute(`drop table if exists ${p.table}`);
+            await driver.execute(`create table ${p.table} (id ${p.ddl} primary key, label text, created_at timestamptz default now(), updated_at timestamptz default now())`);
+            await knex(p.table).insert([{ id: 'k1', label: 'x' }, { id: 'k2', label: 'x' }, { id: 'k3', label: 'x' }]);
+            await knex(GRANTS).insert(p.grants.map((g, i) => ({ id: `${p.table}_g${i}`, object_name: p.table, recipient_type: 'user', recipient_id: 'u9', record_id: g, access_level: 'lvl_edit', organization_id: 'org_a' })));
+          }
+        });
+
+        afterAll(async () => {
+          const driver = driverOf();
+          const knex = knexOf();
+          for (const p of PRESUMED) {
+            await knex(GRANTS).where('object_name', p.table).del().catch(() => {});
+            await driver.execute(`drop table if exists ${p.table}`).catch(() => {});
+          }
+        });
+
+        for (const p of PRESUMED) {
+          it(`${p.ddl} key: a predicate updateMany with the write-form leaf answers the list's rows and touches them`, async () => {
+            const fresh = new SqlDriver(PG_CELL.config());
+            // Managed metadata over a table this driver did not create: `updated_at` is presumed.
+            fresh.registerObjectMetadata([{ name: p.table, fields: { label: { type: 'text' } } } as any]);
+            expect((fresh as any).updatedAtStampIsPresumed(p.table)).toBe(true);
+            const trx = await fresh.beginTransaction();
+            try {
+              const statements = grantStatementsOf(trx);
+              const where = seamed({ id: { $in: SharedRecordIds.write(p.table, 'u9', ['lvl_edit', 'lvl_full']) } });
+              expect(await fresh.updateMany(p.table, { where }, { label: 'touched' }, inTrx(trx))).toBe(p.expected.length);
+              expect(sortedIds(await trx(p.table).where('label', 'touched').select('id'))).toEqual([...p.expected]);
+              // The list's rows, read in the same transaction after the write.
+              expect(sortedIds(await fresh.find(p.table, { where: seamed({ id: { $in: [...p.grants] } }) }, inTrx(trx)))).toEqual([...p.expected]);
+              // The stamped attempt landed, so the presumption settled.
+              expect((fresh as any).updatedAtStampIsPresumed(p.table)).toBe(false);
+              expect(statements.length).toBeGreaterThanOrEqual(1);
+              for (const sql of statements) expect(sql.includes(CAST)).toBe(p.cast);
+            } finally {
+              await trx.rollback();
+              await fresh.disconnect?.();
+            }
+          });
+        }
+      });
     });
 
     it('reads the catalog once per table: a second statement and another verb ask it nothing', async () => {

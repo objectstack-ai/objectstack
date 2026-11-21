@@ -148,6 +148,33 @@ describe('[ADR-0155 O2] the catalog prime and the cast it puts on the inner read
     expectRefused(() => probe.compile(EXT, leafWhere(), inFailing), 'holds no reading');
   });
 
+  it('a savepoint derived from the transaction reaches the transaction\'s reading; the transaction never reaches a savepoint\'s', async () => {
+    const { probe, raw } = pgProbe(() => ({ rows: [row('id', 'pg_catalog', 'int4')] }));
+    const fakeTrx = (rows: unknown[], parentTransaction?: unknown) => {
+      const savepointRaw = vi.fn(async () => ({ rows }));
+      return Object.assign(() => undefined, {
+        transaction: vi.fn(async (handler: (sp: { raw: typeof savepointRaw }) => unknown) => handler({ raw: savepointRaw })),
+        ...(parentTransaction === undefined ? {} : { parentTransaction }),
+      });
+    };
+    const parent = fakeTrx([row('id', 'pg_catalog', 'int8')]);
+    const inParent: DriverOptions = { transaction: parent };
+    await probe.prime(EXT, leafWhere(), inParent);
+    // `attemptWithoutPoisoning`'s shape: a savepoint knex links to its parent.
+    const derived = fakeTrx([row('id', 'pg_catalog', 'uuid')], parent);
+    const inDerived: DriverOptions = { transaction: derived };
+    expect(probe.compile(EXT, leafWhere(), inDerived).sql).toContain('AS "pg_catalog"."int8"');
+    await probe.prime(EXT, leafWhere(), inDerived);
+    expect(derived.transaction).not.toHaveBeenCalled();
+    // A reading a savepoint took is never its parent's.
+    const other = fakeTrx([row('id', 'pg_catalog', 'int8')]);
+    const sibling = fakeTrx([row('id', 'pg_catalog', 'uuid')], other);
+    await probe.prime(EXT, leafWhere(), { transaction: sibling });
+    expect(sibling.transaction).toHaveBeenCalledTimes(1);
+    expectRefused(() => probe.compile(EXT, leafWhere(), { transaction: other }), 'holds no reading');
+    expect(raw).not.toHaveBeenCalled();
+  });
+
   it('a column the read table does not have takes no cast: the database names the missing column itself', async () => {
     const { probe } = pgProbe(() => ({ rows: [row('label', 'pg_catalog', 'text')] }));
     await probe.prime(EXT, leafWhere());
