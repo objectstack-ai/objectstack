@@ -269,6 +269,10 @@ const ru = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Заполните обязательные поля',
+    requiredPromptDescription: 'Это изменение делает поля ниже обязательными. Заполните их, чтобы сохранить его.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Открыть {{name}}',

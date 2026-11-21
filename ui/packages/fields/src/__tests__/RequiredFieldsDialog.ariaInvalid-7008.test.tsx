@@ -84,7 +84,7 @@ describe('RequiredFieldsDialog tells assistive tech about a failed required fiel
     // after the click would prove nothing.
     expect(screen.getByTestId('select-trigger-stage')).toHaveAttribute('aria-invalid', 'false');
 
-    fireEvent.click(screen.getByText('Move card'));
+    fireEvent.click(screen.getByText('Save'));
 
     // The submit is refused (that half already worked) …
     expect(onSubmit).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe('RequiredFieldsDialog tells assistive tech about a failed required fiel
     const notes = screen.getByRole('textbox');
     fireEvent.change(notes, { target: { value: 'ready to move' } });
 
-    fireEvent.click(screen.getByText('Move card'));
+    fireEvent.click(screen.getByText('Save'));
 
     // Still refused, because the select is still empty.
     expect(onSubmit).not.toHaveBeenCalled();

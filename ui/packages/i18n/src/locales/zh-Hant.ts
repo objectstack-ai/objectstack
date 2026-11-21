@@ -270,6 +270,10 @@ const zhHant = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '補填必填欄位',
+    requiredPromptDescription: '這次改動讓下面的欄位變成必填，填好後和改動一起儲存。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '開啟 {{name}}',

@@ -263,6 +263,10 @@ const pt = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Preencha os campos obrigatórios',
+    requiredPromptDescription: 'Esta alteração torna obrigatórios os campos abaixo. Preencha-os para salvá-la.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Abrir {{name}}',

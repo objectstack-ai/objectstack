@@ -260,6 +260,10 @@ const ko = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '필수 필드 입력',
+    requiredPromptDescription: '이 변경으로 아래 필드가 필수가 됩니다. 입력하면 변경 내용과 함께 저장됩니다.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} 열기',

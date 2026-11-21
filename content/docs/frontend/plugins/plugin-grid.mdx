@@ -447,6 +447,19 @@ row whose new value would sort it elsewhere stays in place until the next load
   trigger related automation."). Cancel writes nothing and the cell keeps the
   value it had; Change saves it as any commit is saved. The confirm does not
   list the flows. A host asks this through `GridCellSelection.confirmCommit`.
+- **A change that makes other fields required asks for them** (objectstack#35956).
+  When the new value makes a field's `requiredWhen` true while that field is
+  still empty (a win reason on "Won", say), nothing is written yet: a dialog
+  names the record and the change and asks for those fields, with the editors
+  the record form uses, whether or not the view draws them as columns. A value
+  typed there that makes one more field required adds it. Save writes the cell
+  and the typed values as one update; Cancel writes nothing and the cell keeps
+  its value. A refusal of that update stays in the dialog, under the field it
+  names. That dialog is the confirmation, so a state-machine field does not ask
+  twice. A field that has a value, is hidden or read-only, the reader may not
+  write, or has no in-place editor (a file, rich text) is not asked for: the
+  change is saved and refused as before. The kanban drop and the record page's
+  inline Save open the same dialog (`RequiredFieldsDialog` in `@object-ui/fields`).
 - **The record drawer follows.** A record open in the list's drawer is read
   again when a list cell saves it. If the drawer holds unsaved edits of its own,
   those stay as typed, the drawer's save bar says the record was changed

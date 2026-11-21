@@ -5355,6 +5355,21 @@ export {
 } from './widgets/file-value.js';
 export type { FileValueView, UploadResultLike } from './widgets/file-value.js';
 export * from './FieldEditWidget.js';
+// objectstack#35956 — the in-place fill-in a change opens when it makes other
+// fields required: the pre-evaluation and the dialog, shared by the kanban
+// drop, the list cell and the record page's inline edit.
+export {
+  collectRequiredWhenPromptFields,
+  requiredWhenPromptReads,
+  type RequiredWhenPromptField,
+  type RequiredWhenPromptOptions,
+} from './requiredWhenPrompt.js';
+export {
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredFieldsDialogChange,
+  type RequiredFieldsDialogProps,
+} from './RequiredFieldsDialog.js';
 export * from './widgets/TextField.js';
 export * from './widgets/NumberField.js';
 export * from './widgets/BooleanField.js';
