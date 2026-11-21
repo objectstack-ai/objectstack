@@ -368,8 +368,11 @@ one-step invitation acceptance that creates the account, however long the
 steps between the two take. A password created outside such a request (written
 straight to the store), or before this release, counts as a change at its
 creation. An email-change or verification link carries its issue time in whole
-seconds, so one minted in the same second as the change is refused as well;
-so does an MCP access token.
+seconds, so one minted in the same second as the change is refused as well.
+An MCP access token carries its issue time in milliseconds, signed into it by
+the server, so one minted after the change in the same second is admitted; a
+token without that value (minted before this release), or one whose value
+cannot be placed, keeps the whole-second refusal.
 
 #### What a password reset ends, and what a change keeps
 
