@@ -2031,8 +2031,11 @@ export function EmailCellRenderer({ value }: CellRendererProps): React.ReactElem
           {safe}
         </a>
       </Button>
+      {/* A select-first grid does not draw this (`data-cell-copy`): there a
+          click selects the cell and Ctrl/Cmd+C copies it (objectstack#36015). */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/email:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyEmail', 'Copy email')}
@@ -2128,8 +2131,10 @@ export function PhoneCellRenderer({ value }: CellRendererProps): React.ReactElem
         <PhoneIcon className="h-3 w-3 shrink-0" />
         <span className="truncate">{safe}</span>
       </a>
+      {/* Not drawn in a select-first grid, as `EmailCellRenderer`'s. */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/phone:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyPhone', 'Copy phone number')}
@@ -2286,7 +2291,9 @@ function displayableImagesOf(value: unknown): Array<{ url: string; name?: string
  *
  * Clicking a thumbnail opens a full-screen lightbox (single or gallery). The
  * click is `stopPropagation`-guarded so, inside a grid row, enlarging an image
- * doesn't also trigger row navigation.
+ * doesn't also trigger row navigation. Each thumbnail is a `data-cell-opener`:
+ * in a select-first grid a plain click selects the cell, and the cell's open
+ * button or Ctrl/Cmd+Enter opens the lightbox (objectstack#36015).
  */
 export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElement {
   const { t } = useObjectTranslation();
@@ -2349,6 +2356,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
               key={idx}
               src={img.url}
               alt={imageAlt(idx, img.name)}
+              data-cell-opener=""
               onClick={open(idx)}
               className="size-8 cursor-zoom-in rounded-md border-2 border-background object-cover transition-transform hover:scale-110 hover:z-10"
             />
@@ -2356,6 +2364,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
           {imgs.length > 3 && (
             <button
               type="button"
+              data-cell-opener=""
               onClick={open(3)}
               className="size-8 rounded-md border-2 border-background bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground hover:bg-muted/80"
             >
@@ -2374,6 +2383,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
       <img
         src={imgs[0].url}
         alt={imageAlt(0, imgs[0].name)}
+        data-cell-opener=""
         onClick={open(0)}
         className="size-10 cursor-zoom-in rounded-md object-cover transition-transform hover:scale-105"
       />
