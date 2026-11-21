@@ -452,3 +452,80 @@ describe('a seed never hands the engine a roll-up value (#35655)', () => {
     expect(dropNotices(logger)).toEqual([]);
   });
 });
+
+/**
+ * [#35655] A roll-up an object EXTENSION contributes is never seeded either.
+ * The loader resolves a definition from the metadata service first and uses
+ * that copy whenever it has `fields`; the metadata service stores the object
+ * as registered, with no extension merged in, so its copy can lack a roll-up
+ * the engine's merged schema declares and computes. The strip therefore reads
+ * both the resolved definition and the engine's own schema. These pins hand
+ * the loader a metadata copy WITHOUT the extension's roll-up and an engine
+ * schema WITH it.
+ */
+describe('a roll-up an object extension contributes is never seeded either (#35655)', () => {
+  const METADATA_COPY = {
+    name: 'ext_invoice',
+    fields: {
+      name: { type: 'text' },
+      total: { type: 'number' },
+      paid: { type: 'summary', summaryOperations: { object: 'ext_payment', field: 'amount', function: 'sum' } },
+    },
+  };
+  const ENGINE_SCHEMA = {
+    ...METADATA_COPY,
+    fields: {
+      ...METADATA_COPY.fields,
+      ext_refunds: { type: 'summary', summaryOperations: { object: 'ext_refund', field: 'amount', function: 'count' } },
+    },
+  };
+  const metadataCopy = (): IMetadataService => ({
+    getObject: vi.fn(async (name: string) => (name === 'ext_invoice' ? METADATA_COPY : undefined)),
+    listObjects: vi.fn(async () => [METADATA_COPY]),
+    register: vi.fn(async () => {}),
+    get: vi.fn(async (_t: string, name: string) => (name === 'ext_invoice' ? METADATA_COPY : undefined)),
+    list: vi.fn(async () => []),
+    unregister: vi.fn(async () => {}),
+    exists: vi.fn(async () => false),
+    listNames: vi.fn(async () => []),
+  }) as unknown as IMetadataService;
+  const SEED = seedFor('ext_invoice', [{ name: 'INV-1', total: 10, paid: 3000, ext_refunds: 7 }]);
+  const insertedKeys = (engine: IDataEngine) =>
+    (engine.insert as any).mock.calls
+      .filter(([object]: [string]) => object === 'ext_invoice')
+      .flatMap(([, data]: [string, any]) => (Array.isArray(data) ? data : [data]).map((row: any) => Object.keys(row)));
+  const dropMetas = (logger: ReturnType<typeof createLogger>) =>
+    (logger.warn as any).mock.calls
+      .filter(([m]: [string]) => m.includes('roll-up summary'))
+      .map(([, meta]: [string, any]) => meta);
+
+  it('the metadata copy lacks the extension roll-up, the engine schema has it: neither roll-up reaches the engine, and the notice names both', async () => {
+    const { engine } = createFaithfulEngine();
+    (engine as any).getSchema = vi.fn((name: string) => (name === 'ext_invoice' ? ENGINE_SCHEMA : undefined));
+    const logger = createLogger();
+
+    const result = await new SeedLoaderService(engine, metadataCopy(), logger).load({ seeds: [SEED] as any, config: CONFIG });
+
+    const keys = insertedKeys(engine);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toContain('total');
+    expect(keys[0]).not.toContain('paid');
+    expect(keys[0]).not.toContain('ext_refunds');
+    expect(result.results[0]).toMatchObject({ inserted: 1, errored: 0 });
+    expect(dropMetas(logger)).toEqual([{ object: 'ext_invoice', fields: ['paid', 'ext_refunds'], droppedValues: 2 }]);
+  });
+
+  it('CONTROL: an engine whose schema read throws leaves the metadata copy the only source, and its roll-up is still dropped', async () => {
+    const { engine } = createFaithfulEngine();
+    (engine as any).getSchema = vi.fn(() => { throw new Error('no schema registry'); });
+    const logger = createLogger();
+
+    await new SeedLoaderService(engine, metadataCopy(), logger).load({ seeds: [SEED] as any, config: CONFIG });
+
+    const keys = insertedKeys(engine);
+    expect(keys[0]).not.toContain('paid');
+    // Nothing declares `ext_refunds` a roll-up here, so it is written as authored.
+    expect(keys[0]).toContain('ext_refunds');
+    expect(dropMetas(logger)).toEqual([{ object: 'ext_invoice', fields: ['paid'], droppedValues: 1 }]);
+  });
+});
