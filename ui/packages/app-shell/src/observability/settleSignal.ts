@@ -22,6 +22,8 @@
 type Listener = (pending: number) => void;
 
 let pending = 0;
+/** Whether any request was ever counted: a data layer wraps its `fetch` here. */
+let counted = false;
 const listeners = new Set<Listener>();
 let idleWaiters: Array<() => void> = [];
 
@@ -48,6 +50,7 @@ function notify(): void {
 
 /** Mark one request as in-flight. Pair with {@link endRequest}. */
 export function beginRequest(): void {
+  counted = true;
   pending += 1;
   notify();
 }
@@ -101,6 +104,36 @@ export function whenIdle(timeoutMs = 10_000): Promise<void> {
 }
 
 /**
+ * objectstack#35416 — resolve once no counted request has been in flight for
+ * `quietMs` in a row, or after `maxMs` whatever is in flight. A read that is
+ * not the page's own (the app bar's package list) waits on this so it does
+ * not share the link with the page's requests while they load.
+ *
+ * Resolves at once where nothing was ever counted (no data layer wraps its
+ * `fetch` here, as in a host or a test without one): there is no page load
+ * to wait for.
+ */
+export function whenQuiet(quietMs: number, maxMs: number): Promise<void> {
+  if (!counted || typeof setTimeout === 'undefined') return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    let quietTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      clearTimeout(capTimer);
+      listeners.delete(onChange);
+      resolve();
+    };
+    const onChange = (now: number) => {
+      if (quietTimer !== undefined) clearTimeout(quietTimer);
+      quietTimer = now === 0 ? setTimeout(finish, quietMs) : undefined;
+    };
+    const capTimer = setTimeout(finish, maxMs);
+    listeners.add(onChange);
+    onChange(pending);
+  });
+}
+
+/**
  * Wrap a `fetch` so each call increments the in-flight counter before the
  * request and decrements it when the promise settles (success or failure).
  */
@@ -145,6 +178,7 @@ export function installSettleSignalGlobal(): void {
 /** Test-only: reset the counter and listeners to a clean state. */
 export function __resetSettleSignal(): void {
   pending = 0;
+  counted = false;
   listeners.clear();
   idleWaiters = [];
 }

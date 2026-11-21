@@ -513,8 +513,11 @@ header.sticky {
   background-color: hsl(135 59% 49%) !important;
 }
 
-/* iOS sheet/dialog: extra-rounded corners. */
-[role="dialog"] {
+/* iOS sheet/dialog: extra-rounded corners, for surfaces that float or rise from
+   the bottom. A full-height edge drawer (the left/right Sheet, whose variant
+   pins it with `inset-y-0`) meets the viewport on three edges, so it keeps
+   square corners. */
+[role="dialog"]:not(.inset-y-0) {
   border-radius: 1.25rem !important;
 }
 

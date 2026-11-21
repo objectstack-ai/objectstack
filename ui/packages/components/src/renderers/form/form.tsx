@@ -157,7 +157,7 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
   return (
     <div
       className={cn(
-        'col-span-full pt-4 pb-1 border-b border-border scroll-mt-2',
+        'col-span-full pt-4 pb-1 border-b border-border scroll-mt-2 transition-colors duration-500 data-[section-jumped]:border-primary data-[section-jumped]:bg-primary/10',
         collapsible &&
           'cursor-pointer select-none ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         className
@@ -169,7 +169,9 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
       aria-expanded={collapsible ? !collapsed : undefined}
       // objectstack#34605 — the row's stable DOM identity: `id` is the scroll
       // target the section navigation jumps to, `data-form-section` names the
-      // section. `scroll-mt-2` keeps a jumped-to heading off the scroller's edge.
+      // section. `scroll-mt-2` keeps a jumped-to heading off the scroller's edge,
+      // and `data-section-jumped`, set by the navigation for a moment after a
+      // jump, marks it (objectstack#35472).
       id={anchorId}
       data-form-section={sectionKey}
     >
