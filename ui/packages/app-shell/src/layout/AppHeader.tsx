@@ -782,6 +782,10 @@ export function AppHeader({
             ?? reportLabel({ name: reportName, label: humanizeSlug(reportName) }),
         });
       }
+    } else if (routeType === 'docs') {
+      // objectstack#35424 — 「APP / Documentation」: the docs page names its
+      // book and article itself, above the article.
+      extraSegments.push({ label: t('help.documentation', { defaultValue: 'Documentation' }) });
     } else if (routeType === 'system') {
       extraSegments.push({ label: t('console.breadcrumb.system') });
       if (pathParts[3]) {
@@ -909,11 +913,12 @@ export function AppHeader({
             <ChevronLeft className="h-5 w-5" aria-hidden />
           </Link>
           )
-        ) : isApp ? (
+        ) : isApp && routeType !== 'docs' ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every
-          // surface. Off an app there is no sidebar to toggle, so the
+          // surface. Off an app, and on an app's docs pages (objectstack#35424,
+          // which draw no app menu), there is no sidebar to toggle, so the
           // trigger's slot (its 28 px box and its gap) is held empty: the
           // mark does not jump left when the viewer goes home. Below `sm` the
           // mark is not drawn inside an app, so there is nothing to hold.

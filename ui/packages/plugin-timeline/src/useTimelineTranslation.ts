@@ -97,6 +97,12 @@ export const TIMELINE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // twin of `en.ts`'s, as the strings above are.
   'timeline.unconfigured.noDateAxis':
     'Timeline date axis required — this view declares no date field, and an object-bound timeline will not invent one. Declare one of: {{fields}}. The first is the spec spelling; the rest are legacy aliases.',
+  // The refused-read state reuses the shared no-access sentence the list page
+  // and the related list draw, so a host pack that translates them translates
+  // this timeline too; these rows are the provider-less fallback and say exactly
+  // what the `en` pack says.
+  'list.loadErrorForbiddenTitle': 'You don’t have access',
+  'list.loadErrorForbiddenMessage': 'You don’t have permission to view these records. Contact your administrator if you think you should have access.',
 };
 
 const TEST_KEY = 'timeline.bucket.today';

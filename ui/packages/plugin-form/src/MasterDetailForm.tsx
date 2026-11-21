@@ -30,10 +30,11 @@
  * `lookup`) FK on the child object.
  */
 
-import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { isUntouchedNewRow, LineItemsField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -51,6 +52,7 @@ import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploa
 import { FormDirtyReportContext } from './formDirtyReport';
 import { MasterDetailFrameContext } from './masterDetailFrame';
 import { useFormChromeTranslation } from './formChrome';
+import { FormSlotStore, type FormSlotHandoff, type FormSlotRequest } from './formSlots';
 import {
   buildMasterDetailBatch,
   buildMasterDetailEditBatch,
@@ -64,6 +66,7 @@ import { isSameStoredValue } from './sanitize';
 import { resolveInitialRecord } from './initialRecord';
 import { sectionEntryName } from './sectionFields';
 import { deriveDetail } from './deriveMasterDetail';
+import { schemaDefaultValues } from './schemaDefaults';
 import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 // objectui#11428 — the per-row form's offer test is the spec's rule.
 import { isInlineRowFormOffered } from '@objectstack/spec/data';
@@ -437,6 +440,14 @@ interface DetailEntry {
    */
   lookupAutofill?: LookupAutofillByField;
   /**
+   * The child fields' help text, by field name (`columnHelpByField`), read
+   * from the schema the resolve effect loaded, the definition the record form
+   * reads too, and handed to the line grid's column headers (`GridField`'s
+   * `columnHelp`, objectstack#35804). Absent when no schema was loaded for
+   * this entry. Internal state, never authored.
+   */
+  columnHelp?: ColumnHelp;
+  /**
    * The child fields whose currency follows the header through this entry's
    * relationship (ADR-0144 D2 as amended), by name, read from the schema the
    * resolve effect loaded (`parentCurrencyFieldsOf`). The line grid draws
@@ -776,6 +787,9 @@ function scrapeHeaderRecord(host: HTMLElement | null): Record<string, unknown> {
   els.forEach((el) => {
     const name = el.getAttribute('name');
     if (!name) return;
+    // A collection the header form places at its field group is drawn inside
+    // the header's element (objectstack#35889): its cells are not header fields.
+    if (el.closest('[data-form-slot]')) return;
     if (el.tagName === 'INPUT') {
       const input = el as HTMLInputElement;
       if (input.type === 'checkbox') { out[name] = input.checked; return; }
@@ -816,6 +830,16 @@ function withCodeHoles(sentence: string, holes: Record<string, string | undefine
       <code key={i} className="font-mono">{holes[name]}</code>
     );
   });
+}
+
+/**
+ * A line without the untouched mark `LineItemsField`'s Add gives a line it
+ * starts on its defaults (`UNTOUCHED_NEW_ROW`): the row editor's Apply is
+ * input, and an object spread would carry the mark over.
+ */
+function withoutUntouchedMark(row: Record<string, any>): Record<string, any> {
+  const { [UNTOUCHED_NEW_ROW]: _untouched, ...rest } = row as Record<string, any> & { [UNTOUCHED_NEW_ROW]?: true };
+  return rest;
 }
 
 interface MasterDetailLinesProps {
@@ -859,7 +883,56 @@ interface MasterDetailLinesProps {
    * Remove asks the child's delete grant: a create form's lines are drafts.
    */
   formMode: 'create' | 'edit';
+  /** Where the header form placed each collection (objectstack#35889, `formSlots.ts`). */
+  slotStore: FormSlotStore;
+  /**
+   * The values a new line starts with, by CHILD object name (objectstack#35940):
+   * the child's static defaults, seeded as a create form seeds them. A child
+   * whose schema has not answered has no entry, and its new lines start blank.
+   */
+  newRowValuesByChild: Readonly<Record<string, Record<string, unknown>>>;
+  /**
+   * A save of this form was tried since the lines were last saved: from then
+   * on a new line's empty required cell reads red (objectstack#35940). Before
+   * it, a line the user just added is not flagged for a cell they have not
+   * reached yet.
+   */
+  newRowRequiredShown: boolean;
 }
+
+/**
+ * Draws `children` where the header form placed collection `id`: in its slot
+ * element through a portal, in place when no drawn layout claims it, and
+ * nowhere while a claimed slot's element is not mounted (objectstack#35889).
+ * Its own component, so a slot landing re-renders only what it moves.
+ *
+ * The slot element sits inside the header's `<form>`, so a portaled collection
+ * is wrapped in a form of its own: its controls then belong to that form, not
+ * the header's, exactly as they belonged to none below the form. The header's
+ * `requestSubmit()` validates only its own fields (a line cell's bad input
+ * never blocks Save with a browser bubble), a line button without a `type`
+ * submits only the wrapper, which does nothing, and Enter in a cell finds the
+ * wrapper's disabled default button and submits nothing.
+ */
+const preventSubmit = (event: React.FormEvent) => event.preventDefault();
+
+const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: React.ReactNode }> = ({
+  store,
+  id,
+  children,
+}) => {
+  useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
+  const at = store.placement(id);
+  if (at === 'inline') return <>{children}</>;
+  if (!at) return null;
+  return createPortal(
+    <form noValidate onSubmit={preventSubmit} data-form-slot-owner="">
+      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
+      {children}
+    </form>,
+    at,
+  );
+};
 
 /**
  * The line-item grids + document totals, isolated from the header form.
@@ -888,6 +961,9 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
   onAddViaForm,
   parentObjectName,
   formMode,
+  slotStore,
+  newRowValuesByChild,
+  newRowRequiredShown,
 }) => {
   // The subtotal / tax / grand-total stack formats in the display locale; it
   // used to pass `toLocaleString` an explicit `undefined`, i.e. the MACHINE's
@@ -1030,7 +1106,8 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
         // ahead of the index, which left such a section with no identity beyond
         // its position, so a sibling moving above it re-associated the section
         // and its rows with a different collection (objectui#6371).
-        <section key={entry.id} className="space-y-2">
+        <FormSlotPlacement key={entry.id} store={slotStore} id={entry.id}>
+        <section className="space-y-2" data-testid="md-collection" data-md-collection={d.childObject}>
           <h3 className="text-sm font-medium text-foreground">{d.title || t('form.lineItems.title')}</h3>
           {/* A detail whose child object never resolved gets its OWN branch,
               ahead of the columns/loading one (objectui#6360) — the render half
@@ -1109,7 +1186,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
             <LineItemsField
               value={rowState[entry.id]?.rows ?? []}
               onChange={(rows) => setRows(entry.id, rows)}
-              // The grid's own `disabled`: cells locked, and no ghost row, add,
+              // The grid's own `disabled`: cells locked, and no add,
               // duplicate, remove or reorder while the save is in flight
               // (objectui#10631). Its row "expand" control stays; the editor it
               // opens is held by the same state in <MasterDetailForm>.
@@ -1121,9 +1198,16 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // The child fields' declared `lookupAutofill` pairs: a lookup
               // cell's pick fills their targets in the row.
               lookupAutofill={entry.lookupAutofill}
+              // Each child field's help, on its column header (objectstack#35804).
+              columnHelp={entry.columnHelp}
               // The columns whose amount follows this header's currency
               // (ADR-0144 D2 as amended), in the header's live code.
               columnCurrencies={followedColumnCurrencies(entry.parentCurrencyFields, parentRecord, tenantCurrency)}
+              // objectstack#35940 — a new line starts on the child's defaults,
+              // and its empty required cell reads red once a save was tried,
+              // as on the record page's edit state.
+              newRowValues={newRowValuesByChild[d.childObject]}
+              newRowRequiredShown={newRowRequiredShown}
               // Per-row "expand to full form" is offered when it adds something:
               // always in form mode (it IS the editor), and in grid mode only
               // when the full form has fields the grid omits. A thin grid whose
@@ -1152,8 +1236,8 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
                   sortField: entry.sortField,
                   minRows: d.minRows,
                   maxRows: d.maxRows,
-                  // The map rows above: the grid's Add, entry row and Duplicate
-                  // follow `allowAdd`, its per-row Remove `allowDelete`.
+                  // The map rows above: the grid's Add and Duplicate follow
+                  // `allowAdd`, its per-row Remove `allowDelete`.
                   allowAdd: lineAddGranted,
                   allowDelete: lineRemoveGranted,
                   addLabel: d.inlineMode === 'form' ? (d.addLabel || t('detail.add')) : d.addLabel,
@@ -1165,6 +1249,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
             />
           )}
         </section>
+        </FormSlotPlacement>
         );
       })}
 
@@ -1248,6 +1333,32 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [schema.details],
   );
+
+  /**
+   * objectstack#35889 — the collections the header form may place at the
+   * field group that names them (`formSlots.ts`), from the AUTHORED entries so
+   * the header's schema does not change when the child schemas resolve. A
+   * derived entry already carries its FK (`attachInlineSubforms`); one with no
+   * FK is placed only by a group naming its bare child object.
+   */
+  const slotRequests = useMemo<FormSlotRequest[]>(
+    () =>
+      rawDetails.flatMap((d, i) =>
+        typeof d?.childObject === 'string' && d.childObject
+          ? [{
+              id: detailIds[i],
+              childObject: d.childObject,
+              ...(typeof d.relationshipField === 'string' ? { relationshipField: d.relationshipField } : {}),
+            }]
+          : [],
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [schema.details, detailIds],
+  );
+  // One store per form instance, in a ref (never a memo, AGENTS.md #10).
+  const slotStoreRef = useRef<FormSlotStore | null>(null);
+  if (!slotStoreRef.current) slotStoreRef.current = new FormSlotStore();
+  const slotStore = slotStoreRef.current;
 
   /** The unresolved entries — what renders until (or unless) the fetch lands. */
   const baseEntries = useMemo<DetailEntry[]>(
@@ -1393,6 +1504,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 amountFieldDef: childFieldDef(childSchema, amountField),
                 columnsWith,
                 lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
+                columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
                 parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, d.relationshipField),
               };
             }
@@ -1411,6 +1523,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               amountFieldDef: childFieldDef(childSchema, amountField),
               columnsWith,
               lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
+              columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
               parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, derived.relationshipField),
             };
           } catch (err) {
@@ -1473,6 +1586,10 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   // never resets — the header <ObjectForm> (see #1581). Reads happen at submit
   // time, long after the fetch resolves.
   const childSchemasRef = useRef<Record<string, { fields?: Record<string, any> }>>({});
+  // objectstack#35940 — the same answer for the lines' new-line defaults, which
+  // are read at render. It lands once, in the render the lines' own load lands
+  // in, and the header <ObjectForm>'s props do not depend on it.
+  const [childSchemas, setChildSchemas] = useState<Record<string, { fields?: Record<string, any> }>>({});
   useEffect(() => {
     const ds: any = dataSource;
     if (!ds || typeof ds.getObjectSchema !== 'function') return;
@@ -1489,10 +1606,33 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       const next: Record<string, { fields?: Record<string, any> }> = {};
       for (const [obj, sch] of entries) if (sch) next[obj] = sch;
       childSchemasRef.current = next;
+      setChildSchemas(next);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataSource, schema.objectName, schema.details]);
+
+  // objectstack#35940 — every new line is a child record to create, so it
+  // starts on the values a create form of the child seeds: its static
+  // defaults, with the same session facts `ObjectForm` threads (the acting
+  // user, the organization's currency and time zone). A default the server
+  // resolves per insert (`NOW()`, CEL) is left to the server.
+  const perms = usePermissions();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
+  const newRowValuesByChild = useMemo(() => {
+    const out: Record<string, Record<string, unknown>> = {};
+    for (const [childObject, childSchema] of Object.entries(childSchemas)) {
+      out[childObject] = schemaDefaultValues(childSchema, { currentUserId: perms.userId, homeCurrency, homeTimeZone });
+    }
+    return out;
+  }, [childSchemas, perms.userId, homeCurrency, homeTimeZone]);
+  // objectstack#35940 — set when a save is tried, cleared when one lands: a
+  // new line's empty required cell reads red from the try on.
+  const [saveTried, setSaveTried] = useState(false);
+  // objectstack#35940 (ruling 7056413638) — how many lines the batch in flight
+  // skips because Add started them on their defaults and nobody edited them.
+  // A save that lands says so; such a line is never written.
+  const untouchedSkippedRef = useRef(0);
 
   // Bumped after a successful CREATE to remount the parent <ObjectForm> (which
   // owns react-hook-form state) so its fields clear for the next entry.
@@ -1821,7 +1961,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         const cur = prev[entryId] ?? { rows: [], original: [] };
         return {
           ...prev,
-          [entryId]: { ...cur, rows: cur.rows.map((r, j) => (j === rowIdx ? { ...r, ...values } : r)) },
+          // An applied editor is input, so the line loses the untouched mark
+          // an Add on its defaults gave it (objectstack#35940).
+          [entryId]: { ...cur, rows: cur.rows.map((r, j) => (j === rowIdx ? { ...withoutUntouchedMark(r), ...values } : r)) },
         };
       });
     },
@@ -1867,6 +2009,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     async (parent: any) => {
       releaseSave();
       setHeaderDirty(false);
+      setSaveTried(false);
       if (!schema.onSuccess) {
         toast.success(
           isEdit
@@ -1874,6 +2017,13 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
             : t('form.created'),
           { id: outcomeToastId },
         );
+      }
+      // Said whoever owns the confirmation: a host's own toast cannot know
+      // that lines were left out.
+      const skipped = untouchedSkippedRef.current;
+      untouchedSkippedRef.current = 0;
+      if (skipped > 0) {
+        toast.info(t('form.lineItems.untouchedNotSaved', { count: skipped }), { id: `form-untouched:${formInstanceId}` });
       }
       // An edit keeps its rows: `submitViaBatch` has already advanced their
       // baseline to what this save wrote (objectui#10564).
@@ -1887,7 +2037,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       await schema.onSuccess?.(parent);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isEdit, schema.onSuccess, titleText, entries.length, releaseSave, outcomeToastId, t],
+    [isEdit, schema.onSuccess, titleText, entries.length, releaseSave, outcomeToastId, formInstanceId, t],
   );
 
   /**
@@ -1936,6 +2086,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     async (parentValues: Record<string, any>) => {
       if (!dataSource) throw new Error('MasterDetailForm: dataSource is required');
       const parentData: Record<string, any> = { ...parentValues };
+      untouchedSkippedRef.current = entries
+        .filter((e) => e.config.relationshipField)
+        .reduce((n, e) => n + (rowStateRef.current[e.id]?.rows ?? []).filter(isUntouchedNewRow).length, 0);
       // Client-side rollups merged into the parent payload (hooks can't do
       // nested writes — see ADR-0001).
       entries.forEach((e) => {
@@ -2008,12 +2161,15 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
             // flight (objectui#10631), so every such row is still that object.
             // Were one replaced anyway, it keeps no id: the next save then
             // deletes the created record and creates the row as it now stands.
-            const rows = s.createdIds.size === 0
+            // A line the save skipped untouched (objectstack#35940) leaves
+            // with the save, as it does on the record page: it was never
+            // written, and the notice above says so.
+            const rows = (s.createdIds.size === 0
               ? cur.rows
               : cur.rows.map((r) => {
                   const id = s.createdIds.get(r);
                   return id === undefined ? r : { ...r, id };
-                });
+                })).filter((r) => !isUntouchedNewRow(r));
             next = { ...next, [s.entryId]: { rows, original: s.original } };
           }
           return next;
@@ -2043,6 +2199,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         throw new Error('This save was not sent: another save of this form was still in progress.');
       }
       batchInFlightRef.current = true;
+      setSaveTried(true);
       holdSaveForBatch();
       try {
         return await sendBatch(parentValues);
@@ -2084,8 +2241,10 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       submitHandler: submitViaBatch,
       onSuccess: handleSaved,
       onError: handleError,
-    }),
-    [schema, titleText, submitViaBatch, handleSaved, handleError],
+      // objectstack#35889 — each collection at its field group in the header.
+      formSlots: { requests: slotRequests, host: slotStore },
+    } satisfies FormSlotHandoff & Record<string, unknown>),
+    [schema, titleText, submitViaBatch, handleSaved, handleError, slotRequests, slotStore],
   );
 
   const formHostRef = useRef<HTMLDivElement>(null);
@@ -2154,6 +2313,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
     if (!form) return;
     savingRef.current = true;
     setSaving(true);
+    setSaveTried(true);
     // The previous attempt's outcome belongs to the previous attempt: retire it
     // the moment a new one starts, so no host can confirm a success while this
     // form's last refusal is still on screen (objectui#7345).
@@ -2209,6 +2369,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         onAddViaForm={addRowViaForm}
         parentObjectName={schema.objectName}
         formMode={isEdit ? 'edit' : 'create'}
+        slotStore={slotStore}
+        newRowValuesByChild={newRowValuesByChild}
+        newRowRequiredShown={saveTried}
       />
 
       {/* Per-row "expand to full form": an inline editor panel for the selected
@@ -2220,6 +2383,8 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           the values back into the in-memory row; the atomic batch persists
           everything on the parent Save. */}
       {expanded && expandedDetail && (
+        // Beside its collection: where the header placed that collection, there.
+        <FormSlotPlacement store={slotStore} id={expanded.entryId}>
         <Card className="border-primary/40 shadow-none ring-1 ring-primary/10" data-testid="md-row-form">
           <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-sm font-medium">
@@ -2272,6 +2437,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
             </fieldset>
           </CardContent>
         </Card>
+        </FormSlotPlacement>
       )}
     </>
   );

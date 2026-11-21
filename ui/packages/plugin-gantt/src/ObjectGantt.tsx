@@ -39,6 +39,7 @@ import {
   useDataInvalidation,
   useFilterScope,
   useResolvedFilter,
+  classifyLoadError,
 } from '@object-ui/react';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, formatDisplayNumber } from '@object-ui/i18n';
 import {
@@ -58,6 +59,7 @@ import {
   AlertDialogTitle,
   NavigationOverlay,
   RefreshIndicator,
+  DataEmptyState,
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
   cn,
@@ -100,6 +102,7 @@ import { QuickFilterBar, type QuickFilterField, type QuickFilterOption } from '.
 import type { WorkingCalendar } from './scheduling';
 import { normalizeShiftSegments, type ShiftSegmentsConfig } from './shifts';
 import { useGanttTranslation } from './useGanttTranslation';
+import { Lock } from 'lucide-react';
 
 /**
  * One quick-filter dimension. Generic by design: the page configures
@@ -2325,6 +2328,28 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         <div className="flex items-center justify-center h-96">
           <div className="text-muted-foreground">Loading Gantt chart...</div>
         </div>
+      </div>
+    );
+  }
+
+  // objectstack#35317 — a refused task read (403 / PERMISSION_DENIED, by the
+  // shared `classifyLoadError` verdict the list page and the related list use)
+  // is not a failure of anything the reader did: they may open the record that
+  // hosts this chart without being granted its tasks. It is drawn as the
+  // related list's calm no-access state (`role="status"`, no destructive
+  // styling, the shared `list.loadErrorForbidden*` sentence in the reader's
+  // language) and never the server's text, which a refused read does not get
+  // to show. Every other failure keeps the error screen below.
+  if (error && classifyLoadError(error) === 'forbidden') {
+    return (
+      <div className={className}>
+        <DataEmptyState
+          data-testid="gantt-no-access"
+          className="h-96"
+          icon={<Lock className="size-5 text-muted-foreground" aria-hidden />}
+          title={t('list.loadErrorForbiddenTitle')}
+          description={t('list.loadErrorForbiddenMessage')}
+        />
       </div>
     );
   }

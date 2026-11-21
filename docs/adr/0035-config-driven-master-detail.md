@@ -169,6 +169,19 @@ a self-referential FK surfaces a "children" list.
 > group (a `master_detail` FK may instead drop `relatedList: true`); a group
 > naming a list its FK hides (`false`) is refused.
 
+> **Note (2026-11-21, #35889, second slice).** The entry form now draws a
+> placed child where the record page does, so "placed in the form below the
+> record's fields until the form places it at the group" above is superseded.
+> A form laid out from the parent's field groups draws the child's table
+> after the sections of the groups declared before the placing group and
+> before those declared after it; a tabbed form gives it a tab of its own at
+> that position, labelled with the group's label (a wizard master-detail form
+> is drawn as the simple form, as before). A form whose sections name no
+> declared field group, and a child no group places (a form view's own
+> subforms), keep the table below the record's fields. The table is the same
+> one: it still saves with the record in one batch, and the document totals
+> stay at the foot of the form.
+
 The derivation is a pure function — `deriveRelatedLists(objectDef, objects)` in
 `@object-ui/app-shell` (`utils/deriveRelatedLists.ts`) — the read-side analogue
 of `attachInlineSubforms`. `RecordDetailView` feeds its output into the

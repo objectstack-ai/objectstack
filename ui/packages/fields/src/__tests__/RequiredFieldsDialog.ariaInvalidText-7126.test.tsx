@@ -53,7 +53,7 @@ function textControl(name = 'title'): Element {
   return el;
 }
 
-const moveCard = () => fireEvent.click(screen.getByText('Move card'));
+const moveCard = () => fireEvent.click(screen.getByText('Save'));
 
 describe('RequiredFieldsDialog marks a failed required TEXT field (objectui#7126)', () => {
   it('a required text field reports aria-invalid once a submit attempt finds it empty', () => {

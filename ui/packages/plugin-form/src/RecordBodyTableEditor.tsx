@@ -37,8 +37,9 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, GridFieldMetadata } from '@object-ui/types';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
-import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, lookupAutofillByField, columnHelpByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import { cn } from '@object-ui/components';
+import { useLocalization } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
   extractFieldErrors,
@@ -213,6 +214,7 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
   const parentObject = record?.objectName;
   const parentId = record?.recordId;
   const perms = usePermissions();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   const { t } = useFormChromeTranslation();
   const booleanLabel = useBooleanValueLabel();
   const booleanTrue = booleanLabel(true);
@@ -271,10 +273,16 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
   // defaults, the values a create form seeds (`schemaDefaultValues`), so a
   // required column with a default is filled instead of flagged empty. A
   // default the server resolves per insert (`NOW()`, a CEL expression) is not
-  // seeded; the server fills it as it fills an omitted field.
+  // seeded; the server fills it as it fills an omitted field. The session
+  // facts are the ones `ObjectForm` threads (objectstack#35940): the acting
+  // user, the organization's currency and time zone. Until the child schema
+  // answers there are no defaults, and a new line starts blank.
   const newRowValues = useMemo(
-    () => schemaDefaultValues(childSchema as Parameters<typeof schemaDefaultValues>[0]),
-    [childSchema],
+    () =>
+      childSchema
+        ? schemaDefaultValues(childSchema, { currentUserId: perms.userId, homeCurrency, homeTimeZone })
+        : undefined,
+    [childSchema, perms.userId, homeCurrency, homeTimeZone],
   );
 
   const snapshotRef = useRef<BodyTableSnapshot | null>(null);
@@ -328,6 +336,8 @@ export const RecordBodyTableEditor: React.FC<RecordBodyTableEditorProps> = ({ ob
           disabled={session.saving}
           contextRecord={record?.data as Record<string, unknown> | undefined}
           lookupAutofill={lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined)}
+          // Each child field's help, on its column header (objectstack#35804).
+          columnHelp={columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined)}
           newRowValues={newRowValues}
           // objectstack#35816 — a new line's empty required cell reads red
           // once a save was refused, not the moment the line appears; the

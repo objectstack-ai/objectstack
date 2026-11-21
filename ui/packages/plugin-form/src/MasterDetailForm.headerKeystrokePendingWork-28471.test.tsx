@@ -26,7 +26,7 @@
  * pending work is a page re-render scheduled just before the keystroke.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 import { flushSync } from 'react-dom';
 import { registerAllFields } from '@object-ui/fields';
@@ -120,6 +120,8 @@ describe('MasterDetailForm — a header keystroke is never dropped (objectstack#
       return el;
     });
     const qty = () => screen.getAllByLabelText('Qty')[0] as HTMLInputElement;
+    // A line (the grid draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await waitFor(() => screen.getByTestId('line-items-add')));
     await waitFor(() => expect(qty().disabled).toBe(false));
 
     // The element right under the React root container: above the form host,

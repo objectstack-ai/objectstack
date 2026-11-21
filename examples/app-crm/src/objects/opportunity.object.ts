@@ -14,8 +14,9 @@ export const Opportunity = ObjectSchema.create({
   pluralLabel: 'Opportunities',
   icon: 'trending-up',
   description: 'A potential sale tied to an account.',
-  // What the record page shows at a glance, under the title. The stage is
-  // not here: the record page already draws it as the stage path.
+  // The record's most important fields: the hover card, list columns and
+  // the record picker read them. The stage is not here: the record header
+  // already shows it as the status tag beside the name.
   highlightFields: ['account', 'amount', 'close_date', 'probability'],
   // Field history on the record page: the timeline shows each field change
   // with its before and after values, and offers the Changes filter. The audit

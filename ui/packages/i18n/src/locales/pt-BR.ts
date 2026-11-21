@@ -221,6 +221,10 @@ const pt = {
       notLoaded: "Os itens de linha deste registro não foram carregados.",
       loadFailed: "Falha ao carregar os itens de linha",
       saveFailed: "Falha ao salvar os itens de linha",
+      untouchedNotSaved: "{{count}} linha em branco não foi salva",
+      untouchedNotSaved_one: "{{count}} linha em branco não foi salva",
+      untouchedNotSaved_many: "{{count}} de linhas em branco não foram salvas",
+      untouchedNotSaved_other: "{{count}} linhas em branco não foram salvas",
       noChildObject: "Este painel não tem nenhum objeto filho configurado: defina {{property}} como o objeto cujas linhas ele lista.",
     },
     keepEditing: "Continuar editando",
@@ -259,6 +263,10 @@ const pt = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Preencha os campos obrigatórios',
+    requiredPromptDescription: 'Esta alteração torna obrigatórios os campos abaixo. Preencha-os para salvá-la.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Abrir {{name}}',
@@ -331,6 +339,8 @@ const pt = {
     options: {
       empty: "Nenhuma opção disponível",
       selectFirst: "Selecione primeiro {{fields}}",
+      search: "Pesquisar…",
+      noMatches: "Nenhuma opção correspondente",
     },
     objectRef: {
       loading: "Carregando objetos…",
@@ -415,6 +425,8 @@ const pt = {
     datePicker: {
       today: "Hoje",
       tomorrow: "Amanhã",
+      nextWeek: "Próxima semana",
+      clearPick: "Limpar",
       clear: "Limpar data",
       openCalendar: "Abrir calendário",
       time: "Horário",
@@ -429,6 +441,11 @@ const pt = {
     },
     tags: {
       placeholder: "Digite e pressione Enter para adicionar…",
+      add: "Adicionar “{{value}}”",
+    },
+    color: {
+      swatches: "Cores",
+      custom: "Cor personalizada",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2489,10 +2506,11 @@ const pt = {
     },
     firstRunChecklist: {
       title: "Prepare seu sistema",
-      description: "O que configurar antes de seus colegas começarem. Cada item pode ser alterado depois em Setup.",
+      description: "O que configurar antes de seus colegas começarem. Cada item pode ser alterado depois em Configuração.",
       progress: "{{done}} de {{total}} concluídos",
       dismiss: "Ocultar lista",
       showDone: "Mostrar concluídos ({{done}})",
+      showDoneSplit: "Mostrar concluídos ({{required}} obrigatórios · {{optional}} opcionais)",
       hideDone: "Ocultar concluídos",
       optional: "Opcional",
       set: "Definir",
@@ -2537,13 +2555,13 @@ const pt = {
       aiProvider: {
         title: 'Configurar a IA integrada',
         todo: 'Nenhum provedor de IA está em uso ainda. Escolha um e adicione a chave dele.',
-        doneSettings: '{{provider}}, definido no Setup.',
+        doneSettings: '{{provider}}, definido em Configuração.',
         doneEnvironment: '{{provider}}, detectado no ambiente do servidor.',
         action: 'Configurar',
       },
       connectAssistant: {
         title: 'Conectar um assistente de IA externo',
-        todo: 'Trabalhe neste sistema como você mesmo pelo Claude, Doubao e assistentes semelhantes, via MCP. A IA integrada é configurada à parte, em Setup → IA e Embedder.',
+        todo: 'Trabalhe neste sistema como você mesmo pelo Claude, Doubao e assistentes semelhantes, via MCP. A IA integrada é configurada à parte, em Configuração → IA e Embedder.',
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
@@ -3380,6 +3398,18 @@ const pt = {
     docConflictCandidates: 'Pacotes que fornecem este documento',
     documentation: 'Documentação',
     uncategorized: 'Sem categoria',
+    backToApp: 'Voltar para {{app}}',
+    searchDocs: 'Pesquisar na documentação',
+    noDocsMatch: 'Nenhum artigo corresponde.',
+    docsNavigation: 'Navegação da documentação',
+    docsBreadcrumb: 'Caminho da documentação',
+    articlePager: 'Artigo anterior e próximo',
+    previousArticle: 'Anterior',
+    nextArticle: 'Próximo',
+    firstInBook: 'Este é o primeiro artigo deste manual',
+    lastInBook: 'Este é o último artigo deste manual',
+    enlargeDiagram: 'Ampliar',
+    diagram: 'Diagrama',
     about: 'Sobre',
     aboutTitle: 'Sobre este console',
     aboutDescription: 'A build a partir da qual este console foi compilado.',

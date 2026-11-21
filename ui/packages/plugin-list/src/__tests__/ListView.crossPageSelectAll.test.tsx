@@ -10,12 +10,12 @@
  * Cross-page "Select all N matching" under ListView's EXTERNAL pagination
  * (objectui#4464).
  *
- * `BulkActionBar` gates the cross-page banner on `totalMatching`, and the only
+ * `BulkActionBar` gates the select-all-matching offer on `totalMatching`, and the only
  * writer of the `totalMatching` STATE is `setTotalMatching(...)` inside
  * ObjectGrid's own data loader. In the console the grid never runs that loader:
  * ListView fetches the rows itself and hands the window down as `data` plus
  * `manualPagination` / `rowCount` / `page` / `onPageChange`, so the grid takes
- * the inline-data path, `totalMatching` stays `undefined`, and the banner
+ * the inline-data path, `totalMatching` stays `undefined`, and the offer
  * condition is permanently false — for any match-set size. Found by a retest of
  * `records-forms.bulk-select-all-matching` (objectstack#7439) against a genuinely
  * server-paginated view: 26 records, pageSize 10, "Page 1 of 3", select the whole
@@ -126,7 +126,7 @@ beforeEach(() => { vi.clearAllMocks(); });
 afterEach(() => { cleanup(); });
 
 describe('ListView-hosted grid — cross-page select-all under external pagination (#4464)', () => {
-  it('offers the cross-page banner when the whole server page is selected', async () => {
+  it('offers select-all-matching when the whole server page is selected', async () => {
     const ds = makeDataSource();
     renderComposition(ds, listSchema());
 
@@ -137,7 +137,6 @@ describe('ListView-hosted grid — cross-page select-all under external paginati
 
     // Pre-fix BOTH of these were absent, because `totalMatching` was written
     // only by a loader that never ran on this path.
-    expect(screen.getByTestId('bulk-cross-page-banner')).toBeInTheDocument();
     expect(screen.getByTestId('bulk-select-all-matching')).toBeInTheDocument();
   });
 
@@ -150,11 +149,11 @@ describe('ListView-hosted grid — cross-page select-all under external paginati
     // 26 is `result.total` — the number ListView passes down as `rowCount`.
     // The window (10) is what a page-local count would report instead.
     expect(await screen.findByTestId('bulk-select-all-matching')).toHaveTextContent(
-      'Select all 26 matching',
+      'Select all 26',
     );
-    expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(
-      'All 10 on this page are selected.',
-    );
+    // objectstack#35678 — the bar still counts the page until the user opts in.
+    expect(screen.getByTestId('bulk-selection-count')).toHaveTextContent('10 selected');
+    expect(screen.getByTestId('bulk-selection-count')).not.toHaveAttribute('title');
   });
 
   it('escalates the selection past the page when "Select all matching" is clicked', async () => {
@@ -169,9 +168,7 @@ describe('ListView-hosted grid — cross-page select-all under external paginati
     await waitFor(() =>
       expect(screen.queryByTestId('bulk-select-all-matching')).not.toBeInTheDocument(),
     );
-    expect(screen.getByTestId('bulk-cross-page-banner')).toHaveTextContent(
-      'All 26 matching records are selected.',
-    );
+    expect(screen.getByTestId('bulk-selection-count')).toHaveAttribute('title', 'All 26 matching records are selected.');
     expect(within(bar).getByText(/26 selected \(all matches\)/)).toBeInTheDocument();
 
     // Scope note: the COLLECTED id set is materialized only when a bulk action
@@ -183,7 +180,7 @@ describe('ListView-hosted grid — cross-page select-all under external paginati
     // replay, so there was nothing honest to assert.
   });
 
-  it('shows no banner for a partial page selection', async () => {
+  it('offers no select-all-matching for a partial page selection', async () => {
     const ds = makeDataSource();
     renderComposition(ds, listSchema());
     await awaitFirstPage();
@@ -192,10 +189,9 @@ describe('ListView-hosted grid — cross-page select-all under external paginati
     await waitFor(() => expect(screen.getByTestId('bulk-actions-bar')).toBeInTheDocument());
     expect(within(screen.getByTestId('bulk-actions-bar')).getByText(/1 selected/)).toBeInTheDocument();
 
-    // `totalMatching` IS 26 here after the fix — the banner stays away purely
+    // `totalMatching` IS 26 here after the fix — the offer stays away purely
     // because the selection is short of a full page. That is the clause this
     // case pins, and it is the one the fix could plausibly have widened.
-    expect(screen.queryByTestId('bulk-cross-page-banner')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bulk-select-all-matching')).not.toBeInTheDocument();
   });
 
@@ -206,20 +202,19 @@ describe('ListView-hosted grid — cross-page select-all under external paginati
 
     // Honest limit of this case: `selection.type: 'single'` caps the selection
     // at one row (the data-table enforces replace-on-select, #2941), so the
-    // count clause alone would keep the banner away even if the
+    // count clause alone would keep the offer away even if the
     // `singleSelection ? undefined : …` prop gate were dropped. It is kept
     // because it is the console-visible must-not-change; the prop gate itself
     // is only pinned by inspection.
     fireEvent.click(rowCheckboxes()[0]);
     await waitFor(() => expect(screen.getByTestId('bulk-actions-bar')).toBeInTheDocument());
-    expect(screen.queryByTestId('bulk-cross-page-banner')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bulk-select-all-matching')).not.toBeInTheDocument();
   });
 });
 
 describe('standalone ObjectGrid — the internal-loader path is unchanged (#4464)', () => {
   // The must-not-change side: a grid that fetches its OWN rows still resolves
-  // the total from `result.total` and offers the banner at the same thresholds.
+  // the total from `result.total` and offers select-all-matching at the same thresholds.
   // Rendered through the registry (`type: 'object-grid'`) rather than by
   // importing the component, so plugin-list keeps no dependency on plugin-grid.
   const gridSchema = {
@@ -242,9 +237,8 @@ describe('standalone ObjectGrid — the internal-loader path is unchanged (#4464
 
     await selectWholePage();
 
-    expect(screen.getByTestId('bulk-cross-page-banner')).toBeInTheDocument();
     expect(await screen.findByTestId('bulk-select-all-matching')).toHaveTextContent(
-      'Select all 26 matching',
+      'Select all 26',
     );
   });
 });
@@ -331,7 +325,7 @@ describe('ListView-hosted grid — the escalation fans out with the HOST\'s real
     // The offer itself is the composition: #4510's floor admits it (ListView
     // handed `findParams` down) and #4503's resolved total gives it its count.
     expect(await screen.findByTestId('bulk-select-all-matching')).toHaveTextContent(
-      `Select all ${MATCHING.length} matching`,
+      `Select all ${MATCHING.length}`,
     );
     fireEvent.click(screen.getByTestId('bulk-select-all-matching'));
     await waitFor(() =>

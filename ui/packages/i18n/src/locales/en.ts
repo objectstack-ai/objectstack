@@ -351,6 +351,12 @@ const en = {
       notLoaded: 'This record’s line items have not been loaded.',
       loadFailed: 'Failed to load line items',
       saveFailed: 'Failed to save line items',
+      // The notice after a save that skipped lines Add started on their
+      // defaults and nobody edited (objectstack#35940): the master-detail
+      // form and the record page's edit state. `{{count}}` is how many.
+      untouchedNotSaved: '{{count}} blank line was not saved',
+      untouchedNotSaved_one: '{{count}} blank line was not saved',
+      untouchedNotSaved_other: '{{count}} blank lines were not saved',
       noChildObject: 'This panel has no child object configured: set {{property}} to the object whose rows it lists.',
     },
     keepEditing: 'Keep editing',
@@ -404,6 +410,10 @@ const en = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Complete required fields',
+    requiredPromptDescription: 'This change makes the fields below required. Fill them in to save it.',
     // ADR-0144 D2 — the record-currency code select (`CurrencyCodeField`).
     currencyCode: {
       placeholder: 'Select currency',
@@ -499,6 +509,8 @@ const en = {
     options: {
       empty: 'No options available',
       selectFirst: 'Select {{fields}} first',
+      search: 'Search…',
+      noMatches: 'No matching options',
     },
     objectRef: {
       loading: 'Loading objects…',
@@ -643,6 +655,8 @@ const en = {
     datePicker: {
       today: 'Today',
       tomorrow: 'Tomorrow',
+      nextWeek: 'Next week',
+      clearPick: 'Clear',
       clear: 'Clear date',
       openCalendar: 'Open calendar',
       time: 'Time',
@@ -659,6 +673,11 @@ const en = {
     // is empty. The author-declared `field.placeholder` always wins over this.
     tags: {
       placeholder: 'Type and press Enter to add…',
+      add: 'Add "{{value}}"',
+    },
+    color: {
+      swatches: 'Colors',
+      custom: 'Custom color',
     },
     // objectui#4028 — `AddressField`'s five sub-labels, previously English
     // string literals with no key at all: on a Chinese console every address
@@ -2596,6 +2615,7 @@ const en = {
       progress: '{{done}} of {{total}} done',
       dismiss: 'Hide checklist',
       showDone: 'Show completed ({{done}})',
+      showDoneSplit: 'Show completed ({{required}} required · {{optional}} optional)',
       hideDone: 'Hide completed',
       optional: 'Optional',
       set: 'Set',
@@ -3978,6 +3998,18 @@ const en = {
     docConflictCandidates: 'Packages that provide this document',
     documentation: 'Documentation',
     uncategorized: 'Uncategorized',
+    backToApp: 'Back to {{app}}',
+    searchDocs: 'Search docs',
+    noDocsMatch: 'No articles match.',
+    docsNavigation: 'Documentation navigation',
+    docsBreadcrumb: 'Documentation path',
+    articlePager: 'Previous and next article',
+    previousArticle: 'Previous',
+    nextArticle: 'Next',
+    firstInBook: 'This is the first article in this book',
+    lastInBook: 'This is the last article in this book',
+    enlargeDiagram: 'Enlarge',
+    diagram: 'Diagram',
     about: 'About',
     aboutTitle: 'About this console',
     aboutDescription: 'The build this console was compiled from.',

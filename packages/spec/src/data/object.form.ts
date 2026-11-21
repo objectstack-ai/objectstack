@@ -38,6 +38,9 @@ export const objectForm = defineForm({
         { field: 'label', type: 'text', colSpan: 1, helpText: 'Singular display name (e.g. "Account")' },
         { field: 'pluralLabel', type: 'text', colSpan: 1, helpText: 'Plural display name (e.g. "Accounts")' },
         { field: 'icon', type: 'text', colSpan: 1, helpText: 'Lucide icon name (e.g. "building", "users")' },
+        // [#35985] The colour of the square the icon is drawn on: the swatch row
+        // (`color-picker`) reads its nine names off the closed enum.
+        { field: 'color', widget: 'color-picker', colSpan: 1, helpText: 'Color of the square the icon is drawn on, from the fixed palette. Unset draws gray.' },
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Developer documentation' },
         // #19331 — `nameField` is declared by ObjectSchema and was offered by no
         // control, so the ADR-0079 record-title pointer could only be written
@@ -67,7 +70,7 @@ export const objectForm = defineForm({
         // it would offer an empty list. A misspelt entry is not dropped quietly:
         // the publish door refuses it (`object-field-ref-unknown`,
         // `searchable-field-unknown`, both at `error`), and so does `os validate`.
-        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish.' },
+        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish.' },
         // #27069 — the business order of the record page's related lists: a
         // list of inbound relationship names (child object, or `object.field`)
         // on the `highlightFields` row's face. A dangling name is refused at

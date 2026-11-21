@@ -11,7 +11,9 @@
  * one fits"), and the object settings panel authors it as one.
  *
  * The real panel, inside a host that feeds every patch back into the draft:
- *  - the stored order is the row order and the strip preview's order;
+ *  - the stored order is the row order, and no strip preview is drawn: the
+ *    default record page draws no strip from the key, so the rows are the one
+ *    rendering of the list;
  *  - up / down and a drag move a field, and the written list keeps every other
  *    field in place;
  *  - a picked field is appended at the end;
@@ -59,15 +61,16 @@ function Host({ initial, writes }: { initial: Row; writes: Row[] }) {
 
 const rowOrder = () =>
   screen.getAllByTestId(/^highlight-row-/).map((el) => el.getAttribute('data-testid')!.replace('highlight-row-', ''));
-const previewOrder = () =>
-  within(screen.getByTestId('highlight-preview')).getAllByTestId('highlight-preview-cell').map((c) => c.firstChild!.textContent);
 const lastHighlights = (writes: Row[]) => writes.at(-1)!.highlightFields;
 
-describe('ObjectSettingsPanel — highlightFields is an ordered pick list with a strip preview', () => {
-  it('shows the stored order in the rows and in the strip preview', () => {
+describe('ObjectSettingsPanel — highlightFields is an ordered pick list', () => {
+  it('shows the stored order in the rows, and draws no strip preview', () => {
     render(<Host initial={{ fields: FIELDS, highlightFields: ['status', 'amount', 'name'] }} writes={[]} />);
     expect(rowOrder()).toEqual(['status', 'amount', 'name']);
-    expect(previewOrder()).toEqual(['Status', 'Amount', 'Name']);
+    // The editor itself is drawn (the control), with no preview beside its rows.
+    expect(screen.getByTestId('highlight-fields-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('highlight-preview')).toBeNull();
+    expect(screen.queryAllByTestId('highlight-preview-cell')).toHaveLength(0);
   });
 
   it('moves a field with the up / down buttons, keeping every other field in place', () => {
@@ -76,7 +79,7 @@ describe('ObjectSettingsPanel — highlightFields is an ordered pick list with a
     const amountRow = screen.getByTestId('highlight-row-amount');
     fireEvent.click(within(amountRow).getByRole('button', { name: 'Move up' }));
     expect(lastHighlights(writes)).toEqual(['amount', 'status', 'name']);
-    expect(previewOrder()).toEqual(['Amount', 'Status', 'Name']);
+    expect(rowOrder()).toEqual(['amount', 'status', 'name']);
     fireEvent.click(within(screen.getByTestId('highlight-row-amount')).getByRole('button', { name: 'Move down' }));
     expect(lastHighlights(writes)).toEqual(['status', 'amount', 'name']);
   });
@@ -130,7 +133,7 @@ describe('ObjectSettingsPanel — highlightFields is an ordered pick list with a
     render(<Host initial={{ fields: FIELDS, highlightFields: ['status'] }} writes={writes} />);
     fireEvent.click(screen.getByRole('button', { name: 'Remove status' }));
     expect(writes.at(-1)!.highlightFields).toBeUndefined();
-    expect(screen.queryByTestId('highlight-preview')).toBeNull();
+    expect(screen.queryAllByTestId(/^highlight-row-/)).toHaveLength(0);
     expect(screen.getByText(t('engine.studio.settings.undeclared', 'en-US'))).toBeInTheDocument();
   });
 });
