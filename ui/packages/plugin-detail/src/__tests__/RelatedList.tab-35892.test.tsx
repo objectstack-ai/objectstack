@@ -20,6 +20,7 @@ import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as React from 'react';
+import { FilterScopeProvider } from '@object-ui/react';
 import { RelatedList } from '../RelatedList';
 import {
   RelatedListConditionsSlotContext,
@@ -78,14 +79,16 @@ function dataSourceFor() {
 
 const renderCapturing = (props: RelatedListConditionsProps) => <CapturingConditions {...props} />;
 
-function Tab({ parentId = 'O-1', dataSource, onTotal, onRowDelete, slot = renderCapturing }: {
+function Tab({ parentId = 'O-1', dataSource, onTotal, onRowDelete, slot = renderCapturing, reader = 'u-1' }: {
   parentId?: string;
+  reader?: string;
   dataSource: ReturnType<typeof dataSourceFor>;
   onTotal?: (n: number) => void;
   onRowDelete?: (row: any) => Promise<void> | void;
   slot?: ((props: RelatedListConditionsProps) => React.ReactNode) | null;
 }) {
   return (
+    <FilterScopeProvider currentUserId={reader}>
     <RelatedListConditionsSlotContext.Provider value={slot}>
     <RelatedListTotalReportContext.Provider value={onTotal}>
       <RelatedListEnlargedContext.Provider value>
@@ -104,6 +107,7 @@ function Tab({ parentId = 'O-1', dataSource, onTotal, onRowDelete, slot = render
       </RelatedListEnlargedContext.Provider>
     </RelatedListTotalReportContext.Provider>
     </RelatedListConditionsSlotContext.Provider>
+    </FilterScopeProvider>
   );
 }
 
@@ -225,7 +229,7 @@ describe('the related tab is the child object\'s full list (objectstack#35892)',
     expect(document.querySelector('[data-related-enlarged-conditions]')).not.toBeNull();
   });
 
-  it('the bulk bar\'s delete asks once, counting the rows, then deletes each and reads again', async () => {
+  it('the bulk bar\'s delete asks once, counting the rows; without a batch delete it deletes each row, then reads again', async () => {
     const ds = dataSourceFor();
     const onRowDelete = vi.fn(async () => undefined);
     render(<Tab dataSource={ds} onRowDelete={onRowDelete} />);
@@ -237,5 +241,54 @@ describe('the related tab is the child object\'s full list (objectstack#35892)',
     fireEvent.click(document.querySelector('[data-related-bulk-delete-confirm]')!);
     await waitFor(() => expect(onRowDelete).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(reads));
+    expect((await screen.findByRole('status')).textContent).toBe('Deleted 3 quote records');
+  });
+
+  it('with the data source\'s batch delete, the selection goes in ONE call, not row by row', async () => {
+    const ds = Object.assign(dataSourceFor(), { bulkDelete: vi.fn(async () => 3) });
+    const onRowDelete = vi.fn(async () => undefined);
+    render(<Tab dataSource={ds} onRowDelete={onRowDelete} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
+    fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
+    await waitFor(() => expect(ds.bulkDelete).toHaveBeenCalledTimes(1));
+    expect(ds.bulkDelete).toHaveBeenCalledWith('quote', ['q1', 'q2', 'q3']);
+    expect(onRowDelete).not.toHaveBeenCalled();
+    expect((await screen.findByRole('status')).textContent).toBe('Deleted 3 quote records');
+  });
+
+  it('a partial failure says how many went and how many did not, on the batch path and row by row', async () => {
+    const batch = Object.assign(dataSourceFor(), {
+      bulkDelete: vi.fn(async () => ({ succeeded: 2, errors: [{ id: 'q3', error: 'refused' }] })),
+    });
+    const first = render(<Tab dataSource={batch} onRowDelete={vi.fn()} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
+    fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
+    expect((await screen.findByRole('status')).textContent).toBe('2 deleted, 1 failed');
+    first.unmount();
+    h.byType = {};
+
+    const rowByRow = dataSourceFor();
+    const onRowDelete = vi.fn(async (row: any) => { if (row.id === 'q2') throw new Error('refused'); });
+    render(<Tab dataSource={rowByRow} onRowDelete={onRowDelete} />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => grid().props.onBulkDelete(ROWS.slice(0, 3)));
+    fireEvent.click(await screen.findByText('Delete', { selector: '[data-related-bulk-delete-confirm]' }));
+    await waitFor(() => expect(onRowDelete).toHaveBeenCalledTimes(3));
+    expect((await screen.findByRole('status')).textContent).toBe('2 deleted, 1 failed');
+  });
+
+  it('is held per reader: another account signed in on the same record starts from the default', async () => {
+    const ds = dataSourceFor();
+    const first = render(<Tab dataSource={ds} reader="u-1" />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    act(() => conditions().props.onFiltersChange(AMOUNT_GROUP, AMOUNT_OVER_600));
+    await waitFor(() => expect(grid().schema.data.items).toHaveLength(6));
+    first.unmount();
+    h.byType = {};
+    render(<Tab dataSource={ds} reader="u-2" />);
+    await waitFor(() => expect(grid()?.schema.data.items).toHaveLength(12));
+    expect(conditions().props.filters.conditions).toEqual([]);
   });
 });

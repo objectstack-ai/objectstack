@@ -89,7 +89,7 @@ import {
 } from '@object-ui/core';
 import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type RelatedListPreference } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
+import { useObjectLabel, useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
 import {
@@ -1565,10 +1565,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // reads. What the reader changes there holds while they stay on this record
   // (another tab, or the record's drawer, keeps it) and is gone on a reload or
   // another record; 「Discard」 clears it (`./relatedTabConditions`). Keyed by
-  // the parent record and this list's relationship.
+  // the reader, the parent record and this list's relationship, as the list
+  // page's draft is keyed by its reader: another account signed in on the
+  // same tab starts from the default.
+  const readerScope = useFilterScope();
   const tabRecord = enlargedFace && !schema && (type === 'grid' || type === 'table')
     && ownRelationshipId && parentId !== undefined && parentId !== null && parentId !== ''
-    ? `${preferenceObject ?? ''}:${String(parentId)}`
+    ? `${readerScope.currentUserId ?? ''}|${preferenceObject ?? ''}:${String(parentId)}`
     : null;
   const tabList = tabRecord !== null;
   const {
@@ -2559,23 +2562,37 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     setDeleteTarget(null);
   }, [deleteTarget, onRowDelete]);
   // objectstack#35892 — the related tab's floating bar deletes the selected
-  // rows: one confirm that counts them, then the row delete this list was
-  // handed, row by row, and one re-read. A row that fails stops the rest and
-  // the re-read shows what was removed.
+  // rows (up to every matching row, with "select all"): one confirm that
+  // counts them, then the data source's batch delete in one call where it
+  // has one, else every row through the row delete this list was handed,
+  // settled together as the list page settles them. One re-read, and the
+  // outcome stays on screen: how many went, and how many did not.
   const [bulkDeleteTargets, setBulkDeleteTargets] = React.useState<any[] | null>(null);
+  const [bulkDeleteOutcome, setBulkDeleteOutcome] = React.useState<{ succeeded: number; failed: number } | null>(null);
+  const { objectLabel } = useObjectLabel();
   const handleBulkDeleteRows = React.useCallback((rows: any[]) => {
     if (rows.length > 0) setBulkDeleteTargets(rows);
   }, []);
   const handleConfirmBulkDelete = React.useCallback(async () => {
-    const rows = bulkDeleteTargets ?? [];
+    const rows = (bulkDeleteTargets ?? []).filter((row) => row?.id != null || row?._id != null);
     setBulkDeleteTargets(null);
-    try {
-      for (const row of rows) await onRowDelete?.(row);
-    } catch (err) {
-      console.error('[RelatedList] remove failed', err);
+    if (rows.length === 0) return;
+    const ids = rows.map((row) => String(row.id ?? row._id));
+    let succeeded = 0;
+    if (typeof dataSource?.bulkDelete === 'function') {
+      try {
+        const answer = await dataSource.bulkDelete(api, ids);
+        succeeded = Math.min(ids.length, typeof answer === 'number' ? answer : answer.succeeded);
+      } catch (err) {
+        console.error('[RelatedList] bulk delete failed', err);
+      }
+    } else if (onRowDelete) {
+      const settled = await Promise.allSettled(rows.map((row) => Promise.resolve(onRowDelete(row))));
+      succeeded = settled.filter((result) => result.status === 'fulfilled').length;
     }
+    setBulkDeleteOutcome({ succeeded, failed: ids.length - succeeded });
     setRefreshNonce((n) => n + 1);
-  }, [bulkDeleteTargets, onRowDelete]);
+  }, [bulkDeleteTargets, onRowDelete, dataSource, api]);
 
   /**
    * May the caller Add existing here? The write's row of the affordance-to-grant
@@ -4353,6 +4370,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         </div>
         {conditionRow && <div className="min-w-0" data-related-enlarged-conditions="">{conditionRow}</div>}
+        {bulkDeleteOutcome && (
+          <p
+            role="status"
+            data-related-bulk-delete-outcome=""
+            className={cn('text-xs', bulkDeleteOutcome.failed > 0 ? 'text-destructive' : 'text-muted-foreground')}
+          >
+            {bulkDeleteOutcome.failed > 0
+              ? t('objectActions.bulkDeletePartial', { succeeded: bulkDeleteOutcome.succeeded, failed: bulkDeleteOutcome.failed })
+              : t('objectActions.bulkDeleteSuccess', { count: bulkDeleteOutcome.succeeded, label: objectLabel({ name: api, label: objectSchema?.label ?? api }) })}
+          </p>
+        )}
         {loadFailure ? (
           <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
         ) : loading && relatedData.length === 0 ? (

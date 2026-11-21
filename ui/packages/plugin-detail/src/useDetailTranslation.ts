@@ -127,6 +127,11 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.deleteRowsConfirmation': '{{count}} records will be deleted. This cannot be undone.',
   'detail.deleteRowsConfirmation_one': '{{count}} record will be deleted. This cannot be undone.',
   'detail.deleteRowsConfirmation_other': '{{count}} records will be deleted. This cannot be undone.',
+  // The bulk delete's outcome, in the list page's own words (`objectActions`).
+  'objectActions.bulkDeleteSuccess': 'Deleted {{count}} {{label}} records',
+  'objectActions.bulkDeleteSuccess_one': 'Deleted {{count}} {{label}} record',
+  'objectActions.bulkDeleteSuccess_other': 'Deleted {{count}} {{label}} records',
+  'objectActions.bulkDeletePartial': '{{succeeded}} deleted, {{failed}} failed',
   'detail.actions': 'Actions',
   'detail.previousPage': 'Previous',
   'detail.nextPage': 'Next',
