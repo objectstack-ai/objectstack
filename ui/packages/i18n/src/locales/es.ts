@@ -2797,6 +2797,8 @@ const es = {
       endDateField: "Campo de fecha de fin",
       import: "Importar",
       importTitle: "Importar desde CSV",
+      newObject: 'Nuevo {{object}}',
+      importExport: 'Importar / Exportar',
       select: 'Seleccionar',
       importedToast: "{{count}} fila(s) importada(s).",
       importedToast_one: "{{count}} fila importada.",

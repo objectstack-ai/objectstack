@@ -2790,6 +2790,8 @@ const zhHant = {
       new: '新建',
       import: '匯入',
       importTitle: '從 CSV 檔案匯入',
+      newObject: '新建{{object}}',
+      importExport: '匯入 / 匯出',
       select: '選擇',
       importedToast: '成功匯入 {{count}} 行。',
       importedToast_one: '成功匯入 {{count}} 行。',

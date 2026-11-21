@@ -2723,6 +2723,8 @@ const de = {
       endDateField: "Enddatumsfeld",
       import: "Importieren",
       importTitle: "Aus CSV importieren",
+      newObject: 'Neu: {{object}}',
+      importExport: 'Import / Export',
       select: 'Auswählen',
       importedToast: "{{count}} Zeile(n) importiert.",
       importedToast_one: "{{count}} Zeile importiert.",

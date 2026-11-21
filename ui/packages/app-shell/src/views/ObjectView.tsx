@@ -26,6 +26,7 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 import { CheckSquare, Plus } from 'lucide-react';
 import { DropdownMenuItem, ObjectIconTile } from '@object-ui/components';
 import { requestListSelection, useListPageSelectable, useListPageSelecting } from '@object-ui/plugin-grid';
+import type { ListToolbarTrailingState } from '@object-ui/plugin-list';
 import { usePublishPhonePageBar } from '../layout/PhonePageBar.js';
 import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
@@ -92,7 +93,6 @@ import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import {
     ListViewBarHostContext,
     OBJECT_VIEW_PAGE_COLUMN_ATTR,
-    ObjectViewBarObjectName,
     ObjectViewBarTrailing,
     ObjectViewMoreMenu,
     ObjectViewPageHeader,
@@ -1194,20 +1194,19 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         // objectstack#35548 — the view switcher leads the list's view bar at
         // every width (on a phone since objectstack#27058); the page bar only
         // names the object.
-        // objectstack#35878 — and from `sm` up the object's name leads it,
-        // 「Object / View ▾」: the page draws no page bar of its own above the
-        // list. The 「Personalized · Reset」 marker ends the condition row.
+        // objectstack#36113 — the object's name is the page bar's, the row
+        // above (objectstack#35878 had led this bar with it).
         phoneTitle: titleSwitcher ? (
             <span className="flex min-w-0 max-w-full items-center gap-1.5" data-testid="list-phone-title">
-                <ObjectViewBarObjectName objectDef={objectDef} objectPluralLabel={listTitleOf} />
                 <span className="flex min-w-0">{titleSwitcher}</span>
             </span>
         ) : null,
         // The page's acts, after the list's search: read from the ref the page
-        // fills once its header chrome is known (below).
+        // fills once its header chrome is known (below). The list hands its
+        // export door with the tools (objectstack#36113).
         viewBarTrailing: titleSwitcher
-            ? (tools: ReactNode) => (pageBarPropsRef.current
-                ? <ObjectViewBarTrailing tools={tools} {...pageBarPropsRef.current} />
+            ? (tools: ReactNode, state: ListToolbarTrailingState) => (pageBarPropsRef.current
+                ? <ObjectViewBarTrailing tools={tools} exportDoor={state.export} {...pageBarPropsRef.current} />
                 : tools)
             : null,
         conditionRowEnd: draftActions,
@@ -1304,6 +1303,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         toolbarBar,
         viewAccess,
         titleSwitcher,
+        createLabel: t('console.objectView.newObject', {
+            object: servedObjectLabel(objectDef, language, objectLabel),
+            defaultValue: 'New {{object}}',
+        }),
     });
 
     const pageBarProps: ObjectViewPageBarProps = {
@@ -1413,9 +1416,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  toolbar row, beside its filter / sort / display tools
                  (objectstack#27058). */}
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
-             {/* objectstack#35878 — not drawn while the list's view bar
-                 names the object and carries its acts. */}
-             {!listBarHosted && <ObjectViewPageHeader {...pageBarProps} />}
+             {/* objectstack#36113 — the page's first row: while the list's
+                 view bar carries the page's acts it draws the object's icon
+                 and name alone, ended by the shell's button group. */}
+             <ObjectViewPageHeader {...pageBarProps} hosted={listBarHosted} />
 
              {/* Floating "+" action button — phone-only counterpart to the
                  PageHeader's primary create action we just hid. Positioned

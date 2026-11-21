@@ -2723,6 +2723,8 @@ const ko = {
       endDateField: "종료 날짜 필드",
       import: "가져오기",
       importTitle: "CSV에서 가져오기",
+      newObject: '{{object}} 새로 만들기',
+      importExport: '가져오기 / 내보내기',
       select: '선택',
       importedToast: "{{count}}개 행 가져옴.",
       importedToast_one: "{{count}}개 행 가져옴.",

@@ -485,12 +485,23 @@ export interface ListViewProps {
    * objectstack#35878 — the right end of the view bar, drawn by the host. It
    * is called with the list's own tools for that end (its search) and returns
    * what the end shows: the console puts the page's create button and ⋮ More
-   * after the search, and while rows are selected shows what the selection
-   * offers in their place. Absent ⇒ the search alone, as before.
+   * after the search. Absent ⇒ the search alone, as before.
+   *
+   * objectstack#36113 — the second argument carries the list's export door
+   * (`ListToolbarTrailingState`), for a host that draws it at the bar's end
+   * (`exportAtBarEnd`). The phone's row passes none.
    *
    * A HOST prop, never a schema key.
    */
-  toolbarTrailing?: (tools: React.ReactNode) => React.ReactNode;
+  toolbarTrailing?: (tools: React.ReactNode, state: ListToolbarTrailingState) => React.ReactNode;
+  /**
+   * objectstack#36113 — the host draws the list's export door at the view
+   * bar's end, from `toolbarTrailing`'s `state.export`, so the desktop
+   * 视图设置 panel draws no export entries of its own. The phone's settings
+   * sheet keeps them: a phone draws no such end. Absent ⇒ the panel's footer
+   * carries export, as before. A HOST prop, never a schema key.
+   */
+  exportAtBarEnd?: boolean;
   /**
    * objectstack#35878 — the right end of the condition row under the view
    * bar, drawn by the host: the console's 「Personalized · Reset」. Given, it
@@ -2107,6 +2118,27 @@ export interface ListToolbarLeadingState {
 }
 
 /**
+ * The list's export door, handed to a host that draws it (objectstack#36113):
+ * the formats this reader may export the list as, and the act that exports
+ * the list as one of them — the same `handleExport` the 视图设置 footer runs,
+ * behind the same permission and format verdicts.
+ */
+export interface ListExportDoor {
+  formats: readonly string[];
+  run: (format: string) => void;
+  /** A server-streamed export is in flight. */
+  busy: boolean;
+  /** The last export's failure, said in the list's words; `null` ⇒ none. */
+  error: string | null;
+}
+
+/** What `toolbarTrailing` is called with besides the tools (objectstack#36113). */
+export interface ListToolbarTrailingState {
+  /** Absent ⇒ no format is offered or the reader may not export. */
+  export?: ListExportDoor;
+}
+
+/**
  * Imperative handle exposed by ListView via React.forwardRef.
  * Allows parent components to trigger a data refresh programmatically.
  *
@@ -2145,6 +2177,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   initialSearchTerm,
   toolbarLeading,
   toolbarTrailing,
+  exportAtBarEnd,
   conditionRowEnd,
   rowAdornment,
   recordLinkAdornment,
@@ -7138,6 +7171,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       exportError={exportError}
     />
   );
+  // objectstack#36113 — the same door, for a host that draws it at the view
+  // bar's end (`exportAtBarEnd`).
+  const exportDoor: ListExportDoor | undefined = resolvedExportOptions && exportPermitted && exportableFormats.length > 0
+    ? {
+        formats: exportableFormats,
+        run: (format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf'),
+        busy: exportBusy,
+        error: exportError,
+      }
+    : undefined;
   const phonePanels: ListPhonePanels | null = React.useMemo(
     () => ({ openViewSettings: displayOffered ? () => setPhonePanel('settings') : undefined }),
     [displayOffered],
@@ -7191,7 +7234,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             filterCount={toolbarFlags.showFilters ? (appliedPanelFilters.conditions ?? []).length : null}
             onOpenSort={() => setPhonePanel('sort')}
             onOpenFilter={() => setPhonePanel('filter')}
-            trailing={toolbarTrailing ? toolbarTrailing(phoneSearch) : phoneSearch}
+            trailing={toolbarTrailing ? toolbarTrailing(phoneSearch, {}) : phoneSearch}
             end={conditionRowEnd}
           />
           {((filterElements && userFilterBarShown) || (queueFilterOffered && !datasetChartOnScreen)) && (
@@ -7295,7 +7338,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               columns, then Group, Row height and the rest. Every control
               writes through the same door as its wide-form button; the panel
               adds no storage of its own. */}
-          {displayOffered && viewSettingsElement}
+          {/* objectstack#36113 — the host draws export at the bar's end. */}
+          {displayOffered && (exportAtBarEnd
+            ? <ViewSettingsPopover {...viewSettingsElement.props} exportFormats={undefined} />
+            : viewSettingsElement)}
           {/* User Filters — filter elements (dropdown chips / preset tabs /
               toggles). Mutually exclusive with view tabs above, so at most
               one filter element group ever renders here. On mobile we keep
@@ -7777,7 +7823,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                     size="sm"
                     className={cn(
                       "hidden sm:inline-flex h-7 text-muted-foreground hover:text-foreground text-[13px] transition-colors duration-150",
-                      searchTerm ? "px-2 text-foreground font-medium" : "w-7 p-0"
+                      // objectstack#36113 — a list narrower than 48rem keeps
+                      // the icon alone, still pressed in the term's colour.
+                      searchTerm ? "px-2 text-foreground font-medium @max-[48rem]/list:w-7 @max-[48rem]/list:px-0" : "w-7 p-0"
                     )}
                     data-testid="search-icon-button"
                     title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
@@ -7792,7 +7840,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                         trigger so the active search is visible without opening it. */}
                     {searchTerm && (
                       <span
-                        className="ml-1.5 max-w-[8rem] truncate text-[11px]"
+                        className="ml-1.5 max-w-[8rem] truncate text-[11px] @max-[48rem]/list:hidden"
                         data-testid="search-active-keyword"
                       >
                         {searchTerm}
@@ -7828,7 +7876,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {phoneSearch}
               </>
             );
-            return toolbarTrailing ? toolbarTrailing(searchTools) : searchTools;
+            return toolbarTrailing ? toolbarTrailing(searchTools, { export: exportDoor }) : searchTools;
           })()}
         </div>
       </div>

@@ -2876,6 +2876,8 @@ const ru = {
       endDateField: "Поле даты окончания",
       import: "Импорт",
       importTitle: "Импорт из CSV",
+      newObject: 'Новая запись: {{object}}',
+      importExport: 'Импорт / Экспорт',
       select: 'Выбрать',
       importedToast: "{{count}} строк импортировано.",
       importedToast_one: "Импортирована {{count}} строка.",

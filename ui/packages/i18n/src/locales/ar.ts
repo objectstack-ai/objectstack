@@ -3014,6 +3014,8 @@ const ar = {
       endDateField: "حقل تاريخ الانتهاء",
       import: "استيراد",
       importTitle: "استيراد من CSV",
+      newObject: '{{object}} جديد',
+      importExport: 'استيراد / تصدير',
       select: 'تحديد',
       importedToast: "تم استيراد {{count}} صف(صفوف).",
       importedToast_zero: "تم استيراد {{count}} صف.",
