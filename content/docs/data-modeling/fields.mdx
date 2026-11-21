@@ -417,7 +417,10 @@ child records, so a parent seeded with a total and no children shows the
 empty-set value (`0` for `count` and `sum`, empty for `min`, `max` and `avg`),
 and re-seeding a parent leaves its computed value in place. The load logs one
 warning per dataset that names the object, the fields and how many values it
-did not write. To show a total, seed the child records it sums. Server code that runs with `isSystem: true` can still write the column,
+did not write. One degraded path does not go through the seed loader: when the
+runtime has no metadata service, or the seed loader throws, it falls back to a
+basic insert of the seed records, and that fallback still stores a supplied
+summary value. To show a total, seed the child records it sums. Server code that runs with `isSystem: true` can still write the column,
 as it can any read-only column: a historical import (`treatAsHistorical: true`,
 which only the system principal may send) keeps a pre-computed total, on create
 and on update. Undoing an ordinary

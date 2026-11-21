@@ -33,7 +33,9 @@ export const entry: SemanticMigration = {
     + 'did not write. '
     + 'There is no mechanical rewrite: only the author knows whether the total stands for child rows that should be '
     + 'seeded or for a figure that is not a roll-up at all. Rows an earlier load stored a supplied total on are data, '
-    + 'not metadata: the next child write recomputes them',
+    + 'not metadata: the next child write recomputes them. A parent with no child rows gets no such write, and '
+    + '`os migrate summary-nulls` backfills only NULL columns, so repair one by hand: insert a child row under it and '
+    + 'delete that row again, and the recompute leaves the empty-set value',
   acceptanceCriteria:
     'No seed record supplies a value for a `summary` field: the boot log and a seed validation carry no roll-up '
     + 'drop warning for any dataset, and every seeded roll-up equals the aggregate of its seeded child rows after the '

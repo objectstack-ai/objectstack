@@ -1675,13 +1675,23 @@ export class SeedLoaderService implements ISeedLoaderService {
   private async resolveObjectDefinition(objectName: string): Promise<any> {
     const fromMetadata = (await this.metadata.getObject(objectName)) as any;
     if (fromMetadata?.fields) return fromMetadata;
-    try {
-      const engineSchema = (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName) as any;
-      if (engineSchema?.fields) return engineSchema;
-    } catch {
-      // Engine may not expose a schema registry — the metadata result stands.
-    }
+    const engineSchema = this.engineSchemaOf(objectName) as any;
+    if (engineSchema?.fields) return engineSchema;
     return fromMetadata;
+  }
+
+  /**
+   * The engine's own registered schema for `objectName` — the merged one,
+   * object extensions included — or `undefined` when the engine exposes no
+   * schema registry (or its read throws).
+   */
+  private engineSchemaOf(objectName: string): unknown {
+    try {
+      return (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName);
+    } catch {
+      // Engine may not expose a schema registry — the caller's other source stands.
+      return undefined;
+    }
   }
 
   /**
@@ -2126,8 +2136,15 @@ export class SeedLoaderService implements ISeedLoaderService {
     this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
     // [#35655] The roll-up columns a seed never writes (`summaryFieldNames`),
     // the values this dataset's records supplied for them, and which of them
-    // did — reported once, after the record loop.
-    const summaryFields = summaryFieldNames(objectDefinition);
+    // did — reported once, after the record loop. Read from the resolved
+    // definition AND the engine's merged schema: the metadata service's copy
+    // wins `resolveObjectDefinition` whenever it has `fields`, and it can lack
+    // a roll-up an object extension contributed, which the engine still
+    // computes — so a seed must not write it either.
+    const summaryFields = [...new Set([
+      ...summaryFieldNames(objectDefinition),
+      ...summaryFieldNames(this.engineSchemaOf(objectName)),
+    ])];
     let summaryValuesDropped = 0;
     const summaryFieldsDropped = new Set<string>();
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
