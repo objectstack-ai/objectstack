@@ -68,6 +68,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 import { resolveUserAuthzGrants, vetOrganizationClaim } from '@objectstack/core';
+import { fixedInnerReadOf } from '@objectstack/spec/data';
 import { OWNERSHIP_QUEUE_SERVICE, type AuthoredRowWriteOperation, type IOwnershipQueueService } from '@objectstack/spec/contracts';
 import type { ExplainDecision, ExplainOperation, PermissionSet } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
@@ -97,6 +98,7 @@ import {
  */
 export interface ExplainAccessHost {
   readonly baselinePermissionSets: SecurityPlugin['baselinePermissionSets'];
+  readonly logger: SecurityPlugin['logger'];
   readonly delegatedAdminGate: SecurityPlugin['delegatedAdminGate'];
   readonly permissionEvaluator: SecurityPlugin['permissionEvaluator'];
   readonly ql: SecurityPlugin['ql'];
@@ -167,7 +169,7 @@ export async function mayDescribeAnotherUser(
 
 /** The body of `SecurityPlugin#explainAccessForCaller`; the method's docblock there is its contract. */
 export async function explainAccessForCaller(
-  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
+  this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'logger' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveHopWithheldFields' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
   request: { object: string; operation: string; userId?: string; recordId?: string; recordIds?: readonly string[] },
   callerContext?: any,
 ): Promise<ExplainDecision> {
@@ -484,6 +486,20 @@ export async function explainAccessForCaller(
               actsOnBehalfOf(c) ? sharing.buildReadFilter(o, c) : readFilterWithReadScope(o, c),
           }
         : {}),
+      // [ADR-0155 D4, Q2 as ruled] A share-grant leaf in that filter, resolved
+      // at the record: one indexed read under the leaf's own fixed predicate
+      // (`fixedInnerReadOf`), keyed by the record ids the pass judges, under
+      // system authority: the read `checkEdit` makes for one. ⛔ No predicate
+      // restated here, and no tenant scope on it (ADR-0155 ① ruled A).
+      resolveFixedReadLeaf: async (leaf, ids) => {
+        const read = fixedInnerReadOf(leaf);
+        const where: Record<string, unknown> = { ...read.equals };
+        for (const [column, values] of Object.entries(read.memberOf)) where[column] = { $in: [...values] };
+        where[read.column] = { $in: [...ids] };
+        const rows = await this.ql.find(read.table, { where, fields: [read.column], context: { isSystem: true } });
+        return new Set((Array.isArray(rows) ? rows : []).map((row: Record<string, unknown>) => String(row[read.column])));
+      },
+      fixedReadLeafRefusalLog: this.logger,
       // [#26188 · ADR-0057] Asked by the depth layer's record cell: with no
       // resolver mounted a hierarchy read depth is evaluated as 'own', and the
       // cell names that instead of the depth. The kernel's own answer, read

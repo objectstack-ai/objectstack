@@ -31,6 +31,7 @@ import {
   type FixedReadLeafSeamCase,
 } from '@objectstack/spec/data';
 import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine.js';
+import { driverEvaluatesFixedReadLeaf, fixedReadLeafClassOfEngine } from './index.js';
 
 interface SeenCall { verb: string; object: string; ast: any }
 
@@ -425,4 +426,62 @@ describe('[ADR-0155 D4] a refusal at the door is logged on the boundary\'s flag,
     expect(envelopeOf(await refusalOf(engine.find('srid_doc', { where: misplaced() as unknown as FilterCondition }, { context: ASKER as any })))).toEqual(REFUSED);
     expect(errorsIn(logger)).toEqual(['error']);
   });
+});
+
+describe('[ADR-0155 plan step 5] the seam\'s public face: the recognition an evaluator asks before it compiles', () => {
+  it('answers the seam\'s own class, or undefined, reading the engine and calling no driver', async () => {
+    const { engine, calls, farCalls } = await bootEngine();
+    expect(fixedReadLeafClassOfEngine(engine, SharedRecordIds.read('srid_doc', 'u1'))).toBeUndefined();
+    expect(fixedReadLeafClassOfEngine(engine, SharedRecordIds.read('srid_far', 'u1'))).toMatchObject({
+      class: 'other-datasource', object: 'srid_far', table: 'sys_record_share',
+    });
+    engine.registerHook('afterFind', () => {}, { object: 'sys_record_share' });
+    expect(fixedReadLeafClassOfEngine(engine, SharedRecordIds.read('srid_doc', 'u1'))).toMatchObject({
+      class: 'registration-by-name', table: 'sys_record_share',
+    });
+    expect(calls).toEqual([]);
+    expect(farCalls).toEqual([]);
+  });
+
+  it('driverEvaluatesFixedReadLeaf reads the declaration and nothing else', () => {
+    expect(driverEvaluatesFixedReadLeaf({ supports: DECLARES }, 'SharedRecordIds')).toBe(true);
+    expect(driverEvaluatesFixedReadLeaf({ supports: { readableIdsLeaf: true } }, 'SharedRecordIds')).toBe(false);
+    expect(driverEvaluatesFixedReadLeaf(undefined, 'SharedRecordIds')).toBe(false);
+  });
+});
+
+describe('[ADR-0155 plan step 5, the array-form in / nin decision] D4\'s envelope, never INVALID_FILTER', () => {
+  for (const op of ['in', 'nin']) {
+    it(`an array-form ${op} carrying the leaf is refused INTERNAL_ERROR / 500, naming no recipient`, async () => {
+      const { engine, calls } = await bootEngine();
+      const where = [['id', op, SharedRecordIds.read('srid_doc', 'u-secret')]] as unknown as FilterCondition;
+      const err = await refusalOf(engine.find('srid_doc', { where }, { context: ASKER as any }));
+      expect(envelopeOf(err)).toEqual(REFUSED);
+      expect(err?.message).toContain("holds a SharedRecordIds leaf, a fixed read of 'sys_record_share'");
+      expect(err?.message).not.toContain('u-secret');
+      expect(calls).toEqual([]);
+      expect(engine.judgeFilter('srid_doc', where)).toMatchObject({ ok: false, ...REFUSED });
+    });
+  }
+
+  // The type door's refusals: the shape door passes a list and a scalar
+  // operator, so these answered INVALID_FILTER / 400, printing the leaf's head,
+  // while the object spelling `{ id: { $in: [leaf] } }` answered 500.
+  const typeDoor: Array<[string, (leaf: unknown) => unknown]> = [
+    ['the leaf as an array-form in list member', (leaf) => ['id', 'in', [leaf]]],
+    ['the leaf as an array-form != comparand', (leaf) => ['id', '!=', leaf]],
+  ];
+  for (const [what, condition] of typeDoor) {
+    it(`${what} is refused INTERNAL_ERROR / 500, naming no recipient, as its object spelling is`, async () => {
+      const { engine, calls } = await bootEngine();
+      const where = [condition(SharedRecordIds.read('srid_doc', 'u-secret'))] as unknown as FilterCondition;
+      const err = await refusalOf(engine.find('srid_doc', { where }, { context: ASKER as any }));
+      expect(envelopeOf(err)).toEqual(REFUSED);
+      expect(err?.message).toContain("holds a SharedRecordIds leaf, a fixed read of 'sys_record_share'");
+      expect(err?.message).not.toContain('u-secret');
+      expect(calls).toEqual([]);
+      const objectSpelling = { id: { $in: [SharedRecordIds.read('srid_doc', 'u-secret')] } } as unknown as FilterCondition;
+      expect(envelopeOf(await refusalOf(engine.find('srid_doc', { where: objectSpelling }, { context: ASKER as any })))).toEqual(REFUSED);
+    });
+  }
 });

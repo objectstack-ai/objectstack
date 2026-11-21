@@ -15,6 +15,8 @@ import {
   assertReadScopeAdmittedByEngine,
   assertReadScopeCannotVacate,
   assertReadScopeComparandsRunnable,
+  READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+  fixedReadLeafRefusalSinkOf,
   assertReadScopePlaceholdersResolvable,
 } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
@@ -1217,7 +1219,15 @@ export class AnalyticsServicePlugin implements Plugin {
         // [ADR-0139 D6] The engine's `ReadableIds` leaf admitted, as at the
         // two merges this door mirrors: the `$and` below hands the scope to
         // `executeAggregate` — the engine — whose boundary composes it.
-        if (scope) assertReadScopeComparandsRunnable(scope, targetObject, { admitReadableIds: true });
+        // [ADR-0155 D4] …and the fixed-read leaf brands, as at those merges.
+        if (scope) {
+          assertReadScopeComparandsRunnable(scope, targetObject, {
+            admitReadableIds: true,
+            admitFixedReadLeaves: READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+            fixedReadLeafRefusal: fixedReadLeafRefusalSinkOf(ctx.logger),
+            object: targetObject,
+          });
+        }
         if (scope) assertReadScopePlaceholdersResolvable(scope, targetObject, context);
         if (scope) assertReadScopeAdmittedByEngine(scope, targetObject, context, { judgeFilter });
         // #3680 — the sort-key pass hands over the PRE-window id set (every
