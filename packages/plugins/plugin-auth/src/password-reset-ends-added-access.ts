@@ -53,8 +53,10 @@
  *    administrator uses (`revokeScimConnectionCredential`): its bearer is
  *    refused from the next SCIM request on, and a revoke is one-way, so
  *    provisioning through that connection pauses until a platform
- *    administrator mints a new credential. A credential another
- *    administrator minted for the same connection is not touched;
+ *    administrator mints a new credential. Each revoke writes the
+ *    `scim_credential_revoked` audit row the administrator's revoke writes,
+ *    naming the account as its actor. A credential another administrator
+ *    minted for the same connection is not touched;
  *  - **passkeys: none to end.** The plugin's `passkeys` flag is wired to no
  *    plugin and no passkey store is mounted (`invitation-mailbox-proof.ts`,
  *    `USER_KEYED_STORES`). A passkey store mounted later belongs in this list.
@@ -86,9 +88,10 @@
  * ends none of these. It reminds instead: when the account still holds an API
  * key the seam would admit (not revoked, its own expiry not passed), a linked
  * sign-in account, an authorized app, an enabled OAuth application it
- * registered or an active SCIM credential it minted once its password has
- * changed, the account's address is sent `auth.password_changed_notice`,
- * listing them, through the mail service every auth notice goes through. The
+ * registered or a SCIM credential it minted that the bearer verifier still
+ * admits (active, its own expiry not passed) once its password has changed,
+ * the account's address is sent `auth.password_changed_notice`, listing them,
+ * through the mail service every auth notice goes through. The
  * reminder is best-effort, like the email-change notice: a reminder that
  * cannot be read or sent never fails the change.
  *
@@ -99,11 +102,13 @@
  * credentials beside the sessions they end, through
  * `forced-reset-revocation.ts`, which ends the grants with this module's
  * {@link endOAuthGrants} and the registrations with
- * {@link endWhatTheAccountRegistered}. They send no notice: each answers its
+ * {@link endWhatTheAccountRegistered}. The administrator's forced reset
+ * records each credential it revokes against the administrator; the
+ * operator's command, which names no actor and writes no `sys_audit_log` row
+ * for anything it ends, records none. They send no notice: each answers its
  * requester what it ended (the response's `revoked` and the ledger row; the
  * command's outcome), and the operator's command runs with no server and no
- * mail service. An
- * administrator who turns the switch off (`revokeSessionsAndKeys: false`)
+ * mail service. An administrator who turns the switch off (`revokeSessionsAndKeys: false`)
  * asks for a routine reset, and nothing is ended: the switch is the reason
  * that reset is not treated as a self-service one. The one-step invitation
  * door sets the password only of an account that holds no sign-in and no
@@ -115,9 +120,11 @@
  * In the global after-hook (`auth-manager-after-hook.ts`), on a reset door's
  * success, for the account the before-hook named (`RESET_DOOR_SUBJECT`): the
  * password is written by then, so a reset that does not complete ends
- * nothing. A completed reset whose account cannot be named, and a read or a
- * write that fails, are not swallowed: the error reaches the requester, and
- * the next completed reset ends what remains. Without a data engine the
+ * nothing. Each kind is ended whether or not another could not be: an app
+ * that cannot be disabled leaves no key unrevoked. A completed reset whose
+ * account cannot be named, and a read or a write that fails, are not
+ * swallowed: once every kind has been tried the error reaches the requester,
+ * no notice is sent, and the next completed reset ends what remains. Without a data engine the
  * deployment holds no `sys_api_key`, `sys_oauth_application` or
  * `sys_scim_connection_credential` store, so there is no key, registered app
  * or minted credential to end; the sign-in accounts and the OAuth grants are
@@ -128,7 +135,13 @@ import { isExpired } from '@objectstack/core';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { isMissingTableError, isObjectAbsentError } from '@objectstack/types';
 import type { USER_KEYED_STORES } from './invitation-mailbox-proof.js';
-import { SCIM_CREDENTIAL_OBJECT, revokeScimConnectionCredential } from './scim-connection-service.js';
+import {
+  SCIM_CREDENTIAL_OBJECT,
+  revokeScimConnectionCredential,
+  scimCredentialAuditRow,
+  scimCredentialIsActive,
+  scimCredentialIsLive,
+} from './scim-connection-service.js';
 
 /** The provider id of the account's local password row. */
 const CREDENTIAL_PROVIDER_ID = 'credential';
@@ -144,6 +157,9 @@ const REGISTRATION_PAGE = 500;
 
 /** The single sign-on providers an account registered, which a reset keeps. */
 const SSO_PROVIDER_OBJECT = 'sys_sso_provider';
+
+/** The audit trail a revoked credential is recorded in, as the credential door records its own revoke. */
+const AUDIT_LOG_OBJECT = 'sys_audit_log';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
@@ -195,7 +211,27 @@ export interface MountedOAuthGrants {
  */
 export type RegistrationStore = Parameters<typeof revokeScimConnectionCredential>[0] & {
   find(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
+  /** The audit row a revoked credential writes ({@link CredentialRevokeTrail}); absent ⇒ none written. */
+  insert?(object: string, data: Record<string, unknown>, opts?: unknown): Promise<unknown>;
+  /** Whether the engine holds `object`; absent ⇒ taken at its word that it does, as the credential door takes it. */
+  getSchema?(object: string): unknown;
 };
+
+/**
+ * Who a reset's credential revokes are recorded against: each credential
+ * {@link endWhatTheAccountRegistered} revokes writes the `sys_audit_log` row
+ * the credential door's own revoke writes (`scim_credential_revoked`, the
+ * actor, the credential and its connection; `scimCredentialAuditRow`), so a
+ * credential a reset revoked shows the same trail. A deployment without
+ * `sys_audit_log` (plugin-audit not installed) records nothing, as the door
+ * records nothing there; a refused audit write does not undo the revoke and
+ * is reported once to `warn`.
+ */
+export interface CredentialRevokeTrail {
+  /** The account that reset its own password, or the administrator who forced the reset. */
+  actorId: string;
+  warn?: (message: string) => void;
+}
 
 /** The stores a completed reset reads and writes. */
 export interface ResetStores {
@@ -204,6 +240,8 @@ export interface ResetStores {
   oauth?: MountedOAuthGrants;
   /** The data engine the registered apps and minted credentials live in; absent ⇒ none to end. */
   registrations?: RegistrationStore | undefined;
+  /** Where a credential revoke whose audit row was refused is reported ({@link CredentialRevokeTrail}). */
+  warn?: (message: string) => void;
 }
 
 /** What a completed reset ended: counts of rows really written. */
@@ -263,7 +301,7 @@ export interface AccessAPasswordChangeKeeps {
   authorizedApps: string[];
   /** Each OAuth application the account registered that is not disabled, by its name (its client id when it has none). */
   ownedApps: string[];
-  /** Each SCIM credential the account minted that is still active, by its connection (and label). */
+  /** Each SCIM credential the account minted that the bearer verifier still admits (active, its own expiry not passed), by its connection (and label). */
   scimCredentials: string[];
 }
 
@@ -478,15 +516,24 @@ async function enabledOwnedApps(engine: Pick<RegistrationStore, 'find'>, userId:
   return page.filter((row) => !isOn(row.disabled));
 }
 
-/** The SCIM credentials `userId` minted that are still active: one page, or the page at `offset` in id order. */
+/**
+ * The SCIM credentials `userId` minted whose `active` flag is on: one page, or
+ * the page at `offset` in id order. The flag is read by the bearer verifier's
+ * own reading (`scimCredentialIsActive`, the flag half of
+ * `scimCredentialIsLive`), so a credential the verifier reads as on is never
+ * one this reads as off. The store is asked for `active: true`, the one value
+ * of a boolean column (`true`/`false`/null, `1`/`0` in SQLite) that reading
+ * holds on; its expiry is not asked, so a reset revokes an expired credential
+ * too, as it revokes an expired API key.
+ */
 async function activeMintedCredentials(engine: Pick<RegistrationStore, 'find'>, userId: string, offset?: number): Promise<Array<Record<string, unknown>>> {
   const page = await rowsOrNone(engine, SCIM_CREDENTIAL_OBJECT, {
     where: { user_id: userId, active: true },
-    fields: ['id', 'connection_id', 'label', 'active'],
+    fields: ['id', 'connection_id', 'label', 'active', 'expires_at'],
     limit: REGISTRATION_PAGE,
     ...(offset === undefined ? {} : { orderBy: [{ field: 'id', order: 'asc' }], offset }),
   });
-  return page.filter((row) => isOn(row.active));
+  return page.filter(scimCredentialIsActive);
 }
 
 /**
@@ -506,11 +553,16 @@ async function activeMintedCredentials(engine: Pick<RegistrationStore, 'find'>, 
  * ended and the next read still answers was not ended, which is a failure,
  * never a loop. No engine, nothing to end. Throws when a read or a write
  * fails, once both the apps and the credentials have been tried.
+ *
+ * With a `trail`, each credential revoked writes the credential door's own
+ * `scim_credential_revoked` audit row naming `trail.actorId`
+ * ({@link CredentialRevokeTrail}); without one, none is written.
  */
 export async function endWhatTheAccountRegistered(
   engine: RegistrationStore | undefined,
   userId: string,
   ended: EndedRegistrations = { ownedApps: [], scimCredentials: [] },
+  trail?: CredentialRevokeTrail,
 ): Promise<EndedRegistrations> {
   if (!engine) return ended;
   // The credentials are revoked though an app could not be disabled, and the
@@ -522,7 +574,7 @@ export async function endWhatTheAccountRegistered(
     failure = { error };
   }
   try {
-    await revokeMintedCredentials(engine, userId, ended);
+    await revokeMintedCredentials(engine, userId, ended, trail);
   } catch (error) {
     failure ??= { error };
   }
@@ -552,7 +604,12 @@ async function disableOwnedApps(engine: RegistrationStore, userId: string, ended
 }
 
 /** {@link endWhatTheAccountRegistered}'s credentials: each read repeats until it answers none. */
-async function revokeMintedCredentials(engine: RegistrationStore, userId: string, ended: EndedRegistrations): Promise<void> {
+async function revokeMintedCredentials(
+  engine: RegistrationStore,
+  userId: string,
+  ended: EndedRegistrations,
+  trail: CredentialRevokeTrail | undefined,
+): Promise<void> {
   const revoked = new Set<string>();
   for (;;) {
     const page = await activeMintedCredentials(engine, userId);
@@ -564,9 +621,46 @@ async function revokeMintedCredentials(engine: RegistrationStore, userId: string
       const outcome = await revokeScimConnectionCredential(engine, id);
       revoked.add(id);
       // A credential revoked or removed between the read and the revoke is
-      // not this reset's to count.
-      if (outcome.outcome === 'revoked') ended.scimCredentials.push(nameOfCredential(row));
+      // not this reset's to count, nor to record.
+      if (outcome.outcome !== 'revoked') continue;
+      ended.scimCredentials.push(nameOfCredential(row));
+      if (trail) await recordCredentialRevoke(engine, trail, outcome);
     }
+  }
+}
+
+/**
+ * Write the `scim_credential_revoked` audit row for a credential a reset
+ * revoked, as the credential door writes it for its own revoke
+ * (`scimCredentialAuditRow`): skipped where the deployment holds no
+ * `sys_audit_log`, and a refused write reported to `trail.warn`, never
+ * thrown — the credential is already revoked.
+ */
+async function recordCredentialRevoke(
+  engine: RegistrationStore,
+  trail: CredentialRevokeTrail,
+  revoked: { credentialId: string; connectionId: string },
+): Promise<void> {
+  if (typeof engine.insert !== 'function') return;
+  if (typeof engine.getSchema === 'function' && !engine.getSchema(AUDIT_LOG_OBJECT)) return;
+  try {
+    await engine.insert(
+      AUDIT_LOG_OBJECT,
+      scimCredentialAuditRow({
+        action: 'update',
+        actorId: trail.actorId,
+        credentialId: revoked.credentialId,
+        metadata: { event: 'scim_credential_revoked', connectionId: revoked.connectionId },
+      }),
+      { context: SYSTEM_CTX },
+    );
+  } catch (error) {
+    trail.warn?.(
+      `[AuthPlugin] a password reset revoked SCIM credential ${revoked.credentialId} (connection `
+        + `'${revoked.connectionId}'), but its sys_audit_log row was NOT written: the credential stays revoked, `
+        + 'and nothing retries the row. Remedy: restore write access to sys_audit_log, then treat this line as '
+        + `the audit record. Cause: ${(error as Error)?.message ?? String(error)}`,
+    );
   }
 }
 
@@ -607,9 +701,11 @@ export async function whatAResetKeeps(engine: Pick<RegistrationStore, 'find'> | 
  * End what a completed self-service reset ends for `userId` (module header):
  * every linked sign-in account other than the password, where their plugins
  * are mounted every OAuth grant and approved device sign-in, every OAuth
- * application it registered and every SCIM credential it minted, and every
- * API key. Throws when a read or a write fails, or a row survives its
- * delete, so the requester is told.
+ * application it registered and every SCIM credential it minted (each revoke
+ * recorded against the account, {@link CredentialRevokeTrail}), and every
+ * API key. Each arm runs whether or not another failed, so a failure ends no
+ * less; when a read or a write failed, or a row survived its delete, the
+ * first failure is thrown once every arm has run, so the requester is told.
  */
 export async function endWhatTheAccountAddedBeforeAReset(stores: ResetStores, userId: string): Promise<ResetEndedAccess> {
   const ended: ResetEndedAccess = {
@@ -621,30 +717,53 @@ export async function endWhatTheAccountAddedBeforeAReset(stores: ResetStores, us
     ownedApps: [],
     scimCredentials: [],
   };
-  // Each pass deletes what the read answered; a link a delete hook kept
-  // reads again, which is a failure.
+  const failures: Array<{ error: unknown }> = [];
+  const arm = async (run: () => Promise<unknown>): Promise<void> => {
+    try {
+      await run();
+    } catch (error) {
+      failures.push({ error });
+    }
+  };
+  await arm(() => unlinkSignInAccounts(stores.accounts, userId, ended));
+  await arm(() => endOAuthGrants(stores.oauth, userId, ended));
+  await arm(() => endWhatTheAccountRegistered(stores.registrations, userId, ended, { actorId: userId, warn: stores.warn }));
+  await arm(() => revokeApiKeys(stores.apiKeys, userId, ended));
+  if (failures.length > 0) throw failures[0].error;
+  return ended;
+}
+
+/**
+ * {@link endWhatTheAccountAddedBeforeAReset}'s links: each pass deletes what
+ * the read answered, counted as it is deleted; a link a delete hook kept reads
+ * again, which is a failure.
+ */
+async function unlinkSignInAccounts(store: SignInAccountStore, userId: string, ended: ResetEndedAccess): Promise<void> {
   const unlinked = new Set<string>();
   for (;;) {
-    const linked = await linkedSignInAccounts(stores.accounts, userId);
-    if (linked.length === 0) break;
+    const linked = await linkedSignInAccounts(store, userId);
+    if (linked.length === 0) return;
     for (const account of linked) {
       if (unlinked.has(account.id)) throw new Error(`sign-in account ${account.id} is still linked after it was unlinked`);
-      await stores.accounts.deleteAccount(account.id);
+      await store.deleteAccount(account.id);
       unlinked.add(account.id);
+      ended.signInAccounts += 1;
     }
   }
-  ended.signInAccounts = unlinked.size;
-  await endOAuthGrants(stores.oauth, userId, ended);
-  await endWhatTheAccountRegistered(stores.registrations, userId, ended);
-  const engine: ApiKeyStore | undefined = stores.apiKeys;
-  if (!engine) return ended;
-  // Each pass revokes what the read answered, and the next read no longer
-  // answers it; a key that a pass revoked and the next read still answers was
-  // not revoked, which is a failure, never a loop.
+}
+
+/**
+ * {@link endWhatTheAccountAddedBeforeAReset}'s keys: each pass revokes what
+ * the read answered, and the next read no longer answers it; a key that a
+ * pass revoked and the next read still answers was not revoked, which is a
+ * failure, never a loop. No engine, no key to end.
+ */
+async function revokeApiKeys(engine: ApiKeyStore | undefined, userId: string, ended: ResetEndedAccess): Promise<void> {
+  if (!engine) return;
   const revoked = new Set<string>();
   for (;;) {
     const page = await unrevokedApiKeys(engine, userId);
-    if (page.length === 0) return ended;
+    if (page.length === 0) return;
     for (const row of page) {
       const id = row.id;
       if (typeof id !== 'string' || id.length === 0) throw new Error('an API key row carries no id');
@@ -686,7 +805,8 @@ async function authorizedApps(store: OAuthGrantRows, userId: string): Promise<st
  * admission seam would admit (not revoked, its own expiry not passed), its
  * linked sign-in accounts, the apps it authorized where the OAuth provider is
  * mounted, and the OAuth applications it registered that are not disabled
- * and the SCIM credentials it minted that are still active, for the
+ * and the SCIM credentials it minted that the bearer verifier still admits
+ * (`scimCredentialIsLive`: active, its own expiry not passed), for the
  * reminder. Throws when a read fails.
  */
 export async function accessAPasswordChangeKeeps(stores: ResetStores, userId: string): Promise<AccessAPasswordChangeKeeps> {
@@ -716,9 +836,10 @@ export async function accessAPasswordChangeKeeps(stores: ResetStores, userId: st
       ownedApps.push(...page.map(nameOfApp));
       if (page.length < REGISTRATION_PAGE) break;
     }
+    const nowMs = Date.now();
     for (let offset = 0; ; offset += REGISTRATION_PAGE) {
       const page = await activeMintedCredentials(engine, userId, offset);
-      scimCredentials.push(...page.map(nameOfCredential));
+      scimCredentials.push(...page.filter((row) => scimCredentialIsLive(row, nowMs)).map(nameOfCredential));
       if (page.length < REGISTRATION_PAGE) break;
     }
   }

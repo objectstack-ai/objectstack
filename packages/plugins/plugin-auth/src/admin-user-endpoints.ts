@@ -1289,7 +1289,7 @@ export async function runAdminSetUserPassword(
     mounted: (pluginId) => typeof authCtx.getPlugin === 'function' && Boolean(authCtx.getPlugin(pluginId)),
   };
   const revocation: ForcedResetRevocationOutcome | undefined = revokeSessionsAndKeys
-    ? await revokeSessionsAndApiKeys(deps.getDataEngine(), userId, { logger: deps.logger, oauth })
+    ? await revokeSessionsAndApiKeys(deps.getDataEngine(), userId, { logger: deps.logger, oauth, auditActorId: actor.id })
     : undefined;
 
   await writeAdminAudit(deps, {

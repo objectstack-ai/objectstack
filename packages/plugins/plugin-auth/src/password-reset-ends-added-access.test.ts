@@ -840,15 +840,8 @@ describe('every reset disables the OAuth applications the account registered and
     await app('app_reports', 'report-sync', 'Report Sync', s.userId, false);
     await app('app_retired', 'retired-tool', 'Retired Tool', s.userId, true);
     await app('app_admin', 'admin-console', 'Admin Console', s.adminUserId, false);
-    const mint = (mintedBy: string, label: string) =>
-      mintScimConnectionCredential({ insert: (object: string, row: Record<string, unknown>) => s.engine.insert(object, row as never, SYS) } as never, SECRET, {
-        connectionId: CONNECTION,
-        organizationId: ORGANIZATION,
-        label,
-        mintedByUserId: mintedBy,
-      });
-    const userBearer = (await mint(s.userId, 'rotation')).token;
-    const adminBearer = (await mint(s.adminUserId, 'primary')).token;
+    const user = await mintCredential(s, s.userId, 'rotation');
+    const adminBearer = (await mintCredential(s, s.adminUserId, 'primary')).token;
     await s.engine.insert(
       'sys_sso_provider',
       { id: 'sso_acme', provider_id: 'acme-okta', issuer: 'https://acme.okta.example', domain: 'acme.example', user_id: s.userId },
@@ -856,8 +849,39 @@ describe('every reset disables the OAuth applications the account registered and
     );
     await s.engine.update('sys_user', { id: s.userId, two_factor_enabled: true }, SYS);
     await s.engine.insert('sys_two_factor', { id: 'tf_user', user_id: s.userId, secret: 'enrolled-secret', backup_codes: 'enrolled-codes' }, SYS);
-    return { userBearer, adminBearer };
+    return { userBearer: user.token, userCredentialId: user.credentialId, adminBearer };
   }
+  /** A SCIM credential for {@link CONNECTION}, minted by the mint door's own persist step, its minting account in `user_id`. */
+  const mintCredential = (s: Stage, mintedBy: string, label: string, expiresAt?: Date) =>
+    mintScimConnectionCredential({ insert: (object: string, row: Record<string, unknown>) => s.engine.insert(object, row as never, SYS) } as never, SECRET, {
+      connectionId: CONNECTION,
+      organizationId: ORGANIZATION,
+      label,
+      mintedByUserId: mintedBy,
+      ...(expiresAt ? { expiresAt } : {}),
+    });
+  /**
+   * The `scim_credential_revoked` rows in `sys_audit_log`: the trail the
+   * administrator's Revoke Credential door writes (`scim-connection-admin.ts`).
+   */
+  async function credentialRevokeTrail(s: Stage) {
+    const rows = (await s.engine.find('sys_audit_log', { where: { object_name: 'sys_scim_connection_credential' }, context: { isSystem: true } } as never)) as Array<
+      Record<string, unknown>
+    >;
+    return rows
+      .map((row) => ({ action: row.action, user_id: row.user_id, actor: row.actor, record_id: row.record_id, metadata: JSON.parse(String(row.metadata)) }))
+      .filter((row) => row.metadata.event === 'scim_credential_revoked');
+  }
+  /** The one row a revoke of the account's credential writes, naming `actorId`. */
+  const revokedBy = (actorId: string, credentialId: string) => [
+    {
+      action: 'update',
+      user_id: actorId,
+      actor: actorId,
+      record_id: credentialId,
+      metadata: { event: 'scim_credential_revoked', connectionId: CONNECTION },
+    },
+  ];
   /** Whether each app is disabled, read the way the provider reads the flag (a SQLite `1` is on). */
   async function disabledApps(s: Stage): Promise<Record<string, boolean>> {
     const rows = (await s.engine.find('sys_oauth_application', { context: { isSystem: true } } as never)) as Array<{ id: string; disabled?: unknown }>;
@@ -883,9 +907,10 @@ describe('every reset disables the OAuth applications the account registered and
 
   it('the emailed reset: the apps are disabled and the credential revoked; the rest is kept, and the notice names both', async () => {
     const s = await stage({ plugins: { oidcProvider: true } });
-    const { userBearer, adminBearer } = await registered(s);
+    const { userBearer, userCredentialId, adminBearer } = await registered(s);
     const kept = await keptRows(s);
     expect(kept.twoFactorEnabled, 'the account is enrolled in a second factor').toBe(true);
+    expect(await credentialRevokeTrail(s), 'no revoke recorded before the reset').toEqual([]);
     expect(await disabledApps(s)).toEqual(NONE_DISABLED);
     expect(await scimAdmits(s, userBearer), 'the credential the account minted verifies before the reset').toBe(true);
 
@@ -895,6 +920,9 @@ describe('every reset disables the OAuth applications the account registered and
     expect(await scimAdmits(s, userBearer), 'the credential the account minted no longer verifies').toBe(false);
     expect(await scimAdmits(s, adminBearer), "the administrator's credential for the same connection still does").toBe(true);
     expect(await keptRows(s), 'the single sign-on provider and the second factor are unchanged').toEqual(kept);
+    expect(await credentialRevokeTrail(s), "the revoke is recorded as the door records its own, the account its actor; the administrator's credential is not").toEqual(
+      revokedBy(s.userId, userCredentialId),
+    );
 
     const notices = s.mail.filter((m) => m.template === RESET_NOTICE);
     expect(notices).toHaveLength(1);
@@ -1016,6 +1044,9 @@ describe('every reset disables the OAuth applications the account registered and
   it('a password change disables and revokes nothing, and its reminder lists the apps and the credential', async () => {
     const s = await stage();
     const { userBearer } = await registered(s);
+    // A credential past its expiry: its flag is still on, and the verifier refuses it.
+    const expired = await mintCredential(s, s.userId, 'expired', new Date(Date.now() - 60_000));
+    expect(await scimAdmits(s, expired.token), 'the verifier refuses the expired credential').toBe(false);
     const user = await s.signIn(EMAIL, FIRST);
 
     const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, s.bearer(user.bearer!));
@@ -1025,14 +1056,20 @@ describe('every reset disables the OAuth applications the account registered and
     expect(await scimAdmits(s, userBearer)).toBe(true);
     const notices = s.mail.filter((m) => m.template === NOTICE);
     expect(notices, 'the account holds no key, link or authorized app, and is reminded of these all the same').toHaveLength(1);
-    expect(notices[0].data).toMatchObject({ apiKeyCount: 0, ownedAppCount: 2, scimCredentialCount: 1, scimCredentials: `${CONNECTION} (rotation)` });
+    expect(notices[0].data, 'the credential the verifier admits; not the expired one it refuses').toMatchObject({
+      apiKeyCount: 0,
+      ownedAppCount: 2,
+      scimCredentialCount: 1,
+      scimCredentials: `${CONNECTION} (rotation)`,
+    });
+    expect(await credentialRevokeTrail(s), 'a change records no revoke').toEqual([]);
     expect(names(notices[0].data.ownedApps)).toEqual(['Desk Assistant', 'Report Sync']);
     expect(s.mail.filter((m) => m.template === RESET_NOTICE), 'a change sends no reset notice').toEqual([]);
   }, 60_000);
 
   it("an administrator's forced reset: the same, counted on the response and the ledger; with revocation off, nothing", async () => {
     const s = await stage();
-    const { userBearer, adminBearer } = await registered(s);
+    const { userBearer, userCredentialId, adminBearer } = await registered(s);
     const kept = await keptRows(s);
 
     const routine = await s.fire(
@@ -1043,6 +1080,7 @@ describe('every reset disables the OAuth applications the account registered and
     expect(routine.status, await routine.clone().text()).toBe(200);
     expect(await disabledApps(s), 'a routine reset disables nothing').toEqual(NONE_DISABLED);
     expect(await scimAdmits(s, userBearer)).toBe(true);
+    expect(await credentialRevokeTrail(s)).toEqual([]);
 
     const forced = await s.fire(
       '/admin/set-user-password',
@@ -1061,6 +1099,9 @@ describe('every reset disables the OAuth applications the account registered and
       .filter((metadata) => metadata.revokeSessionsAndKeys === true);
     expect(ledger).toHaveLength(1);
     expect(ledger[0]).toMatchObject({ revokedOwnedApps: 2, revokedScimCredentials: 1, revocationComplete: true });
+    expect(await credentialRevokeTrail(s), 'the revoke is recorded against the administrator who forced the reset').toEqual(
+      revokedBy(s.adminUserId, userCredentialId),
+    );
     expect(s.mail.filter((m) => m.template === RESET_NOTICE), 'the administrator is answered; the account is not mailed').toEqual([]);
   }, 60_000);
 
@@ -1076,11 +1117,14 @@ describe('every reset disables the OAuth applications the account registered and
     expect(await scimAdmits(s, userBearer)).toBe(false);
     expect(await scimAdmits(s, adminBearer)).toBe(true);
     expect(await keptRows(s)).toEqual(kept);
+    expect(await credentialRevokeTrail(s), 'the command names no actor, and records nothing it ends').toEqual([]);
   }, 60_000);
 
-  it('an app that cannot be disabled is not swallowed: the self-service reset revokes the credential and answers an error; the forced one reports itself incomplete', async () => {
+  it('an app that cannot be disabled stops nothing else: each reset ends the keys, the links and the credential, and is not swallowed', async () => {
     const s = await stage();
     const { userBearer, adminBearer } = await registered(s);
+    const key = await s.mintKey('ci-deploy');
+    await s.link('github');
     const original = s.engine.update.bind(s.engine);
     const refusing = vi.spyOn(s.engine, 'update').mockImplementation((async (object: string, ...rest: unknown[]) => {
       if (object === 'sys_oauth_application') throw new Error('sys_oauth_application cannot be written');
@@ -1089,9 +1133,16 @@ describe('every reset disables the OAuth applications the account registered and
 
     const res = await s.reset(SECOND);
     expect(res.status, 'the requester is told').toBeGreaterThanOrEqual(500);
-    expect(await scimAdmits(s, userBearer), 'the credential is revoked all the same').toBe(false);
+    expect(await s.keyAdmits(key), 'the API key is revoked all the same').toBe(false);
+    expect(await s.providers(), 'and the linked sign-in account ended').toEqual(['credential']);
+    expect(await scimAdmits(s, userBearer), 'and the credential revoked').toBe(false);
     expect(await scimAdmits(s, adminBearer)).toBe(true);
+    expect(s.mail.filter((m) => m.template === RESET_NOTICE), 'a reset that answers an error sends no notice').toEqual([]);
 
+    // The forced reset runs each kind on its own too: the key and the link
+    // added since are ended though the apps still cannot be disabled.
+    const later = await s.mintKey('after-self-service');
+    await s.link('google');
     const forced = await s.fire(
       '/admin/set-user-password',
       { userId: s.userId, newPassword: FIRST, mustChangePassword: false },
@@ -1099,7 +1150,9 @@ describe('every reset disables the OAuth applications the account registered and
     );
     expect(forced.status, await forced.clone().text()).toBe(200);
     const body = (await forced.json()) as { data?: { revoked?: Record<string, unknown> } };
-    expect(body.data?.revoked).toMatchObject({ ownedApps: 0, scimCredentials: 0, failed: 1, complete: false });
+    expect(body.data?.revoked).toMatchObject({ apiKeys: 1, signInAccounts: 1, ownedApps: 0, scimCredentials: 0, failed: 1, complete: false });
+    expect(await s.keyAdmits(later)).toBe(false);
+    expect(await s.providers()).toEqual(['credential']);
     refusing.mockRestore();
     expect(await disabledApps(s), 'the apps that could not be disabled are still enabled, and both requesters know').toEqual(NONE_DISABLED);
   }, 60_000);

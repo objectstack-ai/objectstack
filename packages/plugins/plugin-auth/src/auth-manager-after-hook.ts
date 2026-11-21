@@ -307,7 +307,13 @@ async function endOrRemindWhatTheAccountAdded(
     }
     const engine = this.getDataEngine() as never;
     const ended = await endWhatTheAccountAddedBeforeAReset(
-      { accounts: internal, apiKeys: engine, oauth: mountedOAuthGrantsOf(ctx), registrations: engine },
+      {
+        accounts: internal,
+        apiKeys: engine,
+        oauth: mountedOAuthGrantsOf(ctx),
+        registrations: engine,
+        warn: (message) => ctx?.context?.logger?.warn?.(message),
+      },
       subject,
     );
     await noticeWhatAResetEnded.call(this, ctx, internal, subject, ended);

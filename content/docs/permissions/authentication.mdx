@@ -406,8 +406,10 @@ beside the account's sessions, what the account added before it:
   account minted that is still active is revoked, as **Revoke Credential**
   revokes one: its bearer is refused from the next SCIM request on. A revoke
   is one-way, so provisioning through that connection waits until a platform
-  administrator mints a new credential. A credential another administrator
-  minted, for the same connection or another, is not touched.
+  administrator mints a new credential. Each revoke writes the
+  `sys_audit_log` row **Revoke Credential** writes, naming the account as the
+  one who revoked it. A credential another administrator minted, for the same
+  connection or another, is not touched.
 - **Passkeys.** This build offers no passkey sign-in, so there are none to end.
 
 A reset keeps the single sign-on providers the account registered and its
@@ -422,7 +424,9 @@ auth template, overridable like the others.
 A reset that does not complete ends nothing; a key minted after the reset
 works as usual. A completed reset that cannot end one of these — a record that
 cannot be read or written, a linked account a host hook keeps, an account it
-cannot name — answers an error once the password is written. The new password
+cannot name — still ends every other kind: an application that cannot be
+disabled leaves no API key, linked account or credential in place. Once it has
+tried them all it answers an error and sends no notice. The new password
 stands, and its change time and password history are recorded all the same;
 resetting again ends what remains.
 
@@ -433,7 +437,8 @@ after the change. It disables no application and revokes no SCIM credential.
 When the account still holds an API key that is neither revoked nor past its
 own expiry, a linked sign-in account, an authorized app, an OAuth application
 it registered that is not disabled or a SCIM credential it minted that is
-still active after the change, the account's address is sent
+still active and not past its own expiry after the change, the account's
+address is sent
 `auth.password_changed_notice`, naming each one, through the email service
 every auth mail goes through. The notice is best-effort: one that cannot be
 sent never fails the change. It is a built-in auth template, overridable like
@@ -443,8 +448,11 @@ An administrator's forced reset with `revokeSessionsAndKeys` on and the
 operator's `os user set-password` end the API keys, the linked sign-in
 accounts, the authorized apps and the device sign-ins, disable the OAuth
 applications the account registered and revoke the SCIM credentials it
-minted, as [Set / Reset a Password](#set--reset-a-password) describes. They
-send no notice: each tells the one who ran it what it ended.
+minted, as [Set / Reset a Password](#set--reset-a-password) describes. The
+forced reset records each SCIM credential it revokes in `sys_audit_log`
+against the administrator who ran it; `os user set-password`, which runs as
+no signed-in user, records none. They send no notice: each tells the one who
+ran it what it ended.
 
 #### Setting a first local password
 
@@ -1673,8 +1681,10 @@ A credential records the administrator who minted it (`user_id`). A completed
 password reset of that administrator's account, whether self-service, an
 administrator's forced reset with `revokeSessionsAndKeys` on, or
 `os user set-password`, revokes every credential the account minted that is
-still active, as this revoke does ([What a password reset ends, and what a
-change keeps](#what-a-password-reset-ends-and-what-a-change-keeps)). Provisioning
+still active, as this revoke does, and writes the same `sys_audit_log` row for
+each, naming the account for a self-service reset and the administrator for a
+forced one (`os user set-password` writes none) ([What a password reset ends,
+and what a change keeps](#what-a-password-reset-ends-and-what-a-change-keeps)). Provisioning
 through the connection waits until a platform administrator mints a new
 credential; another administrator's credential for the same connection keeps
 working, so a connection with two credentials is not paused.

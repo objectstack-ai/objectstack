@@ -58,7 +58,11 @@
  *   another account registered and a credential another administrator minted
  *   are never touched. A platform administrator may enable a disabled app
  *   again; a revoked credential stays revoked, and its connection's
- *   provisioning waits for a new one.
+ *   provisioning waits for a new one. With `opts.auditActorId` (the
+ *   administrator's route hands its actor), each credential revoked writes
+ *   the `scim_credential_revoked` audit row the credential door's own revoke
+ *   writes, naming that actor; the operator's command names no actor and
+ *   writes none.
  *
  * Unlike the posture refusal (ruling item 4, "the refusal is not a
  * revocation"), this IS a revocation: a revoked key stays revoked after the
@@ -108,6 +112,9 @@ export interface ForcedResetRevocationEngine {
   findOne?(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
   update(object: string, doc: Record<string, unknown>, opts?: unknown): Promise<unknown>;
   delete?(object: string, options?: unknown): Promise<unknown>;
+  /** The audit row a revoked SCIM credential writes; absent ⇒ none written. */
+  insert?(object: string, data: Record<string, unknown>, opts?: unknown): Promise<unknown>;
+  getSchema?(object: string): unknown;
 }
 
 /** What the revocation did. Counts are rows really written. */
@@ -175,11 +182,13 @@ async function endAuthorizedApps(
  * write that does not land, which the outcome counts in `failed` instead. What
  * it ended before the failure is counted all the same: the arm names each row
  * as it ends it. An engine with no single-row read is read through `find`.
+ * With an `auditActorId`, each credential revoked is recorded against it.
  */
 async function endRegistrations(
   outcome: ForcedResetRevocationOutcome,
   engine: ForcedResetRevocationEngine & { find(object: string, query?: unknown, opts?: unknown): Promise<unknown> },
   userId: string,
+  opts: { logger?: { warn(msg: string): void }; auditActorId?: string },
 ): Promise<void> {
   const store: RegistrationStore = {
     find: (object, query, opts) => engine.find(object, query, opts),
@@ -188,10 +197,15 @@ async function endRegistrations(
         ? ((await engine.findOne(object, query, opts)) as Record<string, unknown> | null)
         : (rowsOf(await engine.find(object, { ...query, limit: 1 }, opts))[0] ?? null)),
     update: (object, data, opts) => engine.update(object, data, opts),
+    ...(typeof engine.insert === 'function' ? { insert: engine.insert.bind(engine) } : {}),
+    ...(typeof engine.getSchema === 'function' ? { getSchema: engine.getSchema.bind(engine) } : {}),
   };
   const ended: EndedRegistrations = { ownedApps: [], scimCredentials: [] };
+  const trail = opts.auditActorId
+    ? { actorId: opts.auditActorId, warn: opts.logger ? (message: string) => opts.logger?.warn(message) : undefined }
+    : undefined;
   try {
-    await endWhatTheAccountRegistered(store, userId, ended);
+    await endWhatTheAccountRegistered(store, userId, ended, trail);
   } catch {
     outcome.failed += 1;
   }
@@ -214,7 +228,13 @@ function isLiveSession(row: Record<string, any>, now: number): boolean {
 export async function revokeSessionsAndApiKeys(
   engine: ForcedResetRevocationEngine | undefined,
   userId: string,
-  opts: { logger?: { warn(msg: string): void }; maxRowScan?: number; oauth?: MountedOAuthGrants } = {},
+  opts: {
+    logger?: { warn(msg: string): void };
+    maxRowScan?: number;
+    oauth?: MountedOAuthGrants;
+    /** Who each revoked SCIM credential's audit row names: the administrator who forced the reset. Absent ⇒ none written. */
+    auditActorId?: string;
+  } = {},
 ): Promise<ForcedResetRevocationOutcome> {
   const outcome: ForcedResetRevocationOutcome = {
     sessions: 0,
@@ -334,7 +354,7 @@ export async function revokeSessionsAndApiKeys(
   await endAuthorizedApps(outcome, opts.oauth, userId);
 
   // ── Registered OAuth applications and minted SCIM credentials ──────────
-  await endRegistrations(outcome, engine as Parameters<typeof endRegistrations>[1], userId);
+  await endRegistrations(outcome, engine as Parameters<typeof endRegistrations>[1], userId, opts);
 
   outcome.complete = !incomplete && outcome.failed === 0;
   if (!outcome.complete) {
