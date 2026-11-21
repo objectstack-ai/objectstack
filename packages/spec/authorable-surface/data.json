@@ -753,6 +753,7 @@
     "data/ObjectFieldGroup:collapsible",
     "data/ObjectFieldGroup:defaultExpanded",
     "data/ObjectFieldGroup:description",
+    "data/ObjectFieldGroup:fields",
     "data/ObjectFieldGroup:icon",
     "data/ObjectFieldGroup:key",
     "data/ObjectFieldGroup:label",
