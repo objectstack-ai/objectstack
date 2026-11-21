@@ -509,6 +509,49 @@ export async function recordHeldByLockingApproval(
 }
 
 /**
+ * Is `recordId` of `objectName` a DETAIL row whose master is held by a LOCKING
+ * pending approval — would an ordinary write of it be refused `RECORD_LOCKED`
+ * by the detail-row lock ({@link bindDetailRowLockHook})?
+ *
+ * The record-anchored read's second half: a line of a locked record is locked
+ * with it, so the read that tells a client "this record is locked" says so of
+ * the line too, instead of offering an edit the hook then refuses. Asked as the
+ * hook asks it of an update or delete of the row: the masters the row stands
+ * under (every `master_detail` edge, {@link masterEdgesOf}), read off its FK
+ * columns as SYSTEM, each judged by the one lookup and judgement the hook uses
+ * ({@link lockingRequestsForRecords}). As with
+ * {@link recordHeldByLockingApproval}, what belongs to a WRITE (the opening
+ * run's own writes) is left out: it is not a property of the row.
+ *
+ * ⚠️ It answers for the row, not for a caller, and the FK read is SYSTEM.
+ * Whether the asker may learn the answer — may read the row at all — is the
+ * caller's question to settle first (`ApprovalService.getRecordLock`).
+ */
+export async function detailRowHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find' | 'getSchema'>,
+  objectName: string,
+  recordId: string,
+): Promise<boolean> {
+  if (isApprovalBookkeepingObject(objectName)) return false;
+  const edges = masterEdgesOf(engine, objectName);
+  if (edges.length === 0) return false;
+  const rows = await engine.find(objectName, {
+    where: { id: recordId },
+    fields: ['id', ...edges.map((e) => e.fk)],
+    limit: 1,
+    // SYSTEM_CTX's arrays are `as const` (readonly); the declared type wants mutable ones.
+    context: { ...SYSTEM_CTX, positions: [], permissions: [] },
+  } satisfies EngineQueryOptions);
+  const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
+  if (!row) return false;
+  for (const e of edges) {
+    const masterId = scalarFk(row[e.fk]);
+    if (masterId && (await lockingRequestsForRecords(engine, e.master, [masterId])).length > 0) return true;
+  }
+  return false;
+}
+
+/**
  * The pending requests that hold any of `recordIds` of `objectName` under a
  * LOCKING node — the rows {@link recordHeldByLockingApproval} answers from,
  * handed back whole so a write-side caller can apply the WRITE's exemptions
@@ -759,7 +802,7 @@ interface MasterEdge {
  * gives — a raw `registerObject` skips Zod, and an unread spelling here would
  * be a lock that silently does not apply.
  */
-function masterEdgesOf(engine: MinimalEngine, objectName: string): MasterEdge[] {
+function masterEdgesOf(engine: Pick<MinimalEngine, 'getSchema'>, objectName: string): MasterEdge[] {
   let schema: any;
   try { schema = engine.getSchema?.(objectName); } catch { return []; }
   const fields = schema?.fields;
