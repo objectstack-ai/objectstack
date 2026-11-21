@@ -41,8 +41,6 @@ function comparisons(root: string, op: '==' | '!='): readonly string[] {
     `'a' ${op} ${root}.f`,
     `${root}['f'] ${op} 'a'`,
     `'a' ${op} ${root}["f"]`,
-    `${root}.?f ${op} 'a'`,
-    `${root}[?'f'] ${op} 'a'`,
     `${root}.f ${op} 3`,
     `${root}.f ${op} true`,
     `${root}.name == 'x' && ${root}.f ${op} 'a'`,
@@ -88,6 +86,12 @@ describe('list-equality — refused on an inherently multi-value type', () => {
       }
     }
   }
+
+  it('the optional spellings (`.?f`, `[?\'f\']`) do not compile against a scalar: invalid-cel alone, no second refusal', () => {
+    for (const source of ["record.?f == 'a'", "previous[?'f'] != 'a'"]) {
+      expect(refusalsOf(source, hintFor('tags')).map((e) => e.code)).toEqual(['invalid-cel']);
+    }
+  });
 
   it('refuses in a flattened (flow) condition and in a formula value too', () => {
     expect(refusalsOf("record.f == 'a'", hintFor('tags', false, 'flattened')).map((e) => e.code)).toEqual(['list-equality']);
