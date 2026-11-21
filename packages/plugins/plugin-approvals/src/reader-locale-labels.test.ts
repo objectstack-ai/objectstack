@@ -28,6 +28,7 @@ import {
   flowLabelKey,
   flowNameOfProcess,
   localizeRequestLabels,
+  positionLabelKey,
   readerLabelsFor,
   type ReaderLabelI18n,
 } from './reader-locale-labels.js';
@@ -54,6 +55,7 @@ const ZH = {
   [flowLabelKey('account_approval')]: '客户审批',
   [approvalStepLabelKey('account_approval', 'manager_review')]: '经理审核',
   [objectLabelKey('account')]: '客户',
+  [positionLabelKey('crm_sales_manager')]: '销售经理',
 };
 
 describe('[#24863] every key the reader asks is one the translation contract declares', () => {
@@ -62,6 +64,7 @@ describe('[#24863] every key the reader asks is one the translation contract dec
     expect(approvalStepLabelKey('account_approval', 'manager_review'))
       .toBe('flows.account_approval.approvals.manager_review.label');
     expect(objectLabelKey('account')).toBe('objects.account.label');
+    expect(positionLabelKey('crm_sales_manager')).toBe('positions.crm_sales_manager.label');
   });
 
   it('a pack holding exactly those keys parses, and keeps each value at its address', () => {
@@ -70,6 +73,7 @@ describe('[#24863] every key the reader asks is one the translation contract dec
     expect(result.data.flows.account_approval.label).toBe('客户审批');
     expect(result.data.flows.account_approval.approvals.manager_review.label).toBe('经理审核');
     expect(result.data.objects.account.label).toBe('客户');
+    expect(result.data.positions.crm_sales_manager.label).toBe('销售经理');
   });
 
   it('control: the same round trip refuses a step key the face does not declare', () => {
@@ -98,6 +102,7 @@ describe('[#24863] the pick', () => {
       expect(labels.flowLabel('account_approval')).toBe('客户审批');
       expect(labels.stepLabel('account_approval', 'manager_review')).toBe('经理审核');
       expect(labels.objectLabel('account')).toBe('客户');
+      expect(labels.positionLabel('crm_sales_manager')).toBe('销售经理');
     }
   });
 

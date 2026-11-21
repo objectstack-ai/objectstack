@@ -127,6 +127,7 @@ import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
   adminRescueNoteText,
+  adminRescuePositions,
   adminRescueReason,
   type AdminRescueNote,
 } from './admin-rescue-note.js';
@@ -2075,6 +2076,17 @@ export interface ApprovalServiceOptions {
    */
   i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /**
+   * [#35418] A position's declared `label`, by its name: what a timeline note
+   * names an unheld position by when the reader's language pack holds no
+   * `positions.<name>.label`. The plugin answers it from the `metadata`
+   * service (`get('position', name)`), read per call for the reason
+   * {@link ApprovalServiceOptions.i18nServiceSource} is.
+   *
+   * Absent, or answering `undefined`, the note names the position by its
+   * name, as before.
+   */
+  positionLabelSource?: (positionName: string) => Promise<string | undefined>;
+  /**
    * [ADR-0142 D6] The `ownership-queue` service, through which a `queue`
    * approver expands to the queue's members at node entry. Resolved LAZILY
    * per expansion, for the reason {@link ApprovalServiceOptions.tenancyPosture}
@@ -2211,6 +2223,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private readonly platformAdminStandings = new WeakMap<object, Map<string, Promise<boolean>>>();
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
+  /** [#35418] A position's declared label, for a note that names an unheld position. */
+  private positionLabelSource?: (positionName: string) => Promise<string | undefined>;
   /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
   private ownershipQueues?: () => ApproverQueueSource | undefined;
   /** [ADR-0157 D5] Lazily-resolved working-calendar service a `working_time` escalation counts through. */
@@ -2255,6 +2269,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
     this.i18nServiceSource = opts.i18nServiceSource;
+    this.positionLabelSource = opts.positionLabelSource;
     this.ownershipQueues = opts.ownershipQueues;
     this.workCalendar = opts.workCalendar;
     this.recordReaderVisibleObjects = new Set(
@@ -11346,11 +11361,39 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       if (row && text) row.comment = text;
     };
     const rescue = adminRescueNoteOf(snapshot);
-    if (rescue) overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence));
+    if (rescue) {
+      const positionLabels = await this.notePositionLabels(adminRescuePositions(rescue), labels);
+      overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence, (name) => positionLabels.get(name)));
+    }
     const exclusion = submitterExclusionNoteOf(snapshot);
     if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
     const noApprover = noApproverNoteOf(snapshot);
     if (noApprover) overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence));
+  }
+
+  /**
+   * [#35418] The label a reader reads each of `positions` by: the reader's
+   * language pack (`positions.<name>.label`), else the position's declared
+   * `label` ({@link ApprovalServiceOptions.positionLabelSource}). A position
+   * neither answers is left out, and the note names it by its name. Display
+   * only: a failed read leaves the name standing, never fails the read.
+   */
+  private async notePositionLabels(
+    positions: readonly string[],
+    labels: ReaderLabels,
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const name of positions) {
+      let label = labels.positionLabel(name);
+      if (!label && this.positionLabelSource) {
+        try {
+          const declared = await this.positionLabelSource(name);
+          if (typeof declared === 'string' && declared.trim()) label = declared;
+        } catch { /* display-only — the name stands */ }
+      }
+      if (label) out.set(name, label);
+    }
+    return out;
   }
 
   /**

@@ -41,7 +41,10 @@
  *  - the flow: `flows.<flow>.label`, the `flows` face's own `label`;
  *  - the step: `flows.<flow>.approvals.<node_id>.label`, the face's key for an
  *    `approval` node's step label (`translation.zod.ts`, `approvals`);
- *  - the object: `objects.<object>.label` (`objectLabelKey`).
+ *  - the object: `objects.<object>.label` (`objectLabelKey`);
+ *  - [#35418] a position: `positions.<name>.label`, the security catalog face's
+ *    own `label` (`translation.zod.ts`, `positions`), which `translatePosition`
+ *    overlays on every served `position` document.
  *
  * `<flow>` is the request's `process_name` without its `flow:` prefix, the
  * `Flow.name` the engine hands the node (`$flowName`), and `<node_id>` is its
@@ -82,6 +85,11 @@ export function approvalStepLabelKey(flowName: string, nodeId: string): string {
   return `flows.${flowName}.approvals.${nodeId}.label`;
 }
 
+/** [#35418] The security catalog face's position label, `positions.<name>.label`. */
+export function positionLabelKey(positionName: string): string {
+  return `positions.${positionName}.label`;
+}
+
 /**
  * The flow a request's `process_name` names: `flow:account_approval` →
  * `account_approval`. `undefined` for anything without the prefix, or with
@@ -98,6 +106,8 @@ export interface ReaderLabels {
   flowLabel(flowName: string): string | undefined;
   stepLabel(flowName: string, nodeId: string): string | undefined;
   objectLabel(objectName: string): string | undefined;
+  /** [#35418] A position's label, `positions.<name>.label`. */
+  positionLabel(positionName: string): string | undefined;
   /**
    * [#25576] A catalog sentence (`messages.<id>`) rendered with `params`, by
    * the same `t()` and the same negotiated locale. Not memoised: the params
@@ -181,6 +191,7 @@ export function readerLabelsFor(
     flowLabel: (flowName) => pick(flowLabelKey(flowName)),
     stepLabel: (flowName, nodeId) => pick(approvalStepLabelKey(flowName, nodeId)),
     objectLabel: (objectName) => pick(objectLabelKey(objectName)),
+    positionLabel: (positionName) => pick(positionLabelKey(positionName)),
     sentence: (key, params) => render(key, params),
   };
 }
