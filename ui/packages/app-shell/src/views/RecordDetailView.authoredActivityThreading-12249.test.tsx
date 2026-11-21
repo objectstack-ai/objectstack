@@ -288,9 +288,10 @@ describe('an authored record:activity with enableThreading shows a stored reply 
 
   it('a read with a parent and one child shows the child under the parent, not as a row of its own', async () => {
     const { view } = await mount([PARENT, CHILD, LONE], { perms: answer(CREATE_ONLY) });
-    const parentRow = rootRowOf(view, PARENT_BODY);
+    // Collapsed until asked.
     expect(view.queryByText(CHILD_BODY)).toBeNull();
-    fireEvent.click(within(parentRow).getByRole('button', { name: /1 reply/ }));
+    // `rootRowOf` presses 「回复」, which expands the replies first (objectstack#36070).
+    const parentRow = rootRowOf(view, PARENT_BODY);
     expect(within(parentRow).getByText(CHILD_BODY)).toBeInTheDocument();
     expect(replyToggles(view)).toHaveLength(1);
   });
@@ -321,7 +322,8 @@ describe('an authored record:activity with enableThreading offers the reply inpu
     expect(dataSource.create).toHaveBeenCalledTimes(1);
     expect(dataSource.create.mock.calls[0][0]).toBe(COMMENT);
     expect(dataSource.create.mock.calls[0][1]).toMatchObject({ thread_id: THREAD, parent_id: 'c-lone', body: NEW_REPLY });
-    fireEvent.click(within(loneRow).getByRole('button', { name: /1 reply/ }));
+    // The reply opened behind 「回复」 expanded the thread (objectstack#36070).
+    expect(within(loneRow).getByRole('button', { name: /1 reply/ })).toBeInTheDocument();
     expect(within(loneRow).getByText(NEW_REPLY)).toBeInTheDocument();
   });
 
