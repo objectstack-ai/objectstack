@@ -675,12 +675,15 @@ import {
   ADVISORY_READ_SENDER_GATES,
   advisoryListCall,
   advisoryListDisplay,
+  advisoryListLinkShape,
   advisoryListNextCursor,
   advisoryListPadded,
   advisoryListPageFailure,
   advisoryListPagePath,
   advisoryListPlaintext,
   advisoryListProjection,
+  advisoryListRepoIdOf,
+  advisoryListRepoIdUnreadText,
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
@@ -1844,6 +1847,8 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
   const items = [];
   const seen = new Set();
   let status = null;
+  // The repository's own numeric id, read at most once, and only when a next link names the collection by one.
+  let repoId = null;
   for (const state of ADVISORY_LIST_STATES) {
     let after = null;
     let ended = false;
@@ -1863,8 +1868,17 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
         items.push(item);
       }
       // Every page's Link is read, a short one's too: a short page that still names a next page is not the last.
-      const next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state });
-      if (next.fail) return { ok: false, status: r.status, why: next.fail, notes: [] };
+      let next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state, repoId });
+      if (next.needsRepoId) {
+        // The link names the collection by a numeric id: read the repository's own id ONCE, never trust the link's.
+        const own = await rest(api, `/repos/${payload.repo}`, { method: 'GET' }, t);
+        if (own.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_LIST_UNREACHED, notes: [] };
+        repoId = advisoryListRepoIdOf(own, payload.repo);
+        if (repoId === null) return { ok: false, status: own.status, why: advisoryListRepoIdUnreadText(own.status), notes: [] };
+        next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state, repoId });
+      }
+      // A refusal prints the link's SHAPE beside the fixed sentence (`advisoryListLinkShape`): ⛔ never a value of it.
+      if (next.fail) return { ok: false, status: r.status, why: `${next.fail}; ${advisoryListLinkShape(r.link ?? null, { api, repo: payload.repo, state, repoId })}`, notes: [] };
       if (r.json.length < ADVISORY_LIST_PAGE_SIZE) {
         if (next.after !== null) return { ok: false, status: r.status, why: ADVISORY_LIST_SHORT_PAGE_NEXT, notes: [] };
         ended = true;
