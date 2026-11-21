@@ -671,7 +671,7 @@ export const CEILINGS = new Map([
   // and its home: Flow Types, the packaged-flow paragraphs, the Control Flow table, the
   // remainder of each served section, Flow Variables, Triggers and Assignment rules ->
   // `references/examples-flows.md`; the inbound-webhook section and the platform-code list
-  // of § Integrations -> `references/integration-recipes.md`. 28167 bytes (28147 priced) ->
+  // of § Integrations -> `references/integration-recipes.md`. 28192 bytes (28172 priced) ->
   // 8990 (8970 priced) -> 2243 tokens; the ceiling follows the file down to the measurement,
   // the ratchet's ordinary direction, which also pins the 9 KB budget from here on.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(8970 / 4)
@@ -1737,7 +1737,7 @@ export const CEILINGS = new Map([
   // each bound being a CEL envelope). 5957 -> 6170 bytes; the row moves +49, the
   // measured remainder, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(6170 / 4)
-  // 1543 -> 6627 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
+  // 1543 -> 6628 (#34770): RECEIVES what the router split moved out of SKILL.md, no new
   // teaching: the CEL-envelope note, `## Flow Types`, `## A flow an installed package
   // ships`, `## Flow Node Types` (the Control Flow table whole; of the External Integration
   // rows only what the entry's rows no longer say), the remainder of § notify, § Failure
@@ -1748,16 +1748,16 @@ export const CEILINGS = new Map([
   // `### Time-relative triggers — scheduled per-record date sweep` among them. PAID DOWN
   // FIRST: each moved section was cut to the complement of its SKILL.md section before it
   // landed, so nothing is stated twice (the full-section copies measured 29784 bytes). The
-  // file is 6170 -> 26506 bytes (+20336) -> 6627 tokens, ceiling +5084, pinned AT the
+  // file is 6170 -> 26509 bytes (+20339) -> 6628 tokens, ceiling +5085, pinned AT the
   // measurement; the three objectstack-automation files this change touches are 2980 bytes
-  // larger together (44699 -> 47679), the cost of the entry's first checks and routing
+  // larger together (44738 -> 47718), the cost of the entry's first checks and routing
   // table, and the nine files of both skills 53 bytes smaller.
   // Authority: the ruling of record that orders the entry file down to router size, decision
   // record 6943107981 S3 = A (this header: a ruling of record that orders text into a file
   // authorises its own measured delta), quoted in the PR body beside the standing 2026-10-27
   // ruling 「A:先削重复,余额按实测提高」 (record 6513306068); as the objectstack-ui rows of part 1.
-  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26506 / 4)
-  ['skills/objectstack-automation/references/examples-flows.md', 6627],
+  //   ceil($(wc -c < skills/objectstack-automation/references/examples-flows.md) / 4) == ceil(26509 / 4)
+  ['skills/objectstack-automation/references/examples-flows.md', 6628],
   // NEW FILE (card #27223): one recipe per integration archetype — OpenAPI with
   // a static key, remote MCP with a static header, plain REST, the vendor
   // callback, a hand-written document for a spec-less vendor — plus the two
@@ -1830,14 +1830,14 @@ export const CEILINGS = new Map([
   // tap A verbatim and untranslated: 「A:先削重复,余额按实测提高」 — the
   // standing path of ruling record 6513306068 on #27847.
   //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(10377 / 4)
-  // 2595 -> 3046 (#34770): RECEIVES, no new teaching, SKILL.md § Inbound webhook (`api`)
+  // 2595 -> 3055 (#34770): RECEIVES, no new teaching, SKILL.md § Inbound webhook (`api`)
   // triggers whole (the section recipe 4 already leaned on; its pointer to the Signature
   // bullet now stays inside this file) and the platform-code list of § Integrations are
-  // declared, not coded, as `## When the answer is platform code`. The file is 10362 ->
-  // 12183 bytes (+1821) -> 3046 tokens, the row's 4 tokens of headroom absorbed, ceiling
-  // +451, pinned AT the measurement. Authority as the `references/examples-flows.md` row.
-  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(12183 / 4)
-  ['skills/objectstack-automation/references/integration-recipes.md', 3046],
+  // declared, not coded, as `## When the answer is platform code`. The file is 10376 ->
+  // 12219 bytes (+1843) -> 3055 tokens, the row's 1 token of headroom absorbed, ceiling
+  // +460, pinned AT the measurement. Authority as the `references/examples-flows.md` row.
+  //   ceil($(wc -c < skills/objectstack-automation/references/integration-recipes.md) / 4) == ceil(12219 / 4)
+  ['skills/objectstack-automation/references/integration-recipes.md', 3055],
   // 5569 -> 5587 (card #26298, audit #26184 row A2): the approval config table
   // gains `excludeSubmitter` (refused beside `onEmptyApprovers: 'auto_approve'`),
   // +105 tokens. Paid down first: Best Practices 1 and 4 restated the Branching

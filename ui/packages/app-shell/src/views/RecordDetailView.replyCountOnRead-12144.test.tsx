@@ -244,20 +244,23 @@ afterEach(() => {
 describe('a stored reply shows under its parent on the default record page (objectui#12144)', () => {
   it('a read with a parent and one child shows the child under the parent, not as a row of its own', async () => {
     const { view } = await mount([PARENT, CHILD]);
-    const parentRow = rootRowOf(view, PARENT_BODY);
     // Collapsed until asked: the reply is not on screen yet, and not as a root row either.
     expect(view.queryByText(CHILD_BODY)).toBeNull();
-    const toggle = within(parentRow).getByRole('button', { name: /1 reply/ });
-    fireEvent.click(toggle);
+    // `rootRowOf` presses 「回复」, which expands the replies first (objectstack#36070).
+    const parentRow = rootRowOf(view, PARENT_BODY);
     expect(within(parentRow).getByText(CHILD_BODY)).toBeInTheDocument();
     expect(replyToggles(view)).toHaveLength(1);
+    // The count toggle still folds them away.
+    fireEvent.click(within(parentRow).getByRole('button', { name: /1 reply/ }));
+    expect(view.queryByText(CHILD_BODY)).toBeNull();
   });
 
   it('the count is the children in the read: two stored replies read as two', async () => {
     const second = { ...CHILD, id: 'c-child-2', body: 'Second stored reply', created_at: '2026-10-01T09:30:00.000Z' };
     const { view } = await mount([PARENT, CHILD, second]);
     const parentRow = rootRowOf(view, PARENT_BODY);
-    fireEvent.click(within(parentRow).getByRole('button', { name: /2 replies/ }));
+    // Expanded by 「回复」 (objectstack#36070); the toggle reads the count.
+    expect(within(parentRow).getByRole('button', { name: /2 replies/ })).toBeInTheDocument();
     expect(within(parentRow).getByText(CHILD_BODY)).toBeInTheDocument();
     expect(within(parentRow).getByText('Second stored reply')).toBeInTheDocument();
   });
@@ -288,7 +291,9 @@ describe('a comment read from the server offers the reply input where the caller
     expect(dataSource.create).toHaveBeenCalledTimes(1);
     expect(dataSource.create.mock.calls[0][0]).toBe(COMMENT);
     expect(dataSource.create.mock.calls[0][1]).toMatchObject({ thread_id: THREAD, parent_id: 'c-lone', body: NEW_REPLY });
-    fireEvent.click(within(loneRow).getByRole('button', { name: /1 reply/ }));
+    // The reply opened behind 「回复」 expanded the thread (objectstack#36070), so
+    // the new reply shows at once under its count.
+    expect(within(loneRow).getByRole('button', { name: /1 reply/ })).toBeInTheDocument();
     expect(within(loneRow).getByText(NEW_REPLY)).toBeInTheDocument();
   });
 

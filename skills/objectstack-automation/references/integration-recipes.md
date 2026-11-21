@@ -15,7 +15,7 @@ an unset ref leaves its instance degraded until set. Keep `automation` in
   the `rest` provider's single `request`) — authored on the entry, they are refused.
 - `connectorConfig.input` is a value-slot map: a top-level CEL envelope is evaluated, any other value kept as written,
   so a value from the record is a CEL envelope. The pre-dispatch `inputSchema`
-  judgement honours OpenAPI `nullable`, reads `null` on an optional parameter
+  judgement refuses an undeclared key, honours OpenAPI `nullable`, reads `null` on an optional parameter
   as absent and names each breached path. Text is never converted: cast a
   string-held id, `path: { dialect: 'cel', source: '{"petId": int(record.vendor_id)}' }`.
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
@@ -59,10 +59,10 @@ export const StripeBalanceSweep = defineFlow({
 ```
 
 `requires: ['automation', 'triggers']`. Convert Swagger 2.0 or YAML and
-dereference every `$ref` offline, in-document ones included: the loader skips a
-`$ref` parameter, request body or response and the derived schema silently
-loses it. `providerConfig.include` allowlists operation keys as the
-`mcp` provider's does (absent = every operation; a non-array or unknown entry is
+dereference every `$ref` offline, in-document too: a `$ref` response is
+silently lost; a `$ref` parameter or `$ref` / schemaless body is open input,
+sent unjudged. `providerConfig.include` allowlists operation keys as the
+`mcp` provider's does (absent = all; a non-array or unknown entry is
 fatal).
 
 ## 2 · Remote MCP server, static header — GitHub
@@ -187,19 +187,20 @@ Still never park a short-lived token behind a `bearer` ref.
 
 ## Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
-Endpoint: `POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on
-the **start node `config`**:
+`POST /api/v1/automation/hooks/:flowName/:hookId`, configured on the
+**start node `config`**:
 
 | `config` key | Purpose |
-|:-------------|:--------|
+|:--|:--|
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
 | `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
 
-- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
-- **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
-- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
-- The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
-- **A flow name two packages hold:** the bare hook above answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow is reached only at `POST /api/v1/automation/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env` there: a flow no package ships).
+- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
+- **Idempotency:** `x-idempotency-key` dedupes retries — delivery is at-least-once: author the flow idempotent.
+- **Queue-backed:** it ACKs `202` and enqueues; the flow runs on the consumer.
+- The JSON body is the flow's trigger record (`record.*` / bare fields) plus `params`.
+- **A flow name two packages hold:** the bare hook answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow answers only at `…/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env`: a flow no package ships).
+- **A disabled package's flow:** that `401` at both addresses, nothing enqueued; once enabled, a sender's retry gets `202`.
 
 ## When the answer is platform code
 
