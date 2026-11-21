@@ -408,12 +408,13 @@ describe('deleting an SSO provider names what it removes, and removes what the p
         providerId: PROVIDER,
         unlinkedUsers: 2,
         usersWithoutOtherSignIn: 1,
+        revokedSessions: 0,
         removedGroupMappings: 2,
         removedGrants: 2,
         dependentsRemoved: true,
         message:
           "Deleting SSO provider 'acme-okta' unlinked 2 users from it; 1 of them had no other sign-in method linked (no password, no other provider). "
-          + 'It removed 2 IdP group mappings and the 2 permission-set grants they gave.',
+          + 'It removed 2 IdP group mappings and the 2 permission-set grants they gave. It ended 0 live sessions signed in through it.',
       },
     });
 
@@ -523,6 +524,51 @@ describe('a projected grant whose provider no longer exists is removed at boot',
 
     const left = (await rows(s, 'sys_user_permission_set', { user_id: mia })).map((r) => r.id).sort();
     expect(left).toEqual(['ups_by_hand', 'ups_live_globex', 'ups_scim']);
+  });
+
+  it("revokes the live sessions signed in through a provider that is gone; another provider's, an unstamped one and an ended one stay as they are", async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    const later = new Date(Date.now() + 3_600_000);
+    const session = (id: string, provider: string | null, extra: Record<string, unknown> = {}) =>
+      residue(s.engine, 'sys_session', { id, user_id: mia, token: `tok_${id}`, expires_at: later, sso_provider_id: provider, ...extra });
+    await session('ses_gone', PROVIDER);
+    await session('ses_live_globex', OTHER);
+    await session('ses_password', null);
+    await session('ses_gone_ended', PROVIDER, { revoked_at: new Date(0), revoke_reason: 'user_revoked' });
+
+    await boot(s.engine);
+
+    const byId = new Map((await rows(s, 'sys_session', { user_id: mia })).map((r) => [r.id, r]));
+    expect(byId.get('ses_gone')?.revoke_reason).toBe('sso_provider_deleted');
+    expect(byId.get('ses_gone')?.revoked_at).toBeTruthy();
+    for (const id of ['ses_live_globex', 'ses_password']) expect(byId.get(id)?.revoked_at ?? null, id).toBeNull();
+    expect(byId.get('ses_gone_ended')?.revoke_reason).toBe('user_revoked');
+  });
+
+  it('what a delete whose cleanup failed left behind is removed at the next boot', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    const mia = await ssoOnlyUser(s, 'mia@acme.example');
+    await link(s, mia, PROVIDER, 'idp-sub-mia');
+    await residue(s.engine, 'sys_user_permission_set', { id: 'ups_mia', user_id: mia, permission_set: 'sales_reader', organization_id: ORG, reason: MARKER });
+    // The cleanup after the vendor's delete fails: the provider is gone, its grant is not.
+    const engine = s.engine as any;
+    const realDelete = engine.delete.bind(engine);
+    const spy = vi.spyOn(engine, 'delete').mockImplementation(async (object: unknown, ...rest: unknown[]) => {
+      if (object === 'sys_user_permission_set') throw new Error('driver unavailable');
+      return realDelete(object, ...rest);
+    });
+    const res = await postJson(s, '/sso/delete-provider', { providerId: PROVIDER });
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toMatchObject({ dependentsRemoved: false });
+    spy.mockRestore();
+    expect((await rows(s, 'sys_user_permission_set', { id: 'ups_mia' })).length).toBe(1);
+
+    await boot(s.engine);
+
+    expect(await rows(s, 'sys_user_permission_set', { id: 'ups_mia' })).toEqual([]);
   });
 });
 

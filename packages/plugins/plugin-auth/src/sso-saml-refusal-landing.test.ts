@@ -1579,13 +1579,34 @@ describe('deleting an identity provider ends the sessions signed in through it',
     return { rp, member, operator };
   }
 
+  const sessionRows = (rp: Rp) => (rp.engine.tables.get('sys_session') ?? []) as Array<Record<string, any>>;
+
   it('the session signed in through the deleted provider ends; one signed in through another provider does not', async () => {
     const { rp, member, operator } = await twoProviders();
+    // A returning sign-in through the same provider: its session is that provider's too.
+    const again = cookiesOf(await signInThroughIdp(rp, 'p.member@acme.com'));
+    expect((await sessionOf(rp, again))?.user?.email).toBe('p.member@acme.com');
+    expect(sessionRows(rp).map((r) => r.sso_provider_id).sort()).toEqual([PROVIDER_ID, PROVIDER_ID, OTHER]);
 
     const res = await remove(rp, PROVIDER_ID, operator);
-    expect(res.status, await res.clone().text()).toBe(200);
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ providerId: PROVIDER_ID, revokedSessions: 2, dependentsRemoved: true });
 
     expect(await sessionOf(rp, member)).toBeNull();
+    expect(await sessionOf(rp, again)).toBeNull();
+    expect((await sessionOf(rp, operator))?.user?.email).toBe('q.operator@globex.com');
+    const ended = sessionRows(rp).filter((r) => r.sso_provider_id === PROVIDER_ID);
+    expect(ended.map((r) => r.revoke_reason)).toEqual(['sso_provider_deleted', 'sso_provider_deleted']);
+    expect(sessionRows(rp).find((r) => r.sso_provider_id === OTHER)?.revoked_at).toBeFalsy();
+  });
+
+  it('CONTROL: a delete the vendor refuses ends no session', async () => {
+    const { rp, member, operator } = await twoProviders();
+    // The member does not own the other provider: the vendor refuses the delete.
+    const res = await remove(rp, OTHER, member);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect((await sessionOf(rp, member))?.user?.email).toBe('p.member@acme.com');
     expect((await sessionOf(rp, operator))?.user?.email).toBe('q.operator@globex.com');
   });
 });

@@ -70,6 +70,7 @@ import { LOCKED_ACCOUNT_ROW_FIELDS, refuseLockedAccountSession } from './auth-ma
 import { refuseDevSeedCredentialSession, stampDevSeedCredential } from './dev-seed-credential.js';
 import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking.js';
 import { PENDING_SSO_SOURCE } from './pending-sso-marker.js';
+import { settleSsoSignInProvider } from './sso-session-provider.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -466,6 +467,13 @@ export function composeDatabaseHooks(
   const hostSessionCreateAfter = (host as any)?.session?.create?.after;
   const sessionCreateAfter = async (session: any, ctx: any) => {
     const result = hostSessionCreateAfter ? await hostSessionCreateAfter(session, ctx) : undefined;
+    // A session an SSO sign-in minted records the provider it came through, so
+    // deleting that provider ends it (`sso-session-provider.ts`). Never throws.
+    await settleSsoSignInProvider(session, ctx, this.config.dataEngine as never, (message) => {
+      const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+      if (typeof sink?.error === 'function') sink.error(message);
+      else console.error(message);
+    });
     const sink = this.config.getAuditSink?.();
     if (sink) {
       const login = loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined);

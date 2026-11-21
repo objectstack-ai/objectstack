@@ -251,9 +251,26 @@ export const SysSession = ObjectSchema.create({
       // no longer admit the address the session was read from, judged on a
       // session read through a door (`enforceSessionControls`,
       // `plugin-auth/auth-manager-password-session-policy.ts`).
+      // `sso_provider_deleted`: the SSO provider the session was signed in
+      // through (`sso_provider_id`) was deleted, which ends the access it
+      // vouched for (`plugin-auth/sso-provider-lifecycle.ts`).
       description:
         'Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, '
-        + 'admin, organization_membership_ended, admin_password_reset, password_reset, …).',
+        + 'admin, organization_membership_ended, admin_password_reset, password_reset, sso_provider_deleted, …).',
+    }),
+
+    // ── How the session was obtained ─────────────────────────────
+    // Written once, by plugin-auth, on a session an SSO sign-in minted
+    // (`plugin-auth/sso-session-provider.ts`). Deleting that provider revokes
+    // the live sessions naming it.
+    sso_provider_id: Field.text({
+      label: 'SSO Provider',
+      required: false,
+      maxLength: 255,
+      readonly: true,
+      group: 'Session',
+      description:
+        'The SSO provider this session was signed in through, if any. Deleting that provider ends the session. System-managed.',
     }),
 
     // ── Active context (multi-org/team) ──────────────────────────
@@ -362,6 +379,7 @@ export const SysSession = ObjectSchema.create({
     { fields: ['token'], unique: 'global' },
     { fields: ['user_id'], unique: false },
     { fields: ['expires_at'], unique: false },
+    { fields: ['sso_provider_id'], unique: false },
   ],
 
   enable: {
