@@ -52,6 +52,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Icon",
         helpText: "Lucide icon name (e.g. \"building\", \"users\")"
       },
+      color: {
+        label: "Color",
+        helpText: "Color of the square the icon is drawn on, from the fixed palette. Unset draws gray."
+      },
       description: {
         label: "Description",
         helpText: "Developer documentation"

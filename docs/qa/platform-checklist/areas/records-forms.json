@@ -621,7 +621,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -659,7 +659,7 @@
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
         "on in_progress, with the export grant from fixtures.requires[3] bound, open the 视图设置 (View settings) popover beside the view name — the Display popover, named 选项 (Options) until objectstack#35878 moved it there — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
-        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the selection actions the view bar's right end shows (since #35554 the list page has no bottom bulk bar; since #35878 the selection face is the view bar's right end, with ⋮ still last), or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the selection actions the floating selection bar shows (since #35678 one bar floats at the bottom centre of the list and the view bar does not change on selection; over three actions the rest are under 「更多」), or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal",
         "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: no page bar (objectstack#35878): a 40px view bar with the object's icon and name, 「/」, ONE switcher trigger reading type icon → view name → record count → caret, and 「视图设置」 on the left, and the search icon, 「+ 新建」 and ⋮ (description, import, favorite) last on the right; under it a 40px condition row that is always drawn — dashed 「排序」 and 「筛选」 while no condition is set, one 「按 X 排序」 chip (with +N) and the filter chips once set — so the table's header does not move when a condition is set or reset; on the grid a 32px header and 33px rows at 13px; and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same two rows (objectstack#35548; the count beside the view name returns, after objectstack#34603 removed it)",
         "at 1280×800 with the sidebar open, read the left edges of the list page on All Tasks (a list whose columns fit) and on a list that scrolls sideways (stage one by showing every field of showcase_task through 视图设置 → 添加列): the view bar's object icon, the header's select-all box, each row's checkbox and the footer's record count each start 16px from the main area's left; the selection column is 40px on both lists and stays 40px, pinned at the left, after scrolling to the far right and back; no row shows a number and each row's checkbox shows without a hover; the view bar's last control, ⋮, ends its icon 16px from the right; at 375 wide no leading item sits closer than 12px to the left (objectstack#35663)"
@@ -832,7 +832,8 @@
           "change": "steps[11] and its acceptance clause added: the list page's left edge (objectstack#35663, epic #35547). The page bar's icon, the view bar's icon, the select-all box, every row's checkbox and the footer's count share one 16px line, the selection column is 40px at any width and under a sideways scroll, and the grid draws no row numbers (each row's checkbox shows at rest). No earlier clause changed",
           "ref": "#35663"
         },
-        { "revision": 13, "date": "2026-11-20", "change": "steps[6], [8], [10], [11] and the clauses acceptance[10] and acceptance[11] follow #35878: the list page draws two rows, not three. There is no page bar; the view bar leads with the object's icon and name, then the switcher and 「视图设置」 (was 「选项」), and ends with search, 「+ 新建」 and ⋮ last (#35678). The condition row is always drawn at 40px, so the frame clause reads condition row 40 where it read 'no condition row height', and the left-edge clause's first item is the view bar's object icon where it was the page bar's (the view icon no longer leads the bar). Filter N and Sort N left the bar for the condition row", "ref": "#35878" }
+        { "revision": 13, "date": "2026-11-20", "change": "steps[6], [8], [10], [11] and the clauses acceptance[10] and acceptance[11] follow #35878: the list page draws two rows, not three. There is no page bar; the view bar leads with the object's icon and name, then the switcher and 「视图设置」 (was 「选项」), and ends with search, 「+ 新建」 and ⋮ last (#35678). The condition row is always drawn at 40px, so the frame clause reads condition row 40 where it read 'no condition row height', and the left-edge clause's first item is the view bar's object icon where it was the page bar's (the view icon no longer leads the bar). Filter N and Sort N left the bar for the condition row", "ref": "#35878" },
+        { "revision": 14, "date": "2026-11-21", "change": "steps[8] follows #35678: the selection actions are in one bar floating at the bottom centre of the list, and the view bar no longer changes on selection; what Mark Done's visible gate does is unchanged", "ref": "#35678" }
       ]
     },
     {
@@ -3826,7 +3827,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3845,20 +3846,20 @@
       },
       "steps": [
         "open the showcase_task 'Bulk Actions' view (…/showcase_task/view/bulk_actions) with the scratch tasks in place and quick-search their shared prefix so the match set exceeds one page (e.g. 'QA bulk' → 55 rows); screenshot; note the list shows its first N loaded rows and the count beside the view name shows the server total M (M > N); the view declares no `pagination`, so it loads as it scrolls (#35554) — leave it at its first window",
-        "tick the header checkbox (every loaded row); the view bar's right end swaps to 「已选 N 条」 and offers 「已选当前加载的 N 条。」 with 「选择全部 M 条」 (en 'All N loaded records are selected.' / 'Select all M')",
-        "click 「选择全部 M 条」; the selection face's count reads the whole match set ('M selected (all matches)')",
+        "tick the header checkbox (every loaded row); the selection bar floats at the bottom centre of the list reading 「已选 N 条」 and offers 「选择全部 M 条」 (en 'N selected' / 'Select all M'); the view bar does not change",
+        "click 「选择全部 M 条」; the selection bar's count reads the whole match set ('M selected (all matches)')",
         "dispatch a bulk action; capture the requests — resolveBulkRows fans out a paged find (dropping $top/$skip, paging 500) collecting every matching id ACROSS pages",
         "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
         "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}} (the grid hands them to the action runner as params._selectedIds, ui/packages/plugin-grid/src/ObjectGrid.tsx; since #27611 the console sends a declared same-origin api action through the door, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
         "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)",
-        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
+        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the selection bar and its count (with its title) before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
       ],
       "acceptance": [
         {
-          "clause": "the select-all offer in the view bar's selection face reports the SERVER total (totalMatching from the find result.total), not the loaded row count — and only appears when every loaded row is selected and more matching rows exist past them",
+          "clause": "the select-all offer in the floating selection bar reports the SERVER total (totalMatching from the find result.total), not the loaded row count — and only appears when every loaded row is selected and more matching rows exist past them",
           "oracle": "network",
-          "verify": "the offer's count equals the data request's response total (SelectionPageBar totalMatching; ListView hands result.total down as rowCount, read by ObjectGrid as resolvedTotalMatching)",
-          "evidence": "banner screenshot + the find response total"
+          "verify": "the offer's count equals the data request's response total (BulkActionBar totalMatching; ListView hands result.total down as rowCount, read by ObjectGrid as resolvedTotalMatching)",
+          "evidence": "selection bar screenshot + the find response total"
         },
         {
           "clause": "select-all-matching resolves EVERY matching id across pages: the dispatched set equals a direct filtered API count, not just the visible page (paged fan-out with $top/$skip dropped, capped at 5000)",
@@ -3885,15 +3886,15 @@
           "evidence": "the collected-set size vs the server total"
         },
         {
-          "clause": "past the cap the banner names it: when the server total exceeds HARD_CAP 5000, the cross-page offer, the all-selected line and the selected count say the action covers the first 5000 (e.g. 「将处理前 5000 条」, 'the first 5000 will be processed'), never the uncapped total alone — a banner claiming all M matching while the dispatch stops at 5000 is a silent partial execution",
+          "clause": "past the cap the selection bar names it: when the server total exceeds HARD_CAP 5000, the cross-page offer, the all-selected line and the selected count say the action covers the first 5000 (e.g. 「将处理前 5000 条」, 'the first 5000 will be processed'), never the uncapped total alone — a bar claiming all M matching while the dispatch stops at 5000 is a silent partial execution",
           "oracle": "dom",
-          "verify": "with more than 5000 matching rows (steps[7]), after a screenshot confirms the bar rendered: read the bulk-cross-page-banner text and the selected count before and after Select all; PASS when each names the 5000 cap, FAIL when any presents the uncapped total M as the set the action will process. The fan-out itself is acceptance[4]'s; this clause scores only what the banner tells the user",
-          "evidence": "the banner screenshot and its DOM text before and after Select all, the find response total, the collected-set size"
+          "verify": "with more than 5000 matching rows (steps[7]), after a screenshot confirms the bar rendered: read the bulk-select-all-matching offer text and the bulk-selection-count chip (its text and its title) before and after Select all; PASS when each names the 5000 cap, FAIL when any presents the uncapped total M as the set the action will process. The fan-out itself is acceptance[4]'s; this clause scores only what the bar tells the user",
+          "evidence": "the selection bar screenshot and its DOM text before and after Select all, the find response total, the collected-set size"
         }
       ],
       "negative": [
         "a 'select all matching' that only acts on the RENDERED page (ids = page rows, not the server match set) is THE FAIL this item extends list-view-capabilities (page-local bulk) to catch",
-        "a banner total that disagrees with the filtered API count is a FAIL",
+        "a selection bar total that disagrees with the filtered API count is a FAIL",
         "a clear that leaves the row checkboxes ticked while the toolbar empties (or vice versa) is a FAIL (#3056 drift)"
       ],
       "traps": [
@@ -3905,7 +3906,7 @@
         "ref": "objectui: packages/plugin-grid/src/__tests__/{objectBulkActionDispatch,BulkActionBar,bulkActionRefresh}.test.tsx — component layer, jsdom, over a mocked data source. None of the three exercises resolveBulkRows' paged fan-out or its HARD_CAP, so acceptance[1], acceptance[4] and negative[0] are not pinned by them. packages/plugin-grid/src/__tests__/bulkFanoutHostParams.test.tsx, outside this list, does drive that fan-out at the same component layer (500-record pages that replay the host's query, and 'still honours HARD_CAP over a match set larger than the cap'): it is evidence beside those clauses, never their pass, because their oracle is the dispatched set against a live filtered count (RUNNER rule 6). bulkActionRefresh.test.tsx's 'bulk bar Clear resets both selection sources' case asserts acceptance[3] and negative[2] in jsdom; their dom oracle wants the rendered page, screenshot first"
       },
       "source": [
-        "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/BulkActionBar.tsx (cross-page banner)",
+        "objectui: packages/plugin-grid/src/ObjectGrid.tsx (selectAllMatching, resolveBulkRows paged fan-out + HARD_CAP, resetSelection #3056, totalMatching), packages/plugin-grid/src/components/SelectionBar.tsx (the selection bar: count chip, select-all-matching offer)",
         "examples/app-showcase/src/ui/views/task.view.ts#bulk_actions (the 'Bulk Actions' view: bulkActions + the aggregate bulkActionDefs entry — this item's fixture since #23169; the stock 10 tasks need the scratch rows to exceed a page) — not examples/app-showcase/src/data/seed/index.ts's Northwind 26, which page the Account → Contacts related list (objectui#2711)",
         "PENDING-GAPS §C bulk-select-all-matching; cross-ref records-forms.list-view-capabilities (bulk-actions, page-local)"
       ],
@@ -3970,7 +3971,8 @@
           "change": "steps[0]–[2] and acceptance[0] follow #35554: the bottom bulk bar is retired on the list page and the selection is shown in the page bar (「已选 N 条」, the cross-window offer 「已选当前加载的 N 条。」 + 「选择全部 M 条」); a list with no declared `pagination` loads as it scrolls, so 'the whole page' is now 'every loaded row'. The cap strings of acceptance[5] are unchanged and the page bar names the cap with the same keys. Read at base 93fa4f97",
           "ref": "#35554"
         },
-        { "revision": 11, "date": "2026-11-20", "change": "steps[1], steps[2] and the clause acceptance[0] follow #35878: the list page has no page bar, so the selection face (「已选 N 条」, the cross-window offer) is the view bar's right end, with ⋮ still last. What it reports is unchanged", "ref": "#35878" }
+        { "revision": 11, "date": "2026-11-20", "change": "steps[1], steps[2] and the clause acceptance[0] follow #35878: the list page has no page bar, so the selection face (「已选 N 条」, the cross-window offer) is the view bar's right end, with ⋮ still last. What it reports is unchanged", "ref": "#35878" },
+        { "revision": 12, "date": "2026-11-21", "change": "steps[1]–[3], acceptance[0], acceptance[5], the negative and the source ref follow #35678: the selection is shown in one bar floating at the bottom centre of the list (「已选 N 条」, ×, 「选择全部 M 条」) and the view bar no longer changes; the cross-window sentence is gone, and past the cap the count chip's text and title carry the cap strings acceptance[5] reads. What it reports is unchanged", "ref": "#35678" }
       ]
     },
     {
@@ -7407,6 +7409,116 @@
           "date": "2026-11-20",
           "change": "initial — reader arrangement moved from the related cards to the tabs (#35783, after #35595 retired the cards), read from source on the PR branch; no live run made",
           "ref": "#35783"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.record-open-path-and-header",
+      "title": "An object's list opens a record one way — the name opens the full page, the hover icon beside it the side drawer — and the record's header is two rows: the way through the list (↑ ↓, 「第 N 条，共 M 条 · 视图名」, ✕) over the record (its name, chips and up to three actions), with the tabs right under it",
+      "since": "v18.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase (the live lane's `ui/e2e/live/ci/start-backend.sh`, or `pnpm dev -- --fresh --seed-admin`)",
+          "the showcase_account list (14 seeded accounts, a synthesized record page with a tab row) and the showcase_task list (its showcase_task_detail page authors three record_header actions: Mark Done, Log Time, Archive)"
+        ]
+      },
+      "steps": [
+        "at 1280×900 open the showcase_account list and click the second account's name; read the URL and the header's two rows",
+        "reload the page; read the navigation row again; press ↓; then click the view's name (「All Records」) in the navigation row",
+        "on the list, hover the second row and click the 「在侧边打开」 icon beside the name; read the URL, the drawer's edges and its header; press ↓ in the drawer, then its 「整页打开」",
+        "paste the address of an account record into a fresh tab (no list behind it); read the navigation row; click ✕",
+        "open a backlog task from the showcase_task list and read the record row's buttons; open a task in the drawer at 820 px wide and read them again",
+        "at 390×844 with touch, open the account list and tap a record"
+      ],
+      "acceptance": [
+        {
+          "clause": "the record's name opens the full page and nothing else does: no reader setting and no `navigation.mode` picks the drawer instead",
+          "oracle": "dom",
+          "verify": "after steps[0] the URL is …/showcase_account/record/<id> with no ?recordId=, and no drawer card ([data-record-drawer-card]) is drawn",
+          "evidence": "the URL and a screenshot"
+        },
+        {
+          "clause": "the page remembers the list it came from, across a reload: ↑ ↓ walk the list's rows in its order, the navigation row reads 「2 of 14 · All Records」, and the view's name goes back to the list",
+          "oracle": "dom",
+          "verify": "[data-record-top-bar-position] reads '2 of 14' and [data-record-top-bar-scope] 'All Records' before and after the reload; after ↓ the position reads '3 of 14'; the scope click lands on the list",
+          "evidence": "the navigation row before and after the reload"
+        },
+        {
+          "clause": "the icon beside the name, shown while the row is hovered, opens the record in a side drawer over the list, a floating card 8 px off the window's top, right and bottom edges, with 「整页打开」 and ✕ and no full-width state",
+          "oracle": "dom",
+          "verify": "the icon's opacity is 0 at rest and 1 on hover; after the click the URL carries ?recordId=, the list is still drawn, the card's box is 8 px from three edges with a rounded corner, and its frame holds exactly two buttons",
+          "evidence": "the drawer screenshot"
+        },
+        {
+          "clause": "the header is two rows on the page and in the drawer: a 40 px navigation row (the stepper and position, or the object when no list is behind it; ✕ at its far right) over a 48 px record row (icon, the name at 16 px, chips, actions)",
+          "oracle": "dom",
+          "verify": "[data-record-top-bar-rows='2'] holds [data-record-top-bar-nav] (40 px) above [data-record-top-bar-record] (48 px); the close button ends within 12 px of the row's right edge; with no list behind it there is no [data-record-top-bar-stepper] and the object crumb shows, and ✕ goes to the object's list",
+          "evidence": "the three figure-40 screenshots"
+        },
+        {
+          "clause": "the record row shows three authored actions by default, and folds those that do not fit its width into ⋯ rather than wrapping",
+          "oracle": "dom",
+          "verify": "on a backlog task Mark Done, Log Time and Archive stand inline beside Edit and ⋯; in the 820 px drawer every visible button of [data-record-top-bar-actions] shares one top",
+          "evidence": "both screenshots"
+        },
+        {
+          "clause": "the page's first row (its tab row, or a stage bar) starts right under the header, with no blank band",
+          "oracle": "dom",
+          "verify": "the tab row's top minus the header's bottom is at most 12 px, on the page and in the drawer",
+          "evidence": "the measured gap"
+        },
+        {
+          "clause": "on a phone there is no side-drawer icon; a tap opens the page, whose one-row bar still knows the list",
+          "oracle": "dom",
+          "verify": "no [data-testid='record-open-in-panel'] is drawn; after the tap the URL is the record's page and the bar reads '2 / 14', also after a reload",
+          "evidence": "the phone screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha",
+          "oracle": "test",
+          "verify": "run ui/e2e/live/record-open-path-35854.spec.ts and ui/e2e/live/record-topbar-35853.spec.ts with the live config (playwright.live.config.ts), and ui/packages/app-shell/src/views/ObjectView.recordOpenPath-35854.test.tsx and ui/packages/components/src/__tests__/record-top-bar-two-rows-35853.test.tsx from ui/ with vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the Playwright and vitest summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a name click that opens the drawer, or a 「打开记录：抽屉 / 整页」 setting anywhere in the list's view settings, is a FAIL",
+        "a page opened from a list that loses its position or view name on a reload is a FAIL",
+        "a list view declaring navigation.mode 'none' (or preventNavigation) whose rows open a record is a FAIL: 'none' still means rows open nothing",
+        "a blank band of more than 12 px between the header and the tab row is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "shared-browser-tab"
+      ],
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/live/record-open-path-35854.spec.ts (name → page, hover icon → drawer, provenance across a reload, phone), ui/e2e/live/record-topbar-35853.spec.ts (the two rows on the page and in the drawer, three actions, the width fold, the gap above the tabs, the phone bar); both in the live lane, not in the required `:ci` allowlist"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/objectViewRecordNavigation.ts",
+        "ui/packages/app-shell/src/views/objectViewOpenAsPage.tsx#OpenInSidePanelButton",
+        "ui/packages/app-shell/src/views/recordDrawerStack.tsx#useRecordPageReturn",
+        "ui/packages/components/src/custom/record-top-bar.tsx#RecordTopBar",
+        "ui/packages/components/src/custom/navigation-overlay.tsx",
+        "ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions",
+        "ui/packages/app-shell/src/views/RecordDetailView.tsx",
+        "#35854",
+        "#35853"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-20",
+          "change": "initial — the one open path (#35854, maintainer ruling 「废弃」 on the open preference and navigation.mode) and the two-row record header (#35853, with the gap above the tabs of #35745), read from the PR branch and driven live against the showcase",
+          "ref": "#35854"
         }
       ]
     }

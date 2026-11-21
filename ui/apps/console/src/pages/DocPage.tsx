@@ -20,7 +20,7 @@ import { DocsNav, type DocsNavBook } from './DocsNav';
 import { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
 import { useActiveHeading } from './useActiveHeading';
-import { articleNeighbours, type BookArticle } from './docs-reading';
+import { articleNeighbours, bookHoldsArticle, type BookArticle } from './docs-reading';
 import { resolveBookTree, bookSlug, bookNamedBy, homeBook, labelUncategorized, pkgOfBook, type ResolvedBook } from './book-nav';
 
 interface DocItem {
@@ -282,9 +282,26 @@ export default function DocPage() {
   // context. Only a segment NO book answers by slug is consulted, so every
   // reader URL that finds its book today keeps its answer.
   const namedBook = useMemo(() => (slug && !resolvedBook ? bookNamedBy(slug, books) : null), [slug, resolvedBook, books]);
+  // objectstack#35424 — a reader URL whose book does not hold its doc (a
+  // hand-typed `/docs/BOOK_A/DOC_OF_BOOK_B`) reads in the doc's own book: it is
+  // redirected there once the doc has loaded, so the column, the path above
+  // the article and the pager all describe the book the article is in. With
+  // no book that holds it, the page draws no pager (see below).
+  const inBook = resolvedBook ? bookHoldsArticle(resolvedBook, name) : false;
+  const ownBook = useMemo(() => {
+    if (state !== 'ready' || doc?.name !== name || !name || !resolvedBook || inBook) return null;
+    const home = homeBook(name, books, allDocs, appName);
+    if (!home || bookSlug(home) === slug) return null;
+    const resolved = resolveBookTree(home, allDocs, undefined, authoredBooks);
+    return bookHoldsArticle(resolved, name) ? home : null;
+  }, [state, doc, name, resolvedBook, inBook, books, allDocs, authoredBooks, appName, slug]);
 
   if (namedBook && name) {
     return <Navigate to={{ pathname: `${base}/${bookSlug(namedBook)}/${name}`, hash }} replace />;
+  }
+
+  if (ownBook && name) {
+    return <Navigate to={{ pathname: `${base}/${bookSlug(ownBook)}/${name}`, hash }} replace />;
   }
 
   if (state === 'loading') {
@@ -297,7 +314,7 @@ export default function DocPage() {
 
   if (state === 'missing') {
     return (
-      <DocShell breadcrumb={name}>
+      <DocShell>
         <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
           <FileQuestion className="h-10 w-10 text-muted-foreground" />
           <h1 className="text-lg font-semibold">Documentation not found</h1>
@@ -311,12 +328,12 @@ export default function DocPage() {
   }
 
   if (state === 'refused') {
-    return <DocRefusal name={name} message={errorMessage} />;
+    return <DocRefusal message={errorMessage} />;
   }
 
   if (state === 'conflict') {
     return (
-      <DocShell breadcrumb={name}>
+      <DocShell>
         <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
           <Layers className="h-10 w-10 text-muted-foreground" />
           <h1 className="text-lg font-semibold">
@@ -357,7 +374,7 @@ export default function DocPage() {
 
   if (state === 'error') {
     return (
-      <DocShell breadcrumb={name}>
+      <DocShell>
         <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
           <AlertCircle className="h-10 w-10 text-destructive" />
           <h1 className="text-lg font-semibold">Failed to load documentation</h1>
@@ -381,7 +398,7 @@ export default function DocPage() {
   const docsLabel = t('help.documentation', { defaultValue: 'Documentation' });
 
   return (
-    <DocShell breadcrumb={doc?.label ?? name} backLink={false}>
+    <DocShell backLink={!docsNav}>
       {/* objectstack#35424 — the docs column is the page's one navigation.
         * Inside an app it sits where the app menu would, full height beside
         * the article; on narrow screens it folds into a disclosure above it. */}
@@ -441,7 +458,7 @@ export default function DocPage() {
                   />
                 </MermaidEnlargeContext.Provider>
               </article>
-              {resolvedBook ? (
+              {resolvedBook && inBook ? (
                 <ArticlePager
                   previous={neighbours.previous}
                   next={neighbours.next}

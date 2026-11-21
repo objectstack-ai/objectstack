@@ -261,6 +261,10 @@ const ja = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '必須項目を入力',
+    requiredPromptDescription: 'この変更により、以下の項目が必須になります。入力すると変更と一緒に保存されます。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} を開く',
@@ -332,6 +336,8 @@ const ja = {
     options: {
       empty: "選択できる項目がありません",
       selectFirst: "まず {{fields}} を選択してください",
+      search: "検索…",
+      noMatches: "一致する項目がありません",
     },
     objectRef: {
       loading: "オブジェクトを読み込み中…",
@@ -416,6 +422,8 @@ const ja = {
     datePicker: {
       today: "今日",
       tomorrow: "明日",
+      nextWeek: "来週",
+      clearPick: "クリア",
       clear: "日付をクリア",
       openCalendar: "カレンダーを開く",
       time: "時刻",
@@ -430,6 +438,11 @@ const ja = {
     },
     tags: {
       placeholder: "入力してEnterキーで追加…",
+      add: "「{{value}}」を追加",
+    },
+    color: {
+      swatches: "色",
+      custom: "カスタムカラー",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2761,6 +2774,7 @@ const ja = {
     },
     localeSwitcher: {
       label: "言語",
+      appContentDefault: "アプリの内容は既定の言語で表示されます",
     },
     system: {
       aiApprovals: {
@@ -3305,6 +3319,19 @@ const ja = {
     backToApp: '{{app}}に戻る',
     searchDocs: 'ドキュメントを検索',
     noDocsMatch: '一致する記事はありません。',
+    docsIndexSubtitle: 'インストール済みアプリに付属するガイドです。',
+    searchAllDocs: 'すべてのドキュメントを検索',
+    articleCount: '{{count}} 件の記事',
+    articleCount_one: '{{count}} 件の記事',
+    articleCount_other: '{{count}} 件の記事',
+    otherDocs: 'その他のドキュメント',
+    noDocsInstalled: 'ドキュメントはまだインストールされていません。',
+    loadDocsFailed: 'ドキュメントを読み込めませんでした',
+    searchingDocs: '検索中…',
+    searchResultCount: '{{count}} 件の記事が見つかりました',
+    searchResultCount_one: '{{count}} 件の記事が見つかりました',
+    searchResultCount_other: '{{count}} 件の記事が見つかりました',
+    docsSearchFailed: 'ドキュメントを検索できませんでした: {{message}}',
     docsNavigation: 'ドキュメントのナビゲーション',
     docsBreadcrumb: 'ドキュメントの階層',
     articlePager: '前後の記事',
@@ -4500,6 +4527,7 @@ const ja = {
     loadedOf: '{{total}} 件中 {{loaded}} 件を表示',
     actEscalate: 'SLAエスカレーション',
     systemSlaActor: 'システム（SLA）',
+    systemActor: 'システム',
     reassignBtn: '引き継ぎ',
     reassignTitle: 'この承認を他の人に引き継ぎますか？',
     reassignBody: 'あなたの承認枠は選択した相手に移ります。相手に通知され、すぐに対応できます。',
@@ -4528,6 +4556,7 @@ const ja = {
     actRemind: 'リマインド',
     actRequestInfo: '追加情報を要求',
     actComment: 'コメント',
+    actSystemNote: 'システムからのお知らせ',
     stepProgress: '承認ステップ',
     prevRequest: '前へ',
     nextRequest: '次へ',
@@ -5453,6 +5482,57 @@ const ja = {
     sourceDefault: "組織の既定値",
     sourceBuiltin: "既定",
     sourceMandatory: "必須",
+  },
+  slackLink: {
+    title: "Slack のダイレクトメッセージ",
+    loading: "Slack の連携を読み込んでいます…",
+    loadFailed: "Slack の連携を読み込めませんでした: {{reason}}",
+    notInstalled: "あなたの組織には Slack がインストールされていません。連携する前に、組織の管理者がセットアップでインストールします。",
+    revoked: "Slack が {{workspace}} のトークンを拒否したため、現在 Slack には通知が届きません。組織の管理者がセットアップでトークンを再設定します。",
+    notLinked: "{{workspace}} のあなたの Slack ユーザーを連携すると、通知をダイレクトメッセージで受け取れます。",
+    connect: "Slack と連携",
+    noMatch: "Slack は {{workspace}} のユーザーを提案しませんでした。連携が提案されるのは、確認済みのメールアドレスについて、同じメールアドレスを持ち、ここで他の誰とも連携していないそのワークスペースの Slack ユーザーがいる場合だけです。",
+    proposed: "Slack が {{workspace}} であなたの確認済みメールアドレスのユーザーを見つけました。確認すると通知をダイレクトメッセージで受け取れます。Slack ユーザー名は確認後に表示されます。",
+    confirm: "確認",
+    cancel: "キャンセル",
+    proposeAgain: "新しい提案を取得",
+    linked: "{{workspace}} に {{slackUser}} として連携済みです。",
+    linkedAt: "連携日時 {{at}}",
+    disconnect: "連携を解除",
+  },
+  slackSetup: {
+    title: "Slack のダイレクトメッセージ",
+    subtitle: "組織の Slack アプリをインストールして通知を Slack のダイレクトメッセージで届け、連携しているユーザーを管理します。",
+    notAllowed: "Slack の管理には、現在の組織での {{capability}} 権限が必要です。この権限は組織の管理者が持っています。",
+    loading: "Slack を読み込んでいます…",
+    install: "インストール",
+    workspace: "{{workspace}}（{{workspaceId}}）にインストール済み",
+    statusActive: "有効",
+    statusRevoked: "トークン拒否",
+    notInstalled: "この組織には Slack がインストールされていません。",
+    revokedHint: "Slack がトークンを拒否したため、Slack には何も配信されません。再開するにはトークンを再設定してください。",
+    token: "ボットトークン",
+    tokenReplace: "新しいボットトークン",
+    tokenHint: "Slack アプリのボットトークンです。保存前に Slack が確認します。暗号化して保存され、再び表示されることはありません。",
+    installAction: "インストール",
+    saveToken: "トークンを保存",
+    installed: "Slack が {{workspace}} のトークンを受け付けました。",
+    uninstall: "Slack を削除",
+    uninstallTitle: "この組織から Slack を削除しますか？",
+    uninstallBody: "{{workspace}} へのすべての連携が削除され、連携していた各ユーザーにはアプリ内メッセージとメールで通知されます。今後、Slack には誰にも通知が届きません。",
+    uninstalled: "この組織から Slack を削除しました。",
+    links: "連携しているユーザー",
+    noLinks: "Slack と連携しているユーザーはいません。",
+    linksCapped: "サーバーが返す連携は最大 {{cap}} 件のため、この一覧は不完全な可能性があります。",
+    colPerson: "ユーザー",
+    colSlackUser: "Slack ユーザー",
+    colLinkedAt: "連携日時",
+    proposedLink: "提案済み、未確認",
+    remove: "削除",
+    removeTitle: "この Slack 連携を削除しますか？",
+    removeBody: "{{person}} にはアプリ内メッセージとメールで通知され、通知設定から再度連携できます。",
+    linkRemoved: "{{person}} の Slack 連携を削除しました。",
+    cancel: "キャンセル",
   },
 };
 

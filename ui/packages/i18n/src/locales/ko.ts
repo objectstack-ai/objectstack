@@ -261,6 +261,10 @@ const ko = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '필수 필드 입력',
+    requiredPromptDescription: '이 변경으로 아래 필드가 필수가 됩니다. 입력하면 변경 내용과 함께 저장됩니다.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} 열기',
@@ -332,6 +336,8 @@ const ko = {
     options: {
       empty: "선택할 수 있는 옵션이 없습니다",
       selectFirst: "먼저 {{fields}}을(를) 선택하세요",
+      search: "검색…",
+      noMatches: "일치하는 옵션이 없습니다",
     },
     objectRef: {
       loading: "객체를 불러오는 중…",
@@ -416,6 +422,8 @@ const ko = {
     datePicker: {
       today: "오늘",
       tomorrow: "내일",
+      nextWeek: "다음 주",
+      clearPick: "지우기",
       clear: "날짜 지우기",
       openCalendar: "달력 열기",
       time: "시간",
@@ -430,6 +438,11 @@ const ko = {
     },
     tags: {
       placeholder: "입력 후 Enter 키로 추가…",
+      add: "“{{value}}” 추가",
+    },
+    color: {
+      swatches: "색상",
+      custom: "사용자 지정 색상",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
@@ -2759,6 +2772,7 @@ const ko = {
     },
     localeSwitcher: {
       label: "언어",
+      appContentDefault: "앱 콘텐츠는 기본 언어로 표시됩니다",
     },
     system: {
       aiApprovals: {
@@ -3303,6 +3317,19 @@ const ko = {
     backToApp: '{{app}}(으)로 돌아가기',
     searchDocs: '문서 검색',
     noDocsMatch: '일치하는 문서가 없습니다.',
+    docsIndexSubtitle: '설치된 앱에 포함된 가이드입니다.',
+    searchAllDocs: '모든 문서 검색',
+    articleCount: '문서 {{count}}개',
+    articleCount_one: '문서 {{count}}개',
+    articleCount_other: '문서 {{count}}개',
+    otherDocs: '기타 문서',
+    noDocsInstalled: '아직 설치된 문서가 없습니다.',
+    loadDocsFailed: '문서를 불러오지 못했습니다',
+    searchingDocs: '검색 중…',
+    searchResultCount: '문서 {{count}}개 찾음',
+    searchResultCount_one: '문서 {{count}}개 찾음',
+    searchResultCount_other: '문서 {{count}}개 찾음',
+    docsSearchFailed: '문서를 검색할 수 없습니다: {{message}}',
     docsNavigation: '문서 탐색',
     docsBreadcrumb: '문서 경로',
     articlePager: '이전 및 다음 문서',
@@ -4497,6 +4524,7 @@ const ko = {
     loadedOf: '{{total}}개 중 {{loaded}}개 로드됨',
     actEscalate: 'SLA 에스컬레이션',
     systemSlaActor: '시스템(SLA)',
+    systemActor: '시스템',
     reassignBtn: '재할당',
     reassignTitle: '이 승인을 다른 사람에게 넘길까요?',
     reassignBody: '승인 슬롯이 선택한 사람에게 이동하며, 상대는 알림을 받고 즉시 처리할 수 있습니다.',
@@ -4525,6 +4553,7 @@ const ko = {
     actRemind: '독촉',
     actRequestInfo: '보완 요청',
     actComment: '댓글',
+    actSystemNote: '시스템 안내',
     stepProgress: '승인 단계',
     prevRequest: '이전',
     nextRequest: '다음',
@@ -5450,6 +5479,57 @@ const ko = {
     sourceDefault: "조직 기본값",
     sourceBuiltin: "기본값",
     sourceMandatory: "필수",
+  },
+  slackLink: {
+    title: "Slack 다이렉트 메시지",
+    loading: "Slack 연결을 읽는 중…",
+    loadFailed: "Slack 연결을 읽을 수 없습니다: {{reason}}",
+    notInstalled: "조직에 Slack이 설치되어 있지 않습니다. 연결하기 전에 조직 관리자가 설정에서 설치해야 합니다.",
+    revoked: "Slack이 {{workspace}}의 토큰을 거부하여 현재 Slack으로 알림이 전송되지 않습니다. 조직 관리자가 설정에서 토큰을 다시 설정합니다.",
+    notLinked: "{{workspace}}의 Slack 사용자를 연결하면 알림을 다이렉트 메시지로 받을 수 있습니다.",
+    connect: "Slack 연결",
+    noMatch: "Slack이 {{workspace}}에서 사용자를 제안하지 않았습니다. 연결은 인증된 이메일에 대해서만, 같은 이메일을 가진 해당 워크스페이스의 Slack 사용자 중 이곳에서 다른 사람과 연결되지 않은 사용자에게만 제안됩니다.",
+    proposed: "Slack이 {{workspace}}에서 인증된 이메일을 가진 사용자를 찾았습니다. 확인하면 알림을 다이렉트 메시지로 받습니다. Slack 사용자는 확인한 후에 표시됩니다.",
+    confirm: "확인",
+    cancel: "취소",
+    proposeAgain: "새 제안 요청",
+    linked: "{{workspace}}에 {{slackUser}}(으)로 연결되었습니다.",
+    linkedAt: "연결 시각 {{at}}",
+    disconnect: "연결 해제",
+  },
+  slackSetup: {
+    title: "Slack 다이렉트 메시지",
+    subtitle: "조직의 Slack 앱을 설치하여 알림이 Slack 다이렉트 메시지로 전달되도록 하고, 연결된 사용자를 관리합니다.",
+    notAllowed: "Slack을 관리하려면 현재 조직에서 {{capability}} 권한이 필요하며, 이 권한은 조직 관리자에게 있습니다.",
+    loading: "Slack을 읽는 중…",
+    install: "설치",
+    workspace: "{{workspace}}({{workspaceId}})에 설치됨",
+    statusActive: "활성",
+    statusRevoked: "토큰 거부됨",
+    notInstalled: "이 조직에는 Slack이 설치되어 있지 않습니다.",
+    revokedHint: "Slack이 토큰을 거부하여 Slack으로 아무것도 전송되지 않습니다. 재개하려면 토큰을 다시 설정하세요.",
+    token: "봇 토큰",
+    tokenReplace: "새 봇 토큰",
+    tokenHint: "Slack 앱의 봇 토큰입니다. 저장하기 전에 Slack이 확인하며, 암호화되어 저장되고 다시 표시되지 않습니다.",
+    installAction: "설치",
+    saveToken: "토큰 저장",
+    installed: "Slack이 {{workspace}}의 토큰을 수락했습니다.",
+    uninstall: "Slack 제거",
+    uninstallTitle: "이 조직에서 Slack을 제거하시겠습니까?",
+    uninstallBody: "{{workspace}}에 대한 모든 연결이 제거되며, 연결된 각 사용자에게 앱 내 메시지와 이메일로 알립니다. 이후 Slack으로는 누구에게도 알림이 전송되지 않습니다.",
+    uninstalled: "이 조직에서 Slack을 제거했습니다.",
+    links: "연결된 사용자",
+    noLinks: "Slack에 연결된 사용자가 없습니다.",
+    linksCapped: "서버는 연결을 최대 {{cap}}개까지 표시하므로 이 목록은 불완전할 수 있습니다.",
+    colPerson: "사용자",
+    colSlackUser: "Slack 사용자",
+    colLinkedAt: "연결 시각",
+    proposedLink: "제안됨, 아직 확인되지 않음",
+    remove: "제거",
+    removeTitle: "이 Slack 연결을 제거하시겠습니까?",
+    removeBody: "{{person}}에게 앱 내 메시지와 이메일로 알리며, 알림 설정에서 다시 연결할 수 있습니다.",
+    linkRemoved: "{{person}}의 Slack 연결을 제거했습니다.",
+    cancel: "취소",
   },
 };
 

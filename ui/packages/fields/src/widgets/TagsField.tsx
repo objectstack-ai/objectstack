@@ -4,17 +4,25 @@ import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { isImeKey } from './imeKey.js';
+import { InCellOptionList } from './InCellOptionList.js';
 
 /**
  * TagsField - free-form list of string tags. Type a value and press Enter (or
  * comma) to add it; click a tag's × to remove it. The stored value is a
  * string[]. Used for the `tags` field type.
  */
-export function TagsField({ value, onChange, field, readonly, className, error, ...props }: FieldWidgetComponentProps<string[]>) {
+export function TagsField({ value, onChange, field, readonly, className, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<string[]>) {
   const tags: string[] = Array.isArray(value) ? value : value == null ? [] : [value as unknown as string];
   const [draft, setDraft] = React.useState('');
   // Unconditional hook call (rules-of-hooks): before the readonly early return.
   const { t } = useFieldTranslation();
+  // The in-cell list's rows (see the `inCell` branch): every tag the field has
+  // held since the editor opened, so an unchecked tag stays on offer.
+  // Adjusted while rendering, as React's "storing information from previous
+  // renders" does, rather than in an effect.
+  const [offered, setOffered] = React.useState<string[]>(tags);
+  const unseen = tags.filter((v) => !offered.includes(v));
+  if (unseen.length > 0) setOffered([...offered, ...unseen]);
 
   if (readonly) {
     if (tags.length === 0) return <EmptyValue />;
@@ -35,6 +43,24 @@ export function TagsField({ value, onChange, field, readonly, className, error, 
   const removeTag = (t: string) => onChange(tags.filter((x) => x !== t));
 
   const domProps = toDomProps(props);
+
+  // The grid's cell editor (objectstack#35688): the field's tags as a
+  // searchable check list; unchecking removes a tag, and text that matches
+  // none is added from the list's "Add" row. Every change stages; the grid
+  // commits when the user moves on.
+  if (inCell && !props.disabled) {
+    return (
+      <InCellOptionList
+        options={offered.map((v) => ({ value: v, label: v }))}
+        selected={tags}
+        multiple
+        onPick={(v) => (tags.includes(v) ? removeTag(v) : onChange([...tags, v]))}
+        onAdd={addTag}
+        placeholder={field?.placeholder || t('fields.tags.placeholder')}
+        inputProps={{ id: domProps.id, 'aria-describedby': domProps['aria-describedby'], 'aria-invalid': !!error }}
+      />
+    );
+  }
 
   /**
    * Commit the typed draft as a tag on blur — and then hand the event on to the

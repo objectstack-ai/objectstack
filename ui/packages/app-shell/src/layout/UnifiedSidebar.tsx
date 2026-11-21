@@ -51,7 +51,7 @@ import { useFavorites } from '../hooks/useFavorites.js';
 import { useNavPins } from '../hooks/useNavPins.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
-import { useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
+import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -188,6 +188,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // hook, so the two surfaces cannot name one entry two ways.
   const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
   const resolveNavTargetIcon = useNavTargetIcon();
+  const resolveNavTargetColor = useNavTargetColor();
   // Collapsed, the console's sidebar is hidden and its menu floats over the
   // content (objectstack#35062); below the fold width it collapses on its own
   // (objectstack#27593), and `useResponsiveSidebar` folds and unfolds it.
@@ -663,6 +664,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              onPinnedReorder={reorderPins}
              resolveTargetLabel={resolveNavTargetLabel}
              resolveTargetIcon={resolveNavTargetIcon}
+             resolveTargetColor={resolveNavTargetColor}
              locale={language}
              onAction={dispatchNavAction}
              t={t}
