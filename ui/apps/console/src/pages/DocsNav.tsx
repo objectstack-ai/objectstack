@@ -128,7 +128,7 @@ export function DocsNav({
           data-testid="docs-nav-all-docs"
           className="inline-flex items-center gap-1.5 rounded px-2 py-1 font-medium text-primary hover:bg-muted/50"
         >
-          <span>{t('help.allDocs', { defaultValue: 'All docs' })}</span>
+          <span>{t('help.allDocs', { defaultValue: 'All documentation' })}</span>
           <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
         </Link>
       </div>
