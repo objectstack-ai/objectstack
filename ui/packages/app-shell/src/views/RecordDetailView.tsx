@@ -5671,6 +5671,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           bodyTablesReadOnly={bodyTableIds.size > 0 && !bodyTablesEditable}
           readOnlyNotice={t('detail.bodyTablesReadOnlyBulk')}
           unsavedMessage={t('form.unsavedChanges')}
+          untouchedNotSaved={(count) => t('form.lineItems.untouchedNotSaved', { count })}
         >
         <HighlightFieldsProvider>
         <DiscussionContextProvider

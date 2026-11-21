@@ -351,6 +351,12 @@ const en = {
       notLoaded: 'This record’s line items have not been loaded.',
       loadFailed: 'Failed to load line items',
       saveFailed: 'Failed to save line items',
+      // The notice after a save that skipped lines Add started on their
+      // defaults and nobody edited (objectstack#35940): the master-detail
+      // form and the record page's edit state. `{{count}}` is how many.
+      untouchedNotSaved: '{{count}} blank line was not saved',
+      untouchedNotSaved_one: '{{count}} blank line was not saved',
+      untouchedNotSaved_other: '{{count}} blank lines were not saved',
       noChildObject: 'This panel has no child object configured: set {{property}} to the object whose rows it lists.',
     },
     keepEditing: 'Keep editing',
