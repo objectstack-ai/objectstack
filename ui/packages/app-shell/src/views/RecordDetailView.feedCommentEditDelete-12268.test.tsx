@@ -107,6 +107,7 @@ type Pack = {
     deleteCommentConfirm: string;
     commentEditFailed: string;
     commentDeleteFailed: string;
+    commentDeleted: string;
     edited: string;
     save: string;
     cancel: string;
