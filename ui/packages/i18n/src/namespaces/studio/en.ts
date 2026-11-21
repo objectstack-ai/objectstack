@@ -1509,6 +1509,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.condition.op.atLeast': 'at least',
   'engine.inspector.condition.op.atMost': 'at most',
   'engine.inspector.condition.op.contains': 'contains',
+  // objectstack#36167 — membership's complement on a list subject.
+  'engine.inspector.condition.op.notContains': 'does not contain',
   'engine.inspector.condition.op.inAnyOf': 'in (any of)',
   'engine.inspector.condition.op.notIn': 'not in',
   'engine.inspector.view.type.grid': 'Table / List',
