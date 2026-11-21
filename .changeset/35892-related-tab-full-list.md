@@ -4,6 +4,7 @@
 '@object-ui/plugin-list': patch
 '@object-ui/plugin-detail': patch
 '@object-ui/app-shell': patch
+'@object-ui/cli': patch
 ---
 
 feat(ui): a record page's related tab is the child object's full list
@@ -23,3 +24,5 @@ On a record page, a related list opened as its own tab now works like the object
 Upgrade note: the header sort and the column widths and order that an earlier version remembered for a related tab in a reader's record-page preference (`sys_user_preference`) no longer apply: the tab opens in its declared order, and its column widths and order are now kept in the reader's browser, as the list page's are, so they start from the default once. Nothing stored is deleted. The default sort and columns of every related list are unchanged.
 
 `@object-ui/core` adds `withHeaderSortPick`, the list page's rule for how a header sort joins an existing multi-level sort, now shared with the related tab. `@object-ui/app-shell`'s list Discard is drawn by `ConditionDiscardButton`; it looks and behaves as before.
+
+`@object-ui/cli`'s known node types gain `list-conditions` (regenerated from the registry), so `objectui validate` knows the new block.
