@@ -330,6 +330,11 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     draft: Record<string, unknown>;
     fields: RequiredWhenPromptField[];
   } | null>(null);
+  // The write a conflict raised from that dialog was making (the draft AND the
+  // typed values), so the conflict dialog's overwrite sends all of it rather
+  // than the draft alone, which the server would refuse again. `null` for a
+  // conflict of the plain Save, whose write is the draft.
+  const conflictWriteRef = React.useRef<Record<string, unknown> | null>(null);
   /** A field this reader may fill on this page: the question the inline editors ask. */
   const fillable = React.useCallback(
     (name: string, def: Record<string, unknown>) =>
@@ -525,6 +530,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   }, [inline, onFieldSave, canAtomic, data, dataSource, objectName, recordId, refresh, buildConflict, presentRefusal, objectFields, fillable]);
 
   const closeConflict = React.useCallback(() => {
+    conflictWriteRef.current = null;
     setConflict(null);
     setConflictBusy(false);
   }, []);
@@ -535,6 +541,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
       await refresh?.();
     } finally {
       // Discard the pending draft — the user chose the server's version.
+      setRequiredAsk(null);
       inline?.reset();
       closeConflict();
     }
@@ -549,14 +556,17 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
     try {
       // Re-key the write against the version the server reported in the 409 —
       // "I've seen the newer record, apply my whole draft on top of it."
-      const draft = inline?.draft ?? {};
+      const draft = conflictWriteRef.current ?? inline?.draft ?? {};
       const opts = conflict.currentVersion ? { ifMatch: conflict.currentVersion } : undefined;
       await updateVia(dataSource, objectName!, recordId!, draft, opts);
+      setRequiredAsk(null);
       await refresh?.();
       inline?.reset();
     } catch (err) {
       // Same presentation contract as the first save — an overwrite the server
       // refuses on validation grounds gets per-field reasons, not a raw string.
+      // They are drawn by the save bar, so a fill-in dialog above it closes.
+      setRequiredAsk(null);
       presentRefusal(err);
     } finally {
       closeConflict();
@@ -670,13 +680,19 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
         onSubmit={async (values) => {
           const ifMatch = typeof data?.updated_at === 'string' ? (data.updated_at as string) : undefined;
           inline?.setSaving(true);
+          const write = { ...ask.draft, ...values };
           try {
-            await updateVia(dataSource, objectName!, recordId!, { ...ask.draft, ...values }, ifMatch ? { ifMatch } : undefined);
+            await updateVia(dataSource, objectName!, recordId!, write, ifMatch ? { ifMatch } : undefined);
           } catch (err) {
-            // A stale token means the record changed meanwhile: re-read it,
-            // so the next Save is judged against what is stored. The dialog
-            // says why it did not save.
-            if (isConcurrentUpdateError(err)) await refresh?.();
+            // Someone else saved the record meanwhile: the same conflict
+            // dialog a plain Save opens (L1 7057894230 S1), over this one.
+            // Its overwrite sends the draft and the typed values; its Cancel
+            // comes back here with them still typed; Reload drops the edit.
+            if (isConcurrentUpdateError(err)) {
+              conflictWriteRef.current = write;
+              setConflict(buildConflict(write, err));
+              return;
+            }
             throw err;
           } finally {
             inline?.setSaving(false);

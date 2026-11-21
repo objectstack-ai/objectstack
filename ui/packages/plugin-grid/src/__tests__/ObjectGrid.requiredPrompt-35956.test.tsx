@@ -21,6 +21,12 @@
  *   5. A field that already has a value asks nothing: the change saves at once.
  *   6. A field with no in-place editor (rich text) asks nothing: the change is
  *      written and refused as before.
+ *   7. The row is the view's PROJECTION (this file's server honours `$select`,
+ *      as a real one does): a key the judgment reads that the row lacks is read
+ *      from the record first, so a stored value not drawn as a column is not
+ *      asked for again (L1 7057894230 M1), a predicate operand outside the
+ *      columns is judged on its stored value, and a read that fails asks
+ *      nothing.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
@@ -106,10 +112,26 @@ function makeDataSource() {
 
 const WON_RULE = 'record.stage == "won"';
 
-function makePromptDataSource(winReason: Record<string, unknown> = { type: 'text' }, stored: unknown = null) {
+/** Only the keys a `$select` names, as a real server answers a projection. */
+const project = (record: Record<string, any>, select: unknown) =>
+  Array.isArray(select)
+    ? Object.fromEntries(select.filter((k) => k in record).map((k) => [k, record[k]]))
+    : { ...record };
+
+function makePromptDataSource(
+  winReason: Record<string, unknown> = { type: 'text' },
+  stored: unknown = null,
+  extraFields: Record<string, unknown> = {},
+) {
   const ds = makeDataSource();
   ds.store.d1.stage = 'new';
   ds.store.d1.win_reason = stored;
+  ds.find = vi.fn(async (_object: string, params: any = {}) => {
+    const data = Object.values(ds.store).map((r: any) => project(r, params.$select));
+    return { data, total: data.length, hasMore: false, pageSize: 50 };
+  });
+  ds.findOne = vi.fn(async (_object: string, id: string, params: any = {}) =>
+    (ds.store[id] ? project(ds.store[id], params.$select) : null));
   ds.getObjectSchema = async (name: string) => ({
     name,
     fields: {
@@ -121,6 +143,7 @@ function makePromptDataSource(winReason: Record<string, unknown> = { type: 'text
         options: [{ value: 'new', label: 'New' }, { value: 'won', label: 'Won' }],
       },
       win_reason: { label: 'Win Reason', requiredWhen: WON_RULE, ...winReason },
+      ...extraFields,
       updated_at: { type: 'datetime' },
     },
   });
@@ -245,5 +268,73 @@ describe('ObjectGrid — a cell change that makes fields required asks for them 
     await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
     expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
     expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+  });
+
+  describe('the row is a projection: what it lacks is read from the record first', () => {
+    it('a stored value that is not a column is read, not asked for again, and not overwritten', async () => {
+      const ds = makePromptDataSource({ type: 'text' }, 'Known reason');
+      const { container } = renderPromptGrid(ds);
+      await screen.findByText('beta');
+      // The row really lacks the field: the grid fetched its columns only.
+      expect(ds.find.mock.calls[0][1].$select).not.toContain('win_reason');
+      pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+      await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+      expect(ds.findOne).toHaveBeenCalledWith(OBJECT, 'd1', { $select: ['win_reason'] });
+      expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
+      expect(ds.store.d1.win_reason).toBe('Known reason');
+      expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+    });
+
+    it('an empty stored value read the same way still opens the dialog', async () => {
+      const ds = makePromptDataSource();
+      const { container } = renderPromptGrid(ds);
+      await screen.findByText('beta');
+      pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+      await screen.findByTestId('required-fields-dialog');
+      expect(ds.findOne).toHaveBeenCalledTimes(1);
+      expect(ds.update).not.toHaveBeenCalled();
+    });
+
+    it('a predicate operand outside the columns is judged on its stored value', async () => {
+      const rule = { type: 'text', requiredWhen: 'record.segment == "enterprise" && record.stage == "won"' };
+      const segment = { segment: { type: 'text', label: 'Segment' } };
+      const enterprise = makePromptDataSource(rule, null, segment);
+      enterprise.store.d1.segment = 'enterprise';
+      const first = renderPromptGrid(enterprise);
+      await screen.findByText('beta');
+      pasteInto(first.container, dataCell(first.container, 0, 'New'), 'Won');
+      await screen.findByTestId('required-fields-dialog');
+      expect(enterprise.findOne.mock.calls[0][2].$select).toEqual(['win_reason', 'segment']);
+      first.unmount();
+
+      const smb = makePromptDataSource(rule, null, segment);
+      smb.store.d1.segment = 'smb';
+      const second = renderPromptGrid(smb);
+      await screen.findByText('beta');
+      pasteInto(second.container, dataCell(second.container, 0, 'New'), 'Won');
+      await waitFor(() => expect(smb.update).toHaveBeenCalledTimes(1));
+      expect(smb.update.mock.calls[0][2]).toEqual({ stage: 'won' });
+      expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+    });
+
+    it('a read that fails asks nothing: the change is written and the server judges it', async () => {
+      const ds = makePromptDataSource({ type: 'text' }, 'Known reason');
+      ds.findOne.mockRejectedValueOnce(new Error('offline'));
+      const { container } = renderPromptGrid(ds);
+      await screen.findByText('beta');
+      pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+      await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+      expect(ds.update.mock.calls[0][2]).toEqual({ stage: 'won' });
+      expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+    });
+
+    it('a row that carries every key it needs reads nothing more', async () => {
+      const ds = makePromptDataSource({ type: 'text' }, 'Known reason');
+      const { container } = renderPromptGrid(ds, true);
+      await screen.findByText('beta');
+      pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+      await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+      expect(ds.findOne).not.toHaveBeenCalled();
+    });
   });
 });

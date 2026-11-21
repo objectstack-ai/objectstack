@@ -24,12 +24,26 @@
  *
  * Either way the table is told "no" (`confirmCommit` resolves `false`): the
  * write, when there is one, was the grid's, not the table's.
+ *
+ * ## Judged on what the record holds, not on what the list fetched
+ *
+ * A list row is a PROJECTION: the grid asks the server for the columns it
+ * draws. A `requiredWhen` field that is not a column, or an operand its
+ * predicate reads, is simply absent from the row, and an absent key reads as
+ * empty. Judged on the row alone, a stored 「赢单原因」 would be asked for again
+ * and overwritten by what the reader types (L1 7057894230 M1). So when the
+ * row lacks a key the judgment reads (`requiredWhenPromptReads`), the record's
+ * missing keys are read first (`read`, one `findOne` with `$select` those
+ * keys), and the change is judged on the row with them filled in. A read that
+ * fails asks nothing: the write goes ahead and the server judges it, as before
+ * this card.
  */
 
 import React from 'react';
 import { getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
 import {
   collectRequiredWhenPromptFields,
+  requiredWhenPromptReads,
   hasFieldEditWidget,
   RequiredFieldsDialog,
   type RequiredFieldsDialogField,
@@ -55,10 +69,18 @@ export interface CellRequiredPromptInputs {
   emptyText: string;
   /** The grid's row save: one guarded update of `changes` over `row`. */
   save: (row: any, changes: Record<string, unknown>) => Promise<void>;
+  /**
+   * Reads `keys` of the record `row` stands for (the keys the row lacks).
+   * Absent: the row is judged as it is (a host whose rows are whole records).
+   */
+  read?: (row: any, keys: string[]) => Promise<Record<string, unknown> | null | undefined>;
 }
 
 interface PendingPrompt {
+  /** The grid's row, as the table handed it (what the save is keyed on). */
   row: any;
+  /** The record the change is judged on: the row with the keys it lacked read in. */
+  record: any;
   columnKey: string;
   value: unknown;
   fields: RequiredWhenPromptField[];
@@ -71,7 +93,16 @@ interface PendingPrompt {
  * reads is in scope (the labels read the grid's columns).
  */
 export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
-  ask: (row: any, columnKey: string, value: unknown) => Promise<boolean> | null;
+  /**
+   * `otherwise` is the grid's next question (the state-machine confirm), asked
+   * when this one has nothing to ask; `null` from it means "write".
+   */
+  ask: (
+    row: any,
+    columnKey: string,
+    value: unknown,
+    otherwise: () => Promise<boolean> | null,
+  ) => Promise<boolean> | null;
   renderDialog: () => React.ReactNode;
 } {
   const [pending, setPending] = React.useState<PendingPrompt | null>(null);
@@ -102,23 +133,55 @@ export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
   // Unmounting the grid answers an open ask "no", as the state confirm does.
   React.useEffect(() => () => { pendingRef.current?.resolve(false); pendingRef.current = null; }, []);
 
-  const ask = (row: any, columnKey: string, value: unknown): Promise<boolean> | null => {
-    if (!row || typeof row !== 'object') return null;
-    const fields = collectRequiredWhenPromptFields(objectFields, row, { [columnKey]: value }, { fillable });
-    if (fields.length === 0) return null;
+  const open = (row: any, record: any, columnKey: string, value: unknown, fields: RequiredWhenPromptField[]) =>
     // The table writes nothing either way: the grid's own save did, or the
     // reader cancelled. A second ask while one is open answers the first no.
-    return new Promise<boolean>((resolve) => {
+    new Promise<boolean>((resolve) => {
       pendingRef.current?.resolve(false);
-      const next: PendingPrompt = { row, columnKey, value, fields, resolve: () => resolve(false) };
+      const next: PendingPrompt = { row, record, columnKey, value, fields, resolve: () => resolve(false) };
       pendingRef.current = next;
       setPending(next);
     });
+
+  const ask = (
+    row: any,
+    columnKey: string,
+    value: unknown,
+    otherwise: () => Promise<boolean> | null,
+  ): Promise<boolean> | null => {
+    if (!row || typeof row !== 'object') return otherwise();
+    const judge = (record: any) =>
+      collectRequiredWhenPromptFields(objectFields, record, { [columnKey]: value }, { fillable });
+    const lacking = requiredWhenPromptReads(objectFields, { fillable })
+      .filter((key) => key !== columnKey && !(key in row));
+    if (lacking.length === 0 || !inputs.read) {
+      const fields = judge(row);
+      return fields.length > 0 ? open(row, row, columnKey, value, fields) : otherwise();
+    }
+    const read = inputs.read;
+    return (async () => {
+      let record: any;
+      try {
+        const fresh = await read(row, lacking);
+        if (!fresh || typeof fresh !== 'object') return (await otherwise()) ?? true;
+        // Only the keys the row lacked: the rest of the row is what the reader
+        // sees and what the write is guarded on. A key the read did not answer
+        // (no value, or not readable) stays absent and reads as empty.
+        record = { ...row };
+        for (const key of lacking) record[key] = (fresh as Record<string, unknown>)[key];
+      } catch {
+        // Not knowing the record, ask nothing: the write goes ahead and the
+        // server judges it, as it did before this card.
+        return (await otherwise()) ?? true;
+      }
+      const fields = judge(record);
+      return fields.length > 0 ? open(row, record, columnKey, value, fields) : ((await otherwise()) ?? true);
+    })();
   };
 
   const renderDialog = (): React.ReactNode => {
     if (!pending) return null;
-    const { row, columnKey, value } = pending;
+    const { row, record, columnKey, value } = pending;
     const changes: RequiredFieldsDialogChange[] = [{
       name: columnKey,
       label: inputs.labelOf(columnKey),
@@ -141,11 +204,11 @@ export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
       <RequiredFieldsDialog
         open
         fields={pending.fields.map(label)}
-        recordName={getRecordDisplayName(objectSchema, row)}
+        recordName={getRecordDisplayName(objectSchema, record)}
         changes={changes}
         moreFields={(values) => collectRequiredWhenPromptFields(
           objectFields,
-          row,
+          record,
           { [columnKey]: value, ...values },
           { exclude: [columnKey], fillable },
         ).map(label)}

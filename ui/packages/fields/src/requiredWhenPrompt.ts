@@ -62,7 +62,7 @@
  * The fields the change itself writes are skipped (`options.exclude`, by
  * default every key of `changes`): the change IS their value.
  */
-import { resolveFieldRuleState, isMissingForRequired } from '@object-ui/core';
+import { resolveFieldRuleState, isMissingForRequired, collectPredicateFieldRefs } from '@object-ui/core';
 import { hasFieldEditWidget } from './FieldEditWidget.js';
 
 /** A field the change makes required, paired with the definition to render it. */
@@ -154,4 +154,56 @@ export function collectRequiredWhenPromptFields(
     prompts.push({ name, def: { name, ...def } });
   }
   return prompts;
+}
+
+/** A predicate's `previous.x` spelled as `record.x`, so one harvester reads both. */
+function asRecordScoped(pred: unknown): unknown {
+  const swap = (src: string) => src.replace(/\bprevious\.(\??)/g, 'record.$1');
+  if (typeof pred === 'string') return swap(pred);
+  if (pred && typeof pred === 'object' && typeof (pred as { source?: unknown }).source === 'string') {
+    return { ...(pred as object), source: swap((pred as { source: string }).source) };
+  }
+  return pred;
+}
+
+/**
+ * The record keys {@link collectRequiredWhenPromptFields} reads to judge a
+ * change: every field it could ask for, and every declared field its
+ * `requiredWhen` / `visibleWhen` / `readonlyWhen` predicates name (as
+ * `record.x`, `data.x` or `previous.x`).
+ *
+ * A surface whose row is a PROJECTION (a list fetches the columns it draws)
+ * must not judge a key it never read: an absent key reads as empty, so a stored
+ * value would be asked for again and overwritten, and a predicate would be
+ * judged on a missing operand (objectstack#35956, L1 7057894230 M1). The host
+ * compares this list with the keys its row carries and reads the rest first.
+ *
+ * The same static narrowing as the collector (a `requiredWhen`, an in-place
+ * editor, the host's `fillable`), so an object with nothing to ask reads
+ * nothing more. Declared order, de-duplicated.
+ */
+export function requiredWhenPromptReads(
+  objectFields: Record<string, unknown> | null | undefined,
+  options: Pick<RequiredWhenPromptOptions, 'fillable'> = {},
+): string[] {
+  if (!objectFields) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (name: string) => {
+    if (seen.has(name) || !(name in objectFields)) return;
+    seen.add(name);
+    out.push(name);
+  };
+  for (const [name, raw] of Object.entries(objectFields)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const def = raw as Record<string, unknown>;
+    if (def.requiredWhen == null) continue;
+    if (!hasFieldEditWidget(def.type as string | undefined)) continue;
+    if (options.fillable && !options.fillable(name, def)) continue;
+    add(name);
+    for (const ref of collectPredicateFieldRefs(
+      [def.requiredWhen, def.visibleWhen, def.readonlyWhen].map(asRecordScoped),
+    )) add(ref);
+  }
+  return out;
 }

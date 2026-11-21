@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { collectRequiredWhenPromptFields } from './requiredWhenPrompt';
+import { collectRequiredWhenPromptFields, requiredWhenPromptReads } from './requiredWhenPrompt';
 
 /** The card's own predicate: `has()` + `==` + `&&`. */
 const WHEN_WON = 'has(record.stage) && record.stage == "closed_won"';
@@ -257,5 +257,32 @@ describe('collectRequiredWhenPromptFields over a change of several keys (objects
       { fillable: (name) => name !== 'win_reason' },
     );
     expect(out).toEqual([]);
+  });
+});
+
+describe('requiredWhenPromptReads — the keys the judgment reads (objectstack#35956, L1 M1)', () => {
+  const fields = {
+    name: { type: 'text' },
+    stage: { type: 'select' },
+    segment: { type: 'text' },
+    owner: { type: 'text' },
+    win_reason: {
+      type: 'text',
+      requiredWhen: 'record.segment == "enterprise" && record.stage == "won"',
+      visibleWhen: 'previous.owner != ""',
+    },
+    memo: { type: 'richtext', requiredWhen: 'record.name == "x"' },
+    locked: { type: 'text', requiredWhen: 'record.stage == "won"' },
+    typo: { type: 'text', requiredWhen: 'record.no_such_field == 1' },
+  };
+
+  it('names each askable field and the declared fields its predicates read, record. and previous. alike', () => {
+    expect(requiredWhenPromptReads(fields, { fillable: (name) => name !== 'locked' }))
+      .toEqual(['win_reason', 'segment', 'stage', 'owner', 'typo']);
+  });
+
+  it('reads nothing for an object with nothing to ask', () => {
+    expect(requiredWhenPromptReads({ name: { type: 'text' } })).toEqual([]);
+    expect(requiredWhenPromptReads(undefined)).toEqual([]);
   });
 });

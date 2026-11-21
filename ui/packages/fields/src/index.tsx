@@ -5360,6 +5360,7 @@ export * from './FieldEditWidget.js';
 // drop, the list cell and the record page's inline edit.
 export {
   collectRequiredWhenPromptFields,
+  requiredWhenPromptReads,
   type RequiredWhenPromptField,
   type RequiredWhenPromptOptions,
 } from './requiredWhenPrompt.js';

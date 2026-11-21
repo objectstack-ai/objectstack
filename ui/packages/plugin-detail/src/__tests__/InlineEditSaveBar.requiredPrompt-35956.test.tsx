@@ -15,7 +15,10 @@
  *   2. Save writes the draft and the typed value in ONE guarded update, then
  *      re-reads and leaves edit mode.
  *   3. Cancel writes nothing and keeps the edit session and its draft.
- *   4. A refusal of that write stays in the dialog.
+ *   4. A refusal of that write stays in the dialog; a 409 opens the page's
+ *      conflict dialog over it, as a plain Save's 409 does (L1 7057894230
+ *      S1): its Overwrite sends the draft AND the typed values at the version
+ *      the server reported, its Cancel comes back to the typed values.
  *   5. Control: a draft that makes nothing required saves at once, as before;
  *      and the drawer's per-field callback mode never asks.
  */
@@ -151,5 +154,46 @@ describe('InlineEditSaveBar asks for the fields a draft makes required (objectst
     stageWon();
     await waitFor(() => expect(onFieldSave).toHaveBeenCalledWith('stage', 'won'));
     expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+  });
+
+  describe('a 409 of the combined write opens the conflict dialog, as a plain Save does', () => {
+    const conflict = {
+      code: 'CONCURRENT_UPDATE',
+      currentVersion: 'v2',
+      currentRecord: { ...DATA, priority: 'high', updated_at: 'v2' },
+    };
+
+    it('Overwrite sends the draft and the typed value at the version the server reported', async () => {
+      const update = vi.fn().mockRejectedValueOnce(conflict).mockResolvedValueOnce({});
+      const { refresh } = renderBar(update);
+      stageWon();
+      const dialog = await screen.findByTestId('required-fields-dialog');
+      fireEvent.change(winReasonInput(dialog), { target: { value: 'Better price' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(screen.getByRole('alertdialog')).toBeInTheDocument());
+      // Nothing is re-read under the reader: the choice is theirs.
+      expect(refresh).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: /overwrite/i }));
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+      expect(update).toHaveBeenLastCalledWith('deal', 'd1', { stage: 'won', win_reason: 'Better price' }, { ifMatch: 'v2' });
+      await waitFor(() => expect(screen.getByTestId('editing')).toHaveTextContent('idle'));
+      expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+    });
+
+    it('the conflict dialog\'s Cancel comes back to the fill-in dialog with the value still typed', async () => {
+      const update = vi.fn().mockRejectedValueOnce(conflict);
+      renderBar(update);
+      stageWon();
+      const dialog = await screen.findByTestId('required-fields-dialog');
+      fireEvent.change(winReasonInput(dialog), { target: { value: 'Better price' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(screen.getByRole('alertdialog')).toBeInTheDocument());
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /cancel/i }));
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+      const still = screen.getByTestId('required-fields-dialog');
+      expect(winReasonInput(still).value).toBe('Better price');
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('editing')).toHaveTextContent('editing');
+    });
   });
 });

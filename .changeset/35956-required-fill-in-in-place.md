@@ -8,7 +8,7 @@
 
 feat(list,detail): a change that makes other fields required asks for them in place — the kanban drop's fill-in, now shared by the list cell and the record page
 
-Clause-②: yes (widening) — `@object-ui/fields` exports `collectRequiredWhenPromptFields`, `RequiredFieldsDialog` and their types (moved from `@object-ui/plugin-kanban`, which never exported them); nothing removed or renamed
+Clause-②: yes (widening) — `@object-ui/fields` exports `collectRequiredWhenPromptFields`, `RequiredFieldsDialog` and their types (moved from `@object-ui/plugin-kanban`, which never exported them) and the new `requiredWhenPromptReads`; nothing removed or renamed
 Metadata-protocol: none
 
 When a value about to be written makes another field's `requiredWhen` true while that field is still empty, the write is held and one dialog asks for the missing values:
