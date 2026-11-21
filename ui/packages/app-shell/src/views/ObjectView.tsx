@@ -12,7 +12,7 @@
 import type { ColumnSummary } from '@objectstack/spec/ui';
 import type { ListColumn } from '@object-ui/types';
 import { columnsWithSummary, declaredColumnFields } from './columnSummaryWrite.js';
-import { createElement, useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
@@ -24,9 +24,8 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
 import { CheckSquare, Plus } from 'lucide-react';
-import { DropdownMenuItem } from '@object-ui/components';
+import { DropdownMenuItem, ObjectIconTile } from '@object-ui/components';
 import { requestListSelection, useListPageSelectable, useListPageSelecting } from '@object-ui/plugin-grid';
-import { getIcon } from '../utils/getIcon.js';
 import { usePublishPhonePageBar } from '../layout/PhonePageBar.js';
 import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
@@ -1251,7 +1250,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const listSelectable = useListPageSelectable(pageColumnEl);
     const phoneDescription = objectDef.description ? objectDesc(objectDef) : undefined;
     usePublishPhonePageBar(phone ? {
-        icon: createElement(getIcon((objectDef as any)?.icon), { className: 'h-5 w-5' }),
+        // The object's colour tile, as the desktop page bar draws it (objectstack#35985).
+        icon: <ObjectIconTile icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />,
         title: listTitleOf(objectDef),
         end: (
             <ObjectViewMoreMenu
