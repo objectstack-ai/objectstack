@@ -18,7 +18,7 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *   column, right edge on the column's right edge. No page bar is drawn
  *   above the view bar. A line of the row lines' colour and weight runs
  *   between columns in the header, the rows and the footer row, and none
- *   after the last cell (objectstack#36048).
+ *   after the last cell, drawn as an inset shadow (objectstack#36048).
  *
  * ⚠️ A Playwright spec, not a vitest test: jsdom has no layout engine, so a
  * height read there is 0 and a class-shape assertion would pass against
@@ -209,7 +209,9 @@ const CANDIDATES = [
 let css = '';
 test.beforeAll(async () => {
   const twEntry = fileURLToPath(import.meta.resolve('tailwindcss/index.css'));
-  const compiler = await compile('@import "tailwindcss";', {
+  // The app's border colour, so the row line and the column line resolve to a
+  // real colour each and their comparison below means something.
+  const compiler = await compile('@import "tailwindcss"; @theme { --color-border: rgb(225 225 234); }', {
     base: path.dirname(twEntry),
     loadStylesheet: async (id: string, base: string) => {
       const file = id === 'tailwindcss' ? twEntry : path.resolve(base, id);
@@ -260,9 +262,16 @@ async function measure(page: Page, locale: 'zh' | 'en' = 'zh') {
       footText: ($('#tfoot') as HTMLElement).innerText,
       // objectstack#36048 — the column lines, read off one cell per part.
       lines: (() => {
+        // The line is an inset shadow on the cell's right edge (a collapsed
+        // border would stay behind a frozen cell when the rows scroll):
+        // read the one inset layer, its offsets and its colour.
         const border = (el: Element | null) => {
-          const cs = el ? getComputedStyle(el) : null;
-          return cs ? { width: cs.borderRightWidth, style: cs.borderRightStyle, color: cs.borderRightColor } : null;
+          if (!el) return null;
+          const layers = getComputedStyle(el).boxShadow.split(/,(?![^(]*\))/).map((l) => l.trim());
+          const inset = layers.filter((l) => /\binset\b/.test(l) && !/^(rgba\(0, 0, 0, 0\)|transparent)\s/.test(l));
+          const one = inset[0] ?? '';
+          const m = /\s((?:-?[\d.]+px\s+){3}-?[\d.]+px)\s+inset$/.exec(one);
+          return { insetLayers: inset.length, offsets: m ? m[1] : '', color: m ? one.slice(0, m.index).trim() : '', borderRight: getComputedStyle(el).borderRightWidth };
         };
         const rowLine = getComputedStyle(document.querySelector('tbody tr')!);
         return {
@@ -324,14 +333,16 @@ test.describe('the list page frame (objectstack#35548)', () => {
   test('a line between columns in the header, the rows and the footer, the row lines\' colour and weight, none after the last cell (objectstack#36048)', async ({ page }) => {
     const { lines } = await measure(page);
     expect(lines.rowLine.width).toBe('1px');
+    expect(lines.rowLine.color).not.toBe('rgba(0, 0, 0, 0)');
     for (const [part, b] of Object.entries({ header: lines.header, body: lines.body, bodyLead: lines.bodyLead, foot: lines.foot })) {
       expect(b, part).not.toBeNull();
-      expect(b!.width, `${part}: column line width`).toBe(lines.rowLine.width);
-      expect(b!.style, `${part}: column line style`).toBe('solid');
+      expect(b!.insetLayers, `${part}: one column line`).toBe(1);
+      expect(b!.offsets, `${part}: a 1px line on the right edge`).toBe('-1px 0px 0px 0px');
       expect(b!.color, `${part}: column line colour`).toBe(lines.rowLine.color);
+      expect(b!.borderRight, `${part}: drawn as a shadow, not a border`).toBe('0px');
     }
     for (const [part, b] of Object.entries({ headerLast: lines.headerLast, bodyLast: lines.bodyLast, footLast: lines.footLast })) {
-      expect(b!.width, `${part}: a line after the last cell`).toBe('0px');
+      expect(b!.insetLayers, `${part}: a line after the last cell`).toBe(0);
     }
   });
 

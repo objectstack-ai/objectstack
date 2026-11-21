@@ -632,11 +632,15 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  * objectstack#36048 — the header is 36px tall, as the default row is, and a
  * line of the same shade and weight as the row lines runs between columns in
  * the header, the rows and the footer row (none after the last cell). The
- * last frozen column keeps its scroll shadow on top of its line.
+ * line is an inset shadow on the cell's right edge, not a border: the table
+ * collapses its borders, and a collapsed border belongs to the table, so a
+ * frozen (sticky) cell's border stays behind when the rows scroll sideways
+ * and the frozen columns lose their lines. The inset shadow is the cell's
+ * own and composes with the last frozen column's scroll shadow.
  */
 export const OBJECT_GRID_TABLE_DENSITY = [
   '[&_thead_th]:h-9 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
-  '[&_th:not(:last-child)]:border-r [&_th:not(:last-child)]:border-r-border/50 [&_td:not(:last-child)]:border-r [&_td:not(:last-child)]:border-r-border/50',
+  '[&_th:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_th:not(:last-child)]:inset-shadow-border/50 [&_td:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_td:not(:last-child)]:inset-shadow-border/50',
   // A referenced record (a lookup's link) is a small chip led by its name's
   // first letter; an option label keeps its colour, less saturated.
   '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
