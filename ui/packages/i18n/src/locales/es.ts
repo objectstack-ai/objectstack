@@ -233,6 +233,7 @@ const es = {
       noChildObject: "Este panel no tiene configurado ningún objeto secundario: establezca {{property}} en el objeto cuyas filas enumera.",
     },
     keepEditing: "Seguir editando",
+    createMore: "Crear más",
     discard: "Descartar",
     conflictTitle: "Conflicto al guardar",
     conflictMessage: "Otra persona modificó este registro mientras lo editaba. Sobrescribir reemplazará sus cambios por los suyos.",

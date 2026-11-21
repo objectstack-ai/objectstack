@@ -228,6 +228,7 @@ const fr = {
       noChildObject: "Aucun objet enfant n'est configuré pour ce panneau : définissez {{property}} sur l'objet dont il liste les lignes.",
     },
     keepEditing: "Continuer l'édition",
+    createMore: "Créer d'autres",
     discard: "Abandonner",
     conflictTitle: "Conflit d'enregistrement",
     conflictMessage: "Cet enregistrement a été modifié par quelqu'un d'autre pendant votre édition. L'écrasement remplacera ses modifications par les vôtres.",

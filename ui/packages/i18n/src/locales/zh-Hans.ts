@@ -237,6 +237,7 @@ const zh = {
       noChildObject: '此面板未配置子对象：请将 {{property}} 设为其所列行所属的对象。',
     },
     keepEditing: '继续编辑',
+    createMore: '连续创建',
     discard: '放弃',
     conflictTitle: '保存冲突',
     conflictMessage: '您编辑期间，这条记录已被其他人修改。覆盖保存将用您的内容替换对方的修改。',
