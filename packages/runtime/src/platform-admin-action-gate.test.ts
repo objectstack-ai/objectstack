@@ -165,6 +165,37 @@ describe('[#30771] a hidden action is still refused when called', () => {
     }
 });
 
+describe('sys_user.remove_user_manager: the clear reaches the endpoint as `managerId: null`', () => {
+    // The endpoint clears the link on `managerId: null` and refuses an ABSENT
+    // key, so the null has to survive the door's body assembly: the declared
+    // `bodyExtra` is merged last, after the row id. Driven over the real
+    // declaration; the target is faked so the forwarded body can be read.
+    const forwardOf = (request: ReturnType<typeof boot>['request']) =>
+        (request.mock.calls as unknown as Array<[string, RequestInit]>)[0]!;
+
+    it('the admin\'s click is forwarded to set-user-manager with the row id and the key present and null', async () => {
+        const { dispatcher, request } = boot();
+        const res = await dispatcher.handleActions(`/${OBJECT}/remove_user_manager`, 'POST', { recordId: 'u_target', params: {} }, ADMIN());
+        expect(res?.response?.status).toBe(200);
+        expect(request).toHaveBeenCalledTimes(1);
+        const [url, init] = forwardOf(request);
+        expect(url).toBe('http://localhost/api/v1/auth/admin/set-user-manager');
+        expect(String(init.method).toUpperCase()).toBe('POST');
+        const body = JSON.parse(String(init.body));
+        expect(body.userId).toBe('u_target');
+        expect(Object.prototype.hasOwnProperty.call(body, 'managerId')).toBe(true);
+        expect(body.managerId).toBeNull();
+    });
+
+    it('a plain member is refused 403 at the door with the set action\'s gate, nothing forwarded', async () => {
+        const { dispatcher, request } = boot();
+        const refused = await dispatcher.handleActions(`/${OBJECT}/remove_user_manager`, 'POST', { recordId: 'u_target', params: {} }, MEMBER());
+        expect(refused?.response?.status).toBe(403);
+        expect(String(refused?.response?.body?.error?.message)).toContain('requires capability [manage_users]');
+        expect(request).not.toHaveBeenCalled();
+    });
+});
+
 describe('[#30771] capabilityRefusal: why the scoped MCP pre-screen finds an action missing', () => {
     it('answers the gate\'s refusal for an exposed action the member cannot run — the one run_action throws by name', async () => {
         const { dispatcher, request } = boot();
