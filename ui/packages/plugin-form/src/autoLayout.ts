@@ -593,7 +593,9 @@ export function inferModalSize(columns: number): 'sm' | 'default' | 'lg' | 'xl' 
 
 /**
  * The most fields a dialog lays out in ONE column (objectstack-ai/objectstack#35980).
- * See {@link dialogDrawsSingleColumn}.
+ * See {@link dialogDrawsSingleColumn}. The number is the card's proposal, not a
+ * maintainer's ruling; it waits on the maintainer's answer, and this constant
+ * is the one place to change it.
  */
 export const DIALOG_SINGLE_COLUMN_MAX_FIELDS = 8;
 
@@ -604,10 +606,11 @@ export const DIALOG_SINGLE_COLUMN_MAX_FIELDS = 8;
  * `columns` — not the form, and no section. A short create or edit form then
  * reads top to bottom, the way a list's 「New」 dialog is filled in.
  *
- * This reverses, for such a dialog, the floor of two its undeclared grid drew
- * (objectui#12521, objectstack-ai/objectstack#34607) and the two-per-row
- * effect the section-`columns` fork (ruled 6204264665) had on its undeclared
- * sections: the maintainer approved 「字段少的用单列」 when the card was filed.
+ * This reverses, for such a dialog, the development default of at least two
+ * columns that its undeclared grid drew (objectui#12521,
+ * objectstack-ai/objectstack#34607). It keeps the section-`columns` ruling on
+ * objectui#12521 (6204264665): an undeclared count is still the renderer's
+ * choice, and a declared one is drawn as written.
  * One declared count anywhere keeps the dialog as it was — the declared count
  * is drawn as written, the dialog is as wide as it needs, and an undeclared
  * section beside it keeps {@link dialogUndeclaredColumns}.
