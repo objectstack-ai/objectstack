@@ -167,20 +167,30 @@ async function boot(posture: TenancyPosture) {
   }
   const row = (id: string, name: string, owner: string, creator: string) =>
     ({ id, name, note: '', owner_id: owner, created_by: creator, organization_id: ALPHA });
+  // [#35917, ruled A] Every `held` row is one the delegator did NOT create.
+  // The platform's ownership floor (`created_by == current_user.id`) stays an
+  // OR term beside an authored write policy, so on a row the delegator
+  // created the floor admits it whatever the authored policy says: the rows
+  // whose refusal this file pins are created by someone else, and the
+  // `held_created*` rows pin the creator's admission, by the delegator and
+  // on its behalf alike.
   for (const r of [
-    row('held_1', 'held', BOUNDED, BOUNDED),
-    row('held_2', 'held', OTHER, BOUNDED),
+    row('held_1', 'held', BOUNDED, OTHER),
+    row('held_2', 'held', OTHER, OTHER),
     row('free_1', 'free', BOUNDED, BOUNDED),
-    row('held_del_direct', 'held', BOUNDED, BOUNDED),
-    row('held_del_agent', 'held', BOUNDED, BOUNDED),
+    row('held_del_direct', 'held', BOUNDED, OTHER),
+    row('held_del_agent', 'held', BOUNDED, OTHER),
     row('free_del_direct', 'free', BOUNDED, BOUNDED),
     row('free_del_agent', 'free', BOUNDED, BOUNDED),
-    row('store_direct', 'free', BOUNDED, BOUNDED),
-    row('store_agent', 'free', BOUNDED, BOUNDED),
+    row('store_direct', 'free', BOUNDED, OTHER),
+    row('store_agent', 'free', BOUNDED, OTHER),
+    row('held_created', 'held', BOUNDED, BOUNDED),
+    row('held_created_del_direct', 'held', BOUNDED, BOUNDED),
+    row('held_created_del_agent', 'held', BOUNDED, BOUNDED),
     row('plain_1', 'x', OTHER, OTHER),
     row('plain_2', 'x', PLAIN, OTHER),
   ]) await e.insert(OBJ, r, SYS);
-  await e.insert(MASTER, row('m_held', 'held', BOUNDED, BOUNDED), SYS);
+  await e.insert(MASTER, row('m_held', 'held', BOUNDED, OTHER), SYS);
   await e.insert(MASTER, row('m_free', 'free', BOUNDED, BOUNDED), SYS);
   for (const [id, master] of [
     ['d_held', 'm_held'], ['d_free', 'm_free'], ['d_held_del_direct', 'm_held'], ['d_held_del_agent', 'm_held'],
@@ -332,6 +342,16 @@ const CELLS: Cell[] = [
   {
     delegator: BOUNDED, verb: 'delete', object: 'DETAIL', rows: { direct: 'd_held_del_direct', agent: 'd_held_del_agent' },
     shape: 'a detail whose master refuses the delegator\'s own detail delete', direct: DENIED, agent: DENIED,
+  },
+  // [#35917, ruled A] A held row the delegator CREATED: the ownership floor
+  // stays an OR term beside the authored policy, so both are admitted.
+  {
+    delegator: BOUNDED, verb: 'update', object: 'OBJ', rows: { direct: 'held_created', agent: 'held_created' },
+    shape: 'a held row the delegator created (the floor admits it beside the authored policy)', direct: ADMITTED, agent: ADMITTED,
+  },
+  {
+    delegator: BOUNDED, verb: 'delete', object: 'OBJ', rows: { direct: 'held_created_del_direct', agent: 'held_created_del_agent' },
+    shape: 'a held row the delegator created, delete (the floor admits it beside the authored policy)', direct: ADMITTED, agent: ADMITTED,
   },
   {
     delegator: BOUNDED, verb: 'update', object: 'DETAIL', rows: { direct: 'd_free', agent: 'd_free' },

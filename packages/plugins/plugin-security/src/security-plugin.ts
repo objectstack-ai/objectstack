@@ -632,7 +632,7 @@ interface RlsFilterOptions {
   /**
    * Drop the PLATFORM's own row-level write ownership floor
    * (`owner_only_writes` / `owner_only_deletes` — see
-   * `platform-ownership-policies.ts`) from Layer 1.
+   * `platform-ownership-policies.ts`) from Layer 1 where it is the OR's last term; beside an authored `using` term it stays one (#35917).
    *
    * Set only when `ISharingService.checkEdit` / `checkDelete` answered `allow`
    * for the row this filter is about to be enforced against — a positive basis
