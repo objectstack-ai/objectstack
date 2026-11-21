@@ -37,7 +37,7 @@ const SELECT = {
     { value: 'won', label: 'Closed won' },
     { value: 'lost', label: 'Closed lost' },
   ],
-} as Field;
+} as unknown as Field;
 
 /** The grid's editor wrapper, reduced to the one fact these tests need: did Enter reach it? */
 function GridEditor({ onGridKey, children }: { onGridKey: (key: string) => void; children: React.ReactNode }) {
@@ -119,7 +119,7 @@ describe('in-cell single select (objectstack#35688)', () => {
 describe('in-cell multi-select and tags (objectstack#35688)', () => {
   it('multi-select: a searchable check list; a pick toggles and stages', () => {
     const onChange = vi.fn();
-    render(<MultiSelectField field={{ ...SELECT, type: 'multiselect' }} value={['new']} onChange={onChange} inCell />);
+    render(<MultiSelectField field={{ ...SELECT, type: 'multiselect' } as unknown as Field} value={['new']} onChange={onChange} inCell />);
     expect(screen.getByRole('listbox').getAttribute('aria-multiselectable')).toBe('true');
     fireEvent.click(screen.getByTestId('in-cell-option-won'));
     expect(onChange).toHaveBeenLastCalledWith(['new', 'won']);
@@ -128,7 +128,7 @@ describe('in-cell multi-select and tags (objectstack#35688)', () => {
   });
 
   it('a select declared multiple takes the same face', () => {
-    render(<SelectField field={{ ...SELECT, multiple: true }} value={[]} onChange={() => {}} inCell />);
+    render(<SelectField field={{ ...SELECT, multiple: true } as unknown as Field} value={[]} onChange={() => {}} inCell />);
     expect(screen.getByRole('listbox').getAttribute('aria-multiselectable')).toBe('true');
   });
 
@@ -137,7 +137,7 @@ describe('in-cell multi-select and tags (objectstack#35688)', () => {
     const onGridKey = vi.fn();
     render(
       <GridEditor onGridKey={onGridKey}>
-        <TagsField field={{ name: 'labels', type: 'tags' } as Field} value={['urgent', 'vip-customer']} onChange={onChange} inCell />
+        <TagsField field={{ name: 'labels', type: 'tags' } as unknown as Field} value={['urgent', 'vip-customer']} onChange={onChange} inCell />
       </GridEditor>,
     );
     const box = screen.getByRole('combobox');
@@ -154,11 +154,11 @@ describe('in-cell multi-select and tags (objectstack#35688)', () => {
   it('tags: unchecking removes a tag and keeps its row on offer', () => {
     const onChange = vi.fn();
     const { rerender } = render(
-      <TagsField field={{ name: 'labels', type: 'tags' } as Field} value={['a', 'b']} onChange={onChange} inCell />,
+      <TagsField field={{ name: 'labels', type: 'tags' } as unknown as Field} value={['a', 'b']} onChange={onChange} inCell />,
     );
     fireEvent.click(screen.getByTestId('in-cell-option-a'));
     expect(onChange).toHaveBeenLastCalledWith(['b']);
-    rerender(<TagsField field={{ name: 'labels', type: 'tags' } as Field} value={['b']} onChange={onChange} inCell />);
+    rerender(<TagsField field={{ name: 'labels', type: 'tags' } as unknown as Field} value={['b']} onChange={onChange} inCell />);
     const a = screen.getByTestId('in-cell-option-a');
     expect(a.getAttribute('aria-selected')).toBe('false');
     fireEvent.click(a);
@@ -167,7 +167,7 @@ describe('in-cell multi-select and tags (objectstack#35688)', () => {
 });
 
 describe('in-cell date (objectstack#35688)', () => {
-  const FIELD = { name: 'close_date', type: 'date' } as Field;
+  const FIELD = { name: 'close_date', type: 'date' } as unknown as Field;
   const localDay = (offset: number) => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -212,7 +212,7 @@ describe('in-cell date (objectstack#35688)', () => {
   it('datetime: a day pick stays open for the time and does not end the edit', () => {
     const onCommit = vi.fn();
     render(
-      <DateTimePickerField field={{ name: 'at', type: 'datetime' } as Field} value="" onChange={() => {}} inCell onCommit={onCommit} />,
+      <DateTimePickerField field={{ name: 'at', type: 'datetime' } as unknown as Field} value="" onChange={() => {}} inCell onCommit={onCommit} />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Tomorrow' }));
     expect(onCommit).not.toHaveBeenCalled();
@@ -231,7 +231,7 @@ describe('in-cell date (objectstack#35688)', () => {
 describe('in-cell time and colour (objectstack#35688)', () => {
   it('time: the browser picker shows on the first focus only', () => {
     const showPicker = vi.fn();
-    const { container } = render(<TimeField field={{ name: 't', type: 'time' } as Field} value="09:30" onChange={() => {}} inCell />);
+    const { container } = render(<TimeField field={{ name: 't', type: 'time' } as unknown as Field} value="09:30" onChange={() => {}} inCell />);
     const input = container.querySelector('input[type="time"]') as HTMLInputElement & { showPicker?: () => void };
     input.showPicker = showPicker;
     fireEvent.focus(input);
@@ -245,7 +245,7 @@ describe('in-cell time and colour (objectstack#35688)', () => {
     const onChange = vi.fn();
     const onCommit = vi.fn();
     const { container } = render(
-      <ColorField field={{ name: 'c', type: 'color' } as Field} value="#3b82f6" onChange={onChange} inCell onCommit={onCommit} />,
+      <ColorField field={{ name: 'c', type: 'color' } as unknown as Field} value="#3b82f6" onChange={onChange} inCell onCommit={onCommit} />,
     );
     const first = container.querySelector('input,button') as HTMLInputElement;
     expect(first.type).toBe('text');
@@ -260,7 +260,7 @@ describe('in-cell time and colour (objectstack#35688)', () => {
 describe('FieldEditWidget hands the cell face on (objectstack#35688)', () => {
   it('forwards inCell and onCommit to the widget', () => {
     const onCommit = vi.fn();
-    const element = FieldEditWidget({ field: { name: 'c', type: 'color' } as Field, value: '', onChange: () => {}, inCell: true, onCommit });
+    const element = FieldEditWidget({ field: { name: 'c', type: 'color' } as unknown as Field, value: '', onChange: () => {}, inCell: true, onCommit });
     const forwarded = element!.props as Record<string, unknown>;
     expect(forwarded.inCell).toBe(true);
     expect(forwarded.onCommit).toBe(onCommit);
