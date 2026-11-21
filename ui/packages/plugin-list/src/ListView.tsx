@@ -61,7 +61,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -3076,19 +3076,26 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [exportError, setExportError] = React.useState<string | null>(null);
 
   // Object-level export permission gate. Default-allow: export stays enabled
-  // unless `allowExport === false` or `operations.export === false`, AND — when
-  // the server hands down an effective API operation set for this object
-  // (/me/permissions `apiOperations`, objectstack#3391) — unless it excludes `export`.
-  // Missing effective set (unrestricted object / old backend / no provider)
-  // keeps the current behavior. The frontend consumes the effective set the
-  // server resolved; it never reads the raw `apiMethods`.
+  // unless `allowExport === false` or `operations.export === false`, AND unless
+  // the object's resolved export verdict closes it. That verdict is
+  // `isObjectExportOffered` from `@object-ui/core`:
+  // the object's `userActions.exportCsv` over its `managedBy` default
+  // (objectstack#35619 — `exportCsv: false` hides the whole entry, every
+  // format) ANDed with the server's effective API operation set
+  // (/me/permissions `apiOperations`, objectstack#3391) when one is handed
+  // down. A missing set (unrestricted object / old backend / no provider) and
+  // an object definition still in flight keep the default, which offers
+  // export in every bucket. The frontend consumes the effective set the server
+  // resolved; it never reads the raw `apiMethods`. Every export door below —
+  // the wide toolbar, the Display panel's footer and `handleExport` — reads
+  // this one name.
   const affordancePerms = usePermissions();
   const { getObjectApiOperations } = affordancePerms;
   const effectiveApiOps = schema.objectName ? getObjectApiOperations(schema.objectName) : undefined;
   const exportPermitted =
     schema.allowExport !== false &&
     schema.operations?.export !== false &&
-    (effectiveApiOps ? effectiveApiOps.includes('export') : true);
+    isObjectExportOffered(objectDef as SchemaLike | null, effectiveApiOps);
 
   // [objectstack#3720] Bulk-action gate for the NON-grid views (kanban / calendar /
   // gallery / …), whose bulk bar this component renders itself — the grid path
