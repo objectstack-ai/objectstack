@@ -354,6 +354,7 @@ the same `ConditionChipRow`, `SortPanel` and `FilterPanel` with the same field
 lists, and no view switch, view settings or search. It is controlled and every
 input is a React prop, never a node key:
 
+<!-- doc-snippet: fragment — a JSX excerpt from inside the host's render: `sort`, `filterGroup`, `changed` and their setters are the host's own state, and `list-conditions` is a host-only tag that no `DeclaredNode` arm names (the host spells its node once, as `plugin-detail`'s RelatedList does). Measured TS2304x10, TS7006x2. -->
 ```tsx
 <SchemaRenderer
   schema={{ type: 'list-conditions' }}
