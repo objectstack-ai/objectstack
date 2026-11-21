@@ -33,7 +33,6 @@
  * out an LLM judge, so every axis is decided by code.
  */
 
-import { QUERY_DATASET_TOOL_NAME } from '@objectstack/spec/ai';
 import type { ErrorCode } from '@objectstack/spec/api';
 
 import type { Truth } from '../truth.js';
@@ -552,14 +551,17 @@ interface DatasetCitation {
  * from the dataset it resolved, and its `nextStep` tells the client to cite
  * that `sourceLine` — which names the dataset and its measures, never the
  * object. So a source line naming the dataset, or the `sourceLine` itself,
- * cites the figures of that object. Read off the outputs only: an answer
- * without an `object` or a dataset `provenance` (a refusal, an older door)
- * hands no citation, and the arguments the model sent decide nothing.
+ * cites the figures of that object. Read off the outputs only, by the
+ * answer's shape rather than the tool's name: a top-level `provenance` of
+ * kind `dataset` (`DatasetProvenanceSchema`) is the `query_dataset` answer's
+ * own block, and keying on it keeps the narrow `./score` entry off the spec's
+ * `ai` subpath. An answer without an `object` or a dataset `provenance` (a
+ * refusal, an older door) hands no citation, and the arguments the model
+ * sent decide nothing.
  */
 function datasetCitations(calls: readonly RunToolCall[]): Map<string, DatasetCitation> {
   const out = new Map<string, DatasetCitation>();
   for (const c of calls) {
-    if (c.name !== QUERY_DATASET_TOOL_NAME) continue;
     const v = outputJson(c.output);
     if (!isBag(v) || typeof v.object !== 'string' || v.object.length === 0) continue;
     const p = v.provenance;
