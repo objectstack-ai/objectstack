@@ -13,7 +13,7 @@
 // the `owner_only_writes` floor is keyed on `created_by`, which a transfer does
 // not move, so the previous owner (still the creator) is the case to read.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import showcaseStack from '@objectstack/example-showcase';
@@ -159,7 +159,9 @@ describe('[#35402] Change Owner doors on the showcase', () => {
 
     const own = await create(carolToken, 'carol cannot queue this');
     const refused = await stack.apiAs(carolToken, 'POST', `${OBJ}/${own}/change-owner`, { queue: 'note_triage' });
-    expect(refused.status, JSON.stringify(await refused.clone().json())).toBe(403);
+    const refusedBody: any = await refused.json();
+    expect(refused.status, JSON.stringify(refusedBody)).toBe(403);
+    expect(refusedBody.error?.code, 'the owner guard\'s own refusal, not any other 403').toBe('PERMISSION_DENIED');
     expect((await ql.findOne(OBJECT, { where: { id: own }, context: SYS }))?.owner_id).toBe(carolId);
 
     const r = await stack.apiAs(aliceToken, 'POST', `${OBJ}/${note}/change-owner`, { queue: 'note_triage' });
@@ -176,7 +178,21 @@ describe('[#35402] Change Owner doors on the showcase', () => {
     const body: any = await r.json();
     expect(r.status, JSON.stringify(body)).toBe(200);
     expect(body.data.notified).toBe(true);
-    const events = await ql.find('sys_notification', { where: { topic: 'record.owner_changed' }, context: SYS });
-    expect(events.length).toBeGreaterThanOrEqual(1);
+
+    // One event, naming this record.
+    const events = await ql.find('sys_notification', { where: { topic: 'record.owner_changed', source_id: note }, context: SYS });
+    expect(events, JSON.stringify(events)).toHaveLength(1);
+    expect(events[0].source_object).toBe(OBJECT);
+
+    // Delivered to bob's inbox, once, and to no one else.
+    const inboxOf = (notificationId: string) =>
+      ql.find('sys_inbox_message', { where: { notification_id: notificationId }, context: SYS });
+    const rows: any[] = await vi.waitFor(async () => {
+      const found = await inboxOf(String(events[0].id));
+      if (found.length === 0) throw new Error('no inbox row yet');
+      return found;
+    }, { timeout: 5_000, interval: 100 });
+    expect(rows.map((m) => m.user_id), JSON.stringify(rows)).toEqual([bobId]);
+    expect(rows[0].title).toMatch(/^You are now the owner of this .+ record$/);
   });
 });

@@ -228,6 +228,14 @@ describe('[#35402] notify', () => {
       actorId: 'u_manager',
       organizationId: 'org_1',
     }));
+    // The title rides as catalog keys, rendered in the new owner's language at
+    // delivery; the English literal is the same sentence, filled.
+    const sent = (messaging.emit.mock.calls[0] as any[])[0];
+    expect(sent.keyedText).toEqual({
+      titleKey: 'messages.recordOwnerChangedTitle',
+      params: { object: { key: 'objects.lead.label', fallback: 'Lead' } },
+    });
+    expect(sent.payload.title).toBe('You are now the owner of this Lead record');
   });
 
   it('the bulk form sends one notification for the rows that moved, none when nothing moved', async () => {
@@ -236,7 +244,13 @@ describe('[#35402] notify', () => {
     const report = await changeRecordsOwner(engine, 'lead', ['l1', 'l2', 'l3'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
     expect(report.notified).toBe(true);
     expect(messaging.emit).toHaveBeenCalledTimes(1);
-    expect((messaging.emit.mock.calls[0] as any[])[0].payload.recordIds).toEqual(['l1', 'l3']);
+    const sent = (messaging.emit.mock.calls[0] as any[])[0];
+    expect(sent.payload.recordIds).toEqual(['l1', 'l3']);
+    expect(sent.keyedText).toEqual({
+      titleKey: 'messages.recordsOwnerChangedTitle',
+      params: { object: { key: 'objects.lead.label', fallback: 'Lead' }, count: '2' },
+    });
+    expect(sent.payload.title).toBe('You are now the owner of 2 Lead records');
 
     const none = await changeRecordsOwner(fakeEngine({ refuse: () => transferDenied() }), 'lead', ['l1'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging });
     expect(none.notified).toBe(false);

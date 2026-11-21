@@ -89,6 +89,31 @@ const QUEUE_FIELD = 'queue';
 /** The notification topic a notified new owner receives. */
 export const CHANGE_OWNER_NOTIFICATION_TOPIC = 'record.owner_changed';
 
+/**
+ * The new owner's notification title, as catalog ids of the `messages` face and
+ * their English text. The notice rides `keyedText`, so the messaging service
+ * renders it per recipient, in the new owner's own language, at delivery; the
+ * English is the literal it delivers whenever a key cannot be rendered.
+ *
+ * The entries in every shipped locale live in `@objectstack/service-messaging`'s
+ * bundle (`translations/messages.ts`), beside the topic in its platform topic
+ * list: this package loads no bundle of its own. That bundle's `en` entries ARE
+ * these strings, so the two cannot drift.
+ *
+ * Holes: `{{object}}`, the object's label (itself rendered in the recipient's
+ * language from `objects.<object>.label`, else the declared label), and, for a
+ * bulk move of two or more, `{{count}}`.
+ */
+export const CHANGE_OWNER_NOTIFICATION_TEXT = {
+  recordOwnerChangedTitle: 'You are now the owner of this {{object}} record',
+  recordsOwnerChangedTitle: 'You are now the owner of {{count}} {{object}} records',
+} as const;
+
+/** `{{name}}` holes filled in English, for the literal a recipient reads when no key renders. */
+function fillEnglish(template: string, params: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (hole, name: string) => params[name] ?? hole);
+}
+
 /** Who takes the records: a person, or an ownership queue. Exactly one. */
 export type ChangeOwnerTarget = { ownerId: string; queue?: undefined } | { queue: string; ownerId?: undefined };
 
@@ -111,6 +136,11 @@ export interface ChangeOwnerMessaging {
     actorId?: string;
     organizationId?: string;
     payload?: Record<string, unknown>;
+    /** The title as catalog keys, rendered per recipient at delivery (`EmitInput.keyedText`). */
+    keyedText?: {
+      titleKey: string;
+      params: Record<string, string | { key: string; fallback: string }>;
+    };
   }): Promise<unknown>;
 }
 
@@ -223,6 +253,8 @@ async function notifyNewOwner(
   if (actorId === ownerId) return false;
   const organizationId = ctx?.tenantId != null ? String(ctx.tenantId) : undefined;
   const single = ids.length === 1;
+  const messageId: keyof typeof CHANGE_OWNER_NOTIFICATION_TEXT = single ? 'recordOwnerChangedTitle' : 'recordsOwnerChangedTitle';
+  const count = String(ids.length);
   try {
     await messaging.emit({
       topic: CHANGE_OWNER_NOTIFICATION_TOPIC,
@@ -232,9 +264,16 @@ async function notifyNewOwner(
       ...(actorId ? { actorId } : {}),
       ...(organizationId ? { organizationId } : {}),
       payload: {
-        title: single ? `A ${label} record was assigned to you` : `${ids.length} ${label} records were assigned to you`,
+        title: fillEnglish(CHANGE_OWNER_NOTIFICATION_TEXT[messageId], { object: label, count }),
         object,
         recordIds: ids,
+      },
+      keyedText: {
+        titleKey: `messages.${messageId}`,
+        params: {
+          object: { key: `objects.${object}.label`, fallback: label },
+          ...(single ? {} : { count }),
+        },
       },
     });
     return true;

@@ -684,6 +684,7 @@ export {
 // ownership queue, as the caller, on an object that offers the action.
 export {
   CHANGE_OWNER_DISABLED,
+  CHANGE_OWNER_NOTIFICATION_TEXT,
   CHANGE_OWNER_NOTIFICATION_TOPIC,
   changeOwnerOffReason,
   changeOwnerOffRefusal,
