@@ -2136,7 +2136,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.addFieldOption': '+ 添加字段…',
   'engine.studio.settings.undeclared': '(未声明 —— 各处按启发式自动挑选)',
   'engine.studio.settings.highlightMax': '最多 {max} 个重点字段——移除一个才能再添加。',
-  'engine.studio.settings.highlightPreview': '要点条预览',
   'engine.studio.settings.relatedLists': '关联列表顺序(relatedLists)—— 本对象记录页上各子记录列表的顺序,最重要的在前;只管排序,显示与否仍在关系字段上设置',
   'engine.studio.settings.relatedListsAdd': '+ 添加关系…',
   'engine.studio.settings.relatedListsTail': '未列出 —— 排在以上之后,按默认顺序',
