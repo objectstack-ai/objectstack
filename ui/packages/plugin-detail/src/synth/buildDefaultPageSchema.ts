@@ -39,8 +39,9 @@ export interface ObjectDefLike {
   label?: string;
   fields?: Record<string, ObjectDefFieldLike>;
   /** Semantic role (ADR-0085): the linear-lifecycle field driving the
-   *  `record:path` stepper. `false` = the status-shaped field is NOT a
-   *  linear flow — suppress stage detection entirely (#2065). */
+   *  header's stage tag, and a `record:path` a page places itself. `false` =
+   *  the status-shaped field is NOT a linear flow — suppress stage detection
+   *  entirely (#2065). */
   stageField?: string | false;
   stages?: Array<{ value: any; label: string }>;
   /** Semantic role (ADR-0085): the object's most important fields — the
@@ -459,13 +460,13 @@ export function resolveTitleField(def: ObjectDefLike | undefined): string | null
 }
 
 /**
- * How many highlights the record header shows (objectstack#27055, the v3
+ * How many highlights a synthesized strip shows (objectstack#27055, the v3
  * header: 「要点 6 项等宽」 — the same six Studio's highlight editor offers).
- * A declared `highlightFields` list longer than this is cut here.
+ * A declared `highlightFields` list longer than this is cut here. The default
+ * record page draws no strip; {@link buildDefaultHighlights} builds one for a
+ * page that places it in its `highlights` slot.
  *
- * Declared once in `@objectstack/spec/ui` and re-exported here: the
- * `field-group-shadowed` lint judges which field groups this strip empties
- * with the same constant, so its verdict matches the page.
+ * Declared once in `@objectstack/spec/ui` and re-exported here.
  */
 export { RECORD_HIGHLIGHTS_MAX };
 

@@ -14,8 +14,9 @@ export const Activity = ObjectSchema.create({
   pluralLabel: 'Activities',
   icon: 'calendar-check',
   description: 'A logged interaction (call, email, meeting, or task) related to a CRM record.',
-  // What the record page shows at a glance, under the title. The stage is
-  // not here: the record page already draws it as the stage path.
+  // The record's most important fields: the hover card, list columns and
+  // the record picker read them. The stage is not here: the record header
+  // already shows it as the status tag beside the name.
   highlightFields: ['type', 'due_date', 'contact', 'account'],
 
   fields: {

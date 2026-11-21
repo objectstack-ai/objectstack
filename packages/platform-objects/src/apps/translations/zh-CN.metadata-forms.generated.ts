@@ -70,7 +70,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "重点字段",
-        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列、卡片、子记录预览和详情页的重点信息条。不是本对象字段的名称会在发布时被拒绝。"
+        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列和相关列表列、卡片、子记录预览、记录悬停卡片和记录选择器。不是本对象字段的名称会在发布时被拒绝。"
       },
       relatedLists: {
         label: "相关列表顺序",

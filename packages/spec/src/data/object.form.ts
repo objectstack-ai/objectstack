@@ -67,7 +67,7 @@ export const objectForm = defineForm({
         // it would offer an empty list. A misspelt entry is not dropped quietly:
         // the publish door refuses it (`object-field-ref-unknown`,
         // `searchable-field-unknown`, both at `error`), and so does `os validate`.
-        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list columns, cards, child-record previews and the detail highlight strip. A name that is not a field of this object is refused at publish.' },
+        { field: 'highlightFields', widget: 'string-tags', colSpan: 2, helpText: 'Field names of this object, most important first — the first entry wins where only one fits (ADR-0085). Drives the default list and related-list columns, cards, child-record previews, the record hover card and the record picker. A name that is not a field of this object is refused at publish.' },
         // #27069 — the business order of the record page's related lists: a
         // list of inbound relationship names (child object, or `object.field`)
         // on the `highlightFields` row's face. A dangling name is refused at

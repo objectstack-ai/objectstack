@@ -4603,11 +4603,14 @@ const ObjectSchemaBase = strictObject(
    * [ADR-0085] Semantic role: the object's most important fields, in priority
    * order (the first entry wins wherever only one field fits, e.g. child-record
    * previews). Cross-surface by definition — drives default list/grid columns,
-   * cards, hover/lookup previews, and the record-detail highlight strip (first
-   * 4). Renamed from `compactLayout` (the value is an ordered field list, not
-   * a layout); Salesforce compact-layout semantics.
+   * cards, hover/lookup previews, a related list's default columns and the
+   * record picker's columns. The default record page draws no key-field strip
+   * from it and leaves these fields in their groups; a page that places a
+   * `record:highlights` block draws them there. Renamed from `compactLayout`
+   * (the value is an ordered field list, not a layout); Salesforce
+   * compact-layout semantics.
    */
-  highlightFields: z.array(z.string()).optional().describe('[ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default columns, cards, previews, detail highlight strip. Renamed from compactLayout.'),
+  highlightFields: z.array(z.string()).optional().describe('[ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it. Renamed from compactLayout.'),
   // `compactLayout` (the pre-ADR-0085 spelling of `highlightFields`) was an
   // accepted parse-time alias for one deprecation window and is now RETIRED
   // (framework#2536): authoring it is rejected by `create()` like any unknown
@@ -4661,9 +4664,11 @@ const ObjectSchemaBase = strictObject(
    * field; `false` declares the object's status-like field NON-linear (an
    * unordered state set such as active/suspended/void) and suppresses every
    * consumer's stage heuristics. Absent = consumers may heuristically detect
-   * a stage field (status/stage/state/phase). Consumed by the record-detail
-   * path/stepper today; kanban default grouping, list badges and report
-   * bucketing are natural future consumers.
+   * a stage field (status/stage/state/phase). Consumed by the record page
+   * header today, whose status tag shows the stage and moves it (the default
+   * record page draws no stage path; an authored `record:path` block still
+   * reads it); kanban default grouping, list badges and report bucketing are
+   * natural future consumers.
    *
    * [#23809] When the named field carries options, it must be a single-value
    * `select` / `radio` whose inline options EACH declare their lifecycle `kind`

@@ -70,7 +70,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       highlightFields: {
         label: "重點欄位",
-        helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄、卡片、子記錄預覽和詳細資料頁面的重點資訊條。不是本物件欄位的名稱會在發布時被拒絕。"
+        helpText: "本物件的欄位名，依重要性從高到低排列——只能放下一個時取第一項（ADR-0085）。決定預設清單欄和相關清單欄、卡片、子記錄預覽、記錄懸停卡片和記錄選擇器。不是本物件欄位的名稱會在發布時被拒絕。"
       },
       relatedLists: {
         label: "相關清單順序",
