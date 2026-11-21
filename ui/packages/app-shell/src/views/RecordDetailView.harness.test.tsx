@@ -2910,7 +2910,8 @@ describe('RecordDetailView.recordEditState-35599', () => {
     showcase_task: [{ id: 't1', subject: 'Call', quote: RECORD_ID }],
   };
 
-  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean } = {}) {
+  /** `i18n`: under the real English provider, so a notice reads as the pack writes it. */
+  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean; i18n?: boolean } = {}) {
     const metadata = {
       objects, pages: [], loading: false, error: null,
       refresh: async () => {}, invalidate: () => {},
@@ -2929,7 +2930,7 @@ describe('RecordDetailView.recordEditState-35599', () => {
       batchTransaction: vi.fn(async (ops: unknown[]) => ({ results: ops.map(() => ({})) })),
     };
     const onEdit = vi.fn();
-    const view = render(
+    const page = (
       <MemoryRouter initialEntries={[`/apps/demo/${PARENT}/record/${RECORD_ID}`]}>
         <MetadataCtx.Provider value={metadata}>
           <NavigationProvider>
@@ -2942,7 +2943,12 @@ describe('RecordDetailView.recordEditState-35599', () => {
             </Routes>
           </NavigationProvider>
         </MetadataCtx.Provider>
-      </MemoryRouter>,
+      </MemoryRouter>
+    );
+    const view = render(
+      opts.i18n
+        ? <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>{page}</I18nProvider>
+        : page,
     );
     return { ...view, dataSource, onEdit };
   }
@@ -3164,7 +3170,7 @@ describe('RecordDetailView.recordEditState-35599', () => {
   });
 
   it('objectstack#35940 (ruling 7056413638): a line Add started and nobody edited is not written, and the save says so', async () => {
-    const view = renderPage(objectsWith());
+    const view = renderPage(objectsWith(), { i18n: true });
     await enterEditState(view);
     vi.mocked(toast.info).mockClear();
     fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
