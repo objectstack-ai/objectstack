@@ -1,0 +1,33 @@
+{
+  "number": 35949,
+  "kind": "issue",
+  "title": "ci: Check Changeset re-runs on a merged PR's label event and goes red against the main that already holds its changeset",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T22:21:10Z",
+  "updated_at": "2026-11-20T23:03:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35949",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4d1ZJL93Kin2UHFXbFv\n\n## What happens\n\nOn a Tier H PR, after it merges, the fleet removes `pm:awaiting-merge`. That `unlabeled` event fires `pr-automation.yml` (the `pull_request` types include `unlabeled`). The `changeset-check` job's `if:` does not look at the PR's state, so it runs. Its diff base is `merge-base(origin/main, HEAD)`, and main now contains the PR, so that base is the PR's own merge commit. The step therefore counts **0** added changesets and fails with \"This PR adds no changeset\".\n\nThe result is a red `Check Changeset` on the head of a PR that is already merged and that did ship a changeset. Measured:\n\n| PR | merged | label event | red run | earlier runs on the same head |\n|:--|:--|:--|:--|:--|\n| #35842 | 12:23:51Z | 12:55:26Z `unlabeled pm:awaiting-merge` (objectstack-fleet[bot]) | 44739836712, log: `Diff base: 9a28a480d2 (merge-base of origin/main and HEAD)` = the merge commit | 2× success (11:30Z, 10:55Z) |\n| #35857 | 15:51:07Z | 15:53:08Z same | 15:53:16Z failure | 3× success |\n\nThe merge commits on main are green. So nothing shipped broken, but every Tier H PR that the fleet tidies after merge will show this false red, and people read it as a broken merge (the maintainer flagged #35842 as red).\n\n## Fix\n\nAdd `github.event.pull_request.state == 'open'` to `changeset-check`'s `if:` in `.github/workflows/pr-automation.yml`, with a comment that names this event and the two PRs above. A closed PR's verdict is final: there is nothing left to gate, and its diff base is no longer the PR's own. `pr-size` and `auto-label` already skip label events, so `changeset-check` is the only job this hits.\n\n## Done when\n\n- A label event on a closed or merged PR no longer runs `Check Changeset`.\n- Open PRs keep every run they have today, including `labeled`, `unlabeled` and `edited`.\n- Any repo check that pins this `if:` text, or the workflow's job conditions, is updated in the same PR."
+}

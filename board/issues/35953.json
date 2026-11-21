@@ -1,0 +1,34 @@
+{
+  "number": 35953,
+  "kind": "issue",
+  "title": "approvals: a working-time deadline that fails to compute (not a calendar refusal) fails the request open after the row is written and the approvers are told, and fails the whole inbox list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T22:57:37Z",
+  "updated_at": "2026-11-21T01:09:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35953",
+  "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: L1 notes N1/N2 on PR #35929 (verdict 7052291078) and the seat's ask after its contract PASS 7052603635. ⛔ Not a claim.\n\n**What (after #35929).** `ApprovalService.slaDeadline` turns a calendar *refusal* (`isWorkCalendarRefusal`) into `sla_due_refusal` and rethrows every other error. `projectWorkingTimeDue` runs it per row with no per-row guard:\n- **Open (N1).** `openNodeRequest` calls `projectWorkingTimeDue([row], [opened])` as its last step, after the `sys_approval_request` row is inserted and `approval.requested` has gone to every approver. If the calendar read then throws a non-refusal error (for example, a driver error reading `sys_work_calendar`), the open throws. The approval node's `catch` answers the run `success: false`, so the flow run fails while a pending request it owns exists and its approvers have been notified. The dead-run sweep later recalls it, but until then an approver can act on a request whose run has already failed. Reachable only on a `working_time` escalation and only when the calendar read itself errors.\n- **Lists.** The same throw fails the whole list read (`listRequests`) and `getRequest` for every row on the page, not only the row whose deadline failed.\n- **Cost (N2).** A refused row costs one calendar read per row per read and per sweep, because refusals are never cached. That is correct by ADR-0157 D9 (retry), but a page of rows on one missing calendar repeats the same read.\n\n**Ask.**\n1. Never let the deadline projection fail a write that has already happened. In `openNodeRequest`, compute the deadline guarded: on a non-refusal error, log it, serve the row with no deadline (or a `calendar_error` refusal code if the served shape admits one under contract review), and return the opened request.\n2. Guard per row in `projectWorkingTimeDue`, so one bad row leaves the rest of the list intact.\n3. Optional: memoise the refusal within one read or one sweep pass (never across passes, so D9's retry stands).\nPins: a calendar service that throws a non-refusal error → the open returns the request, the row exists, the run is not failed; a list with one such row → the others still carry their deadlines; the sweep → it skips that row and retries next pass (ADR-0042 §1 single shot unchanged).\n\nBlocked-by: #35929.\nSuggested-grade: p1 · N1 can leave a request opened and notified under a failed run (the seat's line: a half-opened request in production use is p1). Narrow: only `working_time` escalations, and only when the calendar read itself errors. Fix size is small.\nRelated: #35357, ADR-0157 D9/D12.\nDedupe: `projectWorkingTimeDue`, `sla_due_refusal` (0 open hits; searched before filing)."
+}

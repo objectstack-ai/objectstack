@@ -2,8 +2,8 @@
   "number": 35911,
   "kind": "issue",
   "title": "Red error and danger colours: two places use an invalid colour value, one flow preview stays dark red on the dark theme, and the light-theme Delete is below the contrast floor",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T18:11:10Z",
-  "updated_at": "2026-11-20T18:51:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-21T01:34:42Z",
+  "closed_at": "2026-11-21T01:34:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35911",
   "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFiled from the build of #35658 (PR #35904, dark-theme Delete contrast in menus). These were seen during that build and are outside that card's scope. Part of the list-redo epic's colour work only by origin; triage decides the home.\n\n## What a user sees today\n\n1. **Export error line and Markdown \"caution\" alerts use an invalid colour.** The theme variable `--destructive` holds an HSL triplet (`0 84.2% 60.2%`), so a bare `var(--destructive)` is not a colour and the browser drops the declaration:\n   - `ui/packages/plugin-grid/src/ObjectGrid.tsx:3867` and `ui/packages/plugin-list/src/ListView.tsx:7547`: `color: 'var(--destructive, #ef4444)'`. The fallback never applies (the variable IS defined), so the export-error text renders in the inherited colour, not red.\n   - `ui/packages/plugin-markdown/src/markdown-theme.ts:120-121`: the caution alert's border and title colour are dropped the same way.\n   The working spelling elsewhere is `hsl(var(--destructive))` (for example `plugin-gantt/src/ResourceWorkload.tsx:143`), or the `text-destructive` class / the dark-aware token #35658 introduces.\n2. **Flow preview danger shapes on the dark theme.** `ui/packages/app-shell/src/views/metadata-admin/previews/FlowCanvas.tsx` uses `fill-destructive` / `stroke-destructive`, which stay the light-theme red on dark backgrounds (the same low-contrast case #35658 fixed for menu text).\n3. **Light-theme Delete contrast (needs the maintainer's word).** Measured during #35658's build: the light-theme Delete menu item is 3.76:1 against its background, under WCAG AA's 4.5:1 for normal text. #35658 was told not to change the light theme, so it was left as is.\n\n## To do\n- Items 1 and 2: use the valid, theme-aware spelling; light and dark screenshots of the export error, a caution alert and a flow with a danger node.\n- Item 3: ⛔ not before the maintainer rules whether the light theme's danger red may change (it is a brand colour decision, not only a bug).\n\n## Acceptance\n- The export-error line and the caution alert render red in both themes; the flow preview's danger shapes are readable on dark.\n- Item 3 follows the ruling.\n\nReader: `domain:ui`. Evidence from #35658's build: `/mnt/project-files/build-seat1/35658/` (project files)."

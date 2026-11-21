@@ -2,8 +2,8 @@
   "number": 35891,
   "kind": "issue",
   "title": "记录页默认页不再画阶段条和顶部关键字段条；阶段改成记录名旁的状态标签，点开下拉切换（图 41）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T16:59:27Z",
-  "updated_at": "2026-11-20T17:52:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T23:34:25Z",
+  "closed_at": "2026-11-20T23:34:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

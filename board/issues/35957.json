@@ -1,0 +1,37 @@
+{
+  "number": 35957,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the Changes chip no longer folds the record's creation into its edits",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T23:42:35Z",
+  "updated_at": "2026-11-21T00:28:23Z",
+  "closed_at": "2026-11-21T00:28:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T00:28:21Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35957",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuDYM244ZZo7uXksNPNmuEyz)_\n\nFixes #35788\nClause-②: no\nMetadata-protocol: none\n\nrepo:objectstack#1 · os-sales · session_01L6bhgWdb2isyvQFrgHazQx\n\n## 维护者速读\n\n- 用户能看到什么变化:在开了字段历史的记录页「动态」里,点「变更」时,同一个人同一天的几次修改折叠成一行,次数现在只算真正的修改,记录的创建单独显示一次,不再被算成又一次修改。\n- 为什么做:记录页改版里「动态」折叠功能带来的计数错误,替审批人、审计和负责人看准一条记录被改过几次。\n- 出错会怎样:最坏是「变更」里创建那一行显示位置不对,数据本身不受影响,改动可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n- `recordTimelineStream.ts`: new `isRecordCreationEntry(item)` — a field-history entry written by the ledger's `create` action (the action the spec's `RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES` pairs with the `created` activity row). The `auditEntriesToFeedItems` doc now says what the code does: the creation's audit entry pairs onto the `created` row, and where it stands alone it is one row of its own, never one more edit.\n- `RecordActivityTimeline.tsx`: `isStreamFieldChange` (what `foldStreamChanges` folds) excludes that entry. This is the one place All and Changes share, so the fix lands on both: Changes now folds the three edits and shows the creation once, as its own row; All is unchanged (its creation was already the paired `Created` row).\n- `ui/e2e/live/record-history-display.spec.ts`: tightened back to the exact count — the fold holds exactly 3 rows, `data-fold-count` is `3`, no creation line inside the fold, and the creation appears at most once in the stream.\n- Changeset: `@object-ui/plugin-detail` patch.\n\nMechanism, measured: the PM hypothesis holds. On the Changes chip, `fieldHistoryEntriesOf` unwraps the audit entry paired onto the `created` activity row, so the creation's entry (changes from empty values) reaches `foldStreamChanges` as a bare `sys_audit_log` field change and joins the same-actor, same-day run.\n\n## Tests\n\nPins added as a top-level `describe` in the existing fold harness `src/__tests__/denseActivityRows-35602.test.tsx` (same actor, same day, create + 3 updates, activity rows and audit entries paired through `mergeTimelineStream`):\n- Changes: `foldStreamChanges(filterTimelineStream(stream, 'changes'))` is `fold:3, item:audit:c0`.\n- All: `fold:3, item:a0` (the `Created` row) — control, unchanged.\n- Rendered Changes chip: one fold, `data-fold-count` 3, the creation's line outside it, exactly once.\n\nReadings are in the details blocks under Verification.\n\n## Acceptance notes\n\n- The standalone creation row on the Changes chip is drawn the way any unpaired audit entry is (its field values from empty). Only the fold count and placement were in scope; how that row is worded is not changed here.\n- `ui/e2e/live/record-history-display.spec.ts` was not run live (NOT MEASURED: live e2e, reason: needs a booted showcase stack plus console; the `Live E2E UI` CI job runs it).\n\n## Verification\n\nRead first (by risk):\n1. `ui/packages/plugin-detail/src/RecordActivityTimeline.tsx` — the `isStreamFieldChange` hunk.\n2. `ui/packages/plugin-detail/src/recordTimelineStream.ts` — `isRecordCreationEntry`.\n3. `ui/e2e/live/record-history-display.spec.ts` — the tightened count.\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/plugin-detail/src/__tests__/denseActivityRows-35602.test.tsx` — expect 9 passed, including the three `objectstack#35788` cases.\n\n<details><summary>Unit tests (head 5d9f8e56)</summary>\n\n- `cd ui && pnpm exec vitest run packages/plugin-detail/src/__tests__/denseActivityRows-35602.test.tsx packages/plugin-detail/src/__tests__/recordTimelineStream-27055.test.tsx` under `os-verify-lock`: Test Files 2 passed (2), Tests 61 passed (61), VERDICT command-exit 0.\n- Whole package at 7bb40c13 (pre-merge; the merge of main brought no change to these files): `pnpm --filter @object-ui/plugin-detail run type-check` (tsc --noEmit and tsc -p tsconfig.test.json) exit 0; package vitest: Test Files 393 passed, 1 skipped (394); Tests 3602 passed, 18 skipped; VERDICT command-exit 0.\n</details>\n\n<details><summary>Ablation (one-shot, not kept)</summary>\n\n`node scripts/ablation-replace.mjs` on `RecordActivityTimeline.tsx`, anchor `(isFieldHistoryEntry(item) && !isRecordCreationEntry(item))` replaced by `(isFieldHistoryEntry(item) /* ABLATED-35788 */)`: anchor 1 to 0, blob 7ff06177ccfd to 55e3deed89df. Result: 2 failed, 7 passed: the Changes case (`fold:4` instead of `fold:3, item:audit:c0`) and the rendered fold count (`4` instead of `3`); the All control stays green, as expected (All pairs the creation onto its Created row). Restored: blob equals HEAD 7ff06177ccfd, `git diff HEAD` empty. The test imports the subject by relative path (src), so no dist leg. A first attempt was a no-op (replacement text was a substring of the anchor; the tool refused it) and is not counted.\n</details>\n\n<details><summary>Gates (head 5d9f8e56)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 38 commands; all 38 run locally, every one exit 0 (exit captured before any pipe). `--ran`: 38 derived families accounted for, 38 run, 0 NOT-MEASURED (a derived zero). `pnpm --dir ui exec vitest run scripts/`: Test Files 172 passed, 2 skipped; Tests 5111 passed. `check:nul-bytes` exit 0.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgWdb2isyvQFrgHazQx)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgWdb2isyvQFrgHazQx\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgWdb2isyvQFrgHazQx -->\n"
+}

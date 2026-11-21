@@ -2,8 +2,8 @@
   "number": 35692,
   "kind": "issue",
   "title": "skills: master_detail children are record-page body tables by default (no inlineEdit needed); update the data relationships rule and the record-page eval",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-19T23:16:54Z",
-  "updated_at": "2026-11-20T07:54:17Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T22:38:47Z",
+  "closed_at": "2026-11-20T22:38:46Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

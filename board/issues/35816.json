@@ -2,8 +2,8 @@
   "number": 35816,
   "kind": "issue",
   "title": "记录页编辑状态：「取消」是蓝色主按钮、「保存」是描边，主次反了；有默认值的必填列在新行上显示红框",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T09:38:07Z",
-  "updated_at": "2026-11-20T18:48:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T22:38:12Z",
+  "closed_at": "2026-11-20T22:38:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

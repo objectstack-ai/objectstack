@@ -2,8 +2,8 @@
   "number": 35849,
   "kind": "issue",
   "title": "记录页关键字段：不再把字段从分组里拿掉，后台配的分组原样生效；顶部那一排改为只读",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T12:08:47Z",
-  "updated_at": "2026-11-20T18:47:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T23:34:27Z",
+  "closed_at": "2026-11-20T23:34:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

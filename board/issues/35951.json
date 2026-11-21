@@ -1,0 +1,36 @@
+{
+  "number": 35951,
+  "kind": "pull_request",
+  "title": "fix(ui): state the real page:header mobileMaxVisible default in designer text",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T22:48:59Z",
+  "updated_at": "2026-11-20T23:41:33Z",
+  "closed_at": "2026-11-20T23:41:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-20T23:41:31Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35951",
+  "body": "Fixes #35840\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 在 Studio 设计器和组件文档里,页面头部「手机端最多显示的按钮数」的说明,现在写对了默认值(手机记录页底栏是 2,其他头部是 1,原来写成 1)。\n- 为了让设计器说明、文档与已定稿的规格说明一致,避免设计者按错误默认值配置。\n- 只改文字和注释,不改任何行为;出错也只是说明文字不准,可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nText only in `ui/packages/components/src/renderers/layout/containers.tsx`:\n\n- the designer input description of `mobileMaxVisible` (was \"A positive integer, defaulting to 1\") now states the unset default: 2 in a record page's bottom action bar on a phone (host Edit counted), 1 on any other header;\n- the `PageHeaderActionsProps` comments for `maxVisible` / `mobileMaxVisible` (were \"falls back to 3\" / \"falls back to 1\");\n- the inline/overflow comment (\"default to 3 / 1\").\n\nRegenerated, not hand-edited, with `node scripts/gen-sdui-manifest-node.mjs` and `node scripts/gen-sdui-reference.mjs`: `sdui.manifest.json`, `content/docs/ui/components/page.mdx`, and `scripts/sdui-manifest.record.json` (the manifest generator re-records its own sha256 there; one line, `sha256`). One changeset. `types/ui-action.ts` and `action/auto-trigger.ts` are untouched (they describe `action:bar`, fallback still 3 / 1).\n\nSpec text matched (`packages/spec/src/ui/component.zod.ts` on main, from #35660 / #35821):\n\n- `maxVisible`: \"Renderer default when unset: 1 in a record page's one-row header bar, 3 on any other header.\"\n- `mobileMaxVisible`: \"Renderer default when unset: 2 in a record page's bottom action bar on a phone, 1 on any other header.\"\n\nCode agrees with the spec (read before writing): `containers.tsx` `PHONE_ACTION_BAR_BUTTONS = 2` for `face: 'bar'` (Edit takes a slot there), `?? 1` for other mobile headers, `defaultMaxVisible ?? 3` on desktop with the record one-row header passing 1.\n\n## Tests\n\nNo behavior change, so no test change. `pnpm check:sdui-reference` exit 0 (page.mdx matches the manifest, 106 components); `node scripts/check-sdui-manifest.mjs` exit 0; `pnpm check:changeset-fixed` exit 0; `node scripts/check-nul-bytes.mjs` exit 0.\n\n## Acceptance notes\n\n- Designer description, manifest and page.mdx agree with the spec default; the generated-artefact freshness checks pass locally.\n- `scripts/sdui-manifest.record.json` is outside the stated file surface but is written by the same generator run (sha256 line only).\n- Overlap check against #35938 (same file, other region): merges cleanly.\n\n## Verification\n\nRead `page.mdx` row `mobileMaxVisible`: it now reads \"...when unset it is 2 in a record page's bottom action bar on a phone (counting the host's Edit) and 1 on any other header...\".\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgWdb2isyvQFrgHazQx\n"
+}

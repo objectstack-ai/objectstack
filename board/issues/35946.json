@@ -1,0 +1,36 @@
+{
+  "number": 35946,
+  "kind": "issue",
+  "title": "[Decision] ADR-0155 step 5: how the analytics native compiler asks the engine seam which objects decline the share-grant leaf",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-20T21:40:42Z",
+  "updated_at": "2026-11-21T02:02:07Z",
+  "closed_at": "2026-11-21T02:00:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35946",
+  "body": "repo:objectstack#7 · os-tesla · session_01L9qibyXo4gSy8DJPNz4ANz\n\nFiling gate: ② a maintainer fork a ruled record routes to the maintainer (ADR-0155 D4 \"restates none\" plus the engine.ts facade ceiling, which only the maintainer raises) · Source: fleet (os-dev report 7051244258 on #35874, open_questions[0]; PR #35945). Carries the B1 wiring item of #35874; #35874 keeps every other item (native compile, merge admission, echo, explainer record pass, odata refusal, B6), delivered by PR #35945.\n\n## 维护者速读\n- 问题：分析引擎的原生 SQL 路径要先问引擎\"这个对象是否属于两类特殊情况\"（数据在别的数据源，或宿主给共享表挂了钩子），属于就让给引擎路径。但分析服务在运行时不依赖引擎包，现在问不到。第 5 步先接了一个钩子，没接上时一律让给引擎路径，结果永远正确，只是没走原生 SQL。\n- 选项：A 在引擎接口上加一个可选方法（约 30 行，要你同意 engine.ts 行数上限加几行，并过一次合同审查）；B 让分析服务直接依赖引擎包（约 10 行，多一条包依赖，还要类型强转）；C 引擎把这个判断注册成一个命名服务（多一个服务名契约）；D 保持不接。\n- 推荐 A：它和分析插件已经在读的引擎接口（judgeFilter、hasObjectMiddleware）同一个形状，类型安全，缺了也会安全地退回引擎路径。\n- 不定会怎样：今天没影响，因为第 6 步之前没人写这个叶子。第 6 步之后如果还没接，所有受共享约束的用户做分析查询都会离开原生 SQL，只有原生 SQL 能做的查询（比如多跳关联）会被拒。\n\n## Analysis\n\n**Background.** ADR-0155 lowers the sharing scope's share-grant arm to an engine-internal leaf (`SharedRecordIds`). Q2 ruled that the analytics native-SQL compiler compiles the leaf, and that where either of D4's two classes applies (an object bound to another datasource than `sys_record_share`; a host registration made for `sys_record_share` by name) it declines the query to the engine strategy before anything compiles. D4's built-once table: \"The recognition of D4's two classes | once, in the seam. The analytics native compiler asks the seam's recognition before it compiles and restates none\". Step 5 (#35874, PR #35945) built the compile, a hook `AnalyticsServiceConfig.fixedReadLeafClassOf`, and a fail-closed decline: no hook, a throw, or any answer but `null` declines. The hook is left unwired in `AnalyticsServicePlugin`.\n\n**Why it is the maintainer's.** Measured on the card (report 7051244258, B1): `@objectstack/service-analytics` depends at runtime only on core, spec and types (objectql and the drivers are devDependencies). `IObjectQLEngine` offers `judgeFilter` and `hasObjectMiddleware`, and neither runs the class recognition. Restating the classes in analytics breaks D4's \"restates none\". An engine member needs a spec contract row and a raise of `packages/objectql/src/engine.ts`'s facade ceiling (6853 of 6854 lines today), which the maintainer rules.\n\n**Protocol.** No change to what a metadata author can write under any option (`Metadata-protocol: none`).\n\n**Premise (re-check).** Nothing writes the leaf until ADR-0155 step 6 (#33787): `git grep -n 'SharedRecordIds\\.' origin/main -- packages/plugins packages/services | grep -v '\\.test\\.'` lists only the consumers PR #35945 adds, no producer. Until step 6 no leaf reaches analytics, so D costs nothing today.\n\n**Question.** How should the analytics plugin ask the engine seam's recognition of D4's two classes?\n\n| Option | What it does | What the customer sees | Effort |\n|---|---|---|---|\n| A | An optional `IObjectQLEngine` member `fixedReadLeafClassOf?(leaf)`, delegating in engine.ts to the seam's `fixedReadLeafClassOfEngine`; the plugin wires `engine.fixedReadLeafClassOf?.(leaf) ?? null` | Sharing-scoped dashboards keep native SQL after step 6, except on D4's two classes | `domain:server` · 1 PR, ~30 lines · spec contract row + engine.ts ceiling raise of ~3–5 lines · precedent `judgeFilter`, `hasObjectMiddleware` |\n| B | A runtime dependency `service-analytics` → `@objectstack/objectql`; the plugin imports `fixedReadLeafClassOfEngine` | Same as A | 1 PR, ~10 lines · a new package edge (no cycle); the function takes the concrete `ObjectQL` class, so a cast or an `instanceof` |\n| C | objectql's plugin registers the recognition as a named kernel service, read via `ctx.getService` | Same as A | 1 PR, S–M · a new service-name contract |\n| D | Leave it unwired (PR #35945 as shipped) | Correct rows on every host; from step 6, every sharing-scoped analytics query leaves native SQL, and shapes only native SQL serves (a multi-hop join) are refused for sharing-scoped users on every object | 0 |\n\nBusiness meaning: A, B and C each keep dashboards on native SQL for sharing-scoped users after the switch; D trades that away for no code.\n\n<!-- os-decision-facets -->\nos-decision-facets\n- ① Long-term: A is contract-first and matches the engine facets the plugin already reads; B couples a service to the engine's concrete class; C adds a service-name contract for one question; D leaves a ruled behaviour (Q2: \"it compiles the leaf\") unmet in production.\n- ② Business pull: step 6 writes the leaf for every sharing-scoped read, so D degrades every sharing-scoped dashboard at the switch (measured: the decline path is the engine strategy, which refuses native-only shapes).\n- ③ AI-safety: A is a typed optional member whose absence already declines fail-closed (pinned in PR #35945); B rests on a cast; D is safe on rows but silent on the lost capability.\n- ④ Startup focus: A is the smallest change that keeps the ruled behaviour; its one cost is the engine.ts ceiling ruling.\nPrior rulings read: \"ADR-0155 D4 Q2\", \"6942854600\" → ADR-0155 D4 (recognition once, in the seam; restates none), Q2 analytics native compiler row (compiles; declines for the two classes), ② ruled the recommended column; thread: none\n\n**Recommendation: A** (the dev's, report 7051244258; the card thread concurs). Self-check: does any axis flip it? ② and ④ hold for A, B and C alike; ① and ③ separate A from B and C: no flip. Confidence gaps: the exact ceiling raise (3–5 lines) is the dev's estimate, not measured on a built change.\n\n**After the ruling.** A: a `domain:server` card (objectql engine member + spec contract row + the plugin's wiring, one pin that the plugin's native path compiles a leaf on a plain object), landing before step 6, with a contract review. B: a small service-analytics PR. C: an objectql + analytics PR. D: step 6's changeset names the lost native shapes.\n\n**Related.** #33787 (step 6, Blocked-by this card), #35874 / PR #35945 (step 5), #35906 (step 3's PG fork), ADR-0155."
+}

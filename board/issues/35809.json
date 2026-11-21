@@ -13,18 +13,18 @@
   "labels": [
     "area:workflow",
     "domain:server",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-20T09:14:28Z",
-  "updated_at": "2026-11-20T09:54:23Z",
+  "updated_at": "2026-11-20T23:49:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35809",
   "body": "repo:objectstack#4 · os-elon-musk · session_016WV4czKnDE6hsyXQzB9wB2\n\nFiling gate: ② review follow-up on PR #35789 (#34730 step 2), routed to an area card. ⛔ Not a claim.\n\n**Rule.** A person's Slack link proposal (`SlackLinkStore.propose` in `@objectstack/service-messaging`) calls Slack's `users.lookupByEmail` on the organization's token. The rule to add:\n- a short per-person cooldown: a no-match result is cached for a few minutes, keyed on the user and the digest of the email, and a repeat inside the window answers from the cache with no Slack call;\n- while Slack answers `ratelimited` for that organization, a proposal answers `429` (the existing rate-limit refusal shape) instead of calling again;\n- a no-match lookup leaves a trace (log or audit row, per the package's existing convention).\n\nNote: the reusable limiter `applyTokenBucket` lives in `@objectstack/runtime`, which depends on service-messaging, so importing it would close a workspace cycle; use the kernel cache or move the helper to a package both can import.\n\nPins: a repeat no-match inside the window makes no second Slack call; a `ratelimited` answer then a proposal → 429; the trace is written.\n\nBlocked-by: #35789.\nSuggested-grade: p2 · bounds an organization's Slack API budget.\nDedupe: `slack link proposal cooldown`, `lookupByEmail` (searched before filing)."

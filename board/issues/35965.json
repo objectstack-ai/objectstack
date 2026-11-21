@@ -1,0 +1,36 @@
+{
+  "number": 35965,
+  "kind": "pull_request",
+  "title": "fix(pm): the release-blocker patrol metric names the two release boards, and fleet-roster --health reads them",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-21T00:11:34Z",
+  "updated_at": "2026-11-21T00:52:21Z",
+  "closed_at": "2026-11-21T00:52:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-21T00:52:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35965",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuKHtNGi7oErMGn8Ac5mpT4U)_\n\nFixes #35693\nClause-②: no\nMetadata-protocol: none\nRule-change: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用户无感;席位轮次报告里的「发版阻塞」一项改为只数主仓和 cloud 两张发版板,和发版清单的定义一致。\n- 为什么做:车队规则文本里两处说法打架,一处写三个仓三张板,一处写两个仓两张板,巡检工具因此只能把「数哪几个仓」标成读不了。\n- 出错会怎样:读不到 cloud 发版板的席位会看到本次巡检标为不完整并点名 cloud,不会得到一个看似干净的数字;整个改动可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/seat-lifecycle.md`: the release-blocker metric line names the two producer repos (the main repo and cloud) and two boards, as `seat-post-protocol.md` 发版板运维 defines them. The definition passage is unchanged. No third repo is named.\n- `scripts/pm/fleet-roster.mjs`: `--health` leg 5 sums open `priority:p0` over `RELEASE_BOARD_REPOS` (the main repo and cloud) whatever `--repos` holds. A board inside `--repos` is read off its walk; a board outside it by its platform count alone; a board that does not answer is a named gap (INCOMPLETE, exit 4, printed UNREAD). The repo-count unread leg is removed; the release-window leg stays. The rule-text pins change with the skill line and now also pin the definition's producer and zero-condition phrases.\n- `.claude/skills/pm-dispatch/references/seat-post-protocol.md`: one line defining the seat post's intake line (rider, see Acceptance notes), paid by compression in the same file.\n- `scripts/pm/check-skill-line-ratchet.mjs`: two rows lowered to the landed sizes, none raised.\n\nRule-change reasoning: no hunk alters what an agent may do without the maintainer, what gets done and in what order, or what must go to the maintainer. The metric line is made to agree with the existing definition, the rider names an existing part of the seat post, and the rest is wording compression and a read-only script.\n\nBytes (whole file, before -> after): `seat-lifecycle.md` 9071 -> 9070; `seat-post-protocol.md` 7722 -> 7720. Rider line +104 bytes, compression -106 bytes in the same file. Ceiling rows 9071 -> 9070 and 7722 -> 7720. Re-applied by hand on main 7de1bad5 after PR #35740 merged (its `CEILINGS` hunk conflicted; #35740's two ruled raises, `area-lease.md` 6586 and `coordinator.md` 4265, are kept as landed) and re-measured with `wc -c` on this head. No ceiling is raised: no ruling orders this text.\n\n## Tests\n\n- `node scripts/pm/fleet-roster.mjs --self-test`: 150 cases in 12 batteries pass (health battery floor 25 -> 28).\n- Gates on this head (main 7de1bad5 + this commit): `dispatch-gates.mjs --commands` derives 70 families; run serially, 68 exit 0 and 2 exit 3 (prerequisite builds, named under Acceptance notes). `check-skill-line-ratchet.mjs --self-test`: 116 cases pass.\n- Red first: with the script changed and the skill line not yet changed, the self-test failed on the rule-text pin alone; it passed once the line landed.\n\n## Acceptance notes\n\n- Rider: review nit N1 on PR #35740 (contract review records 7031081983 and 7031399118) said `seat-post-protocol.md` does not name the seat post's intake line that PR #35740's text points at. This PR answers it with one defining line under the stub-parts and refresh-occasions lines. PR #35740 has landed (e3e202a97), so its 接卡行 / 接卡面 text is on main. This records N1 as answered on #35693.\n- The default `--repos` list holds no cloud board and is unchanged. Leg 5 reads cloud by its platform count when cloud is outside `--repos`. An identity that cannot read cloud gets a named gap and exit 4.\n- A `priority:p0` on hotcrm, objectui or mobile (any repo other than the two release boards) no longer counts in leg 5.\n- Seat 1's GitHub identity cannot read cloud (its p0 count answers HTTP 422), so a patrol `--health` run from seat 1 reads INCOMPLETE (exit 4) with `cloud UNREAD` as its only gap, where it could exit 0 before. This is the chosen reading (seat ruling 2026-11-20 06:38Z, dev question 1 = A): an unread board is a named gap, never a zero.\n- The metric line names 主仓、cloud directly and drops the suggested pointer to 发版板运维, since the file sat at headroom 0 (seat ruling 06:38Z, dev question 2 = A).\n- `scripts/pm/fleet-roster.fixture.json` holds no cloud board and is unchanged; the self-test adds one in code.\n- Not measured locally: `check:doc-formula-expressions` and `check:i18n-coverage` (prerequisite builds absent); left to CI.\n\n## Verification\n\n- Read first: `scripts/pm/fleet-roster.mjs` (`judgeHealth`, the release-board hunk: a board in neither reading becomes a gap, never a zero); `seat-post-protocol.md` (the compressed lines: same meaning, fewer bytes); `seat-lifecycle.md` (the one metric line).\n- Two-minute check: `node scripts/pm/fleet-roster.mjs --health --fixture scripts/pm/fleet-roster.fixture.json` prints leg 5 as summed over the two release boards with `cloud UNREAD`, and no unread leg about the repo count.\n\n- No changeset: the diff touches `.claude/**` and `scripts/pm/**` only, and neither ships in a package.\n- This PR touches a governed surface (`.claude/**`). It stays a draft for its tier's review record; the L2 record must carry `Rule-change-verified:`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgX4FrRa8yaWd6hv35v\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgX4FrRa8yaWd6hv35v -->\n"
+}

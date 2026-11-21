@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,7 +22,7 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-20T04:48:25Z",
-  "updated_at": "2026-11-20T11:17:18Z",
+  "updated_at": "2026-11-20T22:11:06Z",
   "closed_at": "2026-11-20T11:04:26Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -31,7 +30,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35742",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35590（专题：记录详情页重做，维护者直派）。⛔ 不是认领。优先级 p2。\n\n维护者 2026-11-20 原话：「更新并验证」。这是验证 objectstack-ai/objectstack#35597（PR objectstack-ai/objectstack#35691）合入效果时看到的。原裁决（2026-11-19）：「主从 的子表是否应该始终显示？主从的子表是否应该默认出现在概览的左侧区域？关键字段下面。」\n\n## 现状（主干 `598a34d043`，本机环境，1280 宽，浏览器实测）\n\n对象「会议」，它的主从子表是「待办事项」，会议没有阶段条和关键字段条：\n\n- 概览里**第一块就是「待办事项」表格**，会议自己的字段（负责人、会议日期、会议地点）排在表格下面。打开一条记录，先看到的是子表，不是这条记录本身的信息。\n- 子表每行高 65（实测），主记录字段是每行 32 的密排，两者不一致。\n- 表格右侧被容器裁掉，「备注」列只露出一半，要在表格里横向滚动。\n- 没有数字列，所以看不到合计，这一点无法在这个对象上验证。\n\n![现状：待办事项表格排在会议字段的上面](https://github.com/objectstack-ai/objectstack/blob/78a7ecc1dc57af6b6273a610d9a971199001efcc/record-redo/verify-meeting-overview.jpg?raw=true)\n\n说明：本机环境只替换了界面，服务端仍是较早的固定版本；objectstack-ai/objectstack#35691 同时改了规范。位置和行高是界面行为，实现方请在完整环境里确认一次。\n\n## 要做的\n\n- 概览左侧的顺序：阶段条（有的话）→ 关键字段条（有的话）→ **主记录的字段分组** → 主从子表。没有阶段条和关键字段条的对象，字段分组在最上面。\n- 「更多详情」这类默认折叠的分组排在主从子表后面还是前面，由实现方按「常用字段在子表前」的原则定，并在 PR 里说明。\n- 主从子表的行高与列表的密排一致（33），表头 32。\n- 表格宽度不超出左栏；列放不下时按列的优先级省略或在表格内滚动，但不出现半截的列。\n\n## 不做的\n\n- 不改主从子表只出现在概览、不占页签、不进右栏的规则。\n- 不改一起编辑保存（objectstack-ai/objectstack#35599）。\n\n## 验收\n\n- 「会议」这类没有阶段条和关键字段的对象：打开记录，概览最上面是会议自己的字段，「待办事项」表格在它下面。\n- 有关键字段条的对象：顺序是关键字段条、字段分组、主从子表。\n- 主从子表的数据行高 33。\n- 1280 宽下子表没有被裁掉一半的列。\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/views/buildDefaultPageSchema.ts`、`RecordPageColumns.tsx`、主从子表的表格渲染（`ui/packages/plugin-detail`）。\n\nDedupe: `主从子表 概览 位置 字段上面`（objectstack，open）→ 无同题卡；相关：objectstack-ai/objectstack#35597（已关）。"

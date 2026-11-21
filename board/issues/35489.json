@@ -2,8 +2,8 @@
   "number": 35489,
   "kind": "issue",
   "title": "Units of measure R1: a number field declares its unit (unitConfig) and the write path checks the unit code",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-19T11:45:58Z",
-  "updated_at": "2026-11-20T11:44:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T22:45:02Z",
+  "closed_at": "2026-11-20T22:45:02Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 7,
   "locked": false,

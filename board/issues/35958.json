@@ -1,0 +1,33 @@
+{
+  "number": 35958,
+  "kind": "pull_request",
+  "title": "fix(pm): a ceiling claim's citation is read inside its model slot; RUNNER's security-fix effort follows the pm-dispatch rule",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-20T23:44:42Z",
+  "updated_at": "2026-11-21T00:06:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35958",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuYMxVr4whKU7SgYTUvvzVkx)_\n\nPart of #35270\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；派发认领里「最贵档」的理由只认写在档位那一格里的，测试清单说明里安全修复的力度改成跟派发规则一致。\n- 为什么做：属于车队派发力度整理（替力度规则那张卡收尾两处小尾巴）；此前力度格里的理由会被误当成档位理由放行，清单说明还写着一律最高力度。\n- 出错会怎样：只影响车队自己的认领检查与说明文字；写错最多误拦或误放一条认领，可直接撤回本次改动。\n- 要你做什么：无\n\n## What changes\n\n- `scripts/pm/dispatch-gates.mjs`: `readContainerModelLine` reads the `MANDATORY` / `reason:` citation only inside the `model:` slot, from the `model:` key to the next `effort:` key or to the end of the line. Before, it matched anywhere on the `Container & model:` line, so an `effort: xhigh, reason: ...` citation satisfied the ceiling-tier check by accident (contract-review nit N1, release comment 7027271918). The tier token and every correctly written claim read as before. The jsdoc states the rule.\n- `scripts/pm/dispatch-gates.self-test.mjs`: three cases. Two negatives: a citation only in the effort slot is refused, for `reason:` and for `MANDATORY`. One positive twin: a citation inside the model slot with commas and parentheses still reads with an effort slot after it.\n- `docs/qa/platform-checklist/RUNNER.md` line 94: a runner's security fix is no longer dispatched \"at `xhigh`\". It follows the pm-dispatch security effort rule and names `references/execution-duties.md`: high-severity built at `high` with one read-only `xhigh` diff review, medium-severity at `high`, anything else by difficulty (ruling record 7024443457, decision 一 A).\n\n## Tests\n\n- `pnpm check:pm-dispatch-gates` at `366b52cf2` (the same commit before it was moved onto `main` at `e3e202a97` as `f64915ce5`): exit 0, fast tier 2252 cases pass (2249 + 3).\n- Red on the old code: the three predicates run against the HEAD blob of the old reader answer a=false, b=false, c=true (both negatives red, the twin green); against the new reader, all true.\n\n## Acceptance notes\n\n- N5/N6 of the release comment: gone. The ceiling table was re-based to bytes by #35712 and no longer carries those row comments.\n- Not in this PR: items 1 and 2 of the release comment (measurement runs, the maintainer's word) and nit N4.\n- Landing tier: Tier H. `scripts/pm/dispatch-gates.mjs` is on the governed register, so this PR waits for the governed approver.\n- No changeset: `scripts/pm/**` and `docs/qa/**` do not ship in a package (`skip-changeset`).\n\n## Verification\n\n- `dispatch-gates --commands` derived 69 commands at `366b52cf2`, the same commit on its earlier base; all ran, all exit 0 after the two exit-3 prerequisite builds (verify lock VERDICT command-exit 0); `--ran`: 68 families accounted for, 0 NOT-MEASURED. `overlap-check`: VERDICT clean exit 0.\n\nRead first: the slot cut in `readContainerModelLine` (three added lines), then the three new self-test cases.\n\nTwo-minute check: `node scripts/pm/dispatch-gates.mjs --self-test --fast` prints the three new case titles as passing.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgUU7y15SHQsH8q8y74\n\n<!-- signed: repo:objectstack#1 · os-sales · session_01L6bhgUU7y15SHQsH8q8y74 -->"
+}

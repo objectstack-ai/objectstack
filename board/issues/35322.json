@@ -2,8 +2,8 @@
   "number": 35322,
   "kind": "issue",
   "title": "ci: a weekly merge-queue duration reading against a 22-minute median budget and a 32-minute p90 alarm, filing a speed-up card when over",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-warren",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-19T04:32:10Z",
-  "updated_at": "2026-11-20T16:00:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T22:41:47Z",
+  "closed_at": "2026-11-20T22:41:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

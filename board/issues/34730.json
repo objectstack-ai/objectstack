@@ -13,6 +13,7 @@
   "labels": [
     "area:workflow",
     "domain:server",
+    "domain:ui",
     "pm:dispatched",
     "priority:p1"
   ],
@@ -22,11 +23,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-17T08:54:32Z",
-  "updated_at": "2026-11-20T10:29:07Z",
+  "updated_at": "2026-11-21T01:07:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 14,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34730",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ the maintainer's direct order, in the cloud seat 5 thread on 2026-11-17. The maintainer asked how people receive platform notifications in time, for example 「每个人可以配置绑定slack？」. After the seat's assessment, the maintainer answered, verbatim: 「第一步同意，但是手机app还没上架，接 slack」. Slack is the chat app chosen first. Reader: triage, to split by lane. The channel is `domain:server` (`service-messaging`); the connect page is `domain:ui`; a hosted half may follow in cloud. Dedupe: ADR-0013 / ADR-0022 / ADR-0030 plan this, and no build card is open. Triage grades it; the seat suggests p2 for a feature.\n\n## 维护者速读\n\n1. **要什么**：平台里的通知（审批、@ 提醒、流程通知、AI 待确认操作等）能按每个人的设置，以 Slack 私信送到本人。\n2. **怎么用**：组织管理员为整个组织安装一次 Slack 应用；每个人的账号按邮箱自动匹配到自己的 Slack 账号，也可以在个人「通知设置」页手动连接或断开；在设置页勾选哪类消息发 Slack。\n3. **现状**：平台只有一个「流程里往固定频道发消息」的 Slack 动作（管理员配一个机器人令牌），和具体的人无关；也没有私信个人、绑定个人账号。设计已有：ADR-0013 草案、ADR-0022 已通过、ADR-0030 剩余工作，但没有开工。\n4. **验收**：装好应用、绑好账号后，审批请求在 Slack 私信里送达，带跳转链接；个人关掉 Slack 或在免打扰时段内，不发；没绑定的人照常走站内信和邮件。\n5. **待你拍板的点**：ADR-0013 还是草案。按邮箱自动匹配会不会绑错人、托管版是否由 ObjectOS 提供一个统一的 Slack 应用，这两点由总监席整理成选项呈给你。\n6. **需要你做的**：ADR-0013 定稿时拍板上面两点。\n\n## What exists (read on objectstack main)\n\n- **Channels:** `NotificationChannelSchema` (`packages/spec/src/system/notification.zod.ts`) lists `slack`, but no `MessagingChannel` is registered for it. Only inbox, email, sms and push are (`service-messaging/src/messaging-service-plugin.ts`).\n- **The Slack connector:** `packages/connectors/connector-slack` offers `chat.postMessage` / `chat.update` / `call` as flow `connector_action`s with one static bot token. OAuth install is out of its scope. It is wired only in `examples/app-showcase`.\n- **No per-person binding:** no \"connect your Slack\", no platform-user → Slack-user mapping, no DM delivery.\n- **Design:** ADR-0013 (Draft) plans `plugin-messaging-slack`, Bot OAuth and a `sys_channel_account` binding. ADR-0022 (Accepted) puts push-to-Slack on the messaging-channel side, reusing connector-slack's client. ADR-0030 (Accepted) lists the Slack channel as remaining work.\n- **Preferences:** `sys_notification_preference` already keys on topic × channel, so a `slack` channel joins it with no schema change. The personal settings page is filed separately as step 1.\n\n## Ask (for triage to split)\n\n1. **Settle ADR-0013's open points** (director seat → maintainer):\n   - how the org installs the app (one ObjectOS-provided Slack app for hosted, versus each org's own app);\n   - how a person is bound (automatic email match, confirmed by the person; manual OAuth \"connect\"; who may unbind);\n   - DM only, or also channels.\n2. **The channel:** a `slack` `MessagingChannel` in `service-messaging`, sending DMs to the bound Slack user through connector-slack's client. It obeys preferences, digest and quiet hours, and classifies errors (revoked token, user not found) per the channel interface.\n3. **Binding store and flows:** `sys_channel_account` (or the ADR's final shape); org install; per-person connect/disconnect on the settings page.\n4. **Hosted half** (cloud, a later card): the shared Slack app's credentials and OAuth redirect, if the ruling picks one ObjectOS app.\n5. **Tests:** an approval request reaches the bound person by DM with a deep link; it is suppressed when muted or in quiet hours; an unbound person gets inbox and email only."

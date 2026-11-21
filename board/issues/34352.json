@@ -2,8 +2,8 @@
   "number": 34352,
   "kind": "issue",
   "title": "audit seal: publish refuses a sealed object that has neither a tenant_id field nor a chainField",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:data",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-16T09:01:21Z",
-  "updated_at": "2026-11-20T19:54:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T22:40:05Z",
+  "closed_at": "2026-11-20T22:38:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34352",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ① split out by the seat's ruling on #34164 / PR #34351. That PR adds `lifecycle.seal.chainField` (default `tenant_id`) and refuses at publish a `chainField` that names a missing field. This card is the other half, which the PR does not build because it narrows authoring. ⛔ Not a claim; it stays unclaimed during the wind-down.\n\n## 维护者速读\n\n- **是什么：** 一个开启了审计封存（`lifecycle.seal`）的对象，如果既没有 `tenant_id` 字段、也没有指定 `chainField`，现在能正常发布，但运行时封存器会报错并且不封存这个对象的任何记录。\n- **建议：** 在发布时就拒绝这种对象，让错误在作者写元数据时出现，而不是在运行时悄悄不封存。\n- **注意：** 这是一处收窄（今天能发布的元数据以后会被拒绝），需要按收窄来声明。\n\n## What happens\n\nAt origin/main, `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` `plans()` reports such an object at error and skips it:\n\n> AuditSealer: '<object>' declares lifecycle.seal but cannot be sealed: it declares no 'tenant_id' field, so its rows cannot be chained per organization. Its rows are NOT being sealed — no checkpoint covers them, so a change made outside the platform would not show.\n\nAfter PR #34351, the same holds when the object names no `chainField` and its default, `tenant_id`, is not a field of the object.\n\n## Rule\n\nPublish refuses an object whose `lifecycle.seal` names no `chainField` while the object has no `tenant_id` field, with the same refusal shape PR #34351 uses for a `chainField` that names a missing field. Fields the registry injects count, as they do for `chainField`.\n\n## Done when\n\n- Authoring pins: the case above is refused; an object with `tenant_id`, or with a `chainField` naming a field it has, still publishes.\n- The sealer keeps its runtime report for definitions that skip the parse.\n- Declared as a narrowing: `(narrowing)` arm, BREAKING banner, one ADR-0087 disposition marker, and the dogfood battery. The fixture PR #34351's dev named (one fixture outside that PR's surface) is updated here."

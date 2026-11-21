@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-20T17:30:18Z",
-  "updated_at": "2026-11-20T17:52:25Z",
+  "updated_at": "2026-11-20T23:48:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35902",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35896（专题：记录页的页签和字段分组改由父对象一处声明，维护者直派）。⛔ 不是认领。完整的元数据例子在父单。\n\n维护者 2026-11-20 原话：「「把子表当成一个分组、排在分组之间」这件事 10 月份就做进去了（objectstack#27069），只是没人用，是技能也没写吧？例子有吗？」「「分组指向子表」确实没人知道，立卡了吗」——当时立的 objectstack-ai/objectstack#35852 应维护者要求按不做关闭并重新讨论，本卡是重立，范围扩大到本专题的全部新写法。\n\n## 现状（主干 `8c18a362a2`）\n\n- 「分组指向子表」（`fieldGroups[].relatedList`）只在自动生成的参考表里有一行；技能规则（`skills/objectstack-ui/rules/record-page.md`、`skills/objectstack-data/rules/relationships.md`）、指南文档、仓库示例、HotCRM 里都没有，AI 搭建不会用，人也不知道。\n- `relatedLists` 在两份技能规则里各提到一次，仓库示例和 HotCRM 里没有对象声明它。\n- 本专题子卡 1 到 4 会带来四种新写法，不同步的话会重演「做了没人知道」。\n\n## 要做的\n\n每做完一张子卡，跟着补一批；本卡在四张都补完后关闭。\n\n1. **技能规则**：记录页规则和关系规则里写明——页签用 `relatedLists` 列（含三个内置页签的对象名）；一项可以带标题和列；分组用 `fields` 列成员；什么时候用分组指向子表把明细放进字段区；扩展包怎么声明位置。每条配一个最小例子，并写明「没写就照旧」。\n2. **评测用例**：各加一条，确认 AI 搭建在被要求「把任务页签排到第一个」「去掉附件页签」「报价单的明细放在金额上面」「给客户加一个税号字段排在行业后面」时写出正确的形状。\n3. **指南文档**：记录页一节补上这几种写法和父单里的完整例子。\n4. **仓库示例**：选一个现有示例对象用上 `relatedLists` 和分组的 `fields`；选一个主从对象演示分组指向子表。\n5. **HotCRM**：主要对象（客户、联系人、商机、报价单、订单）声明 `relatedLists`，把页签顺序明确下来。\n\n## 没有定、本卡不做的\n\n- **AI 搭建要不要主动把单据类对象的明细放进字段区**（主动写指向子表的分组）。维护者没有定。本卡的技能规则只写「使用者明确要求时才写」，不让 AI 主动放。\n- **HotCRM 哪几个对象要把明细留在字段区**。维护者说「大部分场景不需要」，哪几个例外需要维护者点名，见 objectstack-ai/hotcrm#2720。本卡第 5 条只做 `relatedLists`，不替 HotCRM 决定分组指向子表。\n\n## 验收\n\n- 技能规则里能找到四种写法各自的例子；`os validate` 能通过这些例子。\n- 四条评测用例通过。\n- 指南文档里有父单的完整例子，并且和规范一致（规范变了例子跟着变）。\n- 仓库示例里至少一个对象声明了 `relatedLists`，至少一个分组指向子表。\n- HotCRM 五个主要对象的页签顺序由声明决定，在测试环境里看到的顺序和声明一致。\n\nReader: `domain:skills` 牵头，`domain:docs` 配合；HotCRM 部分在 hotcrm 仓库另开分支。\n\nDedupe: 已关闭的 objectstack-ai/objectstack#35852（not planned，维护者要求重新讨论后另立）是本卡的前身。其余见父单。"

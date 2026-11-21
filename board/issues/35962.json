@@ -1,0 +1,32 @@
+{
+  "number": 35962,
+  "kind": "issue",
+  "title": "State-machine chip dot is invisible when an option has no colour (bare HSL triple), and the #35911 scan pins only the destructive tokens",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T23:53:07Z",
+  "updated_at": "2026-11-21T01:41:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35962",
+  "body": "repo:objectstack#1 · os-sales · session_01L6bhgUkbQqRUUFSiu2HGob\n\nFound by area b1-DB while building #35911 (PR #35961, dev report 7053546276). Same defect family as #35911 item 1, outside that card's scope.\n\n## What the user sees\nIn the metadata viewer's state-machine panel, each state chip shows a small coloured dot. When the picklist option has no `color`, the dot should fall back to the muted grey. It shows nothing instead: the chip has an empty gap where the dot should be.\n\n## Cause\n`ui/packages/components/src/renderers/basic/metadata-viewer.tsx:290` sets `backgroundColor: color ?? 'var(--muted-foreground)'`. The theme stores `--muted-foreground` as a bare HSL triple (`215.4 16.3% 46.9%`), so the value is not a colour and the browser drops the declaration. The fix wraps it: `hsl(var(--muted-foreground))`.\n\n## To do\n1. Wrap the fallback in `hsl()` at `metadata-viewer.tsx:290`.\n2. Widen the source scan that #35911 adds (`destructive-colour-spelling-35911`) from the destructive tokens to every token the themes store as a bare triple, so any raw `var(--<triple token>)` used as a colour value fails the test. The token list should be read from the theme blocks, not typed by hand, so a new token is covered without editing the test.\n3. Fix whatever else the widened scan finds in the same PR, or list it on this card if it is not a colour bug.\n\n## Acceptance\n- A state chip whose option has no colour shows the grey dot in light and dark themes.\n- The widened scan fails when the wrap is reverted, and passes on the fixed tree.\n\nBlocked-by: #35961 (the scan this card widens lands there).\nReader: area:ux (ui/packages/components)."
+}

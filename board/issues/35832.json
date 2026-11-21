@@ -2,7 +2,7 @@
   "number": 35832,
   "kind": "pull_request",
   "title": "fix(core)!: a non-boolean `$null` / `$exists` flag is refused, and so are the object comparands the value data source cannot compare",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/xl",
     "tests",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-20T10:29:39Z",
-  "updated_at": "2026-11-20T12:36:36Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-20T22:38:10Z",
+  "closed_at": "2026-11-20T22:38:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-20T22:38:07Z",
   "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35832",

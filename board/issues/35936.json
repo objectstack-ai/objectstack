@@ -1,0 +1,31 @@
+{
+  "number": 35936,
+  "kind": "issue",
+  "title": "Studio 看板卡片设置「点击打开」仍把 drawer / page / new_window 列为可选，navigation.mode 在对象列表上废弃后（#35854）已不生效",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-20T20:23:35Z",
+  "updated_at": "2026-11-20T20:48:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35936",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb8qTxAVaE2QKwquQU\n\n立卡门类别：② 施工中发现的范围外事项（PR #35910 的席位 L2 合同复核 S3）。⛔ 不是认领；车道与定级由分诊定。\n\n## 现状（PR #35910 头读源码）\n\n- #35854 把对象列表上的 `navigation.mode` 标为废弃：对象列表忽略 drawer / page / new_window（`'none'` 仍表示不打开；页面块照旧）。\n- Studio 的 `ui/packages/app-shell/src/views/studio-design/ObjectListViewInspector.tsx` `KanbanCardSection`（约 1063–1238）「点击打开」下拉仍把四种模式都当作有效选项，写入 `navigation.mode`。\n- 测试 `StudioDesignSurface.kanbanCardSelection-12725.test.tsx` 有一例选 `drawer`。\n\n## 要做的\n\n- 下拉只给「默认」和 `none`（不打开）；已存的 drawer / page / new_window 显示为标了「已废弃」的项，可以清掉。\n- 改写上述测试用例；`engine.studio.inspector.listView.kanbanCard.mode.{drawer,page,newWindow}` 三个键从 11 个语言包删掉或说明保留理由。\n\n## 验收\n\n- 看板卡片设置里不再把废弃模式当作可选；旧值能看见并能清掉；相关测试与 i18n 门禁通过。\n\nReader: area:ux（`domain:ui`，Studio 检查器）。卡线程估算 25–40 行（不含 i18n 清理），含清理 60–70 行。\n\nDedupe: `kanban card navigation mode inspector`（objectstack，open）→ 无相关。"
+}

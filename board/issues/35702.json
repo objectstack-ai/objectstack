@@ -2,8 +2,8 @@
   "number": 35702,
   "kind": "issue",
   "title": "列表底部计算行：常驻一行，用户点列底下的格子选计算（合计、平均、计数等），存到视图上",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-20T00:37:13Z",
-  "updated_at": "2026-11-20T19:00:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-20T23:41:33Z",
+  "closed_at": "2026-11-20T23:41:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35702",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#35547（专题：列表页重做，维护者直派）。⛔ 不是认领。优先级 p2（协调席定的，维护者未指定）。\n\n维护者 2026-11-20 原话：「之后调研和测试列表底部的增加计算行」；看完对照、建议和四项待定后：「按这版立卡」。\n\n## 现状（主干 `d96c878e33`）\n\n- 计算只能写在视图定义里：`ListColumn.summary`（`packages/spec/src/ui/view.zod.ts:1340-1425`），支持 `count`、`count_empty`、`count_filled`、`count_unique`、`percent_empty`、`percent_filled`、`sum`、`avg`、`min`、`max`；哪种字段能用哪种计算由 `packages/spec/src/data/aggregate-field-type-compatibility.ts:211-222` 决定。\n- **运行时列表上没有任何入口**让用户加、改、取消计算：点列底下、表头菜单、「选项」里都没有（源码未找到；本机实测实验表的数量、金额列下面是空的，点表头是排序，右键表头没有菜单）。\n- 视图没声明计算时没有这一行，页面最底下只有「N 条记录」。\n- 已经做对、本卡不动的部分：\n  - 计算的是全部符合筛选和搜索的记录，服务端算；算不了时退回本页并标「（本页）」（`ui/packages/plugin-grid/src/objectGridSummaries.ts:103-130`、`useWholeSetSummary.ts`）。\n  - 画成表格自己的最后一行，和列对齐，固定在底部（`ui/packages/components/src/renderers/complex/data-table.tsx:4501-4550`，objectstack-ai/objectstack#35548）。\n  - 分组时不画底部行，同一份声明变成每组标题上的数字。\n\n![现状：没有声明计算的列表，底部只有记录数](https://github.com/objectstack-ai/objectstack/blob/3b0af4fd9a2fc9455056d4c29b605e5186485bdd/list-redo/ours-no-footer.jpg?raw=true)\n\n## 参照\n\n参照方式：Twenty 是 AGPL，Attio 是商业产品。只参照行为和步骤，⛔ 不抄代码。\n\n- Twenty（源码核对加实测）：底部常驻一行；悬停某列底下出现「Calculate」，点开选计算，选了立即存到视图；菜单是两级（计数、占比、日期、更多）。\n- Attio（实测）：最后一条记录下面一行；第一列是「10 count」，其余列是「+ Add calculation」，点开一层菜单直接列出可选项。\n\n![参照：Twenty 的计算菜单](https://github.com/objectstack-ai/objectstack/blob/3b0af4fd9a2fc9455056d4c29b605e5186485bdd/list-redo/twenty-calculate-menu.jpg?raw=true)\n\n![参照：Attio 的 Add calculation](https://github.com/objectstack-ai/objectstack/blob/3b0af4fd9a2fc9455056d4c29b605e5186485bdd/list-redo/attio-add-calculation.jpg?raw=true)\n\n## 要做的（维护者同意的做法）\n\n- **底部常驻一行**：表格视图始终有这一行，和列对齐，固定在表格底部。第一列显示记录数；其余列没有计算时是空的，悬停出现「计算」。\n- **点格子直接选**：点某列底下的格子，出一层菜单，按这一列的字段类型列出可选的计算，当前选中的打勾，最后一项是「无」。选了立即生效。不做两级菜单。\n- **存到视图上**：写进这个视图这一列的 `summary`，和列宽、列顺序同一条保存路径，用这个视图的人都看到。个人视图存到个人视图。\n- **权限**：没有改这个视图权限的用户看得到计算结果，不能改；悬停不出现「计算」。\n- **显示**：标签用次要文字色，值用正常文字色，写成「合计 ¥1,234,500」，中间是空格、不用冒号；金额不缩写。\n- **补两种计算**：布尔字段的「是」的条数、「否」的条数；日期字段的 `min`、`max` 在界面上叫「最早」「最晚」。\n- **去掉页面最底下那条「N 条记录」**：第一列已经显示记录数，视图名旁边也有。数据量上限的提示保留，放到不重复的位置。\n- 行内编辑保存后计算结果刷新（现有的写入后重算保留）。\n\n## 不做的\n\n- 不改计算的取数方式和「本页」的标注。\n- 不改分组时的显示位置（每组标题上）。\n- 看板、日历等其他视图类型不加这一行。\n- 手机卡片视图不加。\n\n## 验收\n\n- 新建一个对象和表格视图，不做任何设置：底部有一行，第一列是记录数；悬停金额列底下出现「计算」。\n- 点金额列底下，选「合计」：立即显示「合计 ¥…」，值是全部符合筛选记录的合计（超过一屏的数据也对）；刷新后还在；另一个用户打开同一视图也看到。\n- 再点同一格选「无」：这一列的计算消失。\n- 文本列的菜单里没有合计、平均；关联列只有计数；日期列是最早、最晚；布尔列有「是」「否」的条数。\n- 没有改视图权限的用户：看得到结果，悬停不出现「计算」，点了没有菜单。\n- 加筛选或搜索后，记录数和各列计算跟着变。\n- 页面上不再有第二处「N 条记录」。\n- 分组视图：每组标题上的数字照旧，本卡没有改变它。\n- PR 正文列出迁移和作废的测试。\n\nReader: `domain:ui` 车道；布尔的两种计数若规范里没有，另需 `packages/spec` 和服务端聚合各加一处。`ui/packages/plugin-grid/src/ObjectGrid.tsx`（约 2864-2874、3762-3779）、`useColumnSummary.ts`、`objectGridSummaries.ts`、`ui/packages/components/src/renderers/complex/data-table.tsx:4501-4550`、`ui/packages/plugin-list/src/ListView.tsx:8277-8304`（底部记录数）、`packages/spec/src/ui/view.zod.ts:1340-1425`。视图的保存路径与 objectstack-ai/objectstack#35551（选项菜单）相同，后合入的一方负责对齐。\n\nDedupe: `计算行`、`列表 合计 用户 添加`、`footer summary user add calculation`（objectstack，open）→ 0 张同题卡；相关：objectstack-ai/objectstack#35548（已关，合计与列对齐）。"
