@@ -33,6 +33,10 @@ import { describe, it, expect } from 'vitest';
 import { resolveEnvironmentMembershipEnforcement } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 import type { RestEnvRegistry, RestKernelManager } from './rest-server.js';
+// Clocked windows measure behaviour, never loading: the source under test
+// reaches the engine through a dynamic import, so its first load is paid here,
+// during collection (`check:test-source-alias`).
+import '@objectstack/objectql';
 
 const BASE = '/api/v1';
 const SCOPED = `${BASE}/environments/:environmentId`;
