@@ -615,8 +615,10 @@ export function HomePage({ checklist }: HomePageProps = {}) {
         icon: undefined,
       };
     }
+    // objectstack#36141 — an object, view or record row draws its object's
+    // tile, so all three read the object's icon and colour.
     const objectDef =
-      item.type === 'record' && objectName
+      objectName
         ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown; color?: unknown } | null | undefined>).find(
             (o) => o?.name === objectName,
           )
@@ -630,6 +632,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
       app: app ? appLabel(app) : undefined,
       icon: typeof objectIcon === 'string' && objectIcon !== '' ? objectIcon : undefined,
       color: typeof objectDef?.color === 'string' ? objectDef.color : undefined,
+      object: !!objectDef,
     };
   };
 

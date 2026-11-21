@@ -182,8 +182,8 @@ function renderSidebar() {
 const tick = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 /**
- * A stored favorite's row reads its type icon, then its stored label: `📋Acme`
- * for a record or an object, as the group after Recent drew it.
+ * A stored favorite's row reads its stored label alone (`Acme`): its icon is a
+ * tile, which carries no text (objectstack#36141).
  */
 
 /** Every sidebar group's label text, top to bottom. */
@@ -294,7 +294,7 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
     renderSidebar();
     await tick();
 
-    expect(favoriteLabels()).toEqual(['📋Deals', '📋Acme']);
+    expect(favoriteLabels()).toEqual(['Deals', 'Acme']);
     expect(within(favoritesSection()!).getByRole('link', { name: /Acme/ })).toHaveAttribute('href', RECORD_FAVORITE.href);
     expect(localStorage.getItem(STORE_KEY)).toBe(before);
   });
@@ -319,7 +319,7 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
     renderSidebar();
     await tick();
     expect(screen.getAllByText('Favorites')).toHaveLength(1);
-    expect(favoriteLabels()).toEqual(['Accounts', '📋Acme']);
+    expect(favoriteLabels()).toEqual(['Accounts', 'Acme']);
   });
 
   it('a stored favorite\'s menu removes it; Design shows for an object favorite and not for a record', async () => {
@@ -333,7 +333,7 @@ describe('UnifiedSidebar: the Favorites section sits at the top (objectui#12427)
 
     expect(await openMenu('Acme')).toEqual(['Remove from favorites', 'Open in new tab', 'Copy link']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from favorites' }));
-    await waitFor(() => expect(favoriteLabels()).toEqual(['📋Deals']));
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Deals']));
   });
 });
 
@@ -356,5 +356,44 @@ describe('UnifiedSidebar: Design opens the Studio surface the app bar opens (obj
     await waitFor(() =>
       expect(screen.getByTestId('where')).toHaveTextContent('/studio/com.acme.sales/data?surface=object:sales_quote'),
     );
+  });
+});
+
+describe('objectstack#36141 — Favorites, Recent and the menu draw one tile per row', () => {
+  const DASHBOARD_FAVORITE: FavoriteItem = {
+    id: 'dashboard:pipeline',
+    label: 'Pipeline',
+    href: '/apps/crm/dashboard/pipeline',
+    type: 'dashboard',
+    favoritedAt: '2026-10-03T00:00:00.000Z',
+  };
+  const tileKind = (row: Element) =>
+    row.querySelector('[data-object-icon-tile]') ? 'object' : row.querySelector('[data-neutral-icon-tile]') ? 'neutral' : 'none';
+
+  it('an object or record favorite is its object’s tile, a dashboard favorite the neutral tile; no emoji', async () => {
+    seed([OBJECT_FAVORITE, RECORD_FAVORITE, DASHBOARD_FAVORITE]);
+    renderSidebar();
+    await waitFor(() => expect(favoriteLabels()).toEqual(['Deals', 'Acme', 'Pipeline']));
+    const links = within(favoritesSection()!).getAllByRole('link');
+    expect(links.map(tileKind)).toEqual(['object', 'object', 'neutral']);
+    expect(favoritesSection()!.textContent).not.toMatch(/[📊📈📄📋]/u);
+  });
+
+  it('a menu link that is not an object is the neutral tile beside the object rows', async () => {
+    renderSidebar();
+    await tick();
+    expect(menuRows().map((row) => tileKind(within(row).getByRole('link')))).toEqual(['object', 'object', 'neutral']);
+  });
+
+  it('a Recent record is its object’s tile, a Recent metadata item the neutral tile', async () => {
+    recent.items = [
+      { id: 'record:account:1', type: 'record', label: 'Acme', href: '/apps/crm/account/record/1', visitedAt: '2026-10-08T10:00:00.000Z' },
+      RECENT,
+    ];
+    renderSidebar();
+    await tick();
+    fireEvent.click(screen.getByText('Recent'));
+    const group = screen.getByText('Recent').closest('[data-sidebar="group"]')!;
+    expect(within(group as HTMLElement).getAllByRole('link').map(tileKind)).toEqual(['object', 'neutral']);
   });
 });

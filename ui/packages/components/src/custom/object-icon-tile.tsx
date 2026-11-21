@@ -93,16 +93,65 @@ export interface ObjectIconTileProps {
   glyph?: React.ElementType;
 }
 
-export function ObjectIconTile({ icon, color, size = 'sm', className, title, glyph: Glyph }: ObjectIconTileProps) {
+export function ObjectIconTile({ icon, color, size = 'sm', className, title, glyph }: ObjectIconTileProps) {
   const name = objectColorOrDefault(color);
-  const s = SIZE_CLASS[size] ?? SIZE_CLASS.sm;
+  return (
+    <IconTile
+      data={{ 'data-object-icon-tile': name }}
+      tone={cn('text-white', OBJECT_COLOR_TILE_CLASS[name])}
+      icon={icon}
+      glyph={glyph}
+      size={size}
+      className={className}
+      title={title}
+    />
+  );
+}
+
+/**
+ * The neutral tile: a dark grey glyph on a light grey square (objectstack#36141),
+ * the same edge, glyph and corners as {@link ObjectIconTile} at every size.
+ * Drawn for every entry that is not an object (a dashboard, report, page,
+ * link, component, document or action) so a column of menu rows, recents or
+ * favourites is one shape throughout, while colour still says only which
+ * object a row is. Its one light and one dark value are pinned for glyph
+ * contrast by `__tests__/object-icon-tile-35985.test.tsx`.
+ */
+export const NEUTRAL_ICON_TILE_CLASS = 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+
+export type NeutralIconTileProps = Omit<ObjectIconTileProps, 'color'>;
+
+export function NeutralIconTile({ icon, size = 'sm', className, title, glyph }: NeutralIconTileProps) {
+  return (
+    <IconTile
+      data={{ 'data-neutral-icon-tile': '' }}
+      tone={NEUTRAL_ICON_TILE_CLASS}
+      icon={icon}
+      glyph={glyph}
+      size={size}
+      className={className}
+      title={title}
+    />
+  );
+}
+
+function IconTile({
+  data,
+  tone,
+  icon,
+  glyph: Glyph,
+  size,
+  className,
+  title,
+}: NeutralIconTileProps & { data: Record<string, string>; tone: string }) {
+  const s = SIZE_CLASS[size ?? 'sm'] ?? SIZE_CLASS.sm;
   return (
     <span
-      data-object-icon-tile={name}
+      {...data}
       role={title ? 'img' : undefined}
       aria-label={title}
       aria-hidden={title ? undefined : true}
-      className={cn('inline-flex shrink-0 items-center justify-center text-white', s.tile, OBJECT_COLOR_TILE_CLASS[name], className)}
+      className={cn('inline-flex shrink-0 items-center justify-center', s.tile, tone, className)}
     >
       {Glyph ? <Glyph className={s.glyph} strokeWidth={2.25} aria-hidden /> : <LazyIcon name={icon} className={s.glyph} strokeWidth={2.25} aria-hidden />}
     </span>
