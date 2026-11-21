@@ -85,6 +85,14 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  */
 export const RECORD_DRAWER_PARAM = 'recordId';
 
+/**
+ * The object of the record the drawer's root shows, when it is not the
+ * listed object's (objectstack#36015): a lookup chip in the list opens the
+ * record it names in the list's drawer. Absent ⇒ the listed object. Read
+ * only beside {@link RECORD_DRAWER_PARAM}.
+ */
+export const RECORD_DRAWER_OBJECT_PARAM = 'recordObject';
+
 /** Global record-form overlay: `new` | `<recordId>` (framework#2604). */
 export const RECORD_FORM_PARAM = 'form';
 
@@ -156,6 +164,7 @@ export { NAV_RUN_ACTION_PARAM };
  */
 export const RESERVED_URL_PARAMS: readonly string[] = [
   RECORD_DRAWER_PARAM,
+  RECORD_DRAWER_OBJECT_PARAM,
   RECORD_FORM_PARAM,
   RECORD_FORM_OBJECT_PARAM,
   RECORD_FORM_LINK_PARAM,

@@ -37,29 +37,18 @@
  * @module
  */
 
-import { useLocation, useParams, Link, useNavigate } from 'react-router-dom';
+import { useLocation, useParams, Link } from 'react-router-dom';
 import {
   Button,
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuGroup,
-  Avatar,
-  AvatarImage,
-  AvatarFallback,
   cn,
 } from '@object-ui/components';
 import {
   Search,
-  LogOut,
-  Plus,
   Layers,
-  Bot,
-  User,
-  Building2,
   Pencil,
   Eye,
   MoreHorizontal,
@@ -69,39 +58,29 @@ import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { isPhoneTabRoute } from './PhoneAppNavBar.js';
 import { PhonePageBarEnd, PhonePageBarTitle, useHasPhonePageBar } from './PhonePageBar.js';
 
-import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
+import { useState, useLayoutEffect, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
 import { PresenceAvatars, useTenantPresence, type PresenceUser } from '@object-ui/collaboration';
-import { ModeToggle } from './ModeToggle.js';
-import { WorkspaceSwitcher, WorkspaceSwitcherMenu } from './WorkspaceSwitcher.js';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 import { CurrentOrganizationIndicator } from './CurrentOrganizationIndicator.js';
-import { LocaleSwitcher } from './LocaleSwitcher.js';
-import { NotificationPreferencesMenu } from './NotificationPreferencesMenu.js';
 import { ConnectionStatus } from './ConnectionStatus.js';
 import type { ActivityItem } from './ActivityFeed.js';
-import { InboxPopover } from './InboxPopover.js';
+import { InboxBell } from './InboxBell.js';
+import { AccountMenu } from './AccountMenu.js';
 import { AppSwitcher } from './AppSwitcher.js';
 import type { ConnectionState } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
-import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { preferLocal, matchAppBySegment } from '../utils/index.js';
-import { appAddressSegment } from '../utils/appRoute.js';
-import { connectAssistantPath } from '../console/connect/connectAssistantPath.js';
-import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
 import { metadataText, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
-import { useSharedActivityFeed, type ActivityFeedReading } from '../hooks/sharedUserFeeds.js';
-import { useInboxBell } from '../hooks/useInboxBell.js';
 import { useHomePath } from '../hooks/useHomePath.js';
-import { orgMenuEntries, useOrgMenuPosture } from '../hooks/useOrgMenuPosture.js';
-import { postureHasOrgWall } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
 import { viewTabLabel } from '../views/viewTabLabel.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
@@ -111,7 +90,6 @@ import { PreviewBadge } from './PreviewBadge.js';
 import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { HelpMenu } from './HelpMenu.js';
 import { useAppStudioEntry } from './ShellPageActions.js';
-import { GO_HOME_SHORTCUT, useAdvertiseShortcut, type ShortcutChord } from '../chrome/advertisedShortcuts.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 
 function humanizeSlug(slug: string): string {
@@ -350,57 +328,6 @@ function ProductHomeMark({ homePath, label, className }: { homePath: string; lab
   );
 }
 
-/**
- * Whether a keydown is `chord`: ⌘ or Ctrl exactly when the chord has `mod`
- * (the advertised chords accept either), Shift exactly when it has `shift`,
- * never Alt, and the key compared case-blind (Shift makes it upper case).
- */
-function matchesShortcutChord(
-  e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
-  chord: ShortcutChord,
-): boolean {
-  if (e.altKey) return false;
-  if (Boolean(chord.mod) !== (e.metaKey || e.ctrlKey)) return false;
-  if (Boolean(chord.shift) !== e.shiftKey) return false;
-  return e.key.toLowerCase() === chord.key;
-}
-
-/**
- * A keydown aimed at something the user types into: a text field, a select,
- * a content-editable region (rich-text and code editors), or an ARIA textbox.
- * The home chord leaves those alone, so an editor that binds the same keys
- * keeps them (objectui#12605).
- */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  if (target instanceof HTMLElement && target.isContentEditable) return true;
-  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
-}
-
-/**
- * `⌘⇧H` / `Ctrl+Shift+H` goes home from any app page, as a PUSH so the
- * browser's Back returns to the page (objectui#12605). Advertised beside the
- * listener, under the same gate, so the keyboard-shortcuts dialog lists it
- * exactly where it fires (objectui#11674).
- */
-function useGoHomeShortcut(enabled: boolean, homePath: string): void {
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return;
-      if (!matchesShortcutChord(e, GO_HOME_SHORTCUT.chord)) return;
-      if (isTypingTarget(e.target)) return;
-      e.preventDefault();
-      // A page holding unsaved edits is asked first (objectui#13231).
-      confirmUnsavedLeave(() => navigate(homePath));
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [enabled, homePath, navigate]);
-  useAdvertiseShortcut(GO_HOME_SHORTCUT, enabled);
-}
-
 // No fake fallback presence — render nothing when the API has no data so the
 // header doesn't ship phantom collaborators in production.
 const EMPTY_PRESENCE_USERS: PresenceUser[] = [];
@@ -438,15 +365,9 @@ export function AppHeader({
 
   const location = useLocation();
   const params = useParams();
-  const navigate = useNavigate();
-  // objectui#13231 — the menus below navigate from a button, which no page's
-  // link guard sees, so each departure asks first while a page holds unsaved
-  // edits (and goes at once otherwise).
-  const leaveTo = (to: string) => confirmUnsavedLeave(() => navigate(to));
   // objectui#7256 — the brand logo's target follows the product's DECLARED
   // landing, so the chrome cannot offer a second, contradicting "home".
   const homePath = useHomePath();
-  useGoHomeShortcut(isApp, homePath);
   // objectstack#35881 — on a phone inside an app the menu is the app's home
   // page. On that page and the two inbox pages the bottom bar opens
   // (`isPhoneTabRoute`), the bar's left is the app pill with the app's name,
@@ -472,14 +393,6 @@ export function AppHeader({
   // nothing. The `/studio` landing mounts one with the palette's `studio` scope
   // (objectui#11863), so its `studio` variant draws the trigger.
   const hasCommandPalette = useCommandPaletteProviderMounted();
-  const {
-    user,
-    signOut,
-    isAuthEnabled,
-    organizations,
-    activeOrganization,
-    isOrganizationsLoading,
-  } = useAuth();
   // Runtime AI gating: hide the top-bar AI entry point when the server serves
   // no AI (Community Edition) so it can't dead-end on a chat with no agent.
   // Same signal as the FAB and the `/ai` route guard.
@@ -506,56 +419,6 @@ export function AppHeader({
 
 
   /**
-   * Recent activity for the bell's Activity tab (#4197).
-   *
-   * Read from the shared user-scoped feed rather than a local effect: Home's
-   * activity card reads the very same `sys_activity` rows, and on `/home` the
-   * bell and the card mount in one tree — so an effect here would have made
-   * that page issue the read twice. Also NOT gated on `isApp`: the feed is
-   * tenant-scoped, not app-scoped, and gating it left this tab reading "No
-   * recent activity" on Home / Organizations / the AI screen while the card
-   * two hundred pixels below listed the rows.
-   *
-   * It carries its status and the caller's read grant (objectui#12081): a
-   * caller who may not read `sys_activity` is offered no Activity tab and
-   * issues no read, and a read that fails says so rather than reading empty.
-   *
-   * objectui#12980 — no badge reads it, so it is read when the bell is about to
-   * open (a pointer over it, focus, a click), not on every console open.
-   */
-  const [activityWanted, setActivityWanted] = useState(false);
-  const wantActivity = useCallback(() => setActivityWanted(true), []);
-  const apiActivity = useSharedActivityFeed({ enabled: activityWanted && !activities });
-  /**
-   * The bell's inbox — rows, badge addends and the three mark-read paths — now
-   * comes from `useInboxBell`, the ONE wiring of `sharedUserFeeds` onto an
-   * `InboxPopover` (#4225 / #4316). The `global:notifications` page block
-   * (`f99932a42`) mounts the SAME hook, so a bell in the header and a bell an
-   * author declared on a page cannot disagree about a row's read-state: there
-   * is no second read and no second optimistic overlay left to drift.
-   *
-   * The rows are `sys_inbox_message` (the L5 in-app materialization, `mine`
-   * scope) joined with `sys_notification_receipt` for read-state (ADR-0030) —
-   * the bell does not read the re-modeled `sys_notification` L2 event. Home's
-   * action centre cuts from the same feed. `pendingApprovalsCount` is the
-   * badge's second addend, shared with Home's To-do card (#4197).
-   *
-   * Deliberately NOT gated on `isApp` (#4110): the read is scoped to the USER,
-   * not to the app in the URL — unlike the presence avatars and the connection
-   * dot below, which are app-shell chrome and are the reason that flag exists.
-   */
-  const {
-    notifications,
-    unreadCount,
-    pendingApprovalsCount,
-    pendingApprovals,
-    refreshPendingApprovals,
-    markAllRead,
-    markRead: markNotificationRead,
-    markManyRead,
-  } = useInboxBell();
-
-  /**
    * Presence is the OTHER half of what this component used to fetch here, and
    * it stays app-scoped (#4197). Tenant-wide presence ("who else is online?")
    * is never *read* — it is not a REST collection but a transport-level
@@ -568,25 +431,6 @@ export function AppHeader({
 
   const tenantPresence = useTenantPresence();
   const activeUsers = presenceUsers ?? (tenantPresence.length > 0 ? tenantPresence : EMPTY_PRESENCE_USERS);
-  // The `activities` prop still wins where a host passes one — rows a host
-  // hands over are its answer, so they arrive `ready`; otherwise the shared
-  // feed, which says for itself whether its rows are one.
-  const activeActivity: ActivityFeedReading = activities
-    ? { value: activities, status: 'ready', readable: true }
-    : apiActivity;
-  const orgList = organizations ?? [];
-  const hasOrgSection = isOrganizationsLoading || orgList.length > 0 || !!activeOrganization;
-  // The avatar menu's organization entries follow the served deployment
-  // signals (objectstack-ai/objectstack#34591): none on a single-tenant
-  // deployment, no create entry on a cloud-managed one, and the switcher only
-  // at two or more memberships. Until the config resolves, the spec's absent
-  // readings keep today's rendering; the server still enforces.
-  const orgMenuPosture = useOrgMenuPosture();
-  const orgMenu = orgMenuEntries({
-    posture: orgMenuPosture,
-    hasOrgSection,
-    membershipCount: orgList.length,
-  });
 
   // Build path segments (only used in `app` variant)
   const pathParts = location.pathname.split('/').filter(Boolean);
@@ -595,12 +439,6 @@ export function AppHeader({
 
   const safeObjects = objects ?? [];
 
-  // Connect an AI Assistant: every signed-in person's own door to connecting an
-  // AI client, so it sits in the avatar menu beside Profile (objectstack#30895).
-  // Drawn only while the served Account app carries the page: `@objectstack/mcp`
-  // contributes that entry exactly when it registers the page, so a deployment
-  // with MCP turned off shows no dead item.
-  const connectAssistantHref = connectAssistantPath(metadataApps);
 
   // The app the route is in.
   const appNameKey = activeAppName || currentAppName || appNameFromRoute;
@@ -1137,30 +975,7 @@ export function AppHeader({
            * separate top-bar buttons (ActivityFeed, Approvals, Notifications).
            * Reduces visual noise and removes the duplicated "9+" badges.
            */}
-          {/* objectui#12980 — the open intent that starts the Activity read.
-              `contents` keeps the wrapper out of the bar's flex layout; the
-              events still reach it from the bell inside. */}
-          {!phoneTab && (
-          <span
-            className="contents"
-            data-testid="inbox-bell-intent"
-            onPointerEnter={wantActivity}
-            onFocus={wantActivity}
-            onClickCapture={wantActivity}
-          >
-            <InboxPopover
-              notifications={notifications}
-              unreadCount={unreadCount}
-              pendingApprovalsCount={pendingApprovalsCount}
-              activity={activeActivity}
-              onMarkAllRead={markAllRead}
-              onMarkRead={markNotificationRead}
-              onMarkManyRead={markManyRead}
-              pendingApprovals={pendingApprovals}
-              onApprovalDecided={refreshPendingApprovals}
-            />
-          </span>
-          )}
+          {!phoneTab && <InboxBell activities={activities} />}
 
           {/* AI Assistant — only when the runtime serves AI (hidden on
               Community Edition so it can't dead-end on an agent-less chat).
@@ -1179,198 +994,8 @@ export function AppHeader({
         </div>
 
         {/* Group 3: Account (theme + lang moved into avatar dropdown) */}
-        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>        {/* User Profile + Organization switcher */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 shrink-0 rounded-full"
-              aria-label={t('user.accountMenu', { defaultValue: 'Account menu' })}
-            >
-              <Avatar className="h-7 w-7 rounded-full">
-                <AvatarImage src={user?.image} alt={user?.name ?? 'User'} />
-                <AvatarFallback className="rounded-full bg-primary text-primary-foreground text-xs">
-                  {getUserInitials(user)}
-                </AvatarFallback>
-              </Avatar>
-            </Button>
-          </DropdownMenuTrigger>
-          {/* 44 px rows below `md`, as the app switcher's menu (objectstack#29075). */}
-          <DropdownMenuContent align="end" className="min-w-64 rounded-lg max-md:[&_[role=menuitem]]:min-h-11" sideOffset={4}>
-            {/* User identity */}
-            <DropdownMenuLabel className="p-0 font-normal">
-              <div className="flex items-center gap-2 px-2 py-2">
-                <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={user?.image} alt={user?.name ?? 'User'} />
-                  <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-                    {getUserInitials(user)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user?.name ?? 'User'}</span>
-                  <span className="truncate text-xs text-muted-foreground">{user?.email ?? ''}</span>
-                </div>
-              </div>
-            </DropdownMenuLabel>
-
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              {/*
-               * Profile — land directly on the Account app's profile_card
-               * component. We link to the explicit component route rather than
-               * `/apps/account` because the bare app path does not reliably
-               * resolve to the first (component-type) nav item, leaving the
-               * avatar menu's account entry dead. Entering at the component
-               * route still mounts the Account app shell (Inbox / Security /
-               * Developer remain reachable from its sidebar).
-               */}
-              <DropdownMenuItem
-                onClick={() => leaveTo('/apps/account/component/account/profile_card')}
-                className="cursor-pointer"
-              >
-                <User className="mr-2 h-4 w-4" />
-                {t('user.profile', { defaultValue: 'Profile' })}
-              </DropdownMenuItem>
-              {connectAssistantHref && (
-                <DropdownMenuItem
-                  onClick={() => leaveTo(connectAssistantHref)}
-                  className="cursor-pointer"
-                  data-testid="header-connect-ai-assistant"
-                >
-                  <Bot className="mr-2 h-4 w-4" />
-                  {t('user.connectAiAssistant', { defaultValue: 'Connect an AI Assistant' })}
-                </DropdownMenuItem>
-              )}
-              {/*
-               * Organization entries, by deployment posture (`orgMenuEntries`,
-               * objectstack-ai/objectstack#34591, ruling 6937513776).
-               *
-               * Single-tenant (`multiOrgEnabled` off): none. Member management
-               * for the one organization is Setup → Organization (ruling
-               * 6384629949), so dropping these closes no door.
-               *
-               * Multi-organization: "My Organizations" → `?manage=1`, which
-               * OrganizationsPage reads as "came here to MANAGE" — a member of
-               * one organization is deep-linked to its members page, since the
-               * picker auto-skips at one organization (objectstack#8096: this
-               * entry is that member's door, as the switcher is not offered at
-               * one membership). Then the switcher, at two or more memberships,
-               * and "Create organization" unless the cloud manages this
-               * environment (organizations are created on the cloud there).
-               *
-               * On a walled posture the active organization's name also rides
-               * under "My Organizations", beside the entries that act on it; the
-               * bar names it read-only (`CurrentOrganizationIndicator`).
-               */}
-              {orgMenu.myOrganizations && (
-                <DropdownMenuItem
-                  onClick={() => leaveTo('/organizations?manage=1')}
-                  className="cursor-pointer"
-                  data-testid="header-my-organizations"
-                >
-                  <Building2 className="mr-2 h-4 w-4" />
-                  <span className="grid min-w-0 flex-1 leading-tight">
-                    <span>{t('organizations.mine', { defaultValue: 'My Organizations' })}</span>
-                    {activeOrganization && postureHasOrgWall(orgMenuPosture.tenancyPosture) && (
-                      <span
-                        className="truncate text-xs text-muted-foreground"
-                        data-testid="header-my-organizations-current"
-                      >
-                        {activeOrganization.name}
-                      </span>
-                    )}
-                  </span>
-                </DropdownMenuItem>
-              )}
-              {orgMenu.switchOrganization && (
-                <WorkspaceSwitcherMenu isGroupPosture={orgMenuPosture.tenancyPosture === 'group'} />
-              )}
-              {orgMenu.createOrganization && (
-                <DropdownMenuItem
-                  onClick={() => leaveTo('/organizations?create=1')}
-                  className="cursor-pointer"
-                  data-testid="header-create-workspace"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t('organizations.create', { defaultValue: 'Create organization' })}
-                </DropdownMenuItem>
-              )}
-              {/*
-               * Hidden apps (App.hidden === true) surface here instead
-               * of in the App Switcher. This is the standard pattern for
-               * personal-settings-style apps that would feel out of place
-               * next to business apps — Personal Settings, etc. The `account`
-               * app is represented by the explicit Profile link above, so it
-               * is filtered out here to avoid a duplicate (dead) entry.
-               *
-               * Each entry links to the app's one address (`appAddressSegment`),
-               * never its bare package id: a hidden app that shares its package
-               * with the package's first app is reached by its name alone, and
-               * the package id would open that first app instead.
-               */}
-              {(metadataApps || [])
-                .filter((a: any) => a.active !== false && a.hidden === true && a.name !== 'account')
-                .map((app: any) => {
-                  const AppIcon = getIcon(app.icon);
-                  const label = appLabel(app);
-                  return (
-                    <DropdownMenuItem
-                      key={`hidden_app_${app.name}`}
-                      onClick={() => leaveTo(`/apps/${appAddressSegment(metadataApps, app)}`)}
-                      className="cursor-pointer"
-                    >
-                      <AppIcon className="mr-2 h-4 w-4" />
-                      {label}
-                    </DropdownMenuItem>
-                  );
-                })}
-            </DropdownMenuGroup>
-
-            {/*
-             * UX P0-2: theme + locale switchers used to be standalone
-             * top-bar buttons. They're rarely-used preferences so they live
-             * under the avatar dropdown now, freeing top-bar real estate.
-             * Each is rendered as a non-interactive label + the existing
-             * control so the dropdown handles outside-click / esc cleanly.
-             */}
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground uppercase tracking-wide px-2">
-              {t('user.preferences', { defaultValue: 'Preferences' })}
-            </DropdownMenuLabel>
-            <div className="flex items-center justify-between px-2 py-1.5 text-sm">
-              <span className="text-foreground/80">
-                {t('user.theme', { defaultValue: 'Theme' })}
-              </span>
-              <ModeToggle />
-            </div>
-            <div className="flex items-center justify-between px-2 py-1.5 text-sm">
-              <span className="text-foreground/80">
-                {t('user.language', { defaultValue: 'Language' })}
-              </span>
-              <LocaleSwitcher />
-            </div>
-            {/*
-             * objectui#7011 — the two inbox announcement switches. They belong
-             * beside theme and language for the same reason those moved here:
-             * browser-local preferences a user sets once. The desktop switch is
-             * also the ONLY path to `Notification.requestPermission()` in this
-             * console, and keeping it behind a deliberate gesture is what stops
-             * a load-time prompt from spending that channel permanently.
-             */}
-            <NotificationPreferencesMenu />
-
-            {isAuthEnabled && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => confirmUnsavedLeave(() => signOut())}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  {t('user.logout', { defaultValue: 'Log out' })}
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div data-topbar-group className={cn('flex items-center gap-0.5 shrink-0', phonePageBar && 'hidden')}>
+          <AccountMenu trigger="avatar" />
         </div>
       </div>
     </div>

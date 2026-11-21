@@ -1008,7 +1008,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -1034,6 +1034,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             : null),
         [navOverlay.mode, phone, openInPanelLabel, handleOpenRowInPanel],
     );
+    // objectstack#36015 — a lookup chip in the grid opens its record in the
+    // same side drawer, where this list has one.
+    const openReferencedRecord = navOverlay.mode === 'drawer' && !phone ? handleOpenReferencedRecord : undefined;
 
     // objectstack#25992 slice 8: the `filter[...]` URL equality filters and the `uf_*`
     // user-filter selections moved to `./objectViewListUrlState.ts`.
@@ -1150,6 +1153,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleListRowsChange,
         handleListTotalChange,
         openInPanel,
+        openReferencedRecord,
         // objectstack#33317 — the resolved mode: `none` for an authored
         // `none` and for a list-only object (`servesRecordRead`).
         rowOpensRecord: navOverlay.mode !== 'none',

@@ -186,6 +186,7 @@ export {
   useGridCellSelection,
   type GridCellSelection,
   type GridCellFacts,
+  type GridReferenceCells,
 } from './context/gridCellSelection';
 
 // The header that opens the column menu instead of sorting (objectstack#35876):

@@ -207,7 +207,7 @@ describe('seed reference graph — engine schema fallback (marketplace objects)'
     expect(result.summary.totalReferencesResolved).toBeGreaterThanOrEqual(4);
   });
 
-  it('prefers the metadata service definition when it exists (no engine probe)', async () => {
+  it('prefers the metadata service definition when it exists (the engine is probed only for roll-ups)', async () => {
     const { engine, store } = createFaithfulEngine({});
     const metadata = createEmptyMetadata();
     (metadata.getObject as any).mockImplementation(async (name: string) => ENGINE_SCHEMAS[name]);
@@ -220,12 +220,18 @@ describe('seed reference graph — engine schema fallback (marketplace objects)'
     expect(result.success).toBe(true);
     const acmeId = store.crm_account.find((r) => r.name === 'Acme Corporation')!.id;
     expect(store.crm_contact.find((r) => r.email === 'john.smith@acme.example.com')!.crm_account).toBe(acmeId);
-    // No engine probe for any SEEDED object. (The only engine question asked is
-    // the ADR-0131 D9 registration read for `sys_organization`, which this
+    // The engine here registers no schema at all (`createFaithfulEngine({})`),
+    // so the references above resolved from the metadata service's definition.
+    // The engine is still asked once per seeded object, for the roll-up strip
+    // alone (#35655): the metadata copy carries no object extension, so the
+    // strip also reads the engine's merged schema. (The other engine question
+    // is the ADR-0131 D9 registration read for `sys_organization`, which this
     // metadata double does not know: does the composition register an
     // organization object at all? It answers from the same resolver.)
     const probed = (engine as any).getSchema.mock.calls.map((c: unknown[]) => c[0]);
-    expect(probed.filter((name: string) => name !== 'sys_organization')).toEqual([]);
+    expect(probed.filter((name: string) => name !== 'sys_organization').sort()).toEqual(
+      ['crm_account', 'crm_contact', 'crm_opportunity'],
+    );
   });
 
   it('survives an engine without getSchema (contract-minimal engines keep the old behavior)', async () => {

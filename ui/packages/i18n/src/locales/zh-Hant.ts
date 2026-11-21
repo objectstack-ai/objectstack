@@ -3488,6 +3488,8 @@ const zhHant = {
     removeFromFavorites: '從收藏中移除 {{name}}',
     allReports: '全部報表',
     keepOpen: '保持側邊欄展開',
+    collapse: '收起側邊欄',
+    expand: '展開側邊欄',
   },
   topbar: {
     aiAssistant: 'AI 助手',
@@ -3643,6 +3645,7 @@ const zhHant = {
       backToHome: '返回首頁',
       settings: '系統設定',
       productHome: '{{product}} 首頁',
+      addApp: '新增應用',
     },
     systemNav: {
       systemSettings: '系統設定',

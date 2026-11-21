@@ -19,12 +19,12 @@
  */
 
 import { formatMetadataError } from '@object-ui/data-objectstack';
+import { errorCodeIs } from '@object-ui/types';
 
 type Translate = (key: string) => string;
 
 /** The toast description for a refused view save. */
 export function viewSaveRefusalText(err: unknown, t: Translate): string {
-  const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
-  if (code === 'NOT_OVERRIDABLE') return t('console.objectView.saveRefused.packaged');
+  if (errorCodeIs(err, 'NOT_OVERRIDABLE')) return t('console.objectView.saveRefused.packaged');
   return formatMetadataError(err);
 }
