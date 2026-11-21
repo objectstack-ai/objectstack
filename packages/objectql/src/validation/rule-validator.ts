@@ -4228,15 +4228,11 @@ function checkStateMachine(
   const from = previous[rule.field];
   const to = data[rule.field];
   // Clearing the field is itself a transition — to the empty value, spelled
-  // `''` as a choice field's empty value is — and is judged like any other.
-  // Exempting it let a record leave any declared state, a dead-end included,
-  // in two writes the machine refuses as one: clear, then set (a cleared row's
-  // prior state is described by no key, so the lenient arm below admits
-  // whatever comes next). A state meant to be clearable lists `''` among its
-  // targets.
+  // `''` as a choice field's empty value is — and is judged like any other,
+  // so no sequence of writes leaves a state the machine would refuse to leave
+  // in one write. A state meant to be clearable lists `''` among its targets.
+  if (from === to) return null; // no change
   const cleared = isEmptyStateValue(to);
-  // No change: the same value, or an empty field written empty again.
-  if (from === to || (cleared && isEmptyStateValue(from))) return null;
 
   const fromKey = String(from);
   const allowed = rule.transitions[fromKey];
