@@ -318,8 +318,10 @@ const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)
  * there at first paint, an empty list muted with no number, the width the
  * row's only fold), then the open tab's face.
  *
- * 概览 draws the strip (`record:path`, `record:highlights`) across the whole
- * width, then the details and the right rail — the summary of the other tabs
+ * 概览 draws a strip the page places (`record:path`, `record:highlights`, a
+ * slotted page's `highlights`; the default page places none since
+ * objectstack#35891) across the whole width, then the details and the right
+ * rail — the summary of the other tabs
  * (`RecordSummaryRail`, objectstack#35596: 审批, 附件, 最近动态, then the
  * lists with records; a card with nothing to show is not drawn, and a rail
  * known to have none folds away). Every other tab draws its block in full in

@@ -39,6 +39,7 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { Knex } from 'knex';
 import type { SqlDriver } from './sql-driver.js';
 import { fixedInnerReadPredicates } from './fixed-read-leaf-compile.js';
+import { castFixedReadLeafColumn, fixedReadLeafKeyReading, refuseFixedReadLeafKey } from './fixed-read-leaf-key-type.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link InternalHelpersFacet} read — every one of
@@ -173,10 +174,36 @@ export class InternalHelpersFacet {
    *   another datasource before any driver is called.
    * - **One statement.** No transaction of its own (it is part of the outer
    *   statement), no cap, no ordering, ⛔ no `EXISTS`, no correlation, no join.
+   * - **The outer key's type (O2, ruled A).** `outer` names the object and the
+   *   column the subquery is compared with. On PostgreSQL, where that column's
+   *   base type is not text, the projection is `record_id` cast to it, as the
+   *   catalog read primed it (`fixed-read-leaf-key-type.ts`), so an integer or
+   *   uuid key answers the rows today's list answers. A text key or any
+   *   other dialect projects `record_id` as before. On PostgreSQL a table
+   *   with NO reading (no door primed it, the catalog read failed or found
+   *   no relation; in a transaction it is read on that transaction's
+   *   connection, `outer.transaction`) is refused, ADR-0139 D3's
+   *   envelope (`INTERNAL_ERROR` / 500, logged once), ⛔ never compiled
+   *   uncast: a `character(n)` key would miss a padded grant silently (D2).
    */
-  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle'>, leaf: FixedReadLeaf): Knex.QueryBuilder {
+  static fixedReadLeafSubquery(this: Pick<InternalHelpersHost, 'getBuilder' | 'isOracle' | 'knex' | 'logger' | 'physicalSchemaByObject' | 'physicalTableByObject'>, leaf: FixedReadLeaf, outer?: { readonly object: string | null; readonly column: string; readonly evaluator?: string; readonly transaction?: unknown }): Knex.QueryBuilder {
     const read = fixedInnerReadPredicates(leaf, { emptyStringIsNull: this.isOracle });
-    const inner = this.getBuilder(read.table).select(read.column);
+    let projection: string | Knex.Raw = read.column;
+    // [ADR-0155 O2] PostgreSQL only: the physical table as `getBuilder`
+    // addresses it, the key the prime recorded under. No reading is refused,
+    // never compiled uncast (a `character(n)` key would miss silently).
+    if ((this.knex.client as { dialect?: string }).dialect === 'postgresql') {
+      const object = outer?.object ?? null;
+      const column = outer?.column ?? read.column;
+      const reading = object === null
+        ? { kind: 'unread' as const }
+        : fixedReadLeafKeyReading(this.knex.client, this.physicalSchemaByObject[object], this.physicalTableByObject[object] ?? object, column, outer?.transaction);
+      if (reading.kind === 'unread' || reading.kind === 'unspellable') {
+        throw refuseFixedReadLeafKey(outer?.evaluator ?? 'driver-sql', leaf, object, column, reading.kind, this.logger, this.knex.client);
+      }
+      if (reading.kind === 'cast') projection = castFixedReadLeafColumn(this.knex, read.column, reading.cast);
+    }
+    const inner = this.getBuilder(read.table).select(projection);
     for (const [column, value] of read.equals) inner.where(column, value);
     for (const [column, values] of read.memberOf) inner.whereIn(column, [...values]);
     inner.whereNotNull(read.column);

@@ -427,6 +427,18 @@ row whose new value would sort it elsewhere stays in place until the next load
   takes back that toast's save, while Ctrl+Z always goes newest first. Inside
   an open editor Ctrl+Z stays the editor's own text undo. A save of a field the
   row did not read offers no Undo.
+- **A state-machine field asks first.** When the object's `state_machine`
+  validation rule governs the field (an active rule whose events cover an
+  update), picking a new value — in the cell's editor, or by pasting — opens a
+  confirm that names the field and both values and says saving may trigger
+  related automation ("Status changes from On Hold to Active. Saving may
+  trigger related automation."). Cancel writes nothing and the cell keeps the
+  value it had; Change saves it as any commit is saved. The confirm does not
+  list the flows. A host asks this through `GridCellSelection.confirmCommit`.
+- **The record drawer follows.** A record open in the list's drawer is read
+  again when a list cell saves it. If the drawer holds unsaved edits of its own,
+  those stay as typed, the drawer's save bar says the record was changed
+  elsewhere, and Save writes the drawer's edits over the latest version.
 
 ### Footer calculations
 

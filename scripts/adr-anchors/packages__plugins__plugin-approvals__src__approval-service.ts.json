@@ -1,0 +1,5 @@
+{
+  "file": "packages/plugins/plugin-approvals/src/approval-service.ts",
+  "adrs": ["ADR-0157", "ADR-0042"],
+  "invariant": "ADR-0157 D5, D9, D12: an approval escalation's deadline comes from one function (ApprovalService.slaDeadline) that both the escalation sweep and the sla_due_at read projection call. The default wall_clock counts created_at + timeoutHours elapsed hours (ADR-0042 §3). working_time counts timeoutHours working hours on the request organization's calendar, named by escalation.calendar or else its default, recomputed on every sweep and read and never stored, with no wall-clock fallback; when the calendar refuses, the sweep does not escalate and the read serves sla_due_refusal, and the next sweep asks again. ADR-0042 §1 single-shot escalation stands."
+}

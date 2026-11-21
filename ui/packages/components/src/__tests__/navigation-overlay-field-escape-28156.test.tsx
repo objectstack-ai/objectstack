@@ -8,8 +8,9 @@
 
 /**
  * objectstack#28156 — an `Esc` a field in the record takes is the field's:
- * below the stack's root it does not step the pane back, and maximized it
- * does not restore the pane. A bare `Esc` still does both (the controls).
+ * below the stack's root it does not step the pane back. A bare `Esc` still
+ * does (the control). The maximized state these pins also covered is gone
+ * (objectstack#35854: the drawer is a card with no wider state).
  *
  * The drawer's Radix dialog layer hears `Esc` on the document in the capture
  * phase, ahead of the record's own handlers, so the fields are pinned in the
@@ -115,8 +116,6 @@ const overList: Partial<NavigationOverlayProps> = {
 
 const esc = (target: Element | Document = document.body) => fireEvent.keyDown(target, { key: 'Escape' });
 const field = (label: string) => screen.getByLabelText(label);
-const maximize = () => fireEvent.click(screen.getByTestId('record-pane-maximize'));
-const maximizedPane = () => document.querySelector('[data-maximized]');
 
 describe('drawer, below the root: a field keeps its Esc, the level stays', () => {
   it.each(FIELDS)('Esc in the %s is the field’s; the drawer neither steps back nor closes', (label, logged) => {
@@ -147,29 +146,6 @@ describe('drawer, below the root: a field keeps its Esc, the level stays', () =>
   });
 });
 
-describe('drawer, maximized: a field keeps its Esc, the pane stays maximized', () => {
-  it.each(FIELDS)('Esc in the %s is the field’s; the drawer stays maximized and open', (label, logged) => {
-    const { setIsOpen, close } = renderPane({ maximizable: true });
-    maximize();
-    expect(maximizedPane()).not.toBeNull();
-    esc(field(label));
-    expect(fieldLog).toEqual([logged]);
-    expect(maximizedPane()).not.toBeNull();
-    expect(setIsOpen).not.toHaveBeenCalled();
-    expect(close).not.toHaveBeenCalled();
-  });
-
-  it('CONTROL: a bare Esc restores, and only the next Esc closes the root', () => {
-    const { setIsOpen } = renderPane({ maximizable: true });
-    maximize();
-    esc();
-    expect(maximizedPane()).toBeNull();
-    expect(setIsOpen).not.toHaveBeenCalled();
-    esc();
-    expect(setIsOpen).toHaveBeenCalledWith(false);
-  });
-});
-
 describe('the non-modal drawer over a list: the same answers', () => {
   it.each(FIELDS)('below the root, Esc in the %s keeps the level; a bare Esc steps back (CONTROL)', (label, logged) => {
     const onBack = vi.fn();
@@ -181,16 +157,5 @@ describe('the non-modal drawer over a list: the same answers', () => {
     expect(onBack).not.toHaveBeenCalled();
     esc();
     expect(onBack).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(FIELDS)('maximized, Esc in the %s keeps it maximized; a bare Esc restores (CONTROL)', (label, logged) => {
-    const { close } = renderPane({ ...overList, maximizable: true });
-    maximize();
-    esc(field(label));
-    expect(fieldLog).toEqual([logged]);
-    expect(maximizedPane()).not.toBeNull();
-    esc();
-    expect(maximizedPane()).toBeNull();
-    expect(close).not.toHaveBeenCalled();
   });
 });

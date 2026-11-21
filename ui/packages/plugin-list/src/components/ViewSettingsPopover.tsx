@@ -12,7 +12,9 @@
  *   - Group, Row color;
  *   - Row height: compact, standard, spacious;
  *   - Sort (below `sm` only, where the bar draws no Sort button);
- *   - More: how a record opens, row numbers, inline edit.
+ *   - More: row numbers, inline edit. (How a record opens is no setting: the
+ *     name opens the page, the name cell's hover icon the side panel,
+ *     objectstack#35854.)
  *
  * The footer keeps Restore defaults, Refresh and the export entries.
  *
@@ -20,7 +22,7 @@
  * itself, each control hands its change to the host, which keeps it as the
  * reader's preference. The wide toolbar form (`compactToolbar: false`) keeps
  * one button per control in ListView.tsx; content is duplicated between the
- * two forms, so change one, change both. Open records is drawn here only.
+ * two forms, so change one, change both.
  *
  * @module
  */
@@ -40,8 +42,6 @@ import {
   SelectTrigger,
   SelectValue,
   Switch,
-  ToggleGroup,
-  ToggleGroupItem,
 } from '@object-ui/components';
 import {
   SlidersHorizontal,
@@ -141,42 +141,6 @@ export interface ViewSettingsViewName {
   onRename?: (next: string) => boolean | Promise<boolean>;
 }
 
-/**
- * How a reader prefers a drawer-mode record to open (objectstack#26681): the
- * drawer over the list (the default), or the full page (objectstack#27545).
- * The pane beside the list retired (objectstack#28915, maintainer ruling
- * 2026-11-02: 「默认改抽屉，分屏彻底退役，只留抽屉和整页」).
- */
-export type ViewSettingsRecordOpenPreference = 'drawer' | 'page';
-
-/**
- * The Open records section (objectstack#26681): how a row opens its record.
- *
- * The side-by-side pane is each READER's own choice, kept per browser across
- * objects; it is not metadata, and an object declares only `drawer` (the
- * default) or `page` (maintainer ruling 2026-10-27, objectstack#26677). So the
- * section answers by the mode the host resolved for this object and view:
- *
- *   - `drawer`: two segments, Drawer | Full page, writing the reader's
- *     preference through `setPreference`;
- *   - `page`: one read-only line saying records always open as a full page —
- *     the object's declaration wins, so there is nothing to choose;
- *   - `new_window` / `none`: no section. The preference changes nothing there
- *     and the ruling gives those declarations no line of their own.
- */
-export interface ViewSettingsRecordOpen {
-  /** The `navigation.mode` the host resolved for this object and view. */
-  resolvedMode: 'drawer' | 'page' | 'new_window' | 'none';
-  /**
-   * The reader's current preference; read only when `resolvedMode` is
-   * `drawer`. Read, never handed back: a choice is written through
-   * `setPreference`.
-   */
-  preference: ViewSettingsRecordOpenPreference;
-  /** Keep the reader's choice of Drawer or Full page. The host owns where it is kept. */
-  setPreference: (next: ViewSettingsRecordOpenPreference) => void;
-}
-
 export interface ViewSettingsPopoverProps {
   t: (key: string, opts?: any) => string;
   allFields: ViewSettingsField[];
@@ -213,17 +177,6 @@ export interface ViewSettingsPopoverProps {
    * draws.
    */
   layout?: (closeMenu: () => void) => React.ReactNode;
-
-  /**
-   * The Open records section (objectstack#26681), drawn after Layout. A host
-   * prop: the console passes it; any other host draws no section. It is not a
-   * setting of the view, so it neither counts in `changedCount` nor returns
-   * under Reset.
-   *
-   * Drawn in this panel only: no host that passes it draws the wide toolbar
-   * (`compactToolbar: false`), so the wide form has no twin of it.
-   */
-  recordOpen?: ViewSettingsRecordOpen;
 
   /**
    * The Sort block, drawn below `sm` only (objectstack#28911): there the bar
@@ -456,65 +409,6 @@ function SwitchRow({
 }
 
 /**
- * The Open records section — see {@link ViewSettingsRecordOpen}. `null` for a
- * mode it draws nothing for.
- */
-function RecordOpenSection({
-  t,
-  recordOpen,
-}: {
-  t: ViewSettingsPopoverProps['t'];
-  recordOpen: ViewSettingsRecordOpen;
-}) {
-  const { resolvedMode, preference, setPreference } = recordOpen;
-  if (resolvedMode !== 'drawer' && resolvedMode !== 'page') return null;
-  const title = t('list.recordOpen', { defaultValue: 'Open records' });
-  return (
-    <div className="border-b px-3 py-2" data-testid="display-record-open">
-      <div className="flex items-center justify-between gap-3">
-        <span className="shrink-0 whitespace-nowrap text-xs font-medium text-foreground/80">{title}</span>
-        {resolvedMode === 'drawer' ? (
-          <ToggleGroup
-            type="single"
-            variant="outline"
-            size="sm"
-            value={preference}
-            // Radix hands back '' when the pressed segment is pressed again:
-            // one segment is always the choice, so that writes nothing.
-            onValueChange={(next) => {
-              if (next === preference) return;
-              if (next === 'drawer' || next === 'page') setPreference(next);
-            }}
-            aria-label={title}
-            className="gap-0"
-            data-testid="display-record-open-choice"
-          >
-            <ToggleGroupItem
-              value="drawer"
-              className="h-7 rounded-r-none px-2.5 text-xs"
-              data-testid="display-record-open-drawer"
-            >
-              {t('list.recordOpenDrawer', { defaultValue: 'Drawer' })}
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              value="page"
-              className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
-              data-testid="display-record-open-page"
-            >
-              {t('list.recordOpenPage', { defaultValue: 'Full page' })}
-            </ToggleGroupItem>
-          </ToggleGroup>
-        ) : (
-          <span className="min-w-0 text-right text-xs text-muted-foreground" data-testid="display-record-open-declared">
-            {t('list.optionsMenu.recordOpenAlwaysPage', { defaultValue: 'Records always open as a full page' })}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
  * The fields of `allFields`, in the order the reader's columns are drawn:
  * the names `order` lists first, in its order, then the rest in their own.
  */
@@ -660,7 +554,6 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     onFieldOrderChange,
     fieldType,
     layout,
-    recordOpen,
     sort,
     showGroup,
     groupingConfig,
@@ -712,8 +605,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   const groupFields: string[] = Array.isArray(groupingConfig?.fields)
     ? groupingConfig.fields.map((f: { field?: string }) => f?.field).filter((f: unknown): f is string => typeof f === 'string' && !!f)
     : [];
-  const recordOpenDrawn = !!recordOpen && (recordOpen.resolvedMode === 'drawer' || recordOpen.resolvedMode === 'page');
-  const hasMore = recordOpenDrawn || (!!showInlineEdit && !!setInlineEdit);
+  const hasMore = !!showInlineEdit && !!setInlineEdit;
   const fieldsOffered = !!showHideFields && !!hiddenFields && !!updateHiddenFields;
   const shownCount = fieldsOffered ? allFields.filter((f) => !hiddenFields!.has(f.name)).length : 0;
   const DensityIcon =
@@ -939,7 +831,6 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   } else if (page === 'more' && hasMore) {
     body = (
       <SubPage title={titles.more} onBack={back} testId="options-page-more">
-        {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
         {showInlineEdit && setInlineEdit && (
           <SwitchRow
             label={t('list.inlineEditShort', { defaultValue: 'Edit inline' })}

@@ -188,11 +188,11 @@ describe('defineStack — a field group relatedList names body tables only', () 
     fields: { lead_id: { ...line.fields.lead_id, ...keys } },
   });
 
-  it('accepts a group naming a body table: relatedList primary, or a master_detail with no relatedList (controls)', () => {
+  it('accepts a group naming what it may place: relatedList primary, or a master_detail with no relatedList (controls)', () => {
     expect(() => defineStack(withChild(taskFk({ relatedList: 'primary' }), 'rlo_task'))).not.toThrow();
     expect(() => defineStack(withChild(line, 'rlo_line'))).not.toThrow();
     expect(() => defineStack(withChild(lineFk({ inlineEdit: true }), 'rlo_line.lead_id'))).not.toThrow();
-    // #35597: a plain master_detail (no inlineEdit) is a body table too.
+    // #35597 / #35889: a group may name a plain master_detail (no inlineEdit); the group makes it a body table.
     expect(() => defineStack(withChild(lineFk({ inlineEdit: undefined }), 'rlo_line'))).not.toThrow();
   });
 

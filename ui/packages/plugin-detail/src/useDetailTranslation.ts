@@ -328,6 +328,13 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.pathStageChangeConflict': 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
   'detail.pathStageChangeDenied': "You don't have permission to change this record's stage.",
   'detail.pathStageChangeFailed': 'The stage could not be changed.',
+  // objectstack#35685 — the save bar's note when the record changed elsewhere
+  // during the edit session (`InlineEditSaveBar`). Byte-identical to the `en` pack.
+  'detail.inlineEditRecordChanged': 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
+  'detail.stageMenuTrigger': 'Stage: {{stage}}. Change stage',
+  'detail.stageMenuCurrent': 'current stage',
+  'detail.stageMenuNotReachable': "Can't move here from {{stage}}",
+  'detail.stageMenuFieldsDescription': 'To move this record to {{stage}}, fill in:',
   // objectui#9050 — RelatedList's malformed-filter state. Byte-identical to
   // the `en` pack (`defaults-maps-mirror-en-pack`), and present HERE as well
   // because a provider-less host mounting `RelatedList` directly is exactly

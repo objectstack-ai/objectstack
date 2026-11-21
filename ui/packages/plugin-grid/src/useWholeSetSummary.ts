@@ -95,6 +95,7 @@ import {
   COLUMN_SUMMARY_AGGREGATION,
   LIST_VIEW_GROUP_COUNT_ALIAS,
   columnSummaryAlias,
+  columnSummaryNodeFunctions,
   type ColumnSummary,
   type ListViewGroupHeaderRow,
 } from '@objectstack/spec/ui';
@@ -140,12 +141,17 @@ export function wholeSetSummaryNodes(
     if (!mapping || mapping.kind === 'none' || mapping.kind === 'unmapped') continue;
     const field = typeof summary === 'string' ? column.field : (summary.field ?? column.field);
     if (typeof field !== 'string' || field === '') continue;
-    const fn = mapping.kind === 'derived' ? mapping.from : mapping.function;
-    if (requiredCurrencyGrouping(field, fn, objectFields) !== undefined) continue;
+    // Every node the member reads (a derived member may read two: the boolean
+    // `count_false` asks `SUM(field)` and `COUNT(field)`), off the spec's own
+    // reading of the row, so this question and the group header's agree.
+    const fns = columnSummaryNodeFunctions(mapping);
+    if (fns.some((fn) => requiredCurrencyGrouping(field, fn, objectFields) !== undefined)) continue;
     declared = true;
     const aggregated = mapping.fieldless ? undefined : field;
-    const alias = columnSummaryAlias(fn, aggregated);
-    if (!nodes.has(alias)) nodes.set(alias, { function: fn, ...(aggregated !== undefined ? { field: aggregated } : {}), alias });
+    for (const fn of fns) {
+      const alias = columnSummaryAlias(fn, aggregated);
+      if (!nodes.has(alias)) nodes.set(alias, { function: fn, ...(aggregated !== undefined ? { field: aggregated } : {}), alias });
+    }
   }
   return declared ? [...nodes.values()] : null;
 }

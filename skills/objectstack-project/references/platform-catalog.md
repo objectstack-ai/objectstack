@@ -2,12 +2,10 @@
 
 > **Auto-generated** — do not edit. Regenerate in the framework repo with
 > `pnpm --filter @objectstack/spec gen:skill-refs`
-> (not runnable in an installed app). Names come from `@objectstack/spec`;
-> the prose columns are authored beside the generator.
+> (not runnable in an installed app). Names come from `@objectstack/spec`.
 
 Read this before adding an object, a field or a flow (objectstack-project §0,
-question 3). `list_objects` over MCP hides system objects, so look here, not
-at the runtime.
+question 3). `list_objects` over MCP hides system objects, so look here.
 
 ## Platform objects an app would otherwise build
 
@@ -52,6 +50,8 @@ a seed) without declaring it.
 | Object | Mounted by | What you would otherwise build | How the app reaches it |
 |:--|:--|:--|:--|
 | `sys_exchange_rate` | every boot | an exchange-rate table | `currencyConfig.homeAmount` converts at write; Setup edits rates; data API |
+| `sys_work_calendar` | every boot | a business-hours calendar | kept per organization in Setup; an approval's `escalation.clock: 'working_time'` reads it; data API |
+| `sys_work_calendar_exception` | every boot | a holiday table | a calendar's holidays and make-up workdays, kept in Setup; data API |
 | `sys_import_job` | every boot | a bulk-import job table | `POST /api/v1/data/OBJECT/import/jobs`; data API read |
 | `sys_approval_request` | `requires: ['approvals']` | an approvals table | a flow approval node opens it; `/api/v1/approvals` routes decide; data API read |
 | `sys_approval_action` | `requires: ['approvals']` | an approval decision trail | written per decision; data API read |
@@ -138,18 +138,17 @@ platform" here.
 
 | Concept | Rule |
 |:--|:--|
-| Party master data: customers, suppliers, contacts | one app owns each entity; another app matches its records by the key contract (country plus credit code or registration number), one way, with no platform party object |
-| Item master data: materials, products, plants | the owning app's object is reused by key (material number, plant code); the platform ships no item object |
+| Party master data: customers, suppliers, contacts | one app owns each entity; another app matches its records by the key contract (country plus credit code or registration number), one way |
+| Item master data: materials, products, plants | the owning app's object is reused by key (material number, plant code) |
 
 ## Planned: carded, not shipped
 
 Each row is **not available**: nothing below can be declared or installed.
 The app may build its own meanwhile, marked `// PLATFORM-CANDIDATE:` with
 the link; an interim unit field stores the contract's UN/ECE Rec 20 codes
-(`H87`, `KGM`) as option values, the business's spellings as labels. The PR
-that ships a row moves it into the tables above.
+(`H87`, `KGM`) as option values, the business's spellings as labels.
 
 | Concept | State | Contract |
 |:--|:--|:--|
 | Units of measure (a standard unit table, organization units, a quantity field with its unit) | **not available** (contract accepted, nothing shipped) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md |
-| Working calendars (business days, holidays, SLA clocks) | **not available** (carded, contract in design) | https://github.com/objectstack-ai/objectstack/issues/35340 |
+| Working-day formulas | **not available** (contract accepted; no formula reads a calendar yet) | https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md |

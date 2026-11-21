@@ -41,6 +41,7 @@ export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.position.fields.name.helpText": "3594bba7cc2a3c8a",
   "metadataForms.view.fields.gantt.label": "57ffc6ef520edfc5",
   "metadataForms.view.fields.kanban.label": "dd95c452aa71459e",
+  "metadataForms.view.fields.navigation.mode.helpText": "3a34d1e59dc81b9f",
   "metadataForms.view.sections.gantt.label": "57ffc6ef520edfc5",
   "metadataForms.view.sections.kanban.label": "dd95c452aa71459e",
   "objects.sys_device_code.fields.status.label": "64a420165247654b",

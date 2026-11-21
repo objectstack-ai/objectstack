@@ -284,41 +284,68 @@ describe('mergeViewsIntoObjects — `.form` is the served default form only (obj
 
 import { attachInlineSubforms } from './MetadataProvider';
 
-describe('attachInlineSubforms — relationship-level inlineEdit', () => {
+describe('attachInlineSubforms — a parent field group places the child (objectstack#35889)', () => {
+  // Maintainer ruling B on objectstack#35889 (「明细表应该改成指看分组的定义了」):
+  // the parent's form inlines a child exactly where one of the PARENT's field
+  // groups names it; the FK's `inlineEdit` only picks the form factor.
   const objects = [
-    { name: 'invoice', fields: { number: { type: 'text' } } },
+    {
+      name: 'invoice',
+      fields: { number: { type: 'text' } },
+      fieldGroups: [{ key: 'main', label: 'Main' }, { key: 'lines', relatedList: 'invoice_line' }, { key: 'parts', relatedList: 'invoice_part.invoice' }],
+    },
     {
       name: 'invoice_line',
       fields: {
         amount: { type: 'number' },
-        invoice: { type: 'master_detail', reference: 'invoice', inlineEdit: true, inlineTitle: 'Lines' },
+        invoice: { type: 'master_detail', reference: 'invoice', inlineEdit: 'grid', inlineTitle: 'Lines' },
       },
     },
     {
+      name: 'invoice_part',
+      // placed by a group, no inlineEdit → inlined, the form factor picked by shape
+      fields: { qty: { type: 'number' }, invoice: { type: 'master_detail', reference: 'invoice' } },
+    },
+    {
+      name: 'invoice_note',
+      // inlineEdit but NO group names it → must NOT be inlined
+      fields: { body: { type: 'text' }, invoice: { type: 'master_detail', reference: 'invoice', inlineEdit: true } },
+    },
+    {
       name: 'comment',
-      // master_detail but NOT inlineEdit → must NOT be inlined
+      // master_detail, no group, no inlineEdit → must NOT be inlined
       fields: { body: { type: 'text' }, invoice: { type: 'master_detail', reference: 'invoice' } },
     },
   ];
 
-  it('merges inlineEdit children into the parent form as subforms', () => {
+  it('merges the children a parent group names into the parent form as subforms, inlineEdit picking the form factor', () => {
     const out = attachInlineSubforms(objects);
     const invoice = out.find((o) => o.name === 'invoice')!;
-    expect(invoice.form?.subforms).toHaveLength(1);
+    expect(invoice.form?.subforms).toHaveLength(2);
     expect(invoice.form?.subforms?.[0]).toMatchObject({
       childObject: 'invoice_line',
       relationshipField: 'invoice',
       title: 'Lines',
+      inlineMode: 'grid',
     });
-    // The resolved inline-edit mode is attached too.
-    expect(['grid', 'form']).toContain(invoice.form?.subforms?.[0]?.inlineMode);
+    expect(invoice.form?.subforms?.[1]).toMatchObject({ childObject: 'invoice_part', relationshipField: 'invoice' });
+    expect(['grid', 'form']).toContain(invoice.form?.subforms?.[1]?.inlineMode);
   });
 
-  it('does not inline master_detail children without inlineEdit', () => {
+  it('does not inline a child no parent group names, inlineEdit or not', () => {
     const out = attachInlineSubforms(objects);
     const invoice = out.find((o) => o.name === 'invoice')!;
     const children = (invoice.form?.subforms ?? []).map((s: any) => s.childObject);
     expect(children).not.toContain('comment');
+    expect(children).not.toContain('invoice_note');
+  });
+
+  it('does not inline a child whose FK keeps it a tab (relatedList: true), even when a group names it', () => {
+    const out = attachInlineSubforms([
+      { name: 'order', fields: { number: { type: 'text' } }, fieldGroups: [{ key: 'lines', relatedList: 'order_line' }] },
+      { name: 'order_line', fields: { order: { type: 'master_detail', reference: 'order', relatedList: true } } },
+    ]);
+    expect(out.find((o) => o.name === 'order')!.form).toBeUndefined();
   });
 
   it('lets an explicit form.subforms entry override the derived one', () => {
@@ -335,7 +362,7 @@ describe('attachInlineSubforms — relationship-level inlineEdit', () => {
     expect(lineSubforms[0].columns).toBeTruthy();
   });
 
-  it('returns objects unchanged when no inlineEdit relationships exist', () => {
+  it('returns objects unchanged when no field group places a child', () => {
     const plain = [{ name: 'a', fields: { x: { type: 'text' } } }];
     expect(attachInlineSubforms(plain)).toBe(plain);
   });
@@ -347,7 +374,7 @@ describe('attachInlineSubforms — relationship-level inlineEdit', () => {
     // `reference_to`-only def (the second child here) is one no served object
     // can be, and it resolves no parent.
     const out = attachInlineSubforms([
-      { name: 'order', fields: { number: { type: 'text' } } },
+      { name: 'order', fields: { number: { type: 'text' } }, fieldGroups: [{ key: 'lines', relatedList: 'order_line' }, { key: 'notes', relatedList: 'order_note' }] },
       {
         name: 'order_line',
         fields: {

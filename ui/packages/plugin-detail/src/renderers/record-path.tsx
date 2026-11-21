@@ -147,7 +147,7 @@ const PHONE_LIST_LABEL_CLASS = 'text-left [overflow-wrap:anywhere]';
 
 type StageState = 'completed' | 'current' | 'upcoming';
 
-type PathStage = { value: unknown; label: string; terminal?: 'won' | 'lost' };
+export type PathStage = { value: unknown; label: string; terminal?: 'won' | 'lost' };
 
 /**
  * `stages[].label` is an `I18nLabel` in the spec row
@@ -226,8 +226,11 @@ function readsActingUser(pred: FieldRulePredicate): boolean {
  *
  * No read is added: the record and its object definition are the ones the
  * record context already holds.
+ *
+ * ⚠️ Package-internal: exported for `RecordStageMenu` (objectstack#35891),
+ * which offers the same stages; NOT re-exported from the package entry.
  */
-function stagesThisRecordWalks(
+export function stagesThisRecordWalks(
   stages: PathStage[],
   options: unknown,
   record: Record<string, unknown> | undefined,

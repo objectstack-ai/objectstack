@@ -85,7 +85,6 @@ vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 
 // The page's own reads (the security `explain` probe among them) are relative
 // fetches, which happy-dom would send to a real socket. One double, installed
@@ -286,7 +285,6 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
 
   it('a record open in the drawer over the list keeps the same one switcher in the title', async () => {
     setViewportWidth(1440);
-    localStorage.removeItem(RECORD_OPEN_PREFERENCE_KEY);
     mountLeads('/apps/crm/crm_lead/view/v1?recordId=lead_1');
     await listToolbar();
 

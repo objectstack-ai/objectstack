@@ -269,6 +269,12 @@ export type { DatasourceDef } from './engine.js';
 // refuses the filter rather than truncate it, and its words name this number.
 // Exported so a caller running the two-step route itself can page by it.
 export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
+// [ADR-0155 D4, plan step 5] The seam's recognition of D4's two classes and
+// its reader of a driver's `fixedReadLeaves` declaration, so an evaluator that
+// declines before it compiles (the analytics native compiler) asks the seam
+// and restates neither.
+export { driverEvaluatesFixedReadLeaf, fixedReadLeafClassOfEngine } from './fixed-read-leaf-seam.js';
+export type { FixedReadLeafClass } from './fixed-read-leaf-seam.js';
 // Groups ordered by an aggregated column, cut and counted in the driver's own
 // statement: the engine-internal read option a door carries to `aggregate`,
 // and the request it carries. Carriers that do not import this package spell
