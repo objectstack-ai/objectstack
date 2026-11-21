@@ -299,7 +299,7 @@ export function GridDateCell({ kind, nativeValue, onNativeChange, notice, classN
           defaultMonth={selected}
           selected={selected}
           onSelect={pickDay}
-          className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
+          className="mx-auto bg-transparent [--cell-size:2.75rem] sm:[--cell-size:2rem]"
         />
         <div className="flex flex-wrap items-center gap-2 border-t p-2">
           <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(0)}>
@@ -338,6 +338,7 @@ export const GrowingCellInput = React.forwardRef<HTMLInputElement, React.Compone
   function GrowingCellInput({ className, onFocus, onBlur, onInput, ...props }, forwardedRef) {
     const ownRef = React.useRef<HTMLInputElement | null>(null);
     const [width, setWidth] = React.useState<number | null>(null);
+    const roomRef = React.useRef(0);
     const setRefs = (el: HTMLInputElement | null) => {
       ownRef.current = el;
       if (typeof forwardedRef === 'function') forwardedRef(el);
@@ -350,17 +351,44 @@ export const GrowingCellInput = React.forwardRef<HTMLInputElement, React.Compone
       if (!el || !cell || document.activeElement !== el) return;
       const base = cell.clientWidth;
       // The text's own width: what the input would need to show all of it.
-      const needed = el.scrollWidth + 2;
+      // Read at zero width so a grown input does not measure itself, and add
+      // the far padding and borders, which an input's scrollWidth leaves out.
+      const prior = el.style.width;
+      el.style.width = '0px';
+      const content = el.scrollWidth;
+      el.style.width = prior;
+      const cs = getComputedStyle(el);
+      const needed =
+        content +
+        (parseFloat(cs.paddingRight) || 0) +
+        (parseFloat(cs.borderLeftWidth) || 0) +
+        (parseFloat(cs.borderRightWidth) || 0) +
+        2;
       if (needed <= base) {
         setWidth(null);
         return;
       }
       const box = cell.closest('[data-line-items-scroll]') ?? cell.closest('table');
       const room = box ? box.getBoundingClientRect().right - cell.getBoundingClientRect().left - 4 : needed;
+      roomRef.current = Math.max(base, room);
       setWidth(Math.max(base, Math.min(needed, room)));
     };
     // The value is controlled by the grid; measure after each render it changes.
     React.useLayoutEffect(measure, [props.value]);
+    // Once the input is wide enough for all of the text, show it from the
+    // start: the scroll the narrow cell needed would otherwise clip it.
+    React.useLayoutEffect(() => {
+      const el = ownRef.current;
+      if (!el || width == null) return;
+      // Text metrics round differently at each width: top up what still
+      // overflows, once, as far as the grid's box allows.
+      const over = el.scrollWidth - el.clientWidth;
+      if (over > 0 && width < roomRef.current) {
+        setWidth(Math.min(width + over, roomRef.current));
+        return;
+      }
+      if (over <= 0) el.scrollLeft = 0;
+    }, [width]);
 
     return (
       <div className="relative">
