@@ -89,7 +89,7 @@ describe('publish lint — list-equality at a CEL site', () => {
             ...ticket,
             fields: {
               ...ticket.fields,
-              is_frontend: { type: 'formula', label: 'Is frontend', expression: "record.labels == 'frontend'" },
+              is_frontend: { type: 'formula', label: 'Is frontend', expression: "record.watchers == 'u1'" },
             },
             validations: [
               {
@@ -97,13 +97,13 @@ describe('publish lint — list-equality at a CEL site', () => {
                 type: 'script',
                 severity: 'error',
                 message: 'm',
-                condition: "record.watchers != 'u1'",
+                condition: "record.labels != 'frontend'",
               },
             ],
           },
         ],
       }),
     ).filter((i) => i.severity === 'error' && i.message.includes('holds a list'));
-    expect(issues.map((i) => i.source).sort()).toEqual(["record.labels == 'frontend'", "record.watchers != 'u1'"]);
+    expect(issues.map((i) => i.source).sort()).toEqual(["record.labels != 'frontend'", "record.watchers == 'u1'"]);
   });
 });
