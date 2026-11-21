@@ -27,6 +27,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
 import { ModalForm } from '../ModalForm';
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { modalFormMaximizedStorageKey } from '../modalMaximize';
 
 registerAllFields();
@@ -428,6 +429,20 @@ describe('#35980 — 「Create more」, the save shortcut and the title icon', (
     await nameInput();
     expect(createMoreSwitch()?.getAttribute('aria-checked')).toBe('false');
     expect(createMoreSwitch()?.closest('label')?.textContent).toContain('Create more');
+  });
+
+  it("an object-form page schema that writes createMore gets no switch: it is a host opt-in on ModalForm", async () => {
+    render(
+      <ObjectFormContainer
+        schema={{
+          type: 'object-form', formType: 'modal', objectName: 'deal', mode: 'create', title: 'New deal',
+          open: true, onOpenChange: vi.fn(), createMore: true,
+        } as any}
+        dataSource={flatDs({ deal: DEAL })}
+      />,
+    );
+    await nameInput();
+    expect(createMoreSwitch()).toBeNull();
   });
 
   it('off: a save closes the dialog, and the host is not told to stay', async () => {

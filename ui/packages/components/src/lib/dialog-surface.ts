@@ -54,7 +54,10 @@ export const DIALOG_COMPACT_CONTROLS = 'sm:[&_.h-10]:h-8 sm:[&_.h-10]:py-1 sm:[&
  *
  * `dialog-surface` is a marker, not a utility: the console's shared shadow
  * for floating surfaces (menus, popovers, drawers) skips an element that
- * carries it, because this card draws its own.
+ * carries it, because this card draws its own. That makes the class name a
+ * contract with `apps/console/src/index.css` (`[role="dialog"]:not(.dialog-surface)`),
+ * which no exported name carries: rename it on both sides or the console's
+ * shadow lands on the card again.
  */
 export const DIALOG_CONTENT_SURFACE = [
   'dialog-surface',
