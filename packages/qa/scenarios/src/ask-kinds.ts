@@ -57,7 +57,7 @@ function datasetKindProblem(q: DatasetQuestion): string | undefined {
  * (`run.userHandleFields`). Every hop but the last walks a declared lookup, as the loader resolves
  * a relation path; a hop no lookup declares answers no.
  */
-export function groupsByPerson(card: ScenarioCard, object: string, groupBy: string): boolean {
+function groupsByPerson(card: ScenarioCard, object: string, groupBy: string): boolean {
   const people = new Set(card.run.personas.flatMap((p) => (p.record ? [p.record.object] : [])));
   const lookups = card.expect.lookups ?? [];
   const hops = groupBy.split('.');
