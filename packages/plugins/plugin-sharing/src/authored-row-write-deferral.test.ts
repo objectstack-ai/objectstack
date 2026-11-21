@@ -62,6 +62,9 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SharingService, type SharingSecurityProbe } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
+import { SharedRecordIds } from '@objectstack/spec/data';
+import { WRITE_ACCESS_LEVELS } from './access-level.js';
+import { inMembers } from './shared-record-ids.testkit.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
 
@@ -197,7 +200,8 @@ function makeEngine() {
     for (const [k, v] of Object.entries(filter)) {
       if (k === '$or' || k === '$and') continue;
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
-        if (!(v as any).$in.includes(row[k])) return false;
+        // [ADR-0155] A share-grant leaf resolves over this double's own share rows.
+        if (!inMembers((v as any).$in, tables.sys_record_share).includes(row[k])) return false;
         continue;
       }
       if (row[k] !== v) return false;
@@ -649,8 +653,11 @@ describe('[#5493 / #6736] the BULK path is untouched — a verdict is a by-id an
     let nextCalled = false;
     await stack.mw(opCtx, async () => { nextCalled = true; });
     expect(nextCalled, 'the bulk branch scopes rather than refuses').toBe(true);
-    expect(opCtx.ast.where, 'still scoped by OWNERSHIP, unwidened by any authored policy')
-      .toEqual({ $and: [{ stage: 'prospecting' }, { owner_id: U_WIDENED }] });
+    expect(opCtx.ast.where, 'still scoped by OWNERSHIP and edit-shares, unwidened by any authored policy')
+      .toEqual({ $and: [{ stage: 'prospecting' }, { $or: [
+        { owner_id: U_WIDENED },
+        { id: { $in: SharedRecordIds.write('crm_campaign', U_WIDENED, WRITE_ACCESS_LEVELS) } },
+      ] }] });
     expect(stack.security!.calls, 'the bulk path asks no verdict').toEqual([]);
   });
 });

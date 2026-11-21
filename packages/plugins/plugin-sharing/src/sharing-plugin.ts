@@ -97,6 +97,7 @@ import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { backfillStoredDeclarationPackagesAtBoot } from './stored-declaration-package-backfill.js';
+import { registeredObjectNames, reportInertShareGrantHolders, shareGrantRegistrationRefusal } from './share-arm-boot.js';
 
 /**
  * One page of the boot's organization enumeration. A PAGE size, not a cap: the
@@ -1250,6 +1251,22 @@ export class SharingServicePlugin implements Plugin {
       this.mountShareableObjectsRoute(ctx);
     });
 
+    // [ADR-0155 ② ruled R1 at boot] Registered BEFORE the passes below, so a
+    // host in D4's second class (a middleware or a find hook registered for
+    // `sys_record_share` by name) is refused before any of them runs and
+    // before any request is served (`kernel:listening` has not opened the
+    // socket). Judged here, not at `kernel:ready`: other plugins register
+    // their read middlewares and find hooks in their own `kernel:ready`
+    // handlers, so only now is every registration final. Only where a
+    // producer writes the leaf: the sharing service is registered, whatever
+    // `enforce` says, because plugin-security's read paths ask that service
+    // for its read filter too. See `share-arm-boot.ts`.
+    ctx.hook('kernel:bootstrapped', async () => {
+      if (!this.service) return;
+      const refusal = shareGrantRegistrationRefusal(this.engine as any, ctx.logger as any);
+      if (refusal) throw refusal;
+    });
+
     // [#2926 ③] Materialize sharing grants for rows already present at boot.
     // [#13533] SeedLoader rows used to be the headline case, because the rule
     // hooks short-circuited on `isSystem` and so never produced a
@@ -1355,6 +1372,20 @@ export class SharingServicePlugin implements Plugin {
       // Withdrawal is now complete for this boot; runtime rule writes own it
       // from here (see bindRuleRebindTriggers).
       this.ruleGrantsBootReconciled = true;
+    });
+
+    // [ADR-0155 ② ruled R2, ADR-0111 D10] The visible trail of the storage
+    // rows' tightening: the objects whose share grants stopped counting at the
+    // switch and that hold share rows, named once per boot at `warn`. After
+    // the passes above, in a handler of its own, so it runs in every posture
+    // (`enforce: false` and no rule service included) and never fails the boot.
+    ctx.hook('kernel:bootstrapped', async () => {
+      if (!this.service) return;
+      try {
+        await reportInertShareGrantHolders(this.service, registeredObjectNames(this.engine), ctx.logger as any);
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: the report of share grants that no longer count (kernel:bootstrapped) failed', { error: err?.message });
+      }
     });
   }
 }
@@ -1524,8 +1555,11 @@ export function buildSharingMiddleware(
         // card: vouch the caller's own predicate BEFORE the rewrite below
         // makes it unrecognisable to every later boundary.
         vouchCallerWhereBeforeRewrite(ast, ctx.options);
+        // [ADR-0155 plan step 6] `where` only. The scope used to be mirrored
+        // under the AST's `filter` key too, which the engine's executor seam
+        // does not walk and no driver reads; it now carries the share-grant
+        // leaf, which must never sit where the seam does not judge it.
         ast.where = composeAnd(ast.where, filter);
-        ast.filter = composeAnd(ast.filter, filter);
         ctx.ast = ast;
       }
       return next();
@@ -1688,8 +1722,10 @@ export function buildSharingMiddleware(
       }
       if (writeFilter) {
         const ast: any = ctx.ast ?? {};
+        // [ADR-0155 plan step 6] `where` only, as on the read path above: the
+        // write form of the share-grant leaf is judged by the seam in a
+        // predicate update's `where`, and never mirrored under `filter`.
         ast.where = composeAnd(ast.where, writeFilter);
-        ast.filter = composeAnd(ast.filter, writeFilter);
         ctx.ast = ast;
       }
       return next();

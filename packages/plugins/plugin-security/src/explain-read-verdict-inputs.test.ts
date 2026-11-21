@@ -26,6 +26,7 @@ import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-shar
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { resolveFixedReadLeavesInMemory } from './shared-record-ids-in-memory.testkit.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
@@ -161,7 +162,9 @@ function makeEngine(schema: Record<string, unknown>) {
     getSchema: (name: string) => (name === OBJECT ? schema : undefined),
     async find(object: string, options: any = {}) {
       const rows = (tables[object] ??= []);
-      return rows.filter((r) => matches(r, options.filter ?? options.where)).slice(0, options.limit ?? 1000);
+      // [ADR-0155 plan step 6] The share-grant leaf, resolved once for the statement.
+      const where = resolveFixedReadLeavesInMemory(options.filter ?? options.where, (table) => tables[table]);
+      return rows.filter((r) => matches(r, where)).slice(0, options.limit ?? 1000);
     },
     async findOne(object: string, options: any = {}) {
       assertEngineFindOnePredicate(object, options);

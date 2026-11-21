@@ -32,6 +32,7 @@ import { SharingService, buildSharingMiddleware } from '@objectstack/plugin-shar
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { resolveFixedReadLeavesInMemory } from './shared-record-ids-in-memory.testkit.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
@@ -157,7 +158,11 @@ function makeEngine(schema: Record<string, unknown>, storeFaults: ReadonlyMap<st
     getSchema: (name: string) => (name === OBJECT ? schema : undefined),
     async find(object: string, options: any = {}) {
       const rows = (tables[object] ??= []);
-      const hits = rows.filter((r) => matches(r, options.filter ?? options.where));
+      // [ADR-0155 plan step 6] The share-grant leaf, resolved once for the
+      // statement as the driver's semi-join is: with the share store down, the
+      // statement fails on that fault, whichever arm the row would match.
+      const where = resolveFixedReadLeavesInMemory(options.filter ?? options.where, (table) => tables[table]);
+      const hits = rows.filter((r) => matches(r, where));
       return typeof options.limit === 'number' ? hits.slice(0, options.limit) : hits;
     },
     async findOne(object: string, options: any = {}) {
@@ -317,6 +322,10 @@ function expectNotEvaluated(decision: any, layer: string): void {
 // ───────────────────────────────────────────────────────────────────────────
 
 describe("plugin-sharing's read filter rejects — explain(read) fails closed", () => {
+  // [ADR-0155 plan step 6] With the share store down, the read filter itself
+  // now answers (it reads no grant row: its share arm is the share-grant leaf);
+  // the fault surfaces where the leaf is evaluated, in the find's statement and
+  // in explain's read of the leaf at the record, and both fail on it.
   const rows: RowKey[] = ['unshared', 'shared', 'owned'];
   it.each(rows)('the share store is down × %s row: not visible, and the find fails on the same fault', async (rowKey) => {
     const stack = await makeStack({ storeFaults: ['sys_record_share'] });
