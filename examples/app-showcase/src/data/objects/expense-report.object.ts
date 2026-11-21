@@ -141,8 +141,11 @@ export const ExpenseReport = ObjectSchema.create({
   // ADR-0085 §5: the form, detail and drawer layout is derived from these
   // groups, so each field is placed in a named section rather than left to the
   // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  // [#35889] `lines` places the expense lines' table between the report and
+  // its totals on the record page, and inlines it in the New / Edit form.
   fieldGroups: [
     { key: 'report', label: 'Report' },
+    { key: 'lines', label: 'Expense Lines', relatedList: 'showcase_expense_line' },
     { key: 'totals', label: 'Totals' },
   ],
 });

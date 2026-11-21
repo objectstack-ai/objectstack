@@ -243,14 +243,22 @@ export interface BuildPageOptions {
     /**
      * The list is the record's own body (objectstack#27055, Target 8):
      * `relatedList: 'primary'`, or a `master_detail` FK declaring no
-     * `relatedList` (objectstack#35597; `inlineEdit` no longer required). Drawn
-     * as a full-width table section in the Details tab, before the field
-     * sections, instead of in the Related tab / related column. Absent: `isPrimary` decides. The host computes it from
-     * the FK with `@objectstack/spec`'s `isBodyTableRelationship`
+     * `relatedList` that a field group of the parent places (objectstack#35889;
+     * unplaced, it is a tab). Drawn as a full-width table section in the
+     * Details tab instead of a tab of its own. Absent: `isPrimary` decides. The
+     * host computes it from the FK and the parent's field groups with
+     * `@objectstack/spec`'s `isBodyTableRelationship`
      * (objectstack#27478) — the one predicate, which the spec's refusal of a
      * field group naming a side card reads too (no spec key of its own).
      */
     isBody?: boolean;
+    /**
+     * objectstack#35889 item 4 — a body table that keeps its tab as well: a
+     * plain `master_detail` list a field group of this object makes a body
+     * table (the host sets it). Absent: a body table takes no tab, as a
+     * `relatedList: 'primary'` one never did.
+     */
+    keepsTab?: boolean;
   }>;
   // objectstack#27055 (Target 3): `showActivity` and `history` are gone too.
   // The timeline is ONE stream — discussion, activity (`sys_activity`) and
@@ -828,11 +836,15 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    no fields (the spec refuses one that does), so it is a position, never a
  *    section of its own. A group only POSITIONS a body table: only the
  *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
- *    the spec refuses a group naming a side card or a hidden list, by the same
- *    `isBodyTableRelationship` the host computes `isBody` with);
- *  - every other body table goes AFTER the field sections the record page
+ *    the spec refuses a group naming a side card or a hidden list; a plain
+ *    master-detail list a group names is a body table because the group names
+ *    it, objectstack#35889, by the same `isBodyTableRelationship` the host
+ *    computes `isBody` with);
+ *  - every other body table (a `relatedList: 'primary'` list no group places;
+ *    since objectstack#35889 a master-detail list is a body table only where a
+ *    group places it) goes AFTER the field sections the record page
  *    draws open (objectstack#35742: the record's own fields first, then its
- *    master-detail tables — 「主记录的字段分组 → 主从子表」; the header strip's
+ *    body tables — 「主记录的字段分组 → 主从子表」; the header strip's
  *    stage bar and key fields sit above both, objectstack#35597's
  *    「关键字段下面」), stacked in the order given — the parent's
  *    `relatedLists`, then the derived order. The sections drawn CLOSED that
@@ -1017,7 +1029,12 @@ function synthTabs(
   const related = Array.isArray(options.related) ? options.related : [];
   const isBody = (rel: (typeof related)[number]) => rel.isBody ?? rel.isPrimary === true;
   const bodies = related.filter(isBody).map((rel) => relatedNode(rel, BODY_TABLE_PAGE_SIZE));
-  const sides = related.filter((rel) => !isBody(rel));
+  // objectstack#35889 (item 4) — a body table a field group of this object
+  // MAKES one (`keepsTab`, set by the host for a plain master_detail list a
+  // group names) keeps its tab too, with its count: the group adds it to the
+  // overview, it does not take it off the tab row. A `relatedList: 'primary'`
+  // body table stays body-only, as before, whether or not a group positions it.
+  const sides = related.filter((rel) => !isBody(rel) || rel.keepsTab === true);
   // objectstack#35595 — the first tab is 「概览」 (the token the tab strip
   // localizes as `detail.recordTabOverview`); its value stays `details`, the
   // URL token a `?tab=` link already names.

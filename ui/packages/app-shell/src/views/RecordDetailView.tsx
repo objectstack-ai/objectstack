@@ -4251,7 +4251,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         sections?: Array<Record<string, any>>;
         highlightFields?: string[];
         headerActions?: ActionDef[];
-        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean; isBody?: boolean }>;
+        related?: Array<{ title?: string; objectName: string; relationshipField: string; columns?: any[]; icon?: string; isPrimary?: boolean; isBody?: boolean; keepsTab?: boolean }>;
         approvals?: { count?: number; node?: Record<string, any> };
       };
     }
@@ -4339,12 +4339,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       ...childRelations.filter((relation) => relation.isPrimary),
       ...childRelations.filter((relation) => !relation.isPrimary),
     ];
-    const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, sort: inheritedSort, filter: declaredFilter }) => {
+    const related = orderedRelations.map(({ childObject, childLabel, referenceField, title: titleOverride, columns: columnsOverride, isPrimary, keepsTab, sort: inheritedSort, filter: declaredFilter }) => {
       const childObjectDef = objects.find((o: any) => o.name === childObject);
       // objectstack#27055, Target 8 — the record's own BODY: a list the author
-      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring
-      // `inlineEdit` (the child is edited as part of the parent) and no
-      // `relatedList` — `relatedList: true` keeps it a side card. That is
+      // marks `relatedList: 'primary'`, or a `master_detail` FK declaring no
+      // `relatedList` that one of this object's field groups places
+      // (objectstack#35889; unplaced, it is a tab). That is
       // `isPrimary`: `deriveRelatedLists` sets it from `@objectstack/spec`'s
       // `isBodyTableRelationship` (objectstack#27478), the one predicate the
       // spec's refusal of a field group naming a side card reads too, so no
@@ -4393,6 +4393,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // verdict above: a body list is a table in the Details tab.
         ...(isPrimary ? { isPrimary: true } : {}),
         ...(isBody ? { isBody: true } : {}),
+        // objectstack#35889 item 4 — a body table a field group makes one
+        // keeps its tab as well; a `'primary'` one does not.
+        ...(keepsTab ? { keepsTab: true } : {}),
       };
     });
 

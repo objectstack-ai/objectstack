@@ -73,7 +73,7 @@ const FIELD_NO_CONSUMERS_EXPLANATION: RuleExplanation = {
     'A CARRIER names a field without reading it, so it does not count: a translation label, a seed ' +
       'value, an import-mapping target, a field-level permission grant (the `<object>.<field>` key of a ' +
       'permission set\'s `fields`), a flow that only WRITES it, an ' +
-      '`inlineColumns` entry on a relationship field that does not set `inlineEdit` (no grid is ' +
+      '`inlineColumns` entry on a relationship field no field group of its parent places (no grid is ' +
       'drawn), or a dataset or cube member path the analytics door refuses (a hop or column that does ' +
       'not resolve, or a join the dataset\'s `include` does not declare).',
     'The verdict on the warning is `inert` when no site of any kind names the field, and ' +
@@ -3815,8 +3815,8 @@ const FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION: RuleExplanation = {
       'or `columns` on one promises a typed list the platform does not build.',
     'A list that needs typed columns is a child object: its own fields carry the types, labels, ' +
       'options and validation, and a `master_detail` field on it points back at the parent. The ' +
-      'parent\'s record page lists the children as a related list, and `inlineEdit: \'grid\'` on that ' +
-      'field edits them as an inline grid on the parent\'s form. Each row then has a record identity ' +
+      'parent\'s record page lists the children as a related list, and a field group on the parent whose ' +
+      '`relatedList` names the child edits them as an inline grid on the parent\'s form. Each row then has a record identity ' +
       'that a lookup, a roll-up or a flow can reach. Keep a `composite` / `repeater` only for JSON ' +
       'whose shape the platform does not need to know.',
     'Not judged: a form view\'s `fields` sub-rows and the metadata forms Studio renders — those are ' +
@@ -4729,11 +4729,11 @@ const RELATED_LIST_GROUP_NOT_BODY_EXPLANATION: RuleExplanation = {
   covers: 'which related list a field group may place',
   paragraphs: [
     'A field group\'s `relatedList` places one related list\'s table among the field sections of the ' +
-      'record\'s details column. It only POSITIONS a list that is already a body table; it does not make ' +
-      'one. Whether a list is a body table is decided once, by the relationship\'s own FK field on the ' +
-      'child: `relatedList: \'primary\'`, or a `master_detail` FK that sets `inlineEdit` and declares no ' +
-      '`relatedList`. Every other list is a side card in the related column (`relatedList: true` or ' +
-      'absent), or hidden (`relatedList: false`).',
+      'record\'s details column. It may place a list whose FK declares `relatedList: \'primary\'` (a body ' +
+      'table with or without a group), or a `master_detail` FK that declares no `relatedList`, which is a ' +
+      'tab of the record page until a group names it and then a body table at the group, inlined in the ' +
+      'parent\'s entry form too. Every other list is a tab (`relatedList: true`, or a `lookup` with no ' +
+      '`relatedList`), or hidden (`relatedList: false`), and a group cannot place it.',
     'A group naming a side card or a hidden list draws nothing at the group, silently, so it is an ' +
       'error, the verdict `defineStack` gives on `os validate` and `os build` and the runtime publish ' +
       'gate gives too. A bare child name names every FK of that child, so it is refused when any of ' +

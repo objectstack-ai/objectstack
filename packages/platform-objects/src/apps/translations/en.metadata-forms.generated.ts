@@ -106,7 +106,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.relatedList": {
         label: "Related List",
-        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The record page does not draw this placement yet."
+        helpText: "Makes this entry a related list's table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record's details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The parent's create and edit forms inline the table too, and the record page's Edit saves the record and its rows together."
       },
       "fieldGroups.collapse": {
         label: "Collapse",
@@ -791,7 +791,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       inlineColumns: {
         label: "Inline Columns",
-        helpText: "Columns of the inline grid on the parent's form, in display order; used only when this field sets inlineEdit, which is written in source. Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
+        helpText: "Columns of the inline grid on the parent's form, in display order; used only when a field group of the parent names this child (fieldGroups[].relatedList). Unset: derived from this object's editable fields, and past six the rest start in the grid's column chooser. An entry that names only a field takes its type, options and rules from that field; the other column keys, type first, are written in source."
       },
       "inlineColumns.name": {
         label: "Name",
