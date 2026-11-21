@@ -234,7 +234,7 @@ function Header() {
     identityImportEnabled: false, objectCanImport: false, importVisible: false, importDisabled: false,
     setShowImport: () => {}, listFavorite: null, isEnvironmentList: false,
     toolbarBar: { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
-    viewAccess: { refusal: null },
+    viewAccess: { refusal: null }, createLabel: '新建商机',
   });
   return h(ObjectViewPageHeader, {
     objectDef: { name: 'opportunity', label: '商机', pluralLabel: '商机', icon: 'briefcase' },

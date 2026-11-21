@@ -328,6 +328,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      remove_user_manager: {
+        label: "상사 제거",
+        confirmText: "이 사용자의 상사를 제거하시겠습니까? 상사를 다시 지정할 때까지 이 사용자는 아무에게도 보고하지 않으며, 승인 라우팅과 own_and_reports 레코드 범위도 이 변경을 따릅니다.",
+        successMessage: "상사가 제거되었습니다"
+      },
       list_platform_admins: {
         label: "플랫폼 관리자",
         resultDialog: {

@@ -195,7 +195,7 @@ function renderDetail(opts: { objects: any[]; pages: any[]; comments?: Array<Rec
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={RECORD_ID}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>,

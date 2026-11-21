@@ -580,6 +580,28 @@ export interface FeedItem {
    */
   authoredByViewer?: boolean;
   /**
+   * Whether this top-level comment's thread is resolved (objectstack#36071,
+   * #36075): the row's `is_resolved`. `undefined` where the deployment stores
+   * no resolution (the row carries no `is_resolved`), so a surface offers no
+   * resolve control there. Meaningless on a reply.
+   */
+  resolved?: boolean;
+  /** Who resolved the thread: the row's `resolved_by` user id. */
+  resolvedById?: string;
+  /**
+   * The resolver's display name, where the host knows it (the viewer, or an
+   * author in the same discussion); a surface may look it up elsewhere.
+   */
+  resolvedByName?: string;
+  /** When the thread was resolved (ISO 8601): the row's `resolved_at`. */
+  resolvedAt?: string;
+  /**
+   * Whether the item's stored `mentions` name the signed-in viewer. Set by the
+   * host, relative to the viewer like `authoredByViewer`; the comment panel's
+   * 「只看我参与的」 reads it (objectstack#36075).
+   */
+  mentionsViewer?: boolean;
+  /**
    * Source rich-entity pointer (ADR-0052 ActivityPointer). When the activity
    * was derived from a separate record — an email in `sys_email`, a call/meeting
    * task — these identify it so the timeline can drill from the one-line summary

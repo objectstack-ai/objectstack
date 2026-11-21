@@ -253,6 +253,28 @@ const accountDetailPage = {
 Use a slotted page to change one or two parts of an otherwise standard record page, and a
 `full` page for a record page that looks nothing like the default.
 
+### Where an authored page applies
+
+A `kind: 'full'` record page is drawn on the **desktop full page** only. On a phone (any window
+narrower than 768 px, a narrowed desktop window included), and in every embedded record view (the
+side drawer or split pane a list opens a record in, and an interface page's preview), the record
+takes the platform's standard page for its object, whether or not the object has an authored page; **Open full page** from the
+drawer lands on the authored one. There is no setting that keeps an authored page on the phone
+or in the drawer.
+
+What carries over is what the object declares: its field groups and their order, field
+permissions and visibility, the actions placed at `record_header` and `record_more`, one tab per
+child table, the stage and the approval state. What does not is the page's own layout and
+anything that lives only on it: its tabs and sections, a related list or block placed only on
+the page, a banner, and `record_section` actions, which the standard page does not draw. To keep
+such an action reachable off the full page, add `record_more` to its `locations`, and leave it
+out of the page header's `actions` list so the full page still draws it once.
+
+A slotted page is the standard page with its slots filled, so its slots apply on every surface.
+A page named in the URL (`…/record/:id/page/:pageName`, print pages and other named routes) is
+drawn wherever that route renders. The platform's approval request and user pages keep their
+own page on every surface.
+
 ### The discussion panel is composed, never appended
 
 A record page shows a discussion panel if and only if the page composes a

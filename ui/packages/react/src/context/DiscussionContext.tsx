@@ -60,6 +60,32 @@ export interface DiscussionContextValue {
    * nothing was deleted.
    */
   onDeleteComment?: (itemId: string | number) => void | Promise<void>;
+  /**
+   * Resolve (`true`) or reopen (`false`) the thread of a top-level comment
+   * (objectstack#36071, #36075). Offered under the viewer's `update` grant on
+   * `sys_comment`; the comment panel draws it on the rows whose `resolved` the
+   * host set, on a thread the viewer started, and on anyone's only where
+   * {@link updatesOthersComments} holds. A rejection means nothing changed.
+   */
+  onResolveComment?: (itemId: string | number, resolved: boolean) => void | Promise<void>;
+  /**
+   * The viewer may edit and delete OTHER people's comments on this record
+   * (objectstack#36075 item 6): the server admits a comment's author or a user
+   * whose by-id update of the record is admitted. `true` only on a definite
+   * allow; absent or `false`, the panel offers Edit and Delete on the viewer's
+   * own comments alone. The handlers still come from `onEditComment` /
+   * `onDeleteComment`.
+   */
+  moderatesComments?: boolean;
+  /**
+   * The server admits the viewer's update of a comment they did NOT write
+   * (objectstack#36075): the platform's row floor lets most members update
+   * only the rows they created, before any comment rule is asked. `true` only
+   * on a definite allow; absent or `false`, the panel offers ✓ and Edit on the
+   * viewer's own rows alone. Edit on others' comments also needs
+   * {@link moderatesComments}; Delete does not read this.
+   */
+  updatesOthersComments?: boolean;
   /** Optional list of users (or any mentionable entities) the comment
    *  input can suggest after the user types `@`. When omitted the input
    *  falls back to free-text @-mentions without autocompletion. */
@@ -124,6 +150,9 @@ export const DiscussionContextProvider: React.FC<DiscussionContextProviderProps>
     value.onToggleReaction,
     value.onEditComment,
     value.onDeleteComment,
+    value.onResolveComment,
+    value.moderatesComments,
+    value.updatesOthersComments,
     value.mentionSuggestions,
     value.onMentionSuggestionsWanted,
     value.onUploadAttachments,

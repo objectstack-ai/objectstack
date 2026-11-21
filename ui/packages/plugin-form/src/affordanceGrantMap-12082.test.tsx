@@ -709,6 +709,10 @@ const WRITE_SITES: Record<string, WriteSite> = {
     mapped(['feedComment'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleEditComment :: update':
     mapped(['feedCommentEdit'], RECORD_PAGE),
+  // Resolve / reopen a thread (objectstack#36075) is a by-id update of the
+  // root `sys_comment` row, offered behind the same row as Edit.
+  'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleResolveComment :: update':
+    mapped(['feedCommentEdit'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleDeleteComment :: delete':
     mapped(['feedCommentDelete'], RECORD_PAGE),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > handleToggleReaction :: update':

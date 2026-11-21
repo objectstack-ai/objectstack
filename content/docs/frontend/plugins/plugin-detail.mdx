@@ -202,14 +202,26 @@ opened from the comments icon in the record header (on the record page and in
 the record drawer), and no longer inside the 动态 (Activity) tab
 (objectstack#36075):
 
-- **The icon** shows how many top-level comments the record holds. A press
+- **The icon** shows how many unresolved threads the record holds (a comment
+  and its replies are one thread). A press
   opens the panel, the next one closes it, and the browser remembers whether it
   was left open, once for the record page and once for the drawer.
 - **The panel** is 380 px wide: 「评论」 and ✕ at the top, the threads oldest
   first, the comment box at the foot. A thread's replies fold to 「N 条回复」
-  and open in place. A comment's actions (Reply, an emoji, and More with Edit
-  and Delete on your own comments) appear at its top right while the pointer is
-  over it.
+  and open in place. A comment's actions (Reply, an emoji, ✓ on a thread's
+  first comment, and More with Edit and Delete) appear at its top right while
+  the pointer is over it. Edit and Delete are on your own comments. On other
+  people's they appear only where the server would accept them: Delete for a
+  member who may edit the record, Edit when the server also lets you change a
+  comment you did not write (today, administrators).
+- **Resolved threads**: ✓ marks a thread resolved and it leaves the list; the
+  icon's number drops by one. It is on the threads you started, and on other
+  people's only where the server would accept it: today administrators, since
+  the platform lets a member change only the rows they wrote. The
+  filter menu at the panel's top right holds 「显示已解决」, which shows resolved
+  threads marked with who resolved them (their ✓ reopens them), and
+  「只看我参与的」, the threads you started, replied in or are mentioned in. A
+  reply into a resolved thread reopens it.
 - **Where it sits**: beside the record from a 1280 px window, the record giving
   way; over the record's right edge in a narrower window. In a drawer narrower
   than 760 px (the default drawer is 720) it covers the drawer's body, and ✕ or

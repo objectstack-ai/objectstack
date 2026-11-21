@@ -52,6 +52,9 @@ import { useNavPins } from '../hooks/useNavPins.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
+import { ContentItemTile, favoriteItemObject } from './contentItemTile.js';
+import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
+import { readRecentObjects } from '../console/home/readRecentObjects.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -242,7 +245,8 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   const recentLabel = useRecentItemLabel();
   const { favorites, removeFavorite, reorderFavorites } = useFavorites();
 
-  const { apps: metadataApps } = useMetadata();
+  const metadata = useMetadata();
+  const { apps: metadataApps } = metadata;
   const apps = metadataApps || [];
   // objectui#7256 — every "Home" row below follows the product's DECLARED
   // landing, so the sidebar cannot offer a second home the top bar disowns.
@@ -546,6 +550,30 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // rows are the user's to order: dragged, they keep the order on every device
   // (the favorites store's `reorderFavorites`). A phone, which draws no drag,
   // keeps them in that order.
+  // The objects the Recent, Favorites and Starred rows name, asked in ONE
+  // presence read; a name not answered `read` is asked nothing by name
+  // (objectstack#34692, as Home's recent rows).
+  const contentObjectNames = [
+    ...new Set(
+      [
+        ...favorites.map((f) => favoriteItemObject(f)),
+        ...recentItems.slice(0, 5).map((r) => recentItemObject(r)),
+      ].filter((name): name is string => !!name),
+    ),
+  ].sort();
+  const contentObjectReading = readRecentObjects(metadata, contentObjectNames);
+  const contentTile = (kind: string, objectName?: string, icon?: string) => (
+    <ContentItemTile
+      kind={kind}
+      objectName={objectName}
+      objectRead={!objectName || contentObjectReading(objectName) === 'read'}
+      icon={icon}
+      targetIcon={resolveNavTargetIcon}
+      targetColor={resolveNavTargetColor}
+      size={isMobile ? 'md' : 'sm'}
+      className="-mx-0.5"
+    />
+  );
   const contentFavorites = favorites
     .filter(f => f.type !== 'nav')
     .filter(f => f.type !== 'view' || matchAppBySegment(apps.filter((a: any) => a.active !== false), favoriteAppSegment(f.href)) === activeApp)
@@ -555,15 +583,9 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       <>
         <SidebarMenuButton asChild tooltip={item.label}>
           <Link to={item.href} {...(drag ?? {})}>
-            {item.type === 'view' ? (
-              // `createElement`: the looked-up icon is a value, which
-              // react-hooks/static-components refuses in tag position.
-              React.createElement(getIcon(item.icon), { className: 'h-4 w-4 shrink-0 text-muted-foreground' })
-            ) : (
-              <span className="text-muted-foreground">
-                {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : item.type === 'page' ? '📄' : '📋'}
-              </span>
-            )}
+            {/* objectstack#36141 — the menu's tiles: an object, one of its
+                views or records is that object's tile, the rest neutral. */}
+            {contentTile(item.type, favoriteItemObject(item), item.type === 'view' ? item.icon : undefined)}
             <span className="truncate">{item.label}</span>
           </Link>
         </SidebarMenuButton>
@@ -739,9 +761,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
                      <SidebarMenuItem key={item.id}>
                        <SidebarMenuButton asChild tooltip={recentLabel(item)}>
                          <Link to={item.href}>
-                           <span className="text-muted-foreground">
-                             {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : '📄'}
-                           </span>
+                           {contentTile(item.type, recentItemObject(item))}
                            <span className="truncate">{recentLabel(item)}</span>
                          </Link>
                        </SidebarMenuButton>
@@ -822,9 +842,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
                      <SidebarMenuItem key={item.id}>
                        <SidebarMenuButton asChild tooltip={item.label}>
                          <Link to={item.href}>
-                           <span className="text-muted-foreground">
-                             {item.type === 'dashboard' ? '📊' : item.type === 'page' ? '📄' : '📋'}
-                           </span>
+                           {contentTile(item.type, favoriteItemObject(item))}
                            <span className="truncate">{item.label}</span>
                          </Link>
                        </SidebarMenuButton>
