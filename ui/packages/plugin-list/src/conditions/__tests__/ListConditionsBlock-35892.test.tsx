@@ -96,7 +96,7 @@ describe('list-conditions (objectstack#35892)', () => {
     const { container } = render(<ConditionDiscardButton onDiscard={() => {}} data-testid="list-page-discard" />);
     const listPage = container.querySelector('[data-testid="list-page-discard"]')!;
     const block = screen.getByTestId('condition-discard');
-    for (const cls of ['h-6', 'text-[13px]', 'font-normal', 'text-muted-foreground']) {
+    for (const cls of ['h-6', 'text-sm', 'font-normal', 'text-muted-foreground']) {
       expect(listPage.classList.contains(cls)).toBe(true);
       expect(block.classList.contains(cls)).toBe(true);
     }
