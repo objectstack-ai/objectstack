@@ -210,14 +210,17 @@ the record drawer), and no longer inside the 动态 (Activity) tab
   first, the comment box at the foot. A thread's replies fold to 「N 条回复」
   and open in place. A comment's actions (Reply, an emoji, ✓ on a thread's
   first comment, and More with Edit and Delete) appear at its top right while
-  the pointer is over it. Edit and Delete are on your own comments. On other
-  people's they appear only where the server would accept them: Delete for a
-  member who may edit the record, Edit when the server also lets you change a
-  comment you did not write (today, administrators).
+  the pointer is over it. Edit and Delete are on your own comments; Delete is
+  not on a comment of yours that someone has replied to, unless you hold the
+  `sys_comment` delete grant (administrators do), because the platform keeps
+  it for the replies under it. On other people's comments they appear only
+  where the server would accept them: Delete for someone who holds the
+  `sys_comment` delete grant and may edit the record, Edit when the server
+  also lets you change a comment you did not write (today, administrators).
 - **Resolved threads**: ✓ marks a thread resolved and it leaves the list; the
-  icon's number drops by one. It is on the threads you started, and on other
-  people's only where the server would accept it: today administrators, since
-  the platform lets a member change only the rows they wrote. The
+  icon's number drops by one. It is on every thread, yours and other people's:
+  whoever can read the record may resolve and reopen its threads, through the
+  platform's resolution door (`PUT /api/v1/comments/:id/resolution`). The
   filter menu at the panel's top right holds 「显示已解决」, which shows resolved
   threads marked with who resolved them (their ✓ reopens them), and
   「只看我参与的」, the threads you started, replied in or are mentioned in. A
@@ -392,8 +395,13 @@ affordances, so the feed offers them wherever its host does: on a `comment`
 row (or a reply) whose `authoredByViewer` the host set, with the host's
 `onEditComment` / `onDeleteComment`. The console's record page marks each row
 with `@object-ui/collaboration`'s `isCommentAuthor`, the rule `CommentThread`
-uses, and hands each handler over under the caller's update or delete grant on
-`sys_comment`. Edit opens the text in place; Delete asks through the console's
+uses, and hands Edit over under the caller's update grant on `sys_comment`.
+Delete uses the data API under the caller's delete grant; a caller without it
+(an ordinary member) deletes through the platform's own-comment delete door
+(`DELETE /api/v1/comments/:id`) under the grant they comment with. That door
+removes only the caller's own comment, and not one others replied to, so the
+host sets `ownCommentDeletesOnly` and the feed offers Delete on exactly those
+rows. Edit opens the text in place; Delete asks through the console's
 destructive-action confirm. The server still decides the write, and a refusal
 shows as an error with the comment unchanged. An edited comment reads as
 edited (`is_edited` on the row).
