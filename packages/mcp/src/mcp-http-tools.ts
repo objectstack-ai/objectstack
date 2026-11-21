@@ -48,7 +48,7 @@ import type { DisplayNameObjectMeta, EngineAggregateOptions } from '@objectstack
 // entry IS this node, so this door and the REST query door (which parses
 // `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
 // with one refusal.
-import { AggregationNodeSchema, SEARCH_COMPANION_FIELD, isMultiValueField } from '@objectstack/spec/data';
+import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
 // [#35138] ADR-0079's one reading of an object's name field
 // (`nameField ?? displayNameField ?? derived`), which names a lookup group.
 import { resolveDisplayField } from '@objectstack/spec/data';
@@ -3822,10 +3822,6 @@ export function registerObjectTools(
           const fieldDefs = Array.isArray(def.fields) ? (def.fields as Array<Record<string, unknown>>) : [];
           const fields: string[] = [];
           const fieldTypes: Record<string, string> = {};
-          // [#36167] The list-valued fields, as the gate hands them
-          // (`ExprSchemaHint.multiValueFields`): a `==` / `!=` between one and
-          // a scalar is refused as `list-equality` by the one validator.
-          const multiValueFields: string[] = [];
           // The hidden search companion is served beside the declared fields
           // (the registry stamps it where pinyin search is on), but no
           // expression may read it: every read strips it, and `os validate`
@@ -3837,10 +3833,7 @@ export function registerObjectTools(
             if (typeof f?.name !== 'string') continue;
             if (f.name === SEARCH_COMPANION_FIELD) continue;
             fields.push(f.name);
-            if (typeof f?.type === 'string') {
-              fieldTypes[f.name] = f.type;
-              if (isMultiValueField({ type: f.type, multiple: f.multiple === true })) multiValueFields.push(f.name);
-            }
+            if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
           const { role, scope, slot, optionLabels, traversalHydration, gatePasses, faultOutcome: outcomeOf } =
             VALIDATE_SITE_MAP[site ?? 'formula'];
@@ -3859,7 +3852,6 @@ export function registerObjectTools(
             objectName,
             fields,
             fieldTypes,
-            multiValueFields,
             scope,
             ...(optionFields ? { optionFields } : {}),
             // [#32640] The gate's relationship-traversal checks, where it runs them.
