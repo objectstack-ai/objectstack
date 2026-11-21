@@ -209,6 +209,28 @@ describe('ObjectStackClient', () => {
         ]);
     });
 
+    it('sends `include` as `?include=`, on the unscoped and the environment surface (the doc list keeps its bodies)', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ type: 'doc', items: [{ name: 'intro', content: '# Intro' }] }),
+        });
+        const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000', fetch: fetchMock });
+
+        await client.meta.getItems('doc', { include: 'content' });
+        await client.meta.getItems('doc', { packageId: 'com.acme', include: 'content' });
+        await client.environment('env_1').meta.getItems('doc', { include: 'content' });
+        // Left out, nothing is sent: the list stays the slim default.
+        await client.meta.getItems('doc');
+
+        const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+        expect(urls).toEqual([
+            'http://localhost:3000/api/v1/meta/doc?include=content',
+            'http://localhost:3000/api/v1/meta/doc?package=com.acme&include=content',
+            'http://localhost:3000/api/v1/environments/env_1/meta/doc?include=content',
+            'http://localhost:3000/api/v1/meta/doc',
+        ]);
+    });
+
     it('should get metadata item by type and name', async () => {
         // The server's body is the spec-declared `GetMetaItemResponseSchema`
         // envelope — `{ type, name, item }`, with the metadata document under

@@ -300,7 +300,7 @@ unknown or retired key (`description`, `icon`, `breadcrumb`, `showStar`) is refu
 | `placedActions` | — | `true` asks for every action of the object placed at `record_header` / `record_more`, read live, in place of an `actions` list, so an action another package adds is drawn without editing the page. Refused beside an authored `actions` list: keep one. The platform's user, organization and approval request pages set it |
 | `recordChrome` | `true` | Draw the title as the record chip (object label, copy-id button, the record's picture when the object names an `imageField`); `false` keeps a bare heading |
 | `showCopyId` | `true` | The copy-record-id button in the chip |
-| `maxVisible` / `mobileMaxVisible` | 1 in a record page's one-row header bar, 3 elsewhere / 2 in a phone record page's bottom bar, 1 elsewhere | How many actions render inline before the rest fold into the `⋯` menu |
+| `maxVisible` / `mobileMaxVisible` | 3 on every header (in a record page's header bar the number, authored or not, is an upper bound: actions that do not fit the bar's width fold as well) / 2 in a phone record page's bottom bar (the Edit button counts as one), 1 elsewhere | How many actions render inline before the rest fold into the `⋯` menu |
 | `aria` | — | ARIA attributes (`ariaLabel`, `ariaDescribedBy`, …) for the `<header>` element |
 
 A named action renders only if its `locations` include `record_header` (inline) or

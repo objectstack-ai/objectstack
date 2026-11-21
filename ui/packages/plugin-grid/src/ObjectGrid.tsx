@@ -758,6 +758,12 @@ function RowGroupsReport({
   return null;
 }
 
+/** A rating field's star count: its declared `max`, else `Field.rating`'s default of 5. */
+function ratingScaleOf(fieldDef: unknown): number {
+  const max = (fieldDef as { max?: unknown } | null | undefined)?.max;
+  return typeof max === 'number' && max > 0 ? Math.floor(max) : 5;
+}
+
 /**
  * objectstack#35688 — how wide a field type's editor layer starts. The layer
  * is never narrower than its cell and grows to fit this; the editor fills it.
@@ -784,11 +790,17 @@ function cellEditorWidthClass(type: string): string {
     case 'status':
     case 'date':
     case 'datetime':
+      return 'w-full min-w-56';
+    // objectstack#36023 — a typed input starts as wide as its cell and grows
+    // to the right with its text (`InCellTextInput`).
+    case 'text':
+    case 'email':
     case 'phone':
     case 'url':
-    case 'email':
+    case 'number':
     case 'currency':
-      return 'w-full min-w-56';
+    case 'percent':
+      return 'w-full';
     default:
       return 'w-full min-w-40';
   }
@@ -895,10 +907,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const patchedRowsCacheRef = React.useRef(new WeakMap<any[], { patches: ReadonlyMap<string, RowPatch>; rows: any[] }>());
   // objectstack#35685 — the select-first saves Undo can still take back
   // (`./objectGridCellUndo`), and what an undo reads when it runs, which may
-  // be well after the render that offered it: the patches over the rows.
+  // be well after the render that offered it: the patches over the rows,
+  // which `writeRowInPlace` sets together with the state it renders from.
   const cellUndoRef = React.useRef(createCellUndoStack());
   const rowPatchesRef = React.useRef(rowPatches);
-  useEffect(() => { rowPatchesRef.current = rowPatches; }, [rowPatches]);
   const [showExport, setShowExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1330,6 +1342,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             readOnlyReason: kind ? readOnlyReasonText(kind, t) : null,
             typing: inlineTyping(type),
             ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
+            // objectstack#36023 — a rating is set in place: digits, or a click on a star.
+            ...(type === 'rating' ? { stars: ratingScaleOf(fieldDef) } : {}),
             ...(fromText ? { fromText } : {}),
           };
         },
@@ -2916,12 +2930,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         if (resolved.outcome === 'reloaded') return resolved;
         answer = resolved.result;
       }
-      setRowPatches((prev) => {
-        const next = new Map(prev);
-        const held = prev.get(id);
-        next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
-        return next;
-      });
+      // The ref is the patches' one source and moves with the write, not after
+      // the render: an undo pressed once this row is drawn, before React's
+      // effects ran, reads this patch and not the one it replaced.
+      const prev = rowPatchesRef.current;
+      const next = new Map(prev);
+      const held = prev.get(id);
+      next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
+      rowPatchesRef.current = next;
+      setRowPatches(next);
       return { outcome: 'saved', result: answer };
     } finally {
       releaseOwnWrite();

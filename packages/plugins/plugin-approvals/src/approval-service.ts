@@ -127,6 +127,7 @@ import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
   adminRescueNoteText,
+  adminRescuePositions,
   adminRescueReason,
   type AdminRescueNote,
 } from './admin-rescue-note.js';
@@ -2075,6 +2076,17 @@ export interface ApprovalServiceOptions {
    */
   i18nServiceSource?: () => ReaderLabelI18n | undefined;
   /**
+   * [#35418] A position's declared `label`, by its name: what a timeline note
+   * names an unheld position by when the reader's language pack holds no
+   * `positions.<name>.label`. The plugin answers it from the `metadata`
+   * service (`get('position', name)`), read per call for the reason
+   * {@link ApprovalServiceOptions.i18nServiceSource} is.
+   *
+   * Absent, or answering `undefined`, the note names the position by its
+   * name, as before.
+   */
+  positionLabelSource?: (positionName: string) => Promise<string | undefined>;
+  /**
    * [ADR-0142 D6] The `ownership-queue` service, through which a `queue`
    * approver expands to the queue's members at node entry. Resolved LAZILY
    * per expansion, for the reason {@link ApprovalServiceOptions.tenancyPosture}
@@ -2211,6 +2223,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private readonly platformAdminStandings = new WeakMap<object, Map<string, Promise<boolean>>>();
   /** [#24863] Lazily-resolved `i18n` service for the reader-locale display labels. */
   private i18nServiceSource?: () => ReaderLabelI18n | undefined;
+  /** [#35418] A position's declared label, for a note that names an unheld position. */
+  private positionLabelSource?: (positionName: string) => Promise<string | undefined>;
   /** [ADR-0142 D6] Lazily-resolved `ownership-queue` service a `queue` approver expands through. */
   private ownershipQueues?: () => ApproverQueueSource | undefined;
   /** [ADR-0157 D5] Lazily-resolved working-calendar service a `working_time` escalation counts through. */
@@ -2255,6 +2269,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
     this.i18nServiceSource = opts.i18nServiceSource;
+    this.positionLabelSource = opts.positionLabelSource;
     this.ownershipQueues = opts.ownershipQueues;
     this.workCalendar = opts.workCalendar;
     this.recordReaderVisibleObjects = new Set(
@@ -8321,7 +8336,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * organization's calendar, named by `escalation.calendar` or else its default
    * (D2), recomputed on every call and never stored (D12). A calendar refusal
    * (none resolves, or it is not maintained that far, D8) answers
-   * `{ refusal }` instead of a deadline (D9); every other failure throws.
+   * `{ refusal }` instead of a deadline (D9); every other failure throws, and
+   * each caller costs only that row its deadline: the sweep skips it until the
+   * next pass, {@link projectWorkingTimeDue} serves it with none.
    */
   private async slaDeadline(raw: any, cfg: any): Promise<SlaDeadline | undefined> {
     if (!escalationCountsWorkingTime(cfg)) {
@@ -8354,12 +8371,27 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * calendar cannot count it, through {@link slaDeadline}. `raws[i]` is the
    * stored row `rows[i]` was mapped from; a `wall_clock` row already carries
    * its deadline from the synchronous mapper and is left alone.
+   *
+   * A calendar read that errors (not a refusal) costs only its own row the
+   * deadline: it is logged and that row is served with none, never a
+   * wall-clock one (D2). Every caller serves a row that is already written —
+   * `openNodeRequest` after the insert and the approvers' notices, the list
+   * and single reads — so the error never fails the write or the other rows.
+   * The sweep reads {@link slaDeadline} itself and retries the row next pass.
    */
   private async projectWorkingTimeDue(raws: readonly any[], rows: ApprovalRequestRow[]): Promise<void> {
     for (let i = 0; i < rows.length; i++) {
       const cfg = parseJson<any>(raws[i]?.node_config_json, undefined);
       if (!escalationCountsWorkingTime(cfg)) continue;
-      const deadline = await this.slaDeadline(raws[i], cfg);
+      let deadline: SlaDeadline | undefined;
+      try {
+        deadline = await this.slaDeadline(raws[i], cfg);
+      } catch (err: any) {
+        this.logger?.warn?.('[approvals] working-time SLA deadline could not be computed; the request is served without one', {
+          request: raws[i]?.id, error: err?.message ?? String(err),
+        });
+        continue;
+      }
       if (!deadline) continue;
       if ('refusal' in deadline) rows[i]!.sla_due_refusal = deadline.refusal;
       else rows[i]!.sla_due_at = deadline.due;
@@ -11346,11 +11378,39 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       if (row && text) row.comment = text;
     };
     const rescue = adminRescueNoteOf(snapshot);
-    if (rescue) overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence));
+    if (rescue) {
+      const positionLabels = await this.notePositionLabels(adminRescuePositions(rescue), labels);
+      overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence, (name) => positionLabels.get(name)));
+    }
     const exclusion = submitterExclusionNoteOf(snapshot);
     if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
     const noApprover = noApproverNoteOf(snapshot);
     if (noApprover) overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence));
+  }
+
+  /**
+   * [#35418] The label a reader reads each of `positions` by: the reader's
+   * language pack (`positions.<name>.label`), else the position's declared
+   * `label` ({@link ApprovalServiceOptions.positionLabelSource}). A position
+   * neither answers is left out, and the note names it by its name. Display
+   * only: a failed read leaves the name standing, never fails the read.
+   */
+  private async notePositionLabels(
+    positions: readonly string[],
+    labels: ReaderLabels,
+  ): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const name of positions) {
+      let label = labels.positionLabel(name);
+      if (!label && this.positionLabelSource) {
+        try {
+          const declared = await this.positionLabelSource(name);
+          if (typeof declared === 'string' && declared.trim()) label = declared;
+        } catch { /* display-only — the name stands */ }
+      }
+      if (label) out.set(name, label);
+    }
+    return out;
   }
 
   /**

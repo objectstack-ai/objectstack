@@ -803,6 +803,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // switcher it also registered retired with objectstack#27058).
     const {
         handleViewConfigSave,
+        handleDraftBarChange,
         handleViewCreate,
         handleViewUpdate,
         handleViewChange,
@@ -1483,7 +1484,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                             onCreate={handleViewCreate}
                             metadataClient={metadataClient}
                             dataSource={dataSource}
-                            onAfterChange={() => setRefreshKey(k => k + 1)}
+                            onAfterChange={handleDraftBarChange}
                         />
                     </Suspense>
                 </div>

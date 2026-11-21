@@ -895,7 +895,7 @@ wrapper, with no change to the runner.
 Every published skill bundle carries eval cases (`skills/BUNDLE/evals/*.json`: a `prompt`, an `expected_output` and
 `assertions.must_contain` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
 once with the bundle installed and once without, and grades each answer by the case's own tokens. A trigger case
-asks instead whether the skill was loaded, and runs with the bundle installed only. It runs from this checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
+asks instead whether the skill was loaded, and runs with the bundle installed beside its competitors only. It runs from this checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
 the skill authors' and the runner never edits them.
 
 ```bash
@@ -907,6 +907,7 @@ pnpm --filter @objectstack/scenarios skill-evals                # every case × 
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --repeats 3   # a touched skill
 pnpm --filter @objectstack/scenarios skill-evals --skills-from 18.5.0   # a published @objectstack/skills version's bundles and cases
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --triggers-only   # its trigger cases alone
+pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query,objectstack-ask --triggers-only   # both installed in every trigger turn
 pnpm --filter @objectstack/scenarios skill-evals --regrade DIR  # re-draw a recorded round's verdicts from its records; no model call
 pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's own fixtures; no model call
 ```
@@ -938,10 +939,19 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   cases are all positive, or all negative, is refused. The summary reports trigger cases in their own section beside
   the behaviour cases, never inside their pass rates: per bundle, loaded when it should, left alone when it should
   not, the missed loads and the false loads.
+- **The competing set (`--trigger-field`)**: a trigger turn's project holds every bundle of the round's selection
+  (the `--skills` bundles, or every bundle of the catalog), so a description competes with its neighbours' as it does
+  in a real project. Installed alone, a should-load case sits at the ceiling and a false load is a turn reading the
+  only skill in an empty directory. A should-load case passes only when its own bundle loads. Each record lists
+  `installed` and `trigger.othersLoaded`, and the trigger table names the other bundles each case loaded. A turn whose
+  init line misses an installed bundle is `invalid`. `--trigger-field own` installs the case's bundle alone, as every
+  round recorded before did. `round.json` records `triggerField`, the summary header names it, and `--regrade DIR`
+  keeps it (the flag is refused there). Behaviour cases keep one bundle, so their two arms still differ only in it.
 - **`--triggers-only`**: the selected bundles' trigger cases alone, on the with-skill arm, for a change that only
   touches when a skill loads (its `description`). The summary is the trigger section alone, and `round.json` records
-  `scope.triggersOnly`, so `--regrade DIR` keeps that scope. A bundle `--skills` names with no trigger case is refused
-  (a published version before trigger cases has none), and so is the flag beside `--regrade` or `--self-test`.
+  `scope.triggersOnly`, so `--regrade DIR` keeps that scope. A bundle `--skills` names with no trigger case is
+  installed as a competitor while another named bundle has one; alone, or under `--trigger-field own`, it is refused
+  (a published version before trigger cases has none). The flag is refused beside `--regrade` or `--self-test`.
   `--dry-run` prints the reduced plan, and `--skills-from VERSION` runs it on the published bundles.
 - **Case files**: a case's `files` entries are paths under the bundle's `evals/files/` (anything else is refused, and
   so is a path the bundle lacks or one with a `.claude` segment, since `.claude/` is where the runner places the skill). Each is copied, a directory whole, into both arms' directories at its path below

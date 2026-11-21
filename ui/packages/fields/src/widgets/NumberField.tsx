@@ -4,6 +4,7 @@ import { NumberFieldMetadata } from '@object-ui/types';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { InCellTextInput } from './InCellTextInput.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatNumberFieldValue } from './number-format.js';
@@ -12,7 +13,7 @@ import { formatNumberFieldValue } from './number-format.js';
  * NumberField - Numeric input with optional decimal precision
  * Supports min/max/step constraints and configurable decimal precision
  */
-export function NumberField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<number>) {
+export function NumberField({ value, onChange, field, readonly, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<number>) {
   // Before the readonly return: hooks are unconditional (objectui#6780).
   const { refusal, readBadInput } = useBadInputRefusal('1234');
   const locale = useDisplayLocale();
@@ -64,6 +65,32 @@ export function NumberField({ value, onChange, field, readonly, error, ...props 
     readBadInput(e.target);
     domProps.onBlur?.(e);
   };
+
+  // objectstack#36023 — in a list cell the cell itself is the input: the raw
+  // number, right-aligned, as the cell lines it up.
+  if (inCell) {
+    return (
+      <InCellTextInput
+        {...domProps}
+        type="number"
+        align="end"
+        value={value ?? ''}
+        onChange={(e) => {
+          readBadInput(e.target);
+          const val = e.target.value;
+          onChange(val === '' ? (null as any) : Number(val));
+        }}
+        onBlur={handleBlur}
+        placeholder={numberField?.placeholder}
+        disabled={domProps.disabled}
+        min={typeof numberField?.min === 'number' ? numberField.min : undefined}
+        max={typeof numberField?.max === 'number' ? numberField.max : undefined}
+        step={step}
+        aria-invalid={!!error || !!refusal}
+        below={refusal ? <div className="px-2.5 pb-1"><BadInputMessage refusal={refusal} /></div> : null}
+      />
+    );
+  }
 
   return (
     <div className="space-y-1">
