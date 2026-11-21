@@ -366,8 +366,8 @@ export const Invoice = ObjectSchema.create({
   incoming changes when the predicate is `TRUE` (for everyone; per permission
   set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
-  A stripped write reports success. Imports and migrations are system-context
-  writes too. Keep the field `readonly` when automation maintains it; the flow
+  A stripped write (REST/UI, and any `runAs:'user'` flow) reports success.
+  Imports and migrations are system-context writes too. Keep the field `readonly` when automation maintains it; the flow
   side: [objectstack-automation → Failure routing & `runAs`](../../objectstack-automation/SKILL.md#failure-routing--runas).
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
   enforces it on submit. The `conditionalRequired` alias was REMOVED in

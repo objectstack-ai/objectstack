@@ -339,7 +339,7 @@ The five values and the open-source boundary: SKILL.md § Access depth. A scope
 widens the owner match declaratively instead of a hand-written RLS policy
 (ADR-0057 D1): it resolves at request time into an `owner_id IN (…)` set and
 AND-injects like RLS. The hierarchy-relative three are the open-core boundary
-(ADR-0016). The CLI only advises on a missing or unwired plugin: `os validate`
+(ADR-0016): the paid plugin goes in `plugins[]`. The CLI only advises on a missing or unwired plugin: `os validate`
 warns, `os verify --json` lists it in `capabilities`.
 
 ## Ownership queues — park a record for a team to claim
