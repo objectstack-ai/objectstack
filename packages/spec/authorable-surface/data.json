@@ -677,6 +677,7 @@
     "data/Object:actions",
     "data/Object:activityMilestones",
     "data/Object:attachedOnRead",
+    "data/Object:color",
     "data/Object:datasource",
     "data/Object:defaultRowScope",
     "data/Object:description",

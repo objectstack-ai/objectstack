@@ -52,6 +52,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Symbol",
         helpText: "Name des Lucide-Symbols (z. B. „building“, „users“)"
       },
+      color: {
+        label: "Farbe",
+        helpText: "Farbe des Quadrats, auf dem das Symbol gezeichnet wird, aus der festen Palette. Ohne Angabe wird Grau verwendet."
+      },
       description: {
         label: "Beschreibung",
         helpText: "Entwicklerdokumentation"

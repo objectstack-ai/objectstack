@@ -23,6 +23,13 @@
       "status": "live",
       "note": "objectui."
     },
+    "color": {
+      "status": "live",
+      "verifiedAt": "2026-11-21",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/layout/src/NavigationRenderer.tsx#NavigationItemRenderer (an `object` navigation entry draws an ObjectIconTile coloured by `resolveTargetColor`); ui/packages/app-shell/src/hooks/useNavTargetIcon.ts#useNavTargetColor (reads the object's `color` from the metadata cache for the sidebar and the app-home menu); ui/packages/components/src/custom/object-icon-tile.tsx#ObjectIconTile (maps the palette name to the square's colour); ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectDefaultInspector.tsx#ObjectDefaultInspector (the designer writes it)",
+      "note": "objectstack#35985: the colour of the rounded square the object's icon is drawn on, from the closed palette `OBJECT_COLORS`. Unset draws the neutral gray. The navigation (sidebar, app-home menu, phone menu) reads it; the other places that draw an object icon follow in the card's second PR."
+    },
     "displayNameField": {
       "status": "live",
       "note": "Deprecated alias of nameField (ADR-0079); still read by objectui RecordDetailView + resolveDisplayField back-compat."

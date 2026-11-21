@@ -260,6 +260,10 @@ const de = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Pflichtfelder ausfüllen',
+    requiredPromptDescription: 'Durch diese Änderung werden die folgenden Felder zu Pflichtfeldern. Füllen Sie sie aus, um die Änderung zu speichern.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} öffnen',
@@ -331,6 +335,8 @@ const de = {
     options: {
       empty: "Keine Optionen verfügbar",
       selectFirst: "Zuerst {{fields}} auswählen",
+      search: "Suchen…",
+      noMatches: "Keine passenden Optionen",
     },
     objectRef: {
       loading: "Objekte werden geladen…",
@@ -415,6 +421,8 @@ const de = {
     datePicker: {
       today: "Heute",
       tomorrow: "Morgen",
+      nextWeek: "Nächste Woche",
+      clearPick: "Leeren",
       clear: "Datum löschen",
       openCalendar: "Kalender öffnen",
       time: "Uhrzeit",
@@ -429,6 +437,11 @@ const de = {
     },
     tags: {
       placeholder: "Tippen und mit der Eingabetaste hinzufügen…",
+      add: "„{{value}}“ hinzufügen",
+    },
+    color: {
+      swatches: "Farben",
+      custom: "Eigene Farbe",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

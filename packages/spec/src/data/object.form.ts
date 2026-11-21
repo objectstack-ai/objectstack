@@ -38,6 +38,9 @@ export const objectForm = defineForm({
         { field: 'label', type: 'text', colSpan: 1, helpText: 'Singular display name (e.g. "Account")' },
         { field: 'pluralLabel', type: 'text', colSpan: 1, helpText: 'Plural display name (e.g. "Accounts")' },
         { field: 'icon', type: 'text', colSpan: 1, helpText: 'Lucide icon name (e.g. "building", "users")' },
+        // [#35985] The colour of the square the icon is drawn on: the swatch row
+        // (`color-picker`) reads its nine names off the closed enum.
+        { field: 'color', widget: 'color-picker', colSpan: 1, helpText: 'Color of the square the icon is drawn on, from the fixed palette. Unset draws gray.' },
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Developer documentation' },
         // #19331 — `nameField` is declared by ObjectSchema and was offered by no
         // control, so the ADR-0079 record-title pointer could only be written

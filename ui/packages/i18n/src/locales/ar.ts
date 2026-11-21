@@ -278,6 +278,10 @@ const ar = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'أكمل الحقول المطلوبة',
+    requiredPromptDescription: 'هذا التغيير يجعل الحقول أدناه مطلوبة. املأها لحفظه.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'فتح {{name}}',
@@ -353,6 +357,8 @@ const ar = {
     options: {
       empty: "لا توجد خيارات متاحة",
       selectFirst: "اختر {{fields}} أولاً",
+      search: "بحث…",
+      noMatches: "لا توجد خيارات مطابقة",
     },
     objectRef: {
       loading: "جارٍ تحميل الكائنات…",
@@ -437,6 +443,8 @@ const ar = {
     datePicker: {
       today: "اليوم",
       tomorrow: "غدًا",
+      nextWeek: "الأسبوع القادم",
+      clearPick: "مسح",
       clear: "مسح التاريخ",
       openCalendar: "فتح التقويم",
       time: "الوقت",
@@ -451,6 +459,11 @@ const ar = {
     },
     tags: {
       placeholder: "اكتب واضغط Enter للإضافة…",
+      add: "إضافة «{{value}}»",
+    },
+    color: {
+      swatches: "الألوان",
+      custom: "لون مخصص",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

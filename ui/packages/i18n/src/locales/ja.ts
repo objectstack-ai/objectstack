@@ -260,6 +260,10 @@ const ja = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '必須項目を入力',
+    requiredPromptDescription: 'この変更により、以下の項目が必須になります。入力すると変更と一緒に保存されます。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} を開く',
@@ -331,6 +335,8 @@ const ja = {
     options: {
       empty: "選択できる項目がありません",
       selectFirst: "まず {{fields}} を選択してください",
+      search: "検索…",
+      noMatches: "一致する項目がありません",
     },
     objectRef: {
       loading: "オブジェクトを読み込み中…",
@@ -415,6 +421,8 @@ const ja = {
     datePicker: {
       today: "今日",
       tomorrow: "明日",
+      nextWeek: "来週",
+      clearPick: "クリア",
       clear: "日付をクリア",
       openCalendar: "カレンダーを開く",
       time: "時刻",
@@ -429,6 +437,11 @@ const ja = {
     },
     tags: {
       placeholder: "入力してEnterキーで追加…",
+      add: "「{{value}}」を追加",
+    },
+    color: {
+      swatches: "色",
+      custom: "カスタムカラー",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

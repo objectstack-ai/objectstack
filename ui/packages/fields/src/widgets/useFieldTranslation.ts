@@ -73,6 +73,9 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // renderer so both cannot drift apart in a locale.
   'fields.options.empty': 'No options available',
   'fields.options.selectFirst': 'Select {{fields}} first',
+  // objectstack#35688 — the grid cell editor's option list.
+  'fields.options.search': 'Search…',
+  'fields.options.noMatches': 'No matching options',
   // objectui#12145 — three widgets' accessible names: the crop dialog's
   // preview canvas, the percent slider, and the record picker's grid. The
   // grid borrows the command palette's `Records` key rather than adding a
@@ -247,6 +250,9 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // values as the `en` pack.
   'fields.datePicker.today': 'Today',
   'fields.datePicker.tomorrow': 'Tomorrow',
+  // objectstack#35688 — the grid cell editor's two extra date picks.
+  'fields.datePicker.nextWeek': 'Next week',
+  'fields.datePicker.clearPick': 'Clear',
   'fields.datePicker.clear': 'Clear date',
   'fields.datePicker.openCalendar': 'Open calendar',
   'fields.datePicker.invalid':
@@ -254,6 +260,10 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // objectui#3342 — the tags widget's input hint. Used only when the field
   // author declared no `placeholder` of their own (author declaration wins).
   'fields.tags.placeholder': 'Type and press Enter to add…',
+  // objectstack#35688 — the grid cell editor's tag list and colour swatches.
+  'fields.tags.add': 'Add "{{value}}"',
+  'fields.color.swatches': 'Colors',
+  'fields.color.custom': 'Custom color',
   // objectui#4028 — `AddressField`'s five sub-labels. The parts of an address
   // are NOT fields on the object (`billing_address` is one column), so no
   // translation bundle could ever key them and an app had no workaround short

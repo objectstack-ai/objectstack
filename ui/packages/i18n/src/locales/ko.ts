@@ -260,6 +260,10 @@ const ko = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '필수 필드 입력',
+    requiredPromptDescription: '이 변경으로 아래 필드가 필수가 됩니다. 입력하면 변경 내용과 함께 저장됩니다.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '{{name}} 열기',
@@ -331,6 +335,8 @@ const ko = {
     options: {
       empty: "선택할 수 있는 옵션이 없습니다",
       selectFirst: "먼저 {{fields}}을(를) 선택하세요",
+      search: "검색…",
+      noMatches: "일치하는 옵션이 없습니다",
     },
     objectRef: {
       loading: "객체를 불러오는 중…",
@@ -415,6 +421,8 @@ const ko = {
     datePicker: {
       today: "오늘",
       tomorrow: "내일",
+      nextWeek: "다음 주",
+      clearPick: "지우기",
       clear: "날짜 지우기",
       openCalendar: "달력 열기",
       time: "시간",
@@ -429,6 +437,11 @@ const ko = {
     },
     tags: {
       placeholder: "입력 후 Enter 키로 추가…",
+      add: "“{{value}}” 추가",
+    },
+    color: {
+      swatches: "색상",
+      custom: "사용자 지정 색상",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

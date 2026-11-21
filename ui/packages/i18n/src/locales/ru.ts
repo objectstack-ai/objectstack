@@ -269,6 +269,10 @@ const ru = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: 'Заполните обязательные поля',
+    requiredPromptDescription: 'Это изменение делает поля ниже обязательными. Заполните их, чтобы сохранить его.',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Открыть {{name}}',
@@ -342,6 +346,8 @@ const ru = {
     options: {
       empty: "Нет доступных вариантов",
       selectFirst: "Сначала выберите {{fields}}",
+      search: "Поиск…",
+      noMatches: "Нет подходящих вариантов",
     },
     objectRef: {
       loading: "Загрузка объектов…",
@@ -426,6 +432,8 @@ const ru = {
     datePicker: {
       today: "Сегодня",
       tomorrow: "Завтра",
+      nextWeek: "Через неделю",
+      clearPick: "Очистить",
       clear: "Очистить дату",
       openCalendar: "Открыть календарь",
       time: "Время",
@@ -440,6 +448,11 @@ const ru = {
     },
     tags: {
       placeholder: "Введите и нажмите Enter, чтобы добавить…",
+      add: "Добавить «{{value}}»",
+    },
+    color: {
+      swatches: "Цвета",
+      custom: "Свой цвет",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

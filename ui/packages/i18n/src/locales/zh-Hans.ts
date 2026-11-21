@@ -270,6 +270,10 @@ const zh = {
     },
   },
   fields: {
+    // objectstack#35956 — the in-place fill-in a change opens when it makes
+    // other fields required (`RequiredFieldsDialog`).
+    requiredPromptTitle: '补填必填字段',
+    requiredPromptDescription: '这次改动让下面的字段变成必填，填好后和改动一起保存。',
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: '打开 {{name}}',
@@ -341,6 +345,8 @@ const zh = {
     options: {
       empty: '暂无可选项',
       selectFirst: '请先选择{{fields}}',
+      search: '搜索…',
+      noMatches: '没有匹配的选项',
     },
     objectRef: {
       loading: '正在加载对象…',
@@ -425,6 +431,8 @@ const zh = {
     datePicker: {
       today: '今天',
       tomorrow: '明天',
+      nextWeek: '下周',
+      clearPick: '清空',
       clear: '清除日期',
       openCalendar: '打开日历',
       time: '时间',
@@ -439,6 +447,11 @@ const zh = {
     },
     tags: {
       placeholder: '输入后回车添加…',
+      add: '添加“{{value}}”',
+    },
+    color: {
+      swatches: '颜色',
+      custom: '自定义颜色',
     },
     // objectui#4028 — `AddressField`'s five sub-labels. These were English
     // string literals with no key, and this pack is the one the issue was

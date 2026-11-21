@@ -52,6 +52,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ícone",
         helpText: "Nome do ícone Lucide (por exemplo \"building\", \"users\")"
       },
+      color: {
+        label: "Cor",
+        helpText: "Cor do quadrado em que o ícone é desenhado, da paleta fixa. Sem valor, usa cinza."
+      },
       description: {
         label: "Descrição",
         helpText: "Documentação para desenvolvedores"
