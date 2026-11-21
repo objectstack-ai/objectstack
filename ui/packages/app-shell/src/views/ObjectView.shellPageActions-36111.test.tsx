@@ -195,7 +195,9 @@ describe('objectstack#36113 — the list page\'s top: object row, view bar, cond
     expect(within(row).getByRole('heading', { level: 1 })).toHaveTextContent(/^Leads$/);
     expect(within(row).queryByTestId('object-view-new-button')).toBeNull();
     expect(within(row).queryByTestId('object-view-more-actions')).toBeNull();
-    expect(within(row).queryByTestId('page-header-actions')).toBeNull();
+    expect(within(row).queryByTestId('object-view-import-export')).toBeNull();
+    // Its one cluster is the shell's group.
+    expect(within(row).getByTestId('shell-page-actions')).toBeInTheDocument();
     const lead = screen.getByTestId('list-toolbar-leading');
     const conditions = screen.getByTestId('list-condition-row');
     expect(row.compareDocumentPosition(lead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
