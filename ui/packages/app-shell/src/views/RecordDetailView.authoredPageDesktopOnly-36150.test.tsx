@@ -56,9 +56,12 @@ import { I18nProvider } from '@object-ui/i18n';
 import { MetadataCtx } from '@object-ui/react';
 import { RecordDetailView } from './RecordDetailView';
 import { FavoritesProvider } from '../context/FavoritesProvider';
-import { RECORD_NAMED_PAGE_ROUTE } from '../console/AppContent';
 import { authoredRecordPageApplies, OBJECTS_KEEPING_AUTHORED_PAGE } from './recordPageSurface';
 
+// The console's named record page route (`RECORD_NAMED_PAGE_ROUTE` in
+// `console/AppContent.tsx`), spelled here: importing it would load the whole
+// console shell into this file.
+const RECORD_NAMED_PAGE_ROUTE = ':objectName/record/:recordId/page/:pageName';
 const RECORD_ID = 'rec-1';
 const AUTHORED_MARK = 'Authored page block';
 const SLOT_MARK = 'Slotted alert';
