@@ -24,7 +24,7 @@ in `language: 'js'` (an `expression` body has no I/O) with
 | `record_related` | Related-list section inside a record |
 | `record_section` | Body section/tab of a record |
 | `list_item`      | Per-row action in list views |
-| `list_toolbar`   | Bulk action on selected rows (`input.selectedIds`) |
+| `list_toolbar`   | Toolbar button; its body never gets the selection |
 
 ## Visibility, Disable & Feedback
 
@@ -40,7 +40,7 @@ in `language: 'js'` (an `expression` body has no I/O) with
 - Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
 - A param's `helpText`, like `description`, is a sentence or an inline locale map (`{ en: 'Why {{ record.name }} is paused', 'zh-CN': '暂停原因' }`); the map is how a page button's inline `action` (no bundle reaches it) writes its hint per locale.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
-- An `execution: 'aggregate'` bulk handler runs once for the selection, its ids in `params._selectedIds` (a script body's `input._selectedIds`). One that wrote some rows and refused others catches per row and RESOLVES with `{ succeeded: string[], failed: [{ id, message }] }` (`BulkActionResult`, `@objectstack/spec/ui`) as its whole return value; a throw means no outcome, reported once for the selection. An id outside `_selectedIds` is dropped, a duplicate counts once, an id in both lists counts as failed, and a selected id in neither is reported as not confirmed. A value with neither member keeps the whole-selection report; one carrying either that does not parse (counts, one list) is reported as unreadable, never as full success.
+- A list view's `bulkActions: ['<name>']` runs the action per ticked row (`recordId`); a `bulkActionDefs` entry `{ name, operation: 'custom', execution: 'aggregate' }` runs it once, the ids in `params._selectedIds` (a body's `input._selectedIds`; a sent `selectedIds` is refused). A handler that wrote some rows and refused others catches per row and RESOLVES with `{ succeeded: string[], failed: [{ id, message }] }` (`BulkActionResult`, `@objectstack/spec/ui`) as its whole return value; a throw means no outcome, reported once for the selection. An id outside `_selectedIds` is dropped, a duplicate counts once, an id in both lists counts as failed, and a selected id in neither is reported as not confirmed. A value with neither member keeps the whole-selection report; one carrying either that does not parse (counts, one list) is reported as unreadable, never as full success.
 
 <!-- os:check -->
 ```typescript
@@ -99,21 +99,18 @@ export const AddToCampaignAction = defineAction({
   objectName: 'lead',
   icon: 'send',
   type: 'script',
-  locations: ['list_toolbar'],
+  execution: 'aggregate',
   params: [
     { field: 'campaign_id', objectOverride: 'campaign', required: true },
   ],
   body: {
     language: 'js',
     source: `
-      const campaignId = input.campaign_id;
-      const ids = Array.isArray(input.selectedIds) ? input.selectedIds : [];
-      for (const leadId of ids) {
+      for (const leadId of input._selectedIds) {
         await ctx.api.object('campaign_member').insert({
-          campaign_id: campaignId, lead_id: leadId, status: 'sent',
+          campaign_id: input.campaign_id, lead_id: leadId, status: 'sent',
         });
       }
-      return { count: ids.length };
     `,
     capabilities: ['api.write'],
     timeoutMs: 10000,
@@ -170,9 +167,9 @@ export const PrintA3Action = defineAction({
   label: 'Print Summary Sheet (A3)',
   objectName: 'lead',
   type: 'url',
-  target: '/print/a3?id=${record.id}',   // interpolated at click
+  target: '/print/a3?id=${ctx.recordId}',   // interpolated at click
   openIn: 'new-tab',
-  locations: ['list_toolbar'],
+  locations: ['record_header'],
 });
 ```
 
