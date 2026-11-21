@@ -3,12 +3,13 @@ import { Input, EmptyValue, cn } from '@object-ui/components';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { InCellTextInput } from './InCellTextInput.js';
 
 /**
  * UrlField - URL input with clickable link in readonly mode
  * Validates URLs to only render http/https links for security
  */
-export function UrlField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<string>) {
+export function UrlField({ value, onChange, field, readonly, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<string>) {
   const config = field;
   if (readonly) {
     if (!value) return <EmptyValue />;
@@ -32,6 +33,21 @@ export function UrlField({ value, onChange, field, readonly, error, ...props }: 
   }
 
   const domProps = toDomProps(props);
+
+  // objectstack#36023 — in a list cell the cell itself is the input.
+  if (inCell) {
+    return (
+      <InCellTextInput
+        {...domProps}
+        type="url"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={config?.placeholder || 'https://example.com'}
+        disabled={domProps.disabled}
+        aria-invalid={!!error}
+      />
+    );
+  }
 
   return (
     <Input

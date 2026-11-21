@@ -225,6 +225,7 @@ const de = {
       noChildObject: "Für dieses Panel ist kein untergeordnetes Objekt konfiguriert: Setzen Sie {{property}} auf das Objekt, dessen Zeilen es auflistet.",
     },
     keepEditing: "Weiter bearbeiten",
+    createMore: "Weitere erstellen",
     discard: "Verwerfen",
     conflictTitle: "Speicherkonflikt",
     conflictMessage: "Dieser Datensatz wurde während Ihrer Bearbeitung von jemand anderem geändert. Beim Überschreiben werden dessen Änderungen durch Ihre ersetzt.",
@@ -1227,6 +1228,7 @@ const de = {
   },
   view: {
     editViewConfig: "Ansichtskonfiguration bearbeiten",
+    showViewConfig: "Ansichtskonfiguration anzeigen",
     rename: "Umbenennen",
     duplicateView: "Ansicht duplizieren",
     shareView: "Ansicht teilen",

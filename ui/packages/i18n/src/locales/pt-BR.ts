@@ -228,6 +228,7 @@ const pt = {
       noChildObject: "Este painel não tem nenhum objeto filho configurado: defina {{property}} como o objeto cujas linhas ele lista.",
     },
     keepEditing: "Continuar editando",
+    createMore: "Criar mais",
     discard: "Descartar",
     conflictTitle: "Conflito ao salvar",
     conflictMessage: "Outra pessoa alterou este registro enquanto você editava. Sobrescrever substituirá as alterações dela pelas suas.",
@@ -1259,6 +1260,7 @@ const pt = {
   },
   view: {
     editViewConfig: "Editar configuração da vista",
+    showViewConfig: "Ver configuração da vista",
     rename: "Renomear",
     duplicateView: "Duplicar visualização",
     shareView: "Compartilhar visualização",

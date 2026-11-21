@@ -450,7 +450,9 @@ to draw the same header. Below `sm` it draws the icon, the title and the actions
 the secondary line is hidden there.
 
 Its props are the exported `ConsolePageHeaderProps`: `title` (required),
-`subtitle`, `icon` (a rendered element, sized by the chip), `actions`,
+`subtitle`, `icon` (a rendered element, sized by the chip), `iconTile` (an
+icon that draws its own square, such as `ObjectIconTile`, drawn as given in
+place of `icon`), `actions`,
 `foldedActions`, `accentColor`, `sticky`, `className` and `data-testid`. The
 secondary line is `subtitle`; there is no `description` prop.
 

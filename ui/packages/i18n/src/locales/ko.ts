@@ -225,6 +225,7 @@ const ko = {
       noChildObject: "이 패널에 하위 개체가 구성되지 않았습니다. {{property}}을(를) 행을 나열할 개체로 설정하세요.",
     },
     keepEditing: "계속 편집",
+    createMore: "계속 만들기",
     discard: "버리기",
     conflictTitle: "저장 충돌",
     conflictMessage: "편집하는 동안 다른 사용자가 이 레코드를 변경했습니다. 덮어쓰면 상대방의 변경 내용이 내 내용으로 대체됩니다.",
@@ -1227,6 +1228,7 @@ const ko = {
   },
   view: {
     editViewConfig: "보기 구성 편집",
+    showViewConfig: "보기 구성 보기",
     rename: "이름 변경",
     duplicateView: "뷰 복제",
     shareView: "뷰 공유",

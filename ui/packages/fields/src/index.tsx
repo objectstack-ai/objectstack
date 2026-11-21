@@ -899,6 +899,8 @@ function RatingCellRenderer({ value, field }: CellRendererProps): React.ReactEle
         <Star
           key={i}
           aria-hidden="true"
+          // The star a click on a selected list cell sets (objectstack#36023).
+          data-rating-star={i + 1}
           className={cn(
             'h-3.5 w-3.5 shrink-0',
             i < filled ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/40',
