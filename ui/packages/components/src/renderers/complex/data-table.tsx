@@ -19,6 +19,7 @@ import { caretToEnd, defaultTyping, defaultValueFromText, firstEditorControl, is
 import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use-horizontal-overflow';
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
+import { CellOverlay, CELL_OVERLAY_HOST_CLASS, isCellContentTruncated } from './dataTableCellOverlay';
 import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
@@ -96,6 +97,23 @@ import {
 // emit seam (`normalizeTableColumnType`), so an undeclared spelling can no
 // longer reach this set. Typed as `TableColumnType` so re-adding one is a tsc
 // error rather than a silent re-opening of the undeclared dialect.
+/**
+ * objectstack#35688 — what a cell's layer undoes so its content wraps instead
+ * of truncating, and how wide a type's editor starts.
+ */
+const PREVIEW_UNCLIP_CLASS = '[&_*]:whitespace-normal! [&_*]:overflow-visible! [&_*]:text-clip! [&_.flex]:flex-wrap max-h-64';
+function editorOverlayClass(type: TableColumnType | undefined): string | undefined {
+  switch (type) {
+    case 'date':
+    case 'datetime':
+      return 'min-w-56';
+    case 'text':
+      return 'max-w-[min(28rem,var(--radix-popper-available-width))]';
+    default:
+      return undefined;
+  }
+}
+
 const NUMERIC_EDIT_TYPES = new Set<TableColumnType>(['number', 'currency', 'percent']);
 
 /**
@@ -3537,6 +3555,15 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     : null;
   const setSelectedCell = (pos: { rowIndex: number; colIndex: number } | null) =>
     setSelectedCellKey(pos ? { rowKey: pendingRowKeyOf(paginatedData[pos.rowIndex]), columnKey: columns[pos.colIndex].accessorKey } : null);
+  // objectstack#35688 — a selected cell whose content is cut off shows it in
+  // full on a layer over the cell. Measured after the selection draws.
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const selectedPosKey = selectedPos ? `${selectedPos.rowIndex}:${selectedPos.colIndex}` : null;
+  useLayoutEffect(() => {
+    if (!selectedPosKey || editingCell) { setPreviewKey(null); return; }
+    const display = tableRef.current?.querySelector<HTMLElement>('[data-selected-cell] [data-slot="cell-display"]');
+    setPreviewKey(isCellContentTruncated(display ?? null) ? selectedPosKey : null);
+  }, [selectedPosKey, editingCell]);
   const focusSelectionRef = useRef(false);
   useEffect(() => {
     if (!focusSelectionRef.current || editingCell) return;
@@ -4849,6 +4876,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         const isFrozen = frozenColumns > 0 && colIndex < frozenColumns;
                         // objectstack#35684 — the selected cell of the select-first model.
                         const isSelectedCell = selectFirst && selectedPos?.rowIndex === rowIndex && selectedPos.colIndex === colIndex;
+                        const showsPreview = isSelectedCell && !isEditing && previewKey === `${rowIndex}:${colIndex}`;
                         const frozenOffset = isFrozen
                           ? measuredStickyLefts?.[leadingCellCount + colIndex]
                             ?? columns.slice(0, colIndex).reduce((sum, c, i) => {
@@ -4880,6 +4908,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               cellError !== undefined && "ring-2 ring-inset ring-destructive",
                               isFrozen && ['sticky z-10 bg-background', STICKY_ROW_TINT],
                               isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
+                              // objectstack#35688 — the cell under an open layer paints above
+                              // the sticky header and the frozen columns.
+                              (isEditing || showsPreview) && !isFrozen && 'relative',
+                              (isEditing || showsPreview) && CELL_OVERLAY_HOST_CLASS,
                             )}
                             style={{
                               width: columnWidth,
@@ -5036,7 +5068,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                               );
                             })()}
                             {isEditing ? (
-                              (() => {
+                              <CellOverlay kind="editor" className={editorOverlayClass(col.type)}>{(() => {
                                 // Type-aware inline editor. `col.type` is forwarded
                                 // from a producer's column inference, folded onto the
                                 // DECLARED vocabulary at that producer's emit seam
@@ -5250,7 +5282,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     className="h-8 px-2 py-1"
                                   />
                                 );
-                              })()
+                              })()}</CellOverlay>
                             ) : (
                               <div
                                 className={
@@ -5270,11 +5302,20 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                 // The cell half of the drawn-size read the
                                 // auto width is estimated from (objectui#11682).
                                 data-auto-width-key={autoWidthKey(col)}
+                                data-slot="cell-display"
                               >
                                 {typeof col.cell === 'function'
                                   ? col.cell(cellValue, row)
                                   : (cellValue != null && typeof cellValue === 'object' ? String(cellValue) : formatCellValue(cellValue) as any)}
                               </div>
+                            )}
+                            {showsPreview && (
+                              // objectstack#35688 — the whole content of a cut-off cell, in place.
+                              <CellOverlay kind="preview" className={cn(PREVIEW_UNCLIP_CLASS, editorOverlayClass(col.type))}>
+                                {typeof col.cell === 'function'
+                                  ? col.cell(cellValue, row)
+                                  : (cellValue != null && typeof cellValue === 'object' ? String(cellValue) : formatCellValue(cellValue) as any)}
+                              </CellOverlay>
                             )}
                           </TableCell>
                         );
