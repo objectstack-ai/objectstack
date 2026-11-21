@@ -41,7 +41,8 @@ import type { InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } fro
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
 // [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
 // resolvers' host, built once per engine, which carries every member it reads.
-import { securityResolversHost } from './engine-facet-hosts.js';
+import { middlewareAndContextHost, securityResolversHost } from './engine-facet-hosts.js';
+import { MiddlewareAndContextFacet } from './engine-middleware-and-context.js';
 import { atFixedReadLeafDoor, passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import { assertHavingTemporalComparandsInterpretable, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
@@ -686,7 +687,13 @@ export class DeleteAndAggregateFacet {
                 const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true || permanent);
                 await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
                   .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
-                const entry = await bin?.write();
+                // [ADR-0131 D9] The entry's organization, when neither the record
+                // nor the context names one, is the engine's own system-insert
+                // answer: the one resolver body, reached through the middleware
+                // facet's host of this engine (`capture.ts`,
+                // `RecycleBinSystemInsertOrganization`, says why it is handed in).
+                const entry = await bin?.write((...a) =>
+                  MiddlewareAndContextFacet.resolveSystemInsertOrganization.call(middlewareAndContextHost.of(this.facade), ...a));
                 let removed: Awaited<ReturnType<typeof driver.delete>>;
                 try {
                   removed = await driver.delete(
