@@ -335,6 +335,8 @@ const de = {
     options: {
       empty: "Keine Optionen verfügbar",
       selectFirst: "Zuerst {{fields}} auswählen",
+      search: "Suchen…",
+      noMatches: "Keine passenden Optionen",
     },
     objectRef: {
       loading: "Objekte werden geladen…",
@@ -419,6 +421,8 @@ const de = {
     datePicker: {
       today: "Heute",
       tomorrow: "Morgen",
+      nextWeek: "Nächste Woche",
+      clearPick: "Leeren",
       clear: "Datum löschen",
       openCalendar: "Kalender öffnen",
       time: "Uhrzeit",
@@ -433,6 +437,11 @@ const de = {
     },
     tags: {
       placeholder: "Tippen und mit der Eingabetaste hinzufügen…",
+      add: "„{{value}}“ hinzufügen",
+    },
+    color: {
+      swatches: "Farben",
+      custom: "Eigene Farbe",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

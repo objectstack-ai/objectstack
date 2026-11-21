@@ -780,6 +780,8 @@ function cellEditorWidthClass(type: string): string {
     case 'tags':
     case 'checkboxes':
       return 'w-full min-w-64';
+    case 'select':
+    case 'status':
     case 'date':
     case 'datetime':
     case 'phone':
@@ -3474,7 +3476,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       ? (ctx: { column: any; row: any; pendingRow: any; value: any; stage: (v: any) => void; commit: (v?: any) => void }) => {
           const fieldDef = (objectSchema as any)?.fields?.[ctx.column?.accessorKey];
           if (!fieldDef || !hasFieldEditWidget(fieldDef.type)) return null;
-          const discrete = DISCRETE_EDIT_TYPES.has(fieldDef.type);
+          // objectstack#35688 — a `select` declared `multiple` draws the multi-select
+          // check list (`SelectField` hands it to `MultiSelectField`): each check
+          // stages, and the edit is saved when the user moves on.
+          const discrete = DISCRETE_EDIT_TYPES.has(fieldDef.type) && !fieldDef.multiple;
           let field: any = { name: ctx.column.accessorKey, ...fieldDef };
           // State-machine-aware: a field bound to a `state_machine` validation
           // only offers transitions valid from the current value, so the editor
@@ -3524,6 +3529,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               // saved-row scoping rather than to `{}` — gated forever — and it
               // is the spelling objectui#7188's ruling chose.
               dependentValues={ctx.pendingRow ?? ctx.row}
+              // objectstack#35688 — the cell editor's face: pickers open at once,
+              // and a calendar day or a swatch ends the edit.
+              inCell
+              onCommit={() => ctx.commit()}
             />
             </div>
           );

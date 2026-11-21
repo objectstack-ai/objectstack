@@ -346,6 +346,8 @@ const ru = {
     options: {
       empty: "Нет доступных вариантов",
       selectFirst: "Сначала выберите {{fields}}",
+      search: "Поиск…",
+      noMatches: "Нет подходящих вариантов",
     },
     objectRef: {
       loading: "Загрузка объектов…",
@@ -430,6 +432,8 @@ const ru = {
     datePicker: {
       today: "Сегодня",
       tomorrow: "Завтра",
+      nextWeek: "Через неделю",
+      clearPick: "Очистить",
       clear: "Очистить дату",
       openCalendar: "Открыть календарь",
       time: "Время",
@@ -444,6 +448,11 @@ const ru = {
     },
     tags: {
       placeholder: "Введите и нажмите Enter, чтобы добавить…",
+      add: "Добавить «{{value}}»",
+    },
+    color: {
+      swatches: "Цвета",
+      custom: "Свой цвет",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {

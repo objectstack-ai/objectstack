@@ -335,6 +335,8 @@ const ja = {
     options: {
       empty: "選択できる項目がありません",
       selectFirst: "まず {{fields}} を選択してください",
+      search: "検索…",
+      noMatches: "一致する項目がありません",
     },
     objectRef: {
       loading: "オブジェクトを読み込み中…",
@@ -419,6 +421,8 @@ const ja = {
     datePicker: {
       today: "今日",
       tomorrow: "明日",
+      nextWeek: "来週",
+      clearPick: "クリア",
       clear: "日付をクリア",
       openCalendar: "カレンダーを開く",
       time: "時刻",
@@ -433,6 +437,11 @@ const ja = {
     },
     tags: {
       placeholder: "入力してEnterキーで追加…",
+      add: "「{{value}}」を追加",
+    },
+    color: {
+      swatches: "色",
+      custom: "カスタムカラー",
     },
     // objectui#4028 — `AddressField`'s five sub-labels.
     address: {
