@@ -10,6 +10,8 @@
  *   node scripts/pm/label-write.mjs --issue N --release --recheck-comment ID --comment-file release.md --resume-from BRANCH@SHA
  *   node scripts/pm/label-write.mjs --issue N --add pm:dispatched --remove pm:queue --assign LOGIN --comment-file claim.md
  *   node scripts/pm/label-write.mjs --issue PR --comment-file verdict.md --land
+ *   node scripts/pm/label-write.mjs --issue PR --comment-file request.md --handoff
+ *   node scripts/pm/label-write.mjs --issue PR --handoff --dry-run   # the per-round H43/H48 reading, zero writes
  *   node scripts/pm/label-write.mjs --self-test          # offline, no network at all
  *
  * ## Why this file exists
@@ -226,6 +228,38 @@
  * like every other unread in this file; a judged refusal is exit 2. The ✓ line says the sha alone was judged: whether
  * the battery was full and its reds fixed or reported stays the L1 checklist's.
  *
+ * ## `--handoff` — the seat's Tier H hand-off as ONE relay stroke, RELAY-ONLY
+ *
+ * pm-dispatch SKILL.md 〈路径分叉〉 ② and ③ make the hand-off three writes: the approval-request comment,
+ * `pm:awaiting-merge` on the pull, and a review request to every `GOVERNED_APPROVERS` account. Made by hand from a
+ * template that carried only the first, the other two were dropped and the pulls sat outside the maintainer's
+ * inbox and review queue. `--issue PR --comment-file request.md --handoff` makes all three in one stroke, in this
+ * order: the comment, `labels_add`, `assign` (the author), `pr_request_reviewers` (the rest).
+ *
+ *   tier      `check-governed-merges.mjs --pr OWNER/NAME#N --json`, spawned: the one reading that chains every
+ *             split (workflows, the low-risk arm, `Rule-change:`) and the size limb. Tier H, or the size limb
+ *             firing (it lands the way Tier H does), proceeds; Tier S (「Tier S 不交人」), an ungoverned pull and a
+ *             fork (a proposal, adopted by the owning seat) are refused. A reading that did not answer is exit 3.
+ *   records   on the pull's own thread, with check-half-states' H43 hand-off reading (`h43HandoffReading`, the
+ *             queue guard's author binding): the NEWEST `## 席位核对` must read ACCEPT and be newer than the head's
+ *             committer date (H69's comparison), and the newest trusted `## Contract review` naming the head must
+ *             read PASS with `Served-tier:` standing (`servedTierStands`). A `## 维护者速读` comment must be on the
+ *             thread or be the request itself — H48's brief half.
+ *   plan      the approvers not requested, assigned or holding a submitted review (H43's union); the author among
+ *             them is ASSIGNED, never requested (a request naming the author is a 422). A covered approver and a
+ *             label already on cost no action. ⛔ `fleet-write/execute.mjs`'s `governedReviewPlan` is not called:
+ *             its tier half reads the `.claude/**` row path-only, so it would request nobody on the very pulls
+ *             `Rule-change:` makes Tier H.
+ *   read-back besides the fold's labels, assignees and comment lines: `④ reviewers` against the pull's pending
+ *             requests, then `④ H43` and `④ H48` — the patrol rows THEMSELVES (`h43GovernedReviewRequestGap`,
+ *             `h48GovernedVerdictWithoutBrief`), asked of the pull as read back, on the tier reading's matched
+ *             slice. Any ✗ is exit 4, never repaired.
+ *
+ * Every refusal is exit 2 with ZERO writes. `--dry-run` reads all of it, prints `now H43` / `now H48` for the
+ * pull as it stands and the stroke it would send, and sends nothing — it may omit `--comment-file`, so it is the
+ * per-round reading of a seat's own governed pulls (execution-duties' 每轮 check) without a full patrol run.
+ * `--handoff` owns its plan: `--land`, `--release` and every label or assignee flag are refused beside it.
+ *
  * ## The read-back judge is HANDED to `sendFleetWrite`, never loaded by it
  *
  * Every send from this file passes `judge` (`readBackJudge`: post-stamped's `classifyReadBack` and
@@ -403,11 +437,18 @@ import {
   proxyRearmPlan,
   resolveSweepRepo,
   stripSignatureLine,
+  // `--handoff` (header): the H43 hand-off reading and the two patrol rows its read-back asks, CALLED, never re-spelled.
+  MAINTAINER_BRIEF_MARKER,
+  h43HandoffReading,
+  h43RecordAuthors,
+  h43GovernedReviewRequestGap,
+  h48GovernedVerdictWithoutBrief,
 } from './check-half-states.mjs';
+import { GOVERNED_TIER_H, GOVERNED_TIER_S, sizeLimbFires } from './check-governed-merges.mjs';
 // The `--land` dogfood gate's readers (header: `--land` on a breaking or narrowing pull), each CALLED from its owner:
 // the one `Clause-②:` reader, the card a pull delivers, the relay's identity and the record leg's author trust.
 import { quoteLine, readClause2Line } from './clause2-line.mjs';
-import { deliveredCardNumber, deliveredCardsAtStrongest } from './record-recognisers.mjs';
+import { deliveredCardNumber, deliveredCardsAtStrongest, readServedTier, servedTierStands } from './record-recognisers.mjs';
 import { RELAY_COMMENT_AUTHOR } from './fleet-write/ops.mjs';
 import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
 // The comment half of a release, borrowed exactly as close-cards borrows it:
@@ -1181,6 +1222,7 @@ export function parseOptions(argv) {
     json: false,
     release: false,
     land: false,
+    handoff: false,
     recheckComment: null,
     commentFile: null,
     resumeFrom: null,
@@ -1204,6 +1246,7 @@ export function parseOptions(argv) {
     else if (flag === '--json') opts.json = true;
     else if (flag === '--release') opts.release = true;
     else if (flag === '--land') opts.land = true;
+    else if (flag === '--handoff') opts.handoff = true;
     else if (flag === '--recheck-comment') opts.recheckComment = value();
     else if (flag === '--comment-file') opts.commentFile = value();
     else if (flag === '--resume-from') opts.resumeFrom = value();
@@ -1231,6 +1274,7 @@ export function parseOptions(argv) {
   const releaseOnly = ['--recheck-comment', '--resume-from'].filter((f, k) => [opts.recheckComment, opts.resumeFrom][k] !== null);
   if (!opts.release && releaseOnly.length) return { ok: false, error: `${releaseOnly.join(', ')} belong to --release and mean nothing without it` };
   if (opts.release) {
+    if (opts.handoff) return { ok: false, error: '--handoff hands a pull request to its approvers; a --release moves an issue out of a claim — the two never share a stroke' };
     if (opts.land) return { ok: false, error: '--land readies and arms a pull request; a --release moves an issue out of a claim — the two never share a stroke' };
     if (opts.add.length || opts.remove.length || opts.assign.length || opts.unassign.length || opts.clearAssignees || opts.allowTwoStates) {
       return { ok: false, error: `--release writes exactly \`${RELEASE_FROM}\` → \`${RELEASE_TO}\` and clears every assignee; --add/--remove/--assign/--unassign/--clear-assignees/--allow-two-states are refused beside it` };
@@ -1257,6 +1301,16 @@ export function parseOptions(argv) {
   }
   if (opts.tierEvidence !== null && !opts.commentFile) return { ok: false, error: '--tier-evidence PATH is the transcript behind a `## Contract review` record and travels with --comment-file PATH; alone it judges nothing' };
   if (opts.tierEvidence === '') return { ok: false, error: '--tier-evidence names no file: pass the reviewing run\'s transcript, --tier-evidence PATH' };
+  // ── `--handoff` owns its plan (header): the label is fixed, the reviewers and the author's assignment are read ──
+  if (opts.handoff) {
+    if (opts.land) return { ok: false, error: '--handoff leaves a Tier H pull DRAFT for the maintainer\'s merge and --land readies and arms one — the two never share a stroke' };
+    if (opts.add.length || opts.remove.length || opts.assign.length || opts.unassign.length || opts.clearAssignees || opts.allowTwoStates) {
+      return { ok: false, error: `--handoff writes its own plan — \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` on, every uncovered approver requested and an approver who is the author assigned — so --add/--remove/--assign/--unassign/--clear-assignees/--allow-two-states are refused beside it` };
+    }
+    if (!opts.commentFile && !opts.dryRun) return { ok: false, error: '--handoff needs --comment-file PATH, the signed approval-request comment; only --dry-run, which sends nothing, may omit it' };
+    opts.add = [GOVERNED_PR_AWAITING_MERGE_LABEL];
+    return { ok: true, options: opts };
+  }
   if (opts.land && !opts.commentFile) return { ok: false, error: '--land folds the landing into a verdict comment\'s stroke and needs --comment-file PATH; a bare landing is the relay actions file `rest-channel.md` spells' };
   const planned = opts.add.length || opts.remove.length || opts.assign.length || opts.unassign.length || opts.clearAssignees;
   if (opts.commentFile && !planned && !opts.land) {
@@ -1278,6 +1332,7 @@ const USAGE = [
   '  node scripts/pm/label-write.mjs --issue N --release --recheck-comment ID --comment-file PATH',
   `                                  --resume-from BRANCH@SHA|${RESUME_FROM_NONE} [--repo OWNER/NAME] [--dry-run] [--json]`,
   '  node scripts/pm/label-write.mjs --issue N [label/assignee flags] --comment-file PATH [--tier-evidence PATH] [--land] [--dry-run] [--json]',
+  '  node scripts/pm/label-write.mjs --issue PR --comment-file PATH --handoff [--dry-run] [--json]   (--dry-run may omit the file)',
   '  node scripts/pm/label-write.mjs --self-test',
   '',
   `  --release reclaims a SILENT claim: ${RELEASE_FROM} → ${RELEASE_TO}, every assignee cleared, behind the \`Release:\``,
@@ -1293,6 +1348,10 @@ const USAGE = [
   '  trusted os-dev-report to show dogfood_battery run on the head (or below it over merges of the base only); else exit 2.',
   '  A `## Contract review` record naming CONTRACT_REVIEW_TIER folds only with --tier-evidence PATH, the reviewing run\'s',
   '  transcript, passed by verify-review-tier.mjs (post-stamped\'s rule; the path stays local).',
+  '  --handoff hands a Tier H pull to its approvers in ONE stroke: the request comment, `pm:awaiting-merge`, the',
+  '  author-approver assigned, every other uncovered GOVERNED_APPROVERS account requested; read back with H43 and H48.',
+  '  Refused (exit 2, zero writes) unless check-governed-merges --pr reads Tier H (or the size limb) and the thread holds',
+  '  a seat ACCEPT newer than the head, a same-head trusted Contract review PASS at its Served-tier, and a brief.',
   '',
   '  Additive `POST .../labels` and directed `DELETE .../labels/{name}` first — neither can strip a',
   '  label a concurrent seat wrote. A platform refusal falls back ONCE to `PATCH .../issues/{n}` with',
@@ -1441,9 +1500,10 @@ export async function runLabelWrite(options, deps = {}) {
   }
 
   // ── `--comment-file`: the comment (and `--land`) folded into this ONE stroke, RELAY-ONLY (header) ──
-  if (options.commentFile) {
+  if (options.commentFile || options.handoff) {
     const readText = deps.readText ?? ((p) => readFileSync(p, 'utf8'));
-    return foldStroke({ options, repo, issue, base, labels, assignees, kind: targetKind.kind, card: read.json, route, send, clock, readText, record, stamp, result, doCall, httpCalls });
+    const handoffDeps = { tierReading: deps.tierReading, recordAuthors: deps.recordAuthors, approvers: deps.approvers };
+    return foldStroke({ options, repo, issue, base, labels, assignees, kind: targetKind.kind, card: read.json, route, send, clock, readText, record, stamp, result, doCall, httpCalls, handoffDeps });
   }
 
   const fallbackBody = patchFallbackBody({ labelTarget: labels.target, assigneeTarget: assignees.target });
@@ -1915,15 +1975,169 @@ export function landDogfoodRefusal(gate) {
  * `--comment-file`'s stroke, from step ② on (header): judge the comment on post-stamped's path, send the ONE
  * dispatch, read every part back on its own line. `c` carries `runLabelWrite`'s steps ① and ② and its doors.
  */
+// ---------------------------------------------------------------------------
+// `--handoff` — the seat's Tier H hand-off as ONE relay stroke (header)
+// ---------------------------------------------------------------------------
+
+/** Where the hand-off this mode writes is defined: 〈路径分叉〉 ② (the label) and ③ (the request). */
+export const HANDOFF_RULE_PATH = '.claude/skills/pm-dispatch/SKILL.md';
+/** The tier instrument the hand-off asks, spawned so every split it chains is the one reading (header: `--handoff`). */
+export const HANDOFF_TIER_TOOL = 'scripts/pm/check-governed-merges.mjs';
+/** How many 100-row pages of the pull's own thread the hand-off reads; a thread still full on the last one is TRUNCATED. */
+export const HANDOFF_COMMENT_PAGE_CAP = 30;
+/** The spawned tier reading's wall-clock ceiling: it pages the changed files and may read the checkout. */
+export const HANDOFF_TIER_TIMEOUT_MS = 180_000;
+
+/**
+ * The tier reading, spawned: `check-governed-merges.mjs --pr OWNER/NAME#N --json`. Answers `{ exit, json, detail }` —
+ * `json` the tool's own verdict object when its exit is 0 or 3 (NOT governed / GOVERNED) and its stdout parses, else
+ * null with `detail` saying why. Never throws.
+ */
+export function readGovernedTier({ repo, issue }) {
+  const tool = fileURLToPath(new URL('./check-governed-merges.mjs', import.meta.url));
+  const r = spawnSync(process.execPath, [tool, '--pr', `${repo}#${issue}`, '--json'], { encoding: 'utf8', env: process.env, maxBuffer: 64 * 1024 * 1024, timeout: HANDOFF_TIER_TIMEOUT_MS });
+  const tail = String(r.stderr ?? '').trim().split('\n').slice(-2).join(' · ');
+  if (r.error) return { exit: null, json: null, detail: `the spawn failed: ${r.error.message}` };
+  if (r.status !== 0 && r.status !== 3) return { exit: r.status, json: null, detail: `exit ${r.status}${tail ? ` — ${tail}` : ''}` };
+  try {
+    return { exit: r.status, json: JSON.parse(r.stdout), detail: '' };
+  } catch {
+    return { exit: r.status, json: null, detail: `exit ${r.status} and its stdout is not the --json verdict` };
+  }
+}
+
+/**
+ * Does the tier reading let the hand-off proceed? Pure. `{ ok, unread, why, matched? }` — `matched` the tool's own
+ * post-split slice on a pass, which the patrol rows are asked on: Tier H, or the size limb firing
+ * (it lands the way Tier H does, with no Tier S exception), proceeds; a fork, a Tier S pull and an ungoverned one are
+ * refused; a reading with no verdict object is `unread` — a PREREQUISITE, never a verdict.
+ */
+export function handoffTierVerdict(reading) {
+  const v = reading?.json;
+  const tool = `\`${HANDOFF_TIER_TOOL} --pr\``;
+  if (!v || typeof v !== 'object') return { ok: false, unread: true, why: `${tool} gave no reading (${reading?.detail || 'no answer'}) — NOT MEASURED, so nothing is handed to anyone` };
+  if (v.fork?.isFork === true) return { ok: false, unread: false, why: `${tool} reads a FORK pull request (head ${v.fork.headRepo ?? '?'}): a proposal, never a delivery — no seat hands it to an approver; the owning seat adopts the diff onto an internal branch and hands THAT off` };
+  const matched = Array.isArray(v.matched) ? v.matched : [];
+  if (v.governed === true && v.tier === GOVERNED_TIER_H) return { ok: true, unread: false, matched, why: `${tool} reads Tier H (${(v.matched ?? []).map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`).join(', ')})` };
+  if (sizeLimbFires(v.size)) return { ok: true, unread: false, matched, why: `${tool} reads the SIZE limb: ${v.size.changedLines} changed lines over ${v.size.threshold}, which lands the way Tier H does` };
+  if (v.governed === true && v.tier === GOVERNED_TIER_S) return { ok: false, unread: false, why: `${tool} reads Tier S: it lands on the owning seat's review of record and no human is handed it (「Tier S 不交人」, ${HANDOFF_RULE_PATH})` };
+  return { ok: false, unread: false, why: `${tool} reads this pull as NOT governed (tier ${v.tier ?? 'none'}, size limb clear): nobody is owed a hand-off` };
+}
+
+/**
+ * The hand-off's request plan: the approvers NOT requested, assigned or holding a submitted review (H43's union),
+ * split into `toAssign` (an uncovered approver who is the pull's author — a request naming the author is a 422) and
+ * `toRequest` (the rest). Logins match case-insensitively; the answer keeps `approvers`' spelling and order. Pure.
+ */
+export function handoffReviewPlan({ approvers = GOVERNED_APPROVERS, author = null, requested = [], assigned = [], reviewed = [] } = {}) {
+  const lower = (list) => (Array.isArray(list) ? list : []).map((l) => String(l).toLowerCase());
+  const have = new Set([...lower(requested), ...lower(assigned), ...lower(reviewed)]);
+  const list = Array.isArray(approvers) ? approvers : [];
+  const missing = list.filter((a) => !have.has(a.toLowerCase()));
+  const isAuthor = (a) => typeof author === 'string' && a.toLowerCase() === author.toLowerCase();
+  return { covered: list.filter((a) => have.has(a.toLowerCase())), toRequest: missing.filter((a) => !isAuthor(a)), toAssign: missing.filter(isAuthor) };
+}
+
+/** The pull as the two patrol rows read it: the pull answer, with the labels and assignees of the card read beside it. */
+function handoffPullView(pull, labels, assignees) {
+  return { ...pull, labels: labels.map((name) => ({ name })), assignees: assignees.map((login) => ({ login })) };
+}
+
+/** The `now H43` / `④ H43` and `H48` lines: each row's own finding sentence, or ✓ when it has none. Pure. */
+export function handoffRowLines({ pull, matched, approvers, reviewed, handoff, rows }) {
+  const h43 = h43GovernedReviewRequestGap(pull, matched, approvers, reviewed, handoff);
+  const h48 = h48GovernedVerdictWithoutBrief(pull, matched, rows);
+  return { h43, h48, clean: h43 === null && h48 === null };
+}
+
+/**
+ * Every read and refusal of `--handoff` before the comment is judged (header). Returns `{ ok: true, … }` with the
+ * plan and the readings the read-back reuses, or `{ ok: false, exit, why }` — exit 2 a judged refusal, 3 a read the
+ * platform or the tier tool did not answer. ⛔ Writes nothing.
+ */
+async function handoffGate(c) {
+  const { repo, issue, doCall, record, stamp } = c;
+  const deps = c.handoffDeps ?? {};
+  const approvers = deps.approvers ?? GOVERNED_APPROVERS;
+  const refuse = (why) => ({ ok: false, exit: EXIT_USAGE, why });
+  const unread = (why) => ({ ok: false, exit: EXIT_PREREQUISITE, why });
+  if (c.kind !== KIND_PULL) return refuse(`--handoff hands a PULL REQUEST to its approvers, and ${repo}#${issue} is ${c.kind === null ? 'of no kind step ① could read' : 'an issue'}`);
+  if (c.card?.state !== 'open') return refuse(`${repo}#${issue} is ${c.card?.state ?? 'of no readable state'}: the hand-off is over once a pull is closed or merged`);
+
+  const tier = handoffTierVerdict(await (deps.tierReading ?? readGovernedTier)({ repo, issue }));
+  if (!tier.ok) return tier.unread ? unread(tier.why) : refuse(tier.why);
+  record(`[${stamp()}] ② hand-off tier ✓ — ${tier.why}`);
+
+  const pull = await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {});
+  if (pull.verdict !== 'ok' || !pull.json) return unread(`${pull.call} -> HTTP ${pull.status}: the pull's head, author and pending requests are unknown`);
+  const headSha = String(pull.json.head?.sha ?? '');
+  const reviews = await doCall('reviews-list', `/repos/${repo}/pulls/${issue}/reviews?per_page=100`, {});
+  if (reviews.verdict !== 'ok' || !Array.isArray(reviews.json)) return unread(`${reviews.call} -> HTTP ${reviews.status}: who has already reviewed is unknown`);
+  const reviewed = reviews.json.filter((r) => r?.state !== 'PENDING').map((r) => r?.user?.login).filter(Boolean);
+  const rows = [];
+  for (let page = 1; ; page++) {
+    if (page > HANDOFF_COMMENT_PAGE_CAP) return unread(`the pull's thread is still full after ${HANDOFF_COMMENT_PAGE_CAP} pages — a TRUNCATED thread can hide the newest record`);
+    const r = await doCall('comments-list', `/repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}`, {});
+    if (r.verdict !== 'ok' || !Array.isArray(r.json)) return unread(`${r.call} -> HTTP ${r.status}: the pull's thread could not be read`);
+    rows.push(...r.json);
+    if (r.json.length < 100) break;
+  }
+  const commit = await doCall('commit-read', `/repos/${repo}/commits/${headSha}`, {});
+  const headMs = Date.parse(commit.json?.commit?.committer?.date ?? '');
+  if (commit.verdict !== 'ok' || !Number.isFinite(headMs)) return unread(`${commit.call} -> HTTP ${commit.status}: the head's committer date is unknown, so no record can be dated against it`);
+  const authors = await (deps.recordAuthors ?? (() => h43RecordAuthors()))();
+  if (authors?.available !== true) return unread(`the queue guard's record-author binding did not load (${authors?.reason ?? 'no reason given'}), so no record on the thread can be trusted`);
+
+  const handoff = h43HandoffReading(rows, headSha, authors);
+  const labels = labelNamesOf(c.card?.labels);
+  const assigned = loginsOf(c.card?.assignees);
+  const view = handoffPullView(pull.json, labels, assigned);
+  const now = handoffRowLines({ pull: view, matched: tier.matched, approvers, reviewed, handoff, rows });
+  record(`[${stamp()}] ② now H43 ${now.h43 === null ? '✓' : '✗'} · now H48 ${now.h48 === null ? '✓' : '✗'} — ${repo}#${issue} as it stands, head \`${headSha.slice(0, 12)}\`${now.h43 ? `\n      H43: ${now.h43}` : ''}${now.h48 ? `\n      H48: ${now.h48}` : ''}`);
+
+  const sha12 = headSha.slice(0, 12);
+  if (!handoff.record) return refuse(`no \`## 席位核对\` record is on the thread: the seat's review comes before the hand-off (〈路径分叉〉 ①)`);
+  if (!handoff.accepted) return refuse(`the newest \`## 席位核对\` record (${handoff.record.createdAt ?? 'undated'}) does not read ACCEPT: only an accepted pull is handed to a human`);
+  if (handoff.record.stamp === null || handoff.record.stamp <= headMs) {
+    return refuse(`the newest \`## 席位核对\` ACCEPT (${handoff.record.createdAt ?? 'undated'}) is not newer than the head \`${sha12}\` (committed ${commit.json.commit.committer.date}): the seat read a diff the approver will not be shown — re-make the record for this head`);
+  }
+  if (!handoff.review) return refuse(`no trusted \`## Contract review\` record names the head \`${sha12}\`: the hand-off waits for a same-head PASS (「审核通过才会推送给我审核」)`);
+  if (!handoff.passed) return refuse(`the newest trusted \`## Contract review\` naming \`${sha12}\` (comment ${handoff.review.id}) reads ${handoff.review.verdict ?? 'no single VERDICT line'}, not PASS`);
+  const passRow = rows.find((r) => r?.id === handoff.review.id);
+  const served = readServedTier(passRow?.body);
+  if (!servedTierStands(served)) {
+    return refuse(`the PASS (comment ${handoff.review.id}) does not stand at its tier: its \`Served-tier:\` line is ${served.state === 'read' ? `\`${served.value}\`${served.stamps ? ` with ${served.stamps.atTier}/${served.stamps.total}` : ''}` : served.state} — a same-tier PASS is the record the hand-off rests on`);
+  }
+  record(`[${stamp()}] ② hand-off records ✓ — ACCEPT ${handoff.record.createdAt} newer than head \`${sha12}\` · PASS comment ${handoff.review.id} on that head, \`Served-tier: ${served.value}\``);
+
+  const plan = handoffReviewPlan({ approvers, author: pull.json.user?.login ?? null, requested: (pull.json.requested_reviewers ?? []).map((u) => u?.login).filter(Boolean), assigned, reviewed });
+  const named = (l) => (l.length ? l.map((x) => `\`${x}\``).join(', ') : 'none');
+  record(`[${stamp()}] ② hand-off plan — covered ${named(plan.covered)} · request ${named(plan.toRequest)} · assign the author ${named(plan.toAssign)} · \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` ${labels.includes(GOVERNED_PR_AWAITING_MERGE_LABEL) ? 'already on' : 'to add'}`);
+  return { ok: true, plan, tier, pull: pull.json, reviewed, rows, handoff, headSha, approvers, hasBrief: latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null };
+}
+
 async function foldStroke(c) {
-  const { options, repo, issue, base, labels, assignees, route, record, stamp, result, doCall } = c;
+  const { options, repo, issue, base, labels, route, record, stamp, result, doCall } = c;
+  let { assignees } = c;
   const nothing = () => record(`[${stamp()}] ⛔ NOTHING WAS WRITTEN.`);
-  const done = (exit, extra = {}) => result(exit, { mode: 'fold', labels, assignees, transport: route.transport, ...extra });
+  const done = (exit, extra = {}) => result(exit, { mode: options.handoff ? 'handoff' : 'fold', labels, assignees, transport: route.transport, ...extra });
   const refuse = (why, extra = {}) => {
     record(`[${stamp()}] ② REFUSED — ${why}`);
     nothing();
     return done(EXIT_USAGE, { stoppedAt: 2, refusal: why, ...extra });
   };
+  // `--handoff` (header): every read and refusal before the comment is judged, so a refusal sends nothing at all.
+  let gate = null;
+  if (options.handoff) {
+    gate = await handoffGate(c);
+    if (!gate.ok && gate.exit === EXIT_PREREQUISITE) {
+      record(`[${stamp()}] ② PREREQUISITE NOT MET — ${gate.why}`);
+      nothing();
+      return done(EXIT_PREREQUISITE, { stoppedAt: 2, refusal: 'handoff-unread' });
+    }
+    if (!gate.ok) return refuse(gate.why);
+    assignees = computeAssigneeTarget({ current: loginsOf(c.card?.assignees), assign: gate.plan.toAssign });
+  }
   if (options.land && c.kind !== KIND_PULL) {
     return refuse(`--land readies and arms a PULL REQUEST, and ${repo}#${issue} is ${c.kind === null ? 'of no kind step ① could read' : 'an issue'}`);
   }
@@ -1945,21 +2159,31 @@ async function foldStroke(c) {
           : `[${stamp()}] ② dogfood gate — not judged: no \`!\` in the title and no \`(narrowing)\` arm`,
     );
   }
-  let text;
-  try {
-    text = c.readText(options.commentFile);
-  } catch (e) {
-    return refuse(`cannot read --comment-file ${options.commentFile}: ${e?.message ?? e}`);
+  // A `--handoff --dry-run` may carry no comment (header): the per-round reading, which sends nothing.
+  let rendered = null;
+  let body = null;
+  if (options.commentFile) {
+    let text;
+    try {
+      text = c.readText(options.commentFile);
+    } catch (e) {
+      return refuse(`cannot read --comment-file ${options.commentFile}: ${e?.message ?? e}`);
+    }
+    const judged = judgeBody(text, { mode: 'comment', tierEvidence: options.tierEvidence }, c.clock().getTime(), 'label-write');
+    if (!judged.ok) {
+      record(judged.text);
+      nothing();
+      return done(EXIT_USAGE, { stoppedAt: 2, refusal: 'comment' });
+    }
+    rendered = judged.rendered;
+    body = rendered.body;
+    record(`[${stamp()}] ② comment — ${Buffer.byteLength(body, 'utf8')} byte(s) for ${repo}#${issue}, stamped \`${rendered.stamp}\` · ${substitutionSummary(rendered)}`);
   }
-  const judged = judgeBody(text, { mode: 'comment', tierEvidence: options.tierEvidence }, c.clock().getTime(), 'label-write');
-  if (!judged.ok) {
-    record(judged.text);
-    nothing();
-    return done(EXIT_USAGE, { stoppedAt: 2, refusal: 'comment' });
+  // H48's brief half (header): a `## 维护者速读` comment on the thread, or the request itself.
+  if (gate && !gate.hasBrief && !(body !== null && markerMatches(MAINTAINER_BRIEF_MARKER, body))) {
+    if (body !== null) return refuse('no comment on the thread opens a `## 维护者速读` line and the request does not either: H48 reads an ACCEPT with no brief as half a hand-off — post the seat record (its brief first) or put the brief in the request');
+    record(`[${stamp()}] ② note — no \`## 维护者速读\` comment on the thread: a hand-off from here needs the brief in its request comment`);
   }
-  const { rendered } = judged;
-  const body = rendered.body;
-  record(`[${stamp()}] ② comment — ${Buffer.byteLength(body, 'utf8')} byte(s) for ${repo}#${issue}, stamped \`${rendered.stamp}\` · ${substitutionSummary(rendered)}`);
 
   if (route.error) {
     record(`[${stamp()}] ③ PREREQUISITE NOT MET — ${route.error}`);
@@ -1975,7 +2199,13 @@ async function foldStroke(c) {
     return done(EXIT_PREREQUISITE, { stoppedAt: 3, refusal: 'relay-only' });
   }
   record(`[${stamp()}] ③ transport ${route.transport} — ${route.reason}`);
-  const actions = foldActions({ issue, body, labels, assignees, land: options.land });
+  const reviewerOp = gate?.plan.toRequest.length ? [{ op: 'pr_request_reviewers', pull: issue, reviewers: [...gate.plan.toRequest] }] : [];
+  const actions = body === null ? [...relayActions({ issue, labels, assignees }), ...reviewerOp] : [...foldActions({ issue, body, labels, assignees, land: options.land }), ...reviewerOp];
+  if (body === null) {
+    record(`[${stamp()}] ③ DRY RUN — no comment file, so no stroke is packed; with the request comment first it would send: ${['comment', ...actions.map((a) => a.op)].join(' → ')}${reviewerOp.length ? ` (reviewers ${render(reviewerOp[0].reviewers)})` : ''}`);
+    record(`[${stamp()}] ④ read-back SKIPPED — ⛔ a dry run proves the PLAN and never the board.`);
+    return done(EXIT_OK, { dryRun: true, plan: gate?.plan ?? null });
+  }
   const packed = packRequest({ repo, session: route.session, actions, now: () => c.clock().getTime() });
   if (!packed.ok) {
     record(relayRefusalText(packed.errors));
@@ -2009,7 +2239,7 @@ async function foldStroke(c) {
   const runRef = sent.run?.url ?? sent.run?.id ?? '';
   const back = await doCall('card-read', base, {});
   const tailRead = back.verdict === 'ok' ? await doCall('comments-list', `${base}/comments?since=${encodeURIComponent(new Date(dispatchedAt - 60_000).toISOString())}&per_page=100`, {}) : null;
-  const pullRead = options.land && tailRead?.verdict === 'ok' ? await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {}) : null;
+  const pullRead = (options.land || options.handoff) && tailRead?.verdict === 'ok' ? await doCall('pull-read', `/repos/${repo}/pulls/${issue}`, {}) : null;
   const unread = [back, tailRead, pullRead].filter((r) => r !== null).find((r) => r.verdict !== 'ok');
   if (unread) {
     record(
@@ -2043,22 +2273,33 @@ async function foldStroke(c) {
     });
     for (const l of said.lines ?? []) record(`    ${String(l).trim()}`);
   }
-  const pullReady = pullRead === null ? true : pullRead.json?.draft === false;
-  if (pullRead !== null) {
+  const pullReady = pullRead === null || !options.land ? true : pullRead.json?.draft === false;
+  // `--handoff`'s own parts (header): the pending requests, then the two patrol rows asked of the pull as read back.
+  let handoffClean = true;
+  if (gate) {
+    const pending = (pullRead.json?.requested_reviewers ?? []).map((u) => String(u?.login ?? '').toLowerCase());
+    const unasked = gate.plan.toRequest.filter((a) => !pending.includes(a.toLowerCase()));
+    record(`[${stamp()}] ④ reviewers ${mark(unasked.length === 0)} — pending ${render((pullRead.json?.requested_reviewers ?? []).map((u) => u?.login))} · requested by this stroke ${render(gate.plan.toRequest)}${unasked.length ? ` · NOT pending: ${render(unasked)}` : ''}`);
+    const rows = handoffRowLines({ pull: handoffPullView(pullRead.json ?? {}, backLabels, backAssignees), matched: gate.tier.matched, approvers: gate.approvers, reviewed: gate.reviewed, handoff: gate.handoff, rows: hit ? [...gate.rows, hit] : gate.rows });
+    record(`[${stamp()}] ④ H43 ${mark(rows.h43 === null)} — ${rows.h43 ?? 'every GOVERNED_APPROVERS account is requested, assigned or has reviewed'}`);
+    record(`[${stamp()}] ④ H48 ${mark(rows.h48 === null)} — ${rows.h48 ?? `\`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` and a \`## 维护者速读\` brief both on the pull`}`);
+    handoffClean = unasked.length === 0 && rows.clean;
+  }
+  if (pullRead !== null && options.land) {
     const armed = pullRead.json?.auto_merge ? `auto_merge ${pullRead.json.auto_merge.merge_method ?? 'set'}` : 'auto_merge null on this read';
     record(
       `[${stamp()}] ④ pull ${mark(pullReady)} — draft ${pullRead.json?.draft} · ${armed}, printed and ⛔ not judged (unstable; never a reason to re-arm) — ` +
         `the arming is the executor's landed check on automerge_enable's own answer, which this success run passed`,
     );
   }
-  if (!hit || !verdictIsClean(labelVerdict) || !verdictIsClean(assigneeVerdict) || !pullReady) {
+  if (!hit || !verdictIsClean(labelVerdict) || !verdictIsClean(assigneeVerdict) || !pullReady || !handoffClean) {
     record(
       `[${stamp()}] ④ MISMATCH — the relay run ${runRef} reported success and the board does not show the stroke whole (the ✗ lines above). ` +
         '⛔ Not repaired here — under the relay a re-send is a second write. Go READ the card and fix it deliberately.',
     );
     return done(EXIT_READ_BACK_MISMATCH, { stoppedAt: 4, relay: sent, comment: hit?.id ?? null, labelVerdict, assigneeVerdict, pullReady });
   }
-  record(`[${stamp()}] ④ MATCHES — comment ${hit.id} · labels ${render(backLabels)} · assignees ${render(backAssignees)}${pullRead ? ' · pull ready' : ''} (via the relay run ${runRef}).`);
+  record(`[${stamp()}] ④ MATCHES — comment ${hit.id} · labels ${render(backLabels)} · assignees ${render(backAssignees)}${options.land ? ' · pull ready' : ''}${gate ? ' · reviewers pending · H43 ✓ · H48 ✓' : ''} (via the relay run ${runRef}).`);
   return done(EXIT_OK, { relay: sent, comment: hit.id, backLabels, backAssignees, labelVerdict, assigneeVerdict });
 }
 
@@ -2367,6 +2608,7 @@ export function classifyOp(method, path) {
   if (/\/branches\//.test(path)) return 'branch-read';
   if (/\/pulls(\?|$)/.test(path)) return 'pulls-list';
   if (/\/pulls\/\d+$/.test(path)) return 'pull-read';
+  if (/\/pulls\/\d+\/reviews(\?|$)/.test(path)) return 'reviews-list';
   if (/\/commits\/[0-9a-f]+$/.test(path)) return 'commit-read';
   if (/\/compare\/[^/]+$/.test(path)) return 'compare-read';
   if (/\/labels\/[^/]+$/.test(path) && method === 'DELETE') return 'label-delete';
@@ -2419,6 +2661,12 @@ export function fakeBoard(initial = {}) {
     cards: { ...(initial.cards ?? {}) },
     commits: { ...(initial.commits ?? {}) },
     onBase: new Set(initial.onBase ?? []),
+    // `--handoff`'s reads: the pull's author, its pending review requests, its submitted reviews, and each commit's
+    // committer date (`commitDates`: sha → ISO), which `GET /commits/{sha}` answers beside the parents.
+    author: initial.author ?? 'objectstack-fleet[bot]',
+    requested: [...(initial.requested ?? [])],
+    reviews: [...(initial.reviews ?? [])],
+    commitDates: { ...(initial.commitDates ?? {}) },
   };
   const calls = [];
   const bodies = [];
@@ -2470,8 +2718,12 @@ export function fakeBoard(initial = {}) {
     }
     if (op === 'commit-read') {
       const sha = path.slice(path.lastIndexOf('/') + 1);
-      if (!(sha in board.commits)) return wrap(404, { message: 'No commit found' });
-      return wrap(200, { sha, parents: board.commits[sha].map((p) => ({ sha: p })) });
+      if (!(sha in board.commits) && !(sha in board.commitDates)) return wrap(404, { message: 'No commit found' });
+      return wrap(200, { sha, parents: (board.commits[sha] ?? []).map((p) => ({ sha: p })), commit: { committer: { date: board.commitDates[sha] ?? null } } });
+    }
+    if (op === 'reviews-list') {
+      if (board.kind !== 'pull') return wrap(404, { message: 'Not Found' });
+      return wrap(200, board.reviews);
     }
     if (op === 'compare-read') {
       const [from, to] = decodeURIComponent(path.slice(path.lastIndexOf('/') + 1)).split('...');
@@ -2499,7 +2751,20 @@ export function fakeBoard(initial = {}) {
 
     if (op === 'pull-read') {
       if (board.kind !== 'pull') return wrap(404, { message: 'Not Found' });
-      return wrap(200, { number: board.number, state: board.state, draft: board.draft, auto_merge: board.autoMerge, title: board.title, body: board.body, head: board.head, base: { ref: board.baseRef } });
+      return wrap(200, {
+        number: board.number,
+        state: board.state,
+        draft: board.draft,
+        auto_merge: board.autoMerge,
+        title: board.title,
+        body: board.body,
+        head: board.head,
+        base: { ref: board.baseRef },
+        user: { login: board.author },
+        requested_reviewers: board.requested.map((login) => ({ login })),
+        labels: board.labels.map((name) => ({ name })),
+        assignees: board.assignees.map((login) => ({ login })),
+      });
     }
     if (op === 'card-read') {
       // The two members `readTargetKind` reads, shaped as GitHub's issues endpoint answers them.
@@ -2586,6 +2851,7 @@ function fakeRelay(board, outcome = 'success', sent = []) {
       if (a.op === 'labels_remove') board.labels = board.labels.filter((l) => !a.labels.includes(l));
       if (a.op === 'assign') board.assignees = dedupe([...board.assignees, ...a.assignees]);
       if (a.op === 'unassign') board.assignees = board.assignees.filter((u) => !a.assignees.includes(u));
+      if (a.op === 'pr_request_reviewers') board.requested = dedupe([...board.requested, ...a.reviewers]);
     }
     return { ...base, state: 'success', ok: true, run: RUN, detail: 'conclusion success' };
   };
@@ -2658,7 +2924,7 @@ async function driveOffline(argv, boardInit = {}, extra = {}) {
     if (p in files) return files[p];
     throw new Error(`ENOENT: no such file, open '${p}'`);
   };
-  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l), route: extra.route ?? DIRECT_ROUTE, send, readText, now: extra.now });
+  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l), route: extra.route ?? DIRECT_ROUTE, send, readText, now: extra.now, tierReading: extra.tierReading, recordAuthors: extra.recordAuthors, approvers: extra.approvers });
   return { parsed, exit: res.exit, res, fake, out, sent, text: out.join('\n') };
 }
 
