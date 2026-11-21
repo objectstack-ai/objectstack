@@ -61,6 +61,22 @@ interface TypeCacheEntry {
   error: Error | null;
   fetchedAt: number;
   promise: Promise<any[]> | null;
+  /**
+   * An answer (a list or a failure) has landed and is still held: set when a
+   * fetch settles, cleared only when the entry drops its items (`invalidate`).
+   * A refetch in place (`refresh()`, a lapsed TTL) keeps it, so a reader that
+   * already drew the old answer is not sent back to waiting while the new one
+   * is on the wire (objectstack#35932).
+   */
+  answered: boolean;
+}
+
+/**
+ * Whether a type's answer is in hand: ready, failed, or refetching in place
+ * over an answer it still holds (`TypeCacheEntry.answered`).
+ */
+function typeAnswered(entry: TypeCacheEntry): boolean {
+  return entry.status === 'ready' || entry.status === 'error' || (entry.status === 'loading' && entry.answered);
 }
 
 /**
@@ -954,6 +970,7 @@ function emptyEntry(): TypeCacheEntry {
     error: null,
     fetchedAt: 0,
     promise: null,
+    answered: false,
   };
 }
 
@@ -1287,6 +1304,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           if (type === 'object') ingestObjectList(items, res);
           entry.items = items;
           entry.status = 'ready';
+          entry.answered = true;
           entry.error = null;
           entry.fetchedAt = Date.now();
           entry.promise = null;
@@ -1320,6 +1338,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         .catch((err: unknown) => {
           const error = err instanceof Error ? err : new Error(String(err));
           entry.status = 'error';
+          entry.answered = true;
           entry.error = error;
           entry.promise = null;
           // Stamped on failure too, so ERROR_RETRY_COOLDOWN_MS has a clock to
@@ -1669,6 +1688,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           dropAdapterObjectReads();
         }
         entry.status = 'idle';
+        entry.answered = false;
         entry.items = [];
         entry.byName.clear();
         entry.error = null;
@@ -1840,6 +1860,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       const entry = getEntry('app');
       entry.items = cached;
       entry.status = 'ready';
+      entry.answered = true;
       entry.fetchedAt = 0;
       for (const it of cached) {
         if (isNamedItem(it)) {
@@ -1905,20 +1926,23 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         const fromBundle = (bundledViews(peek.items) as { value: unknown[] }).value;
         const outside = asked.some((name) => !bundledObjects?.has(name));
         if (!outside) {
-          const views = listed.status === 'ready' ? bundledWithListed(fromBundle, bundledObjects, listed.items) : fromBundle;
+          const views = listed.status === 'ready' || (listed.status === 'loading' && listed.answered)
+            ? bundledWithListed(fromBundle, bundledObjects, listed.items)
+            : fromBundle;
           return { views, settled: true };
         }
         const list = readType('view');
-        const status = getEntry('view').status;
-        return { views: bundledWithListed(fromBundle, bundledObjects, list), settled: status === 'ready' || status === 'error' };
+        return { views: bundledWithListed(fromBundle, bundledObjects, list), settled: typeAnswered(getEntry('view')) };
       }
-      if (listed.status === 'ready') return { views: listed.items, settled: true };
+      // objectstack#35932 — a list refetching in place still answers: the
+      // scope stays settled on the views it holds, so a refresh pulse never
+      // sends a drawn route back to its skeleton (which remounts it).
+      if (listed.status === 'ready' || (listed.status === 'loading' && listed.answered)) return { views: listed.items, settled: true };
       // `none` here is an app not entered YET: `peekBundle` answers null once
       // the commit has settled without one.
       if (peek) return { views: NO_VIEWS, settled: false };
       const views = readType('view');
-      const status = getEntry('view').status;
-      return { views, settled: status === 'ready' || status === 'error' };
+      return { views, settled: typeAnswered(getEntry('view')) };
     },
     [getEntry, peekBundle, readType],
   );
@@ -1943,14 +1967,13 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         ? NAMES_BATCH_SCOPE
         : scope.packageId || (namesOnly ? NAMES_ONLY_SCOPE : undefined);
       if (packageId === undefined) {
-        const status = getEntry('object').status;
         const served = readType('object');
         const views = readType('view');
         return {
           objects: composeObjects(served, views) as any[],
           served,
           missing: NO_NAMES,
-          settled: (status === 'ready' || status === 'error') && getEntry('view').status !== 'loading',
+          settled: typeAnswered(getEntry('object')) && (getEntry('view').status !== 'loading' || getEntry('view').answered),
           views,
         };
       }
