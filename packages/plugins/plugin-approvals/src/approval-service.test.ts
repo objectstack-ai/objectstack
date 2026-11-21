@@ -1932,6 +1932,45 @@ describe('ApprovalService (node era)', () => {
     await expect(svc.reassign(req.id, { actorId: 'u9', to: 'u2' }, asUser('u9'))).rejects.toThrow(/VALIDATION_FAILED/);
   });
 
+  describe('reassign: an approver hands over only their own slot', () => {
+    const PLATFORM_ADMIN_CTX = { userId: 'root', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+    const openUnanimous = async () => {
+      const req = await svc.openNodeRequest(openInput(['u9', 'u2'], {}, { behavior: 'unanimous' }), CTX);
+      staffDirectory(engine, 'u7');
+      return req.id as string;
+    };
+    const slate = (id: string) => (engine._tables['sys_approval_request'] ?? []).find(r => r.id === id)?.pending_approvers;
+    const moves = (id: string) =>
+      (engine._tables['sys_approval_action'] ?? []).filter(r => r.request_id === id && r.action === 'reassign');
+
+    it('refuses a slot holder naming another approver\'s slot, and moves nothing', async () => {
+      const id = await openUnanimous();
+      await expect(svc.reassign(id, { actorId: 'u9', from: 'u2', to: 'u7' }, asUser('u9')))
+        .rejects.toThrow(/^FORBIDDEN: actor 'u9' may hand over only their own slot/);
+      expect(slate(id)).toBe('u9,u2');
+      expect(moves(id)).toEqual([]);
+    });
+
+    it('CONTROL: the same holder naming their own slot moves it', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'u9', from: 'u9', to: 'u7' }, asUser('u9'));
+      expect(out.request.pending_approvers).toEqual(['u7', 'u2']);
+      expect(moves(id)).toHaveLength(1);
+    });
+
+    it('the administrator override still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'root', from: 'u2', to: 'u7' }, PLATFORM_ADMIN_CTX);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+
+    it('the system still moves another approver\'s slot', async () => {
+      const id = await openUnanimous();
+      const out = await svc.reassign(id, { actorId: 'system', from: 'u2', to: 'u7' }, SYS);
+      expect(out.request.pending_approvers).toEqual(['u9', 'u7']);
+    });
+  });
+
   // ── reassign target resolution (#25485) ─────────────────────────
   //
   // A `to` that resolves to no one used to be written onto the slate, so the
