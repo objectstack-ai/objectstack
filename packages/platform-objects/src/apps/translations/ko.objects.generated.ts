@@ -492,6 +492,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "취소 사유",
         help: "세션이 취소된 이유입니다(idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
+      sso_provider_id: {
+        label: "SSO 공급자",
+        help: "이 세션이 로그인할 때 거친 SSO 공급자(있는 경우)입니다. 해당 공급자를 삭제하면 세션이 종료됩니다. 시스템에서 관리합니다."
+      },
       active_organization_id: {
         label: "활성 조직"
       },

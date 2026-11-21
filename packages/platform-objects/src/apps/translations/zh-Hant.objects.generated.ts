@@ -492,6 +492,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "撤銷原因",
         help: "工作階段被撤銷的原因（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
       },
+      sso_provider_id: {
+        label: "SSO 提供方",
+        help: "此工作階段登入時所經由的 SSO 提供方（如有）。刪除該提供方會結束此工作階段。由系統管理。"
+      },
       active_organization_id: {
         label: "目前組織"
       },

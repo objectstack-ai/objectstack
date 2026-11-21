@@ -492,6 +492,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Motif de la révocation",
         help: "Pourquoi la session a été révoquée (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
+      sso_provider_id: {
+        label: "Fournisseur SSO",
+        help: "Le fournisseur SSO par lequel cette session a été ouverte, le cas échéant. Supprimer ce fournisseur met fin à la session. Géré par le système."
+      },
       active_organization_id: {
         label: "Organisation active"
       },

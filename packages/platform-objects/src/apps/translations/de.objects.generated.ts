@@ -492,6 +492,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Widerrufsgrund",
         help: "Warum die Sitzung widerrufen wurde (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
+      sso_provider_id: {
+        label: "SSO-Anbieter",
+        help: "Der SSO-Anbieter, über den diese Sitzung angemeldet wurde, falls vorhanden. Das Löschen dieses Anbieters beendet die Sitzung. Vom System verwaltet."
+      },
       active_organization_id: {
         label: "Aktive Organisation"
       },

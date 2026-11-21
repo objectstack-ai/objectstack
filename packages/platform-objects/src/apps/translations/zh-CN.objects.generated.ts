@@ -492,6 +492,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "撤销原因",
         help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
       },
+      sso_provider_id: {
+        label: "SSO 提供方",
+        help: "此会话登录时所经由的 SSO 提供方（如有）。删除该提供方会结束此会话。由系统管理。"
+      },
       active_organization_id: {
         label: "当前组织"
       },
