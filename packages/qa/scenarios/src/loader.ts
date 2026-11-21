@@ -36,6 +36,7 @@ import { basename, join } from 'node:path';
 
 import { ErrorCode } from '@objectstack/spec/api';
 
+import { checkAskKinds } from './ask-kinds.js';
 import { checkDatasets } from './datasets.js';
 import {
   AppCodeSchema,
@@ -1049,6 +1050,9 @@ function checkCard(
     return values.every((v) => v === null || typeof v === 'number') ? 'number' : 'other';
   };
   checkDatasets(card, seedField, new Set([...run.questions.map((q) => q.id), ...run.operations.map((o) => o.id)]), refuse);
+
+  // ── ask kinds: every kind a question declares fits what the card states (ask-kinds.ts) ──
+  checkAskKinds(card, personaTruths, refuse);
 
   // ── iterate: the delta is additive and lands in a consistent expect ──
   const delta = card.iterate.expectDelta;

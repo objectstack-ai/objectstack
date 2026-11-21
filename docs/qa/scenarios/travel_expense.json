@@ -874,6 +874,7 @@
       {
         "id": "paid_reimbursement",
         "ask": {"zh": "已付款报销单的报销金额合计是多少?", "en": "How much is the claimed amount for everything already paid?"},
+        "askKind": "count",
         "object": "expense_claim",
         "truth": {"kind": "sum", "field": "total_amount", "filter": [{"field": "status", "op": "eq", "value": "paid"}]},
         "personas": ["employee", "dept_manager"]
@@ -881,6 +882,7 @@
       {
         "id": "claims_by_status",
         "ask": {"zh": "各个状态的报销单数分别是多少?", "en": "What is the number of claims in each status?"},
+        "askKind": "group_sum",
         "object": "expense_claim",
         "truth": {"kind": "count", "groupBy": "status"},
         "personas": ["dept_manager"]
@@ -891,6 +893,7 @@
           "zh": "财务已批准或已付款的金额最多的三位报销人是谁?",
           "en": "Which three claimants account for the most money on finance-approved or paid claims?"
         },
+        "askKind": "top_n",
         "object": "expense_claim",
         "truth": {
           "kind": "topN",
@@ -904,6 +907,7 @@
       {
         "id": "claimed_last_month",
         "ask": {"zh": "上个月的报销金额合计是多少?", "en": "What do expense claims from last month add up to?"},
+        "askKind": "time_range",
         "object": "expense_claim",
         "truth": {
           "kind": "sum",
@@ -914,6 +918,7 @@
       {
         "id": "over_standard_by_department",
         "ask": {"zh": "每个部门各有多少条超标明细?", "en": "How many over-standard lines does each department have?"},
+        "askKind": "join",
         "object": "claim_line",
         "truth": {
           "kind": "count",
@@ -924,6 +929,7 @@
       {
         "id": "sales_paid_hotel",
         "ask": {"zh": "销售部已付款报销单里的住宿费合计多少?", "en": "How much hotel spend is on the Sales department's paid claims?"},
+        "askKind": "join",
         "object": "claim_line",
         "truth": {
           "kind": "sum",
@@ -938,6 +944,7 @@
       {
         "id": "trips_by_status",
         "ask": {"zh": "出差申请按状态各有多少?", "en": "How many trip requests are in each status?"},
+        "askKind": "group_sum",
         "object": "trip_request",
         "truth": {"kind": "count", "groupBy": "status"},
         "personas": ["employee", "finance_officer"]
@@ -945,6 +952,7 @@
       {
         "id": "ec_0093_waiting_on",
         "ask": {"zh": "报销单 EC-0093 现在卡在谁那里?", "en": "Who is claim EC-0093 waiting on right now?"},
+        "askKind": "owner_latest",
         "object": "approval_step",
         "truth": {
           "kind": "count",
@@ -955,6 +963,7 @@
       {
         "id": "department_budgets",
         "ask": {"zh": "各部门的差旅预算是多少?", "en": "What is each department's travel budget?"},
+        "askKind": "group_sum",
         "object": "department",
         "truth": {"kind": "sum", "field": "travel_budget", "groupBy": "name"},
         "personas": ["employee", "dept_manager"]
@@ -962,6 +971,7 @@
       {
         "id": "recoverable_vat",
         "ask": {"zh": "住宿明细里可以抵扣的进项税一共多少?", "en": "How much input VAT can be recovered on the hotel lines?"},
+        "askKind": "unanswerable",
         "object": "claim_line",
         "truth": {
           "kind": "unanswerable",
@@ -1165,11 +1175,11 @@
       }
     ],
     "datasetQuestions": [
-      {"id": "dq_expense_claims", "ask": {"zh": "我们的报销金额合计是多少?", "en": "What do our expense claims add up to in total?"}, "words": ["expense claims", "报销金额"], "expect": {"kind": "metric_selected", "dataset": "reimbursement", "measure": "claimed_amount"}},
-      {"id": "dq_trip_days", "ask": {"zh": "申请的出差天数一共多少?", "en": "How many trip days have been requested?"}, "words": ["trip days", "出差天数"], "expect": {"kind": "metric_selected", "dataset": "trip_plan", "measure": "trip_days"}},
-      {"id": "dq_travel_spend", "ask": {"zh": "我们的差旅花费一共多少?", "en": "What is our total travel spend?"}, "words": ["travel spend", "差旅花费"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "trip_plan", "measure": "estimated_spend"}, {"dataset": "reimbursement", "measure": "claimed_amount"}]}},
-      {"id": "dq_claimed_so_far", "ask": {"zh": "我们一共报销了多少?", "en": "What has been claimed so far?"}, "words": ["claimed", "报销"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "reimbursement", "measure": "claimed_amount"}]}},
-      {"id": "dq_employee_count", "ask": {"zh": "我们有多少名员工?", "en": "How many employees do we have?"}, "words": ["employees", "员工"], "expect": {"kind": "fallback_labelled", "object": "employee"}}
+      {"id": "dq_expense_claims", "ask": {"zh": "我们的报销金额合计是多少?", "en": "What do our expense claims add up to in total?"}, "askKind": "business_term", "words": ["expense claims", "报销金额"], "expect": {"kind": "metric_selected", "dataset": "reimbursement", "measure": "claimed_amount"}},
+      {"id": "dq_trip_days", "ask": {"zh": "申请的出差天数一共多少?", "en": "How many trip days have been requested?"}, "askKind": "business_term", "words": ["trip days", "出差天数"], "expect": {"kind": "metric_selected", "dataset": "trip_plan", "measure": "trip_days"}},
+      {"id": "dq_travel_spend", "ask": {"zh": "我们的差旅花费一共多少?", "en": "What is our total travel spend?"}, "askKind": "ambiguous", "words": ["travel spend", "差旅花费"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "trip_plan", "measure": "estimated_spend"}, {"dataset": "reimbursement", "measure": "claimed_amount"}]}},
+      {"id": "dq_claimed_so_far", "ask": {"zh": "我们一共报销了多少?", "en": "What has been claimed so far?"}, "askKind": "ambiguous", "words": ["claimed", "报销"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "reimbursement", "measure": "claimed_amount"}]}},
+      {"id": "dq_employee_count", "ask": {"zh": "我们有多少名员工?", "en": "How many employees do we have?"}, "askKind": "count", "words": ["employees", "员工"], "expect": {"kind": "fallback_labelled", "object": "employee"}}
     ]
   },
   "iterate": {
