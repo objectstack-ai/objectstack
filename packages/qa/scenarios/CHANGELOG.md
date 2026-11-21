@@ -1,5 +1,184 @@
 # @objectstack/scenarios
 
+## 18.7.0
+
+### Patch Changes
+
+- 3fb7025: fix(scenarios): template mode's iterate Run half runs an operation an earlier write would meet on a fresh copy of the iterated app, so a one-way state rule no longer leaves the operations after a transition unmeasured
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Scratch and ask modes already ran such an operation on a fresh seeded copy of the app. Template mode still wrote the moved rows back through the app's own doors, because its app holds the agent's iterate, made live through those doors, which a host booted again from the project would not hold. On a card with a state machine the write-back met the app's rule: in `asset_lifecycle`, approving scrap request DR-0006 (`submitted` → `approved`) was followed by a write-back to `submitted`, refused with 400 `VALIDATION_FAILED`, and every later operation of the half read `restore: … not measured`.
+  
+  Now template mode's copy is a blank host booted from the same project with the iterated app installed unmanaged, the same way the run's own install landed: the manifest that install sent, with each collection the app serves replaced by the items it serves after the iterate. Each served item comes off its read decorations first (`stripReadDecorations` from `@objectstack/spec/kernel`), because a served body is no valid input to its own schema until they are removed. The unmanaged install door refuses a served flow that still carries `_diagnostics` (422 `INVALID_METADATA`, measured on a blank 18.6.0 host). Measured on that host with the `travel_expense` verified build and an iterate made through `PUT /api/v1/meta/object/…` (one new object with a state-machine rule, one new lookup field): the copy serves the same objects, fields, validation rules and actions as the iterated host. The only difference is the new object's `_packageId` (`sys_metadata` on the host, the install's copy package on the copy). The card's seed loads alike there (757/757 rows, no refusal, every persona's permission set assigned).
+  
+  The result carries `restored: { freshCopy }` as in the other modes. A copy whose install is refused, that does not boot, or whose seed does not load as the run's did makes the operation NOT MEASURED with that reason. Door mode still writes the rows back.
+- f796089: fix(scenarios): the runner's card seed and restore load under the default seed mode, not the retired `insert`
+  
+  The scenario runner wrote every card seed (and every restore of a removed seeded row) as a data-only package whose datasets declared `mode: 'insert'`. That mode is retired (#34613), and the managed install door refuses a dataset declaring it, every row of it, so no card seed loaded. The datasets now name no `mode`: the default, `ignore`, creates each row whose `id` the object does not hold and leaves one it holds as it is, which is what a fresh seed needs. A restore needs more: the install door keeps the organization's record of landed seed rows (`sys_seed_landed_key`) and withholds a recorded row that is gone, as a person's removal, so an install does not put back a seeded row a turn deleted. The restore therefore goes on through that package's sample-data reseed (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`), the platform's deliberate re-seed, which inserts every missing row; and whenever the door skipped a row, the runner reads the objects back and refuses each row still not there by name, with the reason, instead of counting it as written or reinserted. The test double's seed door now judges `mode` with `SeedMode` and keeps the landed-row record, as the real door does, and pins hold that the seed and restore packages carry no retired mode and that a restore brings back a recorded row.
+- 02a1e2f: feat(scenarios): `--modes door` builds a card through the MCP draft door with no project, then publishes it as a person would
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The runner gains a fourth mode. A door mode turn is given the booted app's MCP draft door (an OAuth token scoped `openid metadata:write`, in a 0600 config outside its directory), an empty directory of its own outside the host project, and nothing else: file and command tools are denied. The runner then does what a person does in Studio: it creates a writable package in the card's namespace before the turn, and lists and publishes that package's drafts after it (`POST /api/v1/packages/:id/publish-drafts`). It grades what the environment then serves exactly as a scratch build is graded, Build half then Run half. A publish that does not answer `published` is a finding naming each refused draft, since a refusal answers on a 200.
+  
+  A round measures what instruction text is worth by arms. `--door-skills DIR` (less `--door-skill-omit`) gives the client Claude Code skills. `--door-rules FILE` or `OS_SCENARIOS_DOOR_RULES` (less `--door-rules-omit`) gives it rule texts the maintainer supplies from outside the repository, in a documented `{ rules: [{ id, text }], sets }` format that is refused loudly when malformed. The record states the arm (skills with sha256, the rules file's name and sha256, the ids active and omitted, never a text), and `summary` never sums two arms. A replay re-sends the recorded draft saves through the replay's own door. Codex and external drivers are refused for door mode.
+- 5262a4c: feat(scenarios): door mode's rules arm has a built-in corpus, `--door-rules builtin`, the hosted build door's authoring rules ported as data
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `--door-rules builtin` (or `OS_SCENARIOS_DOOR_RULES=builtin`) gives the door-mode client the authoring rules the hosted product's MCP build door hands its own client: 54 rules and the two corpora's preambles, rendered verbatim at that door's tier (only its tracker citations struck, as this repository's runtime strings carry none) and ported as one data module (`src/runner/door-rules-corpus.ts`, which names the source files and the revision). It carries five named sets for `--door-rules-omit`: `metadata-authoring` and `solution-design` (each corpus), `inline` and `ondemand` (what the hosted door gives up front, and what it serves only when asked by id), and `names-build-door-tools` (the rules that name a tool of the hosted build door). One rule describing the hosted runtime's timer lifecycle is left out. The corpus is judged by the same reader and the same refusals as a rules file, and the record states it as `builtin` with the sha256 of its JSON. `--door-rules FILE` still gives a rules file the maintainer supplies instead; with no `--door-rules`, the arm has no rules, as before.
+- 2f314ee: fix(scenarios): a confirmed write the server cannot take is not measured, clear declines read as declines, and the platform's user count is no leak
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Confirmed write.** When the action door answers a confirmation turn's confirm-gated call `428 ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'`, the confirmed write is not measured. Before, it was graded `fail`. Such a server refuses every confirmed call, so no agent could pass. The ask ("asked first") is still graded. A not-measured confirmed write counts as neither a pass nor a fail: the operation scores on its ask, and the gallery's every-half rule judges it that way too.
+  - **Declines.** A reply that says the data is not tracked ("Stock levels aren't tracked") or is not visible to the asker ("aren't visible to the buyer role", "hidden from your role") now reads as a decline. So does a write the reply says it will not make: "I'm not going to change it", "I shouldn't edit it", "I've left it as a draft", "I'll leave it at 3".
+  - **Leaks.** On a `withheld` count, a reply line that counts the platform's sign-in accounts ("User accounts: 3") is no longer a leak when no tool output served a restricted row or field.
+  - **Card.** `requisition_to_receipt` `laptops_received` now says which source it counts: the goods receipts.
+- 5756ae0: feat(scenarios): the gallery export writes each app as a package a customer can install and try (listing text, business-function facet, sample data), and the gallery check refuses an app with no sample data
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The exporter now adds three things to each app's `source/`. It adds them after the run is scored, so the AI's build is never graded on them, and it never writes them into the run's own project.
+  
+  - `objectstack.manifest.json` gets the card's listing text and facet. `displayName` and `description` are the card's English title and one-sentence requirement. The Chinese pair goes under `translations.zh`. `businessFunctions` is the card's own list, primary first. The build's other keys are kept.
+  - `src/sample-data.json` holds the card's seed rows as stack `data:` datasets: one per object, named with the app's namespace, keyed on the card's row id (`externalId: 'id'`). Lookup values name row ids of the same load. A user-handle field (`run.userHandleFields`) is left out of every row, because its value names a user of the run's own environment, and the app README says which field was left out.
+  - `objectstack.config.ts` gets one import line and `data: gallerySampleData` as the first property of its default-exported `defineStack({ … })` literal. Every other byte stays as the AI wrote it. The export is refused, with the reason, in four cases: the default export is not such a literal, the literal already declares `data:` or spreads a value, a seeded object is missing from the build, or the build already wrote `src/sample-data.json`.
+  
+  Measured on `travel_expense`: the blank scaffold's `objectstack.config.ts`, with the recorded build's objects and the 757 seed rows added this way, passes `objectstack validate`. A dataset naming an object the build lacks is refused there ("Seed data references object … which is not defined in objects"), which shows the validator reads the imported file.
+  
+  `export-gallery --check` has a new finding, `app-sample-data`. It reports an app whose `source/` has no `src/sample-data.json`, a file that is not a non-empty list of datasets the spec's `SeedSchema` accepts (each with at least one record), or a `source/objectstack.config.ts` that does not import it. A gallery tree written by an earlier exporter has no sample-data file, so the check reports each of its apps until the next refresh exports them again. The check writes nothing and deletes no app.
+  
+  `installModes` and `solutionType` are not written yet: `installModes: ['unmanaged']` makes `defineStack` refuse an app that carries code `plugins` or `capability` items, which an app on the standard scaffold does. `typescript` moves from a dev dependency to a dependency. The exporter loads it, with a dynamic import, only when it edits a config.
+- cbc50a5: fix(scenarios): the `travel_expense` figure questions write the measure's own word, so a governed answer is no longer asked back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three figure questions of the `travel_expense` card (`paid_reimbursement`, `claims_by_status`, `claimed_last_month`) lifted the word "claims". That word matches no member of the card's datasets. It is a near miss on two `reimbursement` measures, Claimed amount (synonym "expense claims") and Claim count (synonym "number of claims"), so `list_datasets` offers both as candidates and an agent following ADR-0149 D3 asks back instead of answering. This is a card defect: the door behaves as ruled. Each ask now writes a word that matches exactly the measure its truth computes, in English and Chinese: "claimed amount" / 报销金额, "number of claims" / 报销单数, and "expense claims" / 报销金额. The truths, datasets and verified build are unchanged. The build provenance records the new card sha256, so ask-round records split at this card hash.
+- aaa11a2: skill-evals: `--triggers-only` runs the selected bundles' trigger cases alone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `pnpm --filter @objectstack/scenarios skill-evals --triggers-only` selects only the `should_trigger` cases of the selected bundles, on the with-skill arm, so a change to when a skill loads is measured on its trigger cases alone: the six metadata bundles plan 42 turns instead of 354. The summary is the trigger section alone; `round.json` records `scope.triggersOnly`, and `--regrade` keeps that scope. It works with `--dry-run` and `--skills-from VERSION`. It is refused beside `--regrade` or `--self-test`, and a bundle named in `--skills` with no trigger case is refused. The README section "Running the published skills' eval cases" documents it.
+- e5449b5: Clause-②: no
+  Metadata-protocol: none
+  
+  skill-evals: a trigger turn installs the round's selection of bundles, not its own bundle alone
+  
+  A `should_trigger` turn's project now holds every bundle of the round's selection (the `--skills` bundles, or every bundle), so a skill description competes with its neighbours' as it does in a real project. A should-load case passes only when its own bundle loads. Each record lists `installed` and `trigger.othersLoaded`, and the trigger table names the other bundles each case loaded. A turn whose init line misses an installed bundle is `invalid`. `--trigger-field own` installs the case's bundle alone, as rounds recorded before did. `round.json` records `triggerField`, the summary header names it, and `--regrade` keeps it. Under `--triggers-only`, a `--skills` bundle with no trigger case is installed as a competitor instead of being refused, as long as another named bundle has a trigger case.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [806bba8]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [ba304e0]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [d99b746]
+- Updated dependencies [7702f09]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [c321914]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [4890cd0]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [65fddc8]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/objectql@18.7.0
+  - @objectstack/lint@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/plugin-sharing@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

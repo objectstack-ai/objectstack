@@ -1,5 +1,268 @@
 # @objectstack/plugin-security
 
+## 18.7.0
+
+### Minor Changes
+
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+
+### Patch Changes
+
+- 7a3f86c: fix: four refusals say what the author can act on — the clone control by its console label, an empty or short unknown key, and an unknown CLI command
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Nothing new is accepted or refused; only the words change.
+  
+  - **Packaged permission sets.** The `ITEM_LOCKED` save refusal and the `NOT_OVERRIDABLE` lock refusals sent the admin to a "Clone" action. Studio's Access pillar and Setup label that control "New similar" ("新建类似" in a Chinese session), so the diagnostic and both end-user messages, in every language they ship, now name it that way.
+  - **Unknown keys.** A refusal naming an empty key printed it as empty backticks; it now says "an empty key (`""`)" and offers no rename. On a key of five characters or fewer, a "Did you mean" rename is offered only when the declared key is one edit away, counting a swap of two adjacent letters as one: `lable` → `label` is still offered, while a removed `aria` is no longer answered with `areas`.
+  - **CLI.** `os <topic> <unknown>` and `os <unknown>` still exit 2 without running anything, and now name the command as typed (`command environments frobnicate not found`) and end with the help that lists the real ones (`See more help with \`os environments --help\``).
+- 93fa4f9: fix(i18n)!: a refusal names fields, options and objects in the declared `sourceLocale` as authored
+  
+  Clause-②: yes (narrowing) — `ValidationMessageContext.labelTranslation` is a new optional member (a widening), and `ValidationMessageContext.translate` no longer translates the labels a refusal names (a narrowing): a direct caller of `validateRecord`, `validateInsertValues` or `evaluateValidationRules` that passes `messages: { locale, objectName, translate }` now gets the declared labels until it also passes `labelTranslation`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md, evals
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/objectql/src/validation/record-validator.ts#ValidationMessageContext) the narrowed behaviour belongs to an input member of a runtime TypeScript interface, the messages option of the published validators; no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, and no key, value or default a metadata author can write changes, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `validateRecord`, `validateInsertValues` or `evaluateValidationRules` (`@objectstack/objectql`) that passes its own `messages`. Engine writes are not affected: the engine builds `labelTranslation` itself from the i18n service.
+  
+  The labels a write refusal names are now resolved the way `GET /meta` serves them: `translateObject` over the deployment's translations, with the request's locale, the declared fallback chain and the authored language (`i18n.sourceLocale`, else `defaultLocale`). They are no longer looked up through `II18nService.t()`. Before this, an app authored in English that defaults its users to Chinese (`sourceLocale: 'en'`, `defaultLocale: 'zh-CN'`) answered an `en` request with the Chinese row in its validation, duplicate-record, delete-restricted and restore refusals, and in the security layer's master-detail and field-write `userMessage`. `/meta` answered the same request with the English label.
+  
+  This covers a field label, a choice option label (field entry, then the shared picklist's), an object label, the master object named by the master-detail write gate and the fields named by the field-write gate. Message templates and authored rule messages still go through `t()`.
+  
+  What follows from it:
+  
+  - In the declared `sourceLocale`, a refusal names labels exactly as declared. In every other locale it follows the same chain `/meta` does.
+  - The labels come from `getLocales()` and `getTranslations()`. An i18n double that implements only `t()` no longer translates labels and leaves the declared ones in place, as `/meta` already did.
+  - On the in-memory i18n fallback (`@objectstack/core`), which reports no `getFallbackLocale()`, a request in a locale with no bundle now gets the declared label, as `/meta` does. Before, it got the default locale's row.
+  - A platform-injected system field (`owner_id`, `created_at`, …) that keeps its English default label is named by the built-in translation of that label, as `/meta` names it.
+  - The security layer's labels now negotiate the request locale the way `/meta` does, so a `zh-TW` request reads the `zh-CN` rows, in step with its `zh-CN` sentence.
+  
+  ## What a direct validator caller sees
+  
+  | `messages` passed to `validateRecord` / `validateInsertValues` / `evaluateValidationRules` | was | now |
+  |:---|:---|:---|
+  | `{ locale, objectName, translate }` | field, option and object labels translated through `translate` | declared labels in every locale; `translate` renders message templates only |
+  | `{ locale, objectName, translate, labelTranslation }` | not a member of the type | labels translated through `labelTranslation`, the way `GET /meta` serves them |
+  
+  What to do on upgrade: add `labelTranslation: () => ({ bundle, options })` to the `messages` you pass, where `bundle` is a `TranslationBundle` keyed by locale and `options` is a `ResolveOptions` (both from `@objectstack/spec/system`). The pair is typed `ValidationLabelTranslation`, now exported as a type from `@objectstack/objectql` and `@objectstack/objectql/core`. Nothing else changes: the call compiles as before, and no verdict, code or status moves.
+- c9b3f7a: feat(account): a Notification Settings page where each person chooses their own notification topics, channels, digest and quiet hours
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The Account app has a new **Notification Settings** page, under Inbox and only when the messaging service runs. It shows one row per notification topic and one column per channel. Each cell shows whether that notification reaches you on that channel, and where the answer comes from: your own setting, your organization's default, the built-in default, or a mandatory topic. Mandatory topics are always delivered and cannot be switched off. A channel the deployment cannot send on yet says so in its column header. Above the matrix you can set your digest and your quiet hours.
+  
+  - **The read: `GET /api/v1/messaging/me/preferences`.** This new door answers the signed-in person's *effective* preferences. The server computes them with the same resolver `emit` uses to filter (`PreferenceResolver.effectiveFor`), so the page shows what is actually sent and computes nothing itself. The door takes no parameters and answers only about the caller: there is no `user` parameter, and any parameter is refused `VALIDATION_ERROR` / `400`. It keeps the posture of `GET /api/v1/messaging/preference-options`:
+    - an anonymous caller gets `401`;
+    - a held sign-in gets `403`;
+    - a source it cannot read is `500` / `INTERNAL_ERROR`, never a partial or "everything on" answer.
+  
+    The door reads only what the answer needs: the caller's own rows and the organization's default rows, each by equality on `user_id` within the caller's organization. A read that comes back with more rows than its cap is a fault (`500`), never a page.
+  
+    The organization's defaults appear only as `source: 'default'` on the caller's own cells. No other person's row, and no row id except the caller's own, is ever answered.
+  - **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default`, the baseline set every signed-in person resolves (external members excepted), now carries a grant of read, create and edit on the object, with no delete. Two row policies come with it:
+    - `sys_notification_preference_self` binds every principal that holds the grant. Its row scope is `user_id == current_user.id`, and its write check is the same expression, so the row as written must still be your own.
+    - `sys_notification_preference_org_admin` widens organization owners and administrators back to every row of their organization. Its write check is `topic != null`, which holds on every row being created because `topic` is required with a default. If `topic` ever becomes optional, an administrator's create is refused, never widened.
+  
+    An ordinary member or a delegated administrator lists only their own rows. Their create with `user_id` omitted, empty or naming another person is refused `403` / `PERMISSION_DENIED`, as is moving their own row to another person or to the organization default.
+  - **Owners and administrators are unchanged.** They still list every row, create and edit the organization default, create and edit another person's row, and delete in the Setup grid.
+  - **App-authored grants are narrowed too.** `sys_notification_preference_self` carries no `positions` domain, so it binds every principal that holds a grant on this object, including through an app's own permission set. A role other than organization owner or administrator that an app grants this object reads and writes only its own rows, unless the app declares its own widening policy for that role.
+  
+  There is no "reset to the organization's default" button, because that needs a delete, which members are not granted. Changing your digest or quiet hours saves your own general setting, and the page says so beside the control. From then on, that setting applies in place of the organization's defaults to every topic and channel you have not set yourself.
+- 6ffa816: feat(security): an unmanaged install copies an app's capabilities, renamed with the copy
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An app that gates an action on its own capability can now install as an unmanaged copy (`installModes: ['unmanaged']`). Before, `capability` was code-only (`allowRuntimeCreate: false`), so the validator refused the mode for any app that declared one, and the install door had no channel to write the copy's capabilities.
+  
+  - **`capability` is runtime-creatable.** Its `DEFAULT_METADATA_TYPE_REGISTRY` entry is now `allowRuntimeCreate: true`, and overlays stay closed (`supportsOverlay: false`, `allowEnvironmentOverlay: false`). A body is judged by `CapabilityDeclarationSchema`, as before.
+  - **The save door refuses two names.**
+    - A platform capability's name (`manage_users`, `setup.access`, every name in `PLATFORM_CAPABILITIES`) answers `422 NAMESPACE_CONFLICT`. An environment item under that name would shadow the platform's definition, because the registry answers its bare slot first.
+    - A name an installed package's capability holds answers `422 NAMESPACE_CONFLICT`, naming the holder. A capability holds one name per deployment, the same rule permission sets and positions follow.
+  - **The environment catalog holds capabilities.** `ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES` is `['position', 'permission', 'capability']`. A package that ships a capability name the environment already authored is refused at boot, as a position or permission-set name is. `os migrate security-catalog-overlays`, the remedy that refusal names, lists and deletes such a capability row too (`capability` and `capabilities` spellings).
+  - **An unmanaged copy renames its capabilities.** When the copy takes a new namespace, a capability whose name starts with the source namespace (`<ns>.` or `<ns>_`) is renamed into the copy's namespace. Every reference is rewritten with it: a permission set's `systemPermissions` (list or per-operation map), an object's or action's `requiredPermissions`, and a quoted `current_user.hasCapability('<name>')` in a predicate. There the object-name rename never touches a name the package declares, so a capability named after a renamed object has one name in the copy; a token the package does not declare follows a renamed object as before. An unprefixed capability keeps its name. A renamed capability that collides with another package's capability refuses the install, naming both. Install again under another namespace.
+  - **Duplicating a package refuses a shared gate.** `duplicatePackage` keeps its source installed, so a capability it cannot rename (no source prefix, or a copy name the package already declares) is refused, and so is every copied item that grants, requires or tests for it, each at its own name in `failed[]`.
+  - **The `everyone` anchor excuses only a declaration that carries a package.** The check that refuses a high-privilege permission set bound to `everyone` excuses the tokens an app declared itself. It now counts only declarations bound to a package (`_packageId`), as ADR-0090 D5 rules: an app's shipped capabilities, an unmanaged copy's, and one saved into a writable package. A capability saved with no package excuses nothing. What bounds a saved declaration is the two refusals above: a platform capability is never excused, and a name a package declares cannot be declared again. A name nobody declares can be declared once, by a `manage_metadata` holder, inside a writable package.
+  - **The gate is unchanged.** It still matches capability names. The copy's action is gated on the copy's capability: a holder of the copy's permission set passes, and a holder of only the source's set does not.
+- 7411f9b: feat(spec, platform-objects): the standard unit table and the organization unit object `sys_unit` (ADR-0158 U1–U3)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Units of measure, first release (ADR-0158 U7 R1). Nothing reads these tables yet: the unit declaration on a `number` field, the write-time membership check and the display of a quantity with its unit ship with their own cards. No field key ships here.
+  
+  - **`@objectstack/spec`** (`@objectstack/spec/data`) exports `STANDARD_UNITS`, a closed table of 41 UN/ECE Recommendation 20 codes. Each code carries its dimension (`UNIT_DIMENSIONS`: `mass`, `length`, `area`, `volume`, `time`, `count`, `package`) and its ratio to the dimension's base unit (`UNIT_DIMENSION_BASE_CODES`: `KGM`, `MTR`, `MTK`, `MTQ`, `SEC`, `H87`), as an exact decimal string: `1 CODE = ratio × BASE`. Package codes (`XBX`, `XCT`, `XPX`, …) carry no ratio. The piece is `H87`; `C62` and `EA` are not members. `ORGANIZATION_UNIT_CODE_PATTERN` is the namespace of an organization's own codes (uppercase letters, digits and underscores, at least 4 characters or containing an underscore), which no standard code can match. `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` gains `sys_unit`. The table is not a value domain: `ValueDomainSchema` keeps its three members.
+  - **`@objectstack/platform-objects`** registers `sys_unit` (Setup → Configuration → Units of Measure), an organization's own units: `code`, `label`, `dimension`, `ratio` (scale 12; required on every dimension but `package`, refused on `package`), `decimal_places` (a display default) and `retired`. It is organization-owned behind the tenant wall and ships no rows. A code outside the organization namespace is refused, the code is unique within the organization, and the code and dimension cannot change after create. A unit is retired instead of deleted, and retiring cannot be undone, so a code is never created again with another meaning; the data API serves no delete on it. Every column carries field history.
+  - **`@objectstack/plugin-security`**: `member_default` reads `sys_unit`, so a unit's label displays to every member; organization administrators write it through their existing grant.
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_unit` as attributed to its organization.
+- 1c4db09: fix(plugin-security)!: a predicate update or delete now writes the rows a Modify All holder, a non-creator owner or an edit-share target can write by id, instead of stopping at the platform's creator-only floor
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is which rows one predicate update or delete by an organization member writes, and whether such a write is refused whole: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a predicate update or delete (`update(object, data, { where, multi: true })`, `delete(object, { where, multi: true })`) by an organization member, whose predicate now matches a row the member did not create because the record-sharing service answers `allow` for a write of that row by id (ownership at the member's write depth or Modify All, and, for an update, an `edit` share or the row sitting in a queue the member belongs to), when that row is refused: on an update, by a row-level `check`, a validation rule or a hook; on a delete, by a `beforeDelete` hook or a `restrict` relation. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no schema, key or stored value moves, so `Metadata-protocol` is `none`.
+  
+  - FROM: the write matched only the rows the member created. It answered success and changed those, and the other row was never judged.
+  - TO: that row is matched and judged too, and the write applies to all of its matched rows or to none. An update whose new image of that row fails a row-level `check` is refused whole with `PERMISSION_DENIED` / 403 and writes nothing. A validation rule or hook that refuses that row refuses the whole update too, with its own code, and a `readonlyWhen` lock on that row strips the field from the whole write. A delete is refused whole, and deletes nothing, when a `beforeDelete` hook or a `restrict` relation refuses that row, with that hook's or relation's own refusal. A write of that row by id is refused too, alone.
+  
+  The fix for a caller: write those rows by id to get an outcome per row, or narrow the predicate to the rows that are not refused.
+  
+  A predicate write (`update(object, data, { where, multi: true })`, `delete(object, { where, multi: true })`) by an organization member held the platform's own ownership floor (`owner_only_writes` / `owner_only_deletes` in `member_default`, `created_by == current_user.id`) as an unconditional condition, where record sharing enforces writes. Unless an app-authored write policy admitted a row, the write matched only the rows that member had created, even when the same user could update or delete the other matching rows one at a time by id. This affected a manager holding `modifyAllRecords` on the object, a row's owner who did not create it, and, for an update, the target of an `edit`-level record share or a member of the queue a row sits in. The write answered success and changed fewer rows than its predicate matched. A write by id lets the record-sharing service's `allow` verdict replace the floor.
+  
+  The predicate write now makes the by-id decision for each matched row the floor would refuse. Such a row is written when a write of that row by id would be, because the sharing service answers `allow` for it: ownership at the caller's write depth, Modify All, or, for an update only, an `edit` share or the row's queue. A row the service abstains on keeps the floor: on an object with no `owner_id`, on a delete under `public_read_write` (an update there has no floor to keep, because that OWD opens row updates), and on a `controlled_by_parent` detail unless an update's row sits in a queue the caller belongs to. A row it denies keeps the floor too. The row-level `check` on each updated row follows the same decision.
+  
+  The by-id decision costs one sharing verdict, a few store reads, for each matched row the floor does not already admit. Measured on SQLite in memory:
+  
+  - A member's predicate update matching 1,000 readable rows owned by other people, every verdict `deny`: 1,000 verdicts and 2,004 store reads, about 1.1 s, against 44 ms and 3 reads before.
+  - The same at 10,000 rows: 10,000 verdicts and 20,004 store reads, about 5.3 s, against 47 ms before.
+  - A Modify All holder at 10,000 rows: 10,000 verdicts and 10,003 store reads, about 1.8 s, and it now writes the 10,000 rows. Before, it took 47 ms and wrote none of them.
+  - Where an app-authored `using` policy for the write applies to the caller: 0 verdicts, because a row the floor refuses fails that policy too (10,000 matched rows the floor refuses, 45 ms).
+  
+  What does not change:
+  
+  - The rows a predicate write can reach are still only the rows its predicate matches that the caller can read. A predicate matching more than 10,000 of them is still refused before anything is written.
+  - The sharing service's own bulk write scope still bounds a predicate write: the owner set at the caller's depth, plus the edit shares (at most 5,000 of them) and the queue on an update. A row that only a read share and an app `update` policy together make writable is still written by id alone.
+  - An app-authored row-level policy still binds every row, and Modify All still does not bypass row-level security on an ordinary business object.
+  - An `edit` share still widens update and never delete.
+  - The tenant wall is unchanged.
+  - A write made on another user's behalf keeps the floor for both principals, as its by-id write does.
+  - A `controlled_by_parent` detail keeps the floor on a predicate write, except on an update of a row that sits in a queue the caller belongs to, which the sharing service answers `allow` for under any OWD. The master gate still judges the predicate write. Its by-id write is decided by the master gate instead of the floor, and that half is not changed here.
+  
+  A flow, script or server-side bulk update or delete that relied on a predicate write skipping the rows its caller did not create now changes those rows too, when the caller may write them by id, and is refused whole when one of them is refused. The fix is the one above.
+- 17ed9e7: fix(objectql): deleting an organization also deletes its units of measure, the one exemption from the `sys_unit` delete refusal
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization that had ever created a unit of measure could not be deleted: the delete was refused with 409 `DELETE_RESTRICTED` naming `sys_unit`, and the units could not be removed first, because the engine refuses every delete of a unit (405 `ERR_UNIT_DELETE_REFUSED`). Now the organization delete's own cascade removes that organization's `sys_unit` rows, retired ones included, through the engine's delete path, after the delete has been admitted, so no unit row is left naming a deleted organization. `organizationOwnedRowCounts` (the question plugin-auth's organization delete asks first) and the engine's own refusal no longer count units as records the organization still owns.
+  
+  **Declared behaviour change.** A delete door widens, in one place only. A delete of an organization that holds units and no other record now succeeds and removes the units; before, it was refused. An organization that owns any other record is still refused, and none of its units is removed. Every other delete of a unit is still refused with 405 `ERR_UNIT_DELETE_REFUSED`, by id and batched, for a user, a system writer and an automation run, including a delete issued by a hook while the organization's delete is running: the exemption is recognised from the engine's own cascade, never from anything a caller passes. Retire a unit (`retired: true`) to stop its use, as before.
+- 0a3dd40: feat: analytics compiles the `SharedRecordIds` fixed-read leaf, the access explainer resolves it at the record, and OData refuses it (ADR-0155, step 5 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **Analytics, the native SQL path** (`@objectstack/service-analytics`). A read scope carrying `{ id: { $in: SharedRecordIds.read(object, user) } }` compiles to one subquery in the list's own position, `id IN (SELECT "record_id" FROM "sys_record_share" WHERE "object_name" = ? AND "recipient_type" = ? AND "recipient_id" = ? AND "record_id" IS NOT NULL AND "record_id" <> '')`, with every value bound and no tenant scope on the subquery (ADR-0155 ① ruled A). The native strategy takes such a scope only when the host answers `AnalyticsServiceConfig.fixedReadLeafClassOf` with `null` for each leaf (outside both classes ADR-0155 D4 recognises: the object on another datasource than `sys_record_share`, or a middleware or `beforeFind` / `afterFind` hook registered for `sys_record_share` by name) and the dialect is SQLite, PostgreSQL, MySQL or SQL Server. Otherwise it declines, and the ObjectQL engine path answers. A host that wires no answer keeps today's behaviour: the native path declines every scope that carries the leaf. This change ships the hook unwired: `AnalyticsServicePlugin` passes no answer, so the native path declines a scope carrying the leaf and the engine path answers, until #35946 wires it.
+  - **Analytics, the ObjectQL path.** The read-scope merges (`withReadScope`, the related-object scope, the label read) admit a placed read-form leaf and hand it to the engine by reference. The dry-run SQL echo prints the subquery. A leaf in any other position, under `$nin`, on another object or in its write form is refused, `INTERNAL_ERROR` / 500, logged at `error` once per service logger.
+  - **Analytics, the query's `where`.** A leaf reaches analytics only in the read scope. A leaf anywhere in a query's `where`, in either spelling, is now refused before either strategy runs, with `INTERNAL_ERROR` / 500. The message names the leaf and its table, not the recipient. Before this release `{ id: { $in: leaf } }` there answered `INVALID_FILTER` / 400, with a message that printed the recipient. A bare `{ id: leaf }`, or an array-form `=`, was read as a relation condition on `id`. No request can spell the leaf, so only in-process code could reach this.
+  - **The access explainer** (`@objectstack/plugin-security`). `ISecurityService.explain` resolves each leaf in the sharing read filter at the record it judges, with one read of `sys_record_share` under the leaf's own predicate, keyed by the record ids (one read for a whole batch). The sharing layer's `rowFilter` then has the two shapes it has today: `{ id: { $in: [recordId] } }` in the share arm for a caller with a grant on the record, and the share arm left out for a caller without one. The published `rowFilter` never carries the leaf. A leaf it cannot resolve is refused, `INTERNAL_ERROR` / 500, logged at `error` once. That includes a leaf anywhere but `{ id: { $in: leaf } }` in the object's own filter, such as one inside a relation condition or a composed `ReadableIds` scope, as the engine and the analytics compiler refuse it.
+  - **OData** (`@objectstack/driver-odata`). `find` and `count` refuse a `where` carrying the leaf before any request is sent, `INTERNAL_ERROR` / 500. An OData `$filter` has no form of the subquery, and the driver declares no `fixedReadLeaves`. Before this release a direct `find` left the leaf's predicate out of the `$filter` it sent. The engine already refused the leaf before calling this driver.
+  - **The array form** (`@objectstack/spec`). `parseFilterAST` now refuses a leaf in the array form with `INTERNAL_ERROR` / 500 wherever it answered `INVALID_FILTER` / 400: as an `in` / `nin` comparand, as a member of an `in` / `nin` list, or as the comparand of a scalar operator (`!=`, `>` and the rest). The old messages printed the leaf's inputs, the recipient among them. The new message names the leaf and its table only. An unbranded copy that crossed JSON is still `INVALID_FILTER` / 400. An array-form `=` is passed on by reference and refused by the engine, as before.
+  - **New exports** (`@objectstack/objectql`). `fixedReadLeafClassOfEngine(engine, leaf)` answers which ADR-0155 D4 class, if any, keeps the engine from handing a leaf to a driver. `driverEvaluatesFixedReadLeaf` answers whether a driver declares the leaf. Neither reads or writes anything.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

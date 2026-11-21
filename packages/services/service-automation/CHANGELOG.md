@@ -1,5 +1,192 @@
 # @objectstack/service-automation
 
+## 18.7.0
+
+### Minor Changes
+
+- f4dbcc2: feat(lint): five publish-time checks for metadata that passes the schema and does nothing at run time, and four build probes over what landed
+  
+  Clause-②: no (narrowing: four publish-time refusals of metadata the schema accepts today)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #35245
+  
+  <!-- adr-0087: registered publish-refuses-metadata-the-runtime-ignores -->
+  
+  Five authoring rules join the registry the runtime publish gate and `objectstack validate` / `lint` / `compile` run. Each finding names its fix.
+  
+  - `flow-node-type-no-executor` (error): a flow node whose `type` no executor in this deployment runs fails every run with `NO_EXECUTOR`. Judged only against the automation engine's SEALED node-type vocabulary, which the publish gate reads from the new `AutomationEngine.getSealedNodeTypeVocabulary()` (it answers `undefined` until `sealNodeTypeVocabulary()` ran at `kernel:bootstrapped`). The CLI does not know which plugins a deployment loads, so it judges nothing here.
+  - `flow-approval-decision-unrouted` (error): an `approval` node whose decision out-edges are not labelled exactly `approve` and `reject` runs every out-edge for a decision no label claims, so the approving and the rejecting branch both run.
+  - `flow-http-timeout-missing` (warning): an `http` node with no positive `config.timeoutMs` and no positive node-level `timeoutMs` waits on a slow upstream for as long as the connection stays open; the engine arms no default timer. A `durable: true` node, which does not wait on the endpoint, is not reported. Like every warning, it makes `os validate --strict` exit 1.
+  - `state-machine-no-initial-states` (error): an active `state_machine` validation without `initialStates` (or with an empty list) lets a record be created already in any state. Add `initialStates`.
+  - `action-no-object-binding` (error): a standalone action that declares `locations` but no `objectName` binds to no object, so its button never renders. Set `objectName`, or write `locations: []` for a headless action.
+  
+  What was accepted before and is refused at publish now: a flow with an unrouted approval decision or a node type the deployment cannot run, a state machine without `initialStates`, a placed action with no object. The fix for each is in the finding.
+  
+  Four post-publish build probes report, as warnings on the publish receipt, what the person will see: `widget_empty_result` (a dashboard card whose real query reads only zeros), `rollup_never_computed` (a roll-up blank on all of the sampled parents that have children, judged inside one organization when the rows carry one), `seed_reference_unresolved` (a sample record the seed loader landed whose reference names no row in the organization that record belongs to, so the reference leads nowhere) and `flow_connector_action_unresolved` (a `connector_action` step naming a connector or action this environment does not serve). Each carries its sentence for the person in every platform locale. `RunBuildProbesOptions` gains `automation`, `packageId` and `seedLanded`; the publish passes the automation engine's connector lookups, the publishing package and its `seedApplied.landed` ids. `ProbeEngine` gains an optional `getSchema`, which names the column a row's organization is stamped in; the roll-up and seed probes judge each row inside that organization.
+  
+  New exports: `@objectstack/lint` adds `validateFlowNodeExecutors`, `validateInertObjectDeclarations`, `validateActionObjectBinding`, their finding types, and the rule ids `FLOW_NODE_TYPE_NO_EXECUTOR`, `FLOW_APPROVAL_DECISION_UNROUTED`, `FLOW_HTTP_TIMEOUT_MISSING`, `STATE_MACHINE_NO_INITIAL_STATES`, `ACTION_NO_OBJECT_BINDING`; `@objectstack/metadata-protocol` adds the `ProbeAutomation` and `SeedLandedRows` types; `@objectstack/service-automation` adds `AutomationEngine.getSealedNodeTypeVocabulary()`. `@objectstack/spec` changes only descriptions: those of `RuntimeBuildIssueSchema`, and that of a state machine validation's `initialStates`.
+
+### Patch Changes
+
+- 8f49499: fix(approvals): a recall or subflow-parent strand reports the hook refusal that stranded the run
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  When an approval decision strands its flow run because the next step was refused (a record hook's declared refusal, a validation rule, a permission), the thrown `RESUME_FAILED` already carries `innerRefusal` and the refusal's marked `userMessage`. Two doors report a stranded run on a success answer instead, through `resumeFailure`: the recall door, whose own resume stranded, and a subflow parent that stranded after the run this door resumed advanced (through `decide` and through `recall`). Those reports carried `code`, `runId`, `status` and `repairable` only, so the approver saw a stranded run with no reason.
+  
+  - `ResumeFailureReport` (`@objectstack/spec/contracts`) gains two optional members, `innerRefusal` (`{ code, message }`, the engine's `AutomationResult.innerRefusal`) and `userMessage` (the declared sentence in the language of whoever started the run, since a resumed leg keeps the starter's locale; the authored message when no person started the run). The names and shapes are the ones the thrown `RESUME_FAILED` uses. `innerRefusal` is absent when the strand met no refusal (a fault), and `userMessage` is absent unless the failure carried a marked end-user text, so it can ride alone; neither changes how `code` and `repairable` are read. `ResumeFailureDetailsSchema` is unchanged. On the resume door these members already ride the error envelope.
+  - `AutomationEngine.takeSubflowParentStrand` now returns the stranded parent's `innerRefusal` / `userMessage` beside `runId`, `repairable` and `error`, read from the parent's own result.
+  - The approvals recall door and the subflow-parent strand fill both members whenever the strand met a refusal, read the way the thrown `RESUME_FAILED` reads them: an `innerRefusal` whose `code` is outside the registered error codes or whose `message` is not a string, and a blank or non-string `userMessage`, are dropped, so a node that returns a malformed pair answers the same on the success channel as on the thrown one.
+  
+  No migration: the change only adds optional members, and a caller that ignores them reads exactly what it read before.
+- 806bba8: fix(lint, service-automation): the date-text refusal on a flow value envelope names the rewrite for a record-triggered flow that a parent also starts
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow with its own record trigger or time-relative sweep gets the date-text check on its value envelopes (`update_record` / `create_record` `fields.*`, `assignment` values). Example: `timestamp(record.borrow_date)` over a `date` field. The check is refused at `os validate` / `os build` and at `registerFlow`. It stays refused when another flow also starts the same flow through a `subflow` or `map` node, because the flow's own trigger hands it a row of the typed object on every run it starts. The set of refused flows does not change.
+  
+  The refusal now also says how to share the steps with such a parent. Move the shared steps into a child flow with no trigger of its own, which is judged untyped because its `record` is whatever each caller hands it. Then start that child from both flows. Both doors append the same sentence after the verdict's own fix. The stored pass of `os migrate meta --stored` lists that sentence too.
+- 3ce6b65: fix(service-automation): the "invalid expression" registration refusal names the template-braces rule only when a refusal it lists is a brace refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Registering a flow whose only refused expression is not about braces — the date-text verdict on `timestamp(record.borrow_date)` over a date field, an unknown function, a `{{ }}` hole over a `$` name the engine does not bind — used to open with the ADR-0032 §1a braces sentence ("Predicates … must not wrap references in `{…}` template braces …"), telling the author about a mistake they did not make. That refusal now opens with a neutral count, `Flow 'X' has N invalid expression(s); each is refused for the reason given with it, and the flow does not register until every one is fixed:`. The braces sentence, unchanged, still heads any list that holds a brace refusal: a `{…}` brace in a CEL slot, a single-brace token in a text slot, a retired `{…}` token in a value slot, or an envelope naming the wrong dialect for its slot.
+  
+  Which flows are refused, and every refusal line listed under the header, are unchanged.
+- Updated dependencies [b02484e]
+- Updated dependencies [c6558d0]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [22af9e6]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [5f18b9b]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [2d33205]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [35c6331]
+- Updated dependencies [de395b4]
+- Updated dependencies [fe3ebc8]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9e65474]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [b863d2b]
+- Updated dependencies [ee40658]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [78fd762]
+- Updated dependencies [a35187e]
+- Updated dependencies [c321914]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [819c067]
+- Updated dependencies [4890cd0]
+- Updated dependencies [c9aad65]
+- Updated dependencies [53c9575]
+- Updated dependencies [7eaa3f5]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [986a0f2]
+- Updated dependencies [c99156e]
+- Updated dependencies [c6b07c2]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [cf7e443]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [92ab056]
+- Updated dependencies [b3247dd]
+- Updated dependencies [97f3420]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [6927c3f]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [1e692d1]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/metadata-protocol@18.7.0
+  - @objectstack/objectql@18.7.0
+  - @objectstack/plugin-auth@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

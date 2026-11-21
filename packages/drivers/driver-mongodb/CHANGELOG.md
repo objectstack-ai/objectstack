@@ -1,5 +1,96 @@
 # @objectstack/driver-mongodb
 
+## 18.7.0
+
+### Patch Changes
+
+- 895dd43: fix(driver-mongodb): refuse a non-UTC date-bucket timezone on a direct `aggregate()` call instead of answering UTC buckets
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is one runtime answer of MongoDBDriver.aggregate() to a direct caller: a non-UTC timezone with a date bucket is refused instead of answered with UTC buckets. No stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a direct `MongoDBDriver.aggregate()` call that carries a non-UTC `timezone` with a `dateGranularity` group-by item: it used to answer UTC buckets and now answers `NOT_IMPLEMENTED` / 501. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no metadata author writes a driver query, so `Metadata-protocol` is `none`, and the engine path never sends this driver a zone.
+  
+  `MongoDBDriver.aggregate()` now refuses a query that carries a non-UTC `timezone` (`DriverAggregateQuery.timezone`) together with a `dateGranularity` group-by item, answering `NOT_IMPLEMENTED` / 501 before anything is sent to the server. It used to ignore the zone and return UTC calendar buckets with no word. This driver does not declare `supports.zonedDateBucketing`, so `engine.aggregate` never sends it a zone and buckets such a query in memory; only a caller that goes around the engine is affected. No `timezone`, or `UTC`, buckets in UTC as before, and a `timezone` on a query with no date bucket is still ignored.
+  
+  Fix for a direct caller: route the query through `engine.aggregate`, or drop the `timezone` and accept UTC buckets.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

@@ -1,5 +1,101 @@
 # @object-ui/auth
 
+## 18.7.0
+
+### Patch Changes
+
+- ca4ec2a: fix(auth): a "Sign in with SSO" request that never answers gives the sign-in page back after 20 seconds
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the login page, when the request behind "Sign in with SSO" got no answer, the button kept spinning and the email field stayed locked until the page was reloaded. The request now runs under the same 20-second limit as the identity-provider buttons: once it passes, the request is cancelled, the page says the sign-in timed out, and the email field and the button can be used again to retry. An answering request still sends the browser to the identity provider as before.
+- 7bd5d28: feat(auth): `directSignIn.afterSignOut` lets an explicit sign-out return through the identity provider's sign-in page
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A deployment with direct sign-in on can now choose where an explicit sign-out returns once the identity provider has ended its own session. The default keeps today's behaviour, so nothing changes until a deployment sets the new value.
+  
+  - The auth plugin's `directSignIn` option takes `afterSignOut: 'hold' | 'identity-provider'`, and the environment variable `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT` wins over it, like the other direct sign-in settings. `hold` is the default. Any other value refuses to boot, naming the variable and both values.
+  - `GET /api/v1/auth/config` serves `features.afterSignOut` while the direct sign-in setting is on, on the same terms as `features.localSignIn`, and leaves it out otherwise. `AuthFeaturesConfigSchema` in `@objectstack/spec` gains the optional `afterSignOut` enum, and `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` gains `'afterSignOut'`.
+  - `hold`: the Console's sign-out sends the sign-in page as the provider's return address, and the page holds with a button to sign in again, as before.
+  - `identity-provider`: while `features.directSignIn` reads `true`, the Console's sign-out sends `{basePath}/sign-in/direct` instead, so after the provider's logout the browser goes through the direct sign-in door to the provider's own sign-in page. The door starts a fresh sign-in without the browser's cookies, and the provider has just ended its session, so it asks for credentials; it does not loop. Register the door's absolute address as a post-logout redirect URI at the provider.
+  - `@object-ui/auth`: `AuthPublicConfig.features` gains the optional `afterSignOut`. When the tab holds no auth config at sign-out, the client reads it once (3 seconds at most) and keeps the sign-in page if it cannot.
+  - Module exports on the `@objectstack/plugin-auth` entry: the type `DirectSignInAfterSignOut`. In `direct-sign-in.ts` (not on the package entry): `DIRECT_SIGN_IN_AFTER_SIGN_OUT`, and `DIRECT_SIGN_IN_ENV.afterSignOut`.
+- e25ca63: fix(console, auth): a cold console load sends `me/localization` once, and asks for the cookie session at parse time
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a device's first visit the console sent `GET /api/v1/auth/me/localization` twice. The language seed asked before the app mounted. The localization provider asked again after its own mount, because the seed's request had already settled and requests are shared only while they are in flight. The provider's boot read now takes the seed's answer to the same request once, but only when it was an authenticated answer about the browser's current owner. A re-read after a write to the user's own row still asks the server, and so does any later mount.
+  
+  With no stored Bearer (a cookie session), `get-session` was asked by `AuthProvider` only after React mounted. That mount waits on the seed's bounded race, so the session check waited for the language read. `index.html`'s parse-time session check now asks the cookie session's question too, without an `Authorization` header. `preflightAuth()` hands the answer to `AuthProvider` through the existing slot with a null token. A signed-out answer is handed on as well: a body naming no user, or the server's 401 `UNAUTHENTICATED`. A signed-out visitor therefore still sends one `get-session`. `AuthProvider` takes a null-token answer only while no token is stored. A protected route still waits for the session answer, and the seed's race and the language applied before first paint are unchanged.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

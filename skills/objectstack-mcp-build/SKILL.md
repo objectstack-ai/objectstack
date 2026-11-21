@@ -15,7 +15,7 @@ license: Apache-2.0
 compatibility: Requires an environment whose @objectstack/runtime 18.x serves the MCP draft door (none through 18.6.0 does), on a connection granted metadata:write
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "18.7.0"
   domain: process
   tags: mcp, build, draft, save_metadata_draft, verdict, studio, no-project, 草稿
 ---

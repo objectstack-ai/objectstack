@@ -1,5 +1,195 @@
 # @object-ui/plugin-chatbot
 
+## 18.7.0
+
+### Patch Changes
+
+- c3fb37a: fix(plugin-chatbot): a file over the chat composer's size limit is named to the user with the limit, instead of only reaching `console.warn`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The two widenings are additive: the new key `chatbot.composer.fileTooLarge` in every locale pack `@object-ui/i18n` publishes through `./locales`, and the optional `files` field on the `onError` argument of `PromptInputProps`, exported as `AIElements` from `@object-ui/plugin-chatbot`.
+  
+  A file picked, pasted or dropped into the chat composer that is larger than `maxFileSize` (10 MB by default) used to vanish: it did not attach and nothing told the user why. `ChatbotEnhanced` now shows a notice above the composer naming every refused file and the limit, in the user's language (new pack key `chatbot.composer.fileTooLarge`, in all eleven locales). The notice closes with its close button or on the next send, and a later refusal replaces it.
+  
+  The vendored `PromptInput` now reports every over-size file of a pick through `onError` with `code: 'max_file_size'` and the refused files in the new optional `files` field. Before, it reported only a pick where every file was over the limit; a pick that mixed sizes attached the small files and dropped the large ones with no report. An `onError` handler that ignores `files` sees one more call, for a mixed pick, with the same `code`.
+- 16d3abc: fix(plugin-chatbot): the chat composer's accept list reads the HTML `accept` grammar, so a picked CSV, PDF or spreadsheet attaches, and a file of a refused type is named to the user
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The vendored `PromptInput` compared every `accept` token with the file's MIME type, so the extension tokens of `ChatbotEnhanced`'s default list (`.pdf`, `.csv`, `.xlsx`, …) never matched: a picked CSV or PDF did not attach, and the refusal reached only `console.warn`. A token is now read the way the file picker reads it: `.ext` matches the end of the file name, `type/*` matches the MIME prefix, any other token matches the MIME type exactly, all case-insensitive.
+  
+  A file that still fails is shown to the user: `ChatbotEnhanced` names it, with the accepted list, in the same notice above the composer that names an over-size file, in the user's language (the existing pack sentence `fields.file.typeNotAccepted`; no new key). When one pick refuses files for type and for size, the notice names both.
+  
+  `PromptInput` now reports every type-refused file of a pick through `onError` with `code: 'accept'` and the refused files in `files`. Before, it reported only a pick where every file was refused, without `files`; a pick that mixed types attached the matching files and dropped the rest with no report. An `onError` handler that ignores `files` sees one more call, for a mixed pick, with the same `code`.
+- 83a79e6: fix(app-shell, plugin-chatbot): the AI panel in an app has one title row, and its composer reads cleanly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console's AI drawer title bar is one row: History, a 「···」 menu and a 「×」 Close. The menu holds the AI usage reading (with its upgrade or top-up entry when the pool runs low), Share, Expand / Restore side panel, and the Build Doctor. The Build Doctor is listed only for a user who may build (`manage_metadata`, the reading that already decides who gets the build composer). While the usage pool is running low or full, the 「···」 trigger carries a marker. The close button is the drawer 「×」, named Close, in both the side panel and the full window; closing still keeps the conversation for the next open. The phone sheet gets the same menu, without Expand.
+  
+  The pane row under the title keeps the agent label and the app chip, but no longer draws Share or the Build Doctor in the drawer. `ChatPane` gains `actionsInHost` for a host that offers them itself. The full-page chat and the Studio copilot are unchanged.
+  
+  In the composer:
+  
+  - the 「正在看」 chip sits on the input's top edge, inside its frame;
+  - the closed model picker shows the model's label alone, truncated, with the full label on its title (no provider, no `×N`). The list rows keep both;
+  - the 「↵ 发送 · Shift+↵ 换行」 hint stays on one line;
+  - the 「+」 attachment button and its menu item are named "Add attachment" (「添加附件」).
+  
+  An answer table's copy and download tools are named in the reader's language (「复制表格」, 「下载表格」 and their format variants) instead of streamdown's English defaults.
+  
+  New locale keys, in every pack: `console.ai.dock.close`, `console.ai.dock.more`, `chatbot.composer.addAttachment`, `chatbot.answer.copyTable`, `copyTableAsMarkdown`, `copyTableAsCsv`, `copyTableAsTsv`, `downloadTable`, `downloadTableAsCsv`, `downloadTableAsMarkdown`. The drawer no longer reads `console.ai.dock.collapse`.
+- 94fb8db: fix(plugin-chatbot): the AI approvals inbox is usable on a phone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  At phone width the AI approvals inbox drew its desktop table, whose fixed columns are far wider than the screen: Approve, Reject and View sat off-screen in a sideways scroller, and the first thing a row said was the internal tool name. Below the `md` breakpoint each pending action is now a stacked card that leads with the action, shows the object, the tool name and the time as its second line, and keeps Approve, Reject and View inside the card on 44 px buttons that wrap. From `md` up the table is unchanged.
+  
+  The detail drawer takes the full width below `sm` (it was three quarters of the screen, and its Reject button ran past the right edge at 390 px), its decision buttons wrap instead of overflowing, and a long action or tool name in its title wraps instead of pushing the drawer sideways. From `sm` up it keeps its 560 px cap.
+  
+  No props, exports or locale keys change; the component needs nothing from its host for this.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [9f352e8]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [3819afe]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [9212119]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [227a16a]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [f51578e]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9a98a46]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [eb53d63]
+- Updated dependencies [a23164e]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/i18n@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @object-ui/components@18.7.0
+  - @object-ui/react@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

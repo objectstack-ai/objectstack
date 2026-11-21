@@ -1,5 +1,142 @@
 # @objectstack/formula
 
+## 18.7.0
+
+### Minor Changes
+
+- c809deb: fix(formula)!: a flow condition that hands `timestamp()` a date field through `record.FIELD` or `previous.FIELD` is now refused, as the bare field name already was
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-formula/SKILL.md` already states the `date-text-call` rule (a `date` / `datetime` field handed to a timestamp-only call, and `timestamp()` over a `date` field) with `record.FIELD` spellings and names no site it is limited to, so it now holds for a flow condition's root reads as written
+  
+  <!-- adr-0087: not-required (already-registered formula-timestamp-date-only-refused, formula-date-text-call-refused, formula-date-subtraction-refused) The three semantic entries already carry these verdicts, their codes and their rewrites to the upgrade guide, and each entry's surface already names flow conditions among the CEL predicates judged with the object's field types, with record.FIELD spellings as its examples. This change makes that text true for a flow condition that reads the field through record or previous, where only the bare field name was judged before; the verdicts, codes, rewrites and acceptance criteria are the entries' own. No id is added, no key is added, removed or re-shaped, and nothing an author wrote is rewritten. -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. In a flow condition (a start, edge or `decision` branch condition) the run binds the record's fields under their bare names and also as `record`, with the row before the write as `previous`. The date-text checks judged only the bare name. `timestamp(borrow_date) < now()` over a `date` field was refused, but `timestamp(record.borrow_date) < now()` passed `os validate` and the publish door. The flow then failed on every run, because a date field reaches the run as its `YYYY-MM-DD` text, which `timestamp()` does not parse.
+  
+  - **The verdicts.** A `record.FIELD` / `previous.FIELD` read in a flow condition now gets the date-text checks its bare name gets, with the same code and outcome arm (`date-text-call-run-fails` / `date-text-arithmetic-run-fails` on a record-triggered flow or a sweep of the typed object, `-run-may-fail` elsewhere). The message names the read as written and prescribes `date(record.FIELD)`, or `isoDate(addDays(record.FIELD, N))` to shift by whole days. This covers the calls the text cannot take (`timestamp(record.FIELD)` over a `date` field, `isoDate(record.FIELD)` over a `date` or `datetime` field) and arithmetic on the text (`record.end_date - record.start_date`).
+  - **Where.** `os validate` / `os build` (`validateStackExpressions`) report an `error`, and the flow publish door refuses the publish with `INVALID_METADATA` (422). `registerFlow` logs it as an advisory, as it does for the bare name, and still registers the flow, so a stored flow keeps running until it is next published.
+  - **Not refused.** `timestamp()` over a `datetime` field. A shape the Timestamp typing already faults on (`record.due_date + 1`), which is another verdict's. An `input.FIELD` read. The run-time evaluator is unchanged.
+  
+  ## FROM → TO
+  
+  | FROM | TO |
+  |:---|:---|
+  | `timestamp(record.borrow_date) < now()` | `date(record.borrow_date) < now()` |
+  | `timestamp(previous.borrow_date) < now()` | `date(previous.borrow_date) < now()` |
+  | `isoDate(record.picked_up_at) == '2026-11-16'` | `isoDate(date(record.picked_up_at)) == '2026-11-16'` |
+  
+  One-line fix: in a flow condition, parse a date field with `date(record.FIELD)` before comparing it with a timestamp, never `timestamp(record.FIELD)`.
+
+### Patch Changes
+
+- 8b550f8: fix(formula): a flow value envelope's date-text refusal says the run fails when the value is computed, not when a condition runs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow value envelope (an `assignment` value, or a `create_record` / `update_record` `fields.*` value) that hands a `date` field's text to a call it cannot take (`timestamp(record.borrow_date)`) or does arithmetic on it (`record.due_date - record.borrow_date`) is refused by `os validate` and by `registerFlow`. The refusal reused the flow-condition sentence: "this faults wherever `record.borrow_date` holds that text when the condition runs, and a flow condition that cannot be evaluated fails the run: the flow stops at this condition …". A value slot has no condition. It now reads "… when the value is computed, and a flow value that cannot be computed fails the run: the flow stops at this step and the work the flow exists to do is not done (it does not read null)."
+  
+  - **Two codes join `ExpressionRefusalCode`** (`EXPRESSION_REFUSAL_CODES`), with the params of the code each splits from: `date-text-call-value-run-may-fail` (params of `date-text-call`) and `date-text-arithmetic-value-run-may-fail` (params of `date-text-arithmetic`). `validateExpression` serves them where `ExprSchemaHint.flowValueEnvelope` is set, in place of `date-text-call-run-may-fail` / `date-text-arithmetic-run-may-fail`. A consumer keyed to the old codes on a value envelope re-keys to the new ones.
+  - **Unchanged:** the same sources are refused, at the same grade (an error), at the same location, with the same leading value-envelope sentence and the same fix hint. A flow condition keeps `date-text-call-run-may-fail` / `date-text-arithmetic-run-may-fail` and `-run-fails`, byte for byte.
+- ed906d5: feat: the working-calendar service, its arithmetic and its refusal codes (ADR-0157, part one of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Not released alone; pair #35641/#35642. This ships in the same release as #35642 (the calendar objects and Setup pages, the second half of this change), the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **The arithmetic** (`@objectstack/formula`). `isWorkingTime`, `addWorkingDays`, `workingDaysBetween` and `addWorkingHours` compute over a resolved calendar and its dated exceptions, as pure functions a formula can call synchronously, beside `parseWorkPeriods` (`HH:mm-HH:mm` periods; a period that crosses midnight is refused, `24:00` is a legal end), `buildWorkCalendar` (a frozen calendar) and the three error classes. A computation that needs a date outside the calendar's maintained span is refused rather than read from the weekly pattern.
+  - **The types, constants and time-zone rule** (`@objectstack/spec`). `WorkCalendar` and the column and code constants are in `@objectstack/spec/data`; the service contract is `IWorkCalendarService` in `@objectstack/spec/contracts`. `zonedWallClockToUtcMs`, `wallClockToUtcMs` and `WallClockParts` move to `@objectstack/spec/data` from `@objectstack/core`, unchanged; `@objectstack/core` re-exports all three, so no import changes.
+  - **Three error codes** in the ADR-0112 ledger: `ERR_WORK_CALENDAR_UNRESOLVED` (no calendar by that code, no organization default, two defaults, or no organization named outside the `single` posture), `ERR_WORK_CALENDAR_NOT_MAINTAINED` and `ERR_WORK_CALENDAR_INVALID`, each a 400.
+  - **The calendar service** (`@objectstack/objectql`, registered as `work-calendar`). `resolve({ organizationId, calendar })` takes the named code, else the organization default, else refuses; it never falls back to wall-clock time. It reads in the organization the caller names, elevated, and caches until a calendar or exception row is written. Outside the `single` tenancy posture, a computation that names no organization is refused before any read. Until the calendar objects are registered it refuses every resolution.
+  - **The write door** (`@objectstack/objectql`). Once the calendar objects exist, a calendar or exception write is refused `400 VALIDATION_FAILED` when a period crosses midnight, is malformed or overlaps another, an `off` row carries periods or an `on` row carries none, `maintained_through` is before `maintained_from`, a second calendar is marked the default, or a calendar created in an organization other than the one being worked in is marked the default (create it there, or set the default by an update); a calendar created without `timezone` takes the organization's Localization time zone. The hooks take the organization from the session.
+- 401eb44: fix(app-shell): Studio's formula inspector asks whether the formula still computes money before it keeps a `currency` result type
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When an author edited a formula field in Studio, the inspector re-stamped `returnType` from the expression's inferred CEL type, and kept a declared `currency` under every `number` or unproven verdict, because that type never says "money". So a formula edited from an amount (`record.amount * 0.1`) into a count (`record.est_hours * 2`) kept `returnType: 'currency'` and its `currencyConfig`, and its value was still shown as an amount.
+  
+  The stamp now also asks `@objectstack/formula`'s `inferFormulaReturn`, over the object's declared fields, whether the edited expression computes money:
+  
+  - Provably money: `returnType` is stamped `currency`, with the currency the source amounts are in as the formula's `currencyConfig` (absent for the tenant default currency). This holds for a formula that was `number` too.
+  - An edit it answers `number` for withdraws a declared `currency`: `returnType` becomes `number` and the `currencyConfig` is removed.
+  - An unproven verdict (a field-over-field quotient, two currencies meeting) keeps a declared `currency`, as before, and so does an engine that does not offer `inferFormulaReturn`.
+  - A declared `percent` is unchanged: it survives a `number`, unproven or money verdict, and is never re-stamped `currency`. A verdict that proves `text`, `boolean` or `date` still stamps, and now also removes a stale `currencyConfig`.
+  
+  `@objectstack/formula`'s `inferFormulaReturn` now answers `{}` (unproven) where it used to answer `{ returnType: 'number' }` on the numeric path, unless the unit proof succeeds or every read of the record (`record.x`, `record['x']`, `record.?x`, `record[?'x']`, or a bare `x`) is one segment naming a declared field whose unit can be read and is not money. FROM `inferFormulaReturn('record.rollup * 0.9', fields)` → `{ returnType: 'number' }` TO → `{}`. The same holds for `100 / record.amount`, `record.amount % 3`, `record.amount * 1.0 + record.fee_eur * 1.0` (two currencies), `double(record.amount) * double(record.tax)`, an amount whose `currencyConfig` does not parse, a hop through a reference (`record.account.balance * 0.9`), a formula operand that declares no `returnType` (`record.subtotal * 0.2`), the indexed and optional spellings of an amount (`record['amount'] * 0.1`), and a name the field map does not declare (`record.unknown_field * 2`). A call with no field map therefore answers `{}` for any numeric expression that reads the record (`inferFormulaReturn('record.amount * 0.1')` was `number`). So a `number` answer means "proved not money", and only that answer withdraws a declared `currency`.
+  
+  What still answers `number` is an expression over declared fields of readable non-money units: number, percent and other plain fields, a formula declaring a non-`currency` `returnType`, and a `count` roll-up whose `summaryOperations` is passed. A bare ratio of two amounts in one currency (`record.amount / record.tax`) types `dyn` and answers `{}`, as before. A caller that read the old `number` for these shapes should read the expression's CEL type (`inferExpressionType`) instead. In Studio, a new formula over such an amount is still stamped `number` from that CEL type.
+  
+  Widened: the published `FormulaSourceField` type gains one optional member, `summaryOperations` (a `summary` field's roll-up, as declared). A `count` roll-up is read as a plain number only when it is passed. A roll-up passed without `summaryOperations`, a `count` included, is read as possibly money, so an expression over it answers `{}`.
+  
+  The stamp still runs only after the author edits the expression; selecting a field writes nothing. The `returnType` description in `@objectstack/spec` now says the same: `currency` is stamped when the expression provably computes money and withdrawn for `number` when an edit leaves it a plain number, and a declared `percent` is kept under a money verdict.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

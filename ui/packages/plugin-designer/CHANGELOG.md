@@ -1,5 +1,178 @@
 # @object-ui/plugin-designer
 
+## 18.7.0
+
+### Patch Changes
+
+- b2d4355: fix(app-shell, plugin-designer, console): app writes send the app as its author stored it, not as the console's locale serves it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The served app list is translated for the reader's locale, and the metadata save door stores a body verbatim. Four writers seeded a whole-app save from that served list: the Edit app wizard, App management's Disable / Enable / Set default and bulk toggles, the navigation sync that adds or removes an entry when a page, dashboard, report or object is created or deleted, and the Publish button on an unpublished app. In a zh-CN session each of them stored the app's label and every navigation label in Chinese, and readers in every other locale were then served Chinese. Each writer now reads the stored app from the untranslated layers through the new `ObjectStackAdapter.getAuthoredItem(type, name, { packageId })`, and changes only the keys its control owns. The served list is still used to find the app. When the stored app cannot be read, the writer refuses with an error and saves nothing; the Edit app page shows the read error instead of opening the wizard.
+- 17ceb2d: fix(plugin-designer): the app wizard decides a generated navigation entry's plural label from the object as authored, not as the console's locale serves it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When the Create app or Edit app wizard leaves the Objects step, it generates one navigation entry for each newly selected object. The entry carries no label unless the object declares a plural label that differs from its label and its name. That decision, and the text it stored, came from the served object list, which is translated for the reader's locale. So a zh-CN session stored the translated plural, such as `项目列表`, as the app's source text, readers in every other locale were served it, and whether a label was stored at all depended on the editor's language. The wizard now reads each newly selected object from the untranslated layers through `ObjectStackAdapter.getAuthoredItem('object', name, { packageId })`, at the package the served object came from, and decides and stores the authored plural label (`Projects`). The Next button waits for these reads, and the step buttons and the object selection are disabled until they settle, so the selection cannot change under them. If an object's stored definition cannot be read, its entry carries no label and inherits the object's label at render time; it never falls back to the served text. To show the plural in another locale, translate the entry under `apps.<app>.navigation.<object>.label`. Entries already stored are not rewritten.
+  
+  `AppCreationWizardProps` gains the optional `readAuthoredObject(objectName)` prop, which `CreateAppPage` and `EditAppPage` now pass. A host that renders `AppCreationWizard` without it gets entries with no label: they inherit the object's label at render time.
+- 2fea6d2: fix(plugin-designer, app-shell): a packaged app is saved at its package, not at the package-less address
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Edit app wizard read a packaged app at its package but saved it with no package, and the navigation sync that adds or removes an entry when a page or dashboard is created or deleted read and saved every app with no package. Both now read and save an app a package owns with `{ packageId }` (sent as `?package=`), the row the console serves, the way App management already saves it. An app no package owns, including one served with the `sys_metadata` sentinel, keeps the package-less address. A managed package's sealed app is still refused by the server at either address, and the navigation sync still skips it.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [b2d4355]
+- Updated dependencies [b1eb500]
+- Updated dependencies [9f352e8]
+- Updated dependencies [3446f23]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [1aac465]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [3819afe]
+- Updated dependencies [0ce2598]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [9212119]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [ec24363]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [227a16a]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [f51578e]
+- Updated dependencies [65fddc8]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [f9f45d3]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9a98a46]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [eb53d63]
+- Updated dependencies [a23164e]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/i18n@18.7.0
+  - @object-ui/plugin-grid@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @object-ui/components@18.7.0
+  - @object-ui/data-objectstack@18.7.0
+  - @object-ui/plugin-form@18.7.0
+  - @object-ui/react@18.7.0
+  - @object-ui/layout@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

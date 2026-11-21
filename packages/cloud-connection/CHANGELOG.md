@@ -1,5 +1,193 @@
 # @objectstack/cloud-connection
 
+## 18.7.0
+
+### Patch Changes
+
+- f796089: fix(spec,metadata-protocol)!: retire the seed modes `insert` and `replace`, which inserted every record again on each replay
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #34798
+  
+  <!-- adr-0087: registered seed-mode-insert-replace-retired -->
+  
+  **BREAKING** for a seed dataset authored with `mode: 'insert'` or `mode: 'replace'`. A seed is replayed on every single-tenant boot, every package install or upgrade and every publish, and neither mode matched an existing row, so every replay inserted each record again: an un-walled install went from 1 to 2 to 3 rows over three boots, a person reference the first load had to leave empty stayed empty on the first row while only the newest copy named the person, and with a unique field the replay insert was refused and the one row stayed empty. `replace` expected the caller to clear the table first, and no load path ever clears one.
+  
+  What moves (each line FROM → TO):
+  
+  - `SeedSchema.mode` / `SeedMode` (`@objectstack/spec/data`; `defineSeed`, `defineStack({ data })`, a `seed` metadata item, a package body's seed): FROM `insert` / `update` / `upsert` / `replace` / `ignore` TO `update` / `upsert` / `ignore` (default `ignore`, unchanged). `mode: 'insert'` or `mode: 'replace'` fails parse with a prescription naming the fix; the save and publish doors refuse it with the same message. The retired pair is exported as `RETIRED_SEED_MODE_VALUES` (`@objectstack/spec/data`): it is derived from the parse refusal's own table, and the loader and the artifact door read it.
+  - a stored dataset that still declares one, replayed by the boot seed, the per-organization replay, the dev hot reload or a package install, upgrade or sample-data reseed (`SeedLoaderService.loadStored`, `@objectstack/metadata-protocol`): FROM inserted again on every load TO refused alone — it writes nothing, the load result carries one error with the prescription and `success: false`, and every other dataset loads. `SeedLoaderService.load()` and `validate()` refuse the dataset the same way when handed one unparsed, so a dry run reports what a real load does.
+  - a compiled artifact (`objectstack.json`) carrying such a dataset, booted by `os serve` / `os start` / `os dev` (the artifact door, `MetadataPlugin`, `@objectstack/metadata`): the door parses the artifact without that dataset and hands it back to the seed load, which refuses it alone; the door logs a warning naming the dataset and the fix. Everything else in the artifact registers and boots.
+  - `os diff` (`@objectstack/cli`) on a dataset declaring either mode: FROM "a replay inserts these again" TO a note that the mode is retired, that a replay refuses the dataset, and what to declare.
+  - the advisory lint rule `seed-insert-mode-duplicates-on-replay` (`validateSeedReplaySafety`, `@objectstack/lint`): FROM a warning on `mode: 'insert'` TO removed; the schema refusal does its job for both modes. The author-time rule count `os validate` / `os build` print drops by one (71 to 70 at this release).
+  - the save door's and the loader's hint for a key no record carries: FROM "or use mode 'insert' for rows with no natural key" TO a list of fields when no single field names a row, or `'id'` when the records carry their own ids.
+  
+  The fix: declare which field identifies a row and drop the mode (or declare `upsert` for reference data the package keeps current). Set `externalId` to the field that names a row, to a list of fields when no single field does (a junction table's `['team', 'project']`), or to `'id'` when the records carry their own ids. Rebuild the package, and reinstall it where it was installed with `os package install`, so the stored body carries the new declaration.
+  
+  No conversion is made, at load, at save or by a migration (ADR-0087 D3, entry `seed-mode-insert-replace-retired`): a keyed mode needs the field that identifies a row, and only the author knows it. Rows earlier replays duplicated are data and are left as they are.
+  
+  Unchanged: `ignore`, `upsert` and `update` datasets load byte-identically.
+- c05a8a0: fix(cloud-connection): a dry-run re-install answers a refused installed copy or incoming package with a 422, never a 500
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `POST /api/v1/marketplace/install-local` with `dryRun: true` compares the installed copy (the body the last install stored) with the incoming version. When today's artifact resolver refused either body (for example, a stored copy that still carries a retired key such as a bare `indexes[].unique: true`), the dry run threw, and the transport answered `500 INTERNAL_ERROR`. It now answers the way the real install already does: the refusal's own `422` and code (`INVALID_ARTIFACT_PACKAGE_ENTRY` and its siblings). When the stored copy is refused, the message names that copy and the way out: uninstall the package, then install the new version. When the incoming package is refused, the message names the incoming package. Nothing is planned or written. A dry run whose two bodies both resolve answers the plan exactly as before.
+- 8596c80: fix(runtime, cloud-connection): an upgrade replaces the package's seed datasets on the shared replay list
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The shared `seed-datasets` list that per-organization seed replay reads was append-only. After a package was upgraded in a running process, the superseded version's datasets stayed on the list until a restart, so every organization founded in between replayed the old and the new version's seed sets. When the upgrade changed an object's `fallback: true` set, the two marked sets refused that object's fallback choice, and a dataset declaring `dependsOn` that object refused the whole load for an organization whose locale no set lists.
+  
+  `mergeSeedDatasets(ctx, datasets, owner?)` takes an optional `owner`. Given, the owner's earlier entries are replaced on the same live array (in their place) instead of kept beside the new ones; an empty `datasets` takes them off. Omitted, the datasets are appended as before, which is what a config app's boot merge still does. The install-local door merges under the package id on install, upgrade, reinstall, reseed and rehydrate, so the list holds the installed version only: reinstalling the same version adds no duplicate, and a version that ships no seed data takes its predecessor's datasets off the list.
+- edc5355: fix(cloud-connection): an uninstall takes the package's seed datasets off the shared replay list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Uninstalling a package through the install-local door in a running process left its entries on the shared `seed-datasets` list that per-organization seed replay reads, so every organization founded before the next restart replayed the removed package's seed sets, over objects that may no longer exist. The uninstall now merges an empty list under the package id once the running kernel has withdrawn the package (the owner-keyed replace an upgrade already uses), so the list matches the installed set without a restart. A composed bundle's entry withdraws the datasets it merged for all of its package bodies; another package's datasets are kept. An uninstall the registry refuses, or whose withdrawal from the running kernel is refused, leaves the list as it was: the package stays loaded until the restart, and its datasets with it.
+- 2211bb1: fix(cloud-connection): a managed install or upgrade fills the stored computed fields it makes live
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A package version that adds a stored computed field (a non-`formula` field declaring `expression`), changes one's expression, stored type or scale, or turns a `formula` field into one used to leave every existing row `NULL` (or holding the old value) after `os package install` / `POST /api/v1/marketplace/install-local`: the metadata doors filled such a change, the install door did not, and a boot never fills. On a hosted tenant nothing could fill them.
+  
+  The managed install door now does what the metadata doors do: it captures the stored computed fields of every object the version contributes to (its own objects and the objects its extensions extend, every unit of a composed artifact) before it registers anything, and after its schema sync fills each field the version changed — every existing row, every organization, keeping each row's `updated_at` — through the data engine's own walk (the one `os migrate stored-expressions --changed --apply` runs). Each field is reported on the answer's new `advisories` (omitted when there is nothing to report), with the metadata doors' rule ids: `stored-expression-filled`, or `stored-expression-fill-incomplete` naming what is left and the command that fills it. A version that changes no stored computed field, a refused install and a fresh install over new tables write no row and add no key to the answer. The fill never fails the install.
+- Updated dependencies [b02484e]
+- Updated dependencies [c6558d0]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [4c2d8d7]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [22af9e6]
+- Updated dependencies [a998964]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [cceb5c6]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [2d33205]
+- Updated dependencies [2d33205]
+- Updated dependencies [78f3ab2]
+- Updated dependencies [3c038eb]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [1950f07]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [35c6331]
+- Updated dependencies [de395b4]
+- Updated dependencies [f848e37]
+- Updated dependencies [fe3ebc8]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [96faf44]
+- Updated dependencies [2df9691]
+- Updated dependencies [961f474]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8596c80]
+- Updated dependencies [ec227fc]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [dbb2f68]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [467b13b]
+- Updated dependencies [b863d2b]
+- Updated dependencies [ee40658]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [78fd762]
+- Updated dependencies [a35187e]
+- Updated dependencies [c321914]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [819c067]
+- Updated dependencies [4890cd0]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [986a0f2]
+- Updated dependencies [c99156e]
+- Updated dependencies [c6b07c2]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [a8126d2]
+- Updated dependencies [c4d6acc]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [97f3420]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [d2bc1ff]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/metadata-protocol@18.7.0
+  - @objectstack/runtime@18.7.0
+  - @objectstack/objectql@18.7.0
+  - @objectstack/rest@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/observability@18.7.0
+  - @objectstack/service-cluster@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

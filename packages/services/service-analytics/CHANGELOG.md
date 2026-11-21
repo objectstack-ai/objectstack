@@ -1,5 +1,212 @@
 # Changelog — @objectstack/service-analytics
 
+## 18.7.0
+
+### Patch Changes
+
+- 96faf44: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  fix(i18n, mcp): a translation fault serves the untranslated text and the fault is logged, instead of failing the read; `list_datasets` is flagged `partial` with a `warning`, while REST `/meta`, the MCP object tools and `query_dataset` log only
+  
+  When the i18n service resolves but its `getLocales` or `getTranslations` throws, the shared `/meta` translator (`translationBundleOf`, `@objectstack/rest`) now answers it as no bundle: the text is served untranslated and the server log says so at `warn` (`The translations could not be read (…), so labels and descriptions are served untranslated.`). Before, the translation rejected, so `GET /meta/:type` and `GET /meta/:type/:name` answered 500, the MCP object tools failed, `list_datasets` answered `datasets: []` with `partial: true`, and `query_dataset` refused 503 on both MCP transports.
+  
+  Now `list_datasets` keeps every dataset, in its authored text, with `partial: true` and that sentence as its `warning`; `query_dataset` answers. A dataset host's `loadDatasets` may return `{ items, warning }` without `partial`: a whole read the tools say something about, which `query_dataset` does not refuse. The translator's sources take an optional `reportTranslationFault(warning)` to carry the sentence on an answer.
+  
+  fix(mcp): `?locale=` reaches the MCP labels, and the dataset tools answer in one language
+  
+  The HTTP MCP door now reads a `?locale=` query parameter as the `/meta` doors do (after `Accept-Language`, before the i18n default), for the object and dataset labels and the app-docs tools; it read headers only, though its docblock promised both. The dataset executor (`createDatasetTools`) takes an optional `translationLocale` dependency, the locale its `loadDatasets` translated the rows for, and reads labels and composes `nextStep` and `sourceLine` in it first. Both MCP transports pass it, so a call with no `Accept-Language` (common for MCP clients, and every stdio call) no longer mixes labels in the i18n default with sentences in the workspace locale.
+- 7ed18b5: fix(analytics): a grouping or time word with only a near dimension no longer stops a matched measure with a question
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A question like 「按行业看销售额」 or "revenue this quarter" sends `list_datasets` a measure word with an exact match (销售额, revenue) and a grouping or time word that matches nothing exactly but is near a dimension (「按行业」 contains 行业, "this quarter" contains `quarter`). The `nextStep` note used to tell the model to ask the user about that word before using it, so an ordinary question got a clarifying question back. Now a word whose candidates are all dimensions is offered as a possible grouping: the note says not to ask about it and that it does not stop the matched measure, which is computed. A word with a measure among its candidates still asks, as before: a bare near-miss measure word (销售 near 销售额) is still `candidates_only` and computes nothing until the user answers, and beside a matched measure it is still asked about.
+  
+  What changes is the note only. `decision`, `terms`, `matches` and `candidates` are the same as before for every input: a word with only dimension candidates is still `candidates_only` when it is the reported case, and its candidates are still listed. When such a word is the only word sent, the note offers the grouping and asks which number is meant, as it does for a word that equals a dimension.
+  
+  The `list_datasets` tool description and the MCP `initialize` selection rule now state the scoped rule in the same words: "A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure."
+- 338448e: fix(service-analytics): a derived dataset measure whose operands are all tenant-currency amounts carries the request's tenant currency
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset `sum` over a `currency` field in `dynamic` mode (the default) already labels its result column with the request's tenant currency (`localization.currency`). A derived `sum` or `difference` over such measures did not: its column carried no `currency`, so it rendered as a bare number beside the plain sums it was built from (a project's actual cost as labor plus expense, for example). Its column now takes the tenant currency too, on `POST /analytics/dataset/query` and on the dataset draft preview alike.
+  
+  A derived measure counts as an amount in the tenant's currency only when every operand is one: an amount aggregate (`sum`, `avg`, `min`, `max`) over a `dynamic` currency field with no `currency` of its own, or a derived `sum` / `difference` of such measures. Unchanged:
+  
+  - A `ratio` or `product` of tenant amounts is no amount and stays bare.
+  - A derived measure that mixes a tenant amount with a `fixed` code, an explicit measure `currency`, a record-mode amount or a `count` stays bare, whichever operand comes first.
+  - A derived `sum` / `difference` over one `fixed` code still carries that code, and a derived measure's own `currency` still wins.
+  - With no tenant currency on the request, the column carries none, as the plain sum under it does.
+  
+  No metadata key, accepted value or default changes; no compile-time guard moves.
+- 8856afc: feat(mcp): a refused record read says the data is not recorded, in the caller's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When `query_records`, `aggregate_records` or `get_record` is refused and the call named an object, or a field, that the caller's own schema does not show (the object as `describe_object` serves it to them), the refusal now carries two members beside it, on the HTTP and the stdio server alike:
+  
+  - `notRecorded`: what is not recorded, as the caller sent it: `{ "object": "<name>" }`, or `{ "object": "<name>", "fields": ["<name>", …] }` for the field names the call sent that the schema does not show, in the order sent. Every sent name is read by its head on every channel (`where`, `fields`, `orderBy`, `groupBy`, an aggregation's `field` and `filter`), so `owner.name` is judged by `owner`, and a dotted name whose head the schema shows is never named.
+  - `ifNotRecorded`: one sentence, in the caller's language (English, Simplified and Traditional Chinese, Japanese), telling the model to say the data is not recorded, never to report 0 or an empty result for it, and not to answer with another object or field in its place.
+  
+  The answer names only what the caller can see: both members are built from the names the caller sent and from the caller's served schema, and nothing else. The refusal itself (`isError`, its `code`, `message` and `status`) is unchanged, byte for byte. A read that answers, a refusal about a field the caller's schema shows, a server fault, and a refusal whose schema read cannot be made carry no member. `id`, `created_at` and `updated_at`, which every object answers, are never named.
+  
+  The language is chosen by one shared picker, `pickSentenceLocale` (with `platformLocaleNamedBy`), now exported from `@objectstack/core`: the first of the caller's locales (the request's, then the workspace default) that names a language the sentence is written in, else `en`. The dataset tools' `nextStep` and `sourceLine` (`@objectstack/service-analytics`) use the same picker, with unchanged behaviour. `McpDataBridge` gains an optional `userTextLocales()` member: the HTTP bridge answers the request's ladder, the stdio bridge the principal's ladder and then the i18n service's default. A bridge without it is answered in `en`.
+- b863d2b: feat(service-analytics): `query_dataset` says how many groups existed before the `limit` cut (`totalGroups`), as `aggregate_records` does
+  
+  Clause-②: yes (widening: QueryDatasetOutputSchema gains totalGroups)
+  Metadata-protocol: added
+  Skills-docs: follow-up #35203
+  
+  `QueryDatasetOutputSchema` gains an optional `totalGroups`: how many groups the selection formed before `offset` and `limit` cut them, the same name and meaning as `aggregate_records`' `totalGroups`. A client asked "how many are there" after a top-N cut can now answer it: a grouped `query_dataset` whose `limit` is below the group count answers `truncated: true` and the full count, and an answer that was not cut answers `totalGroups` equal to `rowCount`.
+  
+  The count never costs a read. Where the window is pushed into the one SQL statement that grouped the answer, the database counts the groups in that statement (`COUNT(*) OVER ()`, after the `GROUP BY` and ahead of the `ORDER BY` and `LIMIT`). Where the window is applied in memory, the count is the length of the grid before the window: an order by a display label (the tool's own order, used when none is sent, sorts every selected dimension, so grouping by any select or reference field brings this in; an order by measures alone does not), a grid assembled from several queries (a measure with its own filter, a derived measure, `compareTo`), and a query the engine's aggregate serves, such as a date bucket, a field-to-field filter, an external object or a driver with no raw SQL. That grid is counted only when every read that built it came back whole; a grid that a cap or row guard cut before the window answers no count.
+  
+  `totalGroups` is absent when: the window was pushed down and the SQL dialect is not one the analytics strategy knows, or a selected member is itself named `__os_group_count`, or the page came back empty after an `offset`; a read was served by a strategy that does not vouch for its grid, such as one a host adds, or was cut by a cap under it; or the dataset's object is missing and the answer is the empty one served for it. Read `totalGroups` as optional.
+  
+  Only the AI tool asks for the count. The REST dataset door, dashboards and reports run the statements they ran before.
+- 068a0f9: fix(service-analytics): `query_dataset` never pairs an empty answer with a group count
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A selection with `totals` runs its totals reads after the primary grid is counted. When one of those reads met a missing source, the service served the empty answer (`rowCount: 0`), but the group count of the primary grid was already written, so `query_dataset` answered `totalGroups` for a grid it never served. The count now reaches the caller only once the whole call has answered; an answer served empty because a read failed carries no `totalGroups`.
+  
+  The `dataset-group-count.ts` header also states where the whole-grid proof stops: at the strategy's own read seam (`ctx.executeRawSql`, `ctx.executeAggregate`). A host-supplied bridge or an out-of-repo driver that silently truncates an unwindowed read would be counted as whole.
+  
+  No key, member or export changes.
+- c321914: fix(objectql,service-analytics): `query_dataset`'s ObjectQL face orders and cuts a top-N in the database instead of reading every group
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A top-N (`order` with a `limit`, optionally an `offset`) on the analytics ObjectQL face — date-bucketed queries, `$field` filters, drivers without raw SQL — used to read every group and cut in memory. On a driver that compiles the engine's order-and-cut (the SQL driver family: `driver-sql`, the WASM SQLite driver, Turso's local and replica faces) the face now hands the engine its order and `offset + limit`, the database orders, cuts and counts in one statement, and only the cut rows are read. `totalGroups` stays the count of every group, taken from that statement.
+  
+  Visible change: a text-ordered top-N on such a driver now returns the database's choice of groups — its collation, NULL last in both directions — the same as the native SQL face and `aggregate_records`, instead of the in-memory comparator's (`localeCompare`, `''` read as empty).
+  
+  Where the engine cannot serve the cut — the in-memory driver, MongoDB, OData, Turso's remote face, a date bucket or reference timezone the driver does not compile, a measure filter it does not evaluate — the face reads every group and cuts in memory as before, and no refusal reaches the caller. A select or lookup dimension ordered by its display label is still cut in memory, by label.
+  
+  `@objectstack/objectql`: an `AGGREGATE_ORDER_CUT` request may set `declinable: true`; where the cut cannot be served the engine then reads nothing, answers `[]`, leaves `outcome` unset and records the reason on the request's new `declined` slot instead of refusing `INVALID_QUERY` / 400. Without the flag nothing changes: `aggregate_records` keeps its refusal, and `AggregateOrderCutOutcome` is unchanged.
+- d76d57a: fix(service-analytics): the cube door refuses a total over a formula with the stored-field remedy, not a row count
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A cube measure that takes the `sum`, `avg`, `min` or `max` of a `formula` field (a configured cube's measure, or an inferred cube's suffix measure such as `expected_sum`) is still refused `INVALID_FIELD` / 400 before anything is read. Its message no longer ends "aggregate a field of one of those types, or count the rows with count": after the accepted set it now prints the spec's one prescription for a virtual field, `VIRTUAL_FIELD_AGGREGATE_REMEDY` ("Computed on read, the field stores no value: make it a field of its return type with the same `expression` (computed and stored on write) and aggregate that. Counting records is a different question."), the sentence the dataset compiler and the engine's aggregate door already print for the same pair. A count in place of a total is a plausible wrong number.
+  
+  Which measures are refused, the error code, the status and the attached `member` / `field` / `object` are unchanged. A refused pair over a stored type (for example `sum` over `text`) keeps its wording.
+- 0a3dd40: feat: analytics compiles the `SharedRecordIds` fixed-read leaf, the access explainer resolves it at the record, and OData refuses it (ADR-0155, step 5 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **Analytics, the native SQL path** (`@objectstack/service-analytics`). A read scope carrying `{ id: { $in: SharedRecordIds.read(object, user) } }` compiles to one subquery in the list's own position, `id IN (SELECT "record_id" FROM "sys_record_share" WHERE "object_name" = ? AND "recipient_type" = ? AND "recipient_id" = ? AND "record_id" IS NOT NULL AND "record_id" <> '')`, with every value bound and no tenant scope on the subquery (ADR-0155 ① ruled A). The native strategy takes such a scope only when the host answers `AnalyticsServiceConfig.fixedReadLeafClassOf` with `null` for each leaf (outside both classes ADR-0155 D4 recognises: the object on another datasource than `sys_record_share`, or a middleware or `beforeFind` / `afterFind` hook registered for `sys_record_share` by name) and the dialect is SQLite, PostgreSQL, MySQL or SQL Server. Otherwise it declines, and the ObjectQL engine path answers. A host that wires no answer keeps today's behaviour: the native path declines every scope that carries the leaf. This change ships the hook unwired: `AnalyticsServicePlugin` passes no answer, so the native path declines a scope carrying the leaf and the engine path answers, until #35946 wires it.
+  - **Analytics, the ObjectQL path.** The read-scope merges (`withReadScope`, the related-object scope, the label read) admit a placed read-form leaf and hand it to the engine by reference. The dry-run SQL echo prints the subquery. A leaf in any other position, under `$nin`, on another object or in its write form is refused, `INTERNAL_ERROR` / 500, logged at `error` once per service logger.
+  - **Analytics, the query's `where`.** A leaf reaches analytics only in the read scope. A leaf anywhere in a query's `where`, in either spelling, is now refused before either strategy runs, with `INTERNAL_ERROR` / 500. The message names the leaf and its table, not the recipient. Before this release `{ id: { $in: leaf } }` there answered `INVALID_FILTER` / 400, with a message that printed the recipient. A bare `{ id: leaf }`, or an array-form `=`, was read as a relation condition on `id`. No request can spell the leaf, so only in-process code could reach this.
+  - **The access explainer** (`@objectstack/plugin-security`). `ISecurityService.explain` resolves each leaf in the sharing read filter at the record it judges, with one read of `sys_record_share` under the leaf's own predicate, keyed by the record ids (one read for a whole batch). The sharing layer's `rowFilter` then has the two shapes it has today: `{ id: { $in: [recordId] } }` in the share arm for a caller with a grant on the record, and the share arm left out for a caller without one. The published `rowFilter` never carries the leaf. A leaf it cannot resolve is refused, `INTERNAL_ERROR` / 500, logged at `error` once. That includes a leaf anywhere but `{ id: { $in: leaf } }` in the object's own filter, such as one inside a relation condition or a composed `ReadableIds` scope, as the engine and the analytics compiler refuse it.
+  - **OData** (`@objectstack/driver-odata`). `find` and `count` refuse a `where` carrying the leaf before any request is sent, `INTERNAL_ERROR` / 500. An OData `$filter` has no form of the subquery, and the driver declares no `fixedReadLeaves`. Before this release a direct `find` left the leaf's predicate out of the `$filter` it sent. The engine already refused the leaf before calling this driver.
+  - **The array form** (`@objectstack/spec`). `parseFilterAST` now refuses a leaf in the array form with `INTERNAL_ERROR` / 500 wherever it answered `INVALID_FILTER` / 400: as an `in` / `nin` comparand, as a member of an `in` / `nin` list, or as the comparand of a scalar operator (`!=`, `>` and the rest). The old messages printed the leaf's inputs, the recipient among them. The new message names the leaf and its table only. An unbranded copy that crossed JSON is still `INVALID_FILTER` / 400. An array-form `=` is passed on by reference and refused by the engine, as before.
+  - **New exports** (`@objectstack/objectql`). `fixedReadLeafClassOfEngine(engine, leaf)` answers which ADR-0155 D4 class, if any, keeps the engine from handing a leaf to a driver. `driverEvaluatesFixedReadLeaf` answers whether a driver declares the leaf. Neither reads or writes anything.
+- e72f2aa: feat: the analytics plugin asks the engine which share-grant scopes its native SQL path may compile (ADR-0155 D4)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **New optional contract member** (`@objectstack/spec`). `IObjectQLEngine.fixedReadLeafClassOf(leaf)` answers which of ADR-0155 D4's two classes a `SharedRecordIds` leaf falls in on an engine: `'other-datasource'` (the leaf's object is bound to another datasource than `sys_record_share`) or `'registration-by-name'` (a middleware or a `beforeFind` / `afterFind` hook is registered for `sys_record_share` by name), with what names it. It answers `null` when neither class applies, and throws `TypeError` on a value that is not a fixed-read leaf. The answer type is the new `EngineFixedReadLeafClass`. The member is optional, and because "neither" is `null`, `engine.fixedReadLeafClassOf?.(leaf)` is a caller's whole answer: a class, `null`, or `undefined` from an engine without the member, which cannot say.
+  - **The engine implements it** (`@objectstack/objectql`). `ObjectQL.fixedReadLeafClassOf` returns the seam's own recognition, `fixedReadLeafClassOfEngine(engine, leaf)`, with "neither" spelled `null`. It reads only datasource bindings, middlewares and hooks. It calls no driver and logs nothing.
+  - **The analytics plugin wires it** (`@objectstack/service-analytics`). `AnalyticsServicePlugin` now fills `AnalyticsServiceConfig.fixedReadLeafClassOf` from the `"data"` engine on each call. When the engine answers `null` (neither class), the native SQL path compiles a read scope that carries the leaf. When the engine names a class, throws, answers anything but `null`, or has no such member, the query goes to the ObjectQL engine path, as before. An engine without the member is reported once at `warn`. Neither class is restated in analytics.
+  
+  Nothing a metadata author writes changes. On a host that runs `ObjectQLPlugin`'s engine as `"data"`, a sharing-scoped analytics query outside both classes keeps the native SQL path once the producer starts writing the leaf (ADR-0155 step 6).
+- d280de9: docs: stale prose on summary currency, the temporal-comparand door and analytics filters now says what the code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No accepted value, key or answer moves. Two refusal messages change their words:
+  
+  - A `currencyMode: 'dynamic'` summary over a child `currency` field that is neither `dynamic` nor a well-formed `record` / `fixed` (a stored `fixed` field with no `defaultCurrency`, or a `currencyMode` outside the three) is still refused, and the refusal now names what the child lacks: "is a 'currency' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)", or "is a 'currency' field whose `currencyMode` 'X' is none of `dynamic`, `fixed` and `record`". Before, it said only "is a 'currency' field, not a `currency` field in `dynamic` mode".
+  - The temporal-comparand door's refusal of a comparand no temporal rule reads (`'not-a-date'`, the preset name `'last_30_days'`) now ends "As written it would reach the driver and be compared as text: it may select every row, none or the wrong ones (or raise a database error), an answer indistinguishable from a real one." Before, it said the comparison would "compare false for EVERY row", which was wrong for `$lt` and others that selected every row, for a partial day such as `'2026-06'` that selected a subset, and on PostgreSQL, which raised a database error. Its `having` twin says the same of the groups it would keep, where it said "no group or every group, a 200".
+  
+  The upgrade-guide entry `summary-dynamic-currency-rollup-home-amount-judged-as-served` now states the admitted set as both doors enforce it: a `dynamic` summary may roll up any child `currency` field in `dynamic` mode, a stored home amount included. Source comments and published docblocks that said every `{placeholder}` is stepped around by the temporal door now state the per-kind rule: a date macro is stepped around and judged by its year once resolved, a period key and a context token are judged as written, and an unknown or record-context token is left to the resolver.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

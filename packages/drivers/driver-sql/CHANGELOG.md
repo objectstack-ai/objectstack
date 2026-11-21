@@ -1,5 +1,206 @@
 # @objectstack/driver-sql
 
+## 18.7.0
+
+### Minor Changes
+
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+
+### Patch Changes
+
+- 24cc61f: fix(driver-sql): `distinct()` and aggregate group keys read a stored text `'0'` / `'false'` boolean as `false`, as `find()` does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A declared `Field.boolean` / `Field.toggle` column can hold the text `'0'`, `'1'`, `'true'` or `'false'` on SQLite: a column whose type changed to boolean without a rebuild keeps TEXT affinity, and rows a boot has not converged yet still hold the legacy text. Record reads presented those values as their boolean, but `distinct()` and an `aggregate()` group key presented them as `Boolean(value)`, so a stored `'0'` or `'false'` showed as `true`. A group-by over a yes/no field then counted un-ticked rows in a `true` bucket, and `distinct()` could answer `[true]` for a column with no ticked row.
+  
+  Both doors now present a boolean through the same function the record read uses: `0`, `'0'` and `'false'` read as `false`; `1`, `'1'` and `'true'` read as `true`. Any other value reads as it did. Postgres is unchanged, since it stores a real boolean. `min` / `max` / `sum` / `avg` over a boolean still answer a number, as before. No metadata key, value or default changes.
+- 65b67be: feat(mcp): `aggregate_records` orders, cuts and counts its groups in the database
+  
+  Clause-②: yes (widening: `orderBy` and `limit` arguments on `aggregate_records`)
+  Metadata-protocol: none
+  
+  A ranking question ("the top five customers by revenue") over more groups than the tool's row cap used to come back as every group, or the first page of them, in no stated order, and the client ranked what it happened to get. `aggregate_records` now takes `orderBy` — a list of `{ field, order }` naming an aggregation alias or a group key (its alias when it has one) — and `limit` (at most the row cap). The database orders the groups, cuts them, and counts how many groups it formed before the cut, in one statement; the result carries the groups, `totalGroups` (the key the tool already answers, now the database's count of the groups before the cut), and `truncated: true` when more groups existed than came back.
+  
+  - An order key that names no column of the aggregated row is refused `INVALID_SORT` / 400, naming the columns the query projects.
+  - Only a driver that runs the cut in its own SQL statement serves it: `driver-sql` (every dialect it speaks; the window `count(*) over ()` needs MySQL 8 or later), the WASM SQLite driver, and the Turso driver's local and replica faces. Every other driver (the in-memory driver, MongoDB, OData, Turso's remote face), an aggregate the engine computes in memory (a date bucket, a reference timezone or a measure filter the driver does not run), and an aggregate with `having` are refused `INVALID_QUERY` / 400 before anything is read. Groups are never ordered or cut in the application.
+  - On an order key without a `rank`, a NULL ranks last in either direction, except a `sum` or a count with no value, which ranks as the `0` it is served as. Group keys the order does not name, and a group key it names only by a `rank`, break ties, ascending, NULL last, so two runs of one call answer the same groups in the same order.
+  - An order key may carry a `rank`, a list of the column's values: the statement ranks each listed value by its position and every other value (a NULL among them) on one rank past them, before the cut, so the unlisted values come after the listed ones ascending and before them descending; among themselves they follow the column's own ascending order, NULL last. It is the tool's own, never an `aggregate_records` argument.
+  - A `limit` with no `orderBy` keeps the declared option order the uncut answer already follows: groups keyed by a leading select or radio field come back in the order the field declares its options, a value no option declares last, and the database takes that order before the cut, so the cut keeps the first declared groups. An `orderBy` the caller sends overrides it.
+  - The cut answer carries what the uncut one does: a fixed-currency amount's currency in `currencies`, and `KEY__label` beside each lookup or master-detail group key, the record's name read with the caller's own permissions.
+  - An amount whose records each carry their own currency is ranked by its bare numbers across currencies: the tool description says to rank it inside one currency by filtering `where` on its currency code field.
+  - Without `orderBy` and `limit` the tool answers as before.
+  
+  `@objectstack/objectql` exports `AGGREGATE_ORDER_CUT`, the engine-internal read option of `aggregate` that carries the request (a symbol, so no wire request can set it), with the `AggregateOrderCutRequest`, `AggregateOrderKey` and `AggregateOrderCutOutcome` types. `McpDataBridge` gains the optional member `aggregateGroups`; a bridge without it refuses `orderBy` / `limit` with `NOT_IMPLEMENTED` / 501 and keeps serving the rest of the tool. Nothing that was accepted before is refused.
+- 1caee8c: feat(mcp): "each X with its latest Y" in one `query_records` call — `latestPer`
+  
+  Clause-②: yes (widening): a new read form on the published MCP tool surface. Judged from the card content; the build confirms it
+  Metadata-protocol: none
+  
+  `query_records` takes `latestPer: { by, orderBy }`: one row per group, the group's first row in the given order. `by` names 1 to 3 fields, `orderBy` 1 to 3 keys (`asc` / `desc`); a tie goes to the record id in the direction of the last key, and an empty order value ranks last. "Each account with its latest deal" is `{ objectName: 'crm_opportunity', latestPer: { by: ['account'], orderBy: [{ field: 'close_date', order: 'desc' }] } }`.
+  
+  - The row is chosen among the rows the caller may read and the `where` admits: a group whose newest row is hidden from the caller answers its newest readable row, never the hidden one and never nothing. The organization wall holds inside the choice. Field masking still applies to the returned rows.
+  - A partition or order field the caller may not read is refused as it is in `orderBy`; a computed, JSON or multi-value field, or a dotted path, is refused as a partition or order field.
+  - `limit` counts groups, capped at the tool's `maxLimit` like any list. The answer is `{ object, records, hasMore }` and never a `total`; when more groups exist than came back it carries `truncated: true`.
+  - Served by the SQL driver (Postgres, MySQL, SQLite) and by `driver-sqlite-wasm` and the Turso driver on a local or embedded-replica database: the driver compiles a `ROW_NUMBER()` window over the read's own scoped selection. Every other driver (in-memory, Turso's remote connection, MongoDB), an object with an `afterFind` hook and an object with object-scoped read middleware refuse with `INVALID_QUERY` / 400 before anything is read. The Turso driver's remote face refuses the directive itself too.
+  - New exports: `LATEST_PER`, `LATEST_PER_MAX_KEYS` and the `LatestPerRequest` / `LatestPerOrder` / `LatestPerOutcome` types from `@objectstack/objectql`; `LATEST_PER_DIRECTIVE`, `latestPerDirectiveOf` and the `LatestPerDirective` / `LatestPerDirectiveOrder` types from `@objectstack/driver-sql`; `McpLatestPer` from `@objectstack/mcp`. The request rides an in-process read option, never a wire or query key; `@objectstack/spec` is unchanged.
+  
+  Without `latestPer`, `query_records` and every read are unchanged.
+- c0484c8: fix(driver-sql): on SQLite, a boolean field retyped from text stores `1` / `0`, so a saved `false` no longer reads as `true`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On SQLite, a field whose type changed from `text` to `boolean` keeps its TEXT column. Every write of that field (create, update, upsert, bulk create, bulk update, update-many) stored `false` as the text `'0.0'` and `true` as `'1.0'`, because the JS number a boolean was bound as reached SQLite as a REAL. Reads then answered `true` for both, `distinct()` and group keys counted every row as `true`, and an `= false` filter disagreed with what the rows showed.
+  
+  - **Writes.** A declared scalar `boolean` / `toggle` value is now bound as the text `'1'` / `'0'`. A column the driver created still stores the integer `1` / `0`, so its stored form does not change; a retyped TEXT column stores `'1'` / `'0'`, which reads back as the boolean that was written.
+  - **Filters.** A boolean comparand on such a field is bound the same way, so `= false`, `= true` and `in [false]` select exactly the rows that read as that boolean.
+  - **Existing rows.** The boot's boolean storage convergence now also rewrites the `'1.0'` / `'0.0'` that earlier writes left, the same as it rewrites `'true'` / `'false'`; `os migrate plan` counts them under `normalize_boolean_storage`. Nothing to run by hand: the next start converges them.
+- 643fe3b: feat(driver-sql, driver-turso): the SQL drivers compile the `SharedRecordIds` fixed-read leaf to a subquery (ADR-0155, step 3 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **The compile** (`@objectstack/driver-sql`). A `SharedRecordIds` leaf in a field's `$in` compiles to one subquery in the list's own position: `id IN (SELECT record_id FROM sys_record_share WHERE object_name = ? AND recipient_type = 'user' AND recipient_id = ? AND record_id IS NOT NULL AND record_id <> '')`. The write form adds `AND access_level IN (…)` inside the subquery. Every value is bound. The subquery carries no tenant scope (ADR-0155 ① ruled A), and the outer statement's tenant wall is unchanged. It compiles on every read verb and on `updateMany`, for SQLite, PostgreSQL, MySQL, SQL Server and Oracle. SQLite and PostgreSQL were run live for this release. MySQL, SQL Server and Oracle are pinned at compile shape, and MySQL also runs live in CI's Temporal Conformance job. On PostgreSQL, an object whose `id` column is not text (an integer- or uuid-keyed federated table) fails the compiled subquery with `DATABASE_ERROR` (42883) instead of answering its rows. That case is open on #35906 (ADR-0155 D-0) and is settled before the sharing plugin writes the leaf. On Oracle the `<> ''` half is left out, because Oracle stores `''` as NULL. `SqliteWasmDriver` and Turso's local mode inherit the compile.
+  - **The remote transport** (`@objectstack/driver-turso`). Turso's remote mode compiles the same subquery with its own compiler, from the same predicates.
+  - **The declaration.** `SqlDriver.supports.fixedReadLeaves` is `['SharedRecordIds']`, and `TursoDriver` inherits it in every mode. The engine's seam now hands the leaf to these drivers instead of refusing it.
+  - **The refusal.** A leaf anywhere other than a field's `$in` comparand is refused before any statement runs, with `INTERNAL_ERROR` / 500, and logged at `error` once per driver.
+  - **New exports** (`@objectstack/driver-sql`). `findMisplacedFixedReadLeaf`, `fixedInnerReadPredicates` and `misplacedFixedReadLeafMessage` are the walk, the predicates and the refusal text the two compilers share.
+  - **The shared case-set** (`@objectstack/spec`). `SHARED_RECORD_IDS_CASE_SET` gains a note (`n5`) on a doc whose only grant is stamped in another organization, and a nested case read under a tenant. Together they witness, in the nested position, that the inner read carries no tenant scope.
+- 850bcec: feat(driver-sql): on PostgreSQL the share-grant subquery compares `record_id` as the outer key's own type (ADR-0155 O2)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step, and this makes that step safe on PostgreSQL tables whose key is not text.
+  
+  - **PostgreSQL, a key that is not text.** The compiled subquery `id IN (SELECT record_id FROM sys_record_share WHERE …)` now projects `record_id` cast to the base type of the column it is compared with: `CAST(NULLIF(record_id, '') AS <type>)`. A federated table keyed by `integer`, `bigint`, `smallint`, `numeric`, `uuid`, `character(n)` or a domain over one of them answers the same rows as the id list of the same grants: `07` names 7, an upper-case or braced uuid names its lower-case twin, and a padded grant names a `character(n)` key. Before, an integer or uuid key failed the statement with `DATABASE_ERROR` (42883), and a `character(n)` key silently missed a padded grant.
+  - **A malformed grant id** (`abc` against an integer key) fails the statement with `DATABASE_ERROR` / 500, the same answer the id list gives for it.
+  - **How the type is known.** The driver reads the column types of the compared table from `pg_catalog` once, the first time a statement holding the leaf reaches that table, and outside a transaction keeps the answer for the life of the driver (inside one, see the next bullet). A statement with no leaf reads nothing. A failed or empty catalog read records nothing and is asked again by the next statement.
+  - **No reading, no statement.** On PostgreSQL a statement whose leaf is compared with a table the driver holds no catalog reading of is refused with `INTERNAL_ERROR` / 500 (logged once), and never runs uncast, which on a `character(n)` key would miss a padded grant silently. A table has no reading when the catalog read fails or finds no such relation; nothing is recorded, and the next statement reads the catalog again.
+  - **Read where the statement runs.** A statement in the caller's transaction reads the catalog on that transaction's own connection, inside a savepoint: it needs no second pooled connection, it sees a table the transaction created, and a failed read rolls back the savepoint alone, so the caller's transaction stays usable. That reading is kept for that transaction only, and reaches every savepoint derived from it, so a write the driver itself retries in a savepoint (an `updateMany` on an object whose `updated_at` column is only presumed) compiles with it; a reading a savepoint takes never reaches its parent. Each transaction therefore pays one savepoint and one catalog read per table it compares a leaf against. A statement outside a transaction reads on the pool and the reading is kept for the life of the driver.
+  - **Unchanged, and what text keys get.** A `text` or `varchar` key, which is every table the platform creates, compiles to exactly step 3's statement, with no cast. What is new for it: the first leaf statement on that table (once per driver, or once per transaction inside one) is preceded by the catalog read, and if that read fails, or finds no such relation, the statement is refused with `INTERNAL_ERROR` / 500 instead of being run. SQLite, MySQL, SQL Server and Oracle compile exactly as before and read no catalog; SQLite answers the list's rows by column affinity. MySQL and SQL Server keys are not measured against a live server yet. An Oracle `RAW(16)` uuid key is expected to fail the statement (ORA-01465, by reading: the subquery converts a dashed uuid grant to `RAW` implicitly, where the id list binds its undashed hex); it is not measured, and is tracked on #35952.
+- 907b378: feat(driver-sql): on Oracle the share-grant subquery converts `record_id` the way the id list binds a `RAW(16)` uuid key (ADR-0155 O2)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step, and this makes that step answer the right rows on Oracle tables keyed by a `RAW(16)` uuid (`SYS_GUID()` keys).
+  
+  - **Oracle, a `RAW(16)` uuid key.** The compiled subquery `id IN (SELECT record_id FROM sys_record_share WHERE …)` now projects the id list's own conversion when the compared column is a `RAW(16)` uuid column, the same catalog reading that makes the list bind its members as `HEXTORAW(?)`: `HEXTORAW(CASE WHEN REGEXP_LIKE(record_id, UUID_PATTERN, 'i') THEN REPLACE(record_id, '-', '') ELSE 'not-a-uuid' END)`. A grant in upper, lower or mixed case, dashed (8-4-4-4-12) or as 32 undashed digits, names the same row it names in the list. `UUID_PATTERN` is the list's own uuid-text check, written for Oracle from the same constant. Before, Oracle compared the column as its upper-case hex text: the subquery matched no row and its negation every row, with no error.
+  - **A grant the id list refuses fails the statement.** The list refuses a value that is not uuid text before any statement (`INVALID_FILTER` / 400). Every such stored grant fails the subquery's statement instead, with `DATABASE_ERROR` / 500 (ORA-01465), on the read and on its negation: hex of another length (31 or 33 digits, `0123`), 32 digits with dashes out of place, a grant of dashes only, a blank or a padded uuid, a braced uuid, or text that is not hex. None of them answers a row, and none empties a negation.
+  - **Unchanged.** Any other Oracle key compiles exactly as before; a `NUMBER` key converts each grant as it converts the list's text binds (measured: the same rows, and the same ORA-01722 for a grant that is not a number). Every other dialect compiles exactly as before.
+- 702b0cf: fix(driver-sql)!: a boolean field is stored as a boolean whatever spelling the caller sends
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the write door of the SQLite-family drivers (SqlDriver on SQLite, both faces of TursoDriver, SqliteWasmDriver) for a direct caller: a value on a declared boolean or toggle field that spells no boolean is refused instead of stored, and the spellings it accepts are stored as the boolean they spell. The engine's own door already refuses those values with invalid_boolean, so no authored metadata, seed or stored row is rewritten and nothing needs a tombstone. -->
+  
+  **BREAKING** for a caller that writes through a SQLite-family driver directly (`create`, `update`, `upsert`, `bulkCreate`, `bulkUpdate`, `updateMany`) and sends a declared `boolean` / `toggle` field a value that spells no boolean, such as `'yes'`, `'TRUE'`, `''`, `2` or an array: it used to be stored as written and is now refused with `VALIDATION_ERROR` / 400 before anything is written. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no metadata author writes a driver call, so `Metadata-protocol` is `none`, and the engine's door already refuses those values.
+  
+  A declared scalar `Field.boolean` / `Field.toggle` is now stored as a boolean on SQLite whatever spelling the write sends. `true` / `false`, the numbers `1` / `0` and the text `'1'` / `'0'`, `'true'` / `'false'` and `'1.0'` / `'0.0'` are bound as the boolean they spell, so a column the driver created holds the INTEGER `1` / `0` and a `text` column retyped to `boolean` holds the text `'1'` / `'0'`. These are the spellings the local boot convergence already rewrites, read from the same table. Before, a string reached the column as text, on the local and the remote face of `TursoDriver` alike, so filters, sorts and groups did not read the row as the boolean it was written as. That includes a `beforeInsert` / `beforeUpdate` hook that assigns a string to such a field: the engine's own rewrite runs before the hooks, so the assignment now lands as a boolean too. On the remote face, a number written to a `toggle` field is stored as `'1'` / `'0'` instead of `'1.0'` / `'0.0'`.
+  
+  A remote `TursoDriver.bulkCreate` checks every row before it writes the first one, so a refused row refuses the batch with nothing written, as the local face's single INSERT already did. `null` still writes NULL. Rows stored before this change keep their stored form.
+  
+  To keep a direct write working, send `true` or `false` (or one of the spellings above) for a boolean or toggle field.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/observability@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

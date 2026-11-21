@@ -1,5 +1,111 @@
 # @objectstack/client
 
+## 18.7.0
+
+### Patch Changes
+
+- f5b2eea: feat(client): `meta.getItem` reads a pending draft with `state: 'draft'`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `meta.getItem(type, name, { packageId, state: 'draft' })` sends `?state=draft` beside `?package=`, on the unscoped client and on the environment-scoped twin. It is the strict draft read the REST door already serves: the answer is the draft row, and its `item._diagnostics` carries the publish verdict (what publishing that draft would refuse). `'active'` is the default said out loud and sends nothing, so a call without the member is the request it always was. A caller the door does not admit to drafts is answered with the published item, so compare the answer's `version` with the draft's before reading it as the draft.
+- dab4712: feat(console): the 「All documentation」 page has the console's top bar, groups its books by app, and searches every article
+  
+  Clause-②: yes (widening) — @objectstack/client `meta.getItems` takes an optional `include` (`'content' | 'grants'`, sent as `?include=`) and exports its options type `MetaItemsListOptions`; @object-ui/i18n adds nine help.* keys (two of them plural, with their per-locale forms); nothing removed
+  Metadata-protocol: none
+  
+  - **The console's top bar on every portal page.** `/docs`, a book (`/docs/<book>`) and an article (`/docs/<book>/<article>`) are drawn in Home's frame, whose bar reads 「<product> / Documentation」 (the crumb links to the portal's index) and carries the search, the inbox, the assistant and the avatar menu, so the reader can go back to any app. The portal's own 「Documentation / <title>」 strip is gone.
+  - **Books grouped by app.** The page lists each app's books under the app's name, as the launcher names it: a book goes under the first app whose navigation links to it (a module's navigation contributions included), else under its package's app; books no app carries are listed last under 「Other documentation」. No card shows a package id; a package's docs with no authored book are named by their app. A platform package's books (`com.objectstack.*`, such as Setup's) are listed only under an app in the member's list that carries them, never under 「Other documentation」, so they are not listed for a member whose app list has no such app. This is what the page lists, not who may read a doc: the server's audience gate decides that, as before.
+  - **The subtitle and the counts read the session language** (「9 篇」, not 「9 articles」).
+  - **「Search all documentation」.** A search field on the page searches every listed article's title, summary and body, and lists the matches with the words marked in context; each opens the article in its own book. The bodies are asked once, the first time the reader searches (`GET /meta/doc?include=content`, through the same audience gate as the list). The query stays in the URL (`?q=`).
+  - **A hand-typed article URL whose book does not hold the article** (`/docs/<book A>/<article of book B>`) now opens the article in its own book; with no book that holds it, the article draws no previous/next pager instead of showing both ends at once. Inside an app, an article whose book is in no package now keeps its 「← Back to <app>」 link.
+  
+  `@objectstack/client`: `client.meta.getItems(type, { include })` and the environment-scoped `meta.getItems` send `?include=`; leaving it out sends nothing, as before. `@object-ui/app-shell`: `AppHeader` takes a `docs` variant and `DefaultHomeLayout` a `variant` prop for it.
+- d9be915: fix(client): `client.approvals.reject` requires the decision and its `comment`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key or authored value changes. What moves is the parameter type of one SDK method: the decision argument and its comment member become required, matching the approvals route, which now refuses a reject without a reason. No stored row changes, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for TypeScript callers of `client.approvals.reject(requestId)` or `client.approvals.reject(requestId, { actorId })`: the decision argument and its `comment` are now required, so those calls no longer compile. At runtime the approvals route refuses a reject without a non-blank reason with `400 VALIDATION_ERROR`. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3). `client.approvals.approve` is unchanged; its comment stays optional.
+  
+  Fix for a caller: pass the reason, `client.approvals.reject(requestId, { comment: 'Over budget.' })`.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/core@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

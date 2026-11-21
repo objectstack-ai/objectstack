@@ -1,5 +1,127 @@
 # @objectstack/plugin-sharing
 
+## 18.7.0
+
+### Patch Changes
+
+- d99b746: fix(plugin-sharing): a hierarchy scope that falls back to owner-only for want of a resolver now says so once per boot
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a permission set grants a hierarchy scope (`own_and_reports`, `unit`, `unit_and_below`) and no `hierarchy-scope-resolver` service is registered (the `hierarchy-security` capability, provided by `@objectstack/security-enterprise`), the sharing layer fails closed to owner-only. It used to do so without a word, so a runtime booted without the CLI gave an operator nothing to explain why every user saw only their own records.
+  
+  - The first time the fallback is taken, the sharing service logs one `warn` naming the capability, its provider and the owner-only consequence. It is logged once per service instance, which is once per boot, never once per request.
+  - Nothing is logged for an app that never asks for a hierarchy scope, or when a resolver is registered.
+  - The answer does not change: the scope still resolves to the caller alone.
+  - `os validate`, `os verify` and `os serve` no longer end the `hierarchy-security` advisory with "and no log line says so": for that token they now say the runtime logs one warning, opening `[sharing] hierarchy scope NOT widened`, the first time it falls back. Other enterprise tokens keep their wording.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [c321914]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [4890cd0]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/objectql@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/core@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

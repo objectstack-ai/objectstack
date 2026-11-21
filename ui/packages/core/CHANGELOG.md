@@ -1,5 +1,240 @@
 # @object-ui/core
 
+## 18.7.0
+
+### Minor Changes
+
+- 811858c: feat(list): a list's cells are selected by a click and edited by a double-click, Enter or typing, with no inline-edit toggle
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  Skills-docs: none — `skills/objectstack-ui/rules/list-views.md` already teaches that inline editing is on by default for a user who may update the object, with `userActions: { editInline: false }` as the opt-out, which the list page now does with no toggle; no skill teaches the toggle or a single-click edit.
+  
+  **The list page (`ListView`) has no inline-edit mode and no toggle.** Its grid is editable in place wherever the reader may update the object and the view does not declare `userActions.editInline: false`; a view's boolean `inlineEdit` still folds into that switch, so `inlineEdit: false` reads off and `inlineEdit: true` reads on. Before, a view that declared neither opened read-only with an "Edit inline" toggle in the toolbar and in the Display menu, the mode lasted for the session, and a click on a cell edited it. Both toggles are gone, and `ListViewProps.onInlineEditChange` is deprecated and never called; the console stops passing it.
+  
+  **The select-first cell model** (`data-table`, behind the new `GridCellSelectionProvider` in `@object-ui/components`; `ObjectGrid` mounts it when its host passes the new `cellSelection` prop, and `ListView` passes it for every `object-grid` view it draws, on the hosts listed below):
+  
+  - A click selects a cell (a ring around it) and neither edits it nor opens the record. A link the cell draws (the name, a lookup, a phone or an email) keeps its own click. A touch tap opens the record and never edits in place.
+  - Double-click, Enter or F2 edits, keeping the value with the caret at its end; typing a character replaces the value with it (a picker or a date opens instead); Backspace or Delete opens an empty editor and saves nothing.
+  - While editing, Enter commits and moves down, Tab and Shift+Tab commit and move right and left, Escape cancels and keeps the cell selected; in a multi-line editor Enter is a new line and Ctrl/Cmd+Enter commits. Commits are the grid's staged edits, saved by the row's Save and Save All as before.
+  - On the selected cell the arrows and Tab move the selection, Space opens the record (a checkbox cell flips and commits instead, as a second click on it does), Ctrl/Cmd+C copies, Ctrl/Cmd+V converts the text to the field's type and commits it, and Escape clears the selection.
+  - An input method's composition is kept whole: keys pressed while composing, and the 229 Enter Safari raises after it, never commit, cancel or move, and a composition started on a selected cell opens the editor with the composed text. This guard applies to every `data-table` editor.
+  - A cell that opens no editor says why on the cell: the field is read-only, calculated or not editable in a list, the reader may not edit the field, these records or this record, the view turned editing off, or the record is locked by an approval. The approval lock is read from the approvals service's per-record lock when a cell of the row is selected, through the record page's rule (`resolveApprovalLock`); until it answers, the row's `approval_status` stands in only where the view fetches that column, which a view that authors its columns does only when a column, a row predicate or a grouping names it.
+  
+  Every grid a `ListView` draws has this model, because `ListView` passes `cellSelection` to each `object-grid` view: the console's object list pages, interface list pages, the object data page (`/apps/:app/:object/data`), the Studio Data pillar's records artboard, and every `list-view` block, whether an SDUI page node or a `ListView` on a `kind: 'react'` page; a grid no `ListView` draws mounts no provider and keeps its click-to-edit (`singleClickEdit`) and click-to-open behaviour unchanged: an authored `object-grid` node, `ObjectView`'s own grid (the `object-view` block, or a host that passes no `renderListView`), a related list, a dashboard table, the record picker and the designer's grids.
+  
+  On every `ListView` grid (the select-first model) the table's trailing edit column, which holds a changed row's Cancel and Save, is drawn only while a row has changes, so the list at rest ends on its last data column. `@object-ui/core` exports `resolveAffordanceGrant`, the grant half of `resolveAffordance`, which the list cell's read-only reason reads.
+  
+  New locale keys, in every pack: `table.cellReadOnly` and `grid.readOnlyReason.*` (nine reasons). No key is removed: `list.inlineEditShort` and `list.inlineEditLabel`, the toggle's words, stay in every pack, though the list no longer draws the toggle.
+
+### Patch Changes
+
+- 4ffe9d3: feat(actions): an action writes the sentences it declares in the organization's language
+  
+  Clause-②: yes (widening: a new optional authorable key `ActionSchema.texts`, and new translation keys)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md, skills/objectstack-i18n/SKILL.md
+  
+  A `script` action's `js` body can now write a sentence into a record in the organization's language, the way a hook does: declare it under `texts`, keyed by a snake_case key, and ask for it by key — `texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }`, then `await ctx.text('email_subject', { subject })` where the body used to write `'Email: ' + subject`. The answer is in the organization's language, because everyone in the organization reads the record: the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person who ran the action. The translation is picked first, then its `{{ }}` holes are filled from `params`. The entry is the hook text's, built by the same shared factory.
+  
+  - The translation sits beside the action's other copy: `objects.<object>._actions.<action>.texts.<key>.message` for an action bound to an object, `globalActions.<action>.texts.<key>.message` for an object-less one. `os i18n extract` scaffolds the keys and the existing coverage check counts them; `objectstack validate` refuses a translation over a key the action does not declare.
+  - A missing translation, or no language to pick, answers the declared sentence, and the action goes on. A Localization setting that cannot be read rejects the call.
+  - Only declared text is translated: a string the body builds itself is written as it is. A key `texts` does not declare is refused when the action is saved if the body asks for it literally (`ctx.text('key')`), otherwise when it runs, as a fault naming the action and the key.
+  - `texts` is read only for a `type: 'script'` action with a `js` body (an inline `target` function is lowered to one by `os build`); on any other action, or with no body, it is refused at save. A `flow` action's record writes are the flow's own, marked and translated there (`flows.<flow>.records.…`).
+  - A text with `params` is compiled like a hook's: a hole over another name is refused when the action is saved, and `objectstack validate`, `compile` and the publish gate refuse a hole holding logic, an unknown formatter, an empty hole and `{{ amount | currency }}` with no code. A translation whose holes do not render at run time is dropped for the declared sentence, filled.
+  - Text is picked when it is written. Records already written are not changed. An action without `texts` runs exactly as before.
+  
+  `@object-ui/core` lists `texts` among the spec's declared action keys, so an action carrying them is not reported as having an unknown key; the console reads nothing new, because the body stores the sentence already picked.
+  
+  New exports: `@objectstack/spec` adds `ActionTextSchema` and the `ActionText` type (`ui`), `actionTextMessageKey` (`system`), and `ACTION_TEXT_MESSAGE_HOLE_REFUSED`, `actionTextsWithoutRunnableCode`, `undeclaredActionTextKeyAtSave` and `undeclaredActionTextAtRun` (`data`); `@objectstack/runtime` adds none. Nothing that was accepted before is refused.
+- 89364b4: feat(spec, core, ui): `{current_iso_week}` defaults a week-keyed filter to the current ISO week
+  
+  Clause-②: yes (widening: the closed filter-placeholder vocabulary gains one token)
+  Metadata-protocol: added
+  
+  A dashboard whose rows carry a text week key (`cost_week: '2026-W47'`) could only default its week filter to a fixed week, which went stale the next Monday. Write the placeholder instead and the filter opens on the current week each time:
+  
+  ```ts
+  globalFilters: [
+    { field: 'cost_week', label: 'Week', type: 'text', defaultValue: '{current_iso_week}' },
+  ],
+  ```
+  
+  - It resolves to the ISO-8601 week key of today, `YYYY-Www`: Monday-start weeks, week 1 is the week that holds the year's first Thursday, and the year is the ISO week-numbering year, so 2027-01-01 is `2026-W53` and 2025-12-29 is `2026-W01`. "Today" is the day in the workspace time zone, on the server and in the browser alike; the label is the one the analytics week bucket already uses.
+  - It is a period key, not a date. It lives in its own closed list, `PERIOD_KEY_TOKENS`, beside `DATE_MACRO_TOKENS` and not inside it, so a date filter default and a calendar `initialDate` still refuse it. `classifyFilterToken` answers a new kind, `period-key`, and `isKnownFilterToken` knows it, so lint, flow filter operands and the server resolver accept it wherever a filter placeholder is accepted. A consumer that switches exhaustively on `kind` gets a compile error until it handles the new kind.
+  - The server resolves it in `resolveFilterTokens`; the browser resolves it in `resolveFilterPlaceholders` and in the dashboard filter defaults (every filter type except `date` and `dateRange`), so the filter box opens showing the resolved key. A literal `2026-W47` default keeps working and stays fixed.
+  - Every filter and default written before parses and resolves exactly as before. Only the whole value is a placeholder: `'week {current_iso_week}'` is left as written. A near spelling such as `{currentIsoWeek}` is still refused as an unknown token.
+  - Use it only on a field that stores week keys. On a date, datetime or time field the placeholder is refused (`INVALID_FILTER` / 400), as the literal key is; filter those with the `this_week` preset or `{current_week_start}` / `{current_week_end}`.
+- eed422e: fix(core): a relationship-path dashboard drill is sent as one nested-relation condition, so the server joins it in the database instead of the app reading related ids first
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the narrowed input is the in-memory filter a host hands ValueDataSource at runtime, and the comparand it now refuses, a plain object with no $ key under a scalar operator, is one the spec's own comparand door already refuses and ViewFilterRuleSchema.value cannot hold. No metadata an author can save changes meaning, so there is nothing for objectstack migrate meta to do. -->
+  
+  **BREAKING** for a host that filters a `ValueDataSource` (the in-memory `provider: 'value'` source) with a comparison whose comparand is a plain object (prototype `Object.prototype` or `null`) with no `$` key, such as `['account', '!=', { owner: 'u1' }]`, under `!=`, `not_contains` or an ordering operator (`>`, `>=`, `<`, `<=`).
+  
+  - FROM: `!=` served every other row (every row but one holding the caller's own object) and `not_contains` every row, and an ordering operator compared each value with the text `[object Object]` and served the string values that happened to sort past it. That holds for an object whose prototype is `Object.prototype`. A `null`-prototype object has no `toString` or `valueOf`, so an ordering operator threw `TypeError: Cannot convert object to primitive value` and `find` rejected; `not_contains` threw as soon as it reached a row holding a string, and served every row when none did.
+  - TO: the condition is refused by name. It excludes every row and logs the sentence the object form `{ account: { owner: 'u1' } }` already logs. `=` compared by reference, so it matched no row unless a row held the caller's own object (stored through `create` or `update`, which copy shallowly), and that row matched; it matches none now and gains the log line.
+  - The spec's comparand door already refuses an object comparand under these operators, so the rows served before were a wrong answer. Spell a relation condition only against a server-backed source, whose server joins it; a value source holds flat rows, so filter there on the row's own fields.
+  
+  `convertFiltersToAST` now lowers the nested-relation form the spec declares on `FilterCondition` (`{ account: { owner: 'u1' } }`, a plain object with no `$` key beneath a field) to one equality node, `['account', '=', { owner: 'u1' }]`, which the spec's `parseFilterAST` reads back as the same nested condition. It used to refuse that shape as an unknown operator. The condition travels as written, deeper relations included; whether the field is a relationship is judged by the server, which answers `INVALID_FILTER` / 400 for such a condition under a field that stores a scalar or a structured-JSON value, and, under a relationship, for a condition key the related object does not declare, a dotted key, or a relation nested past the hop limit. A map that mixes `$` operators with plain keys is still refused.
+  
+  `ValueDataSource` (the in-memory `provider: 'value'` source) does not descend into relations, and it now says so for the lowered node too: a comparison whose comparand is a plain object with no `$` key, such as `['account', '=', { owner: 'u1' }]`, excludes every row and logs the same sentence the object form `{ account: { owner: 'u1' } }` already logged, for `=`, `!=` and every other operator that reads the comparand. Before this, `=` compared the object by reference and matched no row without a word, unless a row held the caller's own object, and `!=` matched every other row. A class instance is not refused as a relation, even one with keys of its own such as a moment, luxon or decimal object: it is a value. An ordering operator compares it through its `valueOf` when that returns a primitive, otherwise as its text; under an equality, membership or text operator it is refused, in a sentence of its own.
+  
+  `resolveDatasetDrillFilter` uses it: a dataset dimension whose field is a relationship path (`account.owner`, up to three hops) drills as `{ account: { owner: VALUE } }`, nested one level per hop, instead of reading up to 200 related ids per hop and filtering on `$in` them. No related record is read, nothing is capped, and the `too-many` answer is no longer produced; `DATASET_DRILL_RELATED_ID_CAP` and the `too-many` member of `DatasetDrillResolution` stay exported, marked deprecated. The schema reads that check each hop is a single-valued relationship, the hop limit and the empty-bucket refusal are unchanged.
+  
+  One visible consequence: the drawer's "Open in list" escape hatch is not offered for a relationship-path drill, because the list page's `filter[...]` URL dialect has no spelling for a nested condition; the drill drawer itself lists the records.
+- 55020c3: fix(form): formula fields are recomputed from the live inputs before the field rules are judged
+  
+  Clause-②: yes (widening) — one new member on the `@object-ui/core` package entry, `planObjectFormulas` (with its `ObjectFormulaPlan` type); nothing removed or renamed
+  Metadata-protocol: none
+  
+  A required field whose `visibleWhen` reads a `formula` field was judged on the formula value the form last read, or on nothing on a create. On a create form the field stayed hidden whatever was typed, or, when the formula was not drawn on the form, the rule faulted on the missing key and every submit was refused. On an edit that moved the inputs across the condition, the field stayed hidden while the server required it. In both cases the user could not save.
+  
+  The object form renderer and the console's form-view page now compute the object's formula fields over the record being edited, in the platform's read order, with the canonical `@objectstack/formula` engine, and judge `visibleWhen`, `requiredWhen` and `readonlyWhen` over that record. The formulas are computed for the signed-in user as the server computes them: `current_user` (also `user` and `ctx.user`) carries the user's id and positions. A formula that faults the way a read faults (an operator over an empty operand, an undeclared key, a cycle, a scope root the server does not bind for a formula, such as `previous`) reads `null`, and the rule is judged on that `null`. A formula the form cannot compute is one that reads through a reference, calls `label()` or `current_user.can()`, reads `os`, reads the user when nobody is signed in, is served without its expression, or reads such a formula. A field whose `visibleWhen` reads one is shown and keeps its `required` flag, with one console warning, and the form does not refuse the submit for that rule; the server, which judges the write, decides. Computed values are used for the rules only and are never sent in the write.
+- 99a0e4f: fix(ui): grouping headers and the filter value picker name a lookup by its target's `nameField`, and the empty group is translated
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A lookup with no `displayField` is now named by the target object's declared `nameField`, the default the spec states for `displayField` ("the referenced object's name/title"). This is the same title the lookup's grid cell and the record header already show. Before, three places guessed a `name`, `label` or `title` key, and showed the raw record id when the target had none, for example a target titled by an autonumber such as `DEAL-2026-0001`:
+  
+  - **Group headers of a list grouped by the lookup**, both server-grouped and client-grouped.
+  - **Filter builder value picker options** for the lookup, and the chip of the chosen value.
+  
+  An explicit `displayField` on the lookup still wins. Grouping and filtering stay keyed by record id, so two records with the same title stay separate groups and separate options. The picker reads the target object's definition once per picker. The ObjectStack adapter serves later reads of it from its metadata cache.
+  
+  The group of rows with no value now reads the grid's own empty-value string (`grid.empty`, for example "Empty" in English and "空" in Chinese) instead of the untranslated `(empty)`. It keeps its place in the group order: first when ascending and last when descending.
+  
+  `@object-ui/core` adds `referencedRecordTitle(targetDef, record, displayField?)` to its public entry, a new export. It gives the title of a referenced record using the lookup's `displayField`, then the record-title ladder of `getRecordDisplayName`, and returns `undefined` instead of the `Record #<id>` floor.
+- ccded86: fix(core)!: the value data source refuses a plain-object comparand with no `$` key, empty or not, in both filter dialects
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the row set `ValueDataSource.find` answers, in its object and its AST dialect, for a filter whose comparand the spec's doors already refuse: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for `ValueDataSource` (the in-memory `provider: 'value'` data source) given a filter whose comparand is a plain object (prototype `Object.prototype` or `null`) with no `$` key, NON-EMPTY such as `{ owner: { $ne: { id: 'u1' } } }` or EMPTY such as `{ owner: { $ne: {} } }`, as the whole comparand or as a member of an `$in` / `$nin` / `$between` list, in either dialect.
+  
+  - FROM: such an object was compared as a value, by reference or as the text `[object Object]`.
+    - Whole comparand: `$ne` and `$notContains` answered every row; `$gt` / `$gte` answered the rows whose value sorts after `[object Object]` and `$lt` / `$lte` the rows sorting before it; `$eq`, `$in`, `$nin`, `$between`, `$contains`, `$startsWith` and `$endsWith` answered no row, with nothing logged.
+    - List member: `$nin` answered every row; `$in` answered the rows its other members matched; `$between` read the object as the text `[object Object]` and answered the rows in the text range up to its other endpoint (`[{ id: 'u1' }, 'zzz']` answers a `'zeta'` row).
+    - The AST dialect answered the same for a list member (`['owner', 'nin', [{ id: 'u1' }]]` every row, `in` and `between` likewise), and for an empty object as the whole comparand (`['owner', '!=', {}]` every row).
+  - TO: both dialects refuse it, for every operator of the spec's `FILTER_OPERATORS` except the three flag operators (`$null`, `$exists`, `$empty`). The rows are excluded and the reason is logged once. A non-empty object gets `filter condition on field 'owner' carries the non-operator key 'id'; the in-memory matcher does not descend into a nested relation constraint`; an empty one, which has no key to name, gets `filter comparand on field 'owner' is an empty object ({}), which is neither a comparison value nor a nested relation constraint`. A server-backed source already refused these filters with `INVALID_FILTER`: the spec's comparand door (`normalizeFilterComparandTypes`) refuses the object as a scalar operator's comparand and as a list member, and `assertListComparandShapes` refuses a whole object under a list operator.
+  - A class instance given as a field's whole condition, such as `{ created: someMomentDate }`, is now read as a value, not as an operator map. The whole filter is refused up front in the filter converter's words (`The filter on field 'created' carries a Moment instance (…) in comparand position`, the class name and the value's text), as the zero-key condition `{ created: {} }` is and as the server refuses it. Before, each of its own keys was refused as a nested relation per row, so on its own it answered no row, but inside `$or` the other branches still answered: `{ $or: [{ owner: 'Alpha' }, { created: someMomentDate }] }` answered the `'Alpha'` rows, and now answers none.
+  
+  **Not moved.** A scalar, a `Date`, a `{ $field }` reference and a class instance under an operator (a moment or luxon date, a decimal object under `$gt`, compared through its `valueOf`) are still compared. `{ owner: {} }` as a field's WHOLE condition keeps the converter's empty-operator-map refusal. `$empty` keeps its own boolean-flag refusal, `$null` / `$exists` still read their flag's truthiness, and a key outside `FILTER_OPERATORS` keeps the refusal it had.
+  
+  The fix for a caller: a filter on a related record's field is not executed by the in-memory source. Filter on a scalar column of the row itself, or compare with a scalar, a `Date` or a `{ $field }` reference.
+- 6b360ab: fix(core)!: a non-boolean `$null` / `$exists` flag is refused in the filter converter and the value data source, and so are the object comparands the value data source cannot compare
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what convertFiltersToAST lowers and what ValueDataSource.find answers for filters the spec already refuses (a non-boolean $null / $exists flag, a plain object of another realm, a plain object with a $ key that is not a { $field } reference such as { $foo: 1 }, a class instance under an equality, membership or text operator) or that this in-memory face cannot evaluate (a { $now, addDays } anchor): no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for `convertFiltersToAST` and `ValueDataSource` (the in-memory `provider: 'value'` data source), for four filter shapes.
+  
+  1. **A `$null` / `$exists` flag that is not a boolean**, such as `{ owner: { $null: 'no' } }`, `{ owner: { $exists: 1 } }` or `{ owner: { $null: { id: 'u1' } } }`.
+     - FROM: the flag was read for its truthiness. `convertFiltersToAST` lowered `{ owner: { $null: 'no' } }` to `['owner', 'is_null', true]` and `{ owner: { $exists: 'no' } }` to `['owner', 'is_not_null', true]`, so a server-backed source answered the null-ness rows and its own door never saw the flag; the value data source answered the same rows (`'no'`, `1` and an object read as `true`; `0` and `null` as `false`).
+     - TO: both refuse it, as they already refused a non-boolean `$empty` flag. The converter throws `FilterOperatorError` (`INVALID_FILTER` / 400) with `The '$null' filter operator on field 'owner' takes a boolean flag (true or false); received "no"`, and the value data source excludes every row and logs `filter operator '$null' on field 'owner' takes a boolean flag (true or false); received "no"`. `true` and `false` lower and match exactly as before. The spec's `FilterConditionSchema` and every query face already refused these flags.
+     - The AST null-ness operators (`is_null`, `is_not_null` and their spellings) carry no flag and are not moved: direction comes from the operator name and the value slot is not read, as the spec's `parseFilterAST` reads it.
+  2. **A plain object of another realm** (an iframe, a `vm` context), whose prototype is that realm's `Object.prototype`.
+     - FROM: `convertFiltersToAST` read it as an operator map, so `{ age: foreignObject }` with `$gte: 18` lowered to `['age', '>=', 18]`, and the value data source answered it with the right rows, the ones with `age >= 18`: that is the answer this change takes away. One with no `$` key lowered to the nested-relation node `['owner', '=', foreignObject]`. In comparand position the value data source compared it as a value: by reference under `$eq` / `=` and as an `$in` member, so no row matched unless a row held the caller's own object (stored through `create` or `update`, which copy shallowly), and that row did; `$ne` / `!=` and `$nin` served every other row; and under an ordering operator it compared as the text `[object Object]`, serving the string values that sort past that text.
+     - TO: it is a comparand, as the spec's filter walk and the engine's `isNoOperatorObject` read it: the converter refuses it as the field's whole condition in a sentence of its own (`The filter on field 'age' is a plain object from another realm (an iframe, a vm context). Only a plain object of this realm (prototype Object.prototype or null) is read as an operator map or a nested condition here…`), and the value data source refuses it in comparand position under every operator (`filter comparand on field 'owner' is a plain object from another realm, which is neither a comparison value nor filter structure here`). The server refused it already when the object reached it in process; sent as JSON, it arrives as a plain object of the server's realm.
+     - Also moved, by the same prototype test (the operator-map test no longer takes a second prototype hop): an object whose prototype is a `null`-prototype object, such as `Object.create(Object.create(null))`. FROM: `convertFiltersToAST` read it as an operator map (with no own key it was refused as an empty operator map; with `$` keys it lowered). In comparand position the value data source compared it by reference under `$eq` and as an `$in` member, so no row matched unless a row held the caller's own object, and `$ne` / `!=` and `$nin` served every other row: these are the rows this change takes away. It has no text of its own, so under an ordering operator, `$between`, and a text operator on a row holding a string, the comparison threw `TypeError: Cannot convert object to primitive value` and `find` rejected, unless its prototype defines a `valueOf` or `toString` that returns a primitive, which it then compared through; with no row holding a string, `$contains`, `$startsWith` and `$endsWith` served no row and `$notContains` every row. TO: both faces refuse it as `an object of an unrecognised type`: the converter as the field's whole condition, and the value data source in comparand position under every operator.
+  3. **A plain object with a `$` key that is not a `{ $field }` reference**, in comparand position on the value data source, the spec's `{ $now, addDays }` date anchor among them, such as `{ due: { $lt: { $now: true, addDays: 7 } } }`.
+     - FROM: compared as a value: by reference under `$eq` and as an `$in` member, so no row matched unless a row held the caller's own object (stored through `create` or `update`), and that row did; `$ne` and `$nin` served every other row, and `$notContains` every row; under an ordering operator it compared as the text `[object Object]`, so `$lt` answered the rows sorting before that text. A `null`-prototype one has no text: under an ordering operator, `$between`, and a text operator on a row holding a string, the comparison threw `TypeError: Cannot convert object to primitive value` and `find` rejected.
+     - TO: refused under every operator that reads a comparand, whole or as a list member, in both dialects. The anchor (by the spec's test: `$now` is `true` or a string) gets `filter comparand on field 'due' is a { $now, addDays } date anchor, which the in-memory matcher does not resolve…`, ending in the remedy `compare with a concrete Date or ISO string here`: the platform resolves it in the compared column's temporal form, and this source has no field types to read a form from, the reason it already refuses a `{ $field, addDays }` offset. Any other one gets `filter comparand on field 'owner' is an object carrying the key '$foo', which is neither a comparison value nor a { $field } reference`, the comparand the spec's door refuses. `convertFiltersToAST` still lowers the anchor verbatim for a server-backed source, which resolves it.
+  4. **A class instance** (a moment or luxon date, a decimal object, a `RegExp`, a `Map`) as the comparand of an equality, membership or text operator on the value data source: `$eq`, `$ne`, an `$in` / `$nin` member, `$contains`, `$notContains`, `$startsWith`, `$endsWith`, and their AST spellings.
+     - FROM: compared by reference or as its text. `$eq` / `=` and `$in` answered no row unless a row held the caller's own instance (stored through `create` or `update`), and that row matched; `$ne` and `$nin` served every other row. `$contains`, `$startsWith` and `$endsWith` matched on the instance's `String()` text and served rows (a `new String('ab')`, a class with a `toString`), and `$notContains` served their complement.
+     - TO: refused, in both dialects, with `filter comparand on field 'age' is a Amount instance, which the in-memory matcher compares only by order…`. The spec's comparand door refuses it at these operators.
+     - Not moved: under `$gt` / `$gte` / `$lt` / `$lte` / `$between` it is still compared through its `valueOf` when that returns a primitive; otherwise as its text. `$icontains` keeps its own text-comparand refusal.
+  
+  **Not moved.** A scalar, a `Date` and a `{ $field }` reference are compared as before; `$empty` keeps its boolean-flag refusal, with the converter's sentence now built by the same helper as `$null` / `$exists`; a `null`-prototype object of this realm is still an operator map.
+  
+  The fix for a caller: write the flag as the boolean itself (`{ owner: { $null: true } }`, `{ owner: { $exists: false } }`); compare with a scalar, a `Date` or a `{ $field }` reference; rebuild a filter object from another realm in this one (`{ ...condition }` per operator map, or `structuredClone(filter)`); filter a relative date on a server-backed source, or compare a value source with a concrete `Date` or ISO string; and convert a class-instance comparand to its primitive (`moment.toDate()`, `decimal.toNumber()`) before filtering.
+- 9ed18a5: fix(ui): danger colours render red in both themes, and light danger text clears 4.5:1
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - The grid and list views' export-error line, and the Markdown caution alert's border and title, set their colour to a bare `var(--destructive)`. That variable holds an HSL triplet, not a colour, so the browser dropped the declaration and the text rendered in the inherited colour. The export-error line now uses the `text-destructive` utility and the caution alert reads `hsl(var(--destructive-text, var(--destructive)))`. The Markdown theme's heading anchors, quote and meta tokens and blockquote border and background had the same defect with other theme variables and now wrap them in `hsl()` too.
+  - The flow preview's invalid-edge stroke and arrowhead paint with the danger text colour, so they stay readable on the dark theme.
+  - The light theme now sets its own `--destructive-text`, red-700 (`#b91c1c`, `0 73.7% 41.8%`), so `text-destructive` reads at 6.47:1 on white instead of 3.76:1. `--destructive`, the brand red used for button and badge fills, is unchanged. The same value is in the stylesheet that `objectui init` generates.
+  - A theme's `error` colour applied through the theme engine still sets `--destructive`, and now also derives a danger text colour for each mode from it (same hue, lightness moved until it reads at 4.5:1 on that mode's surfaces), written as `--destructive-text-light` and `--destructive-text-dark`. The shipped stylesheets read those into `--destructive-text` in their light and dark blocks, so a custom red drives danger text and stays readable in both modes. A host stylesheet that overrides `--destructive` by hand should set `--destructive-text` beside it in each mode.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [0585797]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/types@18.7.0
+  - @objectstack/formula@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

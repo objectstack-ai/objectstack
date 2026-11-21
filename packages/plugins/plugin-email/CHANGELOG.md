@@ -1,5 +1,146 @@
 # @objectstack/plugin-email
 
+## 18.7.0
+
+### Patch Changes
+
+- df8a1b8: fix(plugin-auth)!: a password reset disables the OAuth applications the account registered and revokes the SCIM credentials it minted
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what a completed password reset ends: rows the account owns are written disabled or revoked by the doors administrators already use, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an account that registered an OAuth application or minted a SCIM provisioning credential, and then has its password reset.
+  
+  - FROM: a completed password reset (the emailed link, the texted code, an administrator's `POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, and `os user set-password`) ended the account's sessions, API keys, linked sign-in accounts, authorized apps and device sign-ins. The OAuth applications the account registered (`sys_oauth_application.user_id`) stayed enabled, and the SCIM credentials it minted (`sys_scim_connection_credential.user_id`) stayed active. A self-service reset sent the account no notice.
+  - TO: the same resets also disable every OAuth application the account registered that is not disabled, as a platform administrator's Disable action does (the provider issues it no token, client-credentials tokens included, answers its tokens inactive at introspection, and the MCP endpoint refuses every token it holds), and revoke every SCIM credential the account minted that is still active, as Revoke Credential does, each revoke writing the `sys_audit_log` row Revoke Credential writes (`scim_credential_revoked`) naming the account for a self-service reset and the administrator for a forced one (`os user set-password` names no one and writes none). An application another account registered and a credential another administrator minted are not touched. The account's single sign-on providers and two-factor enrolment are kept.
+  - A completed self-service reset then mails the account `auth.password_reset_notice` (a new built-in template, in en-US, zh-CN, ja-JP and es-ES): how many API keys, linked sign-in accounts and authorized apps it ended, each application it disabled and each credential it revoked by name, and the single sign-on providers and second factor it kept. It is best-effort: a notice that cannot be sent never fails the reset. The forced resets send no notice and answer their requester instead.
+  - The administrator's forced reset reports the new counts on `data.revoked` (`ownedApps`, `scimCredentials`) and on its ledger row (`revokedOwnedApps`, `revokedScimCredentials`); `setOperatorPassword` answers `ownedAppsDisabled` and `scimCredentialsRevoked`, and `os user set-password` prints them. A disable or revoke that does not land answers the self-service requester an error, with no notice, and keeps the forced reset's `complete` false, as for the other rows; every other kind is still ended first, so an application that cannot be disabled leaves no API key, linked sign-in account or credential in place.
+  - A password change disables and revokes nothing. Its reminder, `auth.password_changed_notice`, now also lists the OAuth applications the account registered that are still enabled and the SCIM credentials it minted that are still active and not past their own expiry, and is sent when the account holds only those.
+  
+  The fix for an owner after a reset: ask a platform administrator to enable an application you still need again, and have a platform administrator mint a new SCIM credential for a connection whose credential was revoked.
+- 75925e1: fix(plugin-auth)!: a password reset ends what the account added before it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or export shape is added, removed, renamed or re-shaped, and no stored row is rewritten by a migration: what moves is what the auth doors end when a password is reset or first set, and the answer they give a link minted before it, which is now the answer a link that was never issued gets. The forced reset response gains two counts, its ledger row two keys and the operator outcome two fields. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  A password reset ends what the account added before it, and a password change reminds the account what it keeps.
+  
+  - **A completed self-service reset** (the emailed link at `POST /api/v1/auth/reset-password`, the texted code at `POST /api/v1/auth/phone-number/reset-password`) now ends, beside the account's sessions, every API key the account owns that is not revoked, its `revoked` flag false or unset (revoked as one its owner revoked, so the owner may restore it from the API Keys list), and every sign-in account linked to it other than its password (a social, OAuth or single sign-on link; the provider may be linked again as it was the first time). Where the OAuth provider is enabled it also ends every app authorized to the account: the account's consents, refresh tokens and stored access tokens are deleted, so the app asks to be authorized again, and an MCP access token is refused on its next request. Where device authorization is enabled it ends a device sign-in approved for the account and not yet collected. This build offers no passkey sign-in, so there are no passkeys to end. A reset that does not complete ends nothing. A completed reset that cannot end one of these (a record it cannot read or write, a linked account a host's `account.delete.before` hook keeps, an account it cannot name) answers an error once the password is written; the password stands, its change time and password history are recorded all the same, and resetting again ends what remains.
+  - **A password change** (`POST /api/v1/auth/change-password`) ends none of these: an authorized app keeps its authorization and gets a new MCP access token with its refresh token, issued after the change. When the account still holds an API key that is neither revoked nor past its own expiry, a linked sign-in account or an authorized app afterwards, the account's address is sent the new built-in template `auth.password_changed_notice`, naming each (its variables are `apiKeyCount`, `apiKeys`, `signInAccountCount`, `signInAccounts`, `authorizedAppCount` and `authorizedApps`), through the email service. It is best-effort and never fails the change. plugin-email ships it in `en-US`, `zh-CN`, `ja-JP` and `es-ES`, so `BUILTIN_AUTH_TEMPLATES` grows from 32 rows to 36, and core's `PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template` names it beside the other eight, so it resolves environment-wide and keeps one overriding package per deployment.
+  - **An administrator's forced reset** (`POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, the default) and the operator's `os user set-password` also unlink every linked sign-in account and end every app authorized to the account and every device sign-in approved for it, as the self-service reset does: where the OAuth provider is enabled, the account's consents, refresh tokens and stored access tokens are deleted; where device authorization is enabled, its pending device codes. The operator's command, which runs with no server, ends the ones the project database holds. Both now revoke a key whose `revoked` flag is unset as well. The forced reset's response reports the unlinks as `revoked.signInAccounts` and the apps as `revoked.authorizedApps` (its ledger row as `revokedSignInAccounts` and `revokedAuthorizedApps`), and the operator command prints both (`signInAccountsUnlinked`, `authorizedAppsEnded` on `setOperatorPassword`'s outcome). `revokeSessionsAndKeys: false` still ends nothing.
+  - **An account's first password counts as a password change when it is set onto an account that was already there**: through either reset door, an administrator's `set-user-password`, the one-step invitation acceptance of an existing account, or `POST /api/v1/auth/set-initial-password`. So links and challenges issued before it end, exactly as they do for any other password change. A password created in the same request as its account, as at a sign-up with a password, an administrator's create-user or a one-step invitation acceptance that creates the account, is still not a change, however long the steps between the two take. A password created outside such a request (written straight to the store), or before this release, counts as a change at its creation, so a verification link that signs in, mailed in the same second as that creation, answers as never issued and its owner requests a new one.
+  - **A verification link that signs its holder in** (on a deployment with `emailVerification.autoSignInAfterVerification: true`), **a magic link** and **a texted sign-in code**, issued before the account's password changed, now answer what a link or code that was never issued answers: `401 INVALID_TOKEN` or the `error=INVALID_TOKEN` redirect at `GET /api/v1/auth/verify-email`, the `error=INVALID_TOKEN` redirect with no session at `GET /api/v1/auth/magic-link/verify`, and `400 OTP_NOT_FOUND` with no session at `POST /api/v1/auth/phone-number/verify` (a code sent by `POST /api/v1/auth/phone-number/send-otp`). With auto sign-in off, a verification link still verifies the address. An MCP access token issued before the account's password changed (a reset, a change, or an administrator's `set-user-password`) is refused at the MCP endpoint, as a signed link is, in whole seconds; where the app's authorization still stands (a change, or `revokeSessionsAndKeys: false`), the app gets a new token with its refresh token. A link, code or token issued after the change works as usual.
+  
+  **BREAKING** for a client or integration that keeps using what a reset now ends: an API key the account owned before a completed password reset is refused as revoked (`403 API_KEY_REVOKED`), a linked sign-in account is no longer linked, an authorized app must be authorized again (after a forced reset with revocation on, too), a verification link that signs in, a magic link or a texted sign-in code issued before the account's password changed answers as a never-issued one, and an MCP access token issued before it is refused. The fix: mint a new key after the reset (or restore the old one from the API Keys list), link the provider again, authorize the app again, request a new link or code, or let the app refresh its token.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [c321914]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [4890cd0]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [d71fe59]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [b3247dd]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/objectql@18.7.0
+  - @objectstack/platform-objects@18.7.0
+  - @objectstack/formula@18.7.0
+  - @objectstack/core@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes

@@ -1,5 +1,265 @@
 # @object-ui/plugin-form
 
+## 18.7.0
+
+### Minor Changes
+
+- c7174c3: fix(record-page): business dates read as dates, Save is the edit state's primary button, a new detail line starts on its defaults, and the tabs follow the header with no blank band
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  Four things on the record page.
+  
+  **Dates.** A `date` field that declares no `format` read as a relative phrase on the record page ("6 days ago", "Tomorrow") while the list beside it wrote the date ("Nov 13"), so the reader had to work the day out. The record page's field sections and its highlights strip now write the date itself, with its year, as the list's columns do; the relative phrase (an overdue deadline's "Overdue 5d" included) is the date's tooltip, and a deadline past due still reads red. A declared `format`, `'relative'` included, still wins. A `datetime` field already read as an absolute date there (its cell's default face is the compact one, never the relative phrase), and is now pinned to stay so. The record footer's created and modified times keep their relative wording, and card surfaces (kanban, gallery) are unchanged. `@object-ui/fields`' cell props gain `absoluteDate`, read by the `date` cell.
+  
+  **Edit-state buttons.** In the record page's edit state, Cancel drew as the filled primary button and Save as an outline one, so the hand fell on the button that throws the edit away. Save is now the one filled button, after Cancel, the order a form's footer uses. `page:header` now makes a host button declaring `variant: 'primary'` the primary over the page's own actions, in the place the host gave it; no other host button declares one, so every other header is unchanged.
+  
+  **New detail lines.** A line added to a master-detail table in the record page's edit state started blank, so a required column with a default (a status that defaults to "Pending") read red although the save then stored the default. A new line now starts on the child object's static defaults, the values a create form seeds; a default the server resolves at insert (`NOW()`, a CEL expression) is left to the server. A new line's empty required cell reads red only after a save was refused, with the server's reason listed under the table; a stored line is flagged as before. A line added and never edited, holding only its defaults, is still skipped at save like a blank one; once the user edits a cell of it, it is input and is saved, even when every value they typed equals a default. `LineItemsField` gains `newRowValues` and `newRowRequiredShown`; a line its Add starts on `newRowValues` carries the `UNTOUCHED_NEW_ROW` mark (a symbol key no payload carries) until its first edit, and `isBlankRow` reads that mark. `@object-ui/fields` exports `UNTOUCHED_NEW_ROW` and `isUntouchedNewRow`. A host that passes neither prop sees no change. The save request and its transaction are unchanged.
+  
+  **The band above the tabs.** The record page's scroller and its column layout each padded their top by 24px on a desktop, so a 48px empty band stood between the header and the tab row. The scroller now pads only its sides and bottom, and the column layout keeps a 12px top on every width, so the tabs follow the header at the gap the rest of the page uses; on a phone the title block keeps 16px to the tabs. The print chrome and the approval actions bar that render above the columns keep their own top margin, and an authored page the page renderer draws keeps its own top padding. Side padding is unchanged.
+
+### Patch Changes
+
+- 3446f23: fix(plugin-form): a section navigation jump in a grouped record dialog scrolls only the form, so the dialog keeps its title, navigation and footer in place
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a record dialog with grouped sections, clicking the navigation entry of a short last section used to scroll the dialog box itself: the title and the section navigation moved out of the top of the dialog, a blank area opened below the footer, and nothing could scroll it back, so the user had to close the dialog and lose what they had typed. Two things made that possible, and both are fixed:
+  
+  - The jump scrolled the section heading with an element `scrollIntoView`, which also scrolls every scrollable ancestor, the dialog's clipped (`overflow: hidden`) box included. It now scrolls only the heading's own scroller (the form's body, or the window for a full-page form) with `scrollTo`, keeping the heading's scroll margin.
+  - The dialog's form body is now `relative`, so the hidden native inputs a checkbox or a select mounts beside its control are clipped by the form body and scroll with it, instead of overflowing the dialog box.
+  
+  The highlight rule, section folding and the required-field counts are unchanged. Nothing to migrate.
+- 1aac465: fix(plugin-form): the wizard's final-submit gate judges a `visibleWhen` that reads a formula on the computed value
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `WizardForm` re-checks every declared field when it submits, including the fields on steps the user skipped. The simple form's mobile stepper submits through the same check. That check now computes the object's `formula` fields over the record being written before it judges field rules, the same way the form renderer does (`planObjectFormulas`, ADR-0113). Before, it used the formula value from the last read. So after an edit that moved a required field out of its `visibleWhen`, the wizard still demanded the field even though the server does not require it. After an edit that moved the field into its `visibleWhen`, the wizard sent the save without the field and the server refused it.
+  
+  The `visibleWhen` of a field that reads a formula the form cannot compute is handled as the step forms handle it: the field counts as shown and keeps its `required` flag. The plan is built from the object schema the wizard already reads. When that read fails, or no data source is given, the gate judges the record as it holds it, as before.
+- df81f4c: feat: working calendars in Setup — `sys_work_calendar` and `sys_work_calendar_exception` (ADR-0157, part two of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Not released alone; pair #35641/#35642. The first half, #35641 (the calendar service and its arithmetic), is merged; this half ships in the same release as it, with the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Two platform objects** (`@objectstack/platform-objects`). `sys_work_calendar` holds a calendar's `code` (unique per organization, snake_case), `name`, required IANA `timezone`, `is_default` (one per organization), the required `maintained_from` .. `maintained_through` span its holidays are entered for, and one period column per weekday (`monday_periods` … `sunday_periods`, `HH:mm-HH:mm` periods separated by commas, blank for a day off). `sys_work_calendar_exception` holds dated overrides: `calendar`, `date`, `kind` (`off`, no periods; `on`, that date's full periods), `periods` and `note`, one row per calendar and date. Both are organization data an administrator keeps, audited, like `sys_exchange_rate`; a package may seed rows under the existing seed contract and name a calendar by code. Their names join the platform object name list (`@objectstack/spec`).
+  - **Setup.** Two entries under Exchange Rates: Working Calendars (with a Needs Maintenance list of every calendar whose maintained span ends within 60 days) and Calendar Exceptions, whose list page imports a year of holidays from a file; the `calendar` column names a calendar by its code or name. Labels and help text ship in all eleven locales.
+  - **Time zone on create** (`@object-ui/plugin-form`, ADR-0157 D7). A create form opens a required time-zone field that declares no default (`valueDomain: 'iana_time_zone'`) on the organization's time zone, as it opens a record-currency field on the organization's currency; the user can change it. A create that leaves the calendar's `timezone` out takes the same zone on the server. An optional time-zone field, where blank means "take the parent's", is not prefilled.
+  - **Refusal wording** (`@objectstack/objectql`). The refusal of a create that marks a calendar the default in another organization no longer assumes the writer is working in an organization.
+  - **A calendar stays in its organization** (`@objectstack/objectql`). An update that changes the organization of a calendar or of an exception date is refused with `400 VALIDATION_FAILED` on `organization_id` (`invalid_value`), before any read and for every writer, system writes included. To have a calendar in another organization, create it there. An edit that leaves `organization_id` out or repeats the stored one is judged as before; a predicate update is judged row by row, and one matched row whose organization would change refuses it.
+  - **An exception date names a calendar of its own organization** (`@objectstack/objectql`). On a create, and on an update that carries `calendar`, the calendar is read by id in the exception's organization; when it is not there, the write is refused with `400 VALIDATION_FAILED` on `calendar` (`invalid_value`). A calendar of another organization and an id that names no calendar get the same refusal, word for word. The import door is judged the same way, row by row.
+  - **Organization ownership** (`@objectstack/cli`). Both objects are organization-owned; an exception reaches its organization through its calendar.
+- 98b3f87: fix(plugin-form): a grouped record dialog's section bar is a jump bar, not tabs: it is hidden when the sections fit, and a click marks the section it jumped to
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A create or edit dialog for an object with field groups and no authored form layout draws every group stacked, with a row of group names above them. That row is a jump bar: a click scrolls the form to the group. It was drawn as underlined tabs, so users expected a click to switch the content, and when every group fit the dialog a click had nothing to scroll and only the highlight moved, which looked like tabs that do not work.
+  
+  - The bar is drawn as jump links (a `#` glyph and a pill per group), not as underlined tabs.
+  - The bar is hidden while every group fits the dialog body, and comes back when the content outgrows it (a group unfolding, a field appearing, a smaller window). The dialog header keeps its separator when the bar is hidden.
+  - A click marks the heading of the group it jumped to for a moment, so a jump to a group already in view still shows where it went.
+  
+  The same rules apply to the full-page form's section bar. An authored `tabbed` layout keeps its tab strip, which switches the content as before; collapsed groups, the highlight rule and the error counts are unchanged. Nothing to migrate.
+- ec24363: fix(fields): the inline line grid draws no blank entry row beside "Add line", and each column header shows its field's help
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The inline line grid of a master-detail form always drew an empty line under the lines, directly above the "Add line" button. It had no copy or remove action and was never saved, so users read it as a broken line they could not delete. The grid no longer draws it: a grid with lines shows exactly its lines, and an empty grid says "No items yet — click "Add line" to begin." The keyboard path that line carried stays: "Add line" moves focus into the line it adds, and Enter in the last line adds a line and moves to the same column in it. An empty required grid that the form refused still draws one entry line, so the field's failure stays on the cells a user types into.
+  
+  Each column header now shows its field's help as an info icon beside the label. The help appears on hover and on keyboard focus, and it is the icon's accessible name. The text is what the record form shows under the same field: `inlineHelpText`, else `description`, from the child object's definition as the server serves it, so help written by another package's `objectExtensions.fieldPatches` and the reader's language both apply. `GridField` takes the texts as a new `columnHelp` prop, and `columnHelpByField` builds them from a child object's fields. The master-detail form, the line-items panel and the record-body table editor pass them.
+  
+  What does not change: what a save sends, the `allowAdd` / `allowDelete` / `maxRows` behaviour, and every metadata key, value and default. A master-detail entry whose relationship and every column type are authored loads no child schema, so its headers show no help, as it has no lookup autofill.
+- 1e018d6: feat: edit a record and its line tables together, and lock a record's lines while an approval locks the record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A locked record's lines are locked too.** While a record is held by an approval that locks it, writes to its master-detail child rows are refused with `RECORD_LOCKED` (409), the same answer a write to the record itself gets: inserting a row under it, updating or deleting one of its rows, and moving a row into it or out of it (both ends of a reparent are checked). A multi-row write that touches any such row is refused as a whole, and a row whose parent cannot be read is refused when the parent object has a locking approval the writer's run does not own. The approval's own exemptions carry over: system writes and the flow run that opened the approval still write. The refusal names the record by its object's label ("This Opportunity is locked while an approval is in progress, …"). Lookup children are not affected. `@objectstack/plugin-approvals` binds the new `bindDetailRowLockHook` beside the record lock it already binds.
+  
+  **`@object-ui/plugin-form` exports the record-page body-table editor.** `RecordBodyTableEditor` draws a master-detail body table as editable lines (the `LineItemsField` grid, with the child columns, field permissions and add / remove rules the master-detail form uses) for a host's edit session (`RecordEditSessionContext`). `buildRecordEditBatch` folds a record's field changes and every table's lines into one batch (the `buildMasterDetailEditBatch` diff, table by table), and `attributeRecordEditRefusal` places a refused batch's reasons on the record's field or on the line whose write carried the refused field.
+  
+  **`@object-ui/i18n`** adds `detail.bodyTableRow`, `detail.bodyTablesReadOnlyBulk` and `detail.discardInlineEditsMessage` to every built-in pack.
+  
+  **`@object-ui/plugin-detail`** exports `RecordBodyTableEditorSlotContext`: while a host provides it, a `record:related_list` whose relationship id (`CHILD_OBJECT.FK_FIELD`) is in the slot's set draws the host's element in its place instead of the read-only list. The record page's edit state draws its body-table editors through it; no new node type is registered.
+  
+  In the console, Edit on a record page that draws master-detail body tables now opens the page's edit state: the fields become inputs, the body tables editable lines, and one Save writes all of it in one batch. Per-field inline edit stays on every record page, those included, and saves the record alone through its save bar. One mode runs at a time: the edit state offers no per-field inline edit, and pressing Edit while inline changes are unsaved first asks whether to discard them.
+- 6b51822: fix(ui): the entry form draws a group-placed master-detail table at its field group
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A master-detail child that a field group of the parent places (`fieldGroups[].relatedList`) is now drawn at that group in the parent's create and edit forms, where the record page draws it, instead of below all of the record's fields:
+  
+  - A form laid out from the parent's field groups draws the table after the sections of the groups declared before the placing group and before the ones declared after it.
+  - The form's section bar stops at the table too, between the sections around it.
+  - A tabbed form gives it a tab of its own at that position, labelled with the group's label. A wizard master-detail form is drawn as the simple form, as before, and places it the same way.
+  - A form whose sections name no field group, and a child no group places (a form view's own `subforms`), keep the table below the record's fields, as before.
+  
+  The table is the same one: its rows still save with the record in one batch, an expanded row's editor opens beside it, and the document totals stay at the foot of the form. No metadata changes.
+- 32409a9: fix(form): a new detail line on a master-detail create / edit form starts on the child's defaults, does not read red before a save is tried, and a line added and left untouched is skipped with a notice on the form and the record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a parent object's create or edit form, a line added to a detail table started blank, so a required column with a default (a status that defaults to "Pending") read red at once although saving would store the default. The record page's edit state already started its new lines on their defaults; the form now does the same.
+  
+  **New lines on the form.** A new line starts on the child object's static defaults, the values a create form of the child seeds, whether it is added with Add or with Enter on the last line. A default the server resolves at insert (`NOW()`, a CEL expression) is left to the server. A new line's empty required cell reads red once a save of the form was tried, not the moment the line appears; a stored line is flagged as before. A line added with Add and then applied from the row editor is the user's input and is saved.
+  
+  **A line added and left untouched** (maintainer ruling, card comment 7056413638: 「跳过并提示未保存」). A line Add started on its defaults that nobody edited holds only those defaults. It is still not written, and the save now says so: once the save lands, the form and the record page's edit state show "1 blank line was not saved" (or "N blank lines were not saved"), also when the host supplies its own save confirmation. Such a line never reads red, before or after a refused save, since there is nothing in it to fix; once the user edits any of its cells it is input, saved and flagged like any other new line. On an edit form that stays open after saving, the skipped line leaves with the save, as it does on the record page. A line the user typed into and then cleared is blank and is skipped as before, without the notice. The pack key is `form.lineItems.untouchedNotSaved`, in every built-in locale.
+  
+  **Seeding context.** The defaults on both the form and the record page's edit state are now read with the session facts a create form uses: a child field defaulted to the acting user starts on that user, and the organization's currency and time zone seed the fields they seed on a create form. With no known user that field starts empty and the server fills it, as before.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [a0b4ecf]
+- Updated dependencies [d6d9645]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [c3fb37a]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [8e46424]
+- Updated dependencies [8896822]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [dc53d4a]
+- Updated dependencies [0739dee]
+- Updated dependencies [ad15579]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [bfd6b6b]
+- Updated dependencies [55020c3]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [a9b36ef]
+- Updated dependencies [9f352e8]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [7702f09]
+- Updated dependencies [05e0eb8]
+- Updated dependencies [b863d2b]
+- Updated dependencies [c890070]
+- Updated dependencies [e75a528]
+- Updated dependencies [5bd7257]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [3819afe]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [9212119]
+- Updated dependencies [9b3227f]
+- Updated dependencies [fe75349]
+- Updated dependencies [f4de1de]
+- Updated dependencies [dab4712]
+- Updated dependencies [141a826]
+- Updated dependencies [8145424]
+- Updated dependencies [53c9575]
+- Updated dependencies [83a79e6]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [ccded86]
+- Updated dependencies [f7b172f]
+- Updated dependencies [ec24363]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [e01b8be]
+- Updated dependencies [238661f]
+- Updated dependencies [d96c878]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [9b6db73]
+- Updated dependencies [1e018d6]
+- Updated dependencies [6d86b43]
+- Updated dependencies [bae933b]
+- Updated dependencies [a3a74f2]
+- Updated dependencies [74d3d83]
+- Updated dependencies [401eb44]
+- Updated dependencies [227a16a]
+- Updated dependencies [de25d58]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [4609c48]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [af566c2]
+- Updated dependencies [f909734]
+- Updated dependencies [f51578e]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [1d7015a]
+- Updated dependencies [d7c257e]
+- Updated dependencies [5a68b57]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [dea68e9]
+- Updated dependencies [b113178]
+- Updated dependencies [138faaa]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [52fb30c]
+- Updated dependencies [170ca48]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [32409a9]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9a98a46]
+- Updated dependencies [96b66ca]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [eb53d63]
+- Updated dependencies [a23164e]
+- Updated dependencies [b89f1b5]
+- Updated dependencies [7d3b8d6]
+- Updated dependencies [15f8357]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @object-ui/i18n@18.7.0
+  - @object-ui/fields@18.7.0
+  - @object-ui/types@18.7.0
+  - @object-ui/core@18.7.0
+  - @object-ui/components@18.7.0
+  - @object-ui/react@18.7.0
+  - @object-ui/permissions@18.7.0
+
 ## 18.6.0
 
 ### Patch Changes

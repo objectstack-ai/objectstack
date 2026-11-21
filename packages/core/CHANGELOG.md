@@ -1,5 +1,240 @@
 # @objectstack/core
 
+## 18.7.0
+
+### Patch Changes
+
+- 89364b4: feat(spec, core, ui): `{current_iso_week}` defaults a week-keyed filter to the current ISO week
+  
+  Clause-②: yes (widening: the closed filter-placeholder vocabulary gains one token)
+  Metadata-protocol: added
+  
+  A dashboard whose rows carry a text week key (`cost_week: '2026-W47'`) could only default its week filter to a fixed week, which went stale the next Monday. Write the placeholder instead and the filter opens on the current week each time:
+  
+  ```ts
+  globalFilters: [
+    { field: 'cost_week', label: 'Week', type: 'text', defaultValue: '{current_iso_week}' },
+  ],
+  ```
+  
+  - It resolves to the ISO-8601 week key of today, `YYYY-Www`: Monday-start weeks, week 1 is the week that holds the year's first Thursday, and the year is the ISO week-numbering year, so 2027-01-01 is `2026-W53` and 2025-12-29 is `2026-W01`. "Today" is the day in the workspace time zone, on the server and in the browser alike; the label is the one the analytics week bucket already uses.
+  - It is a period key, not a date. It lives in its own closed list, `PERIOD_KEY_TOKENS`, beside `DATE_MACRO_TOKENS` and not inside it, so a date filter default and a calendar `initialDate` still refuse it. `classifyFilterToken` answers a new kind, `period-key`, and `isKnownFilterToken` knows it, so lint, flow filter operands and the server resolver accept it wherever a filter placeholder is accepted. A consumer that switches exhaustively on `kind` gets a compile error until it handles the new kind.
+  - The server resolves it in `resolveFilterTokens`; the browser resolves it in `resolveFilterPlaceholders` and in the dashboard filter defaults (every filter type except `date` and `dateRange`), so the filter box opens showing the resolved key. A literal `2026-W47` default keeps working and stays fixed.
+  - Every filter and default written before parses and resolves exactly as before. Only the whole value is a placeholder: `'week {current_iso_week}'` is left as written. A near spelling such as `{currentIsoWeek}` is still refused as an unknown token.
+  - Use it only on a field that stores week keys. On a date, datetime or time field the placeholder is refused (`INVALID_FILTER` / 400), as the literal key is; filter those with the `this_week` preset or `{current_week_start}` / `{current_week_end}`.
+- 4b1eb0e: fix(plugin-audit): the platform's own audit and activity rows are no longer judged as an automation's insert
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The audit writer records every audited write with a `sys_audit_log` row and its `sys_activity` mirror. It wrote both through the `sudo()` of the hook api it is handed, and `sudo()` spreads the audited write's context. When that write was made by app-authored automation, the elevation kept the automation's provenance: an action body's or a system hook's app-automation elevation mark, or a flow run's `flowRunId`. plugin-security therefore read the platform's own ledger rows as the automation inserting into an append-only object. Today that logged the "Deprecated: inserting into 'sys_audit_log'" (and `'sys_activity'`) warning on the first such write. Once the announced refusal of those inserts ships, it would have refused the rows and lost the audit trail of every action-body, system-hook and flow write.
+  
+  - The audit writer now writes both rows through the platform's own system api. `platformSystemApi(api)` is a new export of `@objectstack/objectql` and `@objectstack/objectql/core`. It derives from a hook's api the same elevated context `sudo()` gives, minus the app-automation mark and minus `flowRunId`. Every other key is kept, so the rows stay in the write's transaction, organization and attribution. On an app-authored hook's api it sheds nothing: there it returns what that api's `sudo()` returns, the mark and `flowRunId` kept.
+  - `withoutAppAutomationElevation(context)` is a new export of `@objectstack/core`. It returns the context without the mark.
+  - What an automation writes itself is unchanged. An action body's or a hook's insert into `sys_activity` or `sys_audit_log`, through its `ctx.api` or its `ctx.api.sudo()`, still carries the mark and still logs the deprecation. `sudo()` itself is unchanged too: it never sheds the mark.
+- 8856afc: feat(mcp): a refused record read says the data is not recorded, in the caller's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  When `query_records`, `aggregate_records` or `get_record` is refused and the call named an object, or a field, that the caller's own schema does not show (the object as `describe_object` serves it to them), the refusal now carries two members beside it, on the HTTP and the stdio server alike:
+  
+  - `notRecorded`: what is not recorded, as the caller sent it: `{ "object": "<name>" }`, or `{ "object": "<name>", "fields": ["<name>", …] }` for the field names the call sent that the schema does not show, in the order sent. Every sent name is read by its head on every channel (`where`, `fields`, `orderBy`, `groupBy`, an aggregation's `field` and `filter`), so `owner.name` is judged by `owner`, and a dotted name whose head the schema shows is never named.
+  - `ifNotRecorded`: one sentence, in the caller's language (English, Simplified and Traditional Chinese, Japanese), telling the model to say the data is not recorded, never to report 0 or an empty result for it, and not to answer with another object or field in its place.
+  
+  The answer names only what the caller can see: both members are built from the names the caller sent and from the caller's served schema, and nothing else. The refusal itself (`isError`, its `code`, `message` and `status`) is unchanged, byte for byte. A read that answers, a refusal about a field the caller's schema shows, a server fault, and a refusal whose schema read cannot be made carry no member. `id`, `created_at` and `updated_at`, which every object answers, are never named.
+  
+  The language is chosen by one shared picker, `pickSentenceLocale` (with `platformLocaleNamedBy`), now exported from `@objectstack/core`: the first of the caller's locales (the request's, then the workspace default) that names a language the sentence is written in, else `en`. The dataset tools' `nextStep` and `sourceLine` (`@objectstack/service-analytics`) use the same picker, with unchanged behaviour. `McpDataBridge` gains an optional `userTextLocales()` member: the HTTP bridge answers the request's ladder, the stdio bridge the principal's ladder and then the i18n service's default. A bridge without it is answered in `en`.
+- 8384d18: fix(core)!: the offboarding hand-over no longer moves the owner of a `controlled_by_parent` detail record
+  
+  Clause-②: no (narrowing) — narrowed: `GET /api/v1/security/users/USER_ID/assigned-work` no longer lists the `owner_id` of an object whose `sharingModel` is `controlled_by_parent`, and `POST /api/v1/security/users/USER_ID/assigned-work/transfer` no longer moves it, with or without `objects` naming the detail. `userAssignedWorkFields` of `@objectstack/core` leaves that field out of its roster.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answer is which records the hand-over counts and moves. A detail record's owner stays where it was; an administrator who wants a different owner on one edits that record. -->
+  
+  **BREAKING** for an administrator handing a banned user's work to someone else. On a detail object the owner records who did the work — the person on a timesheet, the spender on an expense line, the voter on a vote — not who holds it. The hand-over used to move it with everything else, so the successor appeared to have logged the leaver's hours and spent the leaver's money, and approvals and reports read wrong. Those owners now stay where they are, are not counted in the assigned-work answer, and are not part of `remaining`.
+  
+  Unchanged: the detail's own user fields (an approver, an assignee) are still counted and moved, and the owner of every object whose `sharingModel` is `private`, `public_read`, `public_read_write` or unset is still counted and moved. A detail row that names its master is reached through that master (ADR-0055), so hand over the master record to give the successor that row's access.
+  
+  One row class has no master to hand over: a detail row whose master reference is empty, on a detail whose master is optional (`required: false`, ADR-0055 as amended). Its owner reads and writes it, beside View All / Modify All on the detail. Its owner is not counted or moved either, so after the ban only View All / Modify All holders reach it. To give such rows to someone else, a holder of Modify All on the detail filters the detail by owner and edits the owner by hand.
+- ed906d5: feat: the working-calendar service, its arithmetic and its refusal codes (ADR-0157, part one of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Not released alone; pair #35641/#35642. This ships in the same release as #35642 (the calendar objects and Setup pages, the second half of this change), the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **The arithmetic** (`@objectstack/formula`). `isWorkingTime`, `addWorkingDays`, `workingDaysBetween` and `addWorkingHours` compute over a resolved calendar and its dated exceptions, as pure functions a formula can call synchronously, beside `parseWorkPeriods` (`HH:mm-HH:mm` periods; a period that crosses midnight is refused, `24:00` is a legal end), `buildWorkCalendar` (a frozen calendar) and the three error classes. A computation that needs a date outside the calendar's maintained span is refused rather than read from the weekly pattern.
+  - **The types, constants and time-zone rule** (`@objectstack/spec`). `WorkCalendar` and the column and code constants are in `@objectstack/spec/data`; the service contract is `IWorkCalendarService` in `@objectstack/spec/contracts`. `zonedWallClockToUtcMs`, `wallClockToUtcMs` and `WallClockParts` move to `@objectstack/spec/data` from `@objectstack/core`, unchanged; `@objectstack/core` re-exports all three, so no import changes.
+  - **Three error codes** in the ADR-0112 ledger: `ERR_WORK_CALENDAR_UNRESOLVED` (no calendar by that code, no organization default, two defaults, or no organization named outside the `single` posture), `ERR_WORK_CALENDAR_NOT_MAINTAINED` and `ERR_WORK_CALENDAR_INVALID`, each a 400.
+  - **The calendar service** (`@objectstack/objectql`, registered as `work-calendar`). `resolve({ organizationId, calendar })` takes the named code, else the organization default, else refuses; it never falls back to wall-clock time. It reads in the organization the caller names, elevated, and caches until a calendar or exception row is written. Outside the `single` tenancy posture, a computation that names no organization is refused before any read. Until the calendar objects are registered it refuses every resolution.
+  - **The write door** (`@objectstack/objectql`). Once the calendar objects exist, a calendar or exception write is refused `400 VALIDATION_FAILED` when a period crosses midnight, is malformed or overlaps another, an `off` row carries periods or an `on` row carries none, `maintained_through` is before `maintained_from`, a second calendar is marked the default, or a calendar created in an organization other than the one being worked in is marked the default (create it there, or set the default by an update); a calendar created without `timezone` takes the organization's Localization time zone. The hooks take the organization from the session.
+- 3cfa5bc: fix(core)!: a context placeholder (`{current_user_id}`, `{current_org_id}`) compared against a date, datetime or time field is refused, as the id it resolves to already was
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is the answer of the published isUninterpretableTemporalComparand predicate for a context placeholder, which the engine's temporal-comparand door now refuses as it refuses the id the placeholder resolves to. Such a filter never matched a temporal column correctly, so no consumer had a working form of it to migrate. -->
+  
+  **BREAKING** for a filter that compares a `date`, `datetime` or `time` field against a context placeholder. Such a filter is now refused with `INVALID_FILTER` (400), naming the field, before any read, on `find`, `findOne`, `count`, `aggregate` (its `where`, each aggregation's `filter` and its `having`), `update` and `delete`. It never answered correctly: the placeholder resolves to the caller's user or organization id, an id is not a day, an instant or a time of day, and the comparison ran as text against the stored values.
+  
+  - FROM: `{ due_on: { $lt: '{current_user_id}' } }` answered every row, and `$eq` / `$gte` answered no row, all with a 200, on SqlDriver and InMemoryDriver alike, while the same filter written with the literal id was refused.
+  - TO: the placeholder takes the literal id's refusal, `INVALID_FILTER` / 400, on all three kinds, in both spellings (`{current_user_id}` and `${current_user_id}`).
+  
+  `isUninterpretableTemporalComparand` (`@objectstack/core`) now answers `true` for a context placeholder on every temporal kind, as it does for a period key (`{current_iso_week}`). It still answers `false` for a date macro (`{current_week_start}`, `{30_days_ago}`), which the engine judges by its year once resolved, and for an unknown or record-context placeholder (`{TODAY}`, `{record_id}`), which the resolver keeps refusing by name with `FILTER_TOKEN_UNKNOWN` / `FILTER_TOKEN_UNRESOLVED`. A context placeholder on an id or text field resolves exactly as before.
+  
+  The refusal comes from the temporal-comparand door, which runs one stage ahead of the placeholder resolver. So a caller with no session, which got `FILTER_TOKEN_UNRESOLVED` (400) for this spelling on a temporal field, now gets `INVALID_FILTER` (400). On an id or text field it still gets `FILTER_TOKEN_UNRESOLVED`.
+  
+  The engine's judge-only admission runs the same door, and so do two of its readers:
+  
+  - `IObjectQLEngine.judgeFilter` answers `{ ok: false, code: 'INVALID_FILTER', status: 400 }` for this spelling on a temporal field. With a session it answered `{ ok: true }`; without one it answered `FILTER_TOKEN_UNRESOLVED`.
+  - Lint's row-scope predicate rule (`rls-predicate-unenforceable`) still refuses a predicate such as `due_on < '{current_user_id}'`. The finding now quotes `INVALID_FILTER / 400` with the hint to rewrite the comparison, where it quoted `FILTER_TOKEN_UNRESOLVED / 400` with the hint to write the caller's value as a `current_user` key.
+  - Analytics read-scope admission: when the analytics service asks the engine to admit an object's read scope, a scope that compares a `date`, `datetime` or `time` field with a context placeholder is now refused at compile, `READ_SCOPE_COMPILE_FAILED` (500, fail-closed). After the upgrade, a dashboard or analytics query over such an object answers 500 until that clause is rewritten as below.
+  
+  The fix for an author: compare the date field against a date (a `YYYY-MM-DD` day, an ISO-8601 instant, or a date macro such as `{30_days_ago}`), and compare the user or organization id against the field that holds it, such as `owner_id`. In a row-level-security predicate, write `owner == current_user.id`.
+- 7c122ff: fix(core): a signed-in request reads its session once with the inbound rate limiter armed or an ADR-0069 gate active on REST
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With `server.security.rateLimit` armed, or on the REST door while a session gate is active, one signed-in request read its session (a `sys_session` lookup by token and a `sys_user` lookup by id) two or three times; it now reads it once, on the dispatcher and REST alike. Who is admitted or refused, and with which status, does not change.
+  
+  The inbound rate limiter, the identity step of every door (`resolveRequestExecutionContext`) and REST's `reread-when-active` gate now read the session through one request-scoped carrier (`openRequestSessionRead` / `withRequestSessionRead` / `withoutRequestSessionRead` / `readRequestSession`, exported from `@objectstack/core`). The Hono transport runs its middleware chain in a scope and hands that scope to a route it registered only when every middleware between the two is a whole-server one; a route behind a path-scoped middleware (plugin-auth's door under the auth base path, where the organization's IP list is judged on the read) and a raw-app route read for themselves, and `resolveRequestExecutionContext` opens a scope for its own call where none is open. A read is handed to a later reader of the same request only while no write has landed on the data engine since it was read and the session has not expired; a read that throws is never handed on, so each reader keeps its own outage answer. Nothing is kept across requests. The Hono middleware seam now hands a middleware the same headers a route receives, `host` backfilled from the URL included.
+- d7c257e: feat: the engine's seam for the fixed-read leaf, and the driver declaration for it (ADR-0155, step 2 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  No visible change on its own: nothing on main writes a fixed-read leaf yet (the sharing plugin starts writing `SharedRecordIds` at ADR-0155's last step), and no driver declares one (the SQL drivers and the memory driver declare it on the steps that compile it).
+  
+  - **The driver declaration** (`@objectstack/spec`). `DriverCapabilities.fixedReadLeaves` lists the fixed-read leaves a driver's filter compiler evaluates exactly, by name, e.g. `['SharedRecordIds']`; absence means none. The names are `FIXED_READ_LEAF_NAMES`, and `fixedReadLeafNameOf(leaf)` maps a leaf to its name. It stays separate from `readableIdsLeaf`: a `ReadableIds` leaf is not a fixed-read leaf, and a driver that evaluates both declares both. Both descriptions now say so.
+  - **The seam** (`@objectstack/objectql`). The engine's comparand door admits a branded `SharedRecordIds` leaf as a `$in` comparand, and the engine hands it to the driver by reference only when it sits on `id` of the object it names (directly, or inside a composed `ReadableIds` scope over that object), on a read verb in its read form or in a predicate update's `where` in its write form, for the context's user or its delegator (a system context is exempt), outside both classes ADR-0155 D4 recognises (the object on another datasource than `sys_record_share`; a middleware or a `beforeFind` / `afterFind` hook registered for `sys_record_share` by name), and to a driver whose `fixedReadLeaves` names it. Anything else is refused before any driver is asked, `INTERNAL_ERROR` / 500, logged at `error` once per evaluator. An unbranded copy is still refused at the door as a non-list comparand, `INVALID_FILTER` / 400.
+  - **The refusal** (`@objectstack/core`). `fixedReadLeafRefusal`, `refuseFixedReadLeafOnce` and `describeFixedReadLeaf` are the one envelope every evaluator answers a fixed-read leaf it will not run with; `logRefusalOnce` is the once-per-instance log it shares with the `ReadableIds` refusal.
+  - **Filter tokens** (`@objectstack/core`). `resolveFilterTokens` returns a fixed-read leaf by reference, as it does a `ReadableIds` leaf, so a read scope that carries a placeholder beside the leaf keeps the leaf's brand.
+- df8a1b8: fix(plugin-auth)!: a password reset disables the OAuth applications the account registered and revokes the SCIM credentials it minted
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what a completed password reset ends: rows the account owns are written disabled or revoked by the doors administrators already use, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an account that registered an OAuth application or minted a SCIM provisioning credential, and then has its password reset.
+  
+  - FROM: a completed password reset (the emailed link, the texted code, an administrator's `POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, and `os user set-password`) ended the account's sessions, API keys, linked sign-in accounts, authorized apps and device sign-ins. The OAuth applications the account registered (`sys_oauth_application.user_id`) stayed enabled, and the SCIM credentials it minted (`sys_scim_connection_credential.user_id`) stayed active. A self-service reset sent the account no notice.
+  - TO: the same resets also disable every OAuth application the account registered that is not disabled, as a platform administrator's Disable action does (the provider issues it no token, client-credentials tokens included, answers its tokens inactive at introspection, and the MCP endpoint refuses every token it holds), and revoke every SCIM credential the account minted that is still active, as Revoke Credential does, each revoke writing the `sys_audit_log` row Revoke Credential writes (`scim_credential_revoked`) naming the account for a self-service reset and the administrator for a forced one (`os user set-password` names no one and writes none). An application another account registered and a credential another administrator minted are not touched. The account's single sign-on providers and two-factor enrolment are kept.
+  - A completed self-service reset then mails the account `auth.password_reset_notice` (a new built-in template, in en-US, zh-CN, ja-JP and es-ES): how many API keys, linked sign-in accounts and authorized apps it ended, each application it disabled and each credential it revoked by name, and the single sign-on providers and second factor it kept. It is best-effort: a notice that cannot be sent never fails the reset. The forced resets send no notice and answer their requester instead.
+  - The administrator's forced reset reports the new counts on `data.revoked` (`ownedApps`, `scimCredentials`) and on its ledger row (`revokedOwnedApps`, `revokedScimCredentials`); `setOperatorPassword` answers `ownedAppsDisabled` and `scimCredentialsRevoked`, and `os user set-password` prints them. A disable or revoke that does not land answers the self-service requester an error, with no notice, and keeps the forced reset's `complete` false, as for the other rows; every other kind is still ended first, so an application that cannot be disabled leaves no API key, linked sign-in account or credential in place.
+  - A password change disables and revokes nothing. Its reminder, `auth.password_changed_notice`, now also lists the OAuth applications the account registered that are still enabled and the SCIM credentials it minted that are still active and not past their own expiry, and is sent when the account holds only those.
+  
+  The fix for an owner after a reset: ask a platform administrator to enable an application you still need again, and have a platform administrator mint a new SCIM credential for a connection whose credential was revoked.
+- 75925e1: fix(plugin-auth)!: a password reset ends what the account added before it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or export shape is added, removed, renamed or re-shaped, and no stored row is rewritten by a migration: what moves is what the auth doors end when a password is reset or first set, and the answer they give a link minted before it, which is now the answer a link that was never issued gets. The forced reset response gains two counts, its ledger row two keys and the operator outcome two fields. There is nothing for a migration to rewrite and no tombstone. -->
+  
+  A password reset ends what the account added before it, and a password change reminds the account what it keeps.
+  
+  - **A completed self-service reset** (the emailed link at `POST /api/v1/auth/reset-password`, the texted code at `POST /api/v1/auth/phone-number/reset-password`) now ends, beside the account's sessions, every API key the account owns that is not revoked, its `revoked` flag false or unset (revoked as one its owner revoked, so the owner may restore it from the API Keys list), and every sign-in account linked to it other than its password (a social, OAuth or single sign-on link; the provider may be linked again as it was the first time). Where the OAuth provider is enabled it also ends every app authorized to the account: the account's consents, refresh tokens and stored access tokens are deleted, so the app asks to be authorized again, and an MCP access token is refused on its next request. Where device authorization is enabled it ends a device sign-in approved for the account and not yet collected. This build offers no passkey sign-in, so there are no passkeys to end. A reset that does not complete ends nothing. A completed reset that cannot end one of these (a record it cannot read or write, a linked account a host's `account.delete.before` hook keeps, an account it cannot name) answers an error once the password is written; the password stands, its change time and password history are recorded all the same, and resetting again ends what remains.
+  - **A password change** (`POST /api/v1/auth/change-password`) ends none of these: an authorized app keeps its authorization and gets a new MCP access token with its refresh token, issued after the change. When the account still holds an API key that is neither revoked nor past its own expiry, a linked sign-in account or an authorized app afterwards, the account's address is sent the new built-in template `auth.password_changed_notice`, naming each (its variables are `apiKeyCount`, `apiKeys`, `signInAccountCount`, `signInAccounts`, `authorizedAppCount` and `authorizedApps`), through the email service. It is best-effort and never fails the change. plugin-email ships it in `en-US`, `zh-CN`, `ja-JP` and `es-ES`, so `BUILTIN_AUTH_TEMPLATES` grows from 32 rows to 36, and core's `PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template` names it beside the other eight, so it resolves environment-wide and keeps one overriding package per deployment.
+  - **An administrator's forced reset** (`POST /api/v1/auth/admin/set-user-password` with `revokeSessionsAndKeys` on, the default) and the operator's `os user set-password` also unlink every linked sign-in account and end every app authorized to the account and every device sign-in approved for it, as the self-service reset does: where the OAuth provider is enabled, the account's consents, refresh tokens and stored access tokens are deleted; where device authorization is enabled, its pending device codes. The operator's command, which runs with no server, ends the ones the project database holds. Both now revoke a key whose `revoked` flag is unset as well. The forced reset's response reports the unlinks as `revoked.signInAccounts` and the apps as `revoked.authorizedApps` (its ledger row as `revokedSignInAccounts` and `revokedAuthorizedApps`), and the operator command prints both (`signInAccountsUnlinked`, `authorizedAppsEnded` on `setOperatorPassword`'s outcome). `revokeSessionsAndKeys: false` still ends nothing.
+  - **An account's first password counts as a password change when it is set onto an account that was already there**: through either reset door, an administrator's `set-user-password`, the one-step invitation acceptance of an existing account, or `POST /api/v1/auth/set-initial-password`. So links and challenges issued before it end, exactly as they do for any other password change. A password created in the same request as its account, as at a sign-up with a password, an administrator's create-user or a one-step invitation acceptance that creates the account, is still not a change, however long the steps between the two take. A password created outside such a request (written straight to the store), or before this release, counts as a change at its creation, so a verification link that signs in, mailed in the same second as that creation, answers as never issued and its owner requests a new one.
+  - **A verification link that signs its holder in** (on a deployment with `emailVerification.autoSignInAfterVerification: true`), **a magic link** and **a texted sign-in code**, issued before the account's password changed, now answer what a link or code that was never issued answers: `401 INVALID_TOKEN` or the `error=INVALID_TOKEN` redirect at `GET /api/v1/auth/verify-email`, the `error=INVALID_TOKEN` redirect with no session at `GET /api/v1/auth/magic-link/verify`, and `400 OTP_NOT_FOUND` with no session at `POST /api/v1/auth/phone-number/verify` (a code sent by `POST /api/v1/auth/phone-number/send-otp`). With auto sign-in off, a verification link still verifies the address. An MCP access token issued before the account's password changed (a reset, a change, or an administrator's `set-user-password`) is refused at the MCP endpoint, as a signed link is, in whole seconds; where the app's authorization still stands (a change, or `revokeSessionsAndKeys: false`), the app gets a new token with its refresh token. A link, code or token issued after the change works as usual.
+  
+  **BREAKING** for a client or integration that keeps using what a reset now ends: an API key the account owned before a completed password reset is refused as revoked (`403 API_KEY_REVOKED`), a linked sign-in account is no longer linked, an authorized app must be authorized again (after a forced reset with revocation on, too), a verification link that signs in, a magic link or a texted sign-in code issued before the account's password changed answers as a never-issued one, and an MCP access token issued before it is refused. The fix: mint a new key after the reset (or restore the old one from the API Keys list), link the provider again, authorize the app again, request a new link or code, or let the app refresh its token.
+- ecd4b2b: fix(plugin-auth)!: SSO discovery connects only to addresses that are public at connect time
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. What moves is runtime answers of the SSO doors: a read of an identity provider's OpenID Connect configuration is sent only to an address that is public when the connection is made, unless the deployment's trusted origins list its origin. `AuthManagerOptions` gains one optional member and the guarded fetch's init one optional member; nothing stored, no registry key and no authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an identity provider whose OpenID Connect host resolves to a private, loopback, link-local, cloud metadata or host-platform address (`168.63.129.16` included), or to any other non-public address, on an origin `OS_TRUSTED_ORIGINS` does not list, at the moment the server reads it: a registration (`POST /api/v1/auth/sso/register`, or the Register SSO Provider bridge) is refused `400 VALIDATION_FAILED` on `issuer` (or on `oidcConfig.discoveryEndpoint` when the registration names one), an update that turns "sign out of the company sign-in too" on is refused `400 VALIDATION_FAILED` on `signOutOfIdp`, and a sign-in's callback ends on the error page with `invalid_provider`. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no metadata author writes an SSO provider, so `Metadata-protocol` is `none`.
+  
+  SSO discovery connects only to addresses that are public at connect time. Every read the server makes of an identity provider (a registration's discovery document, the sign-out switch's read of that document on a registration or an update, a sign-in's discovery, and the token, key-set and userinfo reads of a sign-in's callback) is sent through the platform's outbound-request guard (`@objectstack/core/egress`): the connection resolves the host, judges every address by the platform's address classes, and connects to an address it judged, so the address judged is the address connected. A host that is not public is refused and nothing is sent to it, whatever an earlier lookup of the same name answered, and so is a name that does not resolve when the read connects. Only reads at the origins the provider's configuration names are judged (the registration's body, or the provider row the sign-in reads): every other request the server makes while answering, such as a datastore or a rate-limit store reached over HTTP, is sent as before. A registration still judges its discovery host before reading it, now by the same rule and the same address classes, an address literal included; a name that does not resolve there is left to the read, which refuses it. The origins a registration names stay trusted for that registration's discovery checks only, and `OS_EGRESS_ALLOWED_TARGETS` does not open SSO discovery.
+  
+  `@objectstack/core`: the guarded fetch's init takes fetch's `redirect` mode; `manual` answers a redirect response as it is and follows nothing, for a caller that refuses redirects itself.
+  
+  Fix for an operator whose identity provider runs on an internal network: list its origin in `OS_TRUSTED_ORIGINS`, and its reads are sent as before.
+- d280de9: docs: stale prose on summary currency, the temporal-comparand door and analytics filters now says what the code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No accepted value, key or answer moves. Two refusal messages change their words:
+  
+  - A `currencyMode: 'dynamic'` summary over a child `currency` field that is neither `dynamic` nor a well-formed `record` / `fixed` (a stored `fixed` field with no `defaultCurrency`, or a `currencyMode` outside the three) is still refused, and the refusal now names what the child lacks: "is a 'currency' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)", or "is a 'currency' field whose `currencyMode` 'X' is none of `dynamic`, `fixed` and `record`". Before, it said only "is a 'currency' field, not a `currency` field in `dynamic` mode".
+  - The temporal-comparand door's refusal of a comparand no temporal rule reads (`'not-a-date'`, the preset name `'last_30_days'`) now ends "As written it would reach the driver and be compared as text: it may select every row, none or the wrong ones (or raise a database error), an answer indistinguishable from a real one." Before, it said the comparison would "compare false for EVERY row", which was wrong for `$lt` and others that selected every row, for a partial day such as `'2026-06'` that selected a subset, and on PostgreSQL, which raised a database error. Its `having` twin says the same of the groups it would keep, where it said "no group or every group, a 200".
+  
+  The upgrade-guide entry `summary-dynamic-currency-rollup-home-amount-judged-as-served` now states the admitted set as both doors enforce it: a `dynamic` summary may roll up any child `currency` field in `dynamic` mode, a stored home amount included. Source comments and published docblocks that said every `{placeholder}` is stepped around by the temporal door now state the per-kind rule: a date macro is stepped around and judged by its year once resolved, a period key and a context token are judged as written, and an unknown or record-context token is left to the resolver.
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [2495486]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [c99156e]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [401eb44]
+- Updated dependencies [de25d58]
+- Updated dependencies [af566c2]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [170ca48]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a23164e]
+- Updated dependencies [d280de9]
+- Updated dependencies [6296909]
+  - @objectstack/spec@18.7.0
+  - @objectstack/metadata-core@18.7.0
+  - @objectstack/types@18.7.0
+
 ## 18.6.0
 
 ### Minor Changes
