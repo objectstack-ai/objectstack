@@ -134,10 +134,10 @@ export function refuseResolutionOnReply(rows: ReadonlyArray<Record<string, unkno
  * caller — the stamp records what happened, not who was allowed to do it; the
  * authorization handler is separate and exempts system callers).
  *
- * - `is_resolved` turning `true`: `resolved_by` = the session's user; on a
- *   system write, the user it is attributed to (`provenance.attributedUserId`,
- *   the resolution door's caller), else `null`; `resolved_at` = the server
- *   clock.
+ * - `is_resolved` turning `true`: `resolved_by` = the session's user; with
+ *   none (a system write), the user it is attributed to
+ *   (`provenance.attributedUserId`, the resolution door's caller), else
+ *   `null`; `resolved_at` = the server clock.
  * - turning `false`: both cleared.
  * - unchanged (the stored row already carries that value): nothing stamped,
  *   so resolving an already-resolved thread keeps its first resolver.
@@ -167,9 +167,10 @@ export async function stampCommentResolution(ctx: any): Promise<void> {
   if (next) {
     // A system write a door performs for a caller (the resolution door,
     // `comment-routes.ts`) carries that caller as its attribution, never in
-    // `session`, where every gating hook would read them as the caller.
-    const userId: unknown =
-      ctx?.session?.userId ?? (ctx?.session?.isSystem === true ? ctx?.provenance?.attributedUserId : undefined);
+    // `session`, where every gating hook would read them as the caller. The
+    // precedence is the audit writer's own (#4586): the session subject wins
+    // when present, and the attribution names the resolver otherwise.
+    const userId: unknown = ctx?.session?.userId ?? ctx?.provenance?.attributedUserId;
     assign(
       COMMENT_RESOLVED_BY_FIELD,
       (typeof userId === 'string' || typeof userId === 'number') && String(userId) !== '' ? String(userId) : null,

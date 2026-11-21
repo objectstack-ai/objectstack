@@ -11,6 +11,7 @@
  * this package cannot.
  */
 
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { describe, it, expect, vi } from 'vitest';
 import { AuthzStoreUnavailableError } from '@objectstack/core';
 
@@ -135,9 +136,10 @@ describe('the resolution door — answers given before the engine is asked', () 
 
   it('the write sends is_resolved alone, under a system context attributed to the caller and kept in their organization', async () => {
     const engine = {
-      findOne: vi.fn(async (_o: string, q: any) =>
-        q.context?.isSystem ? { id: 'c1', is_resolved: true, resolved_by: 'u_member', resolved_at: '2026-11-21T00:00:00.000Z' } : { id: 'c1' },
-      ),
+      findOne: vi.fn(async (o: string, q: any) => {
+        assertEngineFindOnePredicate(o, q);
+        return q.context?.isSystem ? { id: 'c1', is_resolved: true, resolved_by: 'u_member', resolved_at: '2026-11-21T00:00:00.000Z' } : { id: 'c1' };
+      }),
       update: vi.fn(async () => ({})),
       delete: vi.fn(),
     };
