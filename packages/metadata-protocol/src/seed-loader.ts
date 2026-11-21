@@ -5587,6 +5587,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         totalReferencesDeferred: 0,
         totalReferencesDropped: 0,
         totalSummariesStale: 0,
+        totalSummariesDropped: 0,
         circularDependencyCount: 0,
         durationMs,
       },

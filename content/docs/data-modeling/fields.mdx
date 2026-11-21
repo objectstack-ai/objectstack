@@ -409,10 +409,20 @@ person who submitted it is not shown the drop. A record created with its value
 dropped starts as if no value had been sent: `0`
 for `count` and `sum`, empty for `min`, `max` and `avg`, and the next child write
 replaces it with the computed value. Under `strictReadonlyWrites` the whole write
-is refused. Server code that runs with `isSystem: true` can still write the
-column, as it can any read-only column: seed data, package installs and a
-historical import (`treatAsHistorical: true`, which only the system principal may
-send) keep a pre-computed total, on create and on update. Undoing an ordinary
+is refused. Seed data never stores a summary value, and that includes the seed
+data a package install loads, since it goes through the same seed loader: a value a
+seed record supplies for a summary field is not written, on create or on
+update, and the rest of the record is. The summary is computed from the seeded
+child records, so a parent seeded with a total and no children shows the
+empty-set value (`0` for `count` and `sum`, empty for `min`, `max` and `avg`),
+and re-seeding a parent leaves its computed value in place. The load result
+counts the values it did not write in `summariesDropped` (per dataset) and
+`summary.totalSummariesDropped`, and the load logs one warning per dataset that
+names the object and the fields. To show a total, seed the child records it
+sums. Server code that runs with `isSystem: true` can still write the column,
+as it can any read-only column: a historical import (`treatAsHistorical: true`,
+which only the system principal may send) keeps a pre-computed total, on create
+and on update. Undoing an ordinary
 import restores the rows through an ordinary update, so a summary value that an
 import committed before this rule overwrote is not put back by the undo; it stays
 until the next child write recomputes it.

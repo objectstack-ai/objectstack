@@ -105,6 +105,7 @@
     "data/SeedLoadResult:insertedIds = []",
     "data/SeedLoadResult:landedIds = []",
     "data/SeedLoadResult:referencesDropped = 0",
+    "data/SeedLoadResult:summariesDropped = 0",
     "data/SeedLoadResult:summariesStale = 0",
     "data/SeedLoaderConfig:batchSize = 1000",
     "data/SeedLoaderConfig:defaultMode = \"ignore\"",
