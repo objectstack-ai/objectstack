@@ -69,6 +69,25 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// The harness has no i18n provider, so `t` answers keys. The confirm's
+// question also carries the name it was handed, so the name can be read back
+// (objectstack#35955 L1-b S1).
+vi.mock('@object-ui/i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/i18n')>();
+  const React = await import('react');
+  return {
+    ...actual,
+    useObjectTranslation: (...args: Parameters<typeof actual.useObjectTranslation>) => {
+      const bound = actual.useObjectTranslation(...args);
+      const t = React.useMemo(() => ((key: string, options?: Record<string, unknown>) => {
+        const out = (bound.t as (k: string, o?: unknown) => unknown)(key, options);
+        return key === 'console.objectView.draft.saveToViewConfirm' ? `${String(out)} [${String(options?.name)}]` : out;
+      }) as typeof bound.t, [bound.t]);
+      return { ...bound, t };
+    },
+  };
+});
+
 /** The props the list was last handed. */
 const listProps = vi.hoisted(() => ({ current: null as Record<string, any> | null }));
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({
@@ -240,6 +259,29 @@ describe('objectstack#35955 — Save to this view on a shared view: confirm, the
     expect(toast.success).toHaveBeenCalledWith('console.objectView.draft.savedForEveryone');
     // The draft is the view now: Discard and Save go.
     await waitFor(() => expect(listProps.current?.onSaveView).toBeUndefined());
+  });
+
+  it.each([
+    // A stored view with no label reaches the page named by its name, which is
+    // what its tab draws (`viewTabLabel`), never an empty 「“”」.
+    ['no label', undefined, `${OBJECT}.team_tasks`],
+    ['a label given as a locale map', { en: 'Team list', 'zh-CN': '团队列表' }, 'Team list'],
+    ['CONTROL: a plain label', 'Team tasks', 'Team tasks'],
+  ])('the confirm names the view as its tab does when it has %s (L1-b S1)', async (_case, label, expected) => {
+    const view = SHARED as Record<string, unknown>;
+    const authored = view.label;
+    if (label === undefined) delete view.label;
+    else view.label = label;
+    try {
+      mount(SHARED.name);
+      await settle();
+      await sortByAmount();
+      await pressSave();
+      // Never 「“”」 or 「[object Object]」.
+      expect(await screen.findByText(`console.objectView.draft.saveToViewConfirm [${expected}]`)).toBeInTheDocument();
+    } finally {
+      view.label = authored;
+    }
   });
 
   it('cancelling the confirm writes nothing and keeps the draft', async () => {

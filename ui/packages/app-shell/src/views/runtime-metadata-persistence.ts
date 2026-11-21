@@ -39,9 +39,9 @@
  */
 
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-import { errorCodeIs } from '@object-ui/types';
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from './metadata-admin/createDerive.js';
+import { isDraftVersionConflict } from './metadata-admin/DraftConflictDialog.js';
 import { ensureCustomizationPackage, fetchListedPackageManifests } from './studio-design/packages-io.js';
 
 /** The runtime-editable artifact types ADR-0034 unifies. `page` (a record
@@ -540,7 +540,7 @@ export async function saveAndPublishRuntimeMetadata(
   try {
     await ctx.metadataClient.save(type, name, body, { mode: 'draft', ifNoneMatch: '*' });
   } catch (err) {
-    if ((err as { status?: unknown } | null)?.status === 409 && errorCodeIs(err, 'METADATA_CONFLICT')) {
+    if (isDraftVersionConflict(err)) {
       return 'pending-draft';
     }
     throw err;

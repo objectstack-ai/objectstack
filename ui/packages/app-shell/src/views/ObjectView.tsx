@@ -904,7 +904,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const handleSaveToSharedView = async () => {
         if (!activeView || !canSaveToSharedView) return;
         const confirmed = await confirmHandler(
-            t('console.objectView.draft.saveToViewConfirm', { name: (activeView as any).label ?? '' }),
+            // The view's name as its tab draws it (objectstack#35955 L1-b S1): a
+            // label is an I18nLabel with no default, so never the raw value.
+            t('console.objectView.draft.saveToViewConfirm', { name: listLabel }),
             {
                 title: t('console.objectView.draft.saveToViewConfirmTitle'),
                 confirmText: t('console.objectView.draft.saveToViewConfirmButton'),
@@ -1614,7 +1616,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                         ? t('console.objectView.draft.saveAsMyView')
                         : t('view.rename', { defaultValue: 'Rename' })}
                     initialName={personalViewDialog?.mode === 'saveAs'
-                        ? t('console.objectView.draft.copyName', { name: activeView?.label ?? '' })
+                        ? t('console.objectView.draft.copyName', { name: listLabel })
                         : renamingPersonalView?.label ?? ''}
                     onSubmit={(name) => (personalViewDialog?.mode === 'rename'
                         ? handleRenamePersonalView(personalViewDialog.viewId, name)
