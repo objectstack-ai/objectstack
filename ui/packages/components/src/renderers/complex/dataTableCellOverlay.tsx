@@ -178,10 +178,15 @@ const EDITOR_DENSITY_CLASS = cn(
  * A typed-input editor (`data-in-cell-face="input"`, objectstack#36023) turns
  * the layer into the cell itself: one row tall, square, no padding or shadow,
  * on the page's own background, framed by the 2px line the selected cell draws.
+ *
+ * Square and flat win with `!`: a host theme may round and lift every
+ * `[role=dialog]` with `!important` (the console's iOS layer does), and the
+ * layer is a Radix popover, so it carries that role. An important utility sits
+ * in a cascade layer and so outranks an unlayered important rule.
  */
 // Spelled out in full: Tailwind finds classes by scanning for whole literals.
 const IN_CELL_INPUT_LAYER_CLASS = cn(
-  'has-[[data-in-cell-face=input]]:p-0 has-[[data-in-cell-face=input]]:rounded-none has-[[data-in-cell-face=input]]:shadow-none',
+  'has-[[data-in-cell-face=input]]:p-0 has-[[data-in-cell-face=input]]:rounded-none! has-[[data-in-cell-face=input]]:shadow-none!',
   'has-[[data-in-cell-face=input]]:border-2 has-[[data-in-cell-face=input]]:bg-background has-[[data-in-cell-face=input]]:text-foreground',
   'has-[[data-in-cell-face=input]]:min-h-(--radix-popper-anchor-height)',
 );
