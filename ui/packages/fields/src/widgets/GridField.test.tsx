@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { UploadProvider } from './UploadProvider';
+import { Dialog, DialogContent, DialogTitle } from '@object-ui/components';
 import { formatDate, formatDateTime } from '@object-ui/core';
 import { GridField, LineItemsField, sumColumn, lookupAutofillPatch, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './GridField';
 
@@ -1182,7 +1183,6 @@ describe('cell faces that open under the cell (objectstack#36023)', () => {
     });
 
     it('does not reach a dialog the form is open in: the dialog and every line stay', async () => {
-      const { Dialog, DialogContent, DialogTitle } = await import('@object-ui/components');
       const onOpenChange = vi.fn();
       render(
         <Dialog open onOpenChange={onOpenChange}>
@@ -1208,8 +1208,7 @@ describe('cell faces that open under the cell (objectstack#36023)', () => {
       expect(onOpenChange).not.toHaveBeenCalled();
     });
 
-    it('control: Esc outside the grid still reaches the dialog', async () => {
-      const { Dialog, DialogContent, DialogTitle } = await import('@object-ui/components');
+    it('control: Esc outside the grid still reaches the dialog', () => {
       const onOpenChange = vi.fn();
       render(
         <Dialog open onOpenChange={onOpenChange}>
