@@ -112,8 +112,13 @@ export function LocaleSwitcher() {
           <span className="sr-only">{t('console.localeSwitcher.label')}</span>
         </Button>
       </DropdownMenuTrigger>
-      {/* 44 px rows below `md`, as the top bar's menus (objectstack#29075). */}
-      <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto max-md:[&_[role=menuitem]]:min-h-11">
+      {/* 44 px rows below `md`, as the top bar's menus (objectstack#29075). The
+          width is bounded so a long hint (de, ru) wraps instead of widening the
+          menu past a phone screen. */}
+      <DropdownMenuContent
+        align="end"
+        className="max-h-72 max-w-[min(20rem,calc(100vw-2rem))] overflow-y-auto max-md:[&_[role=menuitem]]:min-h-11"
+      >
         {offerableLanguages.map((code) => {
           // Marked only when the app's list is known and leaves this language
           // out; "not known" marks nothing rather than every row.
