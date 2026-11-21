@@ -2579,7 +2579,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     if (rows.length === 0) return;
     const ids = rows.map((row) => String(row.id ?? row._id));
     let succeeded = 0;
-    if (typeof dataSource?.bulkDelete === 'function') {
+    if (api && typeof dataSource?.bulkDelete === 'function') {
       try {
         const answer = await dataSource.bulkDelete(api, ids);
         succeeded = Math.min(ids.length, typeof answer === 'number' ? answer : answer.succeeded);
@@ -4378,7 +4378,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           >
             {bulkDeleteOutcome.failed > 0
               ? t('objectActions.bulkDeletePartial', { succeeded: bulkDeleteOutcome.succeeded, failed: bulkDeleteOutcome.failed })
-              : t('objectActions.bulkDeleteSuccess', { count: bulkDeleteOutcome.succeeded, label: objectLabel({ name: api, label: objectSchema?.label ?? api }) })}
+              : t('objectActions.bulkDeleteSuccess', { count: bulkDeleteOutcome.succeeded, label: objectLabel({ name: api ?? '', label: objectSchema?.label ?? api ?? '' }) })}
           </p>
         )}
         {loadFailure ? (
