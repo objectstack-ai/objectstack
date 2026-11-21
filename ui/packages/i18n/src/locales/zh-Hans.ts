@@ -2874,6 +2874,7 @@ const zh = {
     },
     localeSwitcher: {
       label: '语言',
+      appContentDefault: '应用内容显示为默认语言',
     },
     system: {
       aiApprovals: {

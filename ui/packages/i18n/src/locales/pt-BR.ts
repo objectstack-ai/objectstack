@@ -2843,6 +2843,7 @@ const pt = {
     },
     localeSwitcher: {
       label: "Idioma",
+      appContentDefault: "O conteúdo do app aparece no idioma padrão",
     },
     system: {
       aiApprovals: {

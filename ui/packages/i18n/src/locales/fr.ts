@@ -2844,6 +2844,7 @@ const fr = {
     },
     localeSwitcher: {
       label: "Langue",
+      appContentDefault: "Le contenu de l'app s'affiche dans la langue par défaut",
     },
     system: {
       aiApprovals: {

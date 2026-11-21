@@ -2771,6 +2771,7 @@ const de = {
     },
     localeSwitcher: {
       label: "Sprache",
+      appContentDefault: "App-Inhalte erscheinen in der Standardsprache",
     },
     system: {
       aiApprovals: {

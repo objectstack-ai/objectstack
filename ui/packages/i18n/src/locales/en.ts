@@ -3378,6 +3378,7 @@ const en = {
     },
     localeSwitcher: {
       label: 'Language',
+      appContentDefault: 'App content shows in the default language',
     },
     system: {
       aiApprovals: {

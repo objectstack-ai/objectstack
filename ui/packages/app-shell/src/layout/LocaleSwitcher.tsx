@@ -5,8 +5,14 @@
  * Uses the i18n context to change language at runtime.
  *
  * The menu is not a list of its own (objectui#4039): it renders whatever the
- * i18n provider says is offerable — the platform locale table ∩ the app's own
- * locale list, as table tags (objectstack#30514). This file owns only the *labels*, because the native
+ * i18n provider says is offerable — every language of the platform locale
+ * table, as table tags, on the sign-in page and in the app alike
+ * (objectstack#35425, which reversed the narrowing to the app's own locale
+ * list). A language the app's own content is not translated into stays
+ * selectable and carries one muted line saying that content shows in the
+ * default language; the provider's `appContentLanguages` says which those are,
+ * and a page that does not know (signed out) marks none. This file owns the
+ * *labels* and that hint, because the native
  * names are the one piece of that no API response supplies:
  * `GET /api/v1/i18n/locales` returns descriptors whose `label` is the code
  * echoed back (`toLocaleDescriptors` in @objectstack/spec), so a server label
@@ -76,18 +82,11 @@ export function localeLabel(code: string): string {
 }
 
 export function LocaleSwitcher() {
-  const { t, language, offerableLanguages } = useObjectTranslation();
+  const { t, language, offerableLanguages, appContentLanguages } = useObjectTranslation();
   // ⛔ Not the i18n context's bare `changeLanguage`: while signed in the switch
   // has to reach `sys_user.locale`, or the globe and the profile page go on
   // naming two settings (objectui#10059). Signed out it IS the bare switch.
   const selectLanguage = useLanguageSelection();
-
-  // Still asking the app which locales it ships. Render nothing rather than a
-  // fallback list that would be replaced a tick later — the same idiom the
-  // sibling menus in this folder use for data they do not have yet
-  // (`AppSwitcher`, `WorkspaceSwitcher`), and it keeps the ten from flashing
-  // past on an app that only ships two.
-  if (offerableLanguages === null) return null;
 
   // The entries are table tags (`zh-Hans`); the session may be running in a
   // stored spelling of one (`zh-CN`). Compare through the same resolution the
@@ -115,16 +114,32 @@ export function LocaleSwitcher() {
       </DropdownMenuTrigger>
       {/* 44 px rows below `md`, as the top bar's menus (objectstack#29075). */}
       <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto max-md:[&_[role=menuitem]]:min-h-11">
-        {offerableLanguages.map((code) => (
-          <DropdownMenuItem
-            key={code}
-            onClick={() => pick(code)}
-            className="gap-2"
-          >
-            {localeLabel(code)}
-            {current === code && <span className="ml-auto text-xs">✓</span>}
-          </DropdownMenuItem>
-        ))}
+        {offerableLanguages.map((code) => {
+          // Marked only when the app's list is known and leaves this language
+          // out; "not known" marks nothing rather than every row.
+          const appContentInDefault =
+            appContentLanguages !== null && !appContentLanguages.includes(code);
+          return (
+            <DropdownMenuItem
+              key={code}
+              onClick={() => pick(code)}
+              className="gap-2"
+            >
+              <span className="flex min-w-0 flex-col">
+                <span>{localeLabel(code)}</span>
+                {appContentInDefault && (
+                  <span
+                    className="text-xs text-muted-foreground"
+                    data-testid="locale-switcher-app-content-default"
+                  >
+                    {t('console.localeSwitcher.appContentDefault')}
+                  </span>
+                )}
+              </span>
+              {current === code && <span className="ml-auto text-xs">✓</span>}
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
