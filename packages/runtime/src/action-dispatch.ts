@@ -644,7 +644,7 @@ async function admitResolvedAction(
             const failure = validationFailureDetails(error);
             if (!failure) throw error;
             const message = (error as Error).message;
-            return refuse({ message: `Invalid action body — ${message}`, status: VALIDATION_FAILED_STATUS, details: failure as ActionRefusal['details'] });
+            return refuse({ message: `Invalid action body — ${message}`, status: VALIDATION_FAILED_STATUS, details: failure as unknown as ActionRefusal['details'] });
         }
     }
 

@@ -4735,7 +4735,7 @@ export interface ActionSelectionLoad {
  *
  * Every other arm (a script body, a flow) is.
  */
-export function actionSelectionIsRead(action: any, ec: { isSystem?: boolean } | null | undefined): boolean {
+export function actionSelectionIsRead(action: any, ec: any): boolean {
     if (ec?.isSystem === true) return false;
     if (isDeclarativeUpdateAction(action)) return false;
     return (typeof action?.type === 'string' ? action.type : 'script') !== 'api';
