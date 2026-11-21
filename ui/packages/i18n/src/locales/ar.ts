@@ -1341,6 +1341,7 @@ const ar = {
   },
   view: {
     editViewConfig: "تعديل إعدادات العرض",
+    showViewConfig: "عرض إعدادات العرض",
     rename: "إعادة تسمية",
     duplicateView: "تكرار العرض",
     shareView: "مشاركة العرض",

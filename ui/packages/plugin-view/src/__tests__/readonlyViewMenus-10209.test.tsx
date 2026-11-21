@@ -25,7 +25,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ViewTabBar } from '../ViewTabBar';
 import type { ViewTabItem } from '../ViewTabBar';
@@ -107,6 +107,53 @@ describe('ManageViewsDialog row menu (#10209)', () => {
     open(screen.getByTestId(`manage-views-actions-${EDITABLE.id}`));
     expect(menuShape()).toEqual(['menuitem']);
     expect(screen.getByTestId(`manage-views-action-delete-${EDITABLE.id}`)).toBeInTheDocument();
+  });
+});
+
+describe('ManageViewsDialog `readonlyConfigViewable` (objectstack#35974)', () => {
+  /** A saved view the server refuses to save: read-only, its configuration still readable. */
+  const VIEWABLE: ViewTabItem = {
+    id: 'crm_lead.shipped', label: 'Shipped', type: 'grid', readonly: true, readonlyConfigViewable: true,
+  };
+
+  it('a read-only row with the flag offers only the configuration entry, labelled as viewing', () => {
+    const onConfigView = vi.fn();
+    renderDialog([VIEWABLE], { onConfigView });
+    // No pin, no set default on the row itself.
+    expect(screen.queryByTestId(`manage-views-pin-${VIEWABLE.id}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-views-default-${VIEWABLE.id}`)).toBeNull();
+    expect(screen.getByTestId(`manage-views-readonly-${VIEWABLE.id}`)).toBeInTheDocument();
+    open(screen.getByTestId(`manage-views-actions-${VIEWABLE.id}`));
+    expect(menuShape()).toEqual(['menuitem']);
+    const entry = screen.getByTestId(`manage-views-action-config-${VIEWABLE.id}`);
+    expect(entry).toHaveTextContent('View config');
+    expect(entry).not.toHaveTextContent('Edit');
+    for (const key of ['rename', 'default', 'pin', 'delete']) {
+      expect(screen.queryByTestId(`manage-views-action-${key}-${VIEWABLE.id}`)).toBeNull();
+    }
+  });
+
+  it('the entry hands the view to the host\'s `onConfigView`', async () => {
+    const onConfigView = vi.fn();
+    renderDialog([VIEWABLE], { onConfigView });
+    open(screen.getByTestId(`manage-views-actions-${VIEWABLE.id}`));
+    fireEvent.click(screen.getByTestId(`manage-views-action-config-${VIEWABLE.id}`));
+    await waitFor(() => expect(onConfigView).toHaveBeenCalledWith(VIEWABLE.id));
+  });
+
+  it('without the flag a read-only row is as before: no `…` trigger, no configuration entry', () => {
+    renderDialog([{ ...VIEWABLE, readonlyConfigViewable: undefined }]);
+    expect(screen.queryByTestId(`manage-views-actions-${VIEWABLE.id}`)).toBeNull();
+    expect(screen.queryByTestId(`manage-views-action-config-${VIEWABLE.id}`)).toBeNull();
+  });
+
+  it('on a mutable row the flag changes nothing: every entry, "Edit view config"', () => {
+    renderDialog([{ ...EDITABLE, readonlyConfigViewable: true }], { onDuplicate: vi.fn() });
+    open(screen.getByTestId(`manage-views-actions-${EDITABLE.id}`));
+    expect(menuShape()).toEqual([
+      'menuitem', 'menuitem', 'menuitem', 'menuitem', 'menuitem', 'separator', 'menuitem',
+    ]);
+    expect(screen.getByTestId(`manage-views-action-config-${EDITABLE.id}`)).toHaveTextContent('Edit view config');
   });
 });
 

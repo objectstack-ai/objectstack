@@ -58,6 +58,7 @@ import {
   Check,
   X,
   Lock,
+  Eye,
 } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/react';
@@ -170,6 +171,10 @@ const SortableRow: React.FC<RowProps> = ({
   // default, pin, edit configuration, delete). Duplicate is preserved
   // because it produces a fresh override that *is* mutable.
   const isReadonly = !!view.readonly;
+  // A read-only row whose configuration may still be looked at
+  // (`ViewTabItem.readonlyConfigViewable`): its configuration entry stays,
+  // labelled as viewing; nothing else read-only rows hide comes back.
+  const viewsConfigOnly = isReadonly && !!view.readonlyConfigViewable;
 
   /**
    * The overflow menu's entries, each resolved ONCE to the handler it will
@@ -184,7 +189,7 @@ const SortableRow: React.FC<RowProps> = ({
    */
   const renameAction = isReadonly ? undefined : onStartRename;
   const duplicateAction = onDuplicate;
-  const configAction = isReadonly ? undefined : onConfigView;
+  const configAction = isReadonly && !viewsConfigOnly ? undefined : onConfigView;
   const setDefaultAction = isReadonly || view.isDefault ? undefined : onSetDefault;
   const pinAction = isReadonly ? undefined : onSetPinned;
   const deleteAction = isReadonly ? undefined : onDelete;
@@ -380,7 +385,9 @@ const SortableRow: React.FC<RowProps> = ({
                 data-testid={`manage-views-action-config-${view.id}`}
                 onClick={() => configAction(view.id)}
               >
-                <Pencil className="h-4 w-4 mr-2" /> {vt('view.editViewConfig', 'Edit view config')}
+                {viewsConfigOnly
+                  ? <><Eye className="h-4 w-4 mr-2" /> {vt('view.showViewConfig', 'View config')}</>
+                  : <><Pencil className="h-4 w-4 mr-2" /> {vt('view.editViewConfig', 'Edit view config')}</>}
               </DropdownMenuItem>
             )}
             {setDefaultAction && (

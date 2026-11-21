@@ -360,9 +360,11 @@ export function useObjectViewTitleSwitcher({
     // rename on a saved view a read-only package ships: the server refuses
     // each (it goes to the customization package). Its row is read-only there,
     // by the package the row was served under and the session-held `writable`
-    // verdict objectstack#35933 reads. Unknown (unread, failed, unlisted)
-    // keeps the row as it was. Manage views only: the switcher's sections
-    // above still read `authored` from `isSystem`.
+    // verdict objectstack#35933 reads, and its configuration stays offered to
+    // look at (`readonlyConfigViewable`): the view panel opens read-only.
+    // Unknown (unread, failed, unlisted) keeps the row as it was. Manage views
+    // only: the switcher's sections above still read `authored` from
+    // `isSystem`.
     const refusingPackages = usePackagesRefusingSaves(isAdmin
         ? savedViews.map((sv: any) => studioPackageId(sv)).filter((id: string | null): id is string => id !== null)
         : []);
@@ -373,7 +375,7 @@ export function useObjectViewTitleSwitcher({
         .map((item) => {
             if (item.readonly) return item;
             const packageId = studioPackageId(savedViews.find((sv: any) => viewRowId(sv) === item.id));
-            return packageId !== null && refusingPackages.has(packageId) ? { ...item, readonly: true } : item;
+            return packageId !== null && refusingPackages.has(packageId) ? { ...item, readonly: true, readonlyConfigViewable: true } : item;
         });
     const switcherViews: TitleSwitcherView[] = viewItems.map((item) => {
         const personal = personalViewIds.has(item.id);

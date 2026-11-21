@@ -1208,6 +1208,7 @@ const ko = {
   },
   view: {
     editViewConfig: "보기 구성 편집",
+    showViewConfig: "보기 구성 보기",
     rename: "이름 변경",
     duplicateView: "뷰 복제",
     shareView: "뷰 공유",

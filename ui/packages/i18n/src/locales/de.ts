@@ -1208,6 +1208,7 @@ const de = {
   },
   view: {
     editViewConfig: "Ansichtskonfiguration bearbeiten",
+    showViewConfig: "Ansichtskonfiguration anzeigen",
     rename: "Umbenennen",
     duplicateView: "Ansicht duplizieren",
     shareView: "Ansicht teilen",

@@ -1235,6 +1235,7 @@ const zh = {
   },
   view: {
     editViewConfig: '编辑视图配置',
+    showViewConfig: '查看视图配置',
     rename: '重命名',
     duplicateView: '复制视图',
     shareView: '共享视图',

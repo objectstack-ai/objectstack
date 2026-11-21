@@ -15,14 +15,15 @@
  *
  * What runs: the real `ObjectView` on a stub data source. `ListView` is a
  * stand-in (the list itself is not under test). The real `ManageViewsDialog`
- * renders, held open, so the row affordances are read from the DOM. The view
- * panel is a stand-in recording the props it is handed: its own read-only face
- * is pinned in `ViewConfigPanel.test.tsx`.
+ * renders, held open, so the row affordances are read from the DOM, and its
+ * "View config" entry is clicked through to the panel. The view panel is a
+ * stand-in recording the props it is handed: its own read-only face is pinned
+ * in `ViewConfigPanel.test.tsx`.
  */
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, act, waitFor, screen } from '@testing-library/react';
+import { render, cleanup, act, waitFor, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 // `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
@@ -198,9 +199,43 @@ describe('objectstack#35974 — a read-only package\'s view: read-only panel, no
     mount(CUSTOM.name);
     await settle();
     await waitFor(() => expect(screen.getByTestId(`manage-views-row-${SHIPPED.name}`)).toBeTruthy());
-    await waitFor(() => expect(rowOffers(SHIPPED.name)).toEqual({ pin: false, setDefault: false, menu: false }));
+    // The ⋯ menu stays, holding only "View config" (next case).
+    await waitFor(() => expect(rowOffers(SHIPPED.name)).toEqual({ pin: false, setDefault: false, menu: true }));
     expect(screen.getByTestId(`manage-views-readonly-${SHIPPED.name}`)).toBeTruthy();
     expect(rowOffers(CUSTOM.name)).toEqual(OFFERED);
+  });
+
+  it('the shipped row\'s "View config" entry opens the panel on that view, read-only', async () => {
+    mount(CUSTOM.name);
+    await settle();
+    const trigger = await waitFor(() => screen.getByTestId(`manage-views-actions-${SHIPPED.name}`));
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    const entry = await waitFor(() => screen.getByTestId(`manage-views-action-config-${SHIPPED.name}`));
+    expect(entry.textContent).toContain('View config');
+    // Nothing else of the row's menu: no rename, set default, pin or delete.
+    for (const key of ['rename', 'default', 'pin', 'delete']) {
+      expect(screen.queryByTestId(`manage-views-action-${key}-${SHIPPED.name}`)).toBeNull();
+    }
+    fireEvent.click(entry);
+    await waitFor(() => expect(panelProps.current?.open).toBe(true));
+    await waitFor(() => expect(panelProps.current?.activeView?.id).toBe(SHIPPED.name));
+    await waitFor(() => expect(panelProps.current?.readOnly).toBe(true));
+    expect(panelProps.current?.mode).toBe('edit');
+  });
+
+  it('the custom row\'s entry still reads "Edit view config" and opens the panel savable', async () => {
+    mount(SHIPPED.name);
+    await settle();
+    const trigger = await waitFor(() => screen.getByTestId(`manage-views-actions-${CUSTOM.name}`));
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    const entry = await waitFor(() => screen.getByTestId(`manage-views-action-config-${CUSTOM.name}`));
+    expect(entry.textContent).toContain('Edit view config');
+    fireEvent.click(entry);
+    await waitFor(() => expect(panelProps.current?.activeView?.id).toBe(CUSTOM.name));
+    await waitFor(() => expect(panelProps.current?.open).toBe(true));
+    expect(panelProps.current?.readOnly).toBe(false);
   });
 
   it('the panel opens on the shipped view read-only', async () => {

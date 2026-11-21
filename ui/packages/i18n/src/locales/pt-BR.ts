@@ -1239,6 +1239,7 @@ const pt = {
   },
   view: {
     editViewConfig: "Editar configuração da vista",
+    showViewConfig: "Ver configuração da vista",
     rename: "Renomear",
     duplicateView: "Duplicar visualização",
     shareView: "Compartilhar visualização",
