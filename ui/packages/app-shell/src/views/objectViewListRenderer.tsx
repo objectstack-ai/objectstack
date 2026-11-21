@@ -1237,10 +1237,10 @@ function ViewBarLead({ store }: { store: LeadStore }) {
     return <>{useSyncExternalStore(store.subscribe, store.get, store.get)}</>;
 }
 
-/** Draws the view bar's right end from the store, around the list's own `tools`. */
 /** A chart heads its page with the view bar but draws no list: no export door. */
 const NO_LIST_TOOLS: ListToolbarTrailingState = {};
 
+/** Draws the view bar's right end from the store, around the list's own `tools`. */
 function ViewBarTrailing({ store, tools, state }: { store: LeadStore<((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null>; tools: ReactNode; state: ListToolbarTrailingState }) {
     const render = useSyncExternalStore(store.subscribe, store.get, store.get);
     return <>{render ? render(tools, state) : tools}</>;

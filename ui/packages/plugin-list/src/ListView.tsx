@@ -490,7 +490,7 @@ export interface ListViewProps {
    * objectstack#36113 — the second argument carries the list's export door
    * (`ListToolbarTrailingState`), for a host that draws it at the bar's end
    * too; the 视图设置 footer keeps its own export entries. The phone's row
-   * passes none.
+   * passes no export door.
    *
    * A HOST prop, never a schema key.
    */
@@ -2114,7 +2114,8 @@ export interface ListToolbarLeadingState {
  * The list's export door, handed to a host that draws it (objectstack#36113):
  * the formats this reader may export the list as, and the act that exports
  * the list as one of them — the same `handleExport` the 视图设置 footer runs,
- * behind the same permission and format verdicts.
+ * behind the same permission and format verdicts (`run` does nothing for a
+ * format outside `formats`).
  */
 export interface ListExportDoor {
   formats: readonly string[];
@@ -7168,7 +7169,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const exportDoor: ListExportDoor | undefined = resolvedExportOptions && exportPermitted && exportableFormats.length > 0
     ? {
         formats: exportableFormats,
-        run: (format) => handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf'),
+        // A format outside `formats` (one the server cannot stream, say) is
+        // refused here, as the footer never offers it.
+        run: (format) => {
+          if (exportableFormats.includes(format)) handleExport(format as 'csv' | 'xlsx' | 'json' | 'pdf');
+        },
         busy: exportBusy,
         error: exportError,
       }

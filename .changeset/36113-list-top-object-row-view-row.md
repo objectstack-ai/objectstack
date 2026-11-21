@@ -6,7 +6,7 @@
 
 feat(console): the list page's top reads the object's row, the view bar, then the condition row; 「Import / Export」 and 「New Account」 end the view bar
 
-Clause-②: yes (widening)
+Clause-②: yes (widening): `@object-ui/plugin-list` exports `ListExportDoor` and `ListToolbarTrailingState` and calls `toolbarTrailing` with a second argument; `@object-ui/i18n` adds `console.objectView.newObject` and `console.objectView.importExport`
 Metadata-protocol: none
 
 An object's list page draws three rows above its table again:

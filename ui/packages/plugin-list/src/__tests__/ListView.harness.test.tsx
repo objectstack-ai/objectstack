@@ -2607,6 +2607,24 @@ describe('ListView.toolbarTrailingExportDoor-36113', () => {
     await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'csv' })));
   });
 
+  it('the door refuses a format it does not offer', async () => {
+    const { ds, seen } = await renderList();
+    await screen.findByTestId('host-export');
+    const door = seen.at(-1)!.export!;
+    expect(door.formats).not.toContain('xlsx');
+    await act(async () => {
+      door.run('xlsx');
+      door.run('pdf');
+    });
+    expect(ds.exportDownload).not.toHaveBeenCalled();
+    // The control: an offered format through the same handle does export.
+    await act(async () => {
+      door.run('json');
+    });
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'json' })));
+    expect(ds.exportDownload).toHaveBeenCalledTimes(1);
+  });
+
   it('exportCsv false: no door, as the footer draws no entry', async () => {
     const { seen } = await renderList({ exportCsv: false });
     await screen.findByTestId('host-end');
